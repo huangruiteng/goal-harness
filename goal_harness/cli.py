@@ -32,6 +32,12 @@ def main(argv: list[str] | None = None) -> int:
 
     check_parser = sub.add_parser("check", help="Run a read-only contract and public/private boundary check.")
     check_parser.add_argument("--scan-root", default=".", help="Public files to scan for obvious private material.")
+    check_parser.add_argument(
+        "--scan-path",
+        action="append",
+        default=[],
+        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
+    )
     check_parser.add_argument("--limit", type=int, default=5)
 
     args = parser.parse_args(argv)
@@ -64,10 +70,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         try:
+            scan_roots = [Path(item).expanduser() for item in args.scan_path]
+            if not scan_roots:
+                scan_roots = [Path(args.scan_root).expanduser()]
             payload = check_contract(
                 registry_path=registry_path,
                 runtime_root_override=args.runtime_root,
-                scan_root=Path(args.scan_root).expanduser(),
+                scan_roots=scan_roots,
                 limit=max(0, args.limit),
             )
         except Exception as exc:
@@ -75,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": False,
                 "registry": str(registry_path),
                 "runtime_root": args.runtime_root,
-                "scan_root": args.scan_root,
+                "scan_roots": args.scan_path or [args.scan_root],
                 "summary": {"errors": 1, "warnings": 0, "checks": 0},
                 "errors": [str(exc)],
                 "warnings": [],

@@ -49,9 +49,13 @@ def iter_scan_files(scan_root: Path) -> list[Path]:
     return sorted(files)
 
 
-def scan_public_boundary(scan_root: Path) -> dict[str, Any]:
+def scan_public_boundary(scan_roots: list[Path]) -> dict[str, Any]:
     hits: list[str] = []
-    files = iter_scan_files(scan_root)
+    files: list[Path] = []
+    for scan_root in scan_roots:
+        files.extend(iter_scan_files(scan_root))
+    files = sorted(set(files))
+
     for path in files:
         try:
             text = path.read_text(encoding="utf-8")
@@ -63,7 +67,7 @@ def scan_public_boundary(scan_root: Path) -> dict[str, Any]:
                     hits.append(f"{rel_or_abs(path, scan_root)}:{line_no}: {name}")
     return {
         "ok": not hits,
-        "scan_root": str(scan_root),
+        "scan_roots": [str(path) for path in scan_roots],
         "files": len(files),
         "hits": hits,
     }
@@ -73,7 +77,7 @@ def check_contract(
     *,
     registry_path: Path,
     runtime_root_override: str | None,
-    scan_root: Path,
+    scan_roots: list[Path],
     limit: int,
 ) -> dict[str, Any]:
     errors: list[str] = []
@@ -108,7 +112,7 @@ def check_contract(
         if raw > unique:
             warnings.append(f"{item.get('id')}: duplicate index rows raw={raw} unique={unique}")
 
-    boundary = scan_public_boundary(scan_root)
+    boundary = scan_public_boundary(scan_roots)
     if boundary.get("ok"):
         checks.append(f"public boundary scan clean: {boundary.get('files')} files")
     else:
@@ -118,7 +122,7 @@ def check_contract(
         "ok": not errors,
         "registry": str(registry_path),
         "runtime_root": str(runtime_root),
-        "scan_root": str(scan_root),
+        "scan_roots": [str(path) for path in scan_roots],
         "summary": {
             "errors": len(errors),
             "warnings": len(warnings),
@@ -137,7 +141,7 @@ def render_contract_markdown(payload: dict[str, Any]) -> str:
         f"- ok: `{payload.get('ok')}`",
         f"- registry: `{payload.get('registry')}`",
         f"- runtime_root: `{payload.get('runtime_root')}`",
-        f"- scan_root: `{payload.get('scan_root')}`",
+        f"- scan_roots: `{payload.get('scan_roots')}`",
     ]
     summary = payload.get("summary") or {}
     lines.append(

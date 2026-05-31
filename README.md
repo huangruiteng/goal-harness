@@ -56,6 +56,15 @@ JSON output is available for pre-tick integration:
 goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json --format json check --scan-root .
 ```
 
+For a project that has many unrelated historical files, restrict the public
+boundary check to the adapter files you intend to publish:
+
+```bash
+goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json check \
+  --scan-path scripts/project-pre-tick.py \
+  --scan-path docs/goal-harness-contract.md
+```
+
 The example registry uses `./runtime` on purpose, so demo commands do not read
 your real local goal history.
 
