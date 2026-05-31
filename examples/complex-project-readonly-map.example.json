@@ -1,0 +1,128 @@
+{
+  "goal_id": "complex-project-main-control",
+  "generated_at": "2026-06-01T02:30:00+08:00",
+  "classification": "read_only_map_ready",
+  "recommended_action": "ask the project controller to opt in before mutations",
+  "authority_sources": [
+    {
+      "id": "todo",
+      "path": "docs/TODO.md",
+      "source_type": "project-todo",
+      "read_status": "read",
+      "why_it_matters": "defines active work and preserved project background",
+      "privacy_level": "project-local"
+    },
+    {
+      "id": "doc-registry",
+      "path": "docs/meta/DOC_REGISTRY.yaml",
+      "source_type": "document-registry",
+      "read_status": "read",
+      "why_it_matters": "connects docs to ownership and validation expectations",
+      "privacy_level": "project-local"
+    },
+    {
+      "id": "git-status",
+      "path": "git status --short",
+      "source_type": "working-tree-signal",
+      "read_status": "read",
+      "why_it_matters": "detects active edits and parallel-work risk",
+      "privacy_level": "project-local"
+    }
+  ],
+  "work_clusters": [
+    {
+      "id": "docs-map",
+      "status": "needs-controller-review",
+      "safe_next_probe": "inspect docs/TODO.md and document registry",
+      "can_parallelize": true,
+      "validation_surface": "markdown structure, link checks, registry consistency"
+    },
+    {
+      "id": "validation-map",
+      "status": "needs-controller-review",
+      "safe_next_probe": "list available tests, scripts, CI checks, and run reports",
+      "can_parallelize": true,
+      "validation_surface": "command availability and coverage gaps"
+    },
+    {
+      "id": "boundary-map",
+      "status": "needs-controller-review",
+      "safe_next_probe": "scan public docs, examples, and scripts for private material",
+      "can_parallelize": true,
+      "validation_surface": "public/private boundary check"
+    }
+  ],
+  "validation_surfaces": [
+    {
+      "work_type": "docs",
+      "proof": "updated markdown plus link/registry check"
+    },
+    {
+      "work_type": "external-sync",
+      "proof": "manifest update plus remote fetch verification"
+    },
+    {
+      "work_type": "benchmark-eval",
+      "proof": "run artifact, metric file, trace, and claim boundary"
+    },
+    {
+      "work_type": "code",
+      "proof": "unit tests, type checks, and smoke tests"
+    },
+    {
+      "work_type": "public-release",
+      "proof": "README quickstart, examples, and sensitive-pattern scan"
+    }
+  ],
+  "subagent_scopes": [
+    {
+      "id": "docs-map",
+      "role": "explorer",
+      "work_scope": [
+        "docs/**",
+        "README.md"
+      ],
+      "write_allowed": false,
+      "expected_output": "task clusters and authoritative docs"
+    },
+    {
+      "id": "validation-map",
+      "role": "validator",
+      "work_scope": [
+        "tests/**",
+        "scripts/**",
+        ".github/**"
+      ],
+      "write_allowed": false,
+      "expected_output": "available validation commands and coverage gaps"
+    },
+    {
+      "id": "boundary-map",
+      "role": "explorer",
+      "work_scope": [
+        "docs/**",
+        "examples/**",
+        "scripts/**"
+      ],
+      "write_allowed": false,
+      "expected_output": "public/private boundary risks"
+    }
+  ],
+  "boundary_findings": [
+    {
+      "severity": "guard",
+      "summary": "raw private logs and local goal state stay out of public reports"
+    }
+  ],
+  "handoff_packet": {
+    "audience": "project-main-controller",
+    "summary": "Read-only map is ready; controller should choose whether to spawn child probes.",
+    "hard_guards": [
+      "no mutations before controller opt-in",
+      "sub-agents default read-only",
+      "overlapping write scopes require parent arbitration",
+      "final state writeback belongs to the controller"
+    ],
+    "residual_risk": "validation commands and active branches are project-specific and must be confirmed locally"
+  }
+}

@@ -144,6 +144,10 @@ runs: the controller owns the goal, merge decision, and final writeback; each
 sub-agent owns a scoped probe, implementation slice, or validation surface. See
 [docs/codex-subagent-orchestration.md](docs/codex-subagent-orchestration.md).
 
+For large repos with many docs, TODOs, run reports, branches, and validation
+surfaces, start with a read-only adapter map before allowing edits. See
+[docs/complex-project-readonly-adapter.md](docs/complex-project-readonly-adapter.md).
+
 ## Public / Private Boundary
 
 Safe to publish:

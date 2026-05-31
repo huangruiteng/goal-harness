@@ -74,6 +74,11 @@ or editing production state requires explicit user approval.
 The bootstrap command does not create a domain adapter. It creates the minimum
 registry and state contract so the first adapter can be added deliberately.
 
+For a large project, prefer a read-only adapter map before any writes. The map
+should identify authority sources, work clusters, validation surfaces, proposed
+sub-agent scopes, boundary findings, and a short controller handoff packet. See
+[complex-project-readonly-adapter.md](complex-project-readonly-adapter.md).
+
 ## Controller / Sub-Agent Coordination
 
 Some Codex goal runs should use multiple sub-agents. Goal Harness should keep
