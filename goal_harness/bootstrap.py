@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs
+
+
+DEFAULT_OBJECTIVE = "Improve this project through bounded, verified goal segments."
+DEFAULT_DOMAIN = "project-goal-control-plane"
+
+
+def slugify_goal_id(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.lower()).strip("-")
+    return slug or "project-goal"
+
+
+def default_goal_id(project: Path) -> str:
+    return f"{slugify_goal_id(project.name)}-goal"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
+
+
+def read_json_if_exists(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return payload
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def render_state_markdown(*, goal_id: str, objective: str, updated_at: str) -> str:
+    safe_objective = objective.replace('"', '\\"')
+    return f"""---
+status: active
+owner_mode: goal
+objective: "{safe_objective}"
+updated_at: {updated_at}
+adapter_id: {goal_id}
+---
+
+# Active Goal State
+
+## Objective
+
+{objective}
+
+## Operating Contract
+
+- Treat this file as the durable goal state for future agent ticks.
+- Read current project evidence before choosing the next action.
+- Run a bounded progress segment when useful; it does not have to be one tiny step.
+- Keep private evidence, credentials, local paths, and raw logs out of public commits.
+- End each tick with changed files, validation, residual risk, and the next action.
+
+## Non-Goals
+
+- Do not perform irreversible production operations without explicit approval.
+- Do not publish private project evidence.
+- Do not optimize for activity if no useful artifact or decision can be produced.
+
+## Next Action
+
+- Run `goal-harness check` against the project registry and decide the first project-specific adapter signal.
+
+## Recent User Feedback
+
+- Initialized by `goal-harness bootstrap`.
+
+## Progress Ledger
+
+- Created the initial goal state and registry connection.
+"""
+
+
+def relative_state_file(project: Path, state_file: Path) -> str:
+    return rel_or_abs(state_file, project)
+
+
+def build_goal_entry(
+    *,
+    project: Path,
+    goal_id: str,
+    domain: str,
+    state_file: Path,
+    adapter_kind: str,
+    adapter_status: str,
+    next_probe: str | None,
+) -> dict[str, Any]:
+    return {
+        "id": goal_id,
+        "domain": domain,
+        "status": "active",
+        "repo": str(project),
+        "state_file": relative_state_file(project, state_file),
+        "adapter": {
+            "kind": adapter_kind,
+            "status": adapter_status,
+        },
+        "next_probe": next_probe
+        or f"goal-harness --registry .goal-harness/registry.json check --scan-root {project}",
+        "guards": [
+            "read-only by default",
+            "do not mutate production systems without explicit user approval",
+            "keep private evidence out of public commits",
+        ],
+    }
+
+
+def merge_goal(registry: dict[str, Any], goal_entry: dict[str, Any], *, force: bool) -> tuple[dict[str, Any], str]:
+    goals = registry.get("goals")
+    if not isinstance(goals, list):
+        goals = []
+    merged: list[Any] = []
+    action = "appended"
+    replaced = False
+    for item in goals:
+        if isinstance(item, dict) and item.get("id") == goal_entry["id"]:
+            if force:
+                merged.append(goal_entry)
+                action = "replaced"
+            else:
+                merged.append(item)
+                action = "kept-existing"
+            replaced = True
+        else:
+            merged.append(item)
+    if not replaced:
+        merged.append(goal_entry)
+    registry["goals"] = merged
+    return registry, action
+
+
+def bootstrap_project(
+    *,
+    project: Path,
+    registry_path: Path,
+    runtime_root: Path | None,
+    goal_id: str | None,
+    objective: str,
+    domain: str,
+    state_file: Path | None,
+    adapter_kind: str,
+    adapter_status: str,
+    next_probe: str | None,
+    force: bool,
+    dry_run: bool,
+) -> dict[str, Any]:
+    project = project.expanduser().resolve()
+    registry_path = registry_path.expanduser()
+    if not registry_path.is_absolute():
+        registry_path = project / registry_path
+    goal_id = goal_id or default_goal_id(project)
+    state_file = state_file or (project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md")
+    state_file = state_file.expanduser()
+    if not state_file.is_absolute():
+        state_file = project / state_file
+    runtime_root = runtime_root.expanduser() if runtime_root else DEFAULT_RUNTIME_ROOT
+    updated_at = now_iso()
+
+    registry = read_json_if_exists(registry_path)
+    registry.setdefault("schema_version", "0.1")
+    registry["updated_at"] = updated_at.split("T")[0]
+    registry.setdefault("common_runtime_root", str(runtime_root))
+    if runtime_root:
+        registry["common_runtime_root"] = str(runtime_root)
+
+    goal_entry = build_goal_entry(
+        project=project,
+        goal_id=goal_id,
+        domain=domain,
+        state_file=state_file,
+        adapter_kind=adapter_kind,
+        adapter_status=adapter_status,
+        next_probe=next_probe,
+    )
+    registry, registry_goal_action = merge_goal(registry, goal_entry, force=force)
+
+    state_action = "created"
+    if state_file.exists() and not force:
+        state_action = "kept-existing"
+    elif state_file.exists() and force:
+        state_action = "replaced"
+
+    dry_state_actions = {
+        "created": "would-create",
+        "kept-existing": "would-keep-existing",
+        "replaced": "would-replace",
+    }
+    actions = [
+        {"path": str(registry_path), "action": "would-write" if dry_run else "wrote", "goal": registry_goal_action},
+        {"path": str(state_file), "action": dry_state_actions.get(state_action, "would-write") if dry_run else state_action},
+    ]
+
+    if not dry_run:
+        write_json(registry_path, registry)
+        if state_action in {"created", "replaced"}:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text(
+                render_state_markdown(goal_id=goal_id, objective=objective, updated_at=updated_at),
+                encoding="utf-8",
+            )
+
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "project": str(project),
+        "goal_id": goal_id,
+        "registry": str(registry_path),
+        "state_file": str(state_file),
+        "runtime_root": str(runtime_root),
+        "registry_goal_action": registry_goal_action,
+        "state_action": state_action,
+        "actions": actions,
+        "next_commands": [
+            f"goal-harness --registry {relative_state_file(project, registry_path)} registry",
+            f"goal-harness --registry {relative_state_file(project, registry_path)} check --scan-root {project}",
+            f"goal-harness --registry {relative_state_file(project, registry_path)} history --goal-id {goal_id}",
+        ],
+        "private_boundary_note": "Add .goal-harness/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
+    }
+
+
+def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Goal Harness Bootstrap",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- dry_run: `{payload.get('dry_run')}`",
+        f"- project: `{payload.get('project')}`",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- registry: `{payload.get('registry')}`",
+        f"- state_file: `{payload.get('state_file')}`",
+        f"- runtime_root: `{payload.get('runtime_root')}`",
+        f"- registry_goal_action: `{payload.get('registry_goal_action')}`",
+        f"- state_action: `{payload.get('state_action')}`",
+        "",
+        "## Actions",
+    ]
+    for action in payload.get("actions") or []:
+        lines.append(f"- `{action.get('path')}`: {action.get('action')} ({action.get('goal', '')})")
+
+    lines.extend(["", "## Next Commands"])
+    for command in payload.get("next_commands") or []:
+        lines.append(f"- `{command}`")
+
+    if payload.get("private_boundary_note"):
+        lines.extend(["", "## Boundary Note", str(payload.get("private_boundary_note"))])
+    return "\n".join(lines)

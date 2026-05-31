@@ -4,6 +4,12 @@ import argparse
 import json
 from pathlib import Path
 
+from .bootstrap import (
+    DEFAULT_DOMAIN,
+    DEFAULT_OBJECTIVE,
+    bootstrap_project,
+    render_bootstrap_markdown,
+)
 from .contract import check_contract, render_contract_markdown
 from .history import collect_history, load_registry, render_history_markdown
 from .paths import default_registry_path, resolve_runtime_root
@@ -24,6 +30,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    bootstrap_parser = sub.add_parser(
+        "bootstrap",
+        aliases=["connect"],
+        help="Create or connect a project-local registry and active goal state.",
+    )
+    bootstrap_parser.add_argument("--project", default=".", help="Project directory to connect.")
+    bootstrap_parser.add_argument("--goal-id", help="Stable goal id. Defaults to <project-name>-goal.")
+    bootstrap_parser.add_argument("--objective", default=DEFAULT_OBJECTIVE, help="Initial goal objective.")
+    bootstrap_parser.add_argument("--domain", default=DEFAULT_DOMAIN, help="Goal domain label.")
+    bootstrap_parser.add_argument("--state-file", help="Active goal state path, relative to project unless absolute.")
+    bootstrap_parser.add_argument("--adapter-kind", default="generic_project_goal_v0")
+    bootstrap_parser.add_argument("--adapter-status", default="connected")
+    bootstrap_parser.add_argument("--next-probe", help="Optional project-specific pre-tick command.")
+    bootstrap_parser.add_argument("--force", action="store_true", help="Replace existing goal entry or state file.")
+    bootstrap_parser.add_argument("--dry-run", action="store_true", help="Show planned writes without changing files.")
+
     sub.add_parser("registry", help="Inspect registry goals and adapter declarations.")
 
     history_parser = sub.add_parser("history", help="Read compact run history from the shared runtime root.")
@@ -42,6 +64,33 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     registry_path = Path(args.registry).expanduser()
+
+    if args.command in {"bootstrap", "connect"}:
+        try:
+            runtime_root = Path(args.runtime_root).expanduser() if args.runtime_root else None
+            state_file = Path(args.state_file).expanduser() if args.state_file else None
+            payload = bootstrap_project(
+                project=Path(args.project),
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                objective=args.objective,
+                domain=args.domain,
+                state_file=state_file,
+                adapter_kind=args.adapter_kind,
+                adapter_status=args.adapter_status,
+                next_probe=args.next_probe,
+                force=args.force,
+                dry_run=args.dry_run,
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_bootstrap_markdown)
+        return 0 if payload.get("ok") else 1
 
     if args.command == "registry":
         payload = inspect_registry(registry_path)

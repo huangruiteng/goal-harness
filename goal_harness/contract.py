@@ -34,7 +34,7 @@ LEAK_PATTERNS = {
 }
 
 DEFAULT_SCAN_SUFFIXES = {".md", ".py", ".toml", ".json", ".yaml", ".yml", ".sh"}
-DEFAULT_SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+DEFAULT_SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"}
 
 
 def iter_scan_files(scan_root: Path) -> list[Path]:
@@ -42,7 +42,7 @@ def iter_scan_files(scan_root: Path) -> list[Path]:
         return [scan_root]
     files: list[Path] = []
     for path in scan_root.rglob("*"):
-        if any(part in DEFAULT_SKIP_DIRS for part in path.parts):
+        if any(part in DEFAULT_SKIP_DIRS or part.endswith(".egg-info") for part in path.parts):
             continue
         if path.is_file() and path.suffix in DEFAULT_SCAN_SUFFIXES:
             files.append(path)

@@ -1,80 +1,131 @@
 # Goal Harness
 
-Goal Harness is a lightweight control plane for long-running agent goals. It is
-designed to sit above local agent apps, CLI sessions, recurring heartbeats, and
-goal-mode runs.
+Goal Harness is a small control plane for long-running agent goals. It helps a
+Codex or Claude-style agent keep durable goal state, inspect recent runs, and
+check project boundaries before the next goal-mode tick.
 
-It does not replace an agent or a project-specific workflow. It gives each goal
-four durable things:
+It is not another agent framework. It sits above your existing app, CLI,
+heartbeat, or goal-mode workflow and gives it a shared structure:
 
 - a project-local goal state file,
-- a registry entry that says where the goal lives and which adapter reads it,
-- a shared runtime directory for run logs,
-- a read-only contract check before the next agent tick.
+- a project-local registry that says where the goal lives,
+- a shared runtime directory for run history,
+- a contract check that catches missing state and obvious private-data leaks.
 
 ## Why
 
-Long-running agent work fails less from a single weak prompt than from drift:
-lost next actions, stale assumptions, unclear handoffs, mixed project state,
-and unreviewed private data. Goal Harness keeps those boundaries explicit.
+Long-running agent work usually fails through drift rather than one bad prompt:
+the next action gets lost, stale assumptions survive, project state gets mixed,
+or private evidence leaks into public artifacts. Goal Harness makes those
+boundaries explicit and repeatable.
 
-## Recommended Layout
+Use it when you want an agent to manage:
 
-Use one local checkout as the shared base:
+- a multi-week engineering or research goal,
+- several local projects with different adapters,
+- recurring heartbeat runs,
+- experiment progress and decision gates,
+- public/private boundary checks before publishing.
+
+## Quickstart
+
+Install one shared local checkout:
 
 ```bash
-git clone <your-fork-or-repo-url> ~/goal-harness
+git clone https://github.com/huangruiteng/goal-harness ~/goal-harness
 python3 -m pip install -e ~/goal-harness
 ```
 
-Each project keeps its own private state and thin adapter:
+Connect a project with one command:
+
+```bash
+cd /path/to/your-project
+goal-harness bootstrap \
+  --goal-id your-project-goal \
+  --objective "Improve this project through bounded, verified goal segments."
+```
+
+`connect` is an alias for `bootstrap`:
+
+```bash
+goal-harness connect --goal-id your-project-goal
+```
+
+The command creates or connects:
 
 ```text
-project/
-  .local/ACTIVE_GOAL_STATE.md        # private, not committed
-  .local/GOAL_HARNESS_REGISTRY.json  # private, can contain local paths
-  scripts/project-pre-tick.py        # optional thin adapter
+your-project/
+  .goal-harness/registry.json
+  .codex/goals/your-project-goal/ACTIVE_GOAL_STATE.md
 
 ~/.codex/goal-harness/
-  goals/<goal-id>/runs/index.jsonl   # shared runtime history
+  goals/<goal-id>/runs/
 ```
 
-The core code is not copied into every project. Project files call the shared
-CLI and keep only project-specific policy, evidence readers, and guards.
+If your goal state contains private evidence, add these paths to the project
+`.gitignore`:
 
-## CLI
+```gitignore
+.goal-harness/
+.codex/goals/
+```
+
+## Daily Use
+
+Inspect the project registry:
 
 ```bash
-goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json registry
-goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json history
-goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json check --scan-root .
+goal-harness registry
 ```
 
-JSON output is available for pre-tick integration:
+Run the contract check:
 
 ```bash
-goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json --format json check --scan-root .
+goal-harness check --scan-root .
 ```
 
-For a project that has many unrelated historical files, restrict the public
-boundary check to the adapter files you intend to publish:
+Read recent run history:
 
 ```bash
-goal-harness --registry .local/GOAL_HARNESS_REGISTRY.json check \
-  --scan-path scripts/project-pre-tick.py \
-  --scan-path docs/goal-harness-contract.md
+goal-harness history --goal-id your-project-goal
 ```
 
-The example registry uses `./runtime` on purpose, so demo commands do not read
-your real local goal history.
+Use JSON output from scripts, heartbeats, or pre-tick adapters:
 
-## Integration Model
+```bash
+goal-harness --format json check --scan-root .
+```
 
-1. Keep the shared package at one stable local path, usually `~/goal-harness`.
-2. Add a private registry in each project.
-3. Add or keep a project-specific pre-tick script that calls Goal Harness.
-4. Save adapter run logs into `~/.codex/goal-harness/goals/<goal-id>/runs/`.
-5. A future UI can read the same runtime root instead of scraping projects.
+For a project with many unrelated files, scan only the public files you intend
+to publish:
+
+```bash
+goal-harness check \
+  --scan-path README.md \
+  --scan-path docs/goal-harness-contract.md \
+  --scan-path scripts/project-pre-tick.py
+```
+
+## Mental Model
+
+```text
+project goal state
+  + project registry
+  + optional project adapter
+        |
+        v
+shared runtime root
+        |
+        v
+goal-harness registry / history / check
+        |
+        v
+Codex goal mode / heartbeat / future UI
+```
+
+The public package should contain generic control-plane logic. Project-specific
+adapters can read local evidence such as tests, experiment boards, TODO files,
+or production-safe status summaries.
 
 ## Public / Private Boundary
 
@@ -88,7 +139,7 @@ Safe to publish:
 
 Keep private:
 
-- real project paths,
+- real local paths,
 - task ids,
 - production logs,
 - internal document links,
@@ -100,6 +151,7 @@ See [docs/public-private-boundary.md](docs/public-private-boundary.md).
 
 ## Current Status
 
-This repository is intentionally small. The first milestone is not a full agent
-platform; it is a reliable shared substrate for local goal state, run history,
-and contract checks across several projects.
+Goal Harness is early. The first milestone is not a full agent platform; it is
+a useful shared substrate for local goal state, run history, and contract
+checks across multiple projects. The next milestones are stronger project
+adapters and a small UI for multi-project goal status.

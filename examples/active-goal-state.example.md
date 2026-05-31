@@ -1,7 +1,7 @@
 ---
 status: active
 owner_mode: goal
-objective: "Improve this project through one verified, low-risk increment per goal tick."
+objective: "Improve this project through bounded, verified goal segments."
 updated_at: 2026-05-31T22:00:00+08:00
 adapter_id: example-project-goal
 ---
@@ -10,7 +10,13 @@ adapter_id: example-project-goal
 
 ## Objective
 
-Improve this project through one verified, low-risk increment per goal tick.
+Improve this project through bounded, verified goal segments.
+
+## Operating Contract
+
+- Read this file before each goal-mode run.
+- A tick may execute a coherent bounded batch when that is better than a tiny step.
+- Keep changed files, validation, residual risk, and next action in the final report.
 
 ## Non-Goals
 
@@ -19,7 +25,7 @@ Improve this project through one verified, low-risk increment per goal tick.
 
 ## Next Action
 
-- Add one read-only health signal to the project pre-tick.
+- Run `goal-harness check` and add the first project-specific read-only health signal.
 
 ## Recent User Feedback
 

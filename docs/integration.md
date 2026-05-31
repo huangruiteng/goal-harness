@@ -20,6 +20,36 @@ goal-harness --registry <private-registry> history
 goal-harness --registry <private-registry> check --scan-root <project-root>
 ```
 
+## One-Command Project Connect
+
+For a new project, start with:
+
+```bash
+cd /path/to/project
+goal-harness bootstrap \
+  --goal-id project-goal \
+  --objective "Improve this project through bounded, verified goal segments."
+```
+
+`goal-harness connect` is an alias for the same operation. The command is
+safe to rerun: by default it keeps an existing state file and existing registry
+entry; pass `--force` only when you intentionally want to replace them.
+
+The default files are:
+
+```text
+.goal-harness/registry.json
+.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md
+```
+
+In most real projects these files should be private. If they contain current
+work state or local evidence, add them to `.gitignore`:
+
+```gitignore
+.goal-harness/
+.codex/goals/
+```
+
 ## Project Adapter
 
 A project adapter should be thin and project-specific. It may read:
@@ -40,6 +70,9 @@ It should output:
 
 By default it should be read-only. Launching jobs, stopping jobs, syncing docs,
 or editing production state requires explicit user approval.
+
+The bootstrap command does not create a domain adapter. It creates the minimum
+registry and state contract so the first adapter can be added deliberately.
 
 ## Shared Runtime
 
