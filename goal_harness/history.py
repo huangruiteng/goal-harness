@@ -80,13 +80,16 @@ def collect_history(
             run["goal_id"] = str(run.get("goal_id") or current_goal_id)
         all_runs.extend(runs)
 
+        registry_member = current_goal_id in goal_meta
         meta = goal_meta.get(current_goal_id) or {}
         adapter = meta.get("adapter") if isinstance(meta.get("adapter"), dict) else {}
         goals.append(
             {
                 "id": current_goal_id,
                 "domain": meta.get("domain"),
-                "status": meta.get("status"),
+                "status": meta.get("status") if registry_member else "legacy-runtime",
+                "registry_member": registry_member,
+                "legacy_runtime_goal": not registry_member,
                 "adapter_kind": adapter.get("kind"),
                 "adapter_status": adapter.get("status"),
                 "index_path": str(index_path),
@@ -142,6 +145,7 @@ def render_history_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             "- "
             f"`{goal.get('id')}`: status=`{goal.get('status')}`, "
+            f"registry_member=`{goal.get('registry_member')}`, "
             f"adapter=`{goal.get('adapter_kind')}:{goal.get('adapter_status')}`, "
             f"index_exists=`{goal.get('index_exists')}`, "
             f"records=`{goal.get('raw_index_records')}`, "

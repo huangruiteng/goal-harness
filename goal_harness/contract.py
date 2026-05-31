@@ -109,6 +109,9 @@ def check_contract(
     for item in history.get("goals") or []:
         raw = int(item.get("raw_index_records") or 0)
         unique = int(item.get("unique_runs") or 0)
+        if item.get("legacy_runtime_goal") and raw > unique:
+            checks.append(f"{item.get('id')}: legacy runtime goal has duplicate rows raw={raw} unique={unique}")
+            continue
         if raw > unique:
             warnings.append(f"{item.get('id')}: duplicate index rows raw={raw} unique={unique}")
 
