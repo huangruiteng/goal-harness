@@ -1,0 +1,12 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Project-local private state. Keep real project paths, task ids, tokens,
+# internal logs, and active goal state outside the public repository.
+.local/
+.goal-wrapper.local/
+runtime/

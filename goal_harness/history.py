@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from .registry import read_json, registry_goals
+
+
+def load_registry(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    return read_json(path)
+
+
+def discover_goal_ids(runtime_root: Path, registry: dict[str, Any], requested_goal: str | None) -> list[str]:
+    if requested_goal:
+        return [requested_goal]
+
+    ids = {str(goal.get("id")) for goal in registry_goals(registry)}
+    goals_dir = runtime_root / "goals"
+    if goals_dir.exists():
+        ids.update(path.name for path in goals_dir.iterdir() if path.is_dir())
+    return sorted(ids)
+
+
+def load_index(path: Path) -> tuple[list[dict[str, Any]], int]:
+    if not path.exists():
+        return [], 0
+
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    raw_count = 0
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            raw_count += 1
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+
+            key = (
+                str(item.get("generated_at") or ""),
+                str(item.get("json_path") or ""),
+                str(item.get("markdown_path") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            item = dict(item)
+            json_path = Path(str(item.get("json_path") or ""))
+            markdown_path = Path(str(item.get("markdown_path") or ""))
+            item["json_exists"] = json_path.exists() if str(json_path) else False
+            item["markdown_exists"] = markdown_path.exists() if str(markdown_path) else False
+            records.append(item)
+    return records, raw_count
+
+
+def collect_history(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    registry = load_registry(registry_path)
+    goal_meta = {str(goal.get("id")): goal for goal in registry_goals(registry)}
+    goals: list[dict[str, Any]] = []
+    all_runs: list[dict[str, Any]] = []
+
+    for current_goal_id in discover_goal_ids(runtime_root, registry, goal_id):
+        index_path = runtime_root / "goals" / current_goal_id / "runs" / "index.jsonl"
+        runs, raw_count = load_index(index_path)
+        runs.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
+        for run in runs:
+            run["goal_id"] = str(run.get("goal_id") or current_goal_id)
+        all_runs.extend(runs)
+
+        meta = goal_meta.get(current_goal_id) or {}
+        adapter = meta.get("adapter") if isinstance(meta.get("adapter"), dict) else {}
+        goals.append(
+            {
+                "id": current_goal_id,
+                "domain": meta.get("domain"),
+                "status": meta.get("status"),
+                "adapter_kind": adapter.get("kind"),
+                "adapter_status": adapter.get("status"),
+                "index_path": str(index_path),
+                "index_exists": index_path.exists(),
+                "raw_index_records": raw_count,
+                "unique_runs": len(runs),
+                "latest_runs": runs[:limit],
+            }
+        )
+
+    all_runs.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
+    return {
+        "ok": True,
+        "registry": str(registry_path),
+        "runtime_root": str(runtime_root),
+        "goal_filter": goal_id,
+        "goal_count": len(goals),
+        "run_count": len(all_runs),
+        "goals": goals,
+        "runs": all_runs[:limit],
+    }
+
+
+def render_history_markdown(payload: dict[str, Any]) -> str:
+    if not payload.get("ok"):
+        return "# Goal Harness Run History\n\n- ok: `False`\n- error: " + str(payload.get("error"))
+
+    lines = [
+        "# Goal Harness Run History",
+        "",
+        f"- runtime_root: `{payload.get('runtime_root')}`",
+        f"- registry: `{payload.get('registry')}`",
+        f"- goal_filter: `{payload.get('goal_filter')}`",
+        f"- goals: `{payload.get('goal_count')}`",
+        f"- unique_runs: `{payload.get('run_count')}`",
+        "",
+        "| generated_at | goal | classification | files | action |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for run in payload.get("runs") or []:
+        action = str(run.get("recommended_action") or "").replace("|", "\\|")
+        lines.append(
+            "| "
+            f"`{run.get('generated_at')}` | "
+            f"`{run.get('goal_id')}` | "
+            f"`{run.get('classification')}` | "
+            f"{run.get('json_exists')}/{run.get('markdown_exists')} | "
+            f"{action} |"
+        )
+
+    lines.extend(["", "## Goals"])
+    for goal in payload.get("goals") or []:
+        lines.append(
+            "- "
+            f"`{goal.get('id')}`: status=`{goal.get('status')}`, "
+            f"adapter=`{goal.get('adapter_kind')}:{goal.get('adapter_status')}`, "
+            f"index_exists=`{goal.get('index_exists')}`, "
+            f"records=`{goal.get('raw_index_records')}`, "
+            f"unique_runs=`{goal.get('unique_runs')}`"
+        )
+    return "\n".join(lines)

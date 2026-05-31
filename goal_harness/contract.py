@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+from .history import collect_history, load_registry
+from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs, resolve_runtime_root
+from .registry import inspect_registry
+
+
+LEAK_PATTERNS = {
+    "private_doc_url": re.compile(
+        "|".join(["la" + "rk" + "office", "docs" + r"\." + "internal"]),
+        re.I,
+    ),
+    "credential": re.compile(
+        "|".join(
+            [
+                "Bear" + "er" + r"\s+[A-Za-z0-9._-]+",
+                "AK" + "IA" + r"[0-9A-Z]{16}",
+                "tok" + "en=",
+                "pass" + "word=",
+                "Author" + "ization:",
+            ]
+        ),
+        re.I,
+    ),
+    "local_private_path": re.compile(
+        "(" + "/" + "Users" + "/" + r"[^/\s]+/(?:Documents|code" + "-" + r"reading)|" + "/ext" + "_data/" + ")"
+    ),
+    "internal_task_id": re.compile(r"\bt-" + r"20\d{12}-[a-z0-9]+\b"),
+    "private_ip": re.compile(r"\b10\.\d+\.\d+\.\d+\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b|\b192\.168\.\d+\.\d+\b"),
+}
+
+DEFAULT_SCAN_SUFFIXES = {".md", ".py", ".toml", ".json", ".yaml", ".yml", ".sh"}
+DEFAULT_SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+
+
+def iter_scan_files(scan_root: Path) -> list[Path]:
+    if scan_root.is_file():
+        return [scan_root]
+    files: list[Path] = []
+    for path in scan_root.rglob("*"):
+        if any(part in DEFAULT_SKIP_DIRS for part in path.parts):
+            continue
+        if path.is_file() and path.suffix in DEFAULT_SCAN_SUFFIXES:
+            files.append(path)
+    return sorted(files)
+
+
+def scan_public_boundary(scan_root: Path) -> dict[str, Any]:
+    hits: list[str] = []
+    files = iter_scan_files(scan_root)
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for name, pattern in LEAK_PATTERNS.items():
+                if pattern.search(line):
+                    hits.append(f"{rel_or_abs(path, scan_root)}:{line_no}: {name}")
+    return {
+        "ok": not hits,
+        "scan_root": str(scan_root),
+        "files": len(files),
+        "hits": hits,
+    }
+
+
+def check_contract(
+    *,
+    registry_path: Path,
+    runtime_root_override: str | None,
+    scan_root: Path,
+    limit: int,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    checks: list[str] = []
+
+    registry_payload = inspect_registry(registry_path)
+    if registry_payload.get("ok"):
+        checks.append(f"registry goals checked: {registry_payload.get('goal_count')}")
+    else:
+        if registry_payload.get("error"):
+            errors.append(str(registry_payload.get("error")))
+        errors.extend(str(item) for item in registry_payload.get("problems") or [])
+
+    registry = load_registry(registry_path)
+    runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    if runtime_root == DEFAULT_RUNTIME_ROOT or runtime_root.exists():
+        checks.append(f"runtime root resolved: {runtime_root}")
+    else:
+        warnings.append(f"runtime root does not exist yet: {runtime_root}")
+
+    history = collect_history(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=None,
+        limit=limit,
+    )
+    checks.append(f"run-history goals={history.get('goal_count')} runs={history.get('run_count')}")
+    for item in history.get("goals") or []:
+        raw = int(item.get("raw_index_records") or 0)
+        unique = int(item.get("unique_runs") or 0)
+        if raw > unique:
+            warnings.append(f"{item.get('id')}: duplicate index rows raw={raw} unique={unique}")
+
+    boundary = scan_public_boundary(scan_root)
+    if boundary.get("ok"):
+        checks.append(f"public boundary scan clean: {boundary.get('files')} files")
+    else:
+        errors.extend(str(item) for item in boundary.get("hits") or [])
+
+    return {
+        "ok": not errors,
+        "registry": str(registry_path),
+        "runtime_root": str(runtime_root),
+        "scan_root": str(scan_root),
+        "summary": {
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "checks": len(checks),
+        },
+        "errors": errors,
+        "warnings": warnings,
+        "checks": checks,
+    }
+
+
+def render_contract_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Goal Harness Contract Check",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- registry: `{payload.get('registry')}`",
+        f"- runtime_root: `{payload.get('runtime_root')}`",
+        f"- scan_root: `{payload.get('scan_root')}`",
+    ]
+    summary = payload.get("summary") or {}
+    lines.append(
+        f"- summary: errors={summary.get('errors')}, warnings={summary.get('warnings')}, checks={summary.get('checks')}"
+    )
+    for title, key in (("Errors", "errors"), ("Warnings", "warnings"), ("Checks", "checks")):
+        items = payload.get(key) or []
+        if items:
+            lines.extend(["", f"## {title}"])
+            lines.extend(f"- {item}" for item in items)
+    return "\n".join(lines)

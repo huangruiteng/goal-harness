@@ -1,0 +1,24 @@
+{
+  "schema_version": "0.1",
+  "updated_at": "2026-05-31",
+  "common_runtime_root": "./runtime",
+  "goals": [
+    {
+      "id": "example-project-goal",
+      "domain": "knowledge-work-control-plane",
+      "status": "active",
+      "repo": "/path/to/project",
+      "state_file": ".local/ACTIVE_GOAL_STATE.md",
+      "adapter": {
+        "kind": "example_adapter_v0",
+        "status": "connected"
+      },
+      "next_probe": "python3 scripts/project-pre-tick.py --format json --save-run",
+      "guards": [
+        "read-only by default",
+        "do not mutate production systems without explicit user approval",
+        "keep private evidence out of public notes"
+      ]
+    }
+  ]
+}
