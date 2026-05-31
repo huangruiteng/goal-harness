@@ -23,6 +23,7 @@ Use it when you want an agent to manage:
 
 - a multi-week engineering or research goal,
 - several local projects with different adapters,
+- Codex-style controller runs that spawn scoped sub-agents,
 - recurring heartbeat runs,
 - experiment progress and decision gates,
 - public/private boundary checks before publishing.
@@ -43,6 +44,17 @@ cd /path/to/your-project
 goal-harness bootstrap \
   --goal-id your-project-goal \
   --objective "Improve this project through bounded, verified goal segments."
+```
+
+For a Codex controller goal that may spawn scoped child agents:
+
+```bash
+goal-harness bootstrap \
+  --goal-id your-controller-goal \
+  --spawn-allowed \
+  --allowed-domain docs-map \
+  --allowed-domain validation-map \
+  --write-scope "docs/**"
 ```
 
 `connect` is an alias for `bootstrap`:
@@ -127,6 +139,11 @@ The public package should contain generic control-plane logic. Project-specific
 adapters can read local evidence such as tests, experiment boards, TODO files,
 or production-safe status summaries.
 
+For Codex-style parallel work, the same model extends to controller/sub-agent
+runs: the controller owns the goal, merge decision, and final writeback; each
+sub-agent owns a scoped probe, implementation slice, or validation surface. See
+[docs/codex-subagent-orchestration.md](docs/codex-subagent-orchestration.md).
+
 ## Public / Private Boundary
 
 Safe to publish:
@@ -154,4 +171,5 @@ See [docs/public-private-boundary.md](docs/public-private-boundary.md).
 Goal Harness is early. The first milestone is not a full agent platform; it is
 a useful shared substrate for local goal state, run history, and contract
 checks across multiple projects. The next milestones are stronger project
-adapters and a small UI for multi-project goal status.
+adapters, safer controller/sub-agent coordination, and a small UI for
+multi-project goal status.

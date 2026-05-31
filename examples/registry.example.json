@@ -7,11 +7,33 @@
       "id": "example-project-goal",
       "domain": "knowledge-work-control-plane",
       "status": "active",
+      "role": "controller",
+      "parent_goal_id": null,
       "repo": "/path/to/project",
       "state_file": ".codex/goals/example-project-goal/ACTIVE_GOAL_STATE.md",
       "adapter": {
         "kind": "example_adapter_v0",
         "status": "connected"
+      },
+      "spawn_policy": {
+        "allowed": true,
+        "max_children": 3,
+        "allowed_domains": [
+          "docs-map",
+          "validation-map"
+        ]
+      },
+      "coordination": {
+        "write_scope": [
+          "docs/**",
+          "examples/**"
+        ],
+        "claim_ttl_minutes": 30,
+        "requires_parent_approval": [
+          "write",
+          "publish",
+          "production-action"
+        ]
       },
       "next_probe": "python3 scripts/project-pre-tick.py --format json --save-run",
       "guards": [

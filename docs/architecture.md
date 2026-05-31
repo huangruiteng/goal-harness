@@ -26,3 +26,27 @@ agent tick / heartbeat / future UI
 The core repository intentionally avoids domain logic. A data experiment goal,
 a note-maintenance goal, and a harness self-improvement goal should share the
 same runtime and contract, but use different adapters.
+
+## Controller / Sub-Agent Model
+
+For Codex-style parallel work, Goal Harness treats the main goal run as a
+controller run. The controller owns:
+
+- the objective and active goal state,
+- the decision to spawn sub-agents,
+- write-scope assignment,
+- merge or rejection of child results,
+- final validation, public/private scan, and state writeback.
+
+Sub-agents own bounded child work:
+
+- read-only repo exploration,
+- one implementation slice with a disjoint write scope,
+- one validation or benchmark surface,
+- one risk or boundary check.
+
+Goal Harness does not execute a scheduler by itself. It records contracts,
+claims, run history, and boundary checks so controller/sub-agent work remains
+inspectable instead of becoming hidden background activity.
+
+See [codex-subagent-orchestration.md](codex-subagent-orchestration.md).

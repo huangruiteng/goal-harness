@@ -39,10 +39,17 @@ def main(argv: list[str] | None = None) -> int:
     bootstrap_parser.add_argument("--goal-id", help="Stable goal id. Defaults to <project-name>-goal.")
     bootstrap_parser.add_argument("--objective", default=DEFAULT_OBJECTIVE, help="Initial goal objective.")
     bootstrap_parser.add_argument("--domain", default=DEFAULT_DOMAIN, help="Goal domain label.")
+    bootstrap_parser.add_argument("--role", choices=["controller", "subagent"], default="controller")
+    bootstrap_parser.add_argument("--parent-goal-id", help="Parent goal id when --role subagent.")
     bootstrap_parser.add_argument("--state-file", help="Active goal state path, relative to project unless absolute.")
     bootstrap_parser.add_argument("--adapter-kind", default="generic_project_goal_v0")
     bootstrap_parser.add_argument("--adapter-status", default="connected")
     bootstrap_parser.add_argument("--next-probe", help="Optional project-specific pre-tick command.")
+    bootstrap_parser.add_argument("--spawn-allowed", action="store_true", help="Declare that this controller may spawn child agents.")
+    bootstrap_parser.add_argument("--max-children", type=int, default=3)
+    bootstrap_parser.add_argument("--allowed-domain", action="append", default=[], help="Allowed child work domain. Repeatable.")
+    bootstrap_parser.add_argument("--write-scope", action="append", default=[], help="Allowed write scope such as docs/**. Repeatable.")
+    bootstrap_parser.add_argument("--claim-ttl-minutes", type=int, default=30)
     bootstrap_parser.add_argument("--force", action="store_true", help="Replace existing goal entry or state file.")
     bootstrap_parser.add_argument("--dry-run", action="store_true", help="Show planned writes without changing files.")
 
@@ -76,10 +83,17 @@ def main(argv: list[str] | None = None) -> int:
                 goal_id=args.goal_id,
                 objective=args.objective,
                 domain=args.domain,
+                role=args.role,
+                parent_goal_id=args.parent_goal_id,
                 state_file=state_file,
                 adapter_kind=args.adapter_kind,
                 adapter_status=args.adapter_status,
                 next_probe=args.next_probe,
+                spawn_allowed=args.spawn_allowed,
+                max_children=args.max_children,
+                allowed_domains=args.allowed_domain,
+                write_scope=args.write_scope,
+                claim_ttl_minutes=args.claim_ttl_minutes,
                 force=args.force,
                 dry_run=args.dry_run,
             )

@@ -56,6 +56,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
         repo = Path(repo_text).expanduser() if repo_text else None
         state_file = resolve_state_file(repo, raw_goal.get("state_file")) if repo else None
         adapter = raw_goal.get("adapter") if isinstance(raw_goal.get("adapter"), dict) else {}
+        spawn_policy = raw_goal.get("spawn_policy") if isinstance(raw_goal.get("spawn_policy"), dict) else {}
 
         status_counts[status] = status_counts.get(status, 0) + 1
         if not goal_id:
@@ -78,12 +79,16 @@ def inspect_registry(path: Path) -> dict[str, Any]:
                 "id": goal_id,
                 "domain": raw_goal.get("domain"),
                 "status": status,
+                "role": raw_goal.get("role") or "controller",
+                "parent_goal_id": raw_goal.get("parent_goal_id"),
                 "repo": repo_text,
                 "repo_exists": bool(repo and repo.exists()),
                 "state_file": raw_goal.get("state_file"),
                 "state_file_exists": bool(state_file and state_file.exists()),
                 "adapter_kind": adapter.get("kind"),
                 "adapter_status": adapter.get("status"),
+                "spawn_allowed": spawn_policy.get("allowed"),
+                "max_children": spawn_policy.get("max_children"),
                 "next_probe": raw_goal.get("next_probe"),
                 "guards": raw_goal.get("guards") or [],
             }
@@ -120,20 +125,24 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
             f"- common_runtime_root: `{payload.get('common_runtime_root')}`",
             f"- goals: `{payload.get('goal_count')}`",
             "",
-            "| goal | domain | status | repo_exists | state_exists | adapter | next_probe |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| goal | role | parent | domain | status | repo_exists | state_exists | spawn | adapter | next_probe |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for goal in payload.get("goals") or []:
         adapter = f"{goal.get('adapter_kind')}:{goal.get('adapter_status')}"
+        spawn = f"{goal.get('spawn_allowed')}:{goal.get('max_children')}"
         next_probe = str(goal.get("next_probe") or "").replace("|", "\\|")
         lines.append(
             "| "
             f"`{goal.get('id')}` | "
+            f"{goal.get('role')} | "
+            f"{goal.get('parent_goal_id') or ''} | "
             f"{goal.get('domain')} | "
             f"{goal.get('status')} | "
             f"{goal.get('repo_exists')} | "
             f"{goal.get('state_file_exists')} | "
+            f"{spawn} | "
             f"{adapter} | "
             f"{next_probe} |"
         )

@@ -74,6 +74,41 @@ or editing production state requires explicit user approval.
 The bootstrap command does not create a domain adapter. It creates the minimum
 registry and state contract so the first adapter can be added deliberately.
 
+## Controller / Sub-Agent Coordination
+
+Some Codex goal runs should use multiple sub-agents. Goal Harness should keep
+that parallelism explicit:
+
+- child runs declare `work_scope` before acting;
+- overlapping write scopes require parent arbitration;
+- children default to read-only unless the registry grants a write scope;
+- only the controller can mark the main goal complete;
+- child final reports include changed files, validation, residual risk, and
+  next handoff;
+- the controller performs final merge, public/private scan, and state writeback.
+
+Minimal registry fields for this pattern are:
+
+```json
+{
+  "role": "controller",
+  "parent_goal_id": null,
+  "spawn_policy": {
+    "allowed": true,
+    "max_children": 3,
+    "allowed_domains": ["docs-map", "validation-map"]
+  },
+  "coordination": {
+    "write_scope": ["docs/**", "examples/**"],
+    "claim_ttl_minutes": 30,
+    "requires_parent_approval": ["write", "publish", "production-action"]
+  }
+}
+```
+
+These fields are a public contract, not a runtime lock manager. A future version
+can add claim files, stale-claim detection, and overlap warnings.
+
 ## Shared Runtime
 
 All adapters should save compact run history under:
@@ -92,7 +127,8 @@ Put generic code here:
 - registry and history readers,
 - contract checker,
 - generic schema and docs,
-- sanitized adapter examples.
+- sanitized adapter examples,
+- controller/sub-agent lifecycle examples.
 
 Keep in the project repo:
 

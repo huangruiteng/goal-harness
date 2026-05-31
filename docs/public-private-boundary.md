@@ -10,6 +10,8 @@ These are safe to keep in the public repository:
 - runtime directory conventions,
 - generic CLI code,
 - adapter lifecycle rules,
+- controller/sub-agent lifecycle states,
+- generic coordination rules,
 - validation commands,
 - sanitized examples,
 - high-level design notes.
@@ -25,7 +27,30 @@ These should stay in project-local ignored files:
 - document links,
 - credentials and tokens,
 - person or team names from private work,
-- active goal state that reveals current user context.
+- active goal state that reveals current user context,
+- raw sub-agent prompts and traces,
+- child run evidence that contains local paths or private artifacts.
+
+## Sub-Agent Data
+
+Sub-agent orchestration increases leakage risk because child prompts often
+contain more context than the final report needs. Public artifacts should keep:
+
+- schema names,
+- role names,
+- sanitized work-scope examples,
+- lifecycle states,
+- generic merge rules.
+
+Private project state should keep:
+
+- raw child prompts,
+- raw trajectories,
+- local task evidence,
+- non-public repo names,
+- exact command output when it contains project-specific context.
+
+Run summaries are publishable only after sanitization.
 
 ## Practical Rule
 
