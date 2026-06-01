@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:33:24+08:00
+updated_at: 2026-06-02T05:43:29+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,28 @@ private project context.
 
 ## Next Action
 
-- Audit and tighten the dashboard selected-action microcopy for the Review
-  Packet path. It should say the operator decides in the dashboard/operator
-  view first, and the copied packet/project-agent command is only the
-  after-approval dry-run execution path. Keep the change to wording and source
-  checks; do not append a real gate or run a real map.
+- Do a browser-level first-screen check of the dashboard Review Packet path:
+  confirm the selected-action panel says the operator decides in the
+  dashboard/operator view first, the old "send directly to project Agent"
+  wording is gone, and the packet details still stay collapsed by default. Keep
+  this to UI verification or a tiny wording follow-up; do not append a real
+  gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:43:29+08:00: Tightened the dashboard selected-action
+  microcopy for the Review Packet path. The first-screen badge now says
+  `Operator Review Packet`, the helper copy now says to decide in the
+  dashboard/operator view first and only then use the packet as project-agent
+  execution context, and the controller dry-run preview says the project agent
+  reports changed files and validation only after approval. The
+  `review-packet-smoke` now rejects the old misleading "send directly to
+  project Agent; human only adds one judgment" wording and asserts the new
+  microcopy. Validation: direct Review Packet smoke passed; aggregate public
+  smokes passed; Python compile passed; dashboard production build passed with
+  the existing >500 kB chunk warning; public contract check passed. Critic:
+  source/build validation protects the copy, but a browser-level first-screen
+  check is still useful before declaring the operator surface polished.
 - 2026-06-02T05:33:24+08:00: Added the Review Packet source-of-truth boundary
   to the public status data contract and extended `review-packet-smoke` to
   assert that contract text. The contract now says the dashboard/operator view

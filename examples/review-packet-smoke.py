@@ -95,6 +95,10 @@ def main() -> int:
     )
     assert "the dashboard/operator view owns the human decision" in contract
     assert "the project-agent command is only the after-approval dry-run execution path" in contract
+    assert "复制后直接发给对应项目 Agent；人只补一句判断。" not in source
+    assert "Operator Review Packet" in source
+    assert "先在 dashboard/operator view 做判断；同意后再把 packet 作为项目 Agent 的执行上下文。" in source
+    assert "项目 Agent 只有在 approval 后才回报 changed files、validation 和 next safe action。" in source
     assert_order(
         controller_contract,
         [

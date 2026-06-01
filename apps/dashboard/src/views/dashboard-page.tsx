@@ -1108,7 +1108,7 @@ function ReviewLinkPanel({
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="info">Selected action share</Badge>
+              <Badge variant="info">Operator Review Packet</Badge>
               <Badge variant="neutral">UI state only</Badge>
               <Badge variant={actionKind === "all" ? "neutral" : userActionKindConfig[actionKind].variant}>
                 {actionKindLabel(actionKind)}
@@ -1120,7 +1120,7 @@ function ReviewLinkPanel({
               {lane !== "all" || severity !== "all" ? <Badge variant="neutral">{lane} / {severity}</Badge> : null}
             </div>
             <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
-              复制后直接发给对应项目 Agent；人只补一句判断。
+              先在 dashboard/operator view 做判断；同意后再把 packet 作为项目 Agent 的执行上下文。
             </p>
             {authorityCoverage ? (
               <p className="mt-2 text-xs leading-5 text-slate-700 dark:text-zinc-300">{authorityCoverage.reviewLine}</p>
@@ -1371,8 +1371,8 @@ function buildOperatorTransitionPreview({
       summary: "预览 controller/read-only handoff 能看到的项目状态；这不是持久 opt-in 或写控制。",
       effects: [
         "运行 read-only map dry-run 或等价 safe path，不 append run history。",
-        "如果人已同意，用户可先预览 operator-gate dry-run 记录；项目 Agent 仍只接收 read-only map dry-run。",
-        "让目标项目 agent 先回报 changed files、validation 和 next safe action。",
+        "人同意后，用户可先预览 operator-gate dry-run 记录；项目 Agent 仍只接收 read-only map dry-run。",
+        "项目 Agent 只有在 approval 后才回报 changed files、validation 和 next safe action。",
         "不记录 approval、controller opt-in、write-control 或生产动作授权。",
       ],
       command,
