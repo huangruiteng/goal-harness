@@ -18,6 +18,9 @@ JSON, but the first screen is a human operator view: `User Review Map` translate
 registry/run/reward/controller signals into review states, while `Goal
 Directory` remains the multi-project switcher with public-safe domain,
 attention state, latest run, and run counts.
+`User Actions` lifts the selected-detail operator logic into the first screen:
+reward gates, controller opt-ins, evidence watches, Codex handoffs, and health
+blocks are grouped as operator cards before the user opens a goal detail.
 The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for

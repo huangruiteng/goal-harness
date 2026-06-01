@@ -709,6 +709,19 @@ type RewardDraftDefaults = {
   label: string;
 };
 
+type UserActionSummaryItem = {
+  goalId: string;
+  title: string;
+  badge: string;
+  variant: BadgeVariant;
+  summary: string;
+  detail: string;
+  phase: string;
+  waitingOn: string;
+  draftLabel?: string;
+  priority: number;
+};
+
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
   if (readiness.decision_advisor_ready) {
     return "success";
@@ -1033,6 +1046,168 @@ function buildRewardDraftDefaults({
     followUp: "Inspect status before recording a real reward.",
     label: "operator default",
   };
+}
+
+function buildUserActionSummaryItems(rows: GoalDirectoryRow[]): UserActionSummaryItem[] {
+  const items = rows.flatMap((row): UserActionSummaryItem[] => {
+    const decision = buildOperatorDecision({ goal: row.goal, queueItem: row.queueItem });
+    const draftDefaults = buildRewardDraftDefaults({ goal: row.goal, queueItem: row.queueItem });
+    const latestRun = row.latestRun;
+    const missingGates = new Set(row.queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []);
+    const handoffCondition = row.queueItem?.next_handoff_condition
+      ?? latestRun?.controller_readiness?.next_handoff_condition
+      ?? "";
+    const base = {
+      goalId: row.goal.id,
+      phase: decision.phase,
+      waitingOn: decision.waitingOn,
+    };
+
+    if (row.severity === "high") {
+      return [{
+        ...base,
+        title: "Fix health first",
+        badge: "Blocking",
+        variant: "danger",
+        summary: decision.action,
+        detail: decision.reason,
+        priority: 0,
+      }];
+    }
+
+    if (missingGates.has("human_reward_capture")) {
+      return [{
+        ...base,
+        title: "Record human reward",
+        badge: "Reward gate",
+        variant: "warning",
+        summary: draftDefaults.reasonSummary,
+        detail: draftDefaults.followUp || handoffCondition || decision.action,
+        draftLabel: draftDefaults.label,
+        priority: 1,
+      }];
+    }
+
+    if (decision.waitingOn === "controller" || decision.waitingOn === "user_or_controller") {
+      return [{
+        ...base,
+        title: decision.title,
+        badge: decision.badge,
+        variant: decision.variant,
+        summary: decision.reason,
+        detail: decision.action,
+        draftLabel: draftDefaults.label,
+        priority: 2,
+      }];
+    }
+
+    if (decision.waitingOn === "external_evidence") {
+      return [{
+        ...base,
+        title: "Watch evidence",
+        badge: decision.badge,
+        variant: "info",
+        summary: decision.reason,
+        detail: handoffCondition || decision.action,
+        draftLabel: draftDefaults.label,
+        priority: 3,
+      }];
+    }
+
+    if (decision.waitingOn === "codex") {
+      return [{
+        ...base,
+        title: decision.title,
+        badge: decision.badge,
+        variant: "success",
+        summary: draftDefaults.reasonSummary,
+        detail: draftDefaults.followUp || decision.action,
+        draftLabel: draftDefaults.label,
+        priority: 4,
+      }];
+    }
+
+    if (decision.phase === "reward_judged") {
+      return [{
+        ...base,
+        title: "Reward captured",
+        badge: "Judged",
+        variant: "success",
+        summary: decision.reason,
+        detail: draftDefaults.followUp || decision.action,
+        draftLabel: draftDefaults.label,
+        priority: 5,
+      }];
+    }
+
+    return [];
+  });
+
+  return items.sort((a, b) => a.priority - b.priority || a.goalId.localeCompare(b.goalId));
+}
+
+function UserActionSummary({
+  rows,
+  selectedGoalId,
+  onSelectGoal,
+}: {
+  rows: GoalDirectoryRow[];
+  selectedGoalId: string;
+  onSelectGoal: (goalId: string) => void;
+}) {
+  const items = buildUserActionSummaryItems(rows);
+  return (
+    <Card>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            User Actions
+          </CardTitle>
+          <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
+            First-screen operator actions derived from status, gates, and reward defaults.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={items.length > 0 ? "warning" : "success"}>{items.length} actions</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500 dark:border-zinc-800 dark:text-zinc-400">
+            No user-facing action is active.
+          </div>
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-3">
+            {items.map((item) => (
+              <button
+                className={cn(
+                  "min-w-0 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900",
+                  item.goalId === selectedGoalId && "border-slate-400 bg-slate-50 dark:border-zinc-600 dark:bg-zinc-900",
+                )}
+                key={`${item.goalId}-${item.title}`}
+                onClick={() => onSelectGoal(item.goalId)}
+                type="button"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={item.variant}>{item.badge}</Badge>
+                  <PhaseBadges compact phase={item.phase} />
+                  {item.waitingOn !== "clear" ? (
+                    <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
+                  ) : null}
+                  {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
+                </div>
+                <div className="mt-3 break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
+                <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.summary}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function buildOperatorActionBridge({
@@ -2007,6 +2182,8 @@ export function DashboardPage() {
                 <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
+
+              <UserActionSummary rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
 
               <GoalDirectory rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
 

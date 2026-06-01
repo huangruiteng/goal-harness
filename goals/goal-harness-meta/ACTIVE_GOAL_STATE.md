@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T19:15:23+08:00
+updated_at: 2026-06-01T19:21:38+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,9 +29,11 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should promote the same operator-derived actions into a first-screen
-  user action summary, so reward gates, controller opt-ins, evidence watches,
-  and Codex handoffs are visible before the user opens a selected-goal detail.
+  slice should make first-screen `User Actions` cards expose the matching safe
+  CLI path or reward draft hint inline while preserving the boundary that
+  dashboard is user-facing and CLI status is agent-facing machine state. The
+  operator should see the next concrete local step without opening run-history
+  detail.
 
 ## Recent Progress
 
@@ -236,6 +238,15 @@ private project context.
   opt-in goals show their gate label but still avoid a reward command when no
   compact run exists. The panel can reset to these defaults after user edits,
   and browser writes remain disabled.
+- 2026-06-01T19:21:38+08:00: Promoted operator-derived actions into a
+  first-screen `User Actions` summary. The React dashboard now derives compact
+  action cards from the same `Operator Decision` and reward-default logic used
+  by selected-goal detail, so reward gates, controller opt-ins, evidence
+  watches, Codex handoffs, and blocking health items are visible before opening
+  a goal. In the current global status, the first screen shows three cards:
+  `Record human reward` for `tiger-team-maiduidui-regauc`, `Review controller
+  opt-in` for `agent-harness-main-control`, and `Let Codex use the map` for the
+  mapped Codex-ready project.
 
 ## Validation
 
@@ -262,6 +273,9 @@ private project context.
   controller-opt-in default source.
 - CLI dry-run smoke: `goal-harness reward --dry-run` accepts the derived tiger
   reward-gate fields and returns `ok=True`, `dry_run=True`, `appended=False`.
+- Browser DOM smoke: first-screen `User Actions` appears before
+  `Goal Directory`, shows `3 actions`, and includes reward gate, controller
+  opt-in, and map handoff cards for the current global status.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load

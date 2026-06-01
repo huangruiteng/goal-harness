@@ -402,6 +402,10 @@ without rewriting the original run JSON or Markdown payload.
 A first useful UI can be built from the export alone:
 
 - Header: `ok`, `goal_count`, `run_count`, and contract summary.
+- User action summary: first-screen cards should derive from the same selected
+  operator decision and reward-default logic, grouping reward gates, controller
+  opt-ins, evidence watches, Codex handoffs, and blocking health items before
+  raw goal detail.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.
