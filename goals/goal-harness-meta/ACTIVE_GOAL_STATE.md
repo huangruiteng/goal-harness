@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T02:55:47+08:00
+updated_at: 2026-06-02T03:52:23+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,49 @@ private project context.
 
 ## Next Action
 
-- Continue the compute quota v0.1 slice by teaching project-facing Goal
-  Harness instructions to call `goal-harness quota should-run --goal-id
-  <goal-id>` before long-running heartbeat or adapter work. Keep this as
-  agent-facing usage guidance, not a scheduler or quota write path.
+- After this compute-quota guard/onboarding slice is packaged, re-run
+  `goal-harness status` and choose the next P0 candidate from the Priority
+  Stack. Prefer state/human-decision reliability over adding quota write
+  commands or a scheduler.
 
 ## Recent Progress
 
+- 2026-06-02T03:52:23+08:00: Packaging pass reviewed the public diff for the
+  compute-quota guard adoption slice. Scope is limited to
+  `goal_harness/project_prompt.py`, `docs/new-project-codex-prompt.md`,
+  `skills/goal-harness-project/SKILL.md`, and this meta state file: project
+  agents and onboarding prompts now ask `quota should-run` before spending
+  automatic compute, and the text preserves gate/reward/write boundaries.
+  Final validation passed: Python compile, generated prompt JSON smoke,
+  public contract check, and `git diff --check`. Commit is the remaining
+  action for this slice.
+- 2026-06-02T03:49:59+08:00: Added the same compute-quota guard to the
+  generated new-project Codex prompt and the static onboarding prompt doc.
+  Newly connected project agents now learn to run
+  `goal-harness --format json quota should-run --goal-id <goal-id>` after
+  `connect` and before heartbeat, scheduled-tick, long-running adapter, or
+  autonomous delivery work. `should_run=false` means skip implementation with
+  the public-safe reason; non-zero status collection fails closed through
+  `doctor` / `status`; the guard is explicitly not write permission,
+  operator-gate bypass, or human reward. Validation covered Python compile,
+  generated prompt JSON smoke, and prompt/doc grep. One failed smoke used the
+  global `--format` flag after the subcommand; rerunning with
+  `goal-harness --format json new-project-prompt ...` passed. Writeback
+  appended a `state_refreshed` run and refreshed the local dashboard status
+  JSON.
+- 2026-06-02T03:45:29+08:00: Added the compute-quota guard to the
+  `goal-harness-project` skill template and reinstalled the local skill copy.
+  Project agents are now instructed to run
+  `goal-harness --format json quota should-run --goal-id <goal-id>` before
+  spending heartbeat, scheduled-tick, adapter, or autonomous delivery compute;
+  `should_run=false` skips implementation work with the public-safe reason,
+  while non-zero status collection fails closed. The skill also states that
+  quota is not write permission, not an operator-gate bypass, and not human
+  reward. Validation covered local install sync, installed-skill grep,
+  Python compile, live `quota should-run` for `goal-harness-meta`, public
+  contract check, and `git diff --check`. Writeback appended a
+  `state_refreshed` run for `goal-harness-meta` and refreshed the local
+  dashboard status JSON.
 - 2026-06-02T02:55:47+08:00: Wired the local hourly heartbeat/control prompt
   into the per-goal quota guard. The heartbeat now instructs the agent to run
   `goal-harness quota should-run --goal-id goal-harness-meta` before spending

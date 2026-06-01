@@ -32,6 +32,10 @@ fi
 goal-harness doctor >/dev/null"""
 
 
+def render_quota_guard_command(goal_id: str) -> str:
+    return f"goal-harness --format json quota should-run --goal-id {shell_arg(goal_id)}"
+
+
 def render_connect_command(
     *,
     project: str,
@@ -106,6 +110,7 @@ def build_new_project_prompt(
         allowed_domains=allowed_domains,
         write_scope=write_scope,
     )
+    quota_guard_command = render_quota_guard_command(resolved_goal_id)
     prompt = render_prompt_text(
         project=project_text,
         goal_doc=goal_doc_text,
@@ -117,6 +122,7 @@ def build_new_project_prompt(
         next_probe=resolved_next_probe,
         cli_preflight=render_cli_preflight(),
         connect_command=connect_command,
+        quota_guard_command=quota_guard_command,
         spawn_allowed=spawn_allowed,
         allowed_domains=allowed_domains,
         write_scope=write_scope,
@@ -135,6 +141,7 @@ def build_new_project_prompt(
         "allowed_domains": allowed_domains,
         "write_scope": write_scope,
         "connect_command": connect_command,
+        "quota_guard_command": quota_guard_command,
         "cli_preflight": render_cli_preflight(),
         "prompt": prompt,
     }
@@ -152,6 +159,7 @@ def render_prompt_text(
     next_probe: str,
     cli_preflight: str,
     connect_command: str,
+    quota_guard_command: str,
     spawn_allowed: bool,
     allowed_domains: list[str],
     write_scope: list[str],
@@ -209,13 +217,22 @@ def render_prompt_text(
 4. 确认 `.goal-harness/registry.json` 和 `.codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md` 已创建或更新。
    如果目标状态包含私有证据，把 `.goal-harness/` 和 `.codex/goals/` 加入该项目 `.gitignore`。
    `goal-harness connect` 默认会同步到共享全局 registry；不要手动编辑其他项目的 registry。
-5. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、不同步外部系统、不要写生产状态，除非目标文档明确授权。通用接入优先跑：
+5. 在任何 heartbeat、scheduled tick、long-running adapter 或自主 delivery 前，先问 compute guard：
+
+```bash
+{quota_guard_command}
+```
+
+   如果返回 `should_run=false`，本轮不要做实现或 adapter 工作，只记录 public-safe reason；
+   如果命令非零，fail closed，先修 `goal-harness doctor` / `goal-harness status`。
+   这个 guard 不等于写权限、不绕过 operator gate、也不替代 human reward。
+6. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、不同步外部系统、不要写生产状态，除非目标文档明确授权。通用接入优先跑：
 
 ```bash
 goal-harness read-only-map --goal-id {goal_id}
 ```
 
-6. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的 adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh run：
+7. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的 adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh run：
 
 ```bash
 goal-harness refresh-state --goal-id {goal_id}
@@ -223,11 +240,11 @@ goal-harness refresh-state --goal-id {goal_id}
 
 这个命令也会自动同步全局 registry。
 
-7. 跑验证：
+8. 跑验证：
    - `goal-harness registry`
    - `goal-harness status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `goal-harness check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
-8. 最后用中文汇报：
+9. 最后用中文汇报：
    - changed files；
    - validation output；
    - 当前 goal 在 dashboard / attention queue 里会怎么显示；

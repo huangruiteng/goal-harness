@@ -43,6 +43,27 @@ goal-harness doctor
 If this still fails, report the exact missing piece and do not fake a successful
 connection.
 
+## Before Spending Automatic Compute
+
+Before a heartbeat, scheduled tick, long-running adapter, or autonomous project
+agent spends another delivery turn, ask Goal Harness whether this goal is
+eligible:
+
+```bash
+goal-harness --format json quota should-run --goal-id <STABLE_GOAL_ID>
+```
+
+If the response has `should_run=false`, do not run implementation or adapter
+work for that goal in this turn. Quietly report or record the public-safe
+`reason` instead. If the command exits non-zero, fail closed: run
+`goal-harness doctor` / `goal-harness status` and fix status collection before
+spending compute.
+
+This guard is only a compute-allocation check. It does not grant write
+permission, bypass operator gates, or replace run-bound human reward. Keep the
+hard order: health/safety -> operator gate -> evidence wait -> compute quota ->
+project-agent execution.
+
 ## Connect A New Project
 
 1. Read the project goal document and inspect the repo narrowly.
