@@ -272,9 +272,15 @@ agent to use that map. Compact run records may include a public-safe
   "sections_found": 4,
   "sections_checked": 7,
   "files_present": 4,
-  "files_checked": 9
+  "files_checked": 9,
+  "residual_risk_count": 1
 }
 ```
+
+The full run payload may also include `residual_risks`, a compact public-safe
+list such as `planned_adapter_requires_controller_opt_in` or
+`project_local_goal_state_not_detected`. Project agents should relay that list
+directly rather than inventing a free-form risk summary.
 
 The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
 defaults to dry-run and requires `--execute` before moving the runtime directory

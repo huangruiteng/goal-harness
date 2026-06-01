@@ -89,7 +89,8 @@ goal-harness read-only-map --goal-id <STABLE_GOAL_ID> --dry-run
 If the adapter status is `planned`, only the `--dry-run` preview is allowed and
 the result should include `opt_in_required=true`. Do not append a real map until
 the user or target controller has moved the adapter to `read-only-map-ready`,
-`connected-read-only`, or `connected`.
+`connected-read-only`, or `connected`. Relay the returned `residual_risks`
+labels directly; do not invent a separate free-form risk summary.
 
 ## Refresh State After Non-Adapter Work
 

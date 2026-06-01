@@ -160,7 +160,9 @@ goal-harness read-only-map --goal-id your-project-goal
 `adapter.kind=read_only_project_map_v0` or a compatible `*_read_only_map_v0`
 adapter. It reads the registry, active state, and a small file-existence
 inventory, then writes a compact `read_only_project_map` run without mutating
-the project.
+the project. The output includes a compact `residual_risks` list so project
+agents can report the same risk vocabulary instead of inferring it from raw
+inventory rows.
 
 For a high-complexity goal whose adapter is still `planned`, use
 `goal-harness read-only-map --goal-id ... --dry-run` as the opt-in preview.

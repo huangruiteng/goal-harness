@@ -200,8 +200,8 @@ compatible `*_read_only_map_v0` variant, and whose adapter status is connected
 for read-only work. It inspects only registry metadata, the active state
 sections, and a bounded file-existence inventory. The compact run index records
 `classification=read_only_project_map`, public-safe `recommended_action`,
-artifact availability, and map counts; raw project evidence stays in the local
-private runtime payload.
+artifact availability, map counts, and compact `residual_risks`; raw project
+evidence stays in the local private runtime payload.
 
 For planned high-complexity adapters, `read-only-map --dry-run` is allowed as
 the opt-in preview path. It returns `opt_in_required=true` and appends nothing,

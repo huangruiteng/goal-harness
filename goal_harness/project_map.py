@@ -170,6 +170,40 @@ def build_project_map_record(
     }
 
 
+def derive_residual_risks(record: dict[str, Any], *, opt_in_required: bool) -> list[str]:
+    risks: list[str] = []
+    registry_goal = record.get("registry_goal") if isinstance(record.get("registry_goal"), dict) else {}
+    state_map = record.get("state_map") if isinstance(record.get("state_map"), dict) else {}
+    inventory = record.get("project_inventory") if isinstance(record.get("project_inventory"), dict) else {}
+
+    if opt_in_required:
+        risks.append("planned_adapter_requires_controller_opt_in")
+    if not registry_goal.get("authority_source_count"):
+        risks.append("authority_sources_not_declared")
+
+    sections = state_map.get("sections") if isinstance(state_map.get("sections"), dict) else {}
+    missing_sections = [
+        heading for heading, item in sections.items() if isinstance(item, dict) and not item.get("present")
+    ]
+    if missing_sections:
+        risks.append("state_sections_missing:" + ",".join(missing_sections[:4]))
+
+    if not inventory.get("repo_exists"):
+        risks.append("project_repo_missing")
+
+    checks = inventory.get("checks") if isinstance(inventory.get("checks"), list) else []
+    missing_paths = {str(item.get("path")) for item in checks if isinstance(item, dict) and not item.get("exists")}
+    if ".goal-harness/registry.json" in missing_paths or ".codex/goals" in missing_paths:
+        risks.append("project_local_goal_state_not_detected")
+    if "README.md" in missing_paths and "docs" in missing_paths:
+        risks.append("project_context_surface_sparse")
+    validation_markers = {"tests", "package.json", "pyproject.toml", "requirements.txt"}
+    if validation_markers.issubset(missing_paths):
+        risks.append("standard_validation_surface_not_detected")
+
+    return risks
+
+
 def compact_project_map(record: dict[str, Any]) -> dict[str, Any]:
     registry_goal = record.get("registry_goal") if isinstance(record.get("registry_goal"), dict) else {}
     adapter = registry_goal.get("adapter") if isinstance(registry_goal.get("adapter"), dict) else {}
@@ -184,6 +218,7 @@ def compact_project_map(record: dict[str, Any]) -> dict[str, Any]:
         "sections_checked": state_map.get("sections_checked"),
         "files_present": inventory.get("files_present"),
         "files_checked": inventory.get("files_checked"),
+        "residual_risk_count": len(record.get("residual_risks") or []),
     }
 
 
@@ -226,8 +261,17 @@ def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
                 f"- guards: `{project_map.get('guard_count')}`",
                 f"- state_sections: `{project_map.get('sections_found')}/{project_map.get('sections_checked')}`",
                 f"- project_inventory: `{project_map.get('files_present')}/{project_map.get('files_checked')}`",
+                f"- residual_risks: `{project_map.get('residual_risk_count')}`",
             ]
         )
+
+    risks = payload.get("residual_risks") if isinstance(payload.get("residual_risks"), list) else []
+    lines.extend(["", "## Residual Risks"])
+    if risks:
+        for risk in risks:
+            lines.append(f"- `{risk}`")
+    else:
+        lines.append("- none detected in bounded map")
 
     inventory = payload.get("project_inventory") if isinstance(payload.get("project_inventory"), dict) else {}
     checks = inventory.get("checks") if isinstance(inventory.get("checks"), list) else []
@@ -303,6 +347,7 @@ def read_only_project_map_run(
         generated_at=generated_at,
         registry_goal=registry_goal,
     )
+    record["residual_risks"] = derive_residual_risks(record, opt_in_required=opt_in_required)
     project_map = compact_project_map(record)
 
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
@@ -316,6 +361,7 @@ def read_only_project_map_run(
         "classification": classification,
         "recommended_action": action,
         "health_check": record["health_check"],
+        "residual_risks": record["residual_risks"],
         "project_map": project_map,
         "json_path": str(json_path),
         "markdown_path": str(markdown_path),
@@ -333,6 +379,7 @@ def read_only_project_map_run(
         "recommended_action": action,
         "generated_at": generated_at,
         "health_check": record["health_check"],
+        "residual_risks": record["residual_risks"],
         "json_path": str(json_path),
         "markdown_path": str(markdown_path),
         "index_path": str(index_path),
