@@ -70,6 +70,25 @@ goal-harness --format json status \
       "public boundary scan clean: 12 files"
     ]
   },
+  "global_registry": {
+    "available": true,
+    "ok": true,
+    "registry": "~/.codex/goal-harness/registry.global.json",
+    "current_registry": ".goal-harness/registry.json",
+    "current_registry_is_global": false,
+    "global_goal_count": 4,
+    "current_goal_count": 3,
+    "source_registry_count": 2,
+    "summary": {
+      "high": 0,
+      "action": 0,
+      "info": 1,
+      "checks": 2,
+      "findings": 1
+    },
+    "findings": [],
+    "checks": []
+  },
   "attention_queue": {
     "available": true,
     "item_count": 2,
@@ -91,6 +110,48 @@ goal-harness --format json status \
 
 Consumers should treat unknown fields as additive. Required fields for a
 first-screen UI are `ok`, `contract`, and `attention_queue`.
+
+## Global Registry Health
+
+`global_registry` is the local multi-project health surface. It checks the
+shared `registry.global.json` even when the current command is pointed at a
+project-local registry, so dashboard users can see registry scope problems
+before they turn into ghost projects.
+
+Health findings are compact and local-only. They may include local filesystem
+paths in a developer machine export, so do not publish a raw local status JSON
+outside the machine.
+
+Finding shape:
+
+```json
+{
+  "kind": "stale_source_registry",
+  "severity": "action",
+  "goal_id": "project-main-control",
+  "message": "`project-main-control` source registry changed after its last global sync",
+  "recommended_action": "run `goal-harness sync-global --goal-id project-main-control` from the source project",
+  "path": "/path/to/project/.goal-harness/registry.json"
+}
+```
+
+Current finding kinds:
+
+- `duplicate_goal_id`: the global registry contains more than one entry for the
+  same goal id; this is high severity because routing is ambiguous.
+- `source_registry_missing`: a global entry points at a source registry that no
+  longer exists.
+- `stale_source_registry`: the source registry changed after the last recorded
+  `synced_at`, so the global entry may be stale.
+- `state_file_missing`: the goal's declared active state file no longer exists.
+- `state_file_not_declared`: the global entry has no durable active state file.
+- `current_registry_scope_excludes_global_goals`: informational reminder that a
+  project-local registry view excludes goals that are present in the shared
+  global registry.
+
+High and action findings are also lifted into `attention_queue.items` with
+`source=global_registry`; informational scope findings stay in the global
+registry panel so local project views are not noisy.
 
 ## Contract Health
 

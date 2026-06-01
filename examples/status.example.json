@@ -20,6 +20,38 @@
       "public boundary scan clean: 14 files"
     ]
   },
+  "global_registry": {
+    "available": true,
+    "ok": true,
+    "registry": "~/.codex/goal-harness/registry.global.json",
+    "current_registry": ".goal-harness/registry.json",
+    "current_registry_is_global": false,
+    "global_goal_count": 5,
+    "current_goal_count": 4,
+    "source_registry_count": 2,
+    "summary": {
+      "high": 0,
+      "action": 0,
+      "info": 1,
+      "checks": 2,
+      "findings": 1
+    },
+    "findings": [
+      {
+        "kind": "current_registry_scope_excludes_global_goals",
+        "severity": "info",
+        "message": "current registry excludes 1 global goal(s)",
+        "recommended_action": "for multi-project dashboard/controller status, run `goal-harness status` without `--registry` or pass the global registry",
+        "goal_ids": [
+          "platform-migration-goal"
+        ]
+      }
+    ],
+    "checks": [
+      "global registry goals checked: 5",
+      "global source registries checked: 2"
+    ]
+  },
   "attention_queue": {
     "available": true,
     "item_count": 3,

@@ -75,6 +75,36 @@ export const runHistorySchema = z.object({
   recent_runs: z.array(runRecordSchema).optional().default([]),
 });
 
+export const globalRegistryFindingSchema = z.object({
+  kind: z.string(),
+  severity: z.string(),
+  message: z.string(),
+  recommended_action: z.string(),
+  goal_id: z.string().optional().nullable(),
+  path: z.string().optional().nullable(),
+  goal_ids: z.array(z.string()).optional().default([]),
+});
+
+export const globalRegistryHealthSchema = z.object({
+  available: z.boolean(),
+  ok: z.boolean(),
+  registry: z.string(),
+  current_registry: z.string().optional().nullable(),
+  current_registry_is_global: z.boolean().optional().default(false),
+  global_goal_count: z.number().optional().default(0),
+  current_goal_count: z.number().optional().default(0),
+  source_registry_count: z.number().optional().default(0),
+  summary: z.object({
+    high: z.number().optional().default(0),
+    action: z.number().optional().default(0),
+    info: z.number().optional().default(0),
+    checks: z.number().optional().default(0),
+    findings: z.number().optional().default(0),
+  }),
+  findings: z.array(globalRegistryFindingSchema).optional().default([]),
+  checks: z.array(z.string()).optional().default([]),
+});
+
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
   registry: z.string(),
@@ -91,6 +121,25 @@ export const statusPayloadSchema = z.object({
     errors: z.array(z.string()),
     warnings: z.array(z.string()),
     checks: z.array(z.string()).optional().default([]),
+  }),
+  global_registry: globalRegistryHealthSchema.optional().default({
+    available: false,
+    ok: true,
+    registry: "",
+    current_registry: null,
+    current_registry_is_global: false,
+    global_goal_count: 0,
+    current_goal_count: 0,
+    source_registry_count: 0,
+    summary: {
+      high: 0,
+      action: 0,
+      info: 0,
+      checks: 0,
+      findings: 0,
+    },
+    findings: [],
+    checks: [],
   }),
   attention_queue: z.object({
     available: z.boolean(),
@@ -131,6 +180,7 @@ export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
+export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 export type RewardDryRunResponse = z.infer<typeof rewardDryRunResponseSchema>;

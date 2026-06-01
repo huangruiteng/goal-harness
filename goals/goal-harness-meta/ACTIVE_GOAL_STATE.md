@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T17:16:09+08:00
+updated_at: 2026-06-01T17:36:10+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,17 +27,13 @@ private project context.
 
 ## Next Action
 
-- For the next real project handoff, use `goal-harness new-project-prompt
-  --project <PROJECT_ROOT> --goal-doc <GOAL_DOC_PATH>`. The receiving shell
-  should pass `goal-harness doctor`, connect with `--goal-doc`, and rely on the
-  default global-registry sync to publish the local goal entry into
-  `~/.codex/goal-harness/registry.global.json`. After any state-only or
-  planning-doc update, run `goal-harness refresh-state --goal-id <GOAL_ID>` so
-  dashboard freshness tracks the active state and the global registry is
-  refreshed. If a runtime goal appears before registry connection, classify it
-  as controller work: register it if active, or preview cleanup with
-  `goal-harness archive-runtime --goal-id <GOAL_ID>` and archive it only after
-  review with `--execute`.
+- Use `goal-harness status` as the multi-project first screen. It now checks
+  the shared global registry for stale source registries, missing active state
+  files, and duplicate goal ids, then lifts action/high findings into the
+  attention queue and renders them in the dashboard. The current local health
+  finding is an `agent-harness-main-control` planned entry whose state file is
+  not present yet; keep that as a controller opt-in/state repair item rather
+  than mutating the target project implicitly.
 
 ## Recent Progress
 
@@ -178,8 +174,14 @@ private project context.
   to install or update it under `~/.codex/skills/goal-harness-project` by
   default. The skill captures the agent-side workflow for project connect,
   state refresh, global sync, validation, private boundary, and Chinese review
-  reporting, so new repository agents can use Goal Harness correctly without
-  manual coaching.
+  reporting.
+- 2026-06-01T17:36:10+08:00: Added global-registry health to the public status
+  contract and React dashboard. `goal-harness status` now reports
+  `global_registry` findings for stale source registries, missing active state
+  files, duplicate goal ids, and local-vs-global scope mismatches. CS-Notes
+  pre-tick now reads the global registry first-screen status, so a newly
+  connected project such as `premium-ui-ai-search-rec-migration` appears as
+  `state_refreshed -> codex` instead of a local-registry ghost.
 
 ## Validation
 

@@ -32,6 +32,7 @@ import { dashboardRoute } from "../router";
 import {
   QueueItem,
   ControllerReadiness,
+  GlobalRegistryHealth,
   HumanReward,
   RewardDryRunResponse,
   RunGoal,
@@ -865,6 +866,94 @@ function ContractHealthPanel({ contract }: { contract: StatusPayload["contract"]
   );
 }
 
+function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth }) {
+  const summary = health.summary;
+  const findings = health.findings ?? [];
+  const checks = health.checks ?? [];
+  const hasFindings = findings.length > 0;
+
+  return (
+    <Card className={cn(!health.ok && "border-rose-200 dark:border-rose-900")}>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4" />
+            Global Registry
+          </CardTitle>
+          <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
+            {health.available ? "Shared multi-project registry health" : "Global registry not found"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={health.ok ? "success" : "danger"}>{health.ok ? "Healthy" : "Blocked"}</Badge>
+          <Badge variant="info">{health.global_goal_count} goals</Badge>
+          <Badge variant={summary.action > 0 ? "warning" : "neutral"}>{summary.action} actions</Badge>
+          <Badge variant={summary.high > 0 ? "danger" : "neutral"}>{summary.high} high</Badge>
+          <Badge variant="neutral">{summary.info} info</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 text-sm md:grid-cols-3">
+          <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+            <div className="text-xs text-slate-500 dark:text-zinc-400">Registry Scope</div>
+            <div className="mt-1 font-medium">
+              {health.current_registry_is_global ? "Global" : "Project-local"}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+            <div className="text-xs text-slate-500 dark:text-zinc-400">Source Registries</div>
+            <div className="mt-1 font-medium">{health.source_registry_count}</div>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+            <div className="text-xs text-slate-500 dark:text-zinc-400">Checks</div>
+            <div className="mt-1 font-medium">{summary.checks}</div>
+          </div>
+        </div>
+
+        {hasFindings ? (
+          <div className="space-y-2">
+            {findings.map((finding) => (
+              <div
+                className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                key={`${finding.kind}-${finding.goal_id ?? finding.goal_ids.join(",")}-${finding.message}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={severityVariant[finding.severity] ?? "info"}>{finding.severity}</Badge>
+                  <span className="font-medium">{finding.kind}</span>
+                  {finding.goal_id ? <span className="break-all text-slate-500 dark:text-zinc-400">{finding.goal_id}</span> : null}
+                </div>
+                <p className="mt-2 leading-6 text-slate-700 dark:text-zinc-300">{finding.message}</p>
+                {finding.goal_ids.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {finding.goal_ids.map((goalId) => (
+                      <Badge key={goalId} variant="neutral">
+                        {goalId}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
+                  {finding.recommended_action}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-zinc-400">No stale source registry, missing state file, or duplicate goal id found.</p>
+        )}
+
+        {checks.length > 0 ? (
+          <div className="space-y-1 text-xs leading-5 text-slate-500 dark:text-zinc-400">
+            {checks.map((check) => (
+              <div key={check}>{check}</div>
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
@@ -1068,6 +1157,8 @@ export function DashboardPage() {
               </section>
 
               <GoalDirectory rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
+
+              <GlobalRegistryHealthPanel health={payload.global_registry} />
 
               <ContractHealthPanel contract={payload.contract} />
 

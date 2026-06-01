@@ -33,7 +33,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 def sanitize_goal_for_global(goal: dict[str, Any], *, source_registry: Path, synced_at: str) -> dict[str, Any]:
     copied = copy.deepcopy(goal)
     authority_sources = copied.pop("authority_sources", [])
-    copied["source_registry"] = str(source_registry)
+    copied["source_registry"] = str(source_registry.expanduser().resolve())
     copied["synced_at"] = synced_at
     copied["authority_source_count"] = len(authority_sources) if isinstance(authority_sources, list) else 0
     return copied

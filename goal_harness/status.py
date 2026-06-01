@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .contract import check_contract
 from .history import collect_history, load_registry
-from .paths import resolve_runtime_root
+from .paths import global_registry_path, resolve_runtime_root
+from .registry import registry_goals
 
 
 CODEX_READY_CLASSIFICATIONS = {
@@ -96,6 +99,200 @@ def attention_item(
     if next_handoff_condition:
         item["next_handoff_condition"] = next_handoff_condition
     return item
+
+
+def parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def same_path(left: Path, right: Path) -> bool:
+    return left.expanduser().resolve() == right.expanduser().resolve()
+
+
+def resolve_goal_local_path(raw: Any, goal: dict[str, Any], *, fallback_base: Path) -> Path | None:
+    if not raw:
+        return None
+    path = Path(str(raw)).expanduser()
+    if path.is_absolute():
+        return path
+    repo = goal.get("repo")
+    if repo:
+        return Path(str(repo)).expanduser() / path
+    return fallback_base / path
+
+
+def global_registry_finding(
+    *,
+    kind: str,
+    severity: str,
+    message: str,
+    recommended_action: str,
+    goal_id: str | None = None,
+    path: Path | None = None,
+    goal_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    finding: dict[str, Any] = {
+        "kind": kind,
+        "severity": severity,
+        "message": message,
+        "recommended_action": recommended_action,
+    }
+    if goal_id:
+        finding["goal_id"] = goal_id
+    if path:
+        finding["path"] = str(path)
+    if goal_ids:
+        finding["goal_ids"] = goal_ids
+    return finding
+
+
+def collect_global_registry_health(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    current_registry: dict[str, Any],
+) -> dict[str, Any]:
+    global_path = global_registry_path(runtime_root)
+    if not global_path.exists():
+        return {
+            "available": False,
+            "ok": True,
+            "registry": str(global_path),
+            "current_registry": str(registry_path),
+            "current_registry_is_global": False,
+            "summary": {"high": 0, "action": 0, "info": 0, "checks": 0, "findings": 0},
+            "findings": [],
+            "checks": [],
+        }
+
+    global_registry = load_registry(global_path)
+    global_goals = registry_goals(global_registry)
+    current_goals = registry_goals(current_registry)
+    current_ids = {str(goal.get("id")) for goal in current_goals if goal.get("id")}
+    global_ids = [str(goal.get("id")) for goal in global_goals if goal.get("id")]
+    global_id_set = set(global_ids)
+    source_registries: set[str] = set()
+    findings: list[dict[str, Any]] = []
+    checks: list[str] = []
+
+    current_is_global = same_path(registry_path, global_path)
+    id_counts = Counter(global_ids)
+    for goal_id, count in sorted(id_counts.items()):
+        if count <= 1:
+            continue
+        findings.append(
+            global_registry_finding(
+                kind="duplicate_goal_id",
+                severity="high",
+                goal_id=goal_id,
+                message=f"global registry contains {count} entries for `{goal_id}`",
+                recommended_action="deduplicate the global registry before trusting multi-project routing",
+            )
+        )
+
+    for goal in global_goals:
+        goal_id = str(goal.get("id") or "unknown-goal")
+        source_path = resolve_goal_local_path(goal.get("source_registry"), goal, fallback_base=global_path.parent)
+        if source_path:
+            source_registries.add(str(source_path))
+            if not source_path.exists():
+                findings.append(
+                    global_registry_finding(
+                        kind="source_registry_missing",
+                        severity="action",
+                        goal_id=goal_id,
+                        path=source_path,
+                        message=f"`{goal_id}` source registry is missing",
+                        recommended_action=f"reconnect `{goal_id}` from its project or archive it if the project is obsolete",
+                    )
+                )
+            else:
+                synced_at = parse_timestamp(goal.get("synced_at"))
+                if synced_at:
+                    source_mtime = datetime.fromtimestamp(source_path.stat().st_mtime, tz=timezone.utc)
+                    if source_mtime > synced_at.astimezone(timezone.utc) + timedelta(seconds=5):
+                        findings.append(
+                            global_registry_finding(
+                                kind="stale_source_registry",
+                                severity="action",
+                                goal_id=goal_id,
+                                path=source_path,
+                                message=f"`{goal_id}` source registry changed after its last global sync",
+                                recommended_action=(
+                                    f"run `goal-harness sync-global --goal-id {goal_id}` from the source project"
+                                ),
+                            )
+                        )
+
+        state_path = resolve_goal_local_path(goal.get("state_file"), goal, fallback_base=global_path.parent)
+        if state_path and not state_path.exists():
+            findings.append(
+                global_registry_finding(
+                    kind="state_file_missing",
+                    severity="action",
+                    goal_id=goal_id,
+                    path=state_path,
+                    message=f"`{goal_id}` active state file is missing",
+                    recommended_action=f"repair `{goal_id}` state_file or reconnect the project",
+                )
+            )
+        if not state_path:
+            findings.append(
+                global_registry_finding(
+                    kind="state_file_not_declared",
+                    severity="action",
+                    goal_id=goal_id,
+                    message=f"`{goal_id}` does not declare a state_file",
+                    recommended_action=f"reconnect `{goal_id}` with a durable active goal state file",
+                )
+            )
+
+    missing_from_current = sorted(global_id_set - current_ids)
+    if not current_is_global and missing_from_current:
+        shown = missing_from_current[:8]
+        findings.append(
+            global_registry_finding(
+                kind="current_registry_scope_excludes_global_goals",
+                severity="info",
+                message=f"current registry excludes {len(missing_from_current)} global goal(s)",
+                recommended_action=(
+                    "for multi-project dashboard/controller status, run `goal-harness status` "
+                    "without `--registry` or pass the global registry"
+                ),
+                goal_ids=shown,
+            )
+        )
+
+    checks.append(f"global registry goals checked: {len(global_goals)}")
+    checks.append(f"global source registries checked: {len(source_registries)}")
+    severity_counts = Counter(str(finding.get("severity") or "info") for finding in findings)
+    return {
+        "available": True,
+        "ok": severity_counts.get("high", 0) == 0,
+        "registry": str(global_path),
+        "current_registry": str(registry_path),
+        "current_registry_is_global": current_is_global,
+        "global_goal_count": len(global_goals),
+        "current_goal_count": len(current_goals),
+        "source_registry_count": len(source_registries),
+        "summary": {
+            "high": severity_counts.get("high", 0),
+            "action": severity_counts.get("action", 0),
+            "info": severity_counts.get("info", 0),
+            "checks": len(checks),
+            "findings": len(findings),
+        },
+        "findings": findings,
+        "checks": checks,
+    }
 
 
 def latest_run(goal: dict[str, Any]) -> dict[str, Any] | None:
@@ -268,6 +465,7 @@ def build_attention_queue(
     *,
     contract: dict[str, Any],
     history: dict[str, Any],
+    global_registry: dict[str, Any],
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     if contract.get("ok") is False:
@@ -279,6 +477,22 @@ def build_attention_queue(
                 severity="high",
                 recommended_action="fix contract errors before advancing goal adapters",
                 source="contract",
+            )
+        )
+    for finding in global_registry.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        if finding.get("severity") not in {"high", "action"}:
+            continue
+        goal_id = str(finding.get("goal_id") or "global-registry")
+        items.append(
+            attention_item(
+                goal_id=goal_id,
+                status=str(finding.get("kind") or "global_registry_finding"),
+                waiting_on="codex",
+                severity=str(finding.get("severity") or "action"),
+                recommended_action=str(finding.get("recommended_action") or "inspect global registry health"),
+                source="global_registry",
             )
         )
 
@@ -386,6 +600,11 @@ def collect_status(
 ) -> dict[str, Any]:
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    global_registry = collect_global_registry_health(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        current_registry=registry,
+    )
     history = collect_history(
         registry_path=registry_path,
         runtime_root=runtime_root,
@@ -398,10 +617,10 @@ def collect_status(
         scan_roots=scan_roots,
         limit=limit,
     )
-    queue = build_attention_queue(contract=contract, history=history)
+    queue = build_attention_queue(contract=contract, history=history, global_registry=global_registry)
     run_history = build_run_history(history)
     return {
-        "ok": bool(contract.get("ok")),
+        "ok": bool(contract.get("ok")) and bool(global_registry.get("ok", True)),
         "registry": str(registry_path),
         "runtime_root": str(runtime_root),
         "goal_count": history.get("goal_count"),
@@ -413,6 +632,7 @@ def collect_status(
             "warnings": contract.get("warnings") or [],
             "checks": contract.get("checks") or [],
         },
+        "global_registry": global_registry,
         "attention_queue": queue,
         "run_history": run_history,
     }
@@ -437,6 +657,24 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         f"errors={summary.get('errors')}, "
         f"warnings={summary.get('warnings')}, "
         f"checks={summary.get('checks')}"
+    )
+
+    global_registry = payload.get("global_registry") if isinstance(payload.get("global_registry"), dict) else {}
+    global_summary = (
+        global_registry.get("summary")
+        if isinstance(global_registry.get("summary"), dict)
+        else {}
+    )
+    lines.extend(
+        [
+            "- global_registry: "
+            f"available={global_registry.get('available')}, "
+            f"ok={global_registry.get('ok')}, "
+            f"findings={global_summary.get('findings')}, "
+            f"high={global_summary.get('high')}, "
+            f"action={global_summary.get('action')}, "
+            f"info={global_summary.get('info')}",
+        ]
     )
 
     queue = payload.get("attention_queue") if isinstance(payload.get("attention_queue"), dict) else {}
@@ -540,5 +778,25 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         if entries:
             lines.extend(["", f"## {title}"])
             lines.extend(f"- {entry}" for entry in entries)
+
+    findings = (
+        global_registry.get("findings")
+        if isinstance(global_registry.get("findings"), list)
+        else []
+    )
+    if findings:
+        lines.extend(["", "## Global Registry Findings"])
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            lines.append(
+                "- "
+                f"{finding.get('severity')} "
+                f"{finding.get('kind')} "
+                f"goal={finding.get('goal_id') or finding.get('goal_ids') or 'global'}: "
+                f"{finding.get('message')}"
+            )
+            if finding.get("recommended_action"):
+                lines.append(f"  - action: {finding.get('recommended_action')}")
 
     return "\n".join(lines)
