@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:11:00+08:00
+updated_at: 2026-06-02T06:17:37+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,27 @@ private project context.
 
 ## Next Action
 
-- Move from human-decision copy polish to the project-agent execution loop:
-  add a tiny public smoke or contract note for the `operator_gate_approved`
-  path showing that, after approval is durably recorded, status exposes the
-  approved project-agent dry-run command as the next Codex/project-agent action.
-  Keep it fixture-based; do not append a real gate or run a real map.
+- Add the complementary fixture smoke for rejected/deferred operator gates:
+  after an operator gate records `reject` or `defer`, status should keep the
+  goal in the user/controller lane and must not expose a project-agent
+  `agent_command`. Keep it fixture-based; do not append a real gate or run a
+  real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:17:37+08:00: Added a fixture-backed status smoke for the
+  `operator_gate_approved` path. `examples/status-markdown-smoke.py` now first
+  verifies the planned high-complexity adapter still shows the operator-gate
+  dry-run preview before `agent_command`, then appends a temporary
+  `operator_gate_approved` run index fixture and verifies status moves the
+  goal to `waiting_on=codex`, hides the operator question, and exposes the
+  approved read-only-map dry-run command as `agent_command`. The fixture only
+  writes inside a temporary runtime; it does not append a real gate or run a
+  real map. Validation: direct status Markdown smoke passed; aggregate public
+  smokes passed; Python compile passed; public contract check passed;
+  `git diff --check` passed. Critic: approval now has a regression guard, but
+  reject/defer should get the complementary guard so denied or delayed gates do
+  not accidentally look project-agent executable.
 - 2026-06-02T06:11:00+08:00: Completed the browser-level check for the
   tightened planned opt-in `recommended_action`. After rebuilding the static
   dashboard and confirming `/status.local.json` contained the new action text,
