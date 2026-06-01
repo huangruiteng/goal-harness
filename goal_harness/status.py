@@ -42,6 +42,8 @@ RUN_COMPACT_FIELDS = (
     "generated_at",
     "goal_id",
     "classification",
+    "lifecycle_phase",
+    "lifecycle_flags",
     "recommended_action",
     "health_check",
     "active_task_count",
@@ -72,6 +74,18 @@ CONTROLLER_READINESS_GATE_FIELDS = (
     "ok",
     "review",
 )
+LIFECYCLE_PRIORITY = (
+    "controller_ready",
+    "reward_judged",
+    "controller_gated",
+    "adapter_inspected",
+    "mapped",
+    "refreshed",
+    "connected",
+    "registered",
+    "planned",
+    "run_recorded",
+)
 
 
 def attention_item(
@@ -85,6 +99,8 @@ def attention_item(
     controller_stage: str | None = None,
     missing_gates: list[str] | None = None,
     next_handoff_condition: str | None = None,
+    lifecycle_phase: str | None = None,
+    lifecycle_flags: list[str] | None = None,
 ) -> dict[str, Any]:
     item = {
         "goal_id": goal_id,
@@ -100,6 +116,10 @@ def attention_item(
         item["missing_gates"] = missing_gates
     if next_handoff_condition:
         item["next_handoff_condition"] = next_handoff_condition
+    if lifecycle_phase:
+        item["lifecycle_phase"] = lifecycle_phase
+    if lifecycle_flags:
+        item["lifecycle_flags"] = lifecycle_flags
     return item
 
 
@@ -305,6 +325,74 @@ def latest_run(goal: dict[str, Any]) -> dict[str, Any] | None:
     return run if isinstance(run, dict) else None
 
 
+def ordered_lifecycle_flags(flags: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped = [flag for flag in flags if flag and not (flag in seen or seen.add(flag))]
+    priority = {phase: index for index, phase in enumerate(LIFECYCLE_PRIORITY)}
+    return sorted(deduped, key=lambda phase: priority.get(phase, len(priority)))
+
+
+def primary_lifecycle_phase(flags: list[str], fallback: str = "registered") -> str:
+    ordered = ordered_lifecycle_flags(flags)
+    return ordered[0] if ordered else fallback
+
+
+def run_lifecycle_flags(run: dict[str, Any] | None) -> list[str]:
+    if not isinstance(run, dict):
+        return []
+
+    flags: list[str] = []
+    classification = str(run.get("classification") or "")
+    if classification == "state_refreshed":
+        flags.append("refreshed")
+    elif classification == "read_only_project_map" or isinstance(run.get("project_map"), dict):
+        flags.append("mapped")
+    elif classification:
+        flags.append("adapter_inspected")
+    else:
+        flags.append("run_recorded")
+
+    if compact_human_reward(run.get("human_reward")):
+        flags.append("reward_judged")
+
+    readiness = compact_controller_readiness(run.get("controller_readiness"))
+    if readiness:
+        if readiness.get("decision_advisor_ready") or readiness.get("write_controller_ready"):
+            flags.append("controller_ready")
+        elif readiness.get("read_only_observer_ready") or readiness.get("classification"):
+            flags.append("controller_gated")
+
+    return ordered_lifecycle_flags(flags)
+
+
+def run_lifecycle_phase(run: dict[str, Any] | None) -> str:
+    return primary_lifecycle_phase(run_lifecycle_flags(run), fallback="run_recorded")
+
+
+def goal_lifecycle_fields(goal: dict[str, Any], current_run: dict[str, Any] | None) -> dict[str, Any]:
+    if current_run:
+        flags = run_lifecycle_flags(current_run)
+        return {
+            "lifecycle_phase": primary_lifecycle_phase(flags),
+            "lifecycle_flags": flags,
+        }
+
+    adapter_status = str(goal.get("adapter_status") or "")
+    status = str(goal.get("status") or "")
+    flags: list[str]
+    if adapter_status in CONNECTED_ADAPTER_STATUSES:
+        flags = ["connected"]
+    elif "planned" in status or adapter_status == "planned":
+        flags = ["planned"]
+    else:
+        flags = ["registered"]
+    flags = ordered_lifecycle_flags(flags)
+    return {
+        "lifecycle_phase": primary_lifecycle_phase(flags),
+        "lifecycle_flags": flags,
+    }
+
+
 def readiness_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(run, dict):
         return {}
@@ -336,6 +424,7 @@ def legacy_runtime_goal_attention(
     json_exists = bool(current_run.get("json_exists"))
     markdown_exists = bool(current_run.get("markdown_exists"))
     classification = str(current_run.get("classification") or "unknown")
+    lifecycle_fields = goal_lifecycle_fields(goal, current_run)
 
     actionable_classification = (
         classification in BLOCKING_CLASSIFICATIONS
@@ -374,6 +463,7 @@ def legacy_runtime_goal_attention(
         recommended_action=action,
         source="run_history",
         **readiness_fields,
+        **lifecycle_fields,
     )
 
 
@@ -382,6 +472,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
     adapter_status = str(goal.get("adapter_status") or "")
     current_run = latest_run(goal)
     readiness_fields = readiness_attention_fields(current_run)
+    lifecycle_fields = goal_lifecycle_fields(goal, current_run)
 
     if goal.get("legacy_runtime_goal"):
         return legacy_runtime_goal_attention(goal, current_run, readiness_fields)
@@ -395,6 +486,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
                 severity="action",
                 recommended_action="run the first read-only adapter tick and save a compact run record",
                 source="run_history",
+                **lifecycle_fields,
             )
         return attention_item(
             goal_id=goal_id,
@@ -403,6 +495,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             severity="action",
             recommended_action="connect an adapter or run a read-only map before expecting runtime status",
             source="registry",
+            **lifecycle_fields,
         )
 
     json_exists = bool(current_run.get("json_exists"))
@@ -416,6 +509,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             recommended_action="repair or regenerate the latest run artifacts before trusting status",
             source="run_history",
             **readiness_fields,
+            **lifecycle_fields,
         )
 
     classification = str(current_run.get("classification") or "unknown")
@@ -429,6 +523,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             recommended_action=action,
             source="latest_run",
             **readiness_fields,
+            **lifecycle_fields,
         )
     if classification in USER_OR_CONTROLLER_CLASSIFICATIONS:
         return attention_item(
@@ -439,6 +534,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             recommended_action=action,
             source="latest_run",
             **readiness_fields,
+            **lifecycle_fields,
         )
     if classification in CODEX_READY_CLASSIFICATIONS:
         return attention_item(
@@ -449,6 +545,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             recommended_action=action,
             source="latest_run",
             **readiness_fields,
+            **lifecycle_fields,
         )
     if classification.startswith(WATCH_CLASSIFICATION_PREFIXES):
         return attention_item(
@@ -459,6 +556,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             recommended_action=action,
             source="latest_run",
             **readiness_fields,
+            **lifecycle_fields,
         )
     return None
 
@@ -545,6 +643,9 @@ def compact_controller_readiness(readiness: Any) -> dict[str, Any] | None:
 
 def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     compact = {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
+    flags = run_lifecycle_flags(run)
+    compact.setdefault("lifecycle_phase", primary_lifecycle_phase(flags, fallback="run_recorded"))
+    compact.setdefault("lifecycle_flags", flags)
     reward = compact_human_reward(run.get("human_reward"))
     if reward:
         compact["human_reward"] = reward
@@ -559,11 +660,15 @@ def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
     for goal in history.get("goals") or []:
         if not isinstance(goal, dict):
             continue
+        current_run = latest_run(goal)
+        lifecycle_fields = goal_lifecycle_fields(goal, current_run)
         goals.append(
             {
                 "id": goal.get("id"),
                 "domain": goal.get("domain"),
                 "status": goal.get("status"),
+                "lifecycle_phase": lifecycle_fields["lifecycle_phase"],
+                "lifecycle_flags": lifecycle_fields["lifecycle_flags"],
                 "registry_member": goal.get("registry_member"),
                 "legacy_runtime_goal": goal.get("legacy_runtime_goal"),
                 "adapter_kind": goal.get("adapter_kind"),
@@ -703,6 +808,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             "- "
             f"`{item.get('goal_id')}`: "
             f"status={item.get('status')} "
+            f"phase={item.get('lifecycle_phase')} "
             f"waiting_on={item.get('waiting_on')} "
             f"severity={item.get('severity')} "
             f"source={item.get('source')}"
@@ -742,6 +848,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             "- "
             f"`{goal.get('id')}`: "
             f"status={goal.get('status')} "
+            f"phase={goal.get('lifecycle_phase')} "
             f"adapter={goal.get('adapter_kind')}:{goal.get('adapter_status')} "
             f"records={goal.get('raw_index_records')} "
             f"unique_runs={goal.get('unique_runs')}"
@@ -770,6 +877,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     "  - latest: "
                     f"{latest.get('generated_at')} "
                     f"classification={latest.get('classification')} "
+                    f"phase={latest.get('lifecycle_phase')} "
                     f"artifacts={latest.get('json_exists')}/{latest.get('markdown_exists')}"
                     f"{reward_text}"
                     f"{readiness_text}"

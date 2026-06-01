@@ -60,10 +60,15 @@
     "needs_codex": 2,
     "watching_external_evidence": 0,
     "items": [
-      {
-        "goal_id": "complex-project-main-control",
-        "status": "ready_for_controller_opt_in",
-        "waiting_on": "user_or_controller",
+        {
+          "goal_id": "complex-project-main-control",
+          "status": "ready_for_controller_opt_in",
+          "lifecycle_phase": "controller_gated",
+          "lifecycle_flags": [
+            "controller_gated",
+            "adapter_inspected"
+          ],
+          "waiting_on": "user_or_controller",
         "severity": "action",
         "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
         "source": "latest_run",
@@ -74,18 +79,28 @@
         ],
         "next_handoff_condition": "record aligned eval evidence and one human reward event"
       },
-      {
-        "goal_id": "docs-maintenance-goal",
-        "status": "connected_without_run",
-        "waiting_on": "codex",
+        {
+          "goal_id": "docs-maintenance-goal",
+          "status": "connected_without_run",
+          "lifecycle_phase": "connected",
+          "lifecycle_flags": [
+            "connected"
+          ],
+          "waiting_on": "codex",
         "severity": "action",
         "recommended_action": "run the first read-only adapter tick and save a compact run record",
         "source": "run_history"
       },
-      {
-        "goal_id": "experiment-controller-goal",
-        "status": "design_next_experiment",
-        "waiting_on": "codex",
+        {
+          "goal_id": "experiment-controller-goal",
+          "status": "design_next_experiment",
+          "lifecycle_phase": "controller_ready",
+          "lifecycle_flags": [
+            "controller_ready",
+            "reward_judged",
+            "adapter_inspected"
+          ],
+          "waiting_on": "codex",
         "severity": "action",
         "recommended_action": "use the latest human reward signal to design the next comparable experiment",
         "source": "latest_run"
@@ -101,6 +116,11 @@
         "id": "complex-project-main-control",
         "domain": "complex-project-control",
         "status": "active-read-only",
+        "lifecycle_phase": "controller_gated",
+        "lifecycle_flags": [
+          "controller_gated",
+          "adapter_inspected"
+        ],
         "registry_member": true,
         "legacy_runtime_goal": false,
         "adapter_kind": "complex_project_read_only_map_v0",
@@ -113,6 +133,11 @@
             "generated_at": "2026-05-31T21:15:00+00:00",
             "goal_id": "complex-project-main-control",
             "classification": "ready_for_controller_opt_in",
+            "lifecycle_phase": "controller_gated",
+            "lifecycle_flags": [
+              "controller_gated",
+              "adapter_inspected"
+            ],
             "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
             "health_check": "8/8",
             "controller_readiness": {
@@ -151,6 +176,10 @@
             "generated_at": "2026-05-31T20:40:00+00:00",
             "goal_id": "complex-project-main-control",
             "classification": "needs_more_read_only_evidence",
+            "lifecycle_phase": "adapter_inspected",
+            "lifecycle_flags": [
+              "adapter_inspected"
+            ],
             "recommended_action": "inspect docs, TODOs, and validation surfaces before writing a handoff packet",
             "health_check": "6/8",
             "json_exists": true,
@@ -162,6 +191,10 @@
         "id": "docs-maintenance-goal",
         "domain": "knowledge-base-maintenance",
         "status": "active",
+        "lifecycle_phase": "connected",
+        "lifecycle_flags": [
+          "connected"
+        ],
         "registry_member": true,
         "legacy_runtime_goal": false,
         "adapter_kind": "generic_project_goal_v0",
@@ -175,6 +208,12 @@
         "id": "experiment-controller-goal",
         "domain": "long-running-experiment-control",
         "status": "active-read-only",
+        "lifecycle_phase": "controller_ready",
+        "lifecycle_flags": [
+          "controller_ready",
+          "reward_judged",
+          "adapter_inspected"
+        ],
         "registry_member": true,
         "legacy_runtime_goal": false,
         "adapter_kind": "experiment_controller_v0",
@@ -187,6 +226,12 @@
             "generated_at": "2026-06-01T00:00:00+00:00",
             "goal_id": "experiment-controller-goal",
           "classification": "design_next_experiment",
+          "lifecycle_phase": "controller_ready",
+          "lifecycle_flags": [
+            "controller_ready",
+            "reward_judged",
+            "adapter_inspected"
+          ],
           "recommended_action": "use the latest human reward signal to design the next comparable experiment",
           "health_check": "7/7",
           "controller_readiness": {
@@ -231,6 +276,10 @@
         "id": "release-watch-goal",
         "domain": "release-monitoring",
         "status": "watching",
+        "lifecycle_phase": "connected",
+        "lifecycle_flags": [
+          "connected"
+        ],
         "registry_member": true,
         "legacy_runtime_goal": false,
         "adapter_kind": "release_monitor_v0",
@@ -246,6 +295,12 @@
         "generated_at": "2026-06-01T00:00:00+00:00",
         "goal_id": "experiment-controller-goal",
       "classification": "design_next_experiment",
+      "lifecycle_phase": "controller_ready",
+      "lifecycle_flags": [
+        "controller_ready",
+        "reward_judged",
+        "adapter_inspected"
+      ],
       "recommended_action": "use the latest human reward signal to design the next comparable experiment",
       "health_check": "7/7",
       "controller_readiness": {
@@ -288,6 +343,11 @@
         "generated_at": "2026-05-31T21:15:00+00:00",
         "goal_id": "complex-project-main-control",
         "classification": "ready_for_controller_opt_in",
+        "lifecycle_phase": "controller_gated",
+        "lifecycle_flags": [
+          "controller_gated",
+          "adapter_inspected"
+        ],
         "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
         "health_check": "8/8",
         "json_exists": true,
@@ -297,6 +357,10 @@
         "generated_at": "2026-05-31T20:40:00+00:00",
         "goal_id": "complex-project-main-control",
         "classification": "needs_more_read_only_evidence",
+        "lifecycle_phase": "adapter_inspected",
+        "lifecycle_flags": [
+          "adapter_inspected"
+        ],
         "recommended_action": "inspect docs, TODOs, and validation surfaces before writing a handoff packet",
         "health_check": "6/8",
         "json_exists": true,

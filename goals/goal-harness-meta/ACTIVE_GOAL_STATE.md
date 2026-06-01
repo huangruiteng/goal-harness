@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T18:36:00+08:00
+updated_at: 2026-06-01T18:51:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,9 +29,10 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should make status/dashboard distinguish connected, mapped, refreshed,
-  adapter-inspected, reward-judged, and controller-ready goals before adding
-  another isolated command.
+  slice should make the dashboard's selected-goal detail more explicitly
+  answer the operator question: judge, authorize, wait for evidence, or let
+  Codex continue. Keep `goal-harness status` as the terse agent-facing machine
+  contract.
 
 ## Recent Progress
 
@@ -207,15 +208,32 @@ private project context.
   rules, invariants, and a feature-gate checklist so future work does not add
   isolated commands before the state contract is clear. Linked it from
   `README.md` and `docs/architecture.md`.
+- 2026-06-01T18:51:00+08:00: Added lifecycle phases to the public status
+  contract and dashboard. `goal-harness status` now derives compact
+  `lifecycle_phase` / `lifecycle_flags` for attention items, run-history goals,
+  and compact runs. The React dashboard validates those fields and renders a
+  human-facing `User Review Map` so users see connected, mapped, refreshed,
+  adapter-inspected, reward-judged, controller-gated, and controller-ready
+  states separately from raw adapter classifications. The docs now clarify that
+  CLI status is agent-facing machine state, while the dashboard is the
+  operator-facing interpretation layer.
 
 ## Validation
 
 - `python3 -m py_compile goal_harness/*.py`
+- `python3 -m py_compile goal_harness/status.py examples/render-status-dashboard.py`
 - `python3 -m goal_harness.cli --help`
 - `python3 -m goal_harness.cli --format json check --scan-root .`
 - Parse all JSON examples in `examples/`.
+- `python3 -m goal_harness.cli --format json status` includes
+  `lifecycle_phase` and `lifecycle_flags` on attention items, run-history
+  goals, and compact runs
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
+- Browser DOM smoke: load
+  `http://127.0.0.1:5173/?lane=all&severity=all&statusUrl=/status.local.json`
+  and verify `User Review Map`, human-facing review copy,
+  `Controller gated`, `Mapped`, and `Goal Directory`
 - `python3 -m goal_harness.cli --format json status > apps/dashboard/public/status.local.json`
 - Browser smoke: load `http://127.0.0.1:5173/?statusUrl=/status.local.json`
 - `python3 -m goal_harness.cli serve-status --help`

@@ -30,6 +30,8 @@ For Goal Harness, the common lesson is not "more charts." The first screen
 needs an action-oriented queue and trustworthy drill-downs:
 
 - at-a-glance health and attention lanes,
+- a human operator view that translates agent-facing status into review,
+  approval, waiting, and reward-capture decisions,
 - filterable goal and run tables,
 - URL-addressable status filters,
 - run detail pages with compact JSON/Markdown links,

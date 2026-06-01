@@ -13,10 +13,11 @@ npm run dev
 
 The default screen uses the sanitized repository example at
 `examples/status.example.json`, including the attention queue and compact run
-history drill-down. The first-screen `Goal Directory` is the multi-project
-switcher: it lists every known goal, its public-safe domain, attention state,
-latest run, and run counts before the operator drills into queue or history
-detail.
+history drill-down. The dashboard consumes agent-facing `goal-harness status`
+JSON, but the first screen is a human operator view: `User Review Map` translates
+registry/run/reward/controller signals into review states, while `Goal
+Directory` remains the multi-project switcher with public-safe domain,
+attention state, latest run, and run counts.
 
 When a selected goal has a compact run record, the run-history panel also shows
 a `Reward CLI Draft`. It is intentionally local-only and defaults to

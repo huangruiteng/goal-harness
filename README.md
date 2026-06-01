@@ -221,7 +221,8 @@ control-plane UI. See
 [docs/dashboard-frontend-selection.md](docs/dashboard-frontend-selection.md).
 The dashboard should follow the actor and state-store model in
 [docs/state-interaction-model.md](docs/state-interaction-model.md): read the
-derived status surface by default, show user/controller and Codex-ready lanes
+derived agent-facing status surface by default, translate it into a
+human-facing operator view, show user/controller and Codex-ready lanes
 separately, and keep browser-side writes behind an explicit local write
 boundary.
 
@@ -249,7 +250,9 @@ http://127.0.0.1:8765/status.json
 
 The dashboard renders the attention queue with a compact run-history drill-down
 for recent classifications, controller readiness, validation health, human
-reward signals, and artifact availability.
+reward signals, and artifact availability. Raw CLI classifications remain
+secondary details; the first screen should answer what the user needs to judge,
+what an agent can do, and what is waiting on evidence.
 
 For a fully static fallback, export current local state into the dashboard
 public folder and load `/status.local.json` from the dashboard source control:

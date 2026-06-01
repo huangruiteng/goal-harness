@@ -105,6 +105,58 @@ const waitingLabel: Record<string, string> = {
   external_evidence: "Evidence",
 };
 
+const lifecycleLabel: Record<string, string> = {
+  connected: "Connected",
+  mapped: "Mapped",
+  refreshed: "Refreshed",
+  adapter_inspected: "Adapter inspected",
+  reward_judged: "Reward judged",
+  controller_gated: "Controller gated",
+  controller_ready: "Controller ready",
+  registered: "Registered",
+  planned: "Planned",
+  run_recorded: "Run recorded",
+};
+
+const lifecycleOperatorText: Record<string, string> = {
+  connected: "An agent should create the first compact run.",
+  mapped: "The project is mapped; choose the next agent handoff.",
+  refreshed: "Goal state changed; an agent should continue from the update.",
+  adapter_inspected: "An adapter has inspected project evidence.",
+  reward_judged: "Your judgment has been captured for a run.",
+  controller_gated: "Controller evidence exists, but a gate is still missing.",
+  controller_ready: "Controller handoff or advice can be reviewed.",
+  registered: "The goal is known but not yet operational.",
+  planned: "The goal is planned and waiting for opt-in or connection.",
+  run_recorded: "A run exists but has no stronger phase yet.",
+};
+
+const lifecycleVariant: Record<string, "neutral" | "success" | "warning" | "info" | "danger"> = {
+  connected: "neutral",
+  mapped: "info",
+  refreshed: "warning",
+  adapter_inspected: "info",
+  reward_judged: "success",
+  controller_gated: "warning",
+  controller_ready: "success",
+  registered: "neutral",
+  planned: "warning",
+  run_recorded: "neutral",
+};
+
+const lifecycleDisplayOrder = [
+  "connected",
+  "mapped",
+  "refreshed",
+  "adapter_inspected",
+  "reward_judged",
+  "controller_gated",
+  "controller_ready",
+  "planned",
+  "registered",
+  "run_recorded",
+];
+
 type DataSource =
   | { kind: "example"; label: "bundled example" }
   | { kind: "url"; label: string }
@@ -124,6 +176,8 @@ type GoalDirectoryRow = {
   status: string;
   waitingOn: string;
   severity: string;
+  lifecyclePhase: string;
+  lifecycleFlags: string[];
 };
 
 function laneFor(item: QueueItem) {
@@ -136,6 +190,67 @@ function ShortText({ children }: { children: string }) {
 
 function StatusBadge({ value }: { value: string }) {
   return <Badge variant={severityVariant[value] ?? "neutral"}>{value}</Badge>;
+}
+
+function inferLifecyclePhase(status?: string | null, run?: RunRecord) {
+  if (run?.controller_readiness?.decision_advisor_ready || run?.controller_readiness?.write_controller_ready) {
+    return "controller_ready";
+  }
+  if (run?.controller_readiness) {
+    return "controller_gated";
+  }
+  if (run?.human_reward) {
+    return "reward_judged";
+  }
+  const value = status || run?.classification || "";
+  if (value === "connected_without_run") {
+    return "connected";
+  }
+  if (value === "read_only_project_map" || run?.project_map) {
+    return "mapped";
+  }
+  if (value === "state_refreshed") {
+    return "refreshed";
+  }
+  if (value && value !== "no_status") {
+    return "adapter_inspected";
+  }
+  return "registered";
+}
+
+function normalizeLifecycle(primary?: string | null, flags?: string[]) {
+  const cleanFlags = (flags ?? []).filter(Boolean);
+  const phase = primary || cleanFlags[0] || "registered";
+  const allFlags = cleanFlags.includes(phase) ? cleanFlags : [phase, ...cleanFlags];
+  return {
+    phase,
+    flags: allFlags,
+  };
+}
+
+function PhaseBadges({
+  phase,
+  flags,
+  compact = false,
+}: {
+  phase?: string | null;
+  flags?: string[];
+  compact?: boolean;
+}) {
+  const normalized = normalizeLifecycle(phase, flags);
+  const shown = compact ? [normalized.phase] : normalized.flags.slice(0, 3);
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {shown.map((flag) => (
+        <Badge key={flag} variant={lifecycleVariant[flag] ?? "neutral"}>
+          {lifecycleLabel[flag] ?? flag}
+        </Badge>
+      ))}
+      {!compact && normalized.flags.length > shown.length ? (
+        <Badge variant="neutral">+{normalized.flags.length - shown.length}</Badge>
+      ) : null}
+    </div>
+  );
 }
 
 function QueueGateSummary({ item, compact = false }: { item?: QueueItem; compact?: boolean }) {
@@ -231,6 +346,17 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
     seen.add(goal.id);
     const queueItem = queueByGoal.get(goal.id);
     const latestRun = goal.latest_runs[0];
+    const phase = queueItem?.lifecycle_phase
+      ?? goal.lifecycle_phase
+      ?? latestRun?.lifecycle_phase
+      ?? inferLifecyclePhase(queueItem?.status ?? latestRun?.classification ?? goal.status, latestRun);
+    const flags = queueItem?.lifecycle_flags?.length
+      ? queueItem.lifecycle_flags
+      : goal.lifecycle_flags?.length
+        ? goal.lifecycle_flags
+        : latestRun?.lifecycle_flags?.length
+          ? latestRun.lifecycle_flags
+          : [phase];
     return {
       goal,
       queueItem,
@@ -238,6 +364,8 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
       status: queueItem?.status ?? latestRun?.classification ?? goal.status ?? "no_status",
       waitingOn: queueItem?.waiting_on ?? "clear",
       severity: queueItem?.severity ?? "clear",
+      lifecyclePhase: phase,
+      lifecycleFlags: flags,
     };
   });
 
@@ -249,6 +377,8 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
       goal: {
         id: item.goal_id,
         status: item.status,
+        lifecycle_phase: item.lifecycle_phase ?? inferLifecyclePhase(item.status),
+        lifecycle_flags: item.lifecycle_flags?.length ? item.lifecycle_flags : [item.lifecycle_phase ?? inferLifecyclePhase(item.status)],
         registry_member: false,
         legacy_runtime_goal: false,
         adapter_kind: null,
@@ -262,6 +392,8 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
       status: item.status,
       waitingOn: item.waiting_on,
       severity: item.severity,
+      lifecyclePhase: item.lifecycle_phase ?? inferLifecyclePhase(item.status),
+      lifecycleFlags: item.lifecycle_flags?.length ? item.lifecycle_flags : [item.lifecycle_phase ?? inferLifecyclePhase(item.status)],
     });
   }
 
@@ -278,6 +410,45 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
     }
     return latestRunSortValue(b.latestRun) - latestRunSortValue(a.latestRun);
   });
+}
+
+function UserReviewMap({ rows }: { rows: GoalDirectoryRow[] }) {
+  const counts = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.lifecyclePhase] = (acc[row.lifecyclePhase] ?? 0) + 1;
+    return acc;
+  }, {});
+  const visiblePhases = lifecycleDisplayOrder.filter((phase) => counts[phase]);
+  return (
+    <Card>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4" />
+            User Review Map
+          </CardTitle>
+          <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
+            Human-facing interpretation of agent status, reward, and controller readiness.
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {(visiblePhases.length ? visiblePhases : ["registered"]).map((phase) => (
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800" key={phase}>
+              <div className="text-xs text-slate-500 dark:text-zinc-400">{lifecycleLabel[phase] ?? phase}</div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-2xl font-semibold">{counts[phase] ?? 0}</div>
+                <Badge variant={lifecycleVariant[phase] ?? "neutral"}>{phase}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
+                {lifecycleOperatorText[phase] ?? "Inspect this goal before acting."}
+              </p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function GoalDirectory({
@@ -332,6 +503,9 @@ function GoalDirectory({
                     <Badge>{row.status}</Badge>
                     {row.severity === "clear" ? <Badge variant="success">Clear</Badge> : <StatusBadge value={row.severity} />}
                   </div>
+                  <div className="mt-1">
+                    <PhaseBadges compact flags={row.lifecycleFlags} phase={row.lifecyclePhase} />
+                  </div>
                   <div className="mt-1 line-clamp-1 text-xs text-slate-500 dark:text-zinc-400">
                     {row.waitingOn === "clear" ? "No attention item" : waitingLabel[row.waitingOn] ?? row.waitingOn}
                   </div>
@@ -383,6 +557,17 @@ function QueueTable({
         accessorKey: "status",
         header: "Status",
         cell: ({ row }) => <Badge>{row.original.status}</Badge>,
+      },
+      {
+        accessorKey: "lifecycle_phase",
+        header: "Phase",
+        cell: ({ row }) => (
+          <PhaseBadges
+            compact
+            flags={row.original.lifecycle_flags}
+            phase={row.original.lifecycle_phase ?? inferLifecyclePhase(row.original.status)}
+          />
+        ),
       },
       {
         accessorKey: "waiting_on",
@@ -576,11 +761,13 @@ function ProjectMapSummary({ projectMap }: { projectMap: ProjectMap }) {
 }
 
 function LatestRun({ run }: { run: RunRecord }) {
+  const lifecyclePhase = run.lifecycle_phase ?? inferLifecyclePhase(run.classification, run);
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">{run.generated_at}</span>
         <Badge variant="info">{formatNullable(run.classification, "unclassified")}</Badge>
+        <PhaseBadges compact flags={run.lifecycle_flags} phase={lifecyclePhase} />
         {run.health_check ? <Badge variant="success">{run.health_check}</Badge> : null}
         {run.human_reward ? <Badge variant={rewardVariant(run.human_reward.reward)}>Reward</Badge> : null}
         {run.controller_readiness ? <Badge variant={readinessVariant(run.controller_readiness)}>Readiness</Badge> : null}
@@ -743,6 +930,8 @@ function RunHistoryPanel({
   const artifactReady = latestRuns.filter((run) => run.json_exists && run.markdown_exists).length;
   const rewardReady = latestRuns.filter((run) => Boolean(run.human_reward)).length;
   const readinessReady = latestRuns.filter((run) => Boolean(run.controller_readiness)).length;
+  const lifecyclePhase = goal?.lifecycle_phase ?? queueItem?.lifecycle_phase ?? inferLifecyclePhase(queueItem?.status, latestRuns[0]);
+  const lifecycleFlags = goal?.lifecycle_flags?.length ? goal.lifecycle_flags : queueItem?.lifecycle_flags ?? [];
   return (
     <Card>
       <CardHeader className="flex-wrap">
@@ -763,6 +952,9 @@ function RunHistoryPanel({
               {goal?.adapter_kind ? <Badge variant="neutral">{goal.adapter_kind}</Badge> : null}
               {goal?.adapter_status ? <Badge variant="info">{goal.adapter_status}</Badge> : null}
               {goal?.legacy_runtime_goal ? <Badge variant="warning">Legacy runtime</Badge> : null}
+            </div>
+            <div className="mt-2">
+              <PhaseBadges flags={lifecycleFlags} phase={lifecyclePhase} />
             </div>
           </div>
 
@@ -1181,6 +1373,8 @@ export function DashboardPage() {
               </section>
 
               <GoalDirectory rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
+
+              <UserReviewMap rows={goalRows} />
 
               <GlobalRegistryHealthPanel health={payload.global_registry} />
 

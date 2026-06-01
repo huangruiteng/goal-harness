@@ -61,6 +61,7 @@ def severity_class(item: dict[str, Any]) -> str:
 
 def render_item(item: dict[str, Any]) -> str:
     status = esc(item.get("status"))
+    phase = esc(item.get("lifecycle_phase"))
     waiting = esc(item.get("waiting_on"))
     source = esc(item.get("source"))
     action = esc(item.get("recommended_action"))
@@ -83,6 +84,7 @@ def render_item(item: dict[str, Any]) -> str:
           </div>
           <dl>
             <dt>Status</dt><dd>{status}</dd>
+            <dt>Phase</dt><dd>{phase}</dd>
             <dt>Waiting</dt><dd>{waiting}</dd>
             <dt>Source</dt><dd>{source}</dd>
           </dl>
@@ -129,6 +131,7 @@ def render_run(run: dict[str, Any]) -> str:
           <dl>
             <dt>Run</dt><dd>{esc(run.get("generated_at"))}</dd>
             <dt>Class</dt><dd>{esc(run.get("classification"))}</dd>
+            <dt>Phase</dt><dd>{esc(run.get("lifecycle_phase"))}</dd>
             <dt>Files</dt><dd>{esc(run.get("json_exists"))}/{esc(run.get("markdown_exists"))}</dd>
           </dl>
           <p>{esc(run.get("recommended_action"))}</p>

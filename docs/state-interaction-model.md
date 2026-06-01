@@ -69,6 +69,7 @@ goal event, state update, or reward overlay before future agents rely on it.
 ### Dashboard
 
 The dashboard is a local control-plane view. It is not the source of truth.
+It is the human-facing product surface, not a dressed-up CLI dump.
 
 By default it reads the status export and optional loopback status server:
 
@@ -85,6 +86,12 @@ writes from the dashboard must remain opt-in and gated. Browser-side writes
 need an explicit capability, preview handshake, exact run target, and loopback
 server boundary.
 
+The dashboard should translate agent-facing status fields into operator
+questions: "do I need to judge this?", "is an agent ready to work?", "are we
+waiting on evidence?", and "is a controller handoff safe yet?" Raw
+classifications, paths, and adapter terms should be secondary drill-down
+details.
+
 ## State Stores
 
 | Store | Owner | Reader | Writer | Purpose |
@@ -94,7 +101,7 @@ server boundary.
 | Shared global registry | Local control plane | Status, dashboard, any project shell | `connect`, `refresh-state`, `sync-global` | Multi-project discovery without manually copying registry entries. |
 | Run payloads | Goal runtime | Executor, local reviewer | Adapters, `refresh-state`, `read-only-map` | Rich private evidence for one run. |
 | Compact run index | Goal runtime | Status, dashboard, heartbeats | Adapters, reward overlay writer | Public-safe timeline and latest status. |
-| Status export | CLI/status layer | Dashboard, pre-tick, heartbeats | `goal-harness status` | First-screen derived view. |
+| Status export | CLI/status layer | Dashboard, pre-tick, heartbeats | `goal-harness status` | Agent-facing machine contract and dashboard input. |
 | Dashboard UI state | Browser session | User | Browser URL/search state | Filters, selected goal, selected run; not durable goal truth. |
 
 ## State Flow
@@ -115,9 +122,10 @@ flowchart LR
   Dashboard -->|"review / dry-run only by default"| User
 ```
 
-The dashboard reads the derived status surface. It should not reach behind the
-status layer to reinterpret private files, and it should not directly mutate
-goal state unless a future explicit write boundary is enabled.
+The CLI status export is for agents and local tools. The dashboard reads that
+derived surface, then presents a user-facing interpretation. It should not
+reach behind the status layer to reinterpret private files, and it should not
+directly mutate goal state unless a future explicit write boundary is enabled.
 
 ## Core Transitions
 
@@ -199,14 +207,19 @@ chat, where feedback is easy to lose.
 ## Dashboard Architecture
 
 The dashboard should optimize for operator decisions, not decorative reporting.
+It should not expose the CLI status contract as the primary mental model.
 
 First screen:
 
 - contract health and global registry health,
 - lanes by `waiting_on`: user/controller, Codex-ready, external evidence,
   blocking health,
-- compact goal rows with latest classification, last run time, recommended
-  action, reward presence, and controller readiness.
+- a user review map that translates lifecycle phases into "needs first run",
+  "state changed", "agent inspected", "reward recorded", and "controller
+  readiness or controller-gated" states;
+- compact goal rows with user-facing phase, latest classification as a
+  secondary detail, last run time, recommended action, reward presence, and
+  controller readiness.
 
 Goal detail:
 
@@ -234,6 +247,13 @@ Executor surface:
 - show missing gates,
 - show whether the next action is read-only, state refresh, adapter tick,
   reward capture, controller opt-in, or explicit write approval.
+
+CLI surface:
+
+- keep fields terse, stable, and machine-readable;
+- prefer classifications, lifecycle phases, gate ids, and one recommended
+  action over user-facing prose;
+- avoid local private evidence and UI-only copy.
 
 ## Invariants
 
@@ -276,7 +296,7 @@ The next milestone should not be another isolated adapter command. It should
 make the dashboard and status contract reflect this model:
 
 - show whether a goal is merely connected, mapped, refreshed, adapter-inspected,
-  reward-judged, or controller-ready;
+  reward-judged, controller-gated, or controller-ready;
 - make the user/controller lane distinct from Codex-ready work;
 - make human reward capture a first-class review action;
 - make stale dashboard state obvious and recoverable;

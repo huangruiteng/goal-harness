@@ -6,6 +6,9 @@ agents, heartbeat jobs, dashboards, and local UI experiments.
 The command is an export: it reads the registry, compact run indexes, and the
 public/private contract check, then emits one JSON object. It does not inspect
 private run payloads beyond compact index fields and does not mutate files.
+The export is agent-facing machine state. A dashboard should consume this
+contract and translate it into a human operator view rather than treating raw
+CLI fields as product copy.
 
 When a command is run outside a project-local `.goal-harness/registry.json`,
 the CLI falls back to the shared local global registry at
@@ -193,6 +196,11 @@ Item shape:
 {
   "goal_id": "complex-project-main-control",
   "status": "ready_for_controller_opt_in",
+  "lifecycle_phase": "controller_gated",
+  "lifecycle_flags": [
+    "controller_gated",
+    "adapter_inspected"
+  ],
   "waiting_on": "user_or_controller",
   "severity": "action",
   "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
@@ -210,6 +218,9 @@ Item fields:
 
 - `goal_id`: stable goal identifier from registry or runtime.
 - `status`: adapter classification or derived status.
+- `lifecycle_phase`: derived state-interaction phase for first-screen
+  visualization.
+- `lifecycle_flags`: all compact phases that apply to the latest state.
 - `waiting_on`: `user_or_controller`, `controller`, `codex`, or
   `external_evidence`.
 - `severity`: `high`, `action`, or `watch`.
@@ -275,6 +286,11 @@ Goal shape:
   "id": "complex-project-main-control",
   "domain": "complex-project-control",
   "status": "active-read-only",
+  "lifecycle_phase": "controller_gated",
+  "lifecycle_flags": [
+    "controller_gated",
+    "adapter_inspected"
+  ],
   "registry_member": true,
   "legacy_runtime_goal": false,
   "adapter_kind": "complex_project_read_only_map_v0",
@@ -293,6 +309,11 @@ Run shape:
   "generated_at": "2026-05-31T21:15:00+00:00",
   "goal_id": "complex-project-main-control",
   "classification": "ready_for_controller_opt_in",
+  "lifecycle_phase": "controller_gated",
+  "lifecycle_flags": [
+    "controller_gated",
+    "adapter_inspected"
+  ],
   "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
   "health_check": "8/8",
   "controller_readiness": {
@@ -336,6 +357,25 @@ Optional compact fields such as `active_task_count`, `active_priorities`, and
 adapters may also include compact `controller_readiness` and `human_reward`
 summaries.
 
+`lifecycle_phase` is derived by the status layer so the dashboard can separate
+state interaction stages from adapter-specific classifications:
+
+- `connected`: the goal is registered with a connected adapter but has no run.
+- `mapped`: the latest run is a generic `read_only_project_map`.
+- `refreshed`: the latest run is a state-only `state_refreshed` update.
+- `adapter_inspected`: a project adapter produced a compact run.
+- `reward_judged`: a human reward overlay is attached to the run.
+- `controller_gated`: controller readiness evidence is present, but the goal is
+  still missing a gate such as human reward or comparable evidence.
+- `controller_ready`: decision-advisor or write-controller readiness is present.
+- `planned`, `registered`, and `run_recorded`: fallback phases for goals that
+  are not yet connected or have an unclassified run.
+
+`lifecycle_flags` may contain more than one phase. For example, a run can be
+both `adapter_inspected` and `reward_judged`, or both `adapter_inspected` and
+`controller_gated`. UIs should show the primary phase first and use flags as
+secondary badges.
+
 For `controller_readiness`, the status export keeps only controller-stage
 booleans, missing gate names, operator-facing review text, next handoff
 condition, and compact gate rows with `id`, `ok`, and `review`. For
@@ -363,7 +403,13 @@ A first useful UI can be built from the export alone:
 
 - Header: `ok`, `goal_count`, `run_count`, and contract summary.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
-  enriched with matching attention items when a goal needs action.
+  enriched with matching attention items and lifecycle phase badges when a
+  goal needs action.
+- User review map: counts for connected, mapped, refreshed,
+  adapter-inspected, reward-judged, and controller-ready goals, written as
+  operator-facing states rather than raw adapter statuses. Goals with
+  controller evidence but missing gates should be shown as controller-gated,
+  not controller-ready.
 - Primary queue: `attention_queue.items`.
 - Queue gate hints: show `controller_stage`, `missing_gates`, and
   `next_handoff_condition` directly in queue rows so an operator can see why a

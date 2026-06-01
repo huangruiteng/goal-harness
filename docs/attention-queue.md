@@ -35,6 +35,8 @@ small queue model.
 {
   "goal_id": "complex-project-main-control",
   "status": "ready_for_controller_opt_in",
+  "lifecycle_phase": "controller_gated",
+  "lifecycle_flags": ["controller_gated", "adapter_inspected"],
   "waiting_on": "user_or_controller",
   "severity": "action",
   "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
@@ -46,6 +48,8 @@ Fields:
 
 - `goal_id`: stable public-safe goal id from registry or runtime.
 - `status`: classification or derived state.
+- `lifecycle_phase`: derived state-interaction phase for dashboard grouping.
+- `lifecycle_flags`: all compact phases that apply to the latest goal state.
 - `waiting_on`: one of `user_or_controller`, `codex`, `external_evidence`, or
   `controller`.
 - `severity`: `high`, `action`, or `watch`.
@@ -132,3 +136,8 @@ recommended actions are sanitized. It should not contain:
 
 Project-specific adapters may keep richer private evidence in their own repo or
 runtime payloads, but the status queue should remain compact and public-safe.
+
+Lifecycle phases are derived by the status layer and should stay separate from
+adapter classifications. A queue item can keep its domain-specific status while
+also saying whether the goal is merely connected, mapped, refreshed,
+adapter-inspected, reward-judged, or controller-ready.
