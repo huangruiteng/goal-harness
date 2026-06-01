@@ -33,14 +33,14 @@ with another local operator or agent. The selected goal is also URL-backed via
 `goalId`, which lets a shared link preserve both the review lane and the
 selected goal detail. The adjacent first-screen `Selected action share`
 control copies the current `actionKind`, selected `goalId`, source
-`statusUrl`, and queue filters as browser UI state only. The same control can
-copy a Chinese user-response template, an operator handoff packet, or a
-project-agent prompt with the selected goal, current action kind, review link,
-safe local path, reward/default hint, and Chinese review action. The
-user-response template helps the operator write an agree/disagree/reason/next
-step reply for reward and controller gates, but it is still copy-only browser
-state. The project-agent prompt is deliberately still a handoff artifact; it
-is not approval, reward append, controller opt-in, or write-control.
+`statusUrl`, and queue filters as browser UI state only. It intentionally has
+one canonical copy affordance: `Copy Review Packet`. The packet follows the
+selected action card, so an operator can click a different card to switch the
+target instead of choosing among several copy formats. The packet combines the
+review link, Chinese agree/disagree/reason/next-step template, project-agent
+instructions, safe local path, reward/default hint, and local dry-run preview.
+It is still a handoff artifact; it is not approval, reward append, controller
+opt-in, or write-control.
 The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for
@@ -60,6 +60,9 @@ values. The operator can still edit or reset the draft before validation.
 When the dashboard is loaded from the loopback `Live` source, the same panel can
 send that draft to `POST /reward/dry-run` for local validation. The endpoint
 returns a compact validation result and never appends to the run index.
+Durable reward should be recorded as a run-bound `human_reward` overlay through
+`goal-harness reward`; active state may summarize the reward afterward, but it
+should not be the only source of truth for multi-agent reward signals.
 
 ## Load Live Status
 

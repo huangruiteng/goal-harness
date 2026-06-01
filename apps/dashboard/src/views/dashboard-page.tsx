@@ -710,6 +710,18 @@ type RewardDraftDefaults = {
   label: string;
 };
 
+type OperatorTransitionPreview = {
+  title: string;
+  badge: string;
+  variant: BadgeVariant;
+  transition: string;
+  goalId: string;
+  runGeneratedAt?: string | null;
+  summary: string;
+  effects: string[];
+  command?: string;
+};
+
 type UserActionKind = "reward" | "controller" | "codex" | "evidence" | "health";
 type UserActionFilter = "all" | UserActionKind;
 
@@ -788,130 +800,84 @@ function chineseReviewAction(item?: UserActionSummaryItem, selectedKind?: UserAc
   return "请先查看 dashboard 当前审阅状态，再决定是否转给项目 agent。";
 }
 
-function buildOperatorHandoffPacket({
-  actionKind,
-  item,
-  reviewUrl,
-  selectedGoalId,
-}: {
-  actionKind: UserActionFilter;
-  item?: UserActionSummaryItem;
-  reviewUrl: string;
-  selectedGoalId: string;
-}) {
+function buildTransitionPreviewText(preview: OperatorTransitionPreview) {
   const lines = [
-    "【Goal Harness Operator Handoff】",
-    `目标：${(item?.goalId ?? selectedGoalId) || "none"}`,
-    `动作类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
-    `审阅链接：${reviewUrl}`,
-    `用户审阅动作：${chineseReviewAction(item, actionKind)}`,
-    `当前判断：${item?.title ?? "No active user-facing action"}`,
-    `上下文摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
-    `Reward/default hint：${item?.rewardHint ?? "none"}`,
-    `Safe local path：${item?.safePathLabel ?? "Inspect status"}`,
+    `transition：${preview.transition}`,
+    `目标：${preview.goalId}`,
+    preview.runGeneratedAt ? `run：${preview.runGeneratedAt}` : "run：none",
+    "dry_run：true",
+    "appended：false",
+    `说明：${preview.summary}`,
+    "将要发生：",
+    ...preview.effects.map((effect) => `- ${effect}`),
   ];
-  if (item?.safePathCommand) {
-    lines.push("```bash", item.safePathCommand, "```");
+  if (preview.command) {
+    lines.push("```bash", preview.command, "```");
   }
-  lines.push("边界：这是 dashboard 审阅转交文本；不写 reward、approval、controller opt-in 或 write-control。");
   return lines.join("\n");
 }
 
-function buildAgentPromptPacket({
+function buildReviewPacket({
   actionKind,
   item,
   reviewUrl,
   selectedGoalId,
+  transitionPreview,
 }: {
   actionKind: UserActionFilter;
   item?: UserActionSummaryItem;
   reviewUrl: string;
   selectedGoalId: string;
+  transitionPreview: OperatorTransitionPreview;
 }) {
   const goalId = (item?.goalId ?? selectedGoalId) || "<goal-id>";
   const lines = [
-    "你是该项目的 Codex agent。请按以下 Goal Harness handoff 继续推进，但不要把本消息当成写权限授权。",
-    "",
+    "【Goal Harness Review Packet】",
     `目标：${goalId}`,
-    `当前动作类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
+    `动作类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
     `Dashboard 审阅链接：${reviewUrl}`,
     `用户审阅动作：${chineseReviewAction(item, actionKind)}`,
     `当前判断：${item?.title ?? "No active user-facing action"}`,
     `上下文摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
     `Reward/default hint：${item?.rewardHint ?? "none"}`,
     "",
-    "执行要求：",
-    "1. 先运行 `goal-harness doctor`，确认 CLI、PATH、wrapper 和 Python import 正常。",
-    "2. 读取本项目 `.goal-harness/registry.json`、active goal state、最近 run history；不要只依赖聊天上下文。",
-    "3. 只沿下面 safe local path 或等价 read-only/dry-run 路径行动；若需要写 reward、approval、controller opt-in 或 write-control，先回报并等待明确授权。",
-    "4. 完成后用中文汇报 changed files、validation、dashboard/attention queue 状态和 next safe action。",
-    "",
-    `Safe local path：${item?.safePathLabel ?? "Inspect status"}`,
+    "【用户需要填写】",
   ];
-  if (item?.safePathCommand) {
-    lines.push("```bash", item.safePathCommand, "```");
-  }
-  lines.push("", "边界：本 prompt 只是 operator handoff；不是 reward append、approval、controller opt-in 或 write-control。");
-  return lines.join("\n");
-}
 
-function buildUserResponseTemplate({
-  actionKind,
-  item,
-  reviewUrl,
-  selectedGoalId,
-}: {
-  actionKind: UserActionFilter;
-  item?: UserActionSummaryItem;
-  reviewUrl: string;
-  selectedGoalId: string;
-}) {
-  const goalId = (item?.goalId ?? selectedGoalId) || "none";
   const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
-  const lines = [
-    "【用户审阅回复模板】",
-    `目标：${goalId}`,
-    `动作类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
-    `审阅链接：${reviewUrl}`,
-    `当前判断：${item?.title ?? "No active user-facing action"}`,
-    `上下文摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
-    `Reward/default hint：${item?.rewardHint ?? "none"}`,
-    "",
-  ];
-
   if (kind === "reward") {
     lines.push(
       "我的判断：同意记录这次 human reward / 暂不同意记录这次 human reward。",
-      "理由：<请写一句中文原因，例如：aligned eval duration RegAUC 已可读，且这个方向值得继续观察。>",
-      "下一步：<请写希望项目 agent 做什么，例如：先按 safe local path 做 dry-run，并把 reward 命令发回给我确认。>",
+      "理由：<请写一句中文原因。>",
+      "下一步：<请写希望项目 agent 做什么，例如：按下面 dry-run preview 先验证，不要直接写入。>",
       "边界：这只是 human reward 判断；不是 write-control、controller opt-in 或生产动作授权。",
     );
   } else if (kind === "controller") {
     lines.push(
       "我的判断：同意继续 read-only/controller opt-in / 暂不同意，原因如下。",
-      "理由：<请写一句中文原因，例如：可以先做 read-only map，但不允许写控制或线上变更。>",
-      "下一步：<请写希望项目 agent 做什么，例如：运行 safe local path 的 dry-run，汇报 changed files、validation 和 next safe action。>",
+      "理由：<请写一句中文原因。>",
+      "下一步：<请写希望项目 agent 做什么，例如：运行下面 dry-run preview，回报 changed files、validation 和 next safe action。>",
       "边界：这不是 write-control；任何写入、实验控制、生产动作都需要再次明确授权。",
     );
   } else if (kind === "codex") {
     lines.push(
       "我的判断：可以让 Codex 沿 safe local path 继续推进。",
-      "理由：<请写一句中文原因，例如：当前 action 已经是 Codex-ready，不需要额外 reward/controller 判断。>",
-      "下一步：<请写希望项目 agent 做什么，例如：读取最新 map/history 后完成一个 bounded progress segment。>",
+      "理由：<请写一句中文原因。>",
+      "下一步：<请写希望项目 agent 做什么。>",
       "边界：如果下一步需要写入、reward append、approval 或 write-control，先回报再等我确认。",
     );
   } else if (kind === "evidence") {
     lines.push(
       "我的判断：继续等待外部证据，不升级为决策建议。",
-      "理由：<请写一句中文原因，例如：aligned eval 还没到可比较窗口。>",
-      "下一步：<请写观察条件，例如：等 duration RegAUC 对齐后再进入 reward/controller 判断。>",
+      "理由：<请写一句中文原因。>",
+      "下一步：<请写观察条件。>",
       "边界：观察状态不是 reward、approval 或 controller opt-in。",
     );
   } else if (kind === "health") {
     lines.push(
       "我的判断：先修复健康阻塞，再讨论 reward/controller/codex handoff。",
-      "理由：<请写一句中文原因，例如：当前 contract/registry/runtime health 不足以支撑后续判断。>",
-      "下一步：<请写希望项目 agent 做什么，例如：先运行 doctor/status/check 并修复阻塞项。>",
+      "理由：<请写一句中文原因。>",
+      "下一步：<请写希望项目 agent 做什么。>",
       "边界：健康修复不等于授权 reward append、approval 或 write-control。",
     );
   } else {
@@ -922,81 +888,53 @@ function buildUserResponseTemplate({
     );
   }
 
+  lines.push(
+    "",
+    "【给项目 Codex 的执行要求】",
+    "1. 先运行 `goal-harness doctor`，确认 CLI、PATH、wrapper 和 Python import 正常。",
+    "2. 读取本项目 `.goal-harness/registry.json`、active goal state、最近 run history；不要只依赖聊天上下文。",
+    "3. 只执行下面 local dry-run preview 或等价 read-only/dry-run 路径；若需要写 reward、approval、controller opt-in 或 write-control，先回报并等待明确授权。",
+    "4. 完成后用中文汇报 changed files、validation、dashboard/attention queue 状态和 next safe action。",
+    "",
+    "【本地 dry-run preview】",
+    buildTransitionPreviewText(transitionPreview),
+    "",
+    "边界：这是唯一推荐复制给项目 agent / 自己审阅的 packet；它不是 reward append、approval、controller opt-in 或 write-control。",
+  );
   return lines.join("\n");
 }
 
 function ReviewLinkPanel({
-  agentPrompt,
   actionKind,
   goalId,
-  handoffPacket,
   lane,
+  reviewPacket,
   reviewUrl,
   severity,
   statusUrl,
-  userResponseTemplate,
+  transitionPreview,
 }: {
-  agentPrompt: string;
   actionKind: UserActionFilter;
   goalId: string;
-  handoffPacket: string;
   lane: string;
+  reviewPacket: string;
   reviewUrl: string;
   severity: string;
   statusUrl: string;
-  userResponseTemplate: string;
+  transitionPreview: OperatorTransitionPreview;
 }) {
-  const [agentPromptCopyState, setAgentPromptCopyState] = useState<CopyState>("idle");
-  const [linkCopyState, setLinkCopyState] = useState<CopyState>("idle");
-  const [handoffCopyState, setHandoffCopyState] = useState<CopyState>("idle");
-  const [userResponseCopyState, setUserResponseCopyState] = useState<CopyState>("idle");
+  const [packetCopyState, setPacketCopyState] = useState<CopyState>("idle");
 
   useEffect(() => {
-    if (agentPromptCopyState === "idle") {
+    if (packetCopyState === "idle") {
       return;
     }
-    const timeoutId = window.setTimeout(() => setAgentPromptCopyState("idle"), 1800);
+    const timeoutId = window.setTimeout(() => setPacketCopyState("idle"), 1800);
     return () => window.clearTimeout(timeoutId);
-  }, [agentPromptCopyState, agentPrompt]);
+  }, [packetCopyState, reviewPacket]);
 
-  useEffect(() => {
-    if (linkCopyState === "idle") {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => setLinkCopyState("idle"), 1800);
-    return () => window.clearTimeout(timeoutId);
-  }, [linkCopyState, reviewUrl]);
-
-  useEffect(() => {
-    if (handoffCopyState === "idle") {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => setHandoffCopyState("idle"), 1800);
-    return () => window.clearTimeout(timeoutId);
-  }, [handoffCopyState, handoffPacket]);
-
-  useEffect(() => {
-    if (userResponseCopyState === "idle") {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => setUserResponseCopyState("idle"), 1800);
-    return () => window.clearTimeout(timeoutId);
-  }, [userResponseCopyState, userResponseTemplate]);
-
-  async function copyReviewLink() {
-    setLinkCopyState((await copyTextToClipboard(reviewUrl)) ? "copied" : "failed");
-  }
-
-  async function copyHandoffPacket() {
-    setHandoffCopyState((await copyTextToClipboard(handoffPacket)) ? "copied" : "failed");
-  }
-
-  async function copyAgentPrompt() {
-    setAgentPromptCopyState((await copyTextToClipboard(agentPrompt)) ? "copied" : "failed");
-  }
-
-  async function copyUserResponseTemplate() {
-    setUserResponseCopyState((await copyTextToClipboard(userResponseTemplate)) ? "copied" : "failed");
+  async function copyReviewPacket() {
+    setPacketCopyState((await copyTextToClipboard(reviewPacket)) ? "copied" : "failed");
   }
 
   return (
@@ -1014,38 +952,44 @@ function ReviewLinkPanel({
               {statusUrl ? <Badge variant="success">Status URL</Badge> : <Badge variant="neutral">Example source</Badge>}
               {lane !== "all" || severity !== "all" ? <Badge variant="neutral">{lane} / {severity}</Badge> : null}
             </div>
+            <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
+              One selected action drives one canonical packet. Click another action card to switch the packet target.
+            </p>
             <code className="mt-3 block truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
               {reviewUrl}
             </code>
           </div>
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <Button aria-label="Copy review link" onClick={() => void copyReviewLink()} variant="primary">
-              {linkCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {linkCopyState === "copied" ? "Copied" : "Copy Review Link"}
+            <Button aria-label="Copy review packet" onClick={() => void copyReviewPacket()} variant="primary">
+              {packetCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {packetCopyState === "copied" ? "Copied" : "Copy Review Packet"}
             </Button>
-            <Button aria-label="Copy user response" onClick={() => void copyUserResponseTemplate()}>
-              {userResponseCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {userResponseCopyState === "copied" ? "Copied" : "Copy User Response"}
-            </Button>
-            <Button aria-label="Copy operator handoff" onClick={() => void copyHandoffPacket()}>
-              {handoffCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {handoffCopyState === "copied" ? "Copied" : "Copy Handoff"}
-            </Button>
-            <Button aria-label="Copy agent prompt" onClick={() => void copyAgentPrompt()}>
-              {agentPromptCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {agentPromptCopyState === "copied" ? "Copied" : "Copy Agent Prompt"}
-            </Button>
-            {linkCopyState === "failed" || handoffCopyState === "failed" || agentPromptCopyState === "failed" || userResponseCopyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
+            {packetCopyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
           </div>
         </div>
-        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-          {userResponseTemplate}
-        </pre>
-        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
-          {handoffPacket}
-        </pre>
-        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-          {agentPrompt}
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            <span className="font-medium">{transitionPreview.title}</span>
+            <Badge variant={transitionPreview.variant}>{transitionPreview.badge}</Badge>
+            <Badge variant="neutral">{transitionPreview.transition}</Badge>
+            <Badge variant="neutral">appended=false</Badge>
+            {transitionPreview.runGeneratedAt ? <Badge variant="info">{transitionPreview.runGeneratedAt}</Badge> : null}
+          </div>
+          <p className="mt-2">{transitionPreview.summary}</p>
+          <ul className="mt-2 list-disc space-y-1 pl-4">
+            {transitionPreview.effects.map((effect) => (
+              <li key={effect}>{effect}</li>
+            ))}
+          </ul>
+          {transitionPreview.command ? (
+            <pre className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-emerald-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-emerald-900">
+              {transitionPreview.command}
+            </pre>
+          ) : null}
+        </div>
+        <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
+          {reviewPacket}
         </pre>
       </CardContent>
     </Card>
@@ -1150,6 +1094,157 @@ function buildRefreshStateDryRunCommand({
     `  --goal-id ${shellQuote(goalId)} \\`,
     "  --dry-run",
   ].join("\n");
+}
+
+function buildOperatorTransitionPreview({
+  actionKind,
+  goal,
+  item,
+  queueItem,
+  registry,
+  runtimeRoot,
+  selectedGoalId,
+}: {
+  actionKind: UserActionFilter;
+  goal?: RunGoal;
+  item?: UserActionSummaryItem;
+  queueItem?: QueueItem;
+  registry: string;
+  runtimeRoot: string;
+  selectedGoalId: string;
+}): OperatorTransitionPreview {
+  const goalId = (item?.goalId ?? goal?.id ?? queueItem?.goal_id ?? selectedGoalId) || "none";
+  const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
+  const latestRun = goal?.latest_runs[0];
+  const statusCommand = buildStatusCommand({ registry, runtimeRoot });
+
+  if (kind === "reward") {
+    if (!latestRun) {
+      return {
+        title: "Local Dry-run Preview",
+        badge: "needs run",
+        variant: "neutral",
+        transition: "human_reward_overlay_preview",
+        goalId,
+        summary: "这个 action 需要 human reward，但当前 status 没有 compact run 可以绑定。",
+        effects: [
+          "不会写入 reward、approval、controller opt-in 或 write-control。",
+          "先让项目 agent 产生或同步一条 compact run，再回到 reward dry-run。",
+        ],
+        command: buildHistoryCommand({ goalId, registry, runtimeRoot }),
+      };
+    }
+
+    const draft = buildRewardDraftDefaults({ goal, queueItem });
+    return {
+      title: "Local Dry-run Preview",
+      badge: "reward dry-run",
+      variant: "warning",
+      transition: "human_reward_overlay_preview",
+      goalId,
+      runGeneratedAt: latestRun.generated_at,
+      summary: "预览 exact run 上的一条 compact human_reward overlay；默认不会 append。",
+      effects: [
+        "校验 goal/run、reward 取值和 public-safe reason/follow-up。",
+        "如果之后由用户明确执行去掉 --dry-run 的 CLI，才会追加一条 human_reward overlay。",
+        "不授权 controller opt-in、write-control、实验控制或生产动作。",
+      ],
+      command: buildRewardCommand({
+        goalId,
+        registry,
+        runtimeRoot,
+        runGeneratedAt: latestRun.generated_at,
+        decision: draft.decision,
+        reward: draft.reward,
+        reasonSummary: draft.reasonSummary,
+        followUp: draft.followUp,
+      }),
+    };
+  }
+
+  if (kind === "controller") {
+    return {
+      title: "Local Dry-run Preview",
+      badge: "controller dry-run",
+      variant: "warning",
+      transition: "read_only_controller_handoff_preview",
+      goalId,
+      runGeneratedAt: latestRun?.generated_at,
+      summary: "预览 controller/read-only handoff 能看到的项目状态；这不是持久 opt-in 或写控制。",
+      effects: [
+        "运行 read-only map dry-run 或等价 safe path，不 append run history。",
+        "让目标项目 agent 先回报 changed files、validation 和 next safe action。",
+        "不记录 approval、controller opt-in、write-control 或生产动作授权。",
+      ],
+      command: item?.safePathCommand ?? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot }),
+    };
+  }
+
+  if (kind === "codex") {
+    return {
+      title: "Local Dry-run Preview",
+      badge: "codex handoff",
+      variant: "success",
+      transition: "codex_safe_path_preview",
+      goalId,
+      runGeneratedAt: latestRun?.generated_at,
+      summary: "预览项目 agent 下一步应该读取的状态或 history；具体改动仍由目标 agent 自己验证后写回。",
+      effects: [
+        "读取 compact status/history 或 refresh/read-only dry-run 结果。",
+        "不把 dashboard 选择解释成 reward、approval 或写入授权。",
+      ],
+      command: item?.safePathCommand ?? buildHistoryCommand({ goalId, registry, runtimeRoot }),
+    };
+  }
+
+  if (kind === "evidence") {
+    return {
+      title: "Local Dry-run Preview",
+      badge: "watch",
+      variant: "info",
+      transition: "external_evidence_watch_preview",
+      goalId,
+      runGeneratedAt: latestRun?.generated_at,
+      summary: "预览当前仍是观察状态；没有足够证据时不升级 reward/controller 判断。",
+      effects: [
+        "读取 status 中的 waiting_on、missing gates 和 next handoff condition。",
+        "不写 reward、approval、controller opt-in 或 write-control。",
+      ],
+      command: item?.safePathCommand ?? statusCommand,
+    };
+  }
+
+  if (kind === "health") {
+    return {
+      title: "Local Dry-run Preview",
+      badge: "health",
+      variant: "danger",
+      transition: "health_blocker_inspection_preview",
+      goalId,
+      runGeneratedAt: latestRun?.generated_at,
+      summary: "预览健康阻塞排查入口；先修 contract/registry/runtime，再做 reward 或 controller 决策。",
+      effects: [
+        "读取 agent-facing status/check 输出定位 blocker。",
+        "健康修复不等于 reward append、approval 或 write-control。",
+      ],
+      command: item?.safePathCommand ?? statusCommand,
+    };
+  }
+
+  return {
+    title: "Local Dry-run Preview",
+    badge: "status",
+    variant: "neutral",
+    transition: "status_inspection_preview",
+    goalId,
+    runGeneratedAt: latestRun?.generated_at,
+    summary: "当前没有明确 user-facing action；先检查 status 再决定下一步。",
+    effects: [
+      "读取 machine contract 作为多个 Codex 协作的共同事实源。",
+      "不写 reward、approval、controller opt-in 或 write-control。",
+    ],
+    command: statusCommand,
+  };
 }
 
 function buildOperatorDecision({
@@ -1603,6 +1698,7 @@ function UserActionSummary({
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={userActionKindConfig[item.kind].variant}>{userActionKindConfig[item.kind].label}</Badge>
                       <Badge variant={item.variant}>{item.badge}</Badge>
+                      {item.goalId === selectedGoalId ? <Badge variant="success">Selected</Badge> : null}
                       <PhaseBadges compact phase={item.phase} />
                       {item.waitingOn !== "clear" ? (
                         <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
@@ -2554,9 +2650,11 @@ export function DashboardPage() {
       ?? focusedItems[0]
       ?? (search.goalId ? userActionItems.find((item) => item.goalId === selectedGoalId) : undefined)
       ?? userActionItems[0];
-  }, [search.actionKind, search.goalId, selectedGoalId, userActionItems]);
-  const selectedReviewGoalId = selectedActionItem?.goalId ?? selectedGoalId;
-  const reviewUrl = useMemo(() => {
+	  }, [search.actionKind, search.goalId, selectedGoalId, userActionItems]);
+	  const selectedReviewGoalId = selectedActionItem?.goalId ?? selectedGoalId;
+	  const selectedActionGoal = runHistory.goals.find((goal) => goal.id === selectedReviewGoalId);
+	  const selectedActionQueueItem = queue.items.find((item) => item.goal_id === selectedReviewGoalId);
+	  const reviewUrl = useMemo(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("actionKind", search.actionKind);
     url.searchParams.set("lane", search.lane);
@@ -2570,36 +2668,39 @@ export function DashboardPage() {
       url.searchParams.set("statusUrl", search.statusUrl);
     } else {
       url.searchParams.delete("statusUrl");
-    }
-    return url.toString();
-  }, [search.actionKind, search.lane, search.severity, search.statusUrl, selectedReviewGoalId]);
-  const handoffPacket = useMemo(
-    () => buildOperatorHandoffPacket({
-      actionKind: search.actionKind,
-      item: selectedActionItem,
-      reviewUrl,
-      selectedGoalId: selectedReviewGoalId,
-    }),
-    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId],
-  );
-  const agentPrompt = useMemo(
-    () => buildAgentPromptPacket({
-      actionKind: search.actionKind,
-      item: selectedActionItem,
-      reviewUrl,
-      selectedGoalId: selectedReviewGoalId,
-    }),
-    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId],
-  );
-  const userResponseTemplate = useMemo(
-    () => buildUserResponseTemplate({
-      actionKind: search.actionKind,
-      item: selectedActionItem,
-      reviewUrl,
-      selectedGoalId: selectedReviewGoalId,
-    }),
-    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId],
-  );
+	    }
+	    return url.toString();
+	  }, [search.actionKind, search.lane, search.severity, search.statusUrl, selectedReviewGoalId]);
+	  const transitionPreview = useMemo(
+	    () => buildOperatorTransitionPreview({
+	      actionKind: search.actionKind,
+	      goal: selectedActionGoal,
+	      item: selectedActionItem,
+	      queueItem: selectedActionQueueItem,
+	      registry: payload.registry,
+	      runtimeRoot: payload.runtime_root,
+	      selectedGoalId: selectedReviewGoalId,
+	    }),
+	    [
+	      payload.registry,
+	      payload.runtime_root,
+	      search.actionKind,
+	      selectedActionGoal,
+	      selectedActionItem,
+	      selectedActionQueueItem,
+	      selectedReviewGoalId,
+	    ],
+	  );
+	  const reviewPacket = useMemo(
+	    () => buildReviewPacket({
+	      actionKind: search.actionKind,
+	      item: selectedActionItem,
+	      reviewUrl,
+	      selectedGoalId: selectedReviewGoalId,
+	      transitionPreview,
+	    }),
+	    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId, transitionPreview],
+	  );
 
   function selectGoal(goalId: string) {
     void navigate({
@@ -2666,24 +2767,23 @@ export function DashboardPage() {
                         actionKind,
                       }),
                     })
-                  }
-                  registry={payload.registry}
+	                  }
+	                  registry={payload.registry}
                   rows={goalRows}
                   runtimeRoot={payload.runtime_root}
                   onSelectGoal={selectGoal}
-                  selectedGoalId={selectedGoalId}
+                  selectedGoalId={selectedReviewGoalId}
                 />
 
                 <ReviewLinkPanel
-                  agentPrompt={agentPrompt}
                   actionKind={search.actionKind}
                   goalId={selectedReviewGoalId}
-                  handoffPacket={handoffPacket}
                   lane={search.lane}
+                  reviewPacket={reviewPacket}
                   reviewUrl={reviewUrl}
                   severity={search.severity}
                   statusUrl={search.statusUrl}
-                  userResponseTemplate={userResponseTemplate}
+                  transitionPreview={transitionPreview}
                 />
               </section>
 

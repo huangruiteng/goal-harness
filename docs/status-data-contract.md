@@ -423,21 +423,13 @@ A first useful UI can be built from the export alone:
   `actionKind`, selected `goalId`, source `statusUrl`, `lane`, and `severity`
   search state. That link is a user review affordance over this export; it
   must not add fields to the status contract or mutate goal runtime state.
-- User-response template: the dashboard may copy a localized operator reply
-  template derived from the selected action card. Reward and controller gates
-  should prompt the user for agree/disagree, reason, and next step in Chinese,
-  but the copied text is still browser UI state and must not be parsed as
-  durable reward, approval, controller opt-in, or write-control.
-- Operator handoff packet: the dashboard may also copy a localized text packet
-  derived from the selected action card. It can include the review link, action
-  kind, selected goal, safe local path, and reward/default hint, but it remains
-  a user-facing handoff artifact and must not be parsed as approval or reward.
-- Project-agent prompt: the dashboard may copy a localized instruction prompt
-  derived from the same selected action card and review link. It can tell the
-  receiving agent to inspect `goal-harness doctor`, the project registry,
-  active state, and run history before following the safe local path, but it is
-  still copy-only UI state and must not be parsed as approval, reward,
-  controller opt-in, or write-control.
+- Review Packet: the dashboard should expose one canonical copy affordance for
+  the selected action card rather than separate link, reply, handoff, and agent
+  prompt buttons. The packet may include the review link, Chinese
+  agree/disagree/reason/next-step prompt, project-agent instructions, safe local
+  path, reward/default hint, and local dry-run preview. It is still browser UI
+  state and must not be parsed as durable reward, approval, controller opt-in,
+  or write-control.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.
@@ -467,6 +459,11 @@ A first useful UI can be built from the export alone:
   server, it may validate the same draft through `POST /reward/dry-run` and
   display the compact result. This is still a validation path, not a browser
   write path.
+- Reward source of truth: durable user reward belongs in a run-bound
+  `human_reward` overlay appended through `goal-harness reward`. Active goal
+  state can summarize that such a reward was recorded, and the Review Packet can
+  be forwarded to another project agent for immediate coordination, but neither
+  replaces the compact run overlay as the multi-agent reward signal.
 - Operator decision: selected goal detail should translate `waiting_on`,
   `severity`, `lifecycle_phase`, `missing_gates`, and `recommended_action`
   into a human stance such as review/authorize, let Codex continue, wait for

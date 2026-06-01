@@ -214,8 +214,8 @@ First screen:
 - user actions that need the operator before auxiliary source controls or raw
   status drill-down,
 - selected action share controls next to those actions, so review links,
-  user-response templates, handoff packets, and project-agent prompts are
-  visible without hunting through the page,
+  user judgment, project-agent instructions, and dry-run preview are visible in
+  one canonical packet without hunting through the page,
 - contract health and global registry health,
 - lanes by `waiting_on`: user/controller, Codex-ready, external evidence,
   blocking health,
@@ -255,19 +255,12 @@ User review surface:
 - expose a compact review link affordance for the current action-kind focus,
   selected goal, status source, and queue filters; copying that link is still
   dashboard UI state, not reward, approval, or controller opt-in,
-- expose a copyable Chinese user-response template for the selected action,
-  especially reward and controller gates, so the operator can quickly fill in
-  agree/disagree, reason, and next step; the template is not parsed as durable
-  reward, approval, controller opt-in, or write-control,
-- expose a copyable operator handoff packet that combines the review link,
-  selected goal, current action kind, safe local path, reward/default hint, and
-  a localized human review action; this packet is for project-agent handoff and
-  must not be treated as a durable state transition,
-- expose a copyable project-agent prompt variant for the same selected action;
-  it may tell the receiving Codex agent to run `goal-harness doctor`, read the
-  project registry, active state, and run history, then follow the safe local
-  path, but it must explicitly keep reward append, approval, controller opt-in,
-  and write-control as separate user-authorized transitions,
+- expose one copyable Review Packet for the selected action rather than several
+  competing copy formats. The packet should combine the review link, Chinese
+  agree/disagree/reason/next-step prompt, project-agent instructions,
+  reward/default hint, and local dry-run preview. It is for user-to-agent
+  collaboration and must not be parsed as durable reward, approval, controller
+  opt-in, or write-control,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,
@@ -306,6 +299,9 @@ CLI surface:
   control.
 - Human reward does not authorize writes unless the reward explicitly records a
   separate approval and the target transition supports it.
+- Durable reward belongs in the run-bound `human_reward` overlay. Active goal
+  state can summarize that a reward was recorded, but it should not become the
+  only reward source that other project agents rely on.
 - The global registry is synced from project-local registries; agents should
   not manually paste project entries into a separate queue.
 - UI filters and selected rows are browser state, not goal state.

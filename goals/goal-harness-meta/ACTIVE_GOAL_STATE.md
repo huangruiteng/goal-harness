@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T20:41:35+08:00
+updated_at: 2026-06-01T22:12:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,13 +29,27 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should connect the Chinese operator-response template to a local
-  dry-run preview path for reward/controller decisions, so the user can see
-  the exact CLI transition that would be recorded before any durable reward,
-  approval, controller opt-in, or write-control is appended.
+  slice should make operator reward submission explicit: when a user gives a
+  Chinese reward judgment, Codex should record the durable signal as an exact
+  run-bound `human_reward` overlay through `goal-harness reward`, then write a
+  short active-state summary and optionally forward the same Review Packet to
+  the target project agent for immediate execution.
 
 ## Recent Progress
 
+- 2026-06-01T22:12:40+08:00: Collapsed the dashboard's first-screen share
+  affordances from several copy buttons into one canonical `Copy Review Packet`.
+  The selected packet now follows the selected action card, so three active
+  actions can share one copy panel without ambiguity: clicking another card
+  changes the packet target and shows a `Selected` badge. The packet combines
+  the review link, Chinese user judgment template, project-agent instructions,
+  reward/default hint, and a local dry-run preview. Reward previews target an
+  exact run-bound `human_reward` overlay via `goal-harness reward --dry-run`;
+  controller previews target `read-only-map --dry-run` or the selected safe
+  path. README, status data contract, and state interaction docs now state that
+  durable reward belongs in the run-bound `human_reward` overlay, while active
+  state only summarizes recorded reward and Review Packet is only for
+  user-to-agent coordination.
 - 2026-06-01T11:43:29+08:00: Added `docs/status-data-contract.md`,
   linked it from README / architecture / attention queue / integration docs,
   pushed the public commit, and saved a compact self-health run with
@@ -389,6 +403,15 @@ private project context.
   `目标：agent-harness-main-control`, and the Chinese
   `同意继续 read-only/controller opt-in / 暂不同意，原因如下` template with a
   no-write-control boundary.
+- Browser DOM smoke: first-screen sharing exposes exactly one
+  `Copy Review Packet` button and no `Copy User Response` / `Copy Handoff` /
+  `Copy Agent Prompt` buttons; `User Actions` remains before `Source`, shows
+  `3 actions`, and the packet includes `Goal Harness Review Packet`, local
+  dry-run preview, `human_reward overlay`, and the no-write-control boundary.
+- Browser DOM smoke: selecting the controller card switches the shared packet
+  target to `agent-harness-main-control`, updates the URL `goalId`, shows the
+  `Selected` badge, and includes `read_only_controller_handoff_preview` plus a
+  `read-only-map --dry-run` command.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load
