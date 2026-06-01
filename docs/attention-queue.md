@@ -58,7 +58,8 @@ Fields:
 - `recommended_action`: exactly one user-facing next action from the adapter or
   status layer.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
-  operator view.
+  operator view. Dashboard action cards should treat this as the primary
+  first-screen question when it is present.
 - `agent_command`: optional target-agent command or instruction that becomes
   valid only after the operator gate is approved.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.

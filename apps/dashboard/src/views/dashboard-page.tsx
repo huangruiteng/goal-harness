@@ -734,6 +734,8 @@ type UserActionSummaryItem = {
   variant: BadgeVariant;
   summary: string;
   detail: string;
+  operatorQuestion?: string;
+  agentCommand?: string;
   safePathLabel: string;
   safePathCommand?: string;
   rewardHint: string;
@@ -860,7 +862,7 @@ function buildReviewPacket({
     `摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
     "",
     "【人只需判断】",
-    `问题：${prompt.question}`,
+    `问题：${item?.operatorQuestion ?? prompt.question}`,
     `回复：${prompt.reply}`,
     `边界：${prompt.boundary}`,
     "",
@@ -1466,6 +1468,8 @@ function buildUserActionSummaryItems({
       goalId: row.goal.id,
       phase: decision.phase,
       waitingOn: decision.waitingOn,
+      operatorQuestion: row.queueItem?.operator_question ?? undefined,
+      agentCommand: row.queueItem?.agent_command ?? undefined,
       safePathLabel: bridgeItem?.label ?? bridge?.badge ?? "Inspect status",
       safePathCommand: bridgeItem?.command,
       rewardHint: latestRun
@@ -1507,7 +1511,7 @@ function buildUserActionSummaryItems({
         title: decision.title,
         badge: decision.badge,
         variant: decision.variant,
-        summary: decision.reason,
+        summary: row.queueItem?.operator_question ?? decision.reason,
         detail: decision.action,
         draftLabel: draftDefaults.label,
         priority: 2,
@@ -1672,8 +1676,25 @@ function UserActionSummary({
                     </div>
                     <div className="mt-3 break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
                     <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
-                    <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.summary}</p>
+                    {item.operatorQuestion ? (
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 dark:border-amber-900/60 dark:bg-amber-950/30">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <CircleAlert className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" />
+                          <Badge variant="warning">Operator question</Badge>
+                        </div>
+                        <p className="mt-2 line-clamp-3 break-words text-sm font-medium leading-6 text-amber-950 dark:text-amber-100">
+                          {item.operatorQuestion}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.summary}</p>
+                    )}
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
+                    {item.agentCommand ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
+                        <Badge variant="info">Agent command ready after approval</Badge>
+                      </div>
+                    ) : null}
                     <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-zinc-800">
                       <div className="rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
                         <div className="flex flex-wrap items-center gap-2">
@@ -1780,6 +1801,8 @@ function buildOperatorActionBridge({
   }
 
   if (waitingOn === "user_or_controller" || waitingOn === "controller") {
+    const command = queueItem?.agent_command
+      ?? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot });
     return {
       title: "Safe CLI Path",
       badge: phase === "planned" ? "opt-in" : "approval",
@@ -1789,7 +1812,7 @@ function buildOperatorActionBridge({
         {
           label: "Read-only map dry-run",
           body: "Preview the controller handoff surface before any run is appended.",
-          command: buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot }),
+          command,
           variant: "warning",
         },
         {

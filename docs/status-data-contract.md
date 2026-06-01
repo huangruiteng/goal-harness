@@ -507,6 +507,10 @@ A first useful UI can be built from the export alone:
   controller evidence but missing gates should be shown as controller-gated,
   not controller-ready.
 - Primary queue: `attention_queue.items`.
+- First-screen action cards: when a queue item carries `operator_question`, show
+  that question as the primary operator prompt before `recommended_action`.
+  `recommended_action` remains context; `agent_command` is displayed as the safe
+  target-agent command only after the operator question has been answered.
 - Queue gate hints: show `controller_stage`, `missing_gates`, and
   `next_handoff_condition` directly in queue rows so an operator can see why a
   watched goal is not ready yet without opening the full run payload.
