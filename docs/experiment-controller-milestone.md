@@ -76,6 +76,22 @@ payloads may keep richer evidence. `goal-harness status` keeps only
 `human_reward`, so the dashboard can show that a human reward signal exists and
 what class of decision it judged.
 
+Use `goal-harness reward` to append this compact signal to an existing run:
+
+```bash
+goal-harness reward \
+  --goal-id example-experiment-goal \
+  --run-generated-at 2026-06-01T00:00:00+00:00 \
+  --decision continue_route \
+  --reward positive \
+  --reason-summary "latest comparable metric beat the previous route and validation was aligned" \
+  --follow-up "promote the route to the next longer-window check"
+```
+
+The writer appends an index overlay; it does not rewrite the private run
+payload. That keeps operator feedback close to the judged decision while
+preserving the public/private evidence boundary.
+
 ## Controller Readiness Model
 
 Readiness is different from reward. It answers "what level of controller

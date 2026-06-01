@@ -29,7 +29,7 @@ def load_index(path: Path) -> tuple[list[dict[str, Any]], int]:
         return [], 0
 
     records: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    positions: dict[tuple[str, str, str], int] = {}
     raw_count = 0
     with path.open(encoding="utf-8") as f:
         for line in f:
@@ -48,15 +48,16 @@ def load_index(path: Path) -> tuple[list[dict[str, Any]], int]:
                 str(item.get("json_path") or ""),
                 str(item.get("markdown_path") or ""),
             )
-            if key in seen:
-                continue
-            seen.add(key)
             item = dict(item)
             json_path = Path(str(item.get("json_path") or ""))
             markdown_path = Path(str(item.get("markdown_path") or ""))
             item["json_exists"] = json_path.exists() if str(json_path) else False
             item["markdown_exists"] = markdown_path.exists() if str(markdown_path) else False
-            records.append(item)
+            if key in positions:
+                records[positions[key]].update(item)
+            else:
+                positions[key] = len(records)
+                records.append(item)
     return records, raw_count
 
 

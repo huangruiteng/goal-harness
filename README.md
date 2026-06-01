@@ -102,6 +102,16 @@ Read recent run history:
 goal-harness history --goal-id your-project-goal
 ```
 
+Append compact operator feedback to the latest run:
+
+```bash
+goal-harness reward \
+  --goal-id your-project-goal \
+  --decision continue_route \
+  --reward positive \
+  --reason-summary "validation improved and the route is worth extending"
+```
+
 See the first-screen status and attention queue:
 
 ```bash

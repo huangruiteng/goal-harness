@@ -215,6 +215,20 @@ condition, and compact gate rows with `id`, `ok`, and `review`. For
 `reward`, `reason_summary`, and `follow_up`; richer evidence belongs in private
 run payloads.
 
+Operators can append `human_reward` with the CLI:
+
+```bash
+goal-harness reward \
+  --goal-id example-experiment-goal \
+  --decision continue_route \
+  --reward positive \
+  --reason-summary "comparable validation improved and the route is worth extending"
+```
+
+The command appends a compact overlay row to the goal's `index.jsonl`. History
+loading merges later rows with the same run key, so feedback can be added
+without rewriting the original run JSON or Markdown payload.
+
 ## Display Model
 
 A first useful UI can be built from the export alone:

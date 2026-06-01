@@ -126,6 +126,26 @@ All adapters should save compact run history under:
 This gives the app, CLI, heartbeats, and future UI one place to inspect goal
 history.
 
+## Human Reward Overlays
+
+When an operator judges a run, append a compact reward overlay instead of
+editing the run JSON by hand:
+
+```bash
+goal-harness reward \
+  --goal-id project-goal \
+  --decision continue_route \
+  --reward positive \
+  --reason-summary "comparable validation improved and the route is worth extending" \
+  --follow-up "promote to the next longer-window check"
+```
+
+By default the command attaches feedback to the latest compact run for the
+goal. Pass `--run-generated-at <timestamp>` to target an older run. The writer
+appends a JSONL overlay to the same `index.jsonl`; it does not mutate private
+run payloads. `goal-harness status` exports only the compact `human_reward`
+fields, so raw evidence should stay in private artifacts.
+
 ## First-Screen Status
 
 Use `goal-harness status` as the entrypoint for the next controller tick or UI

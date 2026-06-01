@@ -11,6 +11,7 @@ from .bootstrap import (
     render_bootstrap_markdown,
 )
 from .contract import check_contract, render_contract_markdown
+from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .history import collect_history, load_registry, render_history_markdown
 from .paths import default_registry_path, resolve_runtime_root
 from .registry import inspect_registry, render_registry_markdown
@@ -65,6 +66,31 @@ def main(argv: list[str] | None = None) -> int:
     history_parser = sub.add_parser("history", help="Read compact run history from the shared runtime root.")
     history_parser.add_argument("--goal-id", help="Only show one goal.")
     history_parser.add_argument("--limit", type=int, default=10)
+
+    reward_parser = sub.add_parser(
+        "reward",
+        help="Append a compact human reward overlay to a goal run index.",
+    )
+    reward_parser.add_argument("--goal-id", required=True, help="Goal id whose latest run should receive feedback.")
+    reward_parser.add_argument(
+        "--run-generated-at",
+        help="Exact run generated_at timestamp. Defaults to the latest compact run for the goal.",
+    )
+    reward_parser.add_argument("--recorded-at", help="Reward timestamp. Defaults to current UTC time.")
+    reward_parser.add_argument("--decision", required=True, help="Operator decision label, such as continue_route.")
+    reward_parser.add_argument(
+        "--reward",
+        required=True,
+        choices=["positive", "negative", "mixed", "neutral"],
+        help="Compact reward polarity.",
+    )
+    reward_parser.add_argument(
+        "--reason-summary",
+        required=True,
+        help="Short public-safe reason. Do not include raw private evidence.",
+    )
+    reward_parser.add_argument("--follow-up", help="Optional next handoff or experiment condition.")
+    reward_parser.add_argument("--dry-run", action="store_true", help="Print the overlay without appending it.")
 
     check_parser = sub.add_parser("check", help="Run a read-only contract and public/private boundary check.")
     check_parser.add_argument("--scan-root", default=".", help="Public files to scan for obvious private material.")
@@ -160,6 +186,36 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_history_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "reward":
+        try:
+            reward = compact_reward(
+                recorded_at=args.recorded_at,
+                decision=args.decision,
+                reward=args.reward,
+                reason_summary=args.reason_summary,
+                follow_up=args.follow_up,
+            )
+            payload = append_human_reward(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                goal_id=args.goal_id,
+                run_generated_at=args.run_generated_at,
+                reward=reward,
+                dry_run=bool(args.dry_run),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "goal_id": args.goal_id,
+                "appended": False,
+                "dry_run": bool(args.dry_run),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_reward_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "check":

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T13:32:10+08:00
+updated_at: 2026-06-01T13:44:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Add a generic operator feedback writer so local adapters can append compact
-  `human_reward` events without hand-editing run indexes or copying private
-  evidence into public-safe status exports.
+- Add a dashboard-side operator action design for recording human reward, but
+  keep the first implementation CLI-first until the browser flow can preserve
+  the local-only boundary and avoid accidental private evidence entry.
 
 ## Recent Progress
 
@@ -87,6 +87,12 @@ private project context.
   history can now show whether an experiment controller is ready for read-only
   observation, decision advice, or write control, plus the missing gate names
   and compact gate reviews. Updated sanitized examples and milestone docs.
+- 2026-06-01T13:44:00+08:00: Added `goal-harness reward`, a generic operator
+  feedback writer that appends compact `human_reward` overlays to a goal run
+  index without rewriting private run payloads. Updated run-history loading to
+  merge later overlay rows for the same run key, documented the command in
+  README / integration / status contract / experiment-controller milestone,
+  and added private-looking text rejection for reward summaries.
 
 ## Validation
 
@@ -114,6 +120,9 @@ private project context.
   controls in the React dashboard
 - `goal-harness status` with a synthetic runtime verifies `human_reward`
   whitelist behavior and does not export unapproved reward keys
+- `goal-harness reward` with a synthetic runtime appends a compact reward
+  overlay, `status` merges it into one unique run, and private-looking reward
+  text is rejected
 - Browser smoke: select `experiment-controller-goal` and verify the dashboard
   shows Human reward without private fields
 - `python3 -m goal_harness.cli --format markdown status` shows the latest run
