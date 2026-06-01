@@ -6,6 +6,7 @@ from pathlib import Path
 
 DEFAULT_RUNTIME_ROOT = Path.home() / ".codex" / "goal-harness"
 DEFAULT_PROJECT_REGISTRY = Path(".goal-harness") / "registry.json"
+GLOBAL_REGISTRY_FILENAME = "registry.global.json"
 
 
 def default_registry_path() -> Path:
@@ -13,6 +14,10 @@ def default_registry_path() -> Path:
     if value:
         return Path(value).expanduser()
     return DEFAULT_PROJECT_REGISTRY
+
+
+def global_registry_path(runtime_root: Path = DEFAULT_RUNTIME_ROOT) -> Path:
+    return runtime_root / GLOBAL_REGISTRY_FILENAME
 
 
 def resolve_runtime_root(registry: dict[str, object], override: str | None = None) -> Path:

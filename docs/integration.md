@@ -13,9 +13,10 @@ git clone <repo-url> ~/goal-harness
 goal-harness doctor
 ```
 
-The installer links the repository wrapper into `~/.local/bin/goal-harness` and
+The installer links the repository wrapper into `~/.local/bin/goal-harness`,
 adds that bin directory to the current shell profile when it is missing from
-`PATH`.
+`PATH`, and installs the `goal-harness-project` Codex skill into
+`~/.codex/skills` so future project agents use the same connection workflow.
 Use `goal-harness doctor` from any project folder to inspect the resolved
 command path, symlink target, wrapper script, and Python import health.
 
@@ -150,6 +151,39 @@ All adapters should save compact run history under:
 
 This gives the app, CLI, heartbeats, and future UI one place to inspect goal
 history.
+
+Project-local registries should also sync into the shared global registry:
+
+```text
+~/.codex/goal-harness/registry.global.json
+```
+
+`goal-harness connect` and `goal-harness refresh-state` do this automatically.
+The global registry is local-private because it contains project paths, but it
+strips raw authority-source details and keeps only enough information for
+multi-project status. If a command is run outside any project registry, Goal
+Harness falls back to the global registry when it exists.
+
+Use the explicit sync command only for diagnosis or recovery:
+
+```bash
+goal-harness sync-global
+```
+
+If a controller updates `ACTIVE_GOAL_STATE.md`, a progress ledger, or an
+external planning section without running a project adapter, append a
+state-only refresh run so status and dashboards do not keep showing the older
+adapter run:
+
+```bash
+goal-harness refresh-state --goal-id project-goal
+```
+
+The command reads the registered state file, writes a private JSON/Markdown
+refresh payload under the shared runtime root, and appends a compact
+`state_refreshed` index record. The compact index should contain only
+public-safe classification, action, health-check, and artifact pointers; raw
+evidence belongs in the project-local state file or private runtime payload.
 
 If a runtime directory belongs to an old goal that is no longer in the registry,
 preview archive cleanup before changing anything:

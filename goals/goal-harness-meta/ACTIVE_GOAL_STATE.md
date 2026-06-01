@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T16:32:48+08:00
+updated_at: 2026-06-01T17:16:09+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,10 +29,13 @@ private project context.
 
 - For the next real project handoff, use `goal-harness new-project-prompt
   --project <PROJECT_ROOT> --goal-doc <GOAL_DOC_PATH>`. The receiving shell
-  should pass `goal-harness doctor`, connect with `--goal-doc`, and verify that
-  registry, status, check, and the dashboard attention queue show the new goal.
-  If a runtime goal appears before registry connection, classify it as
-  controller work: register it if active, or preview cleanup with
+  should pass `goal-harness doctor`, connect with `--goal-doc`, and rely on the
+  default global-registry sync to publish the local goal entry into
+  `~/.codex/goal-harness/registry.global.json`. After any state-only or
+  planning-doc update, run `goal-harness refresh-state --goal-id <GOAL_ID>` so
+  dashboard freshness tracks the active state and the global registry is
+  refreshed. If a runtime goal appears before registry connection, classify it
+  as controller work: register it if active, or preview cleanup with
   `goal-harness archive-runtime --goal-id <GOAL_ID>` and archive it only after
   review with `--execute`.
 
@@ -154,6 +157,29 @@ private project context.
   cleanup path for obsolete runtime-only goals. It defaults to dry-run, requires
   `--execute` before moving files, protects registry members by default, and
   moves reviewed runtime directories under `<runtime-root>/archived-goals/`.
+- 2026-06-01T16:58:24+08:00: Added `goal-harness refresh-state`, a state-only
+  run writer for the case where a controller updated active state, ledger, or
+  planning docs without running a project adapter. `status` now maps the compact
+  `state_refreshed` classification to Codex-ready work, the new-project handoff
+  prompt teaches receiving sessions to run the refresh when dashboard still
+  shows an old run, and the latest zero-start project was connected into the
+  local multi-project registry so it appears as `state_refreshed -> codex`
+  instead of an unregistered runtime goal.
+- 2026-06-01T17:07:01+08:00: Replaced the manual multi-project registry patch
+  with automatic global-registry sync. `goal-harness connect` and
+  `goal-harness refresh-state` now merge local project registry entries into
+  `~/.codex/goal-harness/registry.global.json`; `status` falls back to that
+  global registry when no project-local registry exists; and
+  `goal-harness sync-global` exists for explicit diagnosis or recovery. The
+  global registry strips raw authority-source details while keeping local paths
+  private under the shared runtime root.
+- 2026-06-01T17:16:09+08:00: Added the public
+  `skills/goal-harness-project/SKILL.md` and taught `scripts/install-local.sh`
+  to install or update it under `~/.codex/skills/goal-harness-project` by
+  default. The skill captures the agent-side workflow for project connect,
+  state refresh, global sync, validation, private boundary, and Chinese review
+  reporting, so new repository agents can use Goal Harness correctly without
+  manual coaching.
 
 ## Validation
 
@@ -218,6 +244,40 @@ private project context.
   PATH, wrapper, symlink realpath, and Python import health
 - `PATH=/usr/bin:/bin python3 -m goal_harness.cli --format json doctor`
   reports `ok=false`, `command_on_path=false`, and a concrete install/PATH fix
+- `python3 -m py_compile goal_harness/*.py examples/render-status-dashboard.py`
+- Synthetic project: `refresh-state --dry-run` returns `appended=false`, real
+  `refresh-state` writes JSON/Markdown/index artifacts, and `status` maps the
+  latest run to `state_refreshed -> codex`
+- Latest zero-start project registry: `refresh-state --dry-run` reads the
+  updated active state with `state_file 1/1`; real refresh appended a
+  `state_refreshed` run at `2026-06-01T16:52:57+08:00`
+- Multi-project status export now shows the zero-start project as
+  `state_refreshed -> codex`
+- `python3 -m goal_harness.cli --registry <private-multi-project-registry>
+  --runtime-root <shared-runtime> --format json check --scan-path README.md
+  --scan-path docs --scan-path examples --scan-path goal_harness --scan-path
+  apps/dashboard/src --scan-path goals --scan-path scripts`
+- `npm --prefix apps/dashboard run build`
+- Browser smoke: load
+  `http://127.0.0.1:5173/?lane=all&severity=all&statusUrl=/status.local.json`
+  and verify the latest zero-start project row shows `state_refreshed`, Codex,
+  and the refreshed-state action
+- Synthetic project: `connect` auto-synced `auto-sync-demo` into a temp
+  `registry.global.json`; `refresh-state` re-synced it; and `status` from a
+  directory without `.goal-harness/registry.json` fell back to that global
+  registry and showed `state_refreshed -> codex`
+- Real sync: merged the CS-Notes private registry and the latest zero-start
+  project registry into `/Users/bytedance/.codex/goal-harness/registry.global.json`
+- Default global status: `python3 -m goal_harness.cli --runtime-root
+  /Users/bytedance/.codex/goal-harness --format json status --scan-path
+  README.md --scan-path docs` returns the global registry path, 6 goals, and 3
+  attention items
+- Browser smoke: dashboard loaded `/status.local.json` generated from the
+  global registry and showed the zero-start project as `state_refreshed`
+- `HOME=$(mktemp -d) SHELL=/bin/zsh CODEX_HOME=<tmp> scripts/install-local.sh`
+  creates both the CLI wrapper and `goal-harness-project` skill symlink
+- `scripts/install-local.sh` on the current machine reports
+  `skill: /Users/bytedance/.codex/skills/goal-harness-project`
 - `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` now validates the
   installed wrapper with `goal-harness doctor`
 - `goal-harness status` for the local multi-project registry shows

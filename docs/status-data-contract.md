@@ -7,6 +7,13 @@ The command is an export: it reads the registry, compact run indexes, and the
 public/private contract check, then emits one JSON object. It does not inspect
 private run payloads beyond compact index fields and does not mutate files.
 
+When a command is run outside a project-local `.goal-harness/registry.json`,
+the CLI falls back to the shared local global registry at
+`~/.codex/goal-harness/registry.global.json` if it exists. That registry is
+maintained automatically by `connect` and `refresh-state` so each project agent
+can update its own local state while dashboards still see the multi-project
+view.
+
 For local dashboards, the same JSON shape can be served over loopback HTTP:
 
 ```bash
@@ -157,6 +164,11 @@ goal that is not present in the registry. Dashboard consumers should show this
 as controller work: register the goal if it is active, or archive the runtime
 record if it is old. Watch-only legacy records remain visible in run history
 without entering the queue.
+
+`status=state_refreshed` is emitted for registered goals when the latest compact
+run came from `goal-harness refresh-state`. Dashboard consumers should show it
+as Codex-ready work: the controller state changed, and the next agent turn
+should inspect the refreshed active state before continuing.
 
 The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
 defaults to dry-run and requires `--execute` before moving the runtime directory

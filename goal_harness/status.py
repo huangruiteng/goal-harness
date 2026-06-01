@@ -16,6 +16,7 @@ CODEX_READY_CLASSIFICATIONS = {
     "needs_more_read_only_evidence",
     "needs_validation",
     "run_validation",
+    "state_refreshed",
 }
 USER_OR_CONTROLLER_CLASSIFICATIONS = {
     "needs_human_reward",

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .global_registry import sync_project_registry_to_global
 from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs
 
 
@@ -217,6 +218,7 @@ def bootstrap_project(
     claim_ttl_minutes: int,
     force: bool,
     dry_run: bool,
+    sync_global: bool,
 ) -> dict[str, Any]:
     project = project.expanduser().resolve()
     registry_path = registry_path.expanduser()
@@ -272,7 +274,16 @@ def bootstrap_project(
         {"path": str(registry_path), "action": "would-write" if dry_run else "wrote", "goal": registry_goal_action},
         {"path": str(state_file), "action": dry_state_actions.get(state_action, "would-write") if dry_run else state_action},
     ]
+    if sync_global:
+        actions.append(
+            {
+                "path": str(runtime_root / "registry.global.json"),
+                "action": "would-sync" if dry_run else "synced",
+                "goal": goal_id,
+            }
+        )
 
+    global_sync: dict[str, Any] | None = None
     if not dry_run:
         write_json(registry_path, registry)
         if state_action in {"created", "replaced"}:
@@ -287,6 +298,13 @@ def bootstrap_project(
                 ),
                 encoding="utf-8",
             )
+        if sync_global:
+            global_sync = sync_project_registry_to_global(
+                registry_path=registry_path,
+                runtime_root_override=str(runtime_root),
+                goal_id=goal_id,
+                dry_run=False,
+            )
 
     return {
         "ok": True,
@@ -300,10 +318,19 @@ def bootstrap_project(
         "runtime_root": str(runtime_root),
         "registry_goal_action": registry_goal_action,
         "state_action": state_action,
+        "global_sync": global_sync
+        or {
+            "enabled": sync_global,
+            "dry_run": dry_run,
+            "global_registry": str(runtime_root / "registry.global.json"),
+            "synced_goal_ids": [goal_id] if sync_global else [],
+            "wrote": False,
+        },
         "actions": actions,
         "next_commands": [
             f"goal-harness --registry {relative_state_file(project, registry_path)} registry",
             f"goal-harness --registry {relative_state_file(project, registry_path)} check --scan-root {project}",
+            f"goal-harness --registry {runtime_root / 'registry.global.json'} status",
             f"goal-harness --registry {relative_state_file(project, registry_path)} history --goal-id {goal_id}",
         ],
         "private_boundary_note": "Add .goal-harness/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
@@ -325,6 +352,7 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
         f"- runtime_root: `{payload.get('runtime_root')}`",
         f"- registry_goal_action: `{payload.get('registry_goal_action')}`",
         f"- state_action: `{payload.get('state_action')}`",
+        f"- global_sync: `{(payload.get('global_sync') or {}).get('wrote')}`",
         "",
         "## Actions",
     ]

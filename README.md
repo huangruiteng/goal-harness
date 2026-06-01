@@ -38,9 +38,11 @@ git clone https://github.com/huangruiteng/goal-harness ~/goal-harness
 goal-harness doctor
 ```
 
-The install script creates `~/.local/bin/goal-harness` and adds that directory
-to your shell profile when needed. This keeps the CLI available from any project
-folder and from future Codex sessions on the same machine.
+The install script creates `~/.local/bin/goal-harness`, adds that directory to
+your shell profile when needed, and installs the `goal-harness-project` Codex
+skill into `~/.codex/skills`. This keeps the CLI available from any project
+folder and teaches future Codex sessions on the same machine how to connect,
+refresh, and sync project goals correctly.
 If a project shell cannot find or run the command, `goal-harness doctor`
 reports the PATH, wrapper, symlink, and Python import state.
 
@@ -128,6 +130,25 @@ Read recent run history:
 
 ```bash
 goal-harness history --goal-id your-project-goal
+```
+
+Append a state-only refresh run after updating active state, ledger, or docs
+without running a project adapter:
+
+```bash
+goal-harness refresh-state --goal-id your-project-goal
+```
+
+`connect` and `refresh-state` automatically merge the project registry into the
+shared local global registry at `~/.codex/goal-harness/registry.global.json`.
+If a command is run outside any project registry, Goal Harness falls back to
+that global registry so dashboards and controller ticks can see all synced
+projects.
+
+Manually resync a project registry when needed:
+
+```bash
+goal-harness sync-global
 ```
 
 Preview cleanup for an obsolete runtime-only goal:

@@ -84,6 +84,11 @@ Status treats these as Codex-ready action:
 - `needs_more_read_only_evidence`
 - `needs_validation`
 - `run_validation`
+- `state_refreshed`
+
+`state_refreshed` means a controller updated active state, ledger, or planning
+docs without running a project adapter. The next Codex action is to inspect the
+refreshed state and continue one bounded progress segment.
 
 Status treats `blocked_by_safety` as high-severity user/controller attention.
 

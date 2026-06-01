@@ -1,0 +1,142 @@
+---
+name: goal-harness-project
+description: Use when connecting a repository or project goal document to Goal Harness, maintaining project-local goal state, refreshing stale dashboard status, syncing local projects into the shared global registry, or diagnosing Goal Harness CLI/PATH/status/history issues across multiple repos.
+---
+
+# Goal Harness Project Workflow
+
+Use this skill when the task mentions Goal Harness, goal-harness, a project goal
+document, multi-project dashboard/status, stale latest run,
+`.goal-harness/registry.json`, `.codex/goals`, `refresh-state`,
+`sync-global`, or connecting a new repo.
+
+Goal Harness has two layers:
+
+- **Project-local state**: each repo owns `.goal-harness/registry.json` and
+  `.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md`.
+- **Shared local control plane**: `~/.codex/goal-harness` stores run history and
+  `registry.global.json` for multi-project status.
+
+Do not manually copy one project's registry entry into another project. Local
+`connect` and `refresh-state` should sync into the shared global registry
+automatically.
+
+## Preflight
+
+From the target project shell:
+
+```bash
+goal-harness doctor
+```
+
+If `goal-harness` is not on PATH:
+
+```bash
+install_script="$HOME/goal-harness/scripts/install-local.sh"
+if [ -x "$install_script" ]; then
+  "$install_script"
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+goal-harness doctor
+```
+
+If this still fails, report the exact missing piece and do not fake a successful
+connection.
+
+## Connect A New Project
+
+1. Read the project goal document and inspect the repo narrowly.
+2. Extract a stable `goal_id`, one-line `objective`, `domain`, authority
+   sources, validation surfaces, first safe action, and public/private
+   boundary.
+3. Run `connect` from the project root. Prefer read-only until the goal doc
+   explicitly authorizes mutation:
+
+```bash
+goal-harness connect \
+  --goal-id <STABLE_GOAL_ID> \
+  --objective "<OBJECTIVE_FROM_GOAL_DOC>" \
+  --domain <DOMAIN> \
+  --goal-doc <GOAL_DOC_PATH> \
+  --adapter-kind read_only_project_map_v0 \
+  --adapter-status connected-read-only
+```
+
+`connect` should create or update the local registry/state and auto-sync the
+public-safe entry into `~/.codex/goal-harness/registry.global.json`.
+
+If the goal state or registry contains private evidence, add `.goal-harness/`
+and `.codex/goals/` to that project's `.gitignore`.
+
+## Refresh State After Non-Adapter Work
+
+If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,
+or external coordination state without producing a new adapter run, append a
+state-only refresh:
+
+```bash
+goal-harness refresh-state --goal-id <STABLE_GOAL_ID>
+```
+
+This fixes stale dashboards where the latest run still shows an old
+`ready_for_controller_opt_in` or similar state. It also auto-syncs the project
+entry into the global registry.
+
+## Multi-Project Status
+
+Inside a project:
+
+```bash
+goal-harness status
+```
+
+Outside a project, `goal-harness status` should fall back to:
+
+```text
+~/.codex/goal-harness/registry.global.json
+```
+
+Use explicit sync only for diagnosis or recovery:
+
+```bash
+goal-harness sync-global
+```
+
+If status shows `unregistered_runtime_goal`:
+
+- If the project is active, run `goal-harness sync-global` or reconnect from
+  that project's local registry.
+- If the runtime record is obsolete, preview cleanup with
+  `goal-harness archive-runtime --goal-id <GOAL_ID>` and only execute cleanup
+  when that is clearly intended.
+
+## Validation
+
+After connect or refresh, run the smallest useful set:
+
+```bash
+goal-harness registry
+goal-harness status
+goal-harness check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>
+```
+
+For multi-project UI updates, refresh the dashboard status JSON from the global
+registry:
+
+```bash
+goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" \
+  --format json status > <dashboard>/public/status.local.json
+```
+
+## Reporting
+
+Report in Chinese when the user is reviewing:
+
+- changed files and whether they are public or local-private;
+- validation commands and results;
+- how the goal appears in dashboard or attention queue;
+- the next safe action;
+- any missing gates before decision-advisor or write-controller behavior.
+
+Never include credentials, private docs, raw internal links, production task
+ids, or raw local evidence in public repo docs or examples.

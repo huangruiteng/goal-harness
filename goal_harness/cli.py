@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .bootstrap import (
@@ -13,8 +14,9 @@ from .bootstrap import (
 from .contract import check_contract, render_contract_markdown
 from .doctor import collect_doctor, render_doctor_markdown
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
+from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
 from .history import collect_history, load_registry, render_history_markdown
-from .paths import default_registry_path, resolve_runtime_root
+from .paths import DEFAULT_RUNTIME_ROOT, default_registry_path, global_registry_path, resolve_runtime_root
 from .project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_KIND,
     DEFAULT_HANDOFF_ADAPTER_STATUS,
@@ -23,6 +25,12 @@ from .project_prompt import (
 )
 from .registry import inspect_registry, render_registry_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
+from .state_refresh import (
+    DEFAULT_REFRESH_ACTION,
+    DEFAULT_REFRESH_CLASSIFICATION,
+    refresh_state_run,
+    render_state_refresh_markdown,
+)
 from .status import collect_status, render_status_markdown
 from .status_server import (
     DEFAULT_STATUS_HOST,
@@ -37,6 +45,11 @@ def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> No
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(markdown_renderer(payload))
+
+
+def user_supplied_registry(argv: list[str] | None) -> bool:
+    values = sys.argv[1:] if argv is None else argv
+    return any(value == "--registry" or value.startswith("--registry=") for value in values)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     bootstrap_parser.add_argument("--claim-ttl-minutes", type=int, default=30)
     bootstrap_parser.add_argument("--force", action="store_true", help="Replace existing goal entry or state file.")
     bootstrap_parser.add_argument("--dry-run", action="store_true", help="Show planned writes without changing files.")
+    bootstrap_parser.add_argument(
+        "--no-global-sync",
+        action="store_true",
+        help="Do not merge this project registry into the shared global registry.",
+    )
 
     prompt_parser = sub.add_parser(
         "new-project-prompt",
@@ -112,6 +130,47 @@ def main(argv: list[str] | None = None) -> int:
         "--execute",
         action="store_true",
         help="Actually move the runtime directory. Without this flag the command is a dry-run.",
+    )
+
+    sync_global_parser = sub.add_parser(
+        "sync-global",
+        help="Merge this project-local registry into the shared global registry.",
+    )
+    sync_global_parser.add_argument("--goal-id", help="Only sync one goal id from the source registry.")
+    sync_global_parser.add_argument("--dry-run", action="store_true", help="Preview the global registry merge.")
+
+    refresh_state_parser = sub.add_parser(
+        "refresh-state",
+        help="Append a read-only run from active goal state after state-only updates.",
+    )
+    refresh_state_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Goal id whose active state should be refreshed.",
+    )
+    refresh_state_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
+    refresh_state_parser.add_argument(
+        "--state-file",
+        help="Active goal state path. Defaults to the registry goal state_file.",
+    )
+    refresh_state_parser.add_argument(
+        "--classification",
+        default=DEFAULT_REFRESH_CLASSIFICATION,
+        help=f"Refresh run classification. Defaults to {DEFAULT_REFRESH_CLASSIFICATION}.",
+    )
+    refresh_state_parser.add_argument(
+        "--recommended-action",
+        help=f"Public-safe next action. Defaults to: {DEFAULT_REFRESH_ACTION}",
+    )
+    refresh_state_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the refresh payload without appending.",
+    )
+    refresh_state_parser.add_argument(
+        "--no-global-sync",
+        action="store_true",
+        help="Do not refresh the shared global registry after writing the state run.",
     )
 
     reward_parser = sub.add_parser(
@@ -175,6 +234,15 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     registry_path = Path(args.registry).expanduser()
+    if (
+        args.command not in {"bootstrap", "connect", "doctor", "new-project-prompt", "sync-global"}
+        and not user_supplied_registry(argv)
+        and not registry_path.exists()
+    ):
+        runtime_root = Path(args.runtime_root).expanduser() if args.runtime_root else DEFAULT_RUNTIME_ROOT
+        fallback_registry = global_registry_path(runtime_root)
+        if fallback_registry.exists():
+            registry_path = fallback_registry
 
     if args.command in {"bootstrap", "connect"}:
         try:
@@ -202,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
                 claim_ttl_minutes=args.claim_ttl_minutes,
                 force=args.force,
                 dry_run=args.dry_run,
+                sync_global=not bool(args.no_global_sync),
             )
         except Exception as exc:
             payload = {
@@ -280,6 +349,55 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_archive_runtime_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "sync-global":
+        try:
+            payload = sync_project_registry_to_global(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                goal_id=args.goal_id,
+                dry_run=bool(args.dry_run),
+            )
+        except Exception as exc:
+            registry = load_registry(registry_path)
+            runtime_root = resolve_runtime_root(registry, args.runtime_root)
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": str(runtime_root),
+                "global_registry": str(global_registry_path(runtime_root)),
+                "dry_run": bool(args.dry_run),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_global_sync_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "refresh-state":
+        try:
+            payload = refresh_state_run(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                goal_id=args.goal_id,
+                project=Path(args.project).expanduser() if args.project else None,
+                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                classification=args.classification,
+                recommended_action=args.recommended_action,
+                dry_run=bool(args.dry_run),
+                sync_global=not bool(args.no_global_sync),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "goal_id": args.goal_id,
+                "classification": args.classification,
+                "appended": False,
+                "dry_run": bool(args.dry_run),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_state_refresh_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "reward":
