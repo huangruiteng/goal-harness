@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T07:33:20+08:00
+updated_at: 2026-06-02T07:37:58+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,27 @@ private project context.
 
 ## Next Action
 
-- Add a tiny public dashboard/status fixture for a throttled quota item, so the
-  human first-screen view can show a quiet `throttled` state without putting it
-  in the user-action or reward queue. Keep it fixture-only; do not add a
-  settings panel, append a real gate, run a real map, or change registry state.
+- Add a tiny browser-level dashboard smoke with a public-safe throttled status
+  fixture, verifying the quota chip is visible while User Actions excludes the
+  throttled Codex item. Keep it fixture-only; do not add a settings panel,
+  append a real gate, run a real map, or change registry state.
 
 ## Recent Progress
 
+- 2026-06-02T07:37:58+08:00: Tightened the dashboard User Actions builder so a
+  `waiting_on=codex` item with `quota.state=throttled` is treated as quiet
+  scheduling state instead of a human-facing Codex action. The selected goal can
+  still show the throttled quota chip/review line, but the first-screen action
+  queue no longer tells the user or project agent that Codex should continue
+  when compute quota is spent. Extended `examples/review-packet-smoke.py` to
+  protect the throttled quota labels and the ordering that filters throttled
+  Codex items before the generic Codex action branch. Validation: direct
+  Review Packet smoke passed; aggregate public smokes passed with 5 scripts;
+  Python compile passed; dashboard production build passed with the existing
+  >500 kB chunk warning; public contract check passed; `git diff --check`
+  passed. Critic: the source and smoke now protect the no-extra-user-action
+  boundary; the next narrow gap is a browser-level check with a public-safe
+  throttled status fixture.
 - 2026-06-02T07:33:20+08:00: Extended `examples/quota-plan-smoke.py` to cover
   the executable `quota should-run --format json` path for a throttled goal.
   The smoke now builds a temporary public-safe registry/runtime/project,

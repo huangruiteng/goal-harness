@@ -126,6 +126,23 @@ def main() -> int:
     assert "read-only-map" in read_only_builder
     assert "--dry-run" in read_only_builder
 
+    quota_state_labels = source_between(source, "const quotaStateLabel", "function quotaVariant")
+    assert "Throttled" in quota_state_labels
+    assert "本窗口配额已用完" in quota_state_labels
+
+    user_action_builder = source_between(source, "function buildUserActionSummaryItems", "function UserActionSummary")
+    assert "const quota = row.queueItem?.quota ?? row.goal.quota;" in user_action_builder
+    assert "const quotaState = quota?.state ?? \"waiting\";" in user_action_builder
+    assert "decision.waitingOn === \"codex\" && quotaState === \"throttled\"" in user_action_builder
+    assert_order(
+        user_action_builder,
+        [
+            "if (decision.waitingOn === \"external_evidence\")",
+            "decision.waitingOn === \"codex\" && quotaState === \"throttled\"",
+            "if (decision.waitingOn === \"codex\")",
+        ],
+    )
+
     packet = build_sanitized_controller_packet()
     assert_order(
         packet,

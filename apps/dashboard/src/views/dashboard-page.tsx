@@ -1698,6 +1698,8 @@ function buildUserActionSummaryItems({
     const handoffCondition = row.queueItem?.next_handoff_condition
       ?? latestRun?.controller_readiness?.next_handoff_condition
       ?? "";
+    const quota = row.queueItem?.quota ?? row.goal.quota;
+    const quotaState = quota?.state ?? "waiting";
     const base = {
       goalId: row.goal.id,
       phase: decision.phase,
@@ -1710,7 +1712,7 @@ function buildUserActionSummaryItems({
         ? `${draftDefaults.decision} / ${draftDefaults.reward}`
         : `${draftDefaults.label} / needs run`,
       authorityCoverage,
-      quota: row.queueItem?.quota ?? row.goal.quota,
+      quota,
     };
 
     if (row.severity === "high") {
@@ -1766,6 +1768,10 @@ function buildUserActionSummaryItems({
         draftLabel: draftDefaults.label,
         priority: 3,
       }];
+    }
+
+    if (decision.waitingOn === "codex" && quotaState === "throttled") {
+      return [];
     }
 
     if (decision.waitingOn === "codex") {
