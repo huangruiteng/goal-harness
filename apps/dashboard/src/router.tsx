@@ -11,6 +11,7 @@ import { DashboardPage } from "./views/dashboard-page";
 const searchSchema = z.object({
   lane: z.enum(["all", "user", "codex", "watch"]).optional().default("all"),
   severity: z.enum(["all", "high", "action", "watch"]).optional().default("all"),
+  statusUrl: z.string().optional().default(""),
 });
 
 export const rootRoute = createRootRoute({

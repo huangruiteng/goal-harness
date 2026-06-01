@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T12:15:37+08:00
+updated_at: 2026-06-01T12:28:37+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Add a local status-loading path for `apps/dashboard`: accept a user-provided
-  `goal-harness --format json status` export or a small local API response
-  instead of rendering only `examples/status.example.json`.
+- Add a tiny local dashboard/status serving command so `apps/dashboard` can
+  fetch live `goal-harness --format json status` output without manually
+  copying a `status.local.json` file into the Vite public folder.
 
 ## Recent Progress
 
@@ -54,6 +54,14 @@ private project context.
   `Goal Operations` screen, and a public contract scan over the repo. Updated
   the contract scanner to skip `node_modules` so the new npm app remains
   compatible with `--scan-root .`.
+- 2026-06-01T12:21:11+08:00: Added dashboard status source controls. The app
+  now keeps `examples/status.example.json` as a fallback, accepts a
+  URL-backed status source through `statusUrl`, loads imported JSON files, and
+  validates every loaded payload with the same Zod status data contract.
+- 2026-06-01T12:28:37+08:00: Validated the status source path with a generated
+  `apps/dashboard/public/status.local.json` export and a browser smoke check at
+  `?statusUrl=/status.local.json`. Added dashboard docs plus a `.gitignore`
+  guard so local status exports stay untracked.
 
 ## Validation
 
@@ -63,6 +71,8 @@ private project context.
 - Parse all JSON examples in `examples/`.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
+- `python3 -m goal_harness.cli --format json status > apps/dashboard/public/status.local.json`
+- Browser smoke: load `http://127.0.0.1:5173/?statusUrl=/status.local.json`
 
 ## Guards
 

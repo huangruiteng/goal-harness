@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   CheckCircle2,
@@ -6,8 +6,10 @@ import {
   Clock3,
   FileJson2,
   GitBranch,
+  Link2,
   LayoutDashboard,
   Moon,
+  Upload,
   Radar,
   RefreshCw,
   Sun,
@@ -31,7 +33,13 @@ import {
 } from "@tanstack/react-table";
 
 import { dashboardRoute } from "../router";
-import { QueueItem, statusPayload } from "../data/status";
+import {
+  QueueItem,
+  StatusPayload,
+  exampleStatusPayload,
+  formatStatusError,
+  parseStatusPayload,
+} from "../data/status";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -92,6 +100,11 @@ const waitingLabel: Record<string, string> = {
   codex: "Codex",
   external_evidence: "Evidence",
 };
+
+type DataSource =
+  | { kind: "example"; label: "bundled example" }
+  | { kind: "url"; label: string }
+  | { kind: "file"; label: string };
 
 function laneFor(item: QueueItem) {
   return laneConfig.find((lane) => lane.waitingOn.includes(item.waiting_on));
@@ -188,7 +201,80 @@ export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const queue = statusPayload.attention_queue;
+  const [payload, setPayload] = useState<StatusPayload>(exampleStatusPayload);
+  const [source, setSource] = useState<DataSource>({ kind: "example", label: "bundled example" });
+  const [statusUrl, setStatusUrl] = useState(search.statusUrl);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const queue = payload.attention_queue;
+
+  async function loadFromUrl(url: string) {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setLoadError("status URL is empty");
+      return;
+    }
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const response = await fetch(trimmed, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} while loading ${trimmed}`);
+      }
+      const nextPayload = parseStatusPayload(await response.json());
+      setPayload(nextPayload);
+      setSource({ kind: "url", label: trimmed });
+      setStatusUrl(trimmed);
+      await navigate({
+        search: (current) => ({
+          ...current,
+          statusUrl: trimmed,
+        }),
+      });
+    } catch (error) {
+      setLoadError(formatStatusError(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function loadFromFile(file: File) {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const nextPayload = parseStatusPayload(JSON.parse(await file.text()));
+      setPayload(nextPayload);
+      setSource({ kind: "file", label: file.name });
+    } catch (error) {
+      setLoadError(formatStatusError(error));
+    } finally {
+      setIsLoading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  function resetToExample() {
+    setPayload(exampleStatusPayload);
+    setSource({ kind: "example", label: "bundled example" });
+    setStatusUrl("");
+    setLoadError(null);
+    void navigate({
+      search: (current) => ({
+        ...current,
+        statusUrl: "",
+      }),
+    });
+  }
+
+  useEffect(() => {
+    if (search.statusUrl) {
+      void loadFromUrl(search.statusUrl);
+    }
+  }, []);
+
   const filteredItems = queue.items.filter((item) => {
     const lane = laneFor(item)?.key ?? "all";
     const laneMatches = search.lane === "all" || search.lane === lane;
@@ -228,14 +314,18 @@ export function DashboardPage() {
               <div>
                 <h1 className="text-2xl font-semibold">Goal Operations</h1>
                 <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
-                  {statusPayload.registry} · {statusPayload.runtime_root}
+                  {payload.registry} · {payload.runtime_root}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <Button size="icon" variant="secondary" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Toggle theme">
                   {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </Button>
-                <Button variant="primary" onClick={() => window.location.reload()}>
+                <Button
+                  disabled={isLoading}
+                  onClick={() => (source.kind === "url" ? void loadFromUrl(source.label) : resetToExample())}
+                  variant="primary"
+                >
                   <RefreshCw className="h-4 w-4" />
                   Refresh
                 </Button>
@@ -243,10 +333,54 @@ export function DashboardPage() {
             </header>
 
             <div className="space-y-5 p-4 sm:p-6">
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={source.kind === "example" ? "neutral" : "success"}>Source</Badge>
+                      <span className="break-all text-sm font-medium">{source.label}</span>
+                      {loadError ? <Badge variant="danger">{loadError.slice(0, 120)}</Badge> : null}
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <input
+                        aria-label="Status URL"
+                        className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500 sm:w-80"
+                        onChange={(event) => setStatusUrl(event.target.value)}
+                        placeholder="/status.local.json"
+                        value={statusUrl}
+                      />
+                      <Button disabled={isLoading} onClick={() => void loadFromUrl(statusUrl)}>
+                        <Link2 className="h-4 w-4" />
+                        Load URL
+                      </Button>
+                      <input
+                        accept="application/json,.json"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            void loadFromFile(file);
+                          }
+                        }}
+                        ref={fileInputRef}
+                        type="file"
+                      />
+                      <Button disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
+                        <Upload className="h-4 w-4" />
+                        Import JSON
+                      </Button>
+                      <Button disabled={isLoading} onClick={resetToExample} variant="ghost">
+                        Example
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <MetricCard icon={statusPayload.ok ? CheckCircle2 : CircleAlert} label="Status" value={statusPayload.ok ? "Healthy" : "Blocked"} tone={statusPayload.ok ? "success" : "danger"} />
-                <MetricCard icon={GitBranch} label="Goals" value={String(statusPayload.goal_count)} tone="neutral" />
-                <MetricCard icon={Clock3} label="Runs" value={String(statusPayload.run_count)} tone="info" />
+                <MetricCard icon={payload.ok ? CheckCircle2 : CircleAlert} label="Status" value={payload.ok ? "Healthy" : "Blocked"} tone={payload.ok ? "success" : "danger"} />
+                <MetricCard icon={GitBranch} label="Goals" value={String(payload.goal_count)} tone="neutral" />
+                <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
 

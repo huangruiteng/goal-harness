@@ -40,4 +40,18 @@ export const statusPayloadSchema = z.object({
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 
-export const statusPayload = statusPayloadSchema.parse(rawStatus);
+export function parseStatusPayload(payload: unknown): StatusPayload {
+  return statusPayloadSchema.parse(payload);
+}
+
+export function formatStatusError(error: unknown): string {
+  if (error instanceof z.ZodError) {
+    return error.issues.map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`).join("; ");
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+export const exampleStatusPayload = parseStatusPayload(rawStatus);

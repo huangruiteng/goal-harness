@@ -1,6 +1,7 @@
 .DS_Store
 .venv/
 node_modules/
+apps/dashboard/public/*.local.json
 __pycache__/
 *.pyc
 *.tsbuildinfo

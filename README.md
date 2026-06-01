@@ -135,6 +135,13 @@ npm run build
 npm run dev
 ```
 
+From the repo root, export current local state into the dashboard public folder
+and load `/status.local.json` from the dashboard source control:
+
+```bash
+goal-harness --format json status > apps/dashboard/public/status.local.json
+```
+
 For a project with many unrelated files, scan only the public files you intend
 to publish:
 
