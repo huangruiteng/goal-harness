@@ -35,7 +35,7 @@ if [[ -n "$shell_profile" ]]; then
 fi
 
 export PATH="$bin_dir:$PATH"
-"$bin_dir/goal-harness" --help >/dev/null
+"$bin_dir/goal-harness" doctor >/dev/null
 
 cat <<EOF
 goal-harness installed locally
@@ -44,5 +44,5 @@ goal-harness installed locally
 
 Current shell can use it with:
   export PATH="$bin_dir:\$PATH"
-  goal-harness --help
+  goal-harness doctor
 EOF

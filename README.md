@@ -35,12 +35,14 @@ Install one shared local checkout:
 ```bash
 git clone https://github.com/huangruiteng/goal-harness ~/goal-harness
 ~/goal-harness/scripts/install-local.sh
-goal-harness --help
+goal-harness doctor
 ```
 
 The install script creates `~/.local/bin/goal-harness` and adds that directory
 to your shell profile when needed. This keeps the CLI available from any project
 folder and from future Codex sessions on the same machine.
+If a project shell cannot find or run the command, `goal-harness doctor`
+reports the PATH, wrapper, symlink, and Python import state.
 
 Connect a project with one command:
 
@@ -108,6 +110,12 @@ Inspect the project registry:
 
 ```bash
 goal-harness registry
+```
+
+Diagnose local CLI installation:
+
+```bash
+goal-harness doctor
 ```
 
 Run the contract check:

@@ -60,6 +60,7 @@ Codex goal mode / heartbeat / future UI
 ```bash
 git clone https://github.com/huangruiteng/goal-harness ~/goal-harness
 ~/goal-harness/scripts/install-local.sh
+goal-harness doctor
 
 cd /path/to/your-project
 goal-harness bootstrap \

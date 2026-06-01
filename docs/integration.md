@@ -10,12 +10,14 @@ Clone or symlink one copy:
 ```bash
 git clone <repo-url> ~/goal-harness
 ~/goal-harness/scripts/install-local.sh
-goal-harness --help
+goal-harness doctor
 ```
 
 The installer links the repository wrapper into `~/.local/bin/goal-harness` and
 adds that bin directory to the current shell profile when it is missing from
 `PATH`.
+Use `goal-harness doctor` from any project folder to inspect the resolved
+command path, symlink target, wrapper script, and Python import health.
 
 Then projects can call:
 
@@ -24,6 +26,7 @@ goal-harness --registry <private-registry> registry
 goal-harness --registry <private-registry> history
 goal-harness --registry <private-registry> status
 goal-harness --registry <private-registry> check --scan-root <project-root>
+goal-harness doctor
 ```
 
 ## One-Command Project Connect

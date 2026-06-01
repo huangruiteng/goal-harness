@@ -57,7 +57,7 @@ goal-harness new-project-prompt \
        exit 1
      fi
    fi
-   goal-harness --help >/dev/null
+   goal-harness doctor >/dev/null
    ```
 
 1. 再只读检查项目文件夹和目标文档，抽取：

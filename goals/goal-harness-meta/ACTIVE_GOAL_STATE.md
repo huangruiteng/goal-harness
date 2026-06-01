@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T16:04:18+08:00
+updated_at: 2026-06-01T16:12:12+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,8 +29,8 @@ private project context.
 
 - Use `goal-harness new-project-prompt --project <PROJECT_ROOT> --goal-doc
   <GOAL_DOC_PATH>` for the next real project handoff. The receiving shell should
-  pass the CLI preflight, connect with `--goal-doc`, and then verify registry,
-  status, check, and dashboard attention queue visibility.
+  pass `goal-harness doctor`, connect with `--goal-doc`, and then verify
+  registry, status, check, and dashboard attention queue visibility.
 
 ## Recent Progress
 
@@ -136,6 +136,11 @@ private project context.
   `connect --goal-doc` as a primary authority source in registry and initial
   state, and updated `new-project-prompt` to run a CLI preflight before project
   connection.
+- 2026-06-01T16:12:12+08:00: Added `goal-harness doctor` to diagnose local CLI
+  installation, PATH, symlink realpath, wrapper script, and Python import
+  health. The installer and new-project handoff now call `goal-harness doctor`
+  instead of `--help`, so future connection failures expose a structured fix
+  rather than stopping at a missing command.
 
 ## Validation
 
@@ -196,6 +201,12 @@ private project context.
 - `scripts/install-local.sh && command -v goal-harness && goal-harness --help`
   verifies the current user shell can resolve and execute the CLI from any
   project directory
+- `goal-harness doctor` and `goal-harness --format json doctor` verify current
+  PATH, wrapper, symlink realpath, and Python import health
+- `PATH=/usr/bin:/bin python3 -m goal_harness.cli --format json doctor`
+  reports `ok=false`, `command_on_path=false`, and a concrete install/PATH fix
+- `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` now validates the
+  installed wrapper with `goal-harness doctor`
 - `goal-harness connect --goal-doc docs/GOAL.md` records
   `authority_sources[0].path == "docs/GOAL.md"` in the registry and renders
   `Primary goal document: docs/GOAL.md` in the initial state

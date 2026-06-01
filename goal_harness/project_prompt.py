@@ -29,7 +29,7 @@ if ! command -v goal-harness >/dev/null 2>&1; then
     exit 1
   fi
 fi
-goal-harness --help >/dev/null"""
+goal-harness doctor >/dev/null"""
 
 
 def render_connect_command(

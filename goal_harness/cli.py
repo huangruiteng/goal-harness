@@ -11,6 +11,7 @@ from .bootstrap import (
     render_bootstrap_markdown,
 )
 from .contract import check_contract, render_contract_markdown
+from .doctor import collect_doctor, render_doctor_markdown
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .history import collect_history, load_registry, render_history_markdown
 from .paths import default_registry_path, resolve_runtime_root
@@ -83,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     prompt_parser.add_argument("--spawn-allowed", action="store_true", help="Include controller/sub-agent flags.")
     prompt_parser.add_argument("--allowed-domain", action="append", default=[], help="Allowed child work domain. Repeatable.")
     prompt_parser.add_argument("--write-scope", action="append", default=[], help="Allowed write scope such as docs/**. Repeatable.")
+
+    sub.add_parser("doctor", help="Diagnose local CLI installation, PATH, wrapper, and import health.")
 
     sub.add_parser("registry", help="Inspect registry goals and adapter declarations.")
 
@@ -204,6 +207,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         print_payload(payload, args.format, render_new_project_prompt_markdown)
         return 0
+
+    if args.command == "doctor":
+        payload = collect_doctor()
+        print_payload(payload, args.format, render_doctor_markdown)
+        return 0 if payload.get("ok") else 1
 
     if args.command == "registry":
         payload = inspect_registry(registry_path)
