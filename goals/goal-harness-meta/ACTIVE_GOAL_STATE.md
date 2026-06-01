@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:45:40+08:00
+updated_at: 2026-06-02T04:53:03+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,16 +27,27 @@ private project context.
 
 ## Next Action
 
-- Validate the live `agent-harness-main-control` user/controller flow end to
-  end: the single Review Packet should show the user-owned
-  `goal-harness operator-gate ... --dry-run` recording draft, while the project
-  Agent section still contains only the read-only/dry-run command. If the
-  distinction is only visible in the dashboard and CLI/status agents can still
-  misread it, add the smallest status Markdown hint; do not append a real gate
-  or run the real map.
+- Add a small regression smoke for the planned high-complexity status Markdown:
+  a planned `*_read_only_map_v0` goal with no runs should print
+  `operator_gate_dry_run` before `agent_command`, while JSON status remains
+  unchanged. Keep it as a CLI/status test or example-level check; do not append
+  a real gate or run the real map.
 
 ## Recent Progress
 
+- 2026-06-02T04:53:03+08:00: Added the agent-facing status boundary hint for
+  planned high-complexity read-only-map adapters. Markdown `goal-harness status`
+  now prints `operator_gate_dry_run` before `agent_command` when a queue item has
+  both an operator question and a target-agent command, so CLI-facing project
+  agents see that the gate recording preview is user-owned and comes before any
+  handoff. Documentation clarifies this hint is Markdown-only, not a JSON
+  contract field or project-agent command. Validation: Python compile passed;
+  live status for `agent-harness-main-control` shows `operator_gate_dry_run`
+  before `agent_command`; public contract check passed; `git diff --check`
+  passed; live operator-gate dry-run still reports `appended=False`; current
+  dashboard bundle contains the user-owned gate draft section. Critic: this
+  closes the immediate misread risk, but the behavior should get a tiny
+  regression smoke so future status refactors do not drop the line.
 - 2026-06-02T04:45:40+08:00: Added a dashboard-only user-owned operator-gate
   dry-run draft for controller Review Packets. The selected action now keeps
   one `Copy Review Packet` path, adds a `用户本地 Gate 记录草稿` section for

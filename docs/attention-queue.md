@@ -132,6 +132,9 @@ and exposes `goal-harness read-only-map --goal-id <goal> --dry-run` as
 `agent_command`. The command is execution context, not approval. The preview
 appends nothing; a real map run still waits for the target controller to move
 the adapter to `read-only-map-ready` or `connected-read-only`.
+Markdown status output also prints an `operator_gate_dry_run` helper before
+`agent_command`, so CLI-facing agents see that the operator gate is a
+user-owned dry-run preview before any project-agent handoff.
 
 After the operator answers that gate, record it with `goal-harness
 operator-gate`. Approved gates produce `operator_gate_approved` and move the

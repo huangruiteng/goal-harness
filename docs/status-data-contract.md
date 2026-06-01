@@ -282,6 +282,10 @@ For registered planned high-complexity goals with a compatible
 Harness operator view, and puts the dry-run preview in `agent_command`. The
 preview should report `opt_in_required=true` and append nothing; dashboard
 consumers must not treat the command as controller opt-in or a durable map run.
+The human-readable Markdown status view may also render an
+`operator_gate_dry_run` helper before `agent_command`; that helper is a
+user-owned gate recording preview, not a JSON contract field or project-agent
+command.
 
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready

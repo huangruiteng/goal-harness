@@ -938,6 +938,13 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         agent_command = item.get("agent_command")
         if operator_question:
             lines.append(f"  - operator_question: {operator_question}")
+            if agent_command:
+                goal_id = item.get("goal_id")
+                lines.append(
+                    "  - operator_gate_dry_run: "
+                    f"`goal-harness operator-gate --goal-id {goal_id} --decision approve "
+                    '--reason-summary "<public-safe reason>" --dry-run`'
+                )
         if agent_command:
             lines.append(f"  - agent_command: `{agent_command}`")
         gates = item.get("missing_gates") if isinstance(item.get("missing_gates"), list) else []
