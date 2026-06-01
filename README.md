@@ -126,6 +126,15 @@ a React/Vite app with typed routes, tables, charts, and a more polished
 control-plane UI. See
 [docs/dashboard-frontend-selection.md](docs/dashboard-frontend-selection.md).
 
+Run the dashboard shell locally:
+
+```bash
+cd ~/goal-harness/apps/dashboard
+npm install
+npm run build
+npm run dev
+```
+
 For a project with many unrelated files, scan only the public files you intend
 to publish:
 

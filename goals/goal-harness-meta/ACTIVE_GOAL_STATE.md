@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T11:59:59+08:00
+updated_at: 2026-06-01T12:15:37+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Scaffold `apps/dashboard` with Vite + React + TypeScript + shadcn/ui +
-  TanStack Router/Table, then render `examples/status.example.json` as the
-  first real control-plane screen.
+- Add a local status-loading path for `apps/dashboard`: accept a user-provided
+  `goal-harness --format json status` export or a small local API response
+  instead of rendering only `examples/status.example.json`.
 
 ## Recent Progress
 
@@ -45,6 +45,15 @@ private project context.
   renderer as a diagnostic fallback, and selected a React/Vite/shadcn/TanStack
   stack for the product dashboard after benchmarking observability and
   orchestration consoles.
+- 2026-06-01T12:05:18+08:00: Scaffolded `apps/dashboard` as a Vite + React +
+  TypeScript app that reads `examples/status.example.json`, validates it with
+  Zod, renders status lanes, metrics, a Recharts queue chart, and a sortable
+  TanStack Table behind URL-backed TanStack Router filters.
+- 2026-06-01T12:15:37+08:00: Validated the dashboard scaffold with
+  `npm --prefix apps/dashboard run build`, browser smoke checks for the
+  `Goal Operations` screen, and a public contract scan over the repo. Updated
+  the contract scanner to skip `node_modules` so the new npm app remains
+  compatible with `--scan-root .`.
 
 ## Validation
 
@@ -53,6 +62,7 @@ private project context.
 - `python3 -m goal_harness.cli --format json check --scan-root .`
 - Parse all JSON examples in `examples/`.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
+- `cd apps/dashboard && npm run build`
 
 ## Guards
 

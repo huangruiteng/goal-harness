@@ -105,15 +105,15 @@ The dashboard should be dense, calm, and operational:
 
 ## Next Implementation Segment
 
-Scaffold `apps/dashboard` with the selected stack and render a first real
-screen from `examples/status.example.json`:
+The first dashboard scaffold lives in `apps/dashboard`. It uses the selected
+stack and renders a real screen from `examples/status.example.json`:
 
 - contract health summary,
 - attention queue lanes,
 - sortable queue table,
 - goal/run counters,
 - responsive desktop and mobile layout,
-- `npm run build` and Playwright screenshot verification.
+- `npm run build` verification.
 
 Keep `examples/render-status-dashboard.py` as a low-friction fallback until the
 React dashboard can be built and opened in one command.

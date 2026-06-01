@@ -34,7 +34,16 @@ LEAK_PATTERNS = {
 }
 
 DEFAULT_SCAN_SUFFIXES = {".md", ".py", ".toml", ".json", ".yaml", ".yml", ".sh"}
-DEFAULT_SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"}
+DEFAULT_SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "node_modules",
+}
 
 
 def iter_scan_files(scan_root: Path) -> list[Path]:
