@@ -43,6 +43,9 @@ private project context.
   blocked by operator gates, external evidence, throttling, pause, or health
   issues return `should_run=false` with a public-safe reason. Unknown goals and
   quota/status collection failures fail closed with a non-zero exit code.
+  `public_harness_healthy` is now treated as Codex-ready in status so the
+  harness self-improvement heartbeat can become eligible after a clean
+  self-health run instead of being mistaken for inactive waiting state.
   Updated README and quota/status docs. Validation covered Python compile,
   live operator-gate skip, live external-evidence skip, missing-goal non-zero
   skip, missing-argument non-zero skip, synthetic eligible `run`, public

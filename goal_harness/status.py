@@ -19,6 +19,7 @@ CODEX_READY_CLASSIFICATIONS = {
     "inspect_result",
     "needs_more_read_only_evidence",
     "needs_validation",
+    "public_harness_healthy",
     "read_only_project_map",
     "run_validation",
     "state_refreshed",
