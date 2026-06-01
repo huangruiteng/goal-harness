@@ -238,6 +238,8 @@ User review surface:
 - show first-screen operator actions before raw goal detail: reward gates,
   controller opt-ins, evidence watches, Codex handoffs, and blocking health
   items,
+- include the safe local CLI path or reward-draft hint on first-screen action
+  cards when it helps the user move from judgment to an agent-facing command,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,

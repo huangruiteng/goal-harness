@@ -716,6 +716,9 @@ type UserActionSummaryItem = {
   variant: BadgeVariant;
   summary: string;
   detail: string;
+  safePathLabel: string;
+  safePathCommand?: string;
+  rewardHint: string;
   phase: string;
   waitingOn: string;
   draftLabel?: string;
@@ -1048,10 +1051,25 @@ function buildRewardDraftDefaults({
   };
 }
 
-function buildUserActionSummaryItems(rows: GoalDirectoryRow[]): UserActionSummaryItem[] {
+function buildUserActionSummaryItems({
+  rows,
+  registry,
+  runtimeRoot,
+}: {
+  rows: GoalDirectoryRow[];
+  registry: string;
+  runtimeRoot: string;
+}): UserActionSummaryItem[] {
   const items = rows.flatMap((row): UserActionSummaryItem[] => {
     const decision = buildOperatorDecision({ goal: row.goal, queueItem: row.queueItem });
     const draftDefaults = buildRewardDraftDefaults({ goal: row.goal, queueItem: row.queueItem });
+    const bridge = buildOperatorActionBridge({
+      goal: row.goal,
+      queueItem: row.queueItem,
+      registry,
+      runtimeRoot,
+    });
+    const bridgeItem = bridge?.items.find((item) => item.command) ?? bridge?.items[0];
     const latestRun = row.latestRun;
     const missingGates = new Set(row.queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []);
     const handoffCondition = row.queueItem?.next_handoff_condition
@@ -1061,6 +1079,11 @@ function buildUserActionSummaryItems(rows: GoalDirectoryRow[]): UserActionSummar
       goalId: row.goal.id,
       phase: decision.phase,
       waitingOn: decision.waitingOn,
+      safePathLabel: bridgeItem?.label ?? bridge?.badge ?? "Inspect status",
+      safePathCommand: bridgeItem?.command,
+      rewardHint: latestRun
+        ? `${draftDefaults.decision} / ${draftDefaults.reward}`
+        : `${draftDefaults.label} / needs run`,
     };
 
     if (row.severity === "high") {
@@ -1150,12 +1173,16 @@ function UserActionSummary({
   rows,
   selectedGoalId,
   onSelectGoal,
+  registry,
+  runtimeRoot,
 }: {
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
   onSelectGoal: (goalId: string) => void;
+  registry: string;
+  runtimeRoot: string;
 }) {
-  const items = buildUserActionSummaryItems(rows);
+  const items = buildUserActionSummaryItems({ rows, registry, runtimeRoot });
   return (
     <Card>
       <CardHeader className="flex-wrap">
@@ -1201,6 +1228,27 @@ function UserActionSummary({
                 <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
                 <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.summary}</p>
                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
+                <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-zinc-800">
+                  <div className="rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="neutral">Safe path</Badge>
+                      <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
+                        {item.safePathLabel}
+                      </span>
+                    </div>
+                    {item.safePathCommand ? (
+                      <code className="mt-2 block max-h-16 overflow-hidden whitespace-pre-wrap break-words rounded border border-slate-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-zinc-800">
+                        {item.safePathCommand}
+                      </code>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+                    <Badge variant="info">Reward draft</Badge>
+                    <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
+                      {item.rewardHint}
+                    </span>
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -2183,7 +2231,13 @@ export function DashboardPage() {
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
 
-              <UserActionSummary rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
+              <UserActionSummary
+                registry={payload.registry}
+                rows={goalRows}
+                runtimeRoot={payload.runtime_root}
+                onSelectGoal={setSelectedGoalId}
+                selectedGoalId={selectedGoalId}
+              />
 
               <GoalDirectory rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
 

@@ -20,7 +20,10 @@ Directory` remains the multi-project switcher with public-safe domain,
 attention state, latest run, and run counts.
 `User Actions` lifts the selected-detail operator logic into the first screen:
 reward gates, controller opt-ins, evidence watches, Codex handoffs, and health
-blocks are grouped as operator cards before the user opens a goal detail.
+blocks are grouped as operator cards before the user opens a goal detail. Each
+card also exposes the matching safe local path and reward-draft hint, so the
+first screen stays user-facing while still pointing agents toward the CLI
+contract.
 The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for

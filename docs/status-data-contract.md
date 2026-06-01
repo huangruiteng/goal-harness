@@ -405,7 +405,9 @@ A first useful UI can be built from the export alone:
 - User action summary: first-screen cards should derive from the same selected
   operator decision and reward-default logic, grouping reward gates, controller
   opt-ins, evidence watches, Codex handoffs, and blocking health items before
-  raw goal detail.
+  raw goal detail. Cards may show the matching safe CLI path label or command
+  plus the reward-draft decision/reward hint, but those are affordances over
+  the agent-facing status export, not browser-side writes.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.

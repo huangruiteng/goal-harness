@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T19:21:38+08:00
+updated_at: 2026-06-01T19:30:27+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,11 +29,10 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should make first-screen `User Actions` cards expose the matching safe
-  CLI path or reward draft hint inline while preserving the boundary that
-  dashboard is user-facing and CLI status is agent-facing machine state. The
-  operator should see the next concrete local step without opening run-history
-  detail.
+  slice should turn the first-screen `User Actions` cards into a review flow:
+  filterable by action kind, still sourced only from the status contract, and
+  still explicit that reward hints and safe CLI paths are operator aids rather
+  than browser-side approval or write control.
 
 ## Recent Progress
 
@@ -247,6 +246,14 @@ private project context.
   `Record human reward` for `tiger-team-maiduidui-regauc`, `Review controller
   opt-in` for `agent-harness-main-control`, and `Let Codex use the map` for the
   mapped Codex-ready project.
+- 2026-06-01T19:30:27+08:00: Inlined the selected-detail action affordances
+  into the first-screen `User Actions` cards. Each card now derives a safe path
+  from the same `Safe CLI Path` builder and a compact reward hint from the same
+  reward-draft defaults, so the first screen can show status/history,
+  read-only-map dry-run, or reward-gate hints without turning the dashboard
+  into a writer. README, status contract, and state-interaction docs now state
+  that these first-screen hints are user-facing affordances over the
+  agent-facing status export.
 
 ## Validation
 
@@ -276,6 +283,11 @@ private project context.
 - Browser DOM smoke: first-screen `User Actions` appears before
   `Goal Directory`, shows `3 actions`, and includes reward gate, controller
   opt-in, and map handoff cards for the current global status.
+- Browser DOM smoke: first-screen `User Actions` cards expose `Safe path` and
+  `Reward draft`; the global status case shows a status watch command,
+  `read-only-map --dry-run`, `goal-harness history`, and the reward decisions
+  `record_human_reward_gate`, `controller opt-in / needs run`, and
+  `use_read_only_map`.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load
