@@ -18,6 +18,20 @@
           "role": "primary_goal_document"
         }
       ],
+      "authority_registry": {
+        "path": "docs/meta/DOC_REGISTRY.yaml",
+        "read_status": "read",
+        "default_entry_docs": [
+          "README.md",
+          "docs/GOAL.md"
+        ],
+        "topic_authority": {
+          "goal": "docs/GOAL.md",
+          "validation": "docs/VALIDATION.md"
+        },
+        "deprecated_source_count": 0,
+        "conflict_risk": "low"
+      },
       "adapter": {
         "kind": "example_adapter_v0",
         "status": "connected"

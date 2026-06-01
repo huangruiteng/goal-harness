@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .authority import compact_authority_registry
 from .feedback import validate_public_safe_text
 from .global_registry import sync_project_registry_to_global
 from .history import load_registry
@@ -133,6 +134,7 @@ def build_project_map_record(
     authority_source_count = len(authority_sources)
     if not authority_sources and isinstance(registry_goal.get("authority_source_count"), int):
         authority_source_count = int(registry_goal.get("authority_source_count") or 0)
+    authority_registry = compact_authority_registry(registry_goal, project=project)
     inventory = collect_project_inventory(project)
     state_sections = collect_state_sections(state_text)
     state_exists = state_file.exists()
@@ -140,7 +142,8 @@ def build_project_map_record(
         f"repo {1 if inventory.get('repo_exists') else 0}/1; "
         f"state_file {1 if state_exists else 0}/1; "
         f"sections {state_sections['sections_found']}/{state_sections['sections_checked']}; "
-        f"files {inventory['files_present']}/{inventory['files_checked']}"
+        f"files {inventory['files_present']}/{inventory['files_checked']}; "
+        f"authority_registry {1 if authority_registry.get('declared') else 0}/1"
     )
     return {
         "generated_at": generated_at,
@@ -161,10 +164,12 @@ def build_project_map_record(
                 "status": adapter.get("status"),
             },
             "authority_source_count": authority_source_count,
+            "authority_registry": authority_registry,
             "guard_count": len(registry_goal.get("guards") or []),
             "next_probe_declared": bool(registry_goal.get("next_probe")),
         },
         "authority_sources": authority_sources,
+        "authority_registry": authority_registry,
         "state_map": state_sections,
         "project_inventory": inventory,
     }
@@ -173,6 +178,9 @@ def build_project_map_record(
 def derive_residual_risks(record: dict[str, Any], *, opt_in_required: bool) -> list[str]:
     risks: list[str] = []
     registry_goal = record.get("registry_goal") if isinstance(record.get("registry_goal"), dict) else {}
+    authority_registry = (
+        registry_goal.get("authority_registry") if isinstance(registry_goal.get("authority_registry"), dict) else {}
+    )
     state_map = record.get("state_map") if isinstance(record.get("state_map"), dict) else {}
     inventory = record.get("project_inventory") if isinstance(record.get("project_inventory"), dict) else {}
 
@@ -180,6 +188,20 @@ def derive_residual_risks(record: dict[str, Any], *, opt_in_required: bool) -> l
         risks.append("planned_adapter_requires_controller_opt_in")
     if not registry_goal.get("authority_source_count"):
         risks.append("authority_sources_not_declared")
+    if authority_registry.get("required") and not authority_registry.get("declared"):
+        risks.append("authority_registry_required_but_not_declared")
+    if authority_registry.get("declared"):
+        if authority_registry.get("path") and authority_registry.get("path_exists") is False:
+            risks.append("authority_registry_path_missing")
+        default_count = int(authority_registry.get("default_entry_count") or 0)
+        checked_count = int(authority_registry.get("default_entries_checked") or 0)
+        present_count = int(authority_registry.get("default_entries_present") or 0)
+        if default_count and checked_count and present_count < default_count:
+            risks.append("authority_registry_default_entries_missing")
+        if int(authority_registry.get("deprecated_source_count") or 0) > 0:
+            risks.append("authority_registry_deprecated_sources_seen")
+        if str(authority_registry.get("conflict_risk") or "unknown").lower() in {"medium", "high"}:
+            risks.append("authority_registry_conflict_risk")
 
     sections = state_map.get("sections") if isinstance(state_map.get("sections"), dict) else {}
     missing_sections = [
@@ -207,12 +229,21 @@ def derive_residual_risks(record: dict[str, Any], *, opt_in_required: bool) -> l
 def compact_project_map(record: dict[str, Any]) -> dict[str, Any]:
     registry_goal = record.get("registry_goal") if isinstance(record.get("registry_goal"), dict) else {}
     adapter = registry_goal.get("adapter") if isinstance(registry_goal.get("adapter"), dict) else {}
+    authority_registry = (
+        registry_goal.get("authority_registry") if isinstance(registry_goal.get("authority_registry"), dict) else {}
+    )
     state_map = record.get("state_map") if isinstance(record.get("state_map"), dict) else {}
     inventory = record.get("project_inventory") if isinstance(record.get("project_inventory"), dict) else {}
     return {
         "adapter_kind": adapter.get("kind"),
         "adapter_status": adapter.get("status"),
         "authority_source_count": registry_goal.get("authority_source_count"),
+        "authority_registry_declared": authority_registry.get("declared"),
+        "authority_registry_path_exists": authority_registry.get("path_exists"),
+        "authority_registry_default_entry_count": authority_registry.get("default_entry_count"),
+        "authority_registry_default_entries_present": authority_registry.get("default_entries_present"),
+        "topic_authority_count": authority_registry.get("topic_authority_count"),
+        "authority_registry_conflict_risk": authority_registry.get("conflict_risk"),
         "guard_count": registry_goal.get("guard_count"),
         "sections_found": state_map.get("sections_found"),
         "sections_checked": state_map.get("sections_checked"),
@@ -258,6 +289,16 @@ def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
                 "## Compact Map",
                 f"- adapter: `{project_map.get('adapter_kind')}:{project_map.get('adapter_status')}`",
                 f"- authority_sources: `{project_map.get('authority_source_count')}`",
+                (
+                    "- authority_registry: "
+                    f"`declared={project_map.get('authority_registry_declared')} "
+                    f"path_exists={project_map.get('authority_registry_path_exists')} "
+                    "default_entries="
+                    f"{project_map.get('authority_registry_default_entries_present')}/"
+                    f"{project_map.get('authority_registry_default_entry_count')} "
+                    f"topic_authority={project_map.get('topic_authority_count')} "
+                    f"conflict_risk={project_map.get('authority_registry_conflict_risk')}`"
+                ),
                 f"- guards: `{project_map.get('guard_count')}`",
                 f"- state_sections: `{project_map.get('sections_found')}/{project_map.get('sections_checked')}`",
                 f"- project_inventory: `{project_map.get('files_present')}/{project_map.get('files_checked')}`",

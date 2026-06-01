@@ -57,9 +57,11 @@ should report authority coverage before proposing sub-agent work:
   "authority_registry": {
     "path": "docs/meta/DOC_REGISTRY.yaml",
     "read_status": "read",
-    "default_entry_docs_checked": 3,
+    "default_entry_count": 3,
+    "default_entries_checked": 3,
+    "default_entries_present": 3,
     "topic_authority_count": 24,
-    "deprecated_sources_seen": 2,
+    "deprecated_source_count": 2,
     "conflict_risk": "low"
   }
 }

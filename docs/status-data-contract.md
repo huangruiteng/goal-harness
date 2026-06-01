@@ -287,6 +287,12 @@ agent to use that map. Compact run records may include a public-safe
   "adapter_kind": "read_only_project_map_v0",
   "adapter_status": "connected-read-only",
   "authority_source_count": 1,
+  "authority_registry_declared": true,
+  "authority_registry_path_exists": true,
+  "authority_registry_default_entry_count": 2,
+  "authority_registry_default_entries_present": 2,
+  "topic_authority_count": 8,
+  "authority_registry_conflict_risk": "low",
   "guard_count": 3,
   "sections_found": 4,
   "sections_checked": 7,
@@ -298,8 +304,11 @@ agent to use that map. Compact run records may include a public-safe
 
 The full run payload may also include `residual_risks`, a compact public-safe
 list such as `planned_adapter_requires_controller_opt_in` or
-`project_local_goal_state_not_detected`. Project agents should relay that list
-directly rather than inventing a free-form risk summary.
+`project_local_goal_state_not_detected`. If an optional authority registry is
+declared, missing registry files, missing default entries, deprecated sources,
+or medium/high conflict risk are reported with stable `authority_registry_*`
+labels. Project agents should relay that list directly rather than inventing a
+free-form risk summary.
 
 The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
 defaults to dry-run and requires `--execute` before moving the runtime directory

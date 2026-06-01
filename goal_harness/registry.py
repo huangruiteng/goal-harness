@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .authority import authority_registry_summary
+
 
 def read_json(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
@@ -60,6 +62,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
         authority_sources = raw_goal.get("authority_sources")
         if not isinstance(authority_sources, list):
             authority_sources = []
+        authority_registry = authority_registry_summary(raw_goal)
 
         status_counts[status] = status_counts.get(status, 0) + 1
         if not goal_id:
@@ -92,6 +95,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
                 "adapter_status": adapter.get("status"),
                 "authority_sources": authority_sources,
                 "authority_source_count": len(authority_sources),
+                "authority_registry": authority_registry,
                 "spawn_allowed": spawn_policy.get("allowed"),
                 "max_children": spawn_policy.get("max_children"),
                 "next_probe": raw_goal.get("next_probe"),
@@ -141,6 +145,11 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
         authority_suffix = ""
         if goal.get("authority_source_count"):
             authority_suffix = f" authorities={goal.get('authority_source_count')}"
+        authority_registry = goal.get("authority_registry") if isinstance(goal.get("authority_registry"), dict) else {}
+        if authority_registry.get("declared"):
+            default_count = authority_registry.get("default_entry_count")
+            topic_count = authority_registry.get("topic_authority_count")
+            authority_suffix += f" authority_registry=defaults:{default_count},topics:{topic_count}"
         lines.append(
             "| "
             f"`{goal.get('id')}` | "
