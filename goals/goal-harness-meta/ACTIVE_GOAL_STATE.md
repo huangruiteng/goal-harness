@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T12:37:47+08:00
+updated_at: 2026-06-01T12:47:47+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Add a compact run-history surface for the dashboard so an operator can drill
-  from an attention queue row into recent run classifications, validation
-  health, and saved artifact availability without leaving the UI.
+- Add a contract-health detail surface to the dashboard so an operator can see
+  blocking errors, non-blocking warnings, and recent check evidence before
+  choosing the next goal action.
 
 ## Recent Progress
 
@@ -66,6 +66,11 @@ private project context.
   server for live dashboard status JSON with `/status.json`, `/healthz`,
   no-store responses, and local CORS headers. The React dashboard now has a
   default `Live` source path for `http://127.0.0.1:8765/status.json`.
+- 2026-06-01T12:47:47+08:00: Added compact run-history to the public
+  `goal-harness status` contract, stripping local artifact paths while exposing
+  recent classifications, health check summaries, and JSON/Markdown artifact
+  availability. The React dashboard now lets an operator select an attention
+  queue row and inspect the corresponding run-history detail panel.
 
 ## Validation
 
@@ -82,6 +87,10 @@ private project context.
 - `curl http://127.0.0.1:8765/status.json`
 - Browser smoke: click `Live` in `apps/dashboard` and verify it loads
   `http://127.0.0.1:8765/status.json`
+- `python3 -m goal_harness.cli --format json status` includes `run_history`
+  without local path keys
+- Browser smoke: click `docs-maintenance-goal` in the attention queue and
+  verify the run-history panel switches to the no-run state
 
 ## Guards
 

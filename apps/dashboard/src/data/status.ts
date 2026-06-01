@@ -10,6 +10,40 @@ export const queueItemSchema = z.object({
   source: z.string().optional(),
 });
 
+export const runRecordSchema = z.object({
+  generated_at: z.string(),
+  goal_id: z.string(),
+  classification: z.string().optional().nullable(),
+  recommended_action: z.string().optional().nullable(),
+  health_check: z.string().optional().nullable(),
+  active_task_count: z.number().optional().nullable(),
+  active_priorities: z.record(z.string(), z.unknown()).optional().nullable(),
+  cache_check: z.string().optional().nullable(),
+  json_exists: z.boolean().optional().default(false),
+  markdown_exists: z.boolean().optional().default(false),
+});
+
+export const runGoalSchema = z.object({
+  id: z.string(),
+  status: z.string().optional().nullable(),
+  registry_member: z.boolean().optional().default(false),
+  legacy_runtime_goal: z.boolean().optional().default(false),
+  adapter_kind: z.string().optional().nullable(),
+  adapter_status: z.string().optional().nullable(),
+  index_exists: z.boolean().optional().default(false),
+  raw_index_records: z.number().optional().default(0),
+  unique_runs: z.number().optional().default(0),
+  latest_runs: z.array(runRecordSchema).optional().default([]),
+});
+
+export const runHistorySchema = z.object({
+  available: z.boolean(),
+  goal_count: z.number().optional().default(0),
+  run_count: z.number().optional().default(0),
+  goals: z.array(runGoalSchema).optional().default([]),
+  recent_runs: z.array(runRecordSchema).optional().default([]),
+});
+
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
   registry: z.string(),
@@ -35,10 +69,19 @@ export const statusPayloadSchema = z.object({
     watching_external_evidence: z.number(),
     items: z.array(queueItemSchema),
   }),
+  run_history: runHistorySchema.optional().default({
+    available: false,
+    goal_count: 0,
+    run_count: 0,
+    goals: [],
+    recent_runs: [],
+  }),
 });
 
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
+export type RunGoal = z.infer<typeof runGoalSchema>;
+export type RunRecord = z.infer<typeof runRecordSchema>;
 
 export function parseStatusPayload(payload: unknown): StatusPayload {
   return statusPayloadSchema.parse(payload);

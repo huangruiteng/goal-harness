@@ -59,6 +59,13 @@ goal-harness --format json status \
     "needs_codex": 1,
     "watching_external_evidence": 0,
     "items": []
+  },
+  "run_history": {
+    "available": true,
+    "goal_count": 3,
+    "run_count": 2,
+    "goals": [],
+    "recent_runs": []
   }
 }
 ```
@@ -119,6 +126,47 @@ Item fields:
 - `recommended_action`: exactly one next action.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 
+## Run History
+
+`run_history` is a compact, public-safe drill-down surface for the dashboard.
+It mirrors the compact run index, but strips local artifact paths. UIs should
+show artifact availability with `json_exists` and `markdown_exists` instead of
+linking directly to local files.
+
+Goal shape:
+
+```json
+{
+  "id": "complex-project-main-control",
+  "status": "active-read-only",
+  "registry_member": true,
+  "legacy_runtime_goal": false,
+  "adapter_kind": "complex_project_read_only_map_v0",
+  "adapter_status": "connected-read-only",
+  "index_exists": true,
+  "raw_index_records": 2,
+  "unique_runs": 2,
+  "latest_runs": []
+}
+```
+
+Run shape:
+
+```json
+{
+  "generated_at": "2026-05-31T21:15:00+00:00",
+  "goal_id": "complex-project-main-control",
+  "classification": "ready_for_controller_opt_in",
+  "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
+  "health_check": "8/8",
+  "json_exists": true,
+  "markdown_exists": true
+}
+```
+
+Optional compact fields such as `active_task_count`, `active_priorities`, and
+`cache_check` may appear when an adapter records them.
+
 ## Display Model
 
 A first useful UI can be built from the export alone:
@@ -129,6 +177,8 @@ A first useful UI can be built from the export alone:
 - Codex lane: items with `waiting_on=codex`.
 - Watch lane: items with `waiting_on=external_evidence`.
 - Health panel: contract `errors`, `warnings`, and recent check count.
+- Run detail panel: selected goal from the attention queue, compact
+  classifications, health checks, and artifact availability.
 
 Suggested badge mapping:
 
@@ -192,5 +242,6 @@ The public examples under `examples/` are sanitized and can be used for demos.
 - Existing field meanings should remain stable across minor versions.
 - Consumers should ignore unknown fields.
 - Consumers should handle missing `attention_queue.items` as an empty queue.
+- Consumers should handle missing `run_history` as unavailable.
 - Consumers should treat `contract.ok=false` as a stronger signal than an empty
   attention queue.

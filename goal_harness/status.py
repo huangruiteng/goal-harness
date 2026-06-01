@@ -28,6 +28,18 @@ CONNECTED_ADAPTER_STATUSES = {
     "connected-read-only",
     "pre-tick-runnable",
 }
+RUN_COMPACT_FIELDS = (
+    "generated_at",
+    "goal_id",
+    "classification",
+    "recommended_action",
+    "health_check",
+    "active_task_count",
+    "active_priorities",
+    "cache_check",
+    "json_exists",
+    "markdown_exists",
+)
 
 
 def attention_item(
@@ -166,6 +178,48 @@ def build_attention_queue(
     }
 
 
+def compact_run(run: dict[str, Any]) -> dict[str, Any]:
+    return {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
+
+
+def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
+    goals: list[dict[str, Any]] = []
+    for goal in history.get("goals") or []:
+        if not isinstance(goal, dict):
+            continue
+        goals.append(
+            {
+                "id": goal.get("id"),
+                "status": goal.get("status"),
+                "registry_member": goal.get("registry_member"),
+                "legacy_runtime_goal": goal.get("legacy_runtime_goal"),
+                "adapter_kind": goal.get("adapter_kind"),
+                "adapter_status": goal.get("adapter_status"),
+                "index_exists": goal.get("index_exists"),
+                "raw_index_records": goal.get("raw_index_records"),
+                "unique_runs": goal.get("unique_runs"),
+                "latest_runs": [
+                    compact_run(run)
+                    for run in goal.get("latest_runs") or []
+                    if isinstance(run, dict)
+                ],
+            }
+        )
+
+    recent_runs = [
+        compact_run(run)
+        for run in history.get("runs") or []
+        if isinstance(run, dict)
+    ]
+    return {
+        "available": True,
+        "goal_count": history.get("goal_count"),
+        "run_count": history.get("run_count"),
+        "goals": goals,
+        "recent_runs": recent_runs,
+    }
+
+
 def collect_status(
     *,
     registry_path: Path,
@@ -188,6 +242,7 @@ def collect_status(
         limit=limit,
     )
     queue = build_attention_queue(contract=contract, history=history)
+    run_history = build_run_history(history)
     return {
         "ok": bool(contract.get("ok")),
         "registry": str(registry_path),
@@ -201,6 +256,7 @@ def collect_status(
             "warnings": contract.get("warnings") or [],
         },
         "attention_queue": queue,
+        "run_history": run_history,
     }
 
 
@@ -255,6 +311,41 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         )
         if action:
             lines.append(f"  - action: {action}")
+
+    run_history = payload.get("run_history") if isinstance(payload.get("run_history"), dict) else {}
+    run_goals = run_history.get("goals") if isinstance(run_history.get("goals"), list) else []
+    lines.extend(
+        [
+            "",
+            "## Run History",
+            "- summary: "
+            f"goals={run_history.get('goal_count')}, "
+            f"runs={run_history.get('run_count')}",
+        ]
+    )
+    if not run_goals:
+        lines.append("- none")
+    for goal in run_goals:
+        if not isinstance(goal, dict):
+            continue
+        lines.append(
+            "- "
+            f"`{goal.get('id')}`: "
+            f"status={goal.get('status')} "
+            f"adapter={goal.get('adapter_kind')}:{goal.get('adapter_status')} "
+            f"records={goal.get('raw_index_records')} "
+            f"unique_runs={goal.get('unique_runs')}"
+        )
+        latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
+        if latest_runs:
+            latest = latest_runs[0]
+            if isinstance(latest, dict):
+                lines.append(
+                    "  - latest: "
+                    f"{latest.get('generated_at')} "
+                    f"classification={latest.get('classification')} "
+                    f"artifacts={latest.get('json_exists')}/{latest.get('markdown_exists')}"
+                )
 
     for title, key in (("Errors", "errors"), ("Warnings", "warnings")):
         entries = contract.get(key) if isinstance(contract.get(key), list) else []

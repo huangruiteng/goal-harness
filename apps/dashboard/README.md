@@ -12,7 +12,8 @@ npm run dev
 ```
 
 The default screen uses the sanitized repository example at
-`examples/status.example.json`.
+`examples/status.example.json`, including the attention queue and compact run
+history drill-down.
 
 ## Load Live Status
 

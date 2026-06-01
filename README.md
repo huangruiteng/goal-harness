@@ -148,6 +148,9 @@ The endpoint is local by default:
 http://127.0.0.1:8765/status.json
 ```
 
+The dashboard renders the attention queue with a compact run-history drill-down
+for recent classifications, validation health, and artifact availability.
+
 For a fully static fallback, export current local state into the dashboard
 public folder and load `/status.local.json` from the dashboard source control:
 

@@ -4,8 +4,10 @@ import {
   CheckCircle2,
   CircleAlert,
   Clock3,
+  FileCheck2,
   FileJson2,
   GitBranch,
+  History,
   Link2,
   LayoutDashboard,
   Moon,
@@ -35,6 +37,8 @@ import {
 import { dashboardRoute } from "../router";
 import {
   QueueItem,
+  RunGoal,
+  RunRecord,
   StatusPayload,
   exampleStatusPayload,
   formatStatusError,
@@ -120,14 +124,30 @@ function StatusBadge({ value }: { value: string }) {
   return <Badge variant={severityVariant[value] ?? "neutral"}>{value}</Badge>;
 }
 
-function QueueTable({ items }: { items: QueueItem[] }) {
+function QueueTable({
+  items,
+  selectedGoalId,
+  onSelectGoal,
+}: {
+  items: QueueItem[];
+  selectedGoalId: string;
+  onSelectGoal: (goalId: string) => void;
+}) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo<ColumnDef<QueueItem>[]>(
     () => [
       {
         accessorKey: "goal_id",
         header: "Goal",
-        cell: ({ row }) => <span className="font-medium text-slate-900 dark:text-zinc-100">{row.original.goal_id}</span>,
+        cell: ({ row }) => (
+          <button
+            className="text-left font-medium text-slate-900 underline-offset-4 hover:underline dark:text-zinc-100"
+            onClick={() => onSelectGoal(row.original.goal_id)}
+            type="button"
+          >
+            {row.original.goal_id}
+          </button>
+        ),
       },
       {
         accessorKey: "status",
@@ -185,7 +205,14 @@ function QueueTable({ items }: { items: QueueItem[] }) {
         </TableHeader>
         <TableBody>
           {table.getRowModel().rows.map((row) => (
-            <TableRow key={row.id}>
+            <TableRow
+              className={cn(
+                "cursor-pointer",
+                row.original.goal_id === selectedGoalId && "bg-slate-100 dark:bg-zinc-900",
+              )}
+              key={row.id}
+              onClick={() => onSelectGoal(row.original.goal_id)}
+            >
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id}>
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -199,6 +226,109 @@ function QueueTable({ items }: { items: QueueItem[] }) {
   );
 }
 
+function formatNullable(value: unknown, fallback = "None") {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function artifactVariant(value?: boolean) {
+  return value ? "success" : "neutral";
+}
+
+function LatestRun({ run }: { run: RunRecord }) {
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">{run.generated_at}</span>
+        <Badge variant="info">{formatNullable(run.classification, "unclassified")}</Badge>
+        {run.health_check ? <Badge variant="success">{run.health_check}</Badge> : null}
+        <Badge variant={artifactVariant(run.json_exists)}>JSON</Badge>
+        <Badge variant={artifactVariant(run.markdown_exists)}>Markdown</Badge>
+      </div>
+      {run.recommended_action ? (
+        <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{run.recommended_action}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function RunHistoryPanel({
+  goal,
+  queueItem,
+}: {
+  goal?: RunGoal;
+  queueItem?: QueueItem;
+}) {
+  const latestRuns = goal?.latest_runs ?? [];
+  const artifactReady = latestRuns.filter((run) => run.json_exists && run.markdown_exists).length;
+  return (
+    <Card>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <History className="h-4 w-4" />
+            Run History
+          </CardTitle>
+        </div>
+        {queueItem ? <StatusBadge value={queueItem.severity} /> : null}
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div>
+            <div className="break-all text-sm font-semibold">{goal?.id ?? queueItem?.goal_id ?? "No goal selected"}</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {goal?.status ? <Badge>{goal.status}</Badge> : null}
+              {goal?.adapter_kind ? <Badge variant="neutral">{goal.adapter_kind}</Badge> : null}
+              {goal?.adapter_status ? <Badge variant="info">{goal.adapter_status}</Badge> : null}
+              {goal?.legacy_runtime_goal ? <Badge variant="warning">Legacy runtime</Badge> : null}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+              <div className="text-xs text-slate-500 dark:text-zinc-400">Records</div>
+              <div className="mt-1 text-lg font-semibold">{goal?.raw_index_records ?? 0}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+              <div className="text-xs text-slate-500 dark:text-zinc-400">Unique Runs</div>
+              <div className="mt-1 text-lg font-semibold">{goal?.unique_runs ?? 0}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+              <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-zinc-400">
+                <FileCheck2 className="h-3.5 w-3.5" />
+                Artifacts
+              </div>
+              <div className="mt-1 text-lg font-semibold">{artifactReady}/{latestRuns.length}</div>
+            </div>
+          </div>
+
+          {queueItem ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="font-medium">Queue action</div>
+              <p className="mt-1 leading-6 text-slate-700 dark:text-zinc-300">{queueItem.recommended_action}</p>
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            {latestRuns.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-zinc-700 dark:text-zinc-400">
+                No compact run record yet.
+              </div>
+            ) : (
+              latestRuns.map((run) => <LatestRun key={`${run.goal_id}-${run.generated_at}`} run={run} />)
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
@@ -208,8 +338,10 @@ export function DashboardPage() {
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedGoalId, setSelectedGoalId] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queue = payload.attention_queue;
+  const runHistory = payload.run_history;
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -277,6 +409,16 @@ export function DashboardPage() {
     }
   }, []);
 
+  useEffect(() => {
+    const goalIds = new Set([
+      ...queue.items.map((item) => item.goal_id),
+      ...runHistory.goals.map((goal) => goal.id),
+    ]);
+    if (!selectedGoalId || !goalIds.has(selectedGoalId)) {
+      setSelectedGoalId(queue.items[0]?.goal_id ?? runHistory.goals[0]?.id ?? "");
+    }
+  }, [payload, queue.items, runHistory.goals, selectedGoalId]);
+
   const filteredItems = queue.items.filter((item) => {
     const lane = laneFor(item)?.key ?? "all";
     const laneMatches = search.lane === "all" || search.lane === lane;
@@ -288,6 +430,11 @@ export function DashboardPage() {
     { name: "Codex", count: queue.needs_codex },
     { name: "Watch", count: queue.watching_external_evidence },
   ];
+  const selectedGoal = runHistory.goals.find((goal) => goal.id === selectedGoalId);
+  const selectedQueueItem = queue.items.find((item) => item.goal_id === selectedGoalId);
+  const runHistoryOptions = Array.from(
+    new Set([...queue.items.map((item) => item.goal_id), ...runHistory.goals.map((goal) => goal.id)]),
+  );
 
   return (
     <div className={theme === "dark" ? "dark" : ""}>
@@ -453,52 +600,67 @@ export function DashboardPage() {
                 </Card>
               </section>
 
-              <Card>
-                <CardHeader className="flex-wrap">
-                  <div>
-                    <CardTitle>Attention Queue</CardTitle>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Select
-                      aria-label="Lane filter"
-                      value={search.lane}
-                      onChange={(event) =>
-                        navigate({
-                          search: (current) => ({
-                            ...current,
-                            lane: event.target.value as typeof search.lane,
-                          }),
-                        })
-                      }
-                    >
-                      <option value="all">All lanes</option>
-                      <option value="user">User / Controller</option>
-                      <option value="codex">Codex Ready</option>
-                      <option value="watch">Watching Evidence</option>
+              <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                <Card>
+                  <CardHeader className="flex-wrap">
+                    <div>
+                      <CardTitle>Attention Queue</CardTitle>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Select
+                        aria-label="Lane filter"
+                        value={search.lane}
+                        onChange={(event) =>
+                          navigate({
+                            search: (current) => ({
+                              ...current,
+                              lane: event.target.value as typeof search.lane,
+                            }),
+                          })
+                        }
+                      >
+                        <option value="all">All lanes</option>
+                        <option value="user">User / Controller</option>
+                        <option value="codex">Codex Ready</option>
+                        <option value="watch">Watching Evidence</option>
+                      </Select>
+                      <Select
+                        aria-label="Severity filter"
+                        value={search.severity}
+                        onChange={(event) =>
+                          navigate({
+                            search: (current) => ({
+                              ...current,
+                              severity: event.target.value as typeof search.severity,
+                            }),
+                          })
+                        }
+                      >
+                        <option value="all">All severity</option>
+                        <option value="high">High</option>
+                        <option value="action">Action</option>
+                        <option value="watch">Watch</option>
+                      </Select>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <QueueTable items={filteredItems} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
+                  </CardContent>
+                </Card>
+
+                <div className="space-y-3">
+                  {runHistoryOptions.length > 0 ? (
+                    <Select aria-label="Run history goal" onChange={(event) => setSelectedGoalId(event.target.value)} value={selectedGoalId}>
+                      {runHistoryOptions.map((goalId) => (
+                        <option key={goalId} value={goalId}>
+                          {goalId}
+                        </option>
+                      ))}
                     </Select>
-                    <Select
-                      aria-label="Severity filter"
-                      value={search.severity}
-                      onChange={(event) =>
-                        navigate({
-                          search: (current) => ({
-                            ...current,
-                            severity: event.target.value as typeof search.severity,
-                          }),
-                        })
-                      }
-                    >
-                      <option value="all">All severity</option>
-                      <option value="high">High</option>
-                      <option value="action">Action</option>
-                      <option value="watch">Watch</option>
-                    </Select>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <QueueTable items={filteredItems} />
-                </CardContent>
-              </Card>
+                  ) : null}
+                  <RunHistoryPanel goal={selectedGoal} queueItem={selectedQueueItem} />
+                </div>
+              </section>
             </div>
           </main>
         </div>
