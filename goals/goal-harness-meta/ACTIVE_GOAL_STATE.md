@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T02:47:28+08:00
+updated_at: 2026-06-02T02:55:47+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,22 @@ private project context.
 
 ## Next Action
 
-- Continue the compute quota v0.1 slice by wiring the per-goal guard into the
-  hourly heartbeat/control prompt: call
-  `goal-harness quota should-run --goal-id goal-harness-meta` before spending
-  delivery compute, skip quietly when it returns `should_run=false`, and keep
-  operator/evidence gates ahead of compute. Do not add quota writes or a
-  scheduler yet.
+- Continue the compute quota v0.1 slice by teaching project-facing Goal
+  Harness instructions to call `goal-harness quota should-run --goal-id
+  <goal-id>` before long-running heartbeat or adapter work. Keep this as
+  agent-facing usage guidance, not a scheduler or quota write path.
 
 ## Recent Progress
 
+- 2026-06-02T02:55:47+08:00: Wired the local hourly heartbeat/control prompt
+  into the per-goal quota guard. The heartbeat now instructs the agent to run
+  `goal-harness quota should-run --goal-id goal-harness-meta` before spending
+  compute, to quiet-skip with `DONT_NOTIFY` when `should_run=false`, and to do
+  one verified step only when `should_run=true`. While updating it, the
+  automation cadence was corrected from an accidental two-minute interval back
+  to hourly. Validation: automation TOML shows the new guard protocol and
+  `RRULE:FREQ=HOURLY;INTERVAL=1`; live guard currently returns
+  `should_run=true` for `goal-harness-meta`.
 - 2026-06-02T02:47:28+08:00: Added the per-goal automation guard for compute
   quota. `goal-harness quota should-run --goal-id <goal-id>` now reads the
   same status-derived quota plan and returns a compact `run` or `skip`
