@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:31:05+08:00
+updated_at: 2026-06-02T04:36:53+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,27 @@ private project context.
 
 ## Next Action
 
-- From fresh `goal-harness status` and the dashboard Review Packet, inspect the
-  `agent-harness-main-control` planned opt-in path as the next P0 human-decision
-  loop. If it still asks the user or project agent to reason across too many
-  surfaces, make one small status/dashboard wording or layout fix; do not append
-  an operator gate or run the real map.
+- Inspect whether controller/operator-gate Review Packets should include a
+  user-owned `goal-harness operator-gate ... --dry-run` recording draft, while
+  still giving project agents only the read-only map dry-run command. If useful,
+  implement the smallest dry-run-only UI/packet hint; do not append a real gate
+  or run the real map.
 
 ## Recent Progress
 
+- 2026-06-02T04:36:53+08:00: Tightened the dashboard controller Review Packet
+  prompt for planned opt-in. The human reply now explicitly says
+  `同意先做 read-only map dry-run / 暂不同意 + 一句话原因`, and the boundary states
+  that this only authorizes the project agent to preview the dry-run path; it
+  does not write operator gate, run history, write-control, experiment control,
+  or production actions. Validation: dashboard production build passed with
+  the existing >500 kB chunk warning; grep confirmed the new reply and boundary
+  text; public contract check passed; `git diff --check` passed;
+  `refresh-state` appended a `state_refreshed` run and dashboard local status
+  JSON was refreshed. Critic: this lowers the human decision cost for
+  `agent-harness-main-control`, but durable operator-gate recording is still a
+  separate user-owned action path and should not be delegated to the project
+  agent.
 - 2026-06-02T04:31:05+08:00: Fixed the `refresh-state` Markdown preview wart
   for wrapped `## Next Action` items. `render_state_refresh_markdown()` now
   renders section previews through logical list items, so a bullet plus wrapped

@@ -793,8 +793,8 @@ function humanReviewPrompt(kind?: UserActionKind) {
   if (kind === "controller") {
     return {
       question: "是否允许目标项目进入 read-only/controller opt-in？",
-      reply: "同意继续 read-only / 暂不同意 + 一句话原因。",
-      boundary: "这不是 write-control；任何写入、实验控制或生产动作都需要再次明确授权。",
+      reply: "同意先做 read-only map dry-run / 暂不同意 + 一句话原因。",
+      boundary: "这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
     };
   }
   if (kind === "codex") {
