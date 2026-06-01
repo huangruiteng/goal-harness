@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T07:06:47+08:00
+updated_at: 2026-06-02T07:12:32+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,27 @@ private project context.
 
 ## Next Action
 
-- Add a tiny public smoke assertion that the quota allocation contract and
-  README entry point keep `next_automatic_turn` advisory and keep gated,
-  waiting, throttled, paused, and health-blocked goals out of the eligible lane.
-  Keep it fixture/text-only; do not change planner logic, append a real gate, or
-  run a real map.
+- Extend the quota contract smoke to cover the `docs/status-data-contract.md`
+  quota-plan note too, so the status contract, quota allocation contract, and
+  README entry point cannot drift on the advisory `next_automatic_turn`
+  boundary. Keep it docs/text-only; do not change planner logic, append a real
+  gate, or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T07:12:32+08:00: Added
+  `examples/quota-contract-smoke.py`, a dependency-free text smoke that reads
+  `README.md` and `docs/quota-allocation.md`. It protects the public quota
+  allocation contract wording: `quota plan` is advisory, does not grant
+  permission, does not clear operator gates or record human reward, keeps
+  non-eligible lanes out of the eligible lane, sorts only eligible goals by
+  `quota.compute`, and tells executors to skip delivery work when
+  `quota should-run` returns `should_run=false`. Validation: direct quota
+  contract smoke passed; aggregate public smokes passed with 5 scripts; Python
+  compile passed; public contract check passed; `git diff --check` passed.
+  Critic: README and quota allocation docs are now guarded; the remaining
+  nearby drift risk is `docs/status-data-contract.md`, which also describes the
+  quota-plan advisory boundary.
 - 2026-06-02T07:06:47+08:00: Added the public quota allocation contract note to
   `docs/quota-allocation.md` and the README quota CLI entry point. The contract
   states that `quota plan` reports an advisory `next_automatic_turn`, does not
