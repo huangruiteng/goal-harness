@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T18:02:32+08:00
+updated_at: 2026-06-01T18:24:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,10 +27,9 @@ private project context.
 
 ## Next Action
 
-- Make state-only refreshes produce dashboard-ready action text by default:
-  `goal-harness refresh-state` now derives compact `recommended_action` from the
-  first public-safe line in the refreshed state's `## Next Action`, with
-  `--recommended-action` reserved for explicit override.
+- Turn `read_only_project_map` output into the next adapter handoff surface:
+  decide whether the generic map should feed a project-specific pre-tick
+  command, controller opt-in packet, or dashboard action checklist.
 
 ## Recent Progress
 
@@ -177,21 +176,28 @@ private project context.
   `global_registry` findings for stale source registries, missing active state
   files, duplicate goal ids, and local-vs-global scope mismatches. CS-Notes
   pre-tick now reads the global registry first-screen status, so a newly
-  connected project such as `premium-ui-ai-search-rec-migration` appears as
-  `state_refreshed -> codex` instead of a local-registry ghost.
+  connected read-only project appears as `state_refreshed -> codex` instead of
+  a local-registry ghost.
 - 2026-06-01T17:55:00+08:00: Fixed `status` / `serve-status` default contract
   scan boundaries. Multi-project status can now be run from a private project
   checkout while still checking the public Goal Harness install root by
   default; operators must opt in with `--scan-root` or `--scan-path` before
   scanning a project-specific public surface.
 - 2026-06-01T18:02:32+08:00: Improved state-only refresh action quality after
-  inspecting the real `premium-ui-ai-search-rec-migration` zero-start project.
-  The latest premium state had a precise next action, but the compact dashboard
-  run still showed the generic refresh notice. `refresh-state` now derives the
-  compact `recommended_action` from the first public-safe `## Next Action` line,
-  skips private-looking lines such as internal document URLs, and falls back to
-  the generic refresh notice only when needed. The rendered refresh Markdown
-  also normalizes bullet prefixes.
+  inspecting a real zero-start project connection. The latest active state had
+  a precise next action, but the compact dashboard run still showed the generic
+  refresh notice. `refresh-state` now derives the compact `recommended_action`
+  from the first public-safe `## Next Action` line, skips private-looking lines
+  such as internal document URLs, and falls back to the generic refresh notice
+  only when needed. The rendered refresh Markdown also normalizes bullet
+  prefixes.
+- 2026-06-01T18:24:00+08:00: Added `goal-harness read-only-map`, a generic
+  read-only project-map run writer for connected projects. It accepts
+  `read_only_project_map_v0` or compatible `*_read_only_map_v0` adapters,
+  derives a public-safe dashboard action from active state, records compact map
+  counts in run history, and keeps raw project evidence in the private runtime
+  payload. Updated status classification, dashboard schema/rendering, docs,
+  new-project prompt guidance, and installed skill workflow.
 
 ## Validation
 
@@ -278,24 +284,23 @@ private project context.
   `registry.global.json`; `refresh-state` re-synced it; and `status` from a
   directory without `.goal-harness/registry.json` fell back to that global
   registry and showed `state_refreshed -> codex`
-- Real sync: merged the CS-Notes private registry and the latest zero-start
-  project registry into `/Users/bytedance/.codex/goal-harness/registry.global.json`
+- Real sync: merged a private local registry and the latest zero-start project
+  registry into the shared local global registry
 - Default global status: `python3 -m goal_harness.cli --runtime-root
-  /Users/bytedance/.codex/goal-harness --format json status --scan-path
-  README.md --scan-path docs` returns the global registry path, 6 goals, and 3
-  attention items
+  <runtime-root> --format json status --scan-path README.md --scan-path docs`
+  returns the global registry path, 6 goals, and 3 attention items
 - Browser smoke: dashboard loaded `/status.local.json` generated from the
   global registry and showed the zero-start project as `state_refreshed`
 - `HOME=$(mktemp -d) SHELL=/bin/zsh CODEX_HOME=<tmp> scripts/install-local.sh`
   creates both the CLI wrapper and `goal-harness-project` skill symlink
-- `scripts/install-local.sh` on the current machine reports
-  `skill: /Users/bytedance/.codex/skills/goal-harness-project`
+- `scripts/install-local.sh` on the current machine reports a local
+  `goal-harness-project` skill install path
 - `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` now validates the
   installed wrapper with `goal-harness doctor`
-- `goal-harness status` for the local multi-project registry shows
-  `premium-ui-ai-search-rec-migration` as `unregistered_runtime_goal` with
-  controller readiness gates, while `tiger-team-data-worker-cache` remains out
-  of the attention queue as a watch-only legacy runtime record
+- `goal-harness status` for the local multi-project registry shows a newly
+  connected zero-start project as `unregistered_runtime_goal` with controller
+  readiness gates, while watch-only legacy runtime records remain out of the
+  attention queue
 - `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` writes the
   `export PATH="$HOME/.local/bin:$PATH"` shell profile block and the installed
   wrapper passes `goal-harness doctor`
@@ -305,8 +310,8 @@ private project context.
   synthetic runtime directory under `<runtime-root>/archived-goals/`
 - `goal-harness archive-runtime --goal-id registered-goal` rejects a synthetic
   registry member unless `--allow-registered` is explicitly supplied
-- `goal-harness archive-runtime --goal-id premium-ui-ai-search-rec-migration`
-  dry-runs the current unregistered runtime goal cleanup without moving files
+- `goal-harness archive-runtime --goal-id zero-start-project-goal` dry-runs a
+  current unregistered runtime goal cleanup without moving files
 - `goal-harness connect --goal-doc docs/GOAL.md` records
   `authority_sources[0].path == "docs/GOAL.md"` in the registry and renders
   `Primary goal document: docs/GOAL.md` in the initial state

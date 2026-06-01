@@ -83,12 +83,17 @@ Status treats these as Codex-ready action:
 - `inspect_result`
 - `needs_more_read_only_evidence`
 - `needs_validation`
+- `read_only_project_map`
 - `run_validation`
 - `state_refreshed`
 
 `state_refreshed` means a controller updated active state, ledger, or planning
 docs without running a project adapter. The next Codex action is to inspect the
 refreshed state and continue one bounded progress segment.
+
+`read_only_project_map` means a connected read-only project now has a standard
+map run from `goal-harness read-only-map`. The next Codex action should use the
+map's recommended action or upgrade to a project-specific adapter when needed.
 
 Status treats `blocked_by_safety` as high-severity user/controller attention.
 

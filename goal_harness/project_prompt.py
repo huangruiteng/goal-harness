@@ -209,7 +209,12 @@ def render_prompt_text(
 4. 确认 `.goal-harness/registry.json` 和 `.codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md` 已创建或更新。
    如果目标状态包含私有证据，把 `.goal-harness/` 和 `.codex/goals/` 加入该项目 `.gitignore`。
    `goal-harness connect` 默认会同步到共享全局 registry；不要手动编辑其他项目的 registry。
-5. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、不同步外部系统、不要写生产状态，除非目标文档明确授权。
+5. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、不同步外部系统、不要写生产状态，除非目标文档明确授权。通用接入优先跑：
+
+```bash
+goal-harness read-only-map --goal-id {goal_id}
+```
+
 6. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的 adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh run：
 
 ```bash

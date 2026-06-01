@@ -34,6 +34,7 @@ import {
   ControllerReadiness,
   GlobalRegistryHealth,
   HumanReward,
+  ProjectMap,
   RewardDryRunResponse,
   RunGoal,
   RunRecord,
@@ -552,6 +553,28 @@ function ControllerReadinessSummary({ readiness }: { readiness: ControllerReadin
   );
 }
 
+function ProjectMapSummary({ projectMap }: { projectMap: ProjectMap }) {
+  const sections = `${projectMap.sections_found ?? 0}/${projectMap.sections_checked ?? 0}`;
+  const files = `${projectMap.files_present ?? 0}/${projectMap.files_checked ?? 0}`;
+  return (
+    <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm dark:border-indigo-900 dark:bg-indigo-950">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="info">Project map</Badge>
+        {projectMap.adapter_kind ? (
+          <span className="font-medium text-indigo-950 dark:text-indigo-100">{projectMap.adapter_kind}</span>
+        ) : null}
+        {projectMap.adapter_status ? <Badge variant="neutral">{projectMap.adapter_status}</Badge> : null}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+        <Badge variant="neutral">sources {projectMap.authority_source_count ?? 0}</Badge>
+        <Badge variant="neutral">guards {projectMap.guard_count ?? 0}</Badge>
+        <Badge variant="info">sections {sections}</Badge>
+        <Badge variant="info">files {files}</Badge>
+      </div>
+    </div>
+  );
+}
+
 function LatestRun({ run }: { run: RunRecord }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
@@ -569,6 +592,7 @@ function LatestRun({ run }: { run: RunRecord }) {
       ) : null}
       {run.controller_readiness ? <ControllerReadinessSummary readiness={run.controller_readiness} /> : null}
       {run.human_reward ? <HumanRewardSummary reward={run.human_reward} /> : null}
+      {run.project_map ? <ProjectMapSummary projectMap={run.project_map} /> : null}
     </div>
   );
 }

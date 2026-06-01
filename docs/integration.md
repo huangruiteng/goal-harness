@@ -188,6 +188,21 @@ When `--recommended-action` is omitted, the command derives the compact action
 from the first public-safe line in the active state's `## Next Action`, falling
 back to a generic refresh action if that line contains private-looking content.
 
+For a newly connected read-only project, append a generic map run before
+building a custom adapter:
+
+```bash
+goal-harness read-only-map --goal-id project-goal
+```
+
+The command accepts goals whose adapter kind is `read_only_project_map_v0` or a
+compatible `*_read_only_map_v0` variant, and whose adapter status is connected
+for read-only work. It inspects only registry metadata, the active state
+sections, and a bounded file-existence inventory. The compact run index records
+`classification=read_only_project_map`, public-safe `recommended_action`,
+artifact availability, and map counts; raw project evidence stays in the local
+private runtime payload.
+
 If a runtime directory belongs to an old goal that is no longer in the registry,
 preview archive cleanup before changing anything:
 

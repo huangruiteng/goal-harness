@@ -145,6 +145,18 @@ show the actual next move instead of a generic refresh notice. Use
 `--recommended-action` when the state contains only private or overly detailed
 next-action text.
 
+Append a generic read-only project map for a connected project:
+
+```bash
+goal-harness read-only-map --goal-id your-project-goal
+```
+
+`read-only-map` is the first standard run for projects connected with
+`adapter.kind=read_only_project_map_v0` or a compatible `*_read_only_map_v0`
+adapter. It reads the registry, active state, and a small file-existence
+inventory, then writes a compact `read_only_project_map` run without mutating
+the project.
+
 `connect` and `refresh-state` automatically merge the project registry into the
 shared local global registry at `~/.codex/goal-harness/registry.global.json`.
 If a command is run outside any project registry, Goal Harness falls back to

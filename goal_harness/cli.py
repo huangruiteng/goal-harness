@@ -23,6 +23,11 @@ from .project_prompt import (
     build_new_project_prompt,
     render_new_project_prompt_markdown,
 )
+from .project_map import (
+    DEFAULT_PROJECT_MAP_CLASSIFICATION,
+    read_only_project_map_run,
+    render_read_only_project_map_markdown,
+)
 from .registry import inspect_registry, render_registry_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
 from .state_refresh import (
@@ -175,6 +180,40 @@ def main(argv: list[str] | None = None) -> int:
         "--no-global-sync",
         action="store_true",
         help="Do not refresh the shared global registry after writing the state run.",
+    )
+
+    read_only_map_parser = sub.add_parser(
+        "read-only-map",
+        help="Append a generic read-only project-map run for a connected project.",
+    )
+    read_only_map_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Goal id whose project should be mapped.",
+    )
+    read_only_map_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
+    read_only_map_parser.add_argument(
+        "--state-file",
+        help="Active goal state path. Defaults to the registry goal state_file.",
+    )
+    read_only_map_parser.add_argument(
+        "--classification",
+        default=DEFAULT_PROJECT_MAP_CLASSIFICATION,
+        help=f"Project-map run classification. Defaults to {DEFAULT_PROJECT_MAP_CLASSIFICATION}.",
+    )
+    read_only_map_parser.add_argument(
+        "--recommended-action",
+        help="Public-safe next action. Defaults to the first public-safe line from the active state's Next Action.",
+    )
+    read_only_map_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the project-map payload without appending.",
+    )
+    read_only_map_parser.add_argument(
+        "--no-global-sync",
+        action="store_true",
+        help="Do not refresh the shared global registry after writing the project-map run.",
     )
 
     reward_parser = sub.add_parser(
@@ -410,6 +449,33 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_state_refresh_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "read-only-map":
+        try:
+            payload = read_only_project_map_run(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                goal_id=args.goal_id,
+                project=Path(args.project).expanduser() if args.project else None,
+                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                classification=args.classification,
+                recommended_action=args.recommended_action,
+                dry_run=bool(args.dry_run),
+                sync_global=not bool(args.no_global_sync),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "goal_id": args.goal_id,
+                "classification": args.classification,
+                "appended": False,
+                "dry_run": bool(args.dry_run),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_read_only_project_map_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "reward":

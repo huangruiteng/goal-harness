@@ -38,6 +38,17 @@ export const controllerReadinessSchema = z.object({
   gates: z.array(controllerReadinessGateSchema).optional().default([]),
 });
 
+export const projectMapSchema = z.object({
+  adapter_kind: z.string().optional().nullable(),
+  adapter_status: z.string().optional().nullable(),
+  authority_source_count: z.number().optional().nullable(),
+  guard_count: z.number().optional().nullable(),
+  sections_found: z.number().optional().nullable(),
+  sections_checked: z.number().optional().nullable(),
+  files_present: z.number().optional().nullable(),
+  files_checked: z.number().optional().nullable(),
+});
+
 export const runRecordSchema = z.object({
   generated_at: z.string(),
   goal_id: z.string(),
@@ -51,6 +62,7 @@ export const runRecordSchema = z.object({
   markdown_exists: z.boolean().optional().default(false),
   human_reward: humanRewardSchema.optional().nullable(),
   controller_readiness: controllerReadinessSchema.optional().nullable(),
+  project_map: projectMapSchema.optional().nullable(),
 });
 
 export const runGoalSchema = z.object({
@@ -180,6 +192,7 @@ export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
+export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;

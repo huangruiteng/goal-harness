@@ -68,6 +68,17 @@ public-safe entry into `~/.codex/goal-harness/registry.global.json`.
 If the goal state or registry contains private evidence, add `.goal-harness/`
 and `.codex/goals/` to that project's `.gitignore`.
 
+For a generic read-only connection, create the first non-generic map run:
+
+```bash
+goal-harness read-only-map --goal-id <STABLE_GOAL_ID>
+```
+
+This reads registry metadata, the active state, and a bounded project-file
+inventory, then appends a `read_only_project_map` run. Use it before writing a
+project-specific adapter when the dashboard would otherwise stay on
+`state_refreshed` or `connected_without_run`.
+
 ## Refresh State After Non-Adapter Work
 
 If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,

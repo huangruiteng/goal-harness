@@ -237,6 +237,26 @@ If the refresh command was run without `--recommended-action`, the compact
 active state's `## Next Action`; otherwise it falls back to a generic refresh
 notice.
 
+`status=read_only_project_map` is emitted when the latest compact run came from
+`goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready
+work with a map-specific badge or drill-down: the project is connected and has
+a read-only map run, but the next useful action still needs a controller or
+agent to use that map. Compact run records may include a public-safe
+`project_map` object:
+
+```json
+{
+  "adapter_kind": "read_only_project_map_v0",
+  "adapter_status": "connected-read-only",
+  "authority_source_count": 1,
+  "guard_count": 3,
+  "sections_found": 4,
+  "sections_checked": 7,
+  "files_present": 4,
+  "files_checked": 9
+}
+```
+
 The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
 defaults to dry-run and requires `--execute` before moving the runtime directory
 under `<runtime-root>/archived-goals/`.

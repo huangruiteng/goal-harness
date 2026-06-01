@@ -98,7 +98,11 @@ goal-harness new-project-prompt \
    `goal-harness connect` 默认会同步到共享全局 registry；不要手动编辑其他
    项目的 registry。
 4. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、
-   不同步外部系统、不要写生产状态，除非目标文档明确授权。
+   不同步外部系统、不要写生产状态，除非目标文档明确授权。通用接入优先跑：
+
+   ```bash
+   goal-harness read-only-map --goal-id <STABLE_GOAL_ID>
+   ```
 5. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的
    adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh
    run：

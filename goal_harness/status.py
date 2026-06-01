@@ -18,6 +18,7 @@ CODEX_READY_CLASSIFICATIONS = {
     "inspect_result",
     "needs_more_read_only_evidence",
     "needs_validation",
+    "read_only_project_map",
     "run_validation",
     "state_refreshed",
 }
@@ -46,6 +47,7 @@ RUN_COMPACT_FIELDS = (
     "active_task_count",
     "active_priorities",
     "cache_check",
+    "project_map",
     "json_exists",
     "markdown_exists",
 )
