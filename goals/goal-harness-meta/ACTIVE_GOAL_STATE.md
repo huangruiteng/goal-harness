@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:18:18+08:00
+updated_at: 2026-06-02T05:25:27+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,26 @@ private project context.
 
 ## Next Action
 
-- Validate the live `agent-harness-main-control` planned opt-in flow against
-  the public review-packet smoke: dashboard/status should expose one review
-  packet with the Chinese operator question, local `operator-gate --dry-run`
-  draft, and project-agent `read-only-map --dry-run` command in the same order.
-  If the live packet matches, record a concise user-facing handoff note; do not
-  append a real gate or run a real map.
+- Document or surface the Review Packet source-of-truth boundary as a
+  public-safe contract note: the dashboard/operator view owns the human
+  decision, while the project-agent command is only the after-approval dry-run
+  execution path. Keep this to docs/status-contract wording unless a UI gap is
+  found; do not append a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:25:27+08:00: Validated the live planned high-complexity
+  opt-in status against the public Review Packet smoke contract. Live status
+  exposes one operator question, the local `operator-gate --dry-run` draft
+  before the project-agent command, and the project-agent command remains the
+  read-only map dry-run path. A private handoff note was recorded outside the
+  public repo. Validation: live packet assertion passed; `refresh-state`
+  appended a `state_refreshed` run; dashboard local status JSON was refreshed;
+  aggregate public smokes passed; Python compile passed; public contract check
+  passed; `git diff --check` passed. Critic: the immediate human-decision
+  ordering is healthy, but the source-of-truth boundary should be made explicit
+  in the public contract so future UI/CLI work does not make users watch every
+  project-agent thread.
 - 2026-06-02T05:18:18+08:00: Added a public-safe dashboard Review Packet smoke
   for the planned high-complexity controller opt-in path. The smoke scans the
   dashboard source for the operator-facing packet section order, verifies the
