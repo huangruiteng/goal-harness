@@ -107,15 +107,37 @@ export const statusPayloadSchema = z.object({
   }),
 });
 
+export const rewardDryRunResponseSchema = z.object({
+  ok: z.boolean(),
+  dry_run: z.boolean().optional().default(true),
+  appended: z.boolean().optional().default(false),
+  goal_id: z.string().optional().nullable(),
+  raw_index_records_before: z.number().optional().nullable(),
+  selected_run: z.object({
+    generated_at: z.string().optional().nullable(),
+    classification: z.string().optional().nullable(),
+    recommended_action: z.string().optional().nullable(),
+    json_exists: z.boolean().optional().nullable(),
+    markdown_exists: z.boolean().optional().nullable(),
+  }).optional().nullable(),
+  human_reward: humanRewardSchema.optional().nullable(),
+  error: z.string().optional().nullable(),
+});
+
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
+export type RewardDryRunResponse = z.infer<typeof rewardDryRunResponseSchema>;
 
 export function parseStatusPayload(payload: unknown): StatusPayload {
   return statusPayloadSchema.parse(payload);
+}
+
+export function parseRewardDryRunResponse(payload: unknown): RewardDryRunResponse {
+  return rewardDryRunResponseSchema.parse(payload);
 }
 
 export function formatStatusError(error: unknown): string {

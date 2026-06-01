@@ -166,6 +166,11 @@ Then load `http://127.0.0.1:8765/status.json` from the dashboard source
 control. The command binds to `127.0.0.1` by default and is meant for local
 operator dashboards, not public hosting.
 
+The same loopback server exposes `POST /reward/dry-run` so the dashboard can
+validate a selected goal/run reward draft before any write path exists. The
+dry-run response is compact and does not append to `index.jsonl`; recording a
+real reward still uses the `goal-harness reward` CLI command.
+
 The status command combines contract health and run history into an attention
 queue. Each queue item says which goal needs attention, who it is waiting on,
 how severe the item is, and exactly one recommended action.

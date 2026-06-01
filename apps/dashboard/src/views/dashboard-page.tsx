@@ -33,11 +33,13 @@ import {
   QueueItem,
   ControllerReadiness,
   HumanReward,
+  RewardDryRunResponse,
   RunGoal,
   RunRecord,
   StatusPayload,
   exampleStatusPayload,
   formatStatusError,
+  parseRewardDryRunResponse,
   parseStatusPayload,
 } from "../data/status";
 import { Badge } from "../components/ui/badge";
@@ -107,6 +109,11 @@ type DataSource =
   | { kind: "file"; label: string };
 
 const defaultLiveStatusUrl = "http://127.0.0.1:8765/status.json";
+const rewardOptions = ["positive", "mixed", "neutral", "negative"] as const;
+const inputClassName =
+  "h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500";
+
+type RewardValue = (typeof rewardOptions)[number];
 
 type GoalDirectoryRow = {
   goal: RunGoal;
@@ -141,25 +148,49 @@ function buildRewardCommand({
   registry,
   runtimeRoot,
   runGeneratedAt,
+  decision,
+  reward,
+  reasonSummary,
+  followUp,
 }: {
   goalId: string;
   registry: string;
   runtimeRoot: string;
   runGeneratedAt: string;
+  decision: string;
+  reward: RewardValue;
+  reasonSummary: string;
+  followUp: string;
 }) {
-  return [
+  const lines = [
     "goal-harness \\",
     `  --registry ${shellQuote(registry)} \\`,
     `  --runtime-root ${shellQuote(runtimeRoot)} \\`,
     "  reward \\",
     `  --goal-id ${shellQuote(goalId)} \\`,
     `  --run-generated-at ${shellQuote(runGeneratedAt)} \\`,
-    "  --decision '<decision_label>' \\",
-    "  --reward positive \\",
-    "  --reason-summary '<public_safe_reason>' \\",
-    "  --follow-up '<next_condition>' \\",
-    "  --dry-run",
-  ].join("\n");
+    `  --decision ${shellQuote(decision || "decision_label")} \\`,
+    `  --reward ${shellQuote(reward)} \\`,
+    `  --reason-summary ${shellQuote(reasonSummary || "public_safe_reason")} \\`,
+  ];
+  if (followUp.trim()) {
+    lines.push(`  --follow-up ${shellQuote(followUp.trim())} \\`);
+  }
+  lines.push("  --dry-run");
+  return lines.join("\n");
+}
+
+function buildRewardDryRunUrl(source: DataSource) {
+  if (source.kind !== "url" || !/^https?:\/\//i.test(source.label)) {
+    return null;
+  }
+  try {
+    const url = new URL(source.label);
+    const isLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
+    return isLoopback ? `${url.origin}/reward/dry-run` : null;
+  } catch {
+    return null;
+  }
 }
 
 function latestRunSortValue(run?: RunRecord) {
@@ -514,20 +545,71 @@ function RewardCommandDraft({
   goal,
   registry,
   runtimeRoot,
+  dryRunUrl,
 }: {
   goal?: RunGoal;
   registry: string;
   runtimeRoot: string;
+  dryRunUrl: string | null;
 }) {
   const latestRun = goal?.latest_runs[0];
+  const [decision, setDecision] = useState("review_latest_run");
+  const [reward, setReward] = useState<RewardValue>("neutral");
+  const [reasonSummary, setReasonSummary] = useState("Dashboard dry-run validation only");
+  const [followUp, setFollowUp] = useState("Replace before recording a real reward");
+  const [dryRunResult, setDryRunResult] = useState<RewardDryRunResponse | null>(null);
+  const [dryRunError, setDryRunError] = useState<string | null>(null);
+  const [isDryRunning, setIsDryRunning] = useState(false);
   const command = goal && latestRun
     ? buildRewardCommand({
         goalId: goal.id,
         registry,
         runtimeRoot,
         runGeneratedAt: latestRun.generated_at,
+        decision,
+        reward,
+        reasonSummary,
+        followUp,
       })
     : "";
+  const canDryRun = Boolean(command && dryRunUrl && decision.trim() && reasonSummary.trim());
+
+  useEffect(() => {
+    setDryRunResult(null);
+    setDryRunError(null);
+  }, [goal?.id, latestRun?.generated_at]);
+
+  async function runDryRunCheck() {
+    if (!goal || !latestRun || !dryRunUrl) {
+      return;
+    }
+    setIsDryRunning(true);
+    setDryRunError(null);
+    setDryRunResult(null);
+    try {
+      const response = await fetch(dryRunUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal_id: goal.id,
+          run_generated_at: latestRun.generated_at,
+          decision,
+          reward,
+          reason_summary: reasonSummary,
+          follow_up: followUp.trim() || undefined,
+        }),
+      });
+      const payload = parseRewardDryRunResponse(await response.json());
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setDryRunResult(payload);
+    } catch (error) {
+      setDryRunError(formatStatusError(error));
+    } finally {
+      setIsDryRunning(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -536,11 +618,51 @@ function RewardCommandDraft({
         <span className="font-medium">Reward CLI Draft</span>
         <Badge variant="info">local-only</Badge>
         <Badge variant={command ? "warning" : "neutral"}>{command ? "dry-run" : "needs run"}</Badge>
+        {dryRunResult?.ok ? <Badge variant="success">validated</Badge> : null}
       </div>
       {command ? (
-        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
-          {command}
-        </pre>
+        <div className="mt-3 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px]">
+            <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
+              <span>Decision</span>
+              <input className={inputClassName} onChange={(event) => setDecision(event.target.value)} value={decision} />
+            </label>
+            <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
+              <span>Reward</span>
+              <Select className="w-full" value={reward} onChange={(event) => setReward(event.target.value as RewardValue)}>
+                {rewardOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
+          <label className="block space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
+            <span>Reason summary</span>
+            <input className={inputClassName} onChange={(event) => setReasonSummary(event.target.value)} value={reasonSummary} />
+          </label>
+          <label className="block space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
+            <span>Follow-up</span>
+            <input className={inputClassName} onChange={(event) => setFollowUp(event.target.value)} value={followUp} />
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button disabled={!canDryRun || isDryRunning} onClick={() => void runDryRunCheck()} size="sm">
+              {isDryRunning ? <RefreshCw className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+              Dry-run Check
+            </Button>
+            <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "local API" : "manual CLI"}</Badge>
+            {dryRunError ? <Badge variant="danger">{dryRunError.slice(0, 96)}</Badge> : null}
+          </div>
+          {dryRunResult?.ok ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
+              {dryRunResult.goal_id} · {dryRunResult.selected_run?.generated_at} · appended={String(dryRunResult.appended)}
+            </div>
+          ) : null}
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
+            {command}
+          </pre>
+        </div>
       ) : (
         <p className="mt-3 text-sm text-slate-500 dark:text-zinc-400">No compact run record to reward.</p>
       )}
@@ -553,11 +675,13 @@ function RunHistoryPanel({
   queueItem,
   registry,
   runtimeRoot,
+  rewardDryRunUrl,
 }: {
   goal?: RunGoal;
   queueItem?: QueueItem;
   registry: string;
   runtimeRoot: string;
+  rewardDryRunUrl: string | null;
 }) {
   const latestRuns = goal?.latest_runs ?? [];
   const artifactReady = latestRuns.filter((run) => run.json_exists && run.markdown_exists).length;
@@ -619,7 +743,12 @@ function RunHistoryPanel({
             </div>
           ) : null}
 
-          <RewardCommandDraft goal={goal} registry={registry} runtimeRoot={runtimeRoot} />
+          <RewardCommandDraft
+            dryRunUrl={rewardDryRunUrl}
+            goal={goal}
+            registry={registry}
+            runtimeRoot={runtimeRoot}
+          />
 
           <div className="space-y-2">
             {latestRuns.length === 0 ? (
@@ -721,6 +850,7 @@ export function DashboardPage() {
     () => buildGoalDirectoryRows(runHistory.goals, queue.items),
     [runHistory.goals, queue.items],
   );
+  const rewardDryRunUrl = useMemo(() => buildRewardDryRunUrl(source), [source]);
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -1018,6 +1148,7 @@ export function DashboardPage() {
                     goal={selectedGoal}
                     queueItem={selectedQueueItem}
                     registry={payload.registry}
+                    rewardDryRunUrl={rewardDryRunUrl}
                     runtimeRoot={payload.runtime_root}
                   />
                 </div>

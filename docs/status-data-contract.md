@@ -17,6 +17,12 @@ The default endpoint is `http://127.0.0.1:8765/status.json`. It is intended for
 local dashboard development and includes CORS headers so a Vite app on another
 localhost port can fetch it.
 
+The same local server exposes `POST /reward/dry-run` for dashboard reward
+validation. It accepts the selected `goal_id`, `run_generated_at`, compact
+reward fields, and public-safe summary text, then returns a compact validation
+result with `appended=false`. It does not mutate the run index and does not
+return private artifact paths.
+
 ## Command
 
 ```bash
@@ -249,6 +255,10 @@ A first useful UI can be built from the export alone:
   enough to generate a local `goal-harness reward --dry-run` command. The
   dashboard should not append feedback directly until the local-only evidence
   boundary is explicitly implemented.
+- Reward dry-run check: when the dashboard is loaded from a loopback status
+  server, it may validate the same draft through `POST /reward/dry-run` and
+  display the compact result. This is still a validation path, not a browser
+  write path.
 
 Suggested badge mapping:
 

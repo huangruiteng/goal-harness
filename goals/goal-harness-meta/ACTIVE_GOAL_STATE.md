@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T15:00:00+08:00
+updated_at: 2026-06-01T15:08:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Implement a guarded local dashboard reward submit path only after the CLI
-  draft flow can round-trip through dry-run validation without copying private
-  evidence.
+- Design an explicit opt-in browser append path only after the local reward
+  dry-run endpoint has been exercised against real operator text and still
+  preserves the public/private evidence boundary.
 
 ## Recent Progress
 
@@ -103,6 +103,11 @@ private project context.
   compact run timestamp, registry, and runtime root; defaults to `--dry-run`;
   and keeps browser-side reward writes out of scope until the same safety checks
   are enforced locally.
+- 2026-06-01T15:08:00+08:00: Added local reward dry-run validation for the
+  dashboard. `goal-harness serve-status` now exposes `POST /reward/dry-run`,
+  the React run-history panel can validate selected goal/run reward drafts
+  against that loopback endpoint, and the response is compact with
+  `appended=false` and no private artifact paths.
 
 ## Validation
 
@@ -145,6 +150,11 @@ private project context.
 - Browser smoke: verify `Reward CLI Draft` appears for a selected goal with a
   compact run, includes `--dry-run` and `--run-generated-at`, and selected goals
   without compact runs show `needs run`
+- `curl POST /reward/dry-run` against a synthetic loopback server returns
+  `ok=true`, `appended=false`, and leaves the run index row count unchanged
+- Browser smoke: load the React dashboard from a loopback `statusUrl`, click
+  `Dry-run Check`, and verify the reward panel shows `validated` with
+  `appended=false`
 
 ## Guards
 

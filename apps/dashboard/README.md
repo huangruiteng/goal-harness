@@ -23,6 +23,10 @@ a `Reward CLI Draft`. It is intentionally local-only and defaults to
 `--dry-run`; browser writes to private runtime indexes are not part of this
 surface yet.
 
+When the dashboard is loaded from the loopback `Live` source, the same panel can
+send that draft to `POST /reward/dry-run` for local validation. The endpoint
+returns a compact validation result and never appends to the run index.
+
 ## Load Live Status
 
 Start a local status server from the project you want to inspect:
@@ -40,6 +44,10 @@ http://127.0.0.1:8765/status.json
 
 The status server binds to `127.0.0.1` by default and sends no-store JSON with
 local CORS headers for the Vite dashboard.
+
+It also serves `POST /reward/dry-run` for validating the selected goal/run and
+public-safe reward text. This is a dry-run endpoint only; recording feedback
+still goes through `goal-harness reward`.
 
 ## Load Static Status
 

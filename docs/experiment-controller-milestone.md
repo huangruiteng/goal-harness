@@ -97,6 +97,10 @@ latest run. That draft should default to `--dry-run`; the operator still records
 the judgment through the CLI until browser-side writes can enforce the same
 local-only boundary and public-safe text checks.
 
+For local dashboards backed by `goal-harness serve-status`, the draft can also
+round-trip through `POST /reward/dry-run`. That endpoint validates the selected
+goal/run and compact reward text but always returns `appended=false`.
+
 ## Controller Readiness Model
 
 Readiness is different from reward. It answers "what level of controller
@@ -155,6 +159,7 @@ The current public slice is a read-only experiment-controller contract:
 - compact reward-event schema and status export field;
 - dashboard badge and run-history panel showing whether the latest run has
   controller readiness and human reward;
+- dashboard reward dry-run validation through the loopback status server;
 - example sanitized run and reward files.
 
 Private projects can opt into the adapter by writing a project-local state file
