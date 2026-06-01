@@ -126,6 +126,20 @@ Suggested badge mapping:
 - `severity=action`: needs a decision or bounded work segment.
 - `severity=watch`: no immediate action; wait for evidence.
 
+## Static Dashboard Demo
+
+The repository includes a no-dependency renderer that turns any status JSON
+export into a static HTML dashboard:
+
+```bash
+goal-harness --format json status > /tmp/goal-status.json
+python3 examples/render-status-dashboard.py /tmp/goal-status.json /tmp/goal-status.html
+```
+
+The generated page groups queue items into user/controller, Codex-ready, and
+external-evidence lanes. It is a small demo for local inspection and UI
+prototyping; it is not a hosted web app.
+
 ## Adapter Responsibilities
 
 Adapters should write compact run index records that include:

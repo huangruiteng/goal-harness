@@ -114,6 +114,13 @@ Use JSON output from scripts, heartbeats, or pre-tick adapters:
 goal-harness --format json check --scan-root .
 ```
 
+Render a static local dashboard from status JSON:
+
+```bash
+goal-harness --format json status > /tmp/goal-status.json
+python3 ~/goal-harness/examples/render-status-dashboard.py /tmp/goal-status.json /tmp/goal-status.html
+```
+
 For a project with many unrelated files, scan only the public files you intend
 to publish:
 
