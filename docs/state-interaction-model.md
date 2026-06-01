@@ -109,6 +109,36 @@ details.
 | Status export | CLI/status layer | Dashboard, pre-tick, heartbeats | `goal-harness status` | Agent-facing machine contract and dashboard input. |
 | Dashboard UI state | Browser session | User | Browser URL/search state | Filters, selected goal, selected run; not durable goal truth. |
 
+## Priority Stack And Next Action Selection
+
+`Next Action` should be derived from a goal priority stack, not from the last
+thing the previous executor happened to touch.
+
+For the v0.1 control-plane milestone, use this default priority stack:
+
+| Priority | Meaning | Typical surfaces |
+| --- | --- | --- |
+| P0 | Make the multi-project control loop reliable. | registry, global registry, active state, run history, authority coverage, public/private boundary, operator gate, human reward, project-agent packet, compute quota, real adapter proof |
+| P1 | Make the product easier to understand and use. | dashboard interaction, operator copy, share documents, launch copy, exploration lane design |
+| P2 | Extend the platform after the loop works. | deeper scheduling, richer dreaming, refactor proposals, more adapters, benchmark expansion |
+
+Within P0, choose work in this order:
+
+1. state truth and safety;
+2. human decision loop;
+3. project-agent execution loop;
+4. multi-project allocation through compute quota;
+5. real adapter proof.
+
+This order prevents two common failures. First, a compute quota planner should
+not spend time on a goal whose status is stale, unsafe, or built from the wrong
+authority source. Second, dashboard polish should not replace the durable
+reward or operator-gate state that later project agents need.
+
+A controller tick should record why its selected next action won over nearby
+P0/P1/P2 candidates. The reason can be compact, but it should name the priority
+level and the stale-state or operator-cost failure it prevents.
+
 ## State Flow
 
 ```mermaid

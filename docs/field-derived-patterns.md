@@ -222,6 +222,8 @@ Goal Harness should actively prevent these patterns:
   compact history;
 - overwriting managed external sources without checking remote comments or
   reviewer marks;
+- letting the last completed slice choose the next action without checking the
+  goal's P0/P1/P2 priority stack;
 - handing a project agent a command before recording the operator gate that
   makes the command valid.
 
@@ -239,4 +241,6 @@ These field patterns imply four concrete Goal Harness surfaces:
 4. **Handoff packet discipline**: every cross-thread packet should be short,
    public-safe, and gated; packets are collaboration affordances, not durable
    approval.
-
+5. **Priority-stack next action**: every controller tick should explain whether
+   the selected next action is P0, P1, or P2, and why it outranks adjacent
+   candidates.
