@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:07:45+08:00
+updated_at: 2026-06-02T05:18:18+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,28 @@ private project context.
 
 ## Next Action
 
-- Validate the planned high-complexity opt-in review package with a sanitized
-  example or live status path: it should show one Chinese operator question,
-  the `operator-gate --dry-run` recording draft, and the target-agent
-  `read-only-map --dry-run` command in the right order. If this is not covered
-  by a public-safe fixture, add the smallest fixture or smoke; do not append a
-  real gate or run a real map.
+- Validate the live `agent-harness-main-control` planned opt-in flow against
+  the public review-packet smoke: dashboard/status should expose one review
+  packet with the Chinese operator question, local `operator-gate --dry-run`
+  draft, and project-agent `read-only-map --dry-run` command in the same order.
+  If the live packet matches, record a concise user-facing handoff note; do not
+  append a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:18:18+08:00: Added a public-safe dashboard Review Packet smoke
+  for the planned high-complexity controller opt-in path. The smoke scans the
+  dashboard source for the operator-facing packet section order, verifies the
+  Chinese controller question/reply/boundary text, verifies the local
+  `operator-gate --dry-run` and target-agent `read-only-map --dry-run` builders,
+  and builds a sanitized packet fixture to assert the human question, local
+  gate dry-run draft, and project-agent command appear in that order. The
+  aggregate smoke runner now executes both Review Packet and status Markdown
+  smokes. Validation: `python3 examples/run-smokes.py` passed with 2 smoke
+  scripts; Python compile passed; public contract check passed; `git diff
+  --check` passed. Critic: this protects the key human-decision ordering without
+  a frontend refactor, but it still source-scans the dashboard instead of
+  importing a pure packet builder.
 - 2026-06-02T05:07:45+08:00: Added a tiny aggregate public smoke runner at
   `examples/run-smokes.py`. The runner discovers dependency-free
   `examples/*-smoke.py` scripts, prints each script label before execution, and
