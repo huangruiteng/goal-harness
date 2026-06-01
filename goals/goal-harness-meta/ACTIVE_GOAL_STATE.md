@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:59:47+08:00
+updated_at: 2026-06-02T06:11:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,28 @@ private project context.
 
 ## Next Action
 
-- Do a browser-level check that the attention queue and selected controller
-  action card now show the tightened planned opt-in `recommended_action`:
-  operator judgment happens in Goal Harness first, and the project-agent
-  command is only the after-approval read-only map dry-run path. Keep this to
-  UI verification or tiny wording follow-up; do not append a real gate or run a
-  real map.
+- Move from human-decision copy polish to the project-agent execution loop:
+  add a tiny public smoke or contract note for the `operator_gate_approved`
+  path showing that, after approval is durably recorded, status exposes the
+  approved project-agent dry-run command as the next Codex/project-agent action.
+  Keep it fixture-based; do not append a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:11:00+08:00: Completed the browser-level check for the
+  tightened planned opt-in `recommended_action`. After rebuilding the static
+  dashboard and confirming `/status.local.json` contained the new action text,
+  Playwright opened the controller view for `agent-harness-main-control`.
+  Browser DOM eval returned `hasNewText=true`, `hasOldText=false`,
+  `selectedActionCardHasNewText=true`, and `attentionQueueRowHasNewText=true`.
+  The accessibility snapshot also showed the new action text in the selected
+  controller card, the attention queue row, and the run-detail queue action.
+  The only console error was a harmless missing `favicon.ico`. Validation:
+  dashboard production build passed with the existing >500 kB chunk warning;
+  static status JSON check passed; Playwright DOM and snapshot checks passed.
+  Critic: the planned opt-in human-decision surface is now aligned across
+  status, selected action, and attention queue. The next P0 gap is the
+  project-agent execution loop after an approval is actually recorded.
 - 2026-06-02T05:59:47+08:00: Tightened the planned controller opt-in
   `recommended_action` emitted by `goal-harness status` for planned
   `*_read_only_map_v0` adapters with no run yet. The status layer now says the
