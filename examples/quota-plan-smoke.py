@@ -14,10 +14,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.quota import build_quota_plan, render_quota_markdown  # noqa: E402
+from goal_harness.quota import build_quota_plan, build_quota_should_run, render_quota_markdown  # noqa: E402
 
 
-def goal(goal_id: str, *, compute: float) -> dict:
+def goal(
+    goal_id: str,
+    *,
+    compute: float,
+    spent_slots: int = 0,
+    allowed_slots: int | None = None,
+) -> dict:
+    allowed_slots = round(24 * compute) if allowed_slots is None else allowed_slots
     return {
         "id": goal_id,
         "status": "active",
@@ -28,8 +35,8 @@ def goal(goal_id: str, *, compute: float) -> dict:
         "quota": {
             "compute": compute,
             "window_hours": 24,
-            "allowed_slots": round(24 * compute),
-            "spent_slots": 0,
+            "allowed_slots": allowed_slots,
+            "spent_slots": spent_slots,
         },
         "latest_runs": [
             {
@@ -47,12 +54,16 @@ def attention(
     compute: float,
     state: str = "eligible",
     waiting_on: str = "codex",
+    spent_slots: int = 0,
+    allowed_slots: int | None = None,
 ) -> dict:
-    reason = (
-        "human or target-controller gate must clear before spending compute"
-        if state == "operator_gate"
-        else f"{compute:g} compute quota; eligible for the next automatic agent turn"
-    )
+    allowed_slots = round(24 * compute) if allowed_slots is None else allowed_slots
+    if state == "operator_gate":
+        reason = "human or target-controller gate must clear before spending compute"
+    elif state == "throttled":
+        reason = f"{compute:g} compute quota spent {spent_slots}/{allowed_slots} slots in this window"
+    else:
+        reason = f"{compute:g} compute quota; eligible for the next automatic agent turn"
     return {
         "goal_id": goal_id,
         "status": "state_refreshed" if waiting_on == "codex" else "operator_gate_deferred",
@@ -63,8 +74,8 @@ def attention(
         "quota": {
             "compute": compute,
             "window_hours": 24,
-            "allowed_slots": round(24 * compute),
-            "spent_slots": 0,
+            "allowed_slots": allowed_slots,
+            "spent_slots": spent_slots,
             "state": state,
             "reason": reason,
         },
@@ -76,12 +87,20 @@ def build_status_fixture() -> dict:
         goal("half-speed", compute=0.5),
         goal("full-speed", compute=1.0),
         goal("low-speed", compute=0.3),
+        goal("throttled-half", compute=0.5, spent_slots=12, allowed_slots=12),
         goal("needs-operator", compute=1.0),
     ]
     queue_items = [
         attention("half-speed", compute=0.5),
         attention("full-speed", compute=1.0),
         attention("low-speed", compute=0.3),
+        attention(
+            "throttled-half",
+            compute=0.5,
+            state="throttled",
+            spent_slots=12,
+            allowed_slots=12,
+        ),
         attention(
             "needs-operator",
             compute=1.0,
@@ -105,13 +124,14 @@ def write_cli_fixture(root: Path) -> tuple[Path, Path, Path]:
     runtime = root / "runtime"
     registry_path = project / ".goal-harness" / "registry.json"
     goal_specs = [
-        ("half-speed", 0.5, "state_refreshed"),
-        ("full-speed", 1.0, "state_refreshed"),
-        ("low-speed", 0.3, "state_refreshed"),
-        ("needs-operator", 1.0, "operator_gate_deferred"),
+        ("half-speed", 0.5, "state_refreshed", 0, None),
+        ("full-speed", 1.0, "state_refreshed", 0, None),
+        ("low-speed", 0.3, "state_refreshed", 0, None),
+        ("throttled-half", 0.5, "state_refreshed", 12, 12),
+        ("needs-operator", 1.0, "operator_gate_deferred", 0, None),
     ]
     registry_goals = []
-    for goal_id, compute, classification in goal_specs:
+    for goal_id, compute, classification, spent_slots, allowed_slots in goal_specs:
         state_file = f".codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md"
         state_path = project / state_file
         state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +157,16 @@ def write_cli_fixture(root: Path) -> tuple[Path, Path, Path]:
                     "status": "connected-read-only",
                 },
                 "authority_sources": [],
-                "quota": {"compute": compute, "window_hours": 24},
+                "quota": {
+                    key: value
+                    for key, value in {
+                        "compute": compute,
+                        "window_hours": 24,
+                        "spent_slots": spent_slots,
+                        "allowed_slots": allowed_slots,
+                    }.items()
+                    if value is not None
+                },
             }
         )
         runs_dir = runtime / "goals" / goal_id / "runs"
@@ -223,22 +252,43 @@ def run_cli_quota_plan(root: Path) -> tuple[dict, str]:
 def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
     eligible_ids = [item["goal_id"] for item in plan["groups"]["eligible"]]
     operator_gate_ids = [item["goal_id"] for item in plan["groups"]["operator_gate"]]
+    throttled_ids = [item["goal_id"] for item in plan["groups"]["throttled"]]
 
     assert plan["summary"]["next_automatic_turn"] == "full-speed", plan
     assert plan["next_automatic_turn"]["goal_id"] == "full-speed", plan
     assert eligible_ids == ["full-speed", "half-speed", "low-speed"], eligible_ids
     assert operator_gate_ids == ["needs-operator"], operator_gate_ids
+    assert throttled_ids == ["throttled-half"], throttled_ids
     assert "needs-operator" not in eligible_ids, eligible_ids
+    assert "throttled-half" not in eligible_ids, eligible_ids
     if markdown is not None:
         assert "next_automatic_turn=full-speed" in markdown, markdown
         assert "### operator_gate" in markdown, markdown
+        assert "### throttled" in markdown, markdown
+        assert "`throttled-half`" in markdown, markdown
         assert markdown.index("`full-speed`") < markdown.index("`half-speed`") < markdown.index("`low-speed`"), markdown
 
 
+def assert_throttled_should_run(status_payload: dict) -> None:
+    payload = build_quota_should_run(status_payload, goal_id="throttled-half")
+    quota = payload["quota"]
+
+    assert payload["ok"] is True, payload
+    assert payload["decision"] == "skip", payload
+    assert payload["should_run"] is False, payload
+    assert payload["state"] == "throttled", payload
+    assert payload["plan_summary"]["next_automatic_turn"] == "full-speed", payload
+    assert quota["spent_slots"] == 12, payload
+    assert quota["allowed_slots"] == 12, payload
+    assert "spent 12/12" in payload["reason"], payload
+
+
 def main() -> int:
-    plan = build_quota_plan(build_status_fixture(), mode="plan")
+    status_payload = build_status_fixture()
+    plan = build_quota_plan(status_payload, mode="plan")
     markdown = render_quota_markdown(plan)
     assert_plan_shape(plan, markdown)
+    assert_throttled_should_run(status_payload)
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:
         cli_plan, cli_markdown = run_cli_quota_plan(Path(tmp))
     assert_plan_shape(cli_plan, cli_markdown)

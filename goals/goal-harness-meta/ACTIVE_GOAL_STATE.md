@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T07:22:35+08:00
+updated_at: 2026-06-02T07:29:50+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- Add a tiny public fixture for quota throttling: a goal with
-  `quota.compute=0.5` and spent slots at its allowed limit should land in the
-  `throttled` lane, return `should_run=false`, and stay out of
-  `summary.next_automatic_turn`. Keep it fixture-only; do not append a real
-  gate, run a real map, or change registry state.
+- Add a tiny public CLI fixture for `quota should-run --format json` on a
+  throttled goal, so the executable skip payload exposes `state=throttled`,
+  `should_run=false`, the spent/allowed slots, and the same
+  `plan_summary.next_automatic_turn`. Keep it fixture-only; do not append a
+  real gate, run a real map, or change registry state.
 
 ## Recent Progress
 
+- 2026-06-02T07:29:50+08:00: Extended `examples/quota-plan-smoke.py` with a
+  public-safe throttled quota fixture. The fixture adds `throttled-half` with
+  `quota.compute=0.5` and spent slots equal to allowed slots, verifies the goal
+  lands in the `throttled` lane, stays out of `eligible`, does not become
+  `summary.next_automatic_turn`, and returns `should_run=false` through
+  `build_quota_should_run()`. The CLI quota-plan fixture now carries the same
+  throttled project in its temporary registry/runtime. Validation: direct
+  quota-plan smoke passed; aggregate public smokes passed with 5 scripts;
+  Python compile passed; public contract check passed; `git diff --check`
+  passed. Critic: quota throttling behavior is now guarded for planner and
+  in-process should-run logic; the remaining narrow gap is executable
+  `quota should-run --format json` CLI output for the throttled skip payload.
 - 2026-06-02T07:22:35+08:00: Tightened the quota-plan note in
   `docs/status-data-contract.md` to name the same lane boundary as
   `docs/quota-allocation.md`: `next_automatic_turn` is advisory, may only name
