@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -97,10 +100,127 @@ def build_status_fixture() -> dict:
     }
 
 
-def main() -> int:
-    plan = build_quota_plan(build_status_fixture(), mode="plan")
-    markdown = render_quota_markdown(plan)
+def write_cli_fixture(root: Path) -> tuple[Path, Path, Path]:
+    project = root / "project"
+    runtime = root / "runtime"
+    registry_path = project / ".goal-harness" / "registry.json"
+    goal_specs = [
+        ("half-speed", 0.5, "state_refreshed"),
+        ("full-speed", 1.0, "state_refreshed"),
+        ("low-speed", 0.3, "state_refreshed"),
+        ("needs-operator", 1.0, "operator_gate_deferred"),
+    ]
+    registry_goals = []
+    for goal_id, compute, classification in goal_specs:
+        state_file = f".codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md"
+        state_path = project / state_file
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            "---\n"
+            "status: active\n"
+            "updated_at: 2026-01-01T00:00:00+00:00\n"
+            "---\n\n"
+            f"# {goal_id}\n\n"
+            "## Next Action\n\n"
+            f"- continue {goal_id}\n",
+            encoding="utf-8",
+        )
+        registry_goals.append(
+            {
+                "id": goal_id,
+                "domain": "quota-fixture",
+                "status": "active",
+                "repo": str(project),
+                "state_file": state_file,
+                "adapter": {
+                    "kind": "read_only_project_map_v0",
+                    "status": "connected-read-only",
+                },
+                "authority_sources": [],
+                "quota": {"compute": compute, "window_hours": 24},
+            }
+        )
+        runs_dir = runtime / "goals" / goal_id / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path = runs_dir / "20260101T000000-run.json"
+        markdown_path = runs_dir / "20260101T000000-run.md"
+        record = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "goal_id": goal_id,
+            "classification": classification,
+            "recommended_action": f"continue {goal_id}",
+            "health_check": "fixture 1/1",
+        }
+        if classification == "operator_gate_deferred":
+            record["operator_gate"] = {
+                "recorded_at": "2026-01-01T00:00:00+00:00",
+                "gate": "read_only_map_opt_in",
+                "decision": "defer",
+                "operator_question": f"是否同意 `{goal_id}` 先执行 read-only map opt-in？",
+                "reason_summary": "need more fixture evidence",
+            }
+        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        markdown_path.write_text(f"# {goal_id} fixture run\n", encoding="utf-8")
+        with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        **record,
+                        "json_path": str(json_path),
+                        "markdown_path": str(markdown_path),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": registry_goals,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return registry_path, runtime, project
+
+
+def run_cli_quota_plan(root: Path) -> tuple[dict, str]:
+    registry_path, runtime, project = write_cli_fixture(root)
+    base_args = [
+        sys.executable,
+        "-m",
+        "goal_harness.cli",
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime),
+    ]
+    json_result = subprocess.run(
+        [*base_args, "--format", "json", "quota", "plan", "--scan-path", str(project)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    markdown_result = subprocess.run(
+        [*base_args, "quota", "plan", "--scan-path", str(project)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(json_result.stdout), markdown_result.stdout
+
+
+def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
     eligible_ids = [item["goal_id"] for item in plan["groups"]["eligible"]]
     operator_gate_ids = [item["goal_id"] for item in plan["groups"]["operator_gate"]]
 
@@ -109,8 +229,19 @@ def main() -> int:
     assert eligible_ids == ["full-speed", "half-speed", "low-speed"], eligible_ids
     assert operator_gate_ids == ["needs-operator"], operator_gate_ids
     assert "needs-operator" not in eligible_ids, eligible_ids
-    assert "next_automatic_turn=full-speed" in markdown, markdown
-    assert "### operator_gate" in markdown, markdown
+    if markdown is not None:
+        assert "next_automatic_turn=full-speed" in markdown, markdown
+        assert "### operator_gate" in markdown, markdown
+        assert markdown.index("`full-speed`") < markdown.index("`half-speed`") < markdown.index("`low-speed`"), markdown
+
+
+def main() -> int:
+    plan = build_quota_plan(build_status_fixture(), mode="plan")
+    markdown = render_quota_markdown(plan)
+    assert_plan_shape(plan, markdown)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:
+        cli_plan, cli_markdown = run_cli_quota_plan(Path(tmp))
+    assert_plan_shape(cli_plan, cli_markdown)
     print("quota-plan-smoke ok")
     return 0
 

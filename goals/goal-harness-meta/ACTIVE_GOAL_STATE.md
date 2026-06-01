@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:53:21+08:00
+updated_at: 2026-06-02T06:59:21+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- Add a tiny CLI-level quota plan fixture so `goal-harness quota plan` output
-  preserves the same multi-project allocation rule as `build_quota_plan()`:
-  highest eligible `quota.compute` wins, and operator-gated goals stay out of
-  the eligible lane. Keep it fixture-only; do not append a real gate or run a
+- Add a compact public contract note for quota plan allocation: `quota plan`
+  picks the highest-compute eligible goal as an advisory next turn, while
+  operator-gated, waiting, throttled, paused, and health-blocked goals stay out
+  of the eligible lane. Keep it docs-only; do not append a real gate or run a
   real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:59:21+08:00: Extended `examples/quota-plan-smoke.py` to cover
+  the executable CLI path. The smoke now writes a temporary public-safe
+  registry/runtime/project fixture, runs `python -m goal_harness.cli --format
+  json quota plan` and default Markdown `quota plan`, and verifies both preserve
+  the same multi-project allocation rule as `build_quota_plan()`: the highest
+  compute eligible goal becomes `next_automatic_turn`, eligible goals stay
+  sorted by compute, and the operator-gated goal stays in the `operator_gate`
+  lane. Validation: direct quota-plan smoke passed; aggregate public smokes
+  passed with 4 scripts; Python compile passed; public contract check passed;
+  `git diff --check` passed. Critic: planner and CLI paths are now guarded; the
+  allocation rule should be stated in the public quota contract so project
+  agents and users understand it is advisory compute allocation, not permission.
 - 2026-06-02T06:53:21+08:00: Added `examples/quota-plan-smoke.py`, a pure
   fixture smoke for multi-project allocation. The fixture creates three
   eligible goals with compute shares `1.0`, `0.5`, and `0.3`, plus one
