@@ -8,6 +8,7 @@ from typing import Any
 from .contract import check_contract
 from .history import collect_history, load_registry
 from .paths import global_registry_path, resolve_runtime_root
+from .quota import quota_status
 from .registry import registry_goals
 
 
@@ -660,6 +661,12 @@ def build_attention_queue(
             continue
         item = goal_attention(goal)
         if item:
+            if goal.get("registry_member"):
+                item["quota"] = quota_status(
+                    goal,
+                    waiting_on=str(item.get("waiting_on") or ""),
+                    severity=str(item.get("severity") or ""),
+                )
             items.append(item)
 
     return {
@@ -743,6 +750,7 @@ def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
                 "adapter_kind": goal.get("adapter_kind"),
                 "adapter_status": goal.get("adapter_status"),
                 "authority_registry": goal.get("authority_registry"),
+                "quota": quota_status(goal) if goal.get("registry_member") else None,
                 "index_exists": goal.get("index_exists"),
                 "raw_index_records": goal.get("raw_index_records"),
                 "unique_runs": goal.get("unique_runs"),
@@ -885,6 +893,15 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         )
         if action:
             lines.append(f"  - action: {action}")
+        quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+        if quota:
+            lines.append(
+                "  - quota: "
+                f"compute={quota.get('compute')} "
+                f"state={quota.get('state')} "
+                f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')} "
+                f"reason={quota.get('reason')}"
+            )
         operator_question = item.get("operator_question")
         agent_command = item.get("agent_command")
         if operator_question:
@@ -929,6 +946,14 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             f"records={goal.get('raw_index_records')} "
             f"unique_runs={goal.get('unique_runs')}"
         )
+        quota = goal.get("quota") if isinstance(goal.get("quota"), dict) else {}
+        if quota:
+            lines.append(
+                "  - quota: "
+                f"compute={quota.get('compute')} "
+                f"state={quota.get('state')} "
+                f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')}"
+            )
         latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
         if latest_runs:
             latest = latest_runs[0]

@@ -60,15 +60,15 @@
     "needs_codex": 2,
     "watching_external_evidence": 0,
     "items": [
-        {
-          "goal_id": "complex-project-main-control",
-          "status": "ready_for_controller_opt_in",
-          "lifecycle_phase": "controller_gated",
-          "lifecycle_flags": [
-            "controller_gated",
-            "adapter_inspected"
-          ],
-          "waiting_on": "user_or_controller",
+      {
+        "goal_id": "complex-project-main-control",
+        "status": "ready_for_controller_opt_in",
+        "lifecycle_phase": "controller_gated",
+        "lifecycle_flags": [
+          "controller_gated",
+          "adapter_inspected"
+        ],
+        "waiting_on": "user_or_controller",
         "severity": "action",
         "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
         "source": "latest_run",
@@ -77,33 +77,57 @@
           "human_reward_capture",
           "aligned_eval_decision_evidence"
         ],
-        "next_handoff_condition": "record aligned eval evidence and one human reward event"
+        "next_handoff_condition": "record aligned eval evidence and one human reward event",
+        "quota": {
+          "compute": 0.5,
+          "window_hours": 24,
+          "allowed_slots": 12,
+          "spent_slots": 0,
+          "state": "operator_gate",
+          "reason": "human or target-controller gate must clear before spending compute"
+        }
       },
-        {
-          "goal_id": "docs-maintenance-goal",
-          "status": "connected_without_run",
-          "lifecycle_phase": "connected",
-          "lifecycle_flags": [
-            "connected"
-          ],
-          "waiting_on": "codex",
+      {
+        "goal_id": "docs-maintenance-goal",
+        "status": "connected_without_run",
+        "lifecycle_phase": "connected",
+        "lifecycle_flags": [
+          "connected"
+        ],
+        "waiting_on": "codex",
         "severity": "action",
         "recommended_action": "run the first read-only adapter tick and save a compact run record",
-        "source": "run_history"
+        "source": "run_history",
+        "quota": {
+          "compute": 1,
+          "window_hours": 24,
+          "allowed_slots": 24,
+          "spent_slots": 0,
+          "state": "eligible",
+          "reason": "1 compute quota; eligible for the next automatic agent turn"
+        }
       },
-        {
-          "goal_id": "experiment-controller-goal",
-          "status": "design_next_experiment",
-          "lifecycle_phase": "controller_ready",
-          "lifecycle_flags": [
-            "controller_ready",
-            "reward_judged",
-            "adapter_inspected"
-          ],
-          "waiting_on": "codex",
+      {
+        "goal_id": "experiment-controller-goal",
+        "status": "design_next_experiment",
+        "lifecycle_phase": "controller_ready",
+        "lifecycle_flags": [
+          "controller_ready",
+          "reward_judged",
+          "adapter_inspected"
+        ],
+        "waiting_on": "codex",
         "severity": "action",
         "recommended_action": "use the latest human reward signal to design the next comparable experiment",
-        "source": "latest_run"
+        "source": "latest_run",
+        "quota": {
+          "compute": 0.3,
+          "window_hours": 24,
+          "allowed_slots": 7,
+          "spent_slots": 0,
+          "state": "eligible",
+          "reason": "0.3 compute quota; eligible for the next automatic agent turn"
+        }
       }
     ]
   },
@@ -198,7 +222,15 @@
             "json_exists": true,
             "markdown_exists": true
           }
-        ]
+        ],
+        "quota": {
+          "compute": 0.5,
+          "window_hours": 24,
+          "allowed_slots": 12,
+          "spent_slots": 0,
+          "state": "operator_gate",
+          "reason": "human or target-controller gate must clear before spending compute"
+        }
       },
       {
         "id": "docs-maintenance-goal",
@@ -215,7 +247,15 @@
         "index_exists": false,
         "raw_index_records": 0,
         "unique_runs": 0,
-        "latest_runs": []
+        "latest_runs": [],
+        "quota": {
+          "compute": 1,
+          "window_hours": 24,
+          "allowed_slots": 24,
+          "spent_slots": 0,
+          "state": "eligible",
+          "reason": "1 compute quota; eligible for the next automatic agent turn"
+        }
       },
       {
         "id": "experiment-controller-goal",
@@ -238,52 +278,60 @@
           {
             "generated_at": "2026-06-01T00:00:00+00:00",
             "goal_id": "experiment-controller-goal",
-          "classification": "design_next_experiment",
-          "lifecycle_phase": "controller_ready",
-          "lifecycle_flags": [
-            "controller_ready",
-            "reward_judged",
-            "adapter_inspected"
-          ],
-          "recommended_action": "use the latest human reward signal to design the next comparable experiment",
-          "health_check": "7/7",
-          "controller_readiness": {
-            "classification": "ready_for_decision_advisor",
-            "read_only_observer_ready": true,
-            "decision_advisor_ready": true,
-            "write_controller_ready": false,
-            "missing_gates": [],
-            "review_judgment": "controller can advise the next experiment because durable context, comparable evidence, and human reward are present",
-            "next_handoff_condition": "operator approval is still required before launching or stopping experiments",
-            "gates": [
-              {
-                "id": "durable_goal_context",
-                "ok": true,
-                "review": "goal state, experiment board, and run history are available"
-              },
-              {
-                "id": "human_reward_capture",
-                "ok": true,
-                "review": "operator reward was recorded as a compact signal"
-              },
-              {
-                "id": "aligned_eval_decision_evidence",
-                "ok": true,
-                "review": "comparable validation evidence is present"
-              }
-            ]
-          },
-          "human_reward": {
-            "recorded_at": "2026-06-01T00:05:00+00:00",
-            "decision": "continue_route",
-            "reward": "positive",
+            "classification": "design_next_experiment",
+            "lifecycle_phase": "controller_ready",
+            "lifecycle_flags": [
+              "controller_ready",
+              "reward_judged",
+              "adapter_inspected"
+            ],
+            "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+            "health_check": "7/7",
+            "controller_readiness": {
+              "classification": "ready_for_decision_advisor",
+              "read_only_observer_ready": true,
+              "decision_advisor_ready": true,
+              "write_controller_ready": false,
+              "missing_gates": [],
+              "review_judgment": "controller can advise the next experiment because durable context, comparable evidence, and human reward are present",
+              "next_handoff_condition": "operator approval is still required before launching or stopping experiments",
+              "gates": [
+                {
+                  "id": "durable_goal_context",
+                  "ok": true,
+                  "review": "goal state, experiment board, and run history are available"
+                },
+                {
+                  "id": "human_reward_capture",
+                  "ok": true,
+                  "review": "operator reward was recorded as a compact signal"
+                },
+                {
+                  "id": "aligned_eval_decision_evidence",
+                  "ok": true,
+                  "review": "comparable validation evidence is present"
+                }
+              ]
+            },
+            "human_reward": {
+              "recorded_at": "2026-06-01T00:05:00+00:00",
+              "decision": "continue_route",
+              "reward": "positive",
               "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
               "follow_up": "promote the route to a longer-window check"
             },
             "json_exists": true,
             "markdown_exists": true
           }
-        ]
+        ],
+        "quota": {
+          "compute": 0.3,
+          "window_hours": 24,
+          "allowed_slots": 7,
+          "spent_slots": 0,
+          "state": "eligible",
+          "reason": "0.3 compute quota; eligible for the next automatic agent turn"
+        }
       },
       {
         "id": "release-watch-goal",
@@ -307,45 +355,45 @@
       {
         "generated_at": "2026-06-01T00:00:00+00:00",
         "goal_id": "experiment-controller-goal",
-      "classification": "design_next_experiment",
-      "lifecycle_phase": "controller_ready",
-      "lifecycle_flags": [
-        "controller_ready",
-        "reward_judged",
-        "adapter_inspected"
-      ],
-      "recommended_action": "use the latest human reward signal to design the next comparable experiment",
-      "health_check": "7/7",
-      "controller_readiness": {
-        "classification": "ready_for_decision_advisor",
-        "read_only_observer_ready": true,
-        "decision_advisor_ready": true,
-        "write_controller_ready": false,
-        "missing_gates": [],
-        "review_judgment": "controller can advise the next experiment because durable context, comparable evidence, and human reward are present",
-        "next_handoff_condition": "operator approval is still required before launching or stopping experiments",
-        "gates": [
-          {
-            "id": "durable_goal_context",
-            "ok": true,
-            "review": "goal state, experiment board, and run history are available"
-          },
-          {
-            "id": "human_reward_capture",
-            "ok": true,
-            "review": "operator reward was recorded as a compact signal"
-          },
-          {
-            "id": "aligned_eval_decision_evidence",
-            "ok": true,
-            "review": "comparable validation evidence is present"
-          }
-        ]
-      },
-      "human_reward": {
-        "recorded_at": "2026-06-01T00:05:00+00:00",
-        "decision": "continue_route",
-        "reward": "positive",
+        "classification": "design_next_experiment",
+        "lifecycle_phase": "controller_ready",
+        "lifecycle_flags": [
+          "controller_ready",
+          "reward_judged",
+          "adapter_inspected"
+        ],
+        "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+        "health_check": "7/7",
+        "controller_readiness": {
+          "classification": "ready_for_decision_advisor",
+          "read_only_observer_ready": true,
+          "decision_advisor_ready": true,
+          "write_controller_ready": false,
+          "missing_gates": [],
+          "review_judgment": "controller can advise the next experiment because durable context, comparable evidence, and human reward are present",
+          "next_handoff_condition": "operator approval is still required before launching or stopping experiments",
+          "gates": [
+            {
+              "id": "durable_goal_context",
+              "ok": true,
+              "review": "goal state, experiment board, and run history are available"
+            },
+            {
+              "id": "human_reward_capture",
+              "ok": true,
+              "review": "operator reward was recorded as a compact signal"
+            },
+            {
+              "id": "aligned_eval_decision_evidence",
+              "ok": true,
+              "review": "comparable validation evidence is present"
+            }
+          ]
+        },
+        "human_reward": {
+          "recorded_at": "2026-06-01T00:05:00+00:00",
+          "decision": "continue_route",
+          "reward": "positive",
           "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
           "follow_up": "promote the route to a longer-window check"
         },

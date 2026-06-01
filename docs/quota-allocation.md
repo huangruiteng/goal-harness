@@ -55,6 +55,20 @@ The compact status shape can start with a small object:
 }
 ```
 
+Registry entries may declare the same policy directly:
+
+```json
+{
+  "quota": {
+    "compute": 0.5,
+    "window_hours": 24
+  }
+}
+```
+
+If `quota.compute` is missing, status treats the goal as `1.0` by default so a
+newly connected project remains eligible unless a harder gate blocks it.
+
 For the first implementation, `spent_slots` can count automatic Goal Harness
 ticks, adapter runs, heartbeat continuations, or controller-selected Codex
 turns. It does not need to count exact tokens or wall-clock seconds yet.

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .authority import authority_registry_summary
+from .quota import goal_quota_config
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -63,6 +64,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
         if not isinstance(authority_sources, list):
             authority_sources = []
         authority_registry = authority_registry_summary(raw_goal)
+        quota = goal_quota_config(raw_goal)
 
         status_counts[status] = status_counts.get(status, 0) + 1
         if not goal_id:
@@ -96,6 +98,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
                 "authority_sources": authority_sources,
                 "authority_source_count": len(authority_sources),
                 "authority_registry": authority_registry,
+                "quota": quota,
                 "spawn_allowed": spawn_policy.get("allowed"),
                 "max_children": spawn_policy.get("max_children"),
                 "next_probe": raw_goal.get("next_probe"),
@@ -150,6 +153,8 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
             default_count = authority_registry.get("default_entry_count")
             topic_count = authority_registry.get("topic_authority_count")
             authority_suffix += f" authority_registry=defaults:{default_count},topics:{topic_count}"
+        quota = goal.get("quota") if isinstance(goal.get("quota"), dict) else {}
+        quota_suffix = f" quota={quota.get('compute')}" if quota else ""
         lines.append(
             "| "
             f"`{goal.get('id')}` | "
@@ -160,7 +165,7 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
             f"{goal.get('repo_exists')} | "
             f"{goal.get('state_file_exists')} | "
             f"{spawn} | "
-            f"{adapter}{authority_suffix} | "
+            f"{adapter}{authority_suffix}{quota_suffix} | "
             f"{next_probe} |"
         )
 

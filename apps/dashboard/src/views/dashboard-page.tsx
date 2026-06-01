@@ -7,6 +7,7 @@ import {
   Clock3,
   FileCheck2,
   FileJson2,
+  Gauge,
   GitBranch,
   History,
   Link2,
@@ -33,6 +34,7 @@ import { dashboardRoute } from "../router";
 import {
   QueueItem,
   AuthorityRegistry,
+  ComputeQuota,
   ControllerReadiness,
   GlobalRegistryHealth,
   HumanReward,
@@ -123,21 +125,6 @@ const lifecycleLabel: Record<string, string> = {
   run_recorded: "Run recorded",
 };
 
-const lifecycleOperatorText: Record<string, string> = {
-  connected: "An agent should create the first compact run.",
-  mapped: "The project is mapped; choose the next agent handoff.",
-  refreshed: "Goal state changed; an agent should continue from the update.",
-  adapter_inspected: "An adapter has inspected project evidence.",
-  reward_judged: "Your judgment has been captured for a run.",
-  operator_approved: "The operator gate is approved; send only the approved agent command.",
-  operator_gated: "The operator answered the gate, but the goal should stay gated.",
-  controller_gated: "Controller evidence exists, but a gate is still missing.",
-  controller_ready: "Controller handoff or advice can be reviewed.",
-  registered: "The goal is known but not yet operational.",
-  planned: "The goal is planned and waiting for opt-in or connection.",
-  run_recorded: "A run exists but has no stronger phase yet.",
-};
-
 const lifecycleVariant: Record<string, "neutral" | "success" | "warning" | "info" | "danger"> = {
   connected: "neutral",
   mapped: "info",
@@ -152,21 +139,6 @@ const lifecycleVariant: Record<string, "neutral" | "success" | "warning" | "info
   planned: "warning",
   run_recorded: "neutral",
 };
-
-const lifecycleDisplayOrder = [
-  "connected",
-  "mapped",
-  "refreshed",
-  "adapter_inspected",
-  "reward_judged",
-  "operator_approved",
-  "controller_gated",
-  "operator_gated",
-  "controller_ready",
-  "planned",
-  "registered",
-  "run_recorded",
-];
 
 type DataSource =
   | { kind: "example"; label: "bundled example" }
@@ -430,45 +402,6 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
   });
 }
 
-function UserReviewMap({ rows }: { rows: GoalDirectoryRow[] }) {
-  const counts = rows.reduce<Record<string, number>>((acc, row) => {
-    acc[row.lifecyclePhase] = (acc[row.lifecyclePhase] ?? 0) + 1;
-    return acc;
-  }, {});
-  const visiblePhases = lifecycleDisplayOrder.filter((phase) => counts[phase]);
-  return (
-    <Card>
-      <CardHeader className="flex-wrap">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <GitBranch className="h-4 w-4" />
-            User Review Map
-          </CardTitle>
-          <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            Human-facing interpretation of agent status, reward, and controller readiness.
-          </p>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {(visiblePhases.length ? visiblePhases : ["registered"]).map((phase) => (
-            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800" key={phase}>
-              <div className="text-xs text-slate-500 dark:text-zinc-400">{lifecycleLabel[phase] ?? phase}</div>
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <div className="text-2xl font-semibold">{counts[phase] ?? 0}</div>
-                <Badge variant={lifecycleVariant[phase] ?? "neutral"}>{phase}</Badge>
-              </div>
-              <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
-                {lifecycleOperatorText[phase] ?? "Inspect this goal before acting."}
-              </p>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function GoalDirectory({
   rows,
   selectedGoalId,
@@ -520,6 +453,7 @@ function GoalDirectory({
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge>{row.status}</Badge>
                     {row.severity === "clear" ? <Badge variant="success">Clear</Badge> : <StatusBadge value={row.severity} />}
+                    <QuotaChip quota={row.queueItem?.quota ?? row.goal.quota} />
                   </div>
                   <div className="mt-1">
                     <PhaseBadges compact flags={row.lifecycleFlags} phase={row.lifecyclePhase} />
@@ -596,6 +530,11 @@ function QueueTable({
         accessorKey: "severity",
         header: "Severity",
         cell: ({ row }) => <StatusBadge value={row.original.severity} />,
+      },
+      {
+        accessorKey: "quota",
+        header: "Quota",
+        cell: ({ row }) => <QuotaChip quota={row.original.quota} />,
       },
       {
         accessorKey: "recommended_action",
@@ -756,6 +695,7 @@ type UserActionSummaryItem = {
   safePathCommand?: string;
   rewardHint: string;
   authorityCoverage?: AuthorityCoverage;
+  quota?: ComputeQuota | null;
   phase: string;
   waitingOn: string;
   draftLabel?: string;
@@ -775,6 +715,13 @@ type CopyState = "idle" | "copied" | "failed";
 
 type AuthorityCoverage = {
   badge: string;
+  reviewLine: string;
+  shortLine: string;
+  variant: BadgeVariant;
+};
+
+type QuotaView = {
+  label: string;
   reviewLine: string;
   shortLine: string;
   variant: BadgeVariant;
@@ -988,6 +935,71 @@ function buildAuthorityCoverageFromProjectMap(projectMap: ProjectMap): Authority
   });
 }
 
+const quotaStateLabel: Record<string, string> = {
+  blocked_health: "Health blocked",
+  eligible: "Eligible",
+  operator_gate: "Operator gate",
+  paused: "Paused",
+  throttled: "Throttled",
+  waiting: "Waiting",
+};
+
+const quotaStateReviewLabel: Record<string, string> = {
+  blocked_health: "先修健康阻塞",
+  eligible: "可自动推进",
+  operator_gate: "等待人或控制器决策",
+  paused: "自动 compute 已暂停",
+  throttled: "本窗口配额已用完",
+  waiting: "等待证据或下一步",
+};
+
+function quotaVariant(state?: string | null): BadgeVariant {
+  if (state === "eligible") {
+    return "success";
+  }
+  if (state === "paused") {
+    return "neutral";
+  }
+  if (state === "blocked_health") {
+    return "danger";
+  }
+  if (state === "operator_gate" || state === "throttled") {
+    return "warning";
+  }
+  return "info";
+}
+
+function formatQuotaCompute(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function buildQuotaView(quota?: ComputeQuota | null): QuotaView | undefined {
+  if (!quota) {
+    return undefined;
+  }
+  const state = quota.state || "waiting";
+  const compute = quota.compute ?? 1;
+  const spent = quota.spent_slots ?? 0;
+  const allowed = quota.allowed_slots ?? 0;
+  const computeText = formatQuotaCompute(compute);
+  const stateLabel = quotaStateLabel[state] ?? state;
+  const reviewState = quotaStateReviewLabel[state] ?? state;
+  return {
+    label: `Quota ${computeText}`,
+    shortLine: `${stateLabel}; ${spent}/${allowed} slots`,
+    reviewLine: `配额：compute ${computeText}；${reviewState}；${spent}/${allowed} slots。`,
+    variant: quotaVariant(state),
+  };
+}
+
+function QuotaChip({ quota }: { quota?: ComputeQuota | null }) {
+  const view = buildQuotaView(quota);
+  if (!view) {
+    return null;
+  }
+  return <Badge variant={view.variant}>{view.label}</Badge>;
+}
+
 function buildReviewPacket({
   actionKind,
   item,
@@ -995,6 +1007,7 @@ function buildReviewPacket({
   selectedGoalId,
   transitionPreview,
   authorityCoverage,
+  quotaView,
 }: {
   actionKind: UserActionFilter;
   item?: UserActionSummaryItem;
@@ -1002,6 +1015,7 @@ function buildReviewPacket({
   selectedGoalId: string;
   transitionPreview: OperatorTransitionPreview;
   authorityCoverage?: AuthorityCoverage;
+  quotaView?: QuotaView;
 }) {
   const goalId = (item?.goalId ?? selectedGoalId) || "<goal-id>";
   const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
@@ -1013,6 +1027,7 @@ function buildReviewPacket({
     `链接：${reviewUrl}`,
     `摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
     authorityCoverage?.reviewLine ?? item?.authorityCoverage?.reviewLine ?? "权威源：当前 status 没有 authority registry coverage。",
+    quotaView?.reviewLine ?? buildQuotaView(item?.quota)?.reviewLine ?? "配额：当前 status 没有 compute quota。",
     "",
     "【人只需判断】",
     `问题：${item?.operatorQuestion ?? prompt.question}`,
@@ -1034,6 +1049,7 @@ function ReviewLinkPanel({
   authorityCoverage,
   goalId,
   lane,
+  quotaView,
   reviewPacket,
   reviewUrl,
   severity,
@@ -1044,6 +1060,7 @@ function ReviewLinkPanel({
   authorityCoverage?: AuthorityCoverage;
   goalId: string;
   lane: string;
+  quotaView?: QuotaView;
   reviewPacket: string;
   reviewUrl: string;
   severity: string;
@@ -1077,6 +1094,7 @@ function ReviewLinkPanel({
               </Badge>
               {goalId ? <Badge variant="neutral">{goalId}</Badge> : <Badge variant="neutral">No goal</Badge>}
               {authorityCoverage ? <Badge variant={authorityCoverage.variant}>{authorityCoverage.badge}</Badge> : null}
+              {quotaView ? <Badge variant={quotaView.variant}>{quotaView.label}</Badge> : null}
               {statusUrl ? <Badge variant="success">Status URL</Badge> : <Badge variant="neutral">Example source</Badge>}
               {lane !== "all" || severity !== "all" ? <Badge variant="neutral">{lane} / {severity}</Badge> : null}
             </div>
@@ -1085,6 +1103,9 @@ function ReviewLinkPanel({
             </p>
             {authorityCoverage ? (
               <p className="mt-2 text-xs leading-5 text-slate-700 dark:text-zinc-300">{authorityCoverage.reviewLine}</p>
+            ) : null}
+            {quotaView ? (
+              <p className="mt-1 text-xs leading-5 text-slate-700 dark:text-zinc-300">{quotaView.reviewLine}</p>
             ) : null}
             <code className="mt-3 block truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
               {reviewUrl}
@@ -1636,6 +1657,7 @@ function buildUserActionSummaryItems({
         ? `${draftDefaults.decision} / ${draftDefaults.reward}`
         : `${draftDefaults.label} / needs run`,
       authorityCoverage,
+      quota: row.queueItem?.quota ?? row.goal.quota,
     };
 
     if (row.severity === "high") {
@@ -1833,6 +1855,7 @@ function UserActionSummary({
                       {item.waitingOn !== "clear" ? (
                         <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
                       ) : null}
+                      <QuotaChip quota={item.quota} />
                       {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
                     </div>
                     <div className="mt-3 break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
@@ -1856,33 +1879,23 @@ function UserActionSummary({
                         <Badge variant="info">Agent command ready after approval</Badge>
                       </div>
                     ) : null}
-                    <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-zinc-800">
-                      <div className="rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="neutral">Safe path</Badge>
-                          <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
-                            {item.safePathLabel}
-                          </span>
-                        </div>
-                        {item.safePathCommand ? (
-                          <code className="mt-2 block max-h-16 overflow-hidden whitespace-pre-wrap break-words rounded border border-slate-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-zinc-800">
-                            {item.safePathCommand}
-                          </code>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
-                        <Badge variant="info">Reward draft</Badge>
-                        <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
-                          {item.rewardHint}
-                        </span>
-                      </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 text-xs text-slate-600 dark:border-zinc-800 dark:text-zinc-300">
+                      <Badge variant="neutral">Safe path</Badge>
+                      <span className="line-clamp-1 break-words font-medium">{item.safePathLabel}</span>
+                      <Badge variant="info">Reward</Badge>
+                      <span className="font-medium">{item.rewardHint}</span>
                       {item.authorityCoverage ? (
-                        <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+                        <>
                           <Badge variant={item.authorityCoverage.variant}>Authority</Badge>
-                          <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
-                            {item.authorityCoverage.shortLine}
-                          </span>
-                        </div>
+                          <span className="line-clamp-1 break-words font-medium">{item.authorityCoverage.shortLine}</span>
+                        </>
+                      ) : null}
+                      {buildQuotaView(item.quota) ? (
+                        <>
+                          <Gauge className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
+                          <Badge variant={buildQuotaView(item.quota)?.variant}>Quota</Badge>
+                          <span className="font-medium">{buildQuotaView(item.quota)?.shortLine}</span>
+                        </>
                       ) : null}
                     </div>
                   </button>
@@ -2939,16 +2952,21 @@ export function DashboardPage() {
     () => buildAuthorityCoverage({ goal: selectedActionGoal, run: selectedActionGoal?.latest_runs[0] }),
     [selectedActionGoal],
   );
+  const selectedQuotaView = useMemo(
+    () => buildQuotaView(selectedActionQueueItem?.quota ?? selectedActionGoal?.quota),
+    [selectedActionGoal, selectedActionQueueItem],
+  );
 	  const reviewPacket = useMemo(
 	    () => buildReviewPacket({
 	      actionKind: search.actionKind,
         authorityCoverage: selectedAuthorityCoverage,
 	      item: selectedActionItem,
+        quotaView: selectedQuotaView,
 	      reviewUrl,
 	      selectedGoalId: selectedReviewGoalId,
 	      transitionPreview,
 	    }),
-	    [reviewUrl, search.actionKind, selectedActionItem, selectedAuthorityCoverage, selectedReviewGoalId, transitionPreview],
+	    [reviewUrl, search.actionKind, selectedActionItem, selectedAuthorityCoverage, selectedQuotaView, selectedReviewGoalId, transitionPreview],
 	  );
 
   function selectGoal(goalId: string) {
@@ -3029,6 +3047,7 @@ export function DashboardPage() {
                   authorityCoverage={selectedAuthorityCoverage}
                   goalId={selectedReviewGoalId}
                   lane={search.lane}
+                  quotaView={selectedQuotaView}
                   reviewPacket={reviewPacket}
                   reviewUrl={reviewUrl}
                   severity={search.severity}
@@ -3036,6 +3055,19 @@ export function DashboardPage() {
                   transitionPreview={transitionPreview}
                 />
               </section>
+
+              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <MetricCard icon={payload.ok ? CheckCircle2 : CircleAlert} label="Status" value={payload.ok ? "Healthy" : "Blocked"} tone={payload.ok ? "success" : "danger"} />
+                <MetricCard icon={GitBranch} label="Goals" value={String(payload.goal_count)} tone="neutral" />
+                <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
+                <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
+              </section>
+
+              <GoalDirectory rows={goalRows} onSelectGoal={selectGoal} selectedGoalId={selectedGoalId} />
+
+              <GlobalRegistryHealthPanel health={payload.global_registry} />
+
+              <ContractHealthPanel contract={payload.contract} />
 
               <Card>
                 <CardContent className="pt-4">
@@ -3083,21 +3115,6 @@ export function DashboardPage() {
                   </div>
                 </CardContent>
               </Card>
-
-              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <MetricCard icon={payload.ok ? CheckCircle2 : CircleAlert} label="Status" value={payload.ok ? "Healthy" : "Blocked"} tone={payload.ok ? "success" : "danger"} />
-                <MetricCard icon={GitBranch} label="Goals" value={String(payload.goal_count)} tone="neutral" />
-                <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
-                <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
-              </section>
-
-              <GoalDirectory rows={goalRows} onSelectGoal={selectGoal} selectedGoalId={selectedGoalId} />
-
-              <UserReviewMap rows={goalRows} />
-
-              <GlobalRegistryHealthPanel health={payload.global_registry} />
-
-              <ContractHealthPanel contract={payload.contract} />
 
               <Card>
                 <CardHeader>

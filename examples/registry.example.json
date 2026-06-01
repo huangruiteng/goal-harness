@@ -61,7 +61,11 @@
         "read-only by default",
         "do not mutate production systems without explicit user approval",
         "keep private evidence out of public notes"
-      ]
+      ],
+      "quota": {
+        "compute": 0.5,
+        "window_hours": 24
+      }
     }
   ]
 }

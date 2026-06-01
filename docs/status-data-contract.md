@@ -348,6 +348,14 @@ Goal shape:
     "deprecated_source_count": 0,
     "conflict_risk": "low"
   },
+  "quota": {
+    "compute": 0.5,
+    "window_hours": 24,
+    "allowed_slots": 12,
+    "spent_slots": 0,
+    "state": "operator_gate",
+    "reason": "human or target-controller gate must clear before spending compute"
+  },
   "index_exists": true,
   "raw_index_records": 2,
   "unique_runs": 2,
@@ -360,6 +368,13 @@ when the latest run is an operator gate or reward overlay rather than a fresh
 project map. Dashboard consumers should translate it into one human-facing line
 such as "default entries 3/3, topic 8, risk low" before asking for operator
 decisions.
+
+`quota` on the goal comes from the registry and defaults to `compute=1.0` when
+not declared. In v0.1, status derives only a compact product state from hard
+gates and attention ownership: `eligible`, `throttled`, `waiting`,
+`operator_gate`, `paused`, or `blocked_health`. It is not a permission signal
+and does not replace human reward, operator gates, write approval, or
+production-action authorization.
 
 Run shape:
 

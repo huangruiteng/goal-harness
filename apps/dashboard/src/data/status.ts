@@ -1,6 +1,16 @@
 import rawStatus from "../../../../examples/status.example.json";
 import { z } from "zod";
 
+export const quotaSchema = z.object({
+  compute: z.number().optional().default(1),
+  window_hours: z.number().optional().default(24),
+  allowed_slots: z.number().optional().default(24),
+  spent_slots: z.number().optional().default(0),
+  state: z.string().optional().nullable(),
+  next_eligible_at: z.string().optional().nullable(),
+  reason: z.string().optional().nullable(),
+});
+
 export const queueItemSchema = z.object({
   goal_id: z.string(),
   status: z.string(),
@@ -15,6 +25,7 @@ export const queueItemSchema = z.object({
   controller_stage: z.string().optional().nullable(),
   missing_gates: z.array(z.string()).optional().default([]),
   next_handoff_condition: z.string().optional().nullable(),
+  quota: quotaSchema.optional().nullable(),
 });
 
 export const humanRewardSchema = z.object({
@@ -113,6 +124,7 @@ export const runGoalSchema = z.object({
   adapter_kind: z.string().optional().nullable(),
   adapter_status: z.string().optional().nullable(),
   authority_registry: authorityRegistrySchema.optional().nullable(),
+  quota: quotaSchema.optional().nullable(),
   index_exists: z.boolean().optional().default(false),
   raw_index_records: z.number().optional().default(0),
   unique_runs: z.number().optional().default(0),
@@ -241,6 +253,7 @@ export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type OperatorGate = z.infer<typeof operatorGateSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
 export type AuthorityRegistry = z.infer<typeof authorityRegistrySchema>;
+export type ComputeQuota = z.infer<typeof quotaSchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;

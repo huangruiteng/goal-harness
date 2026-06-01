@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T02:06:00+08:00
+updated_at: 2026-06-02T02:25:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,29 @@ private project context.
 
 ## Next Action
 
-- Start the compute quota v0.1 slice. Add a compact `quota.compute` field to
-  registry/status with simple values such as `1.0`, `0.5`, `0.3`, or `0`, then
-  show a small quota chip in the dashboard without adding a complex settings
-  page.
+- Continue the compute quota v0.1 slice by adding the first agent-facing quota
+  planner command, such as `goal-harness quota status` or
+  `goal-harness quota plan`, that groups goals into `eligible`, `throttled`,
+  `waiting`, `operator_gate`, `paused`, and `blocked_health` using the same
+  compact status fields. Keep it read-only and do not add a settings page or
+  scheduler.
 
 ## Recent Progress
 
+- 2026-06-02T02:25:00+08:00: Added compact compute quota to registry/status and
+  trimmed dashboard attention load. Registry inspection now exposes a default
+  `quota.compute=1.0` when no project declares one, and status attaches compact
+  quota state to registered attention items and run-history goals. The state
+  order follows hard gates first: health, operator gate, evidence wait, then
+  compute quota. The dashboard schema renders `Quota` chips in User Actions,
+  Goal Directory, Queue, and Review Packet without adding a settings page.
+  To keep the first screen quieter, the Source/Load controls moved below
+  health panels, the duplicate User Review Map panel was removed, and User
+  Action cards no longer show raw CLI blocks; detailed commands remain in the
+  single Review Packet. Validation covered Python compile, dashboard build,
+  JSON example parse, refreshed `status.local.json`, Markdown status quota
+  output, `goal-harness check --scan-root .`, `git diff --check`, and
+  Playwright smoke for quota chips plus absence of `User Review Map`.
 - 2026-06-02T02:06:00+08:00: Surfaced authority-registry coverage in the user
   dashboard path. Status now carries registry-level `authority_registry` on
   `run_history.goals`, so coverage remains visible even when the latest run is
