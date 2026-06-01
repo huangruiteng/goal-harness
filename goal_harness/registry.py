@@ -57,6 +57,9 @@ def inspect_registry(path: Path) -> dict[str, Any]:
         state_file = resolve_state_file(repo, raw_goal.get("state_file")) if repo else None
         adapter = raw_goal.get("adapter") if isinstance(raw_goal.get("adapter"), dict) else {}
         spawn_policy = raw_goal.get("spawn_policy") if isinstance(raw_goal.get("spawn_policy"), dict) else {}
+        authority_sources = raw_goal.get("authority_sources")
+        if not isinstance(authority_sources, list):
+            authority_sources = []
 
         status_counts[status] = status_counts.get(status, 0) + 1
         if not goal_id:
@@ -87,6 +90,8 @@ def inspect_registry(path: Path) -> dict[str, Any]:
                 "state_file_exists": bool(state_file and state_file.exists()),
                 "adapter_kind": adapter.get("kind"),
                 "adapter_status": adapter.get("status"),
+                "authority_sources": authority_sources,
+                "authority_source_count": len(authority_sources),
                 "spawn_allowed": spawn_policy.get("allowed"),
                 "max_children": spawn_policy.get("max_children"),
                 "next_probe": raw_goal.get("next_probe"),
@@ -133,6 +138,9 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
         adapter = f"{goal.get('adapter_kind')}:{goal.get('adapter_status')}"
         spawn = f"{goal.get('spawn_allowed')}:{goal.get('max_children')}"
         next_probe = str(goal.get("next_probe") or "").replace("|", "\\|")
+        authority_suffix = ""
+        if goal.get("authority_source_count"):
+            authority_suffix = f" authorities={goal.get('authority_source_count')}"
         lines.append(
             "| "
             f"`{goal.get('id')}` | "
@@ -143,7 +151,7 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
             f"{goal.get('repo_exists')} | "
             f"{goal.get('state_file_exists')} | "
             f"{spawn} | "
-            f"{adapter} | "
+            f"{adapter}{authority_suffix} | "
             f"{next_probe} |"
         )
 

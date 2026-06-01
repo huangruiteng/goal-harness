@@ -18,9 +18,24 @@ def shell_arg(value: str) -> str:
     return shlex.quote(value)
 
 
+def render_cli_preflight() -> str:
+    return """install_script="$HOME/goal-harness/scripts/install-local.sh"
+if ! command -v goal-harness >/dev/null 2>&1; then
+  if [ -x "$install_script" ]; then
+    "$install_script"
+    export PATH="$HOME/.local/bin:$PATH"
+  else
+    echo "goal-harness is not on PATH; clone the Goal Harness repo and run scripts/install-local.sh" >&2
+    exit 1
+  fi
+fi
+goal-harness --help >/dev/null"""
+
+
 def render_connect_command(
     *,
     project: str,
+    goal_doc: str,
     goal_id: str,
     objective: str,
     domain: str,
@@ -37,6 +52,7 @@ def render_connect_command(
         f"  --goal-id {shell_arg(goal_id)} \\",
         f"  --objective {shell_arg(objective)} \\",
         f"  --domain {shell_arg(domain)} \\",
+        f"  --goal-doc {shell_arg(goal_doc)} \\",
         f"  --adapter-kind {shell_arg(adapter_kind)} \\",
         f"  --adapter-status {shell_arg(adapter_status)}",
     ]
@@ -79,6 +95,7 @@ def build_new_project_prompt(
     write_scope = write_scope or []
     connect_command = render_connect_command(
         project=project_text,
+        goal_doc=goal_doc_text,
         goal_id=resolved_goal_id,
         objective=resolved_objective,
         domain=resolved_domain,
@@ -98,6 +115,7 @@ def build_new_project_prompt(
         adapter_kind=adapter_kind,
         adapter_status=adapter_status,
         next_probe=resolved_next_probe,
+        cli_preflight=render_cli_preflight(),
         connect_command=connect_command,
         spawn_allowed=spawn_allowed,
         allowed_domains=allowed_domains,
@@ -117,6 +135,7 @@ def build_new_project_prompt(
         "allowed_domains": allowed_domains,
         "write_scope": write_scope,
         "connect_command": connect_command,
+        "cli_preflight": render_cli_preflight(),
         "prompt": prompt,
     }
 
@@ -131,6 +150,7 @@ def render_prompt_text(
     adapter_kind: str,
     adapter_status: str,
     next_probe: str,
+    cli_preflight: str,
     connect_command: str,
     spawn_allowed: bool,
     allowed_domains: list[str],
@@ -154,7 +174,13 @@ def render_prompt_text(
 
 请你按下面步骤推进，不要停在方案讨论；如果信息缺失，先从目标文档和项目结构中做保守抽取，并在最后说明假设。
 
-1. 先只读检查项目文件夹和目标文档，抽取：
+0. 先确认当前 shell 能调用 Goal Harness CLI；如果提示 `goal-harness` 不在 PATH，运行本机安装脚本再继续：
+
+```bash
+{cli_preflight}
+```
+
+1. 再只读检查项目文件夹和目标文档，抽取：
    - stable goal id；
    - 一句话 objective；
    - domain；
@@ -169,6 +195,7 @@ def render_prompt_text(
    - domain: `{domain}`
    - adapter_kind: `{adapter_kind}`
    - adapter_status: `{adapter_status}`
+   - goal_doc: `{goal_doc}`
    - next_probe: `{next_probe}`
    - spawn_allowed: `{spawn_allowed}`
    - allowed_domains: `{allowed_domains_text}`

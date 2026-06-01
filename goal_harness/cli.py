@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     bootstrap_parser.add_argument("--role", choices=["controller", "subagent"], default="controller")
     bootstrap_parser.add_argument("--parent-goal-id", help="Parent goal id when --role subagent.")
     bootstrap_parser.add_argument("--state-file", help="Active goal state path, relative to project unless absolute.")
+    bootstrap_parser.add_argument("--goal-doc", help="Primary goal document path, relative to project unless absolute.")
     bootstrap_parser.add_argument("--adapter-kind", default="generic_project_goal_v0")
     bootstrap_parser.add_argument("--adapter-status", default="connected")
     bootstrap_parser.add_argument("--next-probe", help="Optional project-specific pre-tick command.")
@@ -155,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             runtime_root = Path(args.runtime_root).expanduser() if args.runtime_root else None
             state_file = Path(args.state_file).expanduser() if args.state_file else None
+            goal_doc = Path(args.goal_doc).expanduser() if args.goal_doc else None
             payload = bootstrap_project(
                 project=Path(args.project),
                 registry_path=registry_path,
@@ -165,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                 role=args.role,
                 parent_goal_id=args.parent_goal_id,
                 state_file=state_file,
+                goal_doc=goal_doc,
                 adapter_kind=args.adapter_kind,
                 adapter_status=args.adapter_status,
                 next_probe=args.next_probe,

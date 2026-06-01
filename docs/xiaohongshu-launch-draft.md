@@ -59,12 +59,13 @@ Codex goal mode / heartbeat / future UI
 
 ```bash
 git clone https://github.com/huangruiteng/goal-harness ~/goal-harness
-python3 -m pip install -e ~/goal-harness
+~/goal-harness/scripts/install-local.sh
 
 cd /path/to/your-project
 goal-harness bootstrap \
   --goal-id your-project-goal \
-  --objective "Improve this project through bounded, verified goal segments."
+  --objective "Improve this project through bounded, verified goal segments." \
+  --goal-doc GOAL.md
 ```
 
 我现在的判断是：AI agent 的体验提升，不只来自更强模型，也来自更好的 harness。

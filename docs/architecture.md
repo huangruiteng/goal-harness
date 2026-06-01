@@ -2,7 +2,8 @@
 
 Goal Harness has six layers.
 
-1. **Registry**: lists known goals, their repos, adapters, status, and guards.
+1. **Registry**: lists known goals, their repos, adapters, authority sources,
+   status, and guards.
 2. **Goal state**: the active state file for one goal.
 3. **Adapter pre-tick**: a read-only project-specific probe.
 4. **Run log**: JSON and Markdown reports saved per goal.

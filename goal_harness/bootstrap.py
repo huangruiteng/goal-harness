@@ -41,7 +41,20 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def render_state_markdown(*, goal_id: str, objective: str, updated_at: str) -> str:
+def resolve_project_path(project: Path, path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    path = path.expanduser()
+    return path if path.is_absolute() else project / path
+
+
+def render_authority_sources(project: Path, goal_doc: Path | None) -> str:
+    if not goal_doc:
+        return "- No explicit goal document was provided during bootstrap."
+    return f"- Primary goal document: `{rel_or_abs(goal_doc, project)}`"
+
+
+def render_state_markdown(*, project: Path, goal_id: str, objective: str, updated_at: str, goal_doc: Path | None) -> str:
     safe_objective = objective.replace('"', '\\"')
     return f"""---
 status: active
@@ -57,9 +70,14 @@ adapter_id: {goal_id}
 
 {objective}
 
+## Authority Sources
+
+{render_authority_sources(project, goal_doc)}
+
 ## Operating Contract
 
 - Treat this file as the durable goal state for future agent ticks.
+- Treat the authority sources above as the first context to inspect before acting.
 - Read current project evidence before choosing the next action.
 - Run a bounded progress segment when useful; it does not have to be one tiny step.
 - Keep private evidence, credentials, local paths, and raw logs out of public commits.
@@ -97,6 +115,7 @@ def build_goal_entry(
     role: str,
     parent_goal_id: str | None,
     state_file: Path,
+    goal_doc: Path | None,
     adapter_kind: str,
     adapter_status: str,
     next_probe: str | None,
@@ -106,6 +125,15 @@ def build_goal_entry(
     write_scope: list[str],
     claim_ttl_minutes: int,
 ) -> dict[str, Any]:
+    authority_sources = []
+    if goal_doc:
+        authority_sources.append(
+            {
+                "kind": "goal_doc",
+                "path": rel_or_abs(goal_doc, project),
+                "role": "primary_goal_document",
+            }
+        )
     return {
         "id": goal_id,
         "domain": domain,
@@ -114,6 +142,7 @@ def build_goal_entry(
         "parent_goal_id": parent_goal_id,
         "repo": str(project),
         "state_file": relative_state_file(project, state_file),
+        "authority_sources": authority_sources,
         "adapter": {
             "kind": adapter_kind,
             "status": adapter_status,
@@ -177,6 +206,7 @@ def bootstrap_project(
     role: str,
     parent_goal_id: str | None,
     state_file: Path | None,
+    goal_doc: Path | None,
     adapter_kind: str,
     adapter_status: str,
     next_probe: str | None,
@@ -197,6 +227,7 @@ def bootstrap_project(
     state_file = state_file.expanduser()
     if not state_file.is_absolute():
         state_file = project / state_file
+    goal_doc = resolve_project_path(project, goal_doc)
     runtime_root = runtime_root.expanduser() if runtime_root else DEFAULT_RUNTIME_ROOT
     updated_at = now_iso()
 
@@ -214,6 +245,7 @@ def bootstrap_project(
         role=role,
         parent_goal_id=parent_goal_id,
         state_file=state_file,
+        goal_doc=goal_doc,
         adapter_kind=adapter_kind,
         adapter_status=adapter_status,
         next_probe=next_probe,
@@ -246,7 +278,13 @@ def bootstrap_project(
         if state_action in {"created", "replaced"}:
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_file.write_text(
-                render_state_markdown(goal_id=goal_id, objective=objective, updated_at=updated_at),
+                render_state_markdown(
+                    project=project,
+                    goal_id=goal_id,
+                    objective=objective,
+                    updated_at=updated_at,
+                    goal_doc=goal_doc,
+                ),
                 encoding="utf-8",
             )
 
@@ -257,6 +295,8 @@ def bootstrap_project(
         "goal_id": goal_id,
         "registry": str(registry_path),
         "state_file": str(state_file),
+        "goal_doc": str(goal_doc) if goal_doc else None,
+        "goal_doc_exists": bool(goal_doc and goal_doc.exists()),
         "runtime_root": str(runtime_root),
         "registry_goal_action": registry_goal_action,
         "state_action": state_action,
@@ -280,6 +320,8 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
         f"- goal_id: `{payload.get('goal_id')}`",
         f"- registry: `{payload.get('registry')}`",
         f"- state_file: `{payload.get('state_file')}`",
+        f"- goal_doc: `{payload.get('goal_doc')}`",
+        f"- goal_doc_exists: `{payload.get('goal_doc_exists')}`",
         f"- runtime_root: `{payload.get('runtime_root')}`",
         f"- registry_goal_action: `{payload.get('registry_goal_action')}`",
         f"- state_action: `{payload.get('state_action')}`",

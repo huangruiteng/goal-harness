@@ -32,7 +32,7 @@ goal-harness new-project-prompt \
 
 ## Copy-Paste Prompt
 
-```text
+````text
 我有一个新项目要接入 Goal Harness。
 
 项目文件夹：
@@ -43,7 +43,24 @@ goal-harness new-project-prompt \
 
 请你按下面步骤推进，不要停在方案讨论：
 
-1. 先只读检查项目文件夹和目标文档，抽取：
+0. 先确认当前 shell 能调用 Goal Harness CLI；如果提示 `goal-harness`
+   不在 PATH，运行本机安装脚本再继续：
+
+   ```bash
+   install_script="$HOME/goal-harness/scripts/install-local.sh"
+   if ! command -v goal-harness >/dev/null 2>&1; then
+     if [ -x "$install_script" ]; then
+       "$install_script"
+       export PATH="$HOME/.local/bin:$PATH"
+     else
+       echo "goal-harness is not on PATH; clone the Goal Harness repo and run scripts/install-local.sh" >&2
+       exit 1
+     fi
+   fi
+   goal-harness --help >/dev/null
+   ```
+
+1. 再只读检查项目文件夹和目标文档，抽取：
    - stable goal id；
    - 一句话 objective；
    - domain；
@@ -59,6 +76,7 @@ goal-harness new-project-prompt \
      --goal-id <STABLE_GOAL_ID> \
      --objective "<OBJECTIVE_FROM_GOAL_DOC>" \
      --domain <DOMAIN> \
+     --goal-doc <GOAL_DOC_PATH> \
      --adapter-kind read_only_project_map_v0 \
      --adapter-status connected-read-only
 
@@ -89,7 +107,7 @@ goal-harness new-project-prompt \
    - 当前 goal 在 dashboard/attention queue 里会怎么显示；
    - next safe action；
    - 如果还不能接入 decision-advisor，明确缺哪些 gates。
-```
+````
 
 ## Minimal Command
 
@@ -100,7 +118,8 @@ cd <PROJECT_ROOT>
 goal-harness connect \
   --goal-id <STABLE_GOAL_ID> \
   --objective "<OBJECTIVE_FROM_GOAL_DOC>" \
-  --domain <DOMAIN>
+  --domain <DOMAIN> \
+  --goal-doc <GOAL_DOC_PATH>
 ```
 
 Then inspect:

@@ -9,8 +9,13 @@ Clone or symlink one copy:
 
 ```bash
 git clone <repo-url> ~/goal-harness
-python3 -m pip install -e ~/goal-harness
+~/goal-harness/scripts/install-local.sh
+goal-harness --help
 ```
+
+The installer links the repository wrapper into `~/.local/bin/goal-harness` and
+adds that bin directory to the current shell profile when it is missing from
+`PATH`.
 
 Then projects can call:
 
@@ -29,7 +34,8 @@ For a new project, start with:
 cd /path/to/project
 goal-harness bootstrap \
   --goal-id project-goal \
-  --objective "Improve this project through bounded, verified goal segments."
+  --objective "Improve this project through bounded, verified goal segments." \
+  --goal-doc GOAL.md
 ```
 
 `goal-harness connect` is an alias for the same operation. The command is
@@ -42,6 +48,10 @@ The default files are:
 .goal-harness/registry.json
 .codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md
 ```
+
+If `--goal-doc` is provided, the document path is recorded as a primary
+authority source. The receiving Codex should inspect that document first before
+choosing a next action.
 
 If another Codex session should perform the connection from a project folder
 and a goal document, use [new-project-codex-prompt.md](new-project-codex-prompt.md)

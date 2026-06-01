@@ -34,8 +34,13 @@ Install one shared local checkout:
 
 ```bash
 git clone https://github.com/huangruiteng/goal-harness ~/goal-harness
-python3 -m pip install -e ~/goal-harness
+~/goal-harness/scripts/install-local.sh
+goal-harness --help
 ```
+
+The install script creates `~/.local/bin/goal-harness` and adds that directory
+to your shell profile when needed. This keeps the CLI available from any project
+folder and from future Codex sessions on the same machine.
 
 Connect a project with one command:
 
@@ -43,7 +48,8 @@ Connect a project with one command:
 cd /path/to/your-project
 goal-harness bootstrap \
   --goal-id your-project-goal \
-  --objective "Improve this project through bounded, verified goal segments."
+  --objective "Improve this project through bounded, verified goal segments." \
+  --goal-doc GOAL.md
 ```
 
 If you already have a project folder and a goal document, use
@@ -84,6 +90,9 @@ your-project/
 ~/.codex/goal-harness/
   goals/<goal-id>/runs/
 ```
+
+When `--goal-doc` is provided, Goal Harness records it as a primary authority
+source in both the registry and the initial active goal state.
 
 If your goal state contains private evidence, add these paths to the project
 `.gitignore`:

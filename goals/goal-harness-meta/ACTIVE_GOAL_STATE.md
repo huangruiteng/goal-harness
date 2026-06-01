@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T15:47:30+08:00
+updated_at: 2026-06-01T16:04:18+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -16,8 +16,9 @@ private project context.
 
 ## Current Scope
 
-- Keep `goal-harness bootstrap`, `goal-harness check`, `goal-harness status`,
-  and `goal-harness serve-status` runnable from a fresh clone.
+- Keep `scripts/install-local.sh`, `goal-harness bootstrap`,
+  `goal-harness check`, `goal-harness status`, and
+  `goal-harness serve-status` runnable from a fresh clone.
 - Keep docs and examples aligned with the current CLI surface.
 - Keep public examples sanitized: no local user paths, private documents,
   credentials, raw logs, or internal task identifiers.
@@ -27,9 +28,9 @@ private project context.
 ## Next Action
 
 - Use `goal-harness new-project-prompt --project <PROJECT_ROOT> --goal-doc
-  <GOAL_DOC_PATH>` to generate the next real project handoff, then verify the
-  connected goal appears in the dashboard attention queue with public-safe
-  controller gates.
+  <GOAL_DOC_PATH>` for the next real project handoff. The receiving shell should
+  pass the CLI preflight, connect with `--goal-doc`, and then verify registry,
+  status, check, and dashboard attention queue visibility.
 
 ## Recent Progress
 
@@ -128,6 +129,11 @@ private project context.
   a project folder plus goal document. The generated command defaults to a
   read-only adapter and omits `--next-probe` unless a real read-only pre-tick
   command is provided.
+- 2026-06-01T16:04:18+08:00: Added `scripts/install-local.sh` so a fresh local
+  checkout can install `goal-harness` into `~/.local/bin` and add that directory
+  to the shell profile. Also added `connect --goal-doc` as a primary authority
+  source in registry and initial state, and updated `new-project-prompt` to run
+  a CLI preflight before project connection.
 
 ## Validation
 
@@ -182,6 +188,16 @@ private project context.
 - `python3 -m goal_harness.cli --format json new-project-prompt --project
   /tmp/demo-project --goal-doc /tmp/demo-project/GOAL.md` exposes the prompt
   and connect command for scripts
+- `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` creates a
+  `~/.local/bin/goal-harness` symlink, adds a Goal Harness PATH block to
+  `.zshrc`, and the installed wrapper runs `goal-harness --help`
+- `scripts/install-local.sh && command -v goal-harness` verifies the current
+  user shell can resolve the CLI from any project directory
+- `goal-harness connect --goal-doc docs/GOAL.md` records
+  `authority_sources[0].path == "docs/GOAL.md"` in the registry and renders
+  `Primary goal document: docs/GOAL.md` in the initial state
+- `goal-harness registry` renders `authorities=1` for a goal connected with a
+  primary goal document
 - Browser smoke: load the dashboard with `/status.local.json`, select
   `tiger-team-maiduidui-regauc`, and verify the queue gate hints plus next
   handoff condition are visible
