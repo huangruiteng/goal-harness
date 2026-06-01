@@ -247,6 +247,9 @@ User review surface:
   share the current review lane without mutating goal, run, or status state,
 - keep selected goal detail URL-backed when useful, while treating it as
   browser review state rather than a durable goal transition,
+- expose a compact review link affordance for the current action-kind focus,
+  selected goal, status source, and queue filters; copying that link is still
+  dashboard UI state, not reward, approval, or controller opt-in,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,

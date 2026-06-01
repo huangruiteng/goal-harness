@@ -29,7 +29,9 @@ the underlying status export. The filter is backed by the `actionKind` URL
 search parameter, so focused review links survive refresh and can be shared
 with another local operator or agent. The selected goal is also URL-backed via
 `goalId`, which lets a shared link preserve both the review lane and the
-selected goal detail.
+selected goal detail. The first screen exposes a compact `Review link` control
+that copies the current `actionKind`, selected `goalId`, source `statusUrl`,
+and queue filters as browser UI state only.
 The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for

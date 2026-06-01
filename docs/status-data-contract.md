@@ -416,6 +416,10 @@ A first useful UI can be built from the export alone:
   URL search state so a review link can reopen the same run-history detail.
   This selected-goal state is not part of the status export and must not be
   treated as an approval, reward, or controller signal.
+- Review link: the dashboard may copy a browser URL that includes local
+  `actionKind`, selected `goalId`, source `statusUrl`, `lane`, and `severity`
+  search state. That link is a user review affordance over this export; it
+  must not add fields to the status contract or mutate goal runtime state.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.

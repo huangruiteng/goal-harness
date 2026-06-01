@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T19:48:44+08:00
+updated_at: 2026-06-01T20:04:30+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,10 +29,10 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should add a compact share/review affordance for the URL-backed
-  `actionKind` and `goalId` state, so the operator can copy the current
-  review lane plus selected goal without confusing it with a durable approval
-  or reward write.
+  slice should turn the copied review link into a concise operator handoff
+  packet: include the selected goal, current action kind, safe local path, and
+  reward/default hint so the user can forward it to another project agent
+  without implying durable approval, reward, or write control.
 
 ## Recent Progress
 
@@ -276,6 +276,15 @@ private project context.
   run-history goal and normalizes the URL. README, status contract, and
   state-interaction docs now describe selected-goal URL state as a browser
   review affordance, not part of the status export or durable goal truth.
+- 2026-06-01T20:04:30+08:00: Added a compact first-screen `Review link`
+  affordance to the React dashboard. It builds a canonical browser URL from the
+  current `actionKind`, selected `goalId`, `statusUrl`, `lane`, and `severity`,
+  displays those as review-state badges, and copies the link with a clipboard
+  fallback for local HTTP previews. The control is labeled as UI state only and
+  does not write reward, approval, controller opt-in, runtime indexes, or the
+  status contract. README, status data contract, and state interaction docs now
+  describe the copied link as a user review affordance over agent-facing
+  status.
 
 ## Validation
 
@@ -323,6 +332,10 @@ private project context.
   controller-focused action card and selected run-history detail; selecting the
   reward card updates `goalId=tiger-team-maiduidui-regauc`, keeps
   `actionKind=reward`, and preserves `statusUrl`.
+- Browser DOM smoke: the `Review link` panel is visible, shows `UI state only`,
+  copies the current controller/agent-harness review URL into the clipboard,
+  preserves `statusUrl`, `lane`, and `severity`, and updates when the operator
+  switches to the reward filter and selects `tiger-team-maiduidui-regauc`.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load

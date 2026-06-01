@@ -3,6 +3,7 @@ import {
   Bot,
   CheckCircle2,
   CircleAlert,
+  Copy,
   Clock3,
   FileCheck2,
   FileJson2,
@@ -737,6 +738,92 @@ const userActionKindConfig: Record<UserActionKind, { label: string; variant: Bad
   evidence: { label: "Evidence", variant: "info" },
   health: { label: "Health", variant: "danger" },
 };
+
+type CopyState = "idle" | "copied" | "failed";
+
+async function copyTextToClipboard(value: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall through to the legacy path for local HTTP previews.
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+function ReviewLinkPanel({
+  actionKind,
+  goalId,
+  lane,
+  reviewUrl,
+  severity,
+  statusUrl,
+}: {
+  actionKind: UserActionFilter;
+  goalId: string;
+  lane: string;
+  reviewUrl: string;
+  severity: string;
+  statusUrl: string;
+}) {
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+
+  useEffect(() => {
+    if (copyState === "idle") {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setCopyState("idle"), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [copyState, reviewUrl]);
+
+  async function copyReviewLink() {
+    setCopyState((await copyTextToClipboard(reviewUrl)) ? "copied" : "failed");
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="info">Review link</Badge>
+              <Badge variant="neutral">UI state only</Badge>
+              <Badge variant={actionKind === "all" ? "neutral" : userActionKindConfig[actionKind].variant}>
+                {actionKind === "all" ? "All actions" : userActionKindConfig[actionKind].label}
+              </Badge>
+              {goalId ? <Badge variant="neutral">{goalId}</Badge> : <Badge variant="neutral">No goal</Badge>}
+              {statusUrl ? <Badge variant="success">Status URL</Badge> : <Badge variant="neutral">Example source</Badge>}
+              {lane !== "all" || severity !== "all" ? <Badge variant="neutral">{lane} / {severity}</Badge> : null}
+            </div>
+            <code className="mt-3 block truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+              {reviewUrl}
+            </code>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <Button aria-label="Copy review link" onClick={() => void copyReviewLink()} variant="primary">
+              {copyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copyState === "copied" ? "Copied" : "Copy Link"}
+            </Button>
+            {copyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
   if (readiness.decision_advisor_ready) {
@@ -2225,6 +2312,24 @@ export function DashboardPage() {
     : runHistoryOptions[0] ?? "";
   const selectedGoal = runHistory.goals.find((goal) => goal.id === selectedGoalId);
   const selectedQueueItem = queue.items.find((item) => item.goal_id === selectedGoalId);
+  const reviewUrl = useMemo(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("actionKind", search.actionKind);
+    url.searchParams.set("lane", search.lane);
+    url.searchParams.set("severity", search.severity);
+    if (selectedGoalId) {
+      url.searchParams.set("goalId", selectedGoalId);
+    } else {
+      url.searchParams.delete("goalId");
+    }
+    if (search.statusUrl) {
+      url.searchParams.set("statusUrl", search.statusUrl);
+    } else {
+      url.searchParams.delete("statusUrl");
+    }
+    return url.toString();
+  }, [search.actionKind, search.lane, search.severity, search.statusUrl, selectedGoalId]);
+
   function selectGoal(goalId: string) {
     void navigate({
       search: (current) => ({
@@ -2333,6 +2438,15 @@ export function DashboardPage() {
                 <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
+
+              <ReviewLinkPanel
+                actionKind={search.actionKind}
+                goalId={selectedGoalId}
+                lane={search.lane}
+                reviewUrl={reviewUrl}
+                severity={search.severity}
+                statusUrl={search.statusUrl}
+              />
 
               <UserActionSummary
                 selectedKind={search.actionKind}
