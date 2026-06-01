@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:36:53+08:00
+updated_at: 2026-06-02T04:45:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,28 @@ private project context.
 
 ## Next Action
 
-- Inspect whether controller/operator-gate Review Packets should include a
-  user-owned `goal-harness operator-gate ... --dry-run` recording draft, while
-  still giving project agents only the read-only map dry-run command. If useful,
-  implement the smallest dry-run-only UI/packet hint; do not append a real gate
+- Validate the live `agent-harness-main-control` user/controller flow end to
+  end: the single Review Packet should show the user-owned
+  `goal-harness operator-gate ... --dry-run` recording draft, while the project
+  Agent section still contains only the read-only/dry-run command. If the
+  distinction is only visible in the dashboard and CLI/status agents can still
+  misread it, add the smallest status Markdown hint; do not append a real gate
   or run the real map.
 
 ## Recent Progress
 
+- 2026-06-02T04:45:40+08:00: Added a dashboard-only user-owned operator-gate
+  dry-run draft for controller Review Packets. The selected action now keeps
+  one `Copy Review Packet` path, adds a `用户本地 Gate 记录草稿` section for
+  `goal-harness operator-gate ... --dry-run`, and keeps the project Agent
+  section limited to the read-only/dry-run command. The Safe CLI Path panel also
+  shows the gate draft as an attached operator preview rather than a second
+  primary action. Validation: dashboard production build passed with the
+  existing >500 kB chunk warning; `git diff --check` passed; grep confirmed the
+  new packet section, draft command, and UI label; public contract check passed.
+  Critic: this fixes the dashboard/user review affordance, but the next useful
+  check is whether live status/CLI-facing agents still need a compact boundary
+  hint.
 - 2026-06-02T04:36:53+08:00: Tightened the dashboard controller Review Packet
   prompt for planned opt-in. The human reply now explicitly says
   `同意先做 read-only map dry-run / 暂不同意 + 一句话原因`, and the boundary states

@@ -677,6 +677,7 @@ type OperatorTransitionPreview = {
   effects: string[];
   command?: string;
   agentVisibilityCommand?: string;
+  operatorGateDraftCommand?: string;
 };
 
 type UserActionKind = "reward" | "controller" | "codex" | "evidence" | "health";
@@ -1049,6 +1050,12 @@ function buildReviewPacket({
     `问题：${item?.operatorQuestion ?? prompt.question}`,
     `回复：${prompt.reply}`,
     `边界：${prompt.boundary}`,
+    ...(transitionPreview.operatorGateDraftCommand ? [
+      "",
+      "【用户本地 Gate 记录草稿】",
+      "用途：人确认后，由用户或主控先 dry-run 预览 durable operator gate；不要把它当作项目 Agent 执行命令。",
+      commandBlock(transitionPreview.operatorGateDraftCommand),
+    ] : []),
     "",
     "【给项目 Agent】",
     buildProjectAgentPacketText(kind, transitionPreview),
@@ -1262,6 +1269,27 @@ function buildRefreshStateDryRunCommand({
   ].join("\n");
 }
 
+function buildOperatorGateDryRunCommand({
+  goalId,
+  registry,
+  runtimeRoot,
+}: {
+  goalId: string;
+  registry: string;
+  runtimeRoot: string;
+}) {
+  return [
+    "goal-harness \\",
+    `  --registry ${shellQuote(registry)} \\`,
+    `  --runtime-root ${shellQuote(runtimeRoot)} \\`,
+    "  operator-gate \\",
+    `  --goal-id ${shellQuote(goalId)} \\`,
+    "  --decision approve \\",
+    `  --reason-summary ${shellQuote("同意先做 read-only map dry-run，不授权写入或生产动作")} \\`,
+    "  --dry-run",
+  ].join("\n");
+}
+
 function buildOperatorTransitionPreview({
   actionKind,
   goal,
@@ -1332,6 +1360,7 @@ function buildOperatorTransitionPreview({
   }
 
   if (kind === "controller") {
+    const command = item?.safePathCommand ?? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot });
     return {
       title: "Local Dry-run Preview",
       badge: "controller dry-run",
@@ -1342,10 +1371,12 @@ function buildOperatorTransitionPreview({
       summary: "预览 controller/read-only handoff 能看到的项目状态；这不是持久 opt-in 或写控制。",
       effects: [
         "运行 read-only map dry-run 或等价 safe path，不 append run history。",
+        "如果人已同意，用户可先预览 operator-gate dry-run 记录；项目 Agent 仍只接收 read-only map dry-run。",
         "让目标项目 agent 先回报 changed files、validation 和 next safe action。",
         "不记录 approval、controller opt-in、write-control 或生产动作授权。",
       ],
-      command: item?.safePathCommand ?? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot }),
+      command,
+      operatorGateDraftCommand: buildOperatorGateDryRunCommand({ goalId, registry, runtimeRoot }),
     };
   }
 
@@ -2007,6 +2038,7 @@ function buildOperatorActionBridge({
   if (waitingOn === "user_or_controller" || waitingOn === "controller") {
     const command = queueItem?.agent_command
       ?? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot });
+    const gateDraftCommand = buildOperatorGateDryRunCommand({ goalId, registry, runtimeRoot });
     return {
       title: "Safe CLI Path",
       badge: phase === "planned" ? "opt-in" : "approval",
@@ -2018,6 +2050,12 @@ function buildOperatorActionBridge({
           body: "Preview the controller handoff surface before any run is appended.",
           command,
           variant: "warning",
+        },
+        {
+          label: "Operator gate dry-run draft",
+          body: "User-owned preview after the human approves; keep --dry-run until intentionally recording the gate.",
+          command: gateDraftCommand,
+          variant: "neutral",
         },
         {
           label: "Approval boundary",
