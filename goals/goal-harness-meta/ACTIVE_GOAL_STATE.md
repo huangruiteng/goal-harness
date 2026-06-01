@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:11:09+08:00
+updated_at: 2026-06-02T04:18:41+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,27 @@ private project context.
 
 ## Next Action
 
-- Continue the P0 human-decision loop pass from fresh `goal-harness status`.
-  Next inspect whether rewarded runs appear clearly in `goal-harness status`
-  and dashboard run detail after a real append. Pick the smallest
-  status/dashboard/docs fix; do not add browser-side reward append, quota write
+- From fresh `goal-harness status` and the dashboard first screen, audit the
+  operator surface for redundant panels or copy affordances. Keep the single
+  Review Packet / history lookup path, and only remove or fold UI that does not
+  reduce user decision cost. Do not add browser-side reward append, quota write
   commands, or a scheduler.
 
 ## Recent Progress
 
+- 2026-06-02T04:18:41+08:00: Made rewarded runs easier for project agents to
+  notice from CLI status. `goal-harness status` Markdown now expands compact
+  `human_reward` fields under the latest run in `Run History`, including
+  `recorded_at`, `decision`, `reward`, `reason_summary`, `follow_up`, and the
+  standard `goal-harness history --goal-id ... --limit 3` project-agent lookup.
+  Updated the status data contract to keep dashboard as the operator surface
+  while making CLI status sufficient for agent inspection. Validation: Python
+  compile passed; example status Markdown smoke confirms reward detail and
+  history lookup render; public contract check passed; `git diff --check`
+  passed; `refresh-state` appended a `state_refreshed` run and dashboard local
+  status JSON was refreshed. Critic: this avoids fabricating a real human reward
+  and improves P0 visibility, but the dashboard first screen still needs a
+  separate attention audit for redundant controls.
 - 2026-06-02T04:11:09+08:00: Made reward CLI Markdown easier to judge at a
   glance by adding a `Write Effect` section near the top. Dry-runs and real
   appends now summarize the selected run, whether the run overlay was written

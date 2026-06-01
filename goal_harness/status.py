@@ -720,6 +720,32 @@ def compact_controller_readiness(readiness: Any) -> dict[str, Any] | None:
     return compact or None
 
 
+def _markdown_scalar(value: Any) -> str:
+    return str(value).replace("\n", " ").replace("|", "\\|").strip()
+
+
+def _append_human_reward_markdown(lines: list[str], goal_id: Any, reward: dict[str, Any]) -> None:
+    headline_parts = []
+    for field in ("recorded_at", "decision", "reward"):
+        value = reward.get(field)
+        if value:
+            headline_parts.append(f"{field}={_markdown_scalar(value)}")
+    if not headline_parts:
+        headline_parts.append("recorded=True")
+    lines.append(f"    - human_reward: {' '.join(headline_parts)}")
+    reason = reward.get("reason_summary")
+    if reason:
+        lines.append(f"      - reason_summary: {_markdown_scalar(reason)}")
+    follow_up = reward.get("follow_up")
+    if follow_up:
+        lines.append(f"      - follow_up: {_markdown_scalar(follow_up)}")
+    if goal_id:
+        lines.append(
+            "      - project_agent_visibility: "
+            f"`goal-harness history --goal-id {_markdown_scalar(goal_id)} --limit 3`"
+        )
+
+
 def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     compact = {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
     flags = run_lifecycle_flags(run)
@@ -1000,6 +1026,8 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     f"{operator_gate_text}"
                     f"{readiness_text}"
                 )
+                if reward:
+                    _append_human_reward_markdown(lines, goal.get("id"), reward)
 
     for title, key in (("Errors", "errors"), ("Warnings", "warnings"), ("Checks", "checks")):
         entries = contract.get(key) if isinstance(contract.get(key), list) else []

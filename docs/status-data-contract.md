@@ -520,6 +520,12 @@ Agents should treat `history_command` as the standard visibility path. Active
 state can repeat the summary and next action for context, but it is not the
 durable reward store.
 
+When `goal-harness status` renders Markdown, a latest run with `human_reward`
+should expand the compact reward fields under `Run History` and repeat the same
+project-agent history lookup. This keeps the dashboard as the operator surface
+while making CLI status sufficient for project agents that only need to notice
+and inspect a recorded reward.
+
 The Markdown response should also show a short `Write Effect` section near the
 top so the operator can see the selected run, whether the overlay was actually
 appended or only previewed, whether active-state writeback would happen, and
