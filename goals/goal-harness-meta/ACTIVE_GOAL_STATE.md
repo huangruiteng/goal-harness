@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T18:24:00+08:00
+updated_at: 2026-06-01T18:36:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,9 +27,11 @@ private project context.
 
 ## Next Action
 
-- Turn `read_only_project_map` output into the next adapter handoff surface:
-  decide whether the generic map should feed a project-specific pre-tick
-  command, controller opt-in packet, or dashboard action checklist.
+- Use `docs/state-interaction-model.md` as the gate before adding more
+  controller, reward, adapter, or dashboard features. The next implementation
+  slice should make status/dashboard distinguish connected, mapped, refreshed,
+  adapter-inspected, reward-judged, and controller-ready goals before adding
+  another isolated command.
 
 ## Recent Progress
 
@@ -198,6 +200,13 @@ private project context.
   counts in run history, and keeps raw project evidence in the private runtime
   payload. Updated status classification, dashboard schema/rendering, docs,
   new-project prompt guidance, and installed skill workflow.
+- 2026-06-01T18:36:00+08:00: Added
+  `docs/state-interaction-model.md` to define the state boundary between the
+  durable goal, Codex App executor, human operator, and dashboard. The document
+  names actor ownership, state stores, state transitions, dashboard first-screen
+  rules, invariants, and a feature-gate checklist so future work does not add
+  isolated commands before the state contract is clear. Linked it from
+  `README.md` and `docs/architecture.md`.
 
 ## Validation
 

@@ -12,6 +12,11 @@ heartbeat, or goal-mode workflow and gives it a shared structure:
 - a shared runtime directory for run history,
 - a contract check that catches missing state and obvious private-data leaks.
 
+The core design boundary is the state interaction between the durable goal, the
+Codex App executor, the human operator, and the dashboard. See
+[docs/state-interaction-model.md](docs/state-interaction-model.md) before
+adding new controller, reward, or dashboard capabilities.
+
 ## Why
 
 Long-running agent work usually fails through drift rather than one bad prompt:
@@ -214,6 +219,11 @@ The Python renderer is a diagnostic fallback. The planned product dashboard is
 a React/Vite app with typed routes, tables, charts, and a more polished
 control-plane UI. See
 [docs/dashboard-frontend-selection.md](docs/dashboard-frontend-selection.md).
+The dashboard should follow the actor and state-store model in
+[docs/state-interaction-model.md](docs/state-interaction-model.md): read the
+derived status surface by default, show user/controller and Codex-ready lanes
+separately, and keep browser-side writes behind an explicit local write
+boundary.
 
 Run the dashboard shell locally:
 

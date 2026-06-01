@@ -32,6 +32,25 @@ The core repository intentionally avoids domain logic. A data experiment goal,
 a note-maintenance goal, and a harness self-improvement goal should share the
 same runtime and contract, but use different adapters.
 
+## State Interaction Model
+
+Goal Harness has four product actors:
+
+- the **goal**, which owns durable objective, state, guards, run history, and
+  reward overlays;
+- the **Codex App executor**, which performs bounded transitions but should not
+  be the long-term source of truth;
+- the **user**, who supplies operator intent, approval, and high-quality reward
+  signals;
+- the **dashboard**, which visualizes derived status and should remain
+  read-mostly unless an explicit local write boundary is enabled.
+
+This actor model is the design gate for future commands and dashboard work. A
+new capability should name the state it reads, the state it writes, the owner
+of that write, and how the dashboard proves the transition happened.
+
+See [state-interaction-model.md](state-interaction-model.md).
+
 ## Controller / Sub-Agent Model
 
 For Codex-style parallel work, Goal Harness treats the main goal run as a
