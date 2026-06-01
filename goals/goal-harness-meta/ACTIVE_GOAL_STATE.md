@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:43:29+08:00
+updated_at: 2026-06-02T05:54:31+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,28 @@ private project context.
 
 ## Next Action
 
-- Do a browser-level first-screen check of the dashboard Review Packet path:
-  confirm the selected-action panel says the operator decides in the
-  dashboard/operator view first, the old "send directly to project Agent"
-  wording is gone, and the packet details still stay collapsed by default. Keep
-  this to UI verification or a tiny wording follow-up; do not append a real
-  gate or run a real map.
+- Tighten the planned controller opt-in `recommended_action` wording used by
+  status/attention queue rows so it matches the Review Packet boundary: the
+  operator decides in Goal Harness first, and the project-agent command is only
+  an after-approval dry-run execution path. Keep this to status wording and
+  source checks; do not append a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:54:31+08:00: Completed a browser-level first-screen check of
+  the dashboard Review Packet path with Playwright against the local static
+  dashboard at `127.0.0.1:5173`. The selected `agent-harness-main-control`
+  controller review showed `Operator Review Packet`, showed the helper copy
+  saying the operator decides in the dashboard/operator view first, did not
+  contain the old "send directly to project Agent; human only adds one
+  judgment" wording, and kept the single `Packet details` disclosure collapsed
+  by default. Validation: Playwright snapshot confirmed the first-screen text;
+  DOM eval returned `hasNewCopy=true`, `hasOldCopy=false`, `hasBadge=true`,
+  `packetDetailsCount=1`, and `packetDetailsOpen=[false]`. The only console
+  error was a harmless missing `favicon.ico`. Critic: the selected-action panel
+  is now visually aligned, but the attention queue/recommended action copy
+  still says "review gate, then send project agent command" and should be
+  tightened to the same after-approval language.
 - 2026-06-02T05:43:29+08:00: Tightened the dashboard selected-action
   microcopy for the Review Packet path. The first-screen badge now says
   `Operator Review Packet`, the helper copy now says to decide in the
