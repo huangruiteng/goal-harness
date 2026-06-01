@@ -115,6 +115,8 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 "raw_index_records_before": payload.get("raw_index_records_before"),
                 "selected_run": payload.get("selected_run"),
                 "human_reward": payload.get("human_reward"),
+                "active_state_summary": payload.get("active_state_summary"),
+                "project_agent_visibility": payload.get("project_agent_visibility"),
             }
         )
 

@@ -2232,8 +2232,18 @@ function RewardCommandDraft({
             {dryRunError ? <Badge variant="danger">{dryRunError.slice(0, 96)}</Badge> : null}
           </div>
           {dryRunResult?.ok ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
-              {dryRunResult.goal_id} · {dryRunResult.selected_run?.generated_at} · appended={String(dryRunResult.appended)}
+            <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
+              <div>
+                {dryRunResult.goal_id} · {dryRunResult.selected_run?.generated_at} · appended={String(dryRunResult.appended)}
+              </div>
+              {dryRunResult.active_state_summary ? (
+                <p>{dryRunResult.active_state_summary}</p>
+              ) : null}
+              {dryRunResult.project_agent_visibility?.history_command ? (
+                <code className="block rounded border border-emerald-200 bg-white/60 p-2 text-[11px] leading-4 dark:border-emerald-900 dark:bg-zinc-950/50">
+                  {dryRunResult.project_agent_visibility.history_command}
+                </code>
+              ) : null}
             </div>
           ) : null}
           <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">

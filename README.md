@@ -191,6 +191,11 @@ goal-harness reward \
   --reason-summary "validation improved and the route is worth extending"
 ```
 
+Use `--dry-run` first when turning a dashboard review into durable feedback.
+The command returns a Chinese `active_state_summary` and a
+`project_agent_visibility.history_command` so Codex can update active state as a
+summary while project agents read the run-bound reward from history.
+
 See the first-screen status and attention queue:
 
 ```bash

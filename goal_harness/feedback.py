@@ -92,6 +92,40 @@ def select_run(runs: list[dict[str, Any]], run_generated_at: str | None) -> dict
     return sorted(runs, key=lambda item: str(item.get("generated_at") or ""), reverse=True)[0]
 
 
+def build_reward_coordination(
+    *,
+    goal_id: str,
+    selected_run: dict[str, Any],
+    reward: dict[str, Any],
+    dry_run: bool,
+) -> dict[str, Any]:
+    run_generated_at = str(selected_run.get("generated_at") or "unknown-run")
+    reward_value = str(reward.get("reward") or "unknown")
+    decision = str(reward.get("decision") or "unknown_decision")
+    verb = "dry-run：将记录" if dry_run else "已记录"
+    reason_summary = reward.get("reason_summary")
+    summary = (
+        f"{verb}目标 `{goal_id}` 的 run `{run_generated_at}` "
+        f"human_reward={reward_value}，decision=`{decision}`。"
+        "权威来源是 run-bound `human_reward` overlay；"
+        "active state 只摘要这个指针和下一步。"
+    )
+    if reason_summary:
+        summary = f"{summary} reason_summary：{reason_summary}"
+    follow_up = reward.get("follow_up")
+    if follow_up:
+        summary = f"{summary} follow_up：{follow_up}"
+    return {
+        "active_state_summary": summary,
+        "project_agent_visibility": {
+            "source_of_truth": "run_bound_human_reward_overlay",
+            "history_command": f"goal-harness history --goal-id {goal_id} --limit 3",
+            "active_state_role": "summary_only",
+            "review_packet_role": "optional_handoff_only",
+        },
+    }
+
+
 def append_human_reward(
     *,
     registry_path: Path,
@@ -132,6 +166,20 @@ def append_human_reward(
         with index_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
 
+    selected_run = {
+        "generated_at": selected.get("generated_at"),
+        "classification": selected.get("classification"),
+        "recommended_action": selected.get("recommended_action"),
+        "json_exists": selected.get("json_exists"),
+        "markdown_exists": selected.get("markdown_exists"),
+    }
+    coordination = build_reward_coordination(
+        goal_id=goal_id,
+        selected_run=selected_run,
+        reward=index_record["human_reward"],
+        dry_run=dry_run,
+    )
+
     return {
         "ok": True,
         "registry": str(registry_path),
@@ -140,14 +188,9 @@ def append_human_reward(
         "index_path": str(index_path),
         "raw_index_records_before": raw_count,
         "dry_run": dry_run,
-        "selected_run": {
-            "generated_at": selected.get("generated_at"),
-            "classification": selected.get("classification"),
-            "recommended_action": selected.get("recommended_action"),
-            "json_exists": selected.get("json_exists"),
-            "markdown_exists": selected.get("markdown_exists"),
-        },
+        "selected_run": selected_run,
         "human_reward": index_record["human_reward"],
+        **coordination,
         "index_record": index_record,
         "appended": not dry_run,
     }
@@ -186,4 +229,18 @@ def render_reward_markdown(payload: dict[str, Any]) -> str:
     )
     if reward.get("follow_up"):
         lines.append(f"- follow_up: {reward.get('follow_up')}")
+    if payload.get("active_state_summary"):
+        lines.extend(["", "## Active-State Summary", str(payload.get("active_state_summary"))])
+    visibility = payload.get("project_agent_visibility") if isinstance(payload.get("project_agent_visibility"), dict) else {}
+    if visibility:
+        lines.extend(
+            [
+                "",
+                "## Project-Agent Visibility",
+                f"- source_of_truth: `{visibility.get('source_of_truth')}`",
+                f"- history_command: `{visibility.get('history_command')}`",
+                f"- active_state_role: `{visibility.get('active_state_role')}`",
+                f"- review_packet_role: `{visibility.get('review_packet_role')}`",
+            ]
+        )
     return "\n".join(lines)

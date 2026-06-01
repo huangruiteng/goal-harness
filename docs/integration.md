@@ -235,6 +235,19 @@ appends a JSONL overlay to the same `index.jsonl`; it does not mutate private
 run payloads. `goal-harness status` exports only the compact `human_reward`
 fields, so raw evidence should stay in private artifacts.
 
+`goal-harness reward --dry-run` and the real append response both include two
+coordination fields:
+
+- `active_state_summary`: a short Chinese summary Codex can copy into the
+  active goal state after the operator judgment is recorded.
+- `project_agent_visibility`: the standard way another project agent should
+  find the reward, including the `goal-harness history --goal-id ... --limit 3`
+  command.
+
+The run-bound `human_reward` overlay remains the source of truth. Active state
+is only the human-readable pointer and next-action summary; a dashboard Review
+Packet is only an immediate handoff artifact.
+
 ## First-Screen Status
 
 Use `goal-harness status` as the entrypoint for the next controller tick or UI

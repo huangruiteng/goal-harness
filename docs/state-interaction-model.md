@@ -199,6 +199,7 @@ Writer: user-authorized `goal-harness reward`.
 Writes:
 
 - compact overlay row in the run index.
+- coordination hints for active-state summary and project-agent history lookup.
 
 Dashboard effect: selected runs show whether human judgment exists and what
 class of decision it judged. This is the main improvement over bare goal-mode

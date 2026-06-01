@@ -191,6 +191,13 @@ export const rewardDryRunResponseSchema = z.object({
     markdown_exists: z.boolean().optional().nullable(),
   }).optional().nullable(),
   human_reward: humanRewardSchema.optional().nullable(),
+  active_state_summary: z.string().optional().nullable(),
+  project_agent_visibility: z.object({
+    source_of_truth: z.string().optional().nullable(),
+    history_command: z.string().optional().nullable(),
+    active_state_role: z.string().optional().nullable(),
+    review_packet_role: z.string().optional().nullable(),
+  }).optional().nullable(),
   error: z.string().optional().nullable(),
 });
 

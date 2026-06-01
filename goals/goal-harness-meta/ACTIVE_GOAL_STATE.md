@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T22:12:40+08:00
+updated_at: 2026-06-01T22:45:18+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,16 +27,28 @@ private project context.
 
 ## Next Action
 
-- Use `docs/state-interaction-model.md` as the gate before adding more
-  controller, reward, adapter, or dashboard features. The next implementation
-  slice should make operator reward submission explicit: when a user gives a
-  Chinese reward judgment, Codex should record the durable signal as an exact
-  run-bound `human_reward` overlay through `goal-harness reward`, then write a
-  short active-state summary and optionally forward the same Review Packet to
-  the target project agent for immediate execution.
+- Use a real operator judgment to validate the reward submission loop
+  end-to-end before adding more browser write capability: run
+  `goal-harness reward --dry-run`, append the exact run-bound `human_reward`
+  overlay only after explicit operator intent, copy the returned
+  `active_state_summary` into active state, and have the target project agent
+  read the reward through `project_agent_visibility.history_command`.
 
 ## Recent Progress
 
+- 2026-06-01T22:45:18+08:00: Made reward submission produce a standard
+  coordination surface. `goal-harness reward --dry-run` and real append now
+  return a Chinese `active_state_summary` plus
+  `project_agent_visibility.history_command`, and `POST /reward/dry-run`
+  exposes the same fields for the live dashboard. The dashboard displays the
+  summary and one project-agent history command after dry-run validation.
+  README, integration, status contract, experiment milestone, state model, and
+  dashboard docs now state that the run-bound `human_reward` overlay is the
+  durable source of truth while active state is summary-only. Validation used a
+  temporary registry/runtime to prove dry-run does not write, append adds one
+  overlay row, and `history` merges the reward into the judged run; Python
+  compile, public contract check, dashboard build, and live dashboard dry-run
+  smoke all passed.
 - 2026-06-01T22:12:40+08:00: Collapsed the dashboard's first-screen share
   affordances from several copy buttons into one canonical `Copy Review Packet`.
   The selected packet now follows the selected action card, so three active

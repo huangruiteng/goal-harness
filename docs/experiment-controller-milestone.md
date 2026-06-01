@@ -92,6 +92,12 @@ The writer appends an index overlay; it does not rewrite the private run
 payload. That keeps operator feedback close to the judged decision while
 preserving the public/private evidence boundary.
 
+The dry-run and append response also carry coordination fields. Codex can copy
+the Chinese `active_state_summary` into the active state after the real append,
+while project agents should use `project_agent_visibility.history_command` to
+read the reward from run history. This avoids making chat text, dashboard copy
+packets, or active-state prose the durable reward source.
+
 The dashboard may generate a `Reward CLI Draft` for the selected goal and
 latest run. That draft should default to `--dry-run`; the operator still records
 the judgment through the CLI until browser-side writes can enforce the same

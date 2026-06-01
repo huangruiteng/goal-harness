@@ -30,8 +30,9 @@ localhost port can fetch it.
 The same local server exposes `POST /reward/dry-run` for dashboard reward
 validation. It accepts the selected `goal_id`, `run_generated_at`, compact
 reward fields, and public-safe summary text, then returns a compact validation
-result with `appended=false`. It does not mutate the run index and does not
-return private artifact paths.
+result with `appended=false`. It also returns the same coordination fields as
+the CLI: `active_state_summary` and `project_agent_visibility`. It does not
+mutate the run index and does not return private artifact paths.
 
 ## Command
 
@@ -397,6 +398,24 @@ The command appends a compact overlay row to the goal's `index.jsonl`. History
 loading merges later rows with the same run key, so feedback can be added
 without rewriting the original run JSON or Markdown payload.
 
+Both dry-run and append responses include:
+
+```json
+{
+  "active_state_summary": "dry-run：将记录目标 `example-experiment-goal` ...",
+  "project_agent_visibility": {
+    "source_of_truth": "run_bound_human_reward_overlay",
+    "history_command": "goal-harness history --goal-id example-experiment-goal --limit 3",
+    "active_state_role": "summary_only",
+    "review_packet_role": "optional_handoff_only"
+  }
+}
+```
+
+Agents should treat `history_command` as the standard visibility path. Active
+state can repeat the summary and next action for context, but it is not the
+durable reward store.
+
 ## Display Model
 
 A first useful UI can be built from the export alone:
@@ -457,7 +476,8 @@ A first useful UI can be built from the export alone:
   implemented.
 - Reward dry-run check: when the dashboard is loaded from a loopback status
   server, it may validate the same draft through `POST /reward/dry-run` and
-  display the compact result. This is still a validation path, not a browser
+  display the compact result, including the Chinese active-state summary and
+  project-agent history command. This is still a validation path, not a browser
   write path.
 - Reward source of truth: durable user reward belongs in a run-bound
   `human_reward` overlay appended through `goal-harness reward`. Active goal

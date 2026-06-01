@@ -59,7 +59,9 @@ values. The operator can still edit or reset the draft before validation.
 
 When the dashboard is loaded from the loopback `Live` source, the same panel can
 send that draft to `POST /reward/dry-run` for local validation. The endpoint
-returns a compact validation result and never appends to the run index.
+returns a compact validation result, the Chinese active-state summary Codex can
+write after a real reward append, and the project-agent history command. It
+never appends to the run index.
 Durable reward should be recorded as a run-bound `human_reward` overlay through
 `goal-harness reward`; active state may summarize the reward afterward, but it
 should not be the only source of truth for multi-agent reward signals.
