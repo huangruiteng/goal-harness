@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T11:43:29+08:00
+updated_at: 2026-06-01T11:48:36+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Use the status data contract to build the next public product segment: a
-  minimal local dashboard data export demo, a reusable adapter-template doc, or
-  a controller/sub-agent coordination example backed by compact run history.
+- Use the status data contract and dashboard renderer as the base for the next
+  public product segment: either a reusable adapter-template doc or a more
+  polished dashboard data export example backed by compact run history.
 
 ## Recent Progress
 
@@ -36,6 +36,10 @@ private project context.
   linked it from README / architecture / attention queue / integration docs,
   pushed the public commit, and saved a compact self-health run with
   `health_check=22/22`.
+- 2026-06-01T11:48:36+08:00: Added
+  `examples/render-status-dashboard.py`, documented the static dashboard demo,
+  and validated that `examples/status.example.json` renders to a local HTML
+  dashboard with user/controller, Codex-ready, and external-evidence lanes.
 
 ## Validation
 
