@@ -106,6 +106,8 @@ type DataSource =
   | { kind: "url"; label: string }
   | { kind: "file"; label: string };
 
+const defaultLiveStatusUrl = "http://127.0.0.1:8765/status.json";
+
 function laneFor(item: QueueItem) {
   return laneConfig.find((lane) => lane.waitingOn.includes(item.waiting_on));
 }
@@ -346,7 +348,7 @@ export function DashboardPage() {
                         aria-label="Status URL"
                         className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500 sm:w-80"
                         onChange={(event) => setStatusUrl(event.target.value)}
-                        placeholder="/status.local.json"
+                        placeholder={defaultLiveStatusUrl}
                         value={statusUrl}
                       />
                       <Button disabled={isLoading} onClick={() => void loadFromUrl(statusUrl)}>
@@ -371,6 +373,9 @@ export function DashboardPage() {
                       </Button>
                       <Button disabled={isLoading} onClick={resetToExample} variant="ghost">
                         Example
+                      </Button>
+                      <Button disabled={isLoading} onClick={() => void loadFromUrl(defaultLiveStatusUrl)} variant="ghost">
+                        Live
                       </Button>
                     </div>
                   </div>

@@ -135,8 +135,21 @@ npm run build
 npm run dev
 ```
 
-From the repo root, export current local state into the dashboard public folder
-and load `/status.local.json` from the dashboard source control:
+Serve live status JSON from the project you want to inspect, then use the
+dashboard `Live` source button:
+
+```bash
+goal-harness serve-status --port 8765
+```
+
+The endpoint is local by default:
+
+```text
+http://127.0.0.1:8765/status.json
+```
+
+For a fully static fallback, export current local state into the dashboard
+public folder and load `/status.local.json` from the dashboard source control:
 
 ```bash
 goal-harness --format json status > apps/dashboard/public/status.local.json

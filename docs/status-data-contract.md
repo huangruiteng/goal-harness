@@ -7,6 +7,16 @@ The command is an export: it reads the registry, compact run indexes, and the
 public/private contract check, then emits one JSON object. It does not inspect
 private run payloads beyond compact index fields and does not mutate files.
 
+For local dashboards, the same JSON shape can be served over loopback HTTP:
+
+```bash
+goal-harness serve-status --port 8765
+```
+
+The default endpoint is `http://127.0.0.1:8765/status.json`. It is intended for
+local dashboard development and includes CORS headers so a Vite app on another
+localhost port can fetch it.
+
 ## Command
 
 ```bash

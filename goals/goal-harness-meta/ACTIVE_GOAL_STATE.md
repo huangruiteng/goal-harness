@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T12:28:37+08:00
+updated_at: 2026-06-01T12:37:47+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -16,8 +16,8 @@ private project context.
 
 ## Current Scope
 
-- Keep `goal-harness bootstrap`, `goal-harness check`, and `goal-harness status`
-  runnable from a fresh clone.
+- Keep `goal-harness bootstrap`, `goal-harness check`, `goal-harness status`,
+  and `goal-harness serve-status` runnable from a fresh clone.
 - Keep docs and examples aligned with the current CLI surface.
 - Keep public examples sanitized: no local user paths, private documents,
   credentials, raw logs, or internal task identifiers.
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Add a tiny local dashboard/status serving command so `apps/dashboard` can
-  fetch live `goal-harness --format json status` output without manually
-  copying a `status.local.json` file into the Vite public folder.
+- Add a compact run-history surface for the dashboard so an operator can drill
+  from an attention queue row into recent run classifications, validation
+  health, and saved artifact availability without leaving the UI.
 
 ## Recent Progress
 
@@ -62,6 +62,10 @@ private project context.
   `apps/dashboard/public/status.local.json` export and a browser smoke check at
   `?statusUrl=/status.local.json`. Added dashboard docs plus a `.gitignore`
   guard so local status exports stay untracked.
+- 2026-06-01T12:37:47+08:00: Added `goal-harness serve-status`, a loopback HTTP
+  server for live dashboard status JSON with `/status.json`, `/healthz`,
+  no-store responses, and local CORS headers. The React dashboard now has a
+  default `Live` source path for `http://127.0.0.1:8765/status.json`.
 
 ## Validation
 
@@ -73,6 +77,11 @@ private project context.
 - `cd apps/dashboard && npm run build`
 - `python3 -m goal_harness.cli --format json status > apps/dashboard/public/status.local.json`
 - Browser smoke: load `http://127.0.0.1:5173/?statusUrl=/status.local.json`
+- `python3 -m goal_harness.cli serve-status --help`
+- `curl http://127.0.0.1:8765/healthz`
+- `curl http://127.0.0.1:8765/status.json`
+- Browser smoke: click `Live` in `apps/dashboard` and verify it loads
+  `http://127.0.0.1:8765/status.json`
 
 ## Guards
 

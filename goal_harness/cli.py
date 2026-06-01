@@ -15,6 +15,12 @@ from .history import collect_history, load_registry, render_history_markdown
 from .paths import default_registry_path, resolve_runtime_root
 from .registry import inspect_registry, render_registry_markdown
 from .status import collect_status, render_status_markdown
+from .status_server import (
+    DEFAULT_STATUS_HOST,
+    DEFAULT_STATUS_PATH,
+    DEFAULT_STATUS_PORT,
+    serve_status,
+)
 
 
 def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> None:
@@ -79,6 +85,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
     )
     status_parser.add_argument("--limit", type=int, default=5)
+
+    serve_status_parser = sub.add_parser("serve-status", help="Serve live status JSON for the local dashboard.")
+    serve_status_parser.add_argument("--host", default=DEFAULT_STATUS_HOST, help="Bind host. Defaults to localhost only.")
+    serve_status_parser.add_argument("--port", type=int, default=DEFAULT_STATUS_PORT)
+    serve_status_parser.add_argument("--path", default=DEFAULT_STATUS_PATH, help="Status JSON route.")
+    serve_status_parser.add_argument("--scan-root", default=".", help="Public files to scan for obvious private material.")
+    serve_status_parser.add_argument(
+        "--scan-path",
+        action="append",
+        default=[],
+        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
+    )
+    serve_status_parser.add_argument("--limit", type=int, default=5)
+    serve_status_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
 
     args = parser.parse_args(argv)
     registry_path = Path(args.registry).expanduser()
@@ -204,6 +224,32 @@ def main(argv: list[str] | None = None) -> int:
             }
         print_payload(payload, args.format, render_status_markdown)
         return 0 if payload.get("ok") else 1
+
+    if args.command == "serve-status":
+        try:
+            scan_roots = [Path(item).expanduser() for item in args.scan_path]
+            if not scan_roots:
+                scan_roots = [Path(args.scan_root).expanduser()]
+            serve_status(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                scan_roots=scan_roots,
+                limit=max(0, args.limit),
+                host=args.host,
+                port=args.port,
+                status_path=args.path,
+                verbose=bool(args.verbose),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "error": str(exc),
+            }
+            print_payload(payload, args.format, render_status_markdown)
+            return 1
+        return 0
 
     return 2
 

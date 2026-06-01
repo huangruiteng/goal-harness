@@ -14,7 +14,25 @@ npm run dev
 The default screen uses the sanitized repository example at
 `examples/status.example.json`.
 
-## Load Real Status
+## Load Live Status
+
+Start a local status server from the project you want to inspect:
+
+```bash
+goal-harness serve-status --port 8765
+```
+
+Then run the dashboard and use the `Live` source button, or load this URL from
+the source control:
+
+```text
+http://127.0.0.1:8765/status.json
+```
+
+The status server binds to `127.0.0.1` by default and sends no-store JSON with
+local CORS headers for the Vite dashboard.
+
+## Load Static Status
 
 Use a local static export:
 
