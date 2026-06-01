@@ -239,6 +239,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Short public-safe reason. Do not include raw private evidence.",
     )
     reward_parser.add_argument("--follow-up", help="Optional next handoff or experiment condition.")
+    reward_parser.add_argument(
+        "--state-file",
+        help="Active goal state path for optional summary writeback. Defaults to the registry goal state_file.",
+    )
+    reward_parser.add_argument(
+        "--write-active-state-summary",
+        action="store_true",
+        help="After a real append, also add the returned active_state_summary to the active state's Progress Ledger. With --dry-run, preview only.",
+    )
     reward_parser.add_argument("--dry-run", action="store_true", help="Print the overlay without appending it.")
 
     check_parser = sub.add_parser("check", help="Run a read-only contract and public/private boundary check.")
@@ -494,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
                 run_generated_at=args.run_generated_at,
                 reward=reward,
                 dry_run=bool(args.dry_run),
+                state_file_override=Path(args.state_file).expanduser() if args.state_file else None,
+                write_active_state_summary=bool(args.write_active_state_summary),
             )
         except Exception as exc:
             payload = {

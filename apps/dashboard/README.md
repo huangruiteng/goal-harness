@@ -65,6 +65,9 @@ never appends to the run index.
 Durable reward should be recorded as a run-bound `human_reward` overlay through
 `goal-harness reward`; active state may summarize the reward afterward, but it
 should not be the only source of truth for multi-agent reward signals.
+When a real CLI append should also update the active goal state, use
+`goal-harness reward --write-active-state-summary`; the dashboard endpoint
+remains dry-run only.
 
 ## Load Live Status
 

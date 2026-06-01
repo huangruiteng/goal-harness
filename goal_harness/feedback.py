@@ -8,6 +8,7 @@ from typing import Any
 
 from .history import load_index, load_registry
 from .paths import resolve_runtime_root
+from .registry import registry_goals, resolve_state_file
 
 
 REWARD_VALUES = {"positive", "negative", "mixed", "neutral"}
@@ -47,6 +48,10 @@ RUN_OVERLAY_FIELDS = (
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def now_local() -> str:
+    return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
 
 
 def validate_public_safe_text(label: str, value: str | None) -> None:
@@ -92,6 +97,31 @@ def select_run(runs: list[dict[str, Any]], run_generated_at: str | None) -> dict
     return sorted(runs, key=lambda item: str(item.get("generated_at") or ""), reverse=True)[0]
 
 
+def find_registry_goal(registry: dict[str, Any], goal_id: str) -> dict[str, Any] | None:
+    for goal in registry_goals(registry):
+        if str(goal.get("id") or "") == goal_id:
+            return goal
+    return None
+
+
+def resolve_reward_state_file(
+    *,
+    registry: dict[str, Any],
+    goal_id: str,
+    state_file_override: Path | None,
+) -> Path | None:
+    goal = find_registry_goal(registry, goal_id)
+    repo = Path(str(goal.get("repo") or "")).expanduser() if goal and goal.get("repo") else None
+    if state_file_override:
+        state_file = state_file_override.expanduser()
+        if state_file.is_absolute():
+            return state_file
+        return (repo or Path.cwd()) / state_file
+    if not goal or not repo:
+        return None
+    return resolve_state_file(repo, goal.get("state_file"))
+
+
 def build_reward_coordination(
     *,
     goal_id: str,
@@ -126,6 +156,106 @@ def build_reward_coordination(
     }
 
 
+def build_active_state_entry(
+    *,
+    reward: dict[str, Any],
+    active_state_summary: str,
+    project_agent_visibility: dict[str, Any],
+) -> str:
+    recorded_at = str(reward.get("recorded_at") or now_local())
+    history_command = project_agent_visibility.get("history_command")
+    lines = [f"- {recorded_at}: {active_state_summary}"]
+    if history_command:
+        lines.append(f"  - project_agent_visibility: `{history_command}`")
+    return "\n".join(lines)
+
+
+def update_frontmatter_timestamp(text: str, updated_at: str) -> str:
+    if not text.startswith("---\n"):
+        return text
+    end = text.find("\n---", 4)
+    if end < 0:
+        return text
+    frontmatter = text[:end]
+    body = text[end:]
+    if re.search(r"^updated_at:\s*.*$", frontmatter, flags=re.M):
+        frontmatter = re.sub(r"^updated_at:\s*.*$", f"updated_at: {updated_at}", frontmatter, flags=re.M)
+    else:
+        frontmatter = f"{frontmatter}\nupdated_at: {updated_at}"
+    return frontmatter + body
+
+
+def insert_progress_ledger_entry(text: str, entry: str, updated_at: str) -> tuple[str, bool]:
+    text = update_frontmatter_timestamp(text, updated_at)
+    if entry in text:
+        return text, False
+
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "## Progress Ledger":
+            continue
+        insert_at = index + 1
+        while insert_at < len(lines) and not lines[insert_at].strip():
+            insert_at += 1
+        lines[insert_at:insert_at] = entry.splitlines() + [""]
+        return "\n".join(lines).rstrip() + "\n", True
+
+    separator = "" if text.endswith("\n") else "\n"
+    return f"{text}{separator}\n## Progress Ledger\n\n{entry}\n", True
+
+
+def plan_active_state_update(
+    *,
+    registry: dict[str, Any],
+    goal_id: str,
+    state_file_override: Path | None,
+    active_state_summary: str,
+    project_agent_visibility: dict[str, Any],
+    reward: dict[str, Any],
+    requested: bool,
+    dry_run: bool,
+) -> tuple[dict[str, Any], Path | None, str | None]:
+    update: dict[str, Any] = {
+        "requested": requested,
+        "written": False,
+        "would_write": False,
+    }
+    if not requested:
+        return update, None, None
+
+    state_file = resolve_reward_state_file(
+        registry=registry,
+        goal_id=goal_id,
+        state_file_override=state_file_override,
+    )
+    if state_file is None:
+        raise ValueError("active state summary write requested, but the registry goal has no state_file")
+    if not state_file.exists():
+        raise FileNotFoundError(f"active state file does not exist: {state_file}")
+
+    entry = build_active_state_entry(
+        reward=reward,
+        active_state_summary=active_state_summary,
+        project_agent_visibility=project_agent_visibility,
+    )
+    current_text = state_file.read_text(encoding="utf-8")
+    updated_text, changed = insert_progress_ledger_entry(
+        current_text,
+        entry,
+        updated_at=str(reward.get("recorded_at") or now_local()),
+    )
+    update.update(
+        {
+            "state_file": str(state_file),
+            "section": "Progress Ledger",
+            "entry": entry,
+            "already_present": not changed,
+            "would_write": bool(dry_run and changed),
+        }
+    )
+    return update, state_file, updated_text if changed and not dry_run else None
+
+
 def append_human_reward(
     *,
     registry_path: Path,
@@ -134,6 +264,8 @@ def append_human_reward(
     run_generated_at: str | None,
     reward: dict[str, Any],
     dry_run: bool = False,
+    state_file_override: Path | None = None,
+    write_active_state_summary: bool = False,
 ) -> dict[str, Any]:
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -161,11 +293,6 @@ def append_human_reward(
         if field in reward
     }
 
-    if not dry_run:
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
-
     selected_run = {
         "generated_at": selected.get("generated_at"),
         "classification": selected.get("classification"),
@@ -179,6 +306,30 @@ def append_human_reward(
         reward=index_record["human_reward"],
         dry_run=dry_run,
     )
+    project_agent_visibility = (
+        coordination.get("project_agent_visibility")
+        if isinstance(coordination.get("project_agent_visibility"), dict)
+        else {}
+    )
+    active_state_update, state_file_to_write, state_text_to_write = plan_active_state_update(
+        registry=registry,
+        goal_id=goal_id,
+        state_file_override=state_file_override,
+        active_state_summary=str(coordination.get("active_state_summary") or ""),
+        project_agent_visibility=project_agent_visibility,
+        reward=index_record["human_reward"],
+        requested=write_active_state_summary,
+        dry_run=dry_run,
+    )
+
+    if not dry_run:
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        with index_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        if state_file_to_write and state_text_to_write is not None:
+            state_file_to_write.write_text(state_text_to_write, encoding="utf-8")
+            active_state_update["written"] = True
+            active_state_update["would_write"] = False
 
     return {
         "ok": True,
@@ -191,6 +342,7 @@ def append_human_reward(
         "selected_run": selected_run,
         "human_reward": index_record["human_reward"],
         **coordination,
+        "active_state_update": active_state_update,
         "index_record": index_record,
         "appended": not dry_run,
     }
@@ -231,6 +383,19 @@ def render_reward_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- follow_up: {reward.get('follow_up')}")
     if payload.get("active_state_summary"):
         lines.extend(["", "## Active-State Summary", str(payload.get("active_state_summary"))])
+    state_update = payload.get("active_state_update") if isinstance(payload.get("active_state_update"), dict) else {}
+    if state_update:
+        lines.extend(
+            [
+                "",
+                "## Active-State Writeback",
+                f"- requested: `{state_update.get('requested')}`",
+                f"- state_file: `{state_update.get('state_file')}`",
+                f"- would_write: `{state_update.get('would_write')}`",
+                f"- written: `{state_update.get('written')}`",
+                f"- already_present: `{state_update.get('already_present')}`",
+            ]
+        )
     visibility = payload.get("project_agent_visibility") if isinstance(payload.get("project_agent_visibility"), dict) else {}
     if visibility:
         lines.extend(

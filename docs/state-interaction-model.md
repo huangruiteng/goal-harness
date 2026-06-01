@@ -200,6 +200,8 @@ Writes:
 
 - compact overlay row in the run index.
 - coordination hints for active-state summary and project-agent history lookup.
+- optional active-state `Progress Ledger` summary when the operator explicitly
+  requests `--write-active-state-summary`.
 
 Dashboard effect: selected runs show whether human judgment exists and what
 class of decision it judged. This is the main improvement over bare goal-mode

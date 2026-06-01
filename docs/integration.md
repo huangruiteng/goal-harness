@@ -248,6 +248,24 @@ The run-bound `human_reward` overlay remains the source of truth. Active state
 is only the human-readable pointer and next-action summary; a dashboard Review
 Packet is only an immediate handoff artifact.
 
+When the operator has explicitly approved recording the reward, Codex can close
+the durable loop in one CLI call:
+
+```bash
+goal-harness reward \
+  --goal-id project-goal \
+  --decision continue_route \
+  --reward positive \
+  --reason-summary "comparable validation improved and the route is worth extending" \
+  --follow-up "promote to the next longer-window check" \
+  --write-active-state-summary
+```
+
+The state write is opt-in. With `--dry-run --write-active-state-summary`, the
+command reports `active_state_update.would_write=true` but does not append the
+reward overlay or edit the active state. Without `--write-active-state-summary`,
+the command records only the run-bound reward overlay.
+
 ## First-Screen Status
 
 Use `goal-harness status` as the entrypoint for the next controller tick or UI

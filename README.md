@@ -195,6 +195,10 @@ Use `--dry-run` first when turning a dashboard review into durable feedback.
 The command returns a Chinese `active_state_summary` and a
 `project_agent_visibility.history_command` so Codex can update active state as a
 summary while project agents read the run-bound reward from history.
+After the operator explicitly approves the write, add
+`--write-active-state-summary` to also append that summary to the goal state's
+`Progress Ledger`. With `--dry-run`, the same flag previews the state write but
+does not mutate the run index or active state.
 
 See the first-screen status and attention queue:
 

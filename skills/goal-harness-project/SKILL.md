@@ -96,6 +96,29 @@ refresh run should publish the first public-safe line from `## Next Action` as
 the compact dashboard action; keep raw evidence and private links in the state
 file, not in that action line.
 
+## Record Human Reward
+
+When the user gives a clear reward judgment for an exact run, first validate
+the overlay and active-state writeback:
+
+```bash
+goal-harness reward \
+  --goal-id <STABLE_GOAL_ID> \
+  --run-generated-at <RUN_GENERATED_AT> \
+  --decision <DECISION_LABEL> \
+  --reward positive \
+  --reason-summary "<PUBLIC_SAFE_CHINESE_REASON>" \
+  --follow-up "<PUBLIC_SAFE_NEXT_ACTION>" \
+  --write-active-state-summary \
+  --dry-run
+```
+
+Only after the user has explicitly approved recording the reward, rerun without
+`--dry-run`. The durable source of truth is still the run-bound
+`human_reward` overlay. The active-state writeback is a `Progress Ledger`
+summary for future agents; project agents should read the reward through the
+returned `project_agent_visibility.history_command`.
+
 ## Multi-Project Status
 
 Inside a project:

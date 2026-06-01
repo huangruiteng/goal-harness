@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T22:45:18+08:00
+updated_at: 2026-06-01T23:00:12+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,33 @@ private project context.
 
 ## Next Action
 
-- Use a real operator judgment to validate the reward submission loop
-  end-to-end before adding more browser write capability: run
-  `goal-harness reward --dry-run`, append the exact run-bound `human_reward`
-  overlay only after explicit operator intent, copy the returned
-  `active_state_summary` into active state, and have the target project agent
-  read the reward through `project_agent_visibility.history_command`.
+- Use the first real operator judgment to validate the reward submission loop
+  end-to-end with the new explicit state writeback path:
+  `goal-harness reward --write-active-state-summary --dry-run`, then rerun
+  without `--dry-run` only after explicit operator approval. Confirm the target
+  project agent can see the reward through `goal-harness history --goal-id ...`
+  and that active state contains only the summary, not raw evidence.
 
 ## Recent Progress
 
+- 2026-06-01T23:00:12+08:00: Added an explicit active-state summary writeback
+  path to `goal-harness reward`. The default behavior is unchanged: reward
+  appends only the run-bound `human_reward` overlay. Passing
+  `--write-active-state-summary` resolves the registry `state_file` or an
+  explicit `--state-file`, inserts the returned Chinese `active_state_summary`
+  into `## Progress Ledger`, updates frontmatter `updated_at`, and reports an
+  `active_state_update` object. With `--dry-run`, the same flag previews
+  `would_write=true` without mutating either the run index or active state.
+  The dashboard reward preview now includes
+  `--write-active-state-summary --dry-run`, and the Review Packet explains that
+  the real command will append the reward overlay plus Progress Ledger summary
+  only after explicit user action. Docs and the installed project skill now
+  teach the dry-run-first, explicit-write flow. Validation used a temporary
+  registry/runtime/state file to prove: no flag leaves state untouched,
+  dry-run with the flag previews state write only, real append with the flag
+  writes one overlay and one active-state summary, and `history` still merges
+  the reward into a single judged run. Python compile, public contract check,
+  dashboard build, and Playwright command smoke all passed.
 - 2026-06-01T22:45:18+08:00: Made reward submission produce a standard
   coordination surface. `goal-harness reward --dry-run` and real append now
   return a Chinese `active_state_summary` plus

@@ -416,6 +416,35 @@ Agents should treat `history_command` as the standard visibility path. Active
 state can repeat the summary and next action for context, but it is not the
 durable reward store.
 
+The CLI can also preview or perform the active-state summary write when the
+operator explicitly asks for it:
+
+```bash
+goal-harness reward \
+  --goal-id example-experiment-goal \
+  --decision continue_route \
+  --reward positive \
+  --reason-summary "comparable validation improved and the route is worth extending" \
+  --write-active-state-summary
+```
+
+That response includes `active_state_update`, for example:
+
+```json
+{
+  "active_state_update": {
+    "requested": true,
+    "section": "Progress Ledger",
+    "would_write": false,
+    "written": true,
+    "already_present": false
+  }
+}
+```
+
+The loopback dashboard endpoint remains dry-run only and does not expose state
+file paths in its compact response.
+
 ## Display Model
 
 A first useful UI can be built from the export alone:

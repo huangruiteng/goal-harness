@@ -319,6 +319,7 @@ function buildRewardCommand({
   if (followUp.trim()) {
     lines.push(`  --follow-up ${shellQuote(followUp.trim())} \\`);
   }
+  lines.push("  --write-active-state-summary \\");
   lines.push("  --dry-run");
   return lines.join("\n");
 }
@@ -1143,10 +1144,10 @@ function buildOperatorTransitionPreview({
       transition: "human_reward_overlay_preview",
       goalId,
       runGeneratedAt: latestRun.generated_at,
-      summary: "预览 exact run 上的一条 compact human_reward overlay；默认不会 append。",
+      summary: "预览 exact run 上的一条 compact human_reward overlay，并预览 active-state 摘要写回；默认不会 append。",
       effects: [
-        "校验 goal/run、reward 取值和 public-safe reason/follow-up。",
-        "如果之后由用户明确执行去掉 --dry-run 的 CLI，才会追加一条 human_reward overlay。",
+        "校验 goal/run、reward 取值、public-safe reason/follow-up 和 active state 写回路径。",
+        "如果之后由用户明确执行去掉 --dry-run 的 CLI，才会追加 human_reward overlay 并写入 Progress Ledger 摘要。",
         "不授权 controller opt-in、write-control、实验控制或生产动作。",
       ],
       command: buildRewardCommand({

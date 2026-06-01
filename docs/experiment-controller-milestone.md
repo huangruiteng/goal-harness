@@ -97,6 +97,9 @@ the Chinese `active_state_summary` into the active state after the real append,
 while project agents should use `project_agent_visibility.history_command` to
 read the reward from run history. This avoids making chat text, dashboard copy
 packets, or active-state prose the durable reward source.
+When that active-state summary should be written by the CLI, use the explicit
+`--write-active-state-summary` flag; `--dry-run --write-active-state-summary`
+previews both the overlay and the state edit.
 
 The dashboard may generate a `Reward CLI Draft` for the selected goal and
 latest run. That draft should default to `--dry-run`; the operator still records
