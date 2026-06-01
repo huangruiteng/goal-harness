@@ -76,6 +76,37 @@ payloads may keep richer evidence. `goal-harness status` keeps only
 `human_reward`, so the dashboard can show that a human reward signal exists and
 what class of decision it judged.
 
+## Controller Readiness Model
+
+Readiness is different from reward. It answers "what level of controller
+connection is safe right now?"
+
+Experiment-controller adapters should summarize readiness with compact fields:
+
+```json
+{
+  "classification": "ready_for_read_only_not_decision",
+  "read_only_observer_ready": true,
+  "decision_advisor_ready": false,
+  "write_controller_ready": false,
+  "missing_gates": [
+    "human_reward_capture",
+    "aligned_eval_decision_evidence"
+  ],
+  "review_judgment": "safe for read-only observation, not route decisions",
+  "next_handoff_condition": "record aligned eval evidence and one human reward event"
+}
+```
+
+The common progression is:
+
+- read-only observer: safe when durable context and multi-project visibility
+  are present.
+- decision advisor: safe after comparable evidence and human reward are
+  recorded.
+- write controller: remains opt-in; Goal Harness should not imply mutation
+  permission from observation or advice readiness.
+
 ## Readiness Checklist
 
 Before connecting a real experiment controller, validate:
@@ -84,6 +115,8 @@ Before connecting a real experiment controller, validate:
   attention queue without local path leaks.
 - The adapter writes compact run history with `classification`,
   `recommended_action`, `health_check`, and artifact availability.
+- The latest run includes controller readiness so the operator can see whether
+  the goal is observation-only, decision-advisor ready, or still missing gates.
 - The next action separates "run another experiment" from "wait for comparable
   evidence" and "ask a human to judge a tradeoff."
 - The dashboard can show the goal next to unrelated goals without collapsing
@@ -97,9 +130,10 @@ The current public slice is a read-only experiment-controller contract:
 
 - adapter classification vocabulary for `await_eval`, `inspect_result`,
   `design_next_experiment`, `needs_human_reward`, and `blocked_by_safety`;
+- compact controller-readiness schema and dashboard panel;
 - compact reward-event schema and status export field;
 - dashboard badge and run-history panel showing whether the latest run has
-  human reward;
+  controller readiness and human reward;
 - example sanitized run and reward files.
 
 Private projects can opt into the adapter by writing a project-local state file

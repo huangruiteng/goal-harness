@@ -167,6 +167,30 @@ Run shape:
   "classification": "ready_for_controller_opt_in",
   "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
   "health_check": "8/8",
+  "controller_readiness": {
+    "classification": "ready_for_read_only_not_decision",
+    "read_only_observer_ready": true,
+    "decision_advisor_ready": false,
+    "write_controller_ready": false,
+    "missing_gates": [
+      "human_reward_capture",
+      "aligned_eval_decision_evidence"
+    ],
+    "review_judgment": "safe to connect read-only observation, but not decision advice",
+    "next_handoff_condition": "record aligned eval evidence and one human reward event",
+    "gates": [
+      {
+        "id": "durable_goal_context",
+        "ok": true,
+        "review": "goal state and run history are available"
+      },
+      {
+        "id": "human_reward_capture",
+        "ok": false,
+        "review": "no operator reward has been recorded yet"
+      }
+    ]
+  },
   "human_reward": {
     "recorded_at": "2026-06-01T00:05:00+00:00",
     "decision": "continue_route",
@@ -181,9 +205,15 @@ Run shape:
 
 Optional compact fields such as `active_task_count`, `active_priorities`, and
 `cache_check` may appear when an adapter records them. Experiment-controller
-adapters may also include a compact `human_reward` summary. The status export
-keeps only `recorded_at`, `decision`, `reward`, `reason_summary`, and
-`follow_up`; richer evidence belongs in private run payloads.
+adapters may also include compact `controller_readiness` and `human_reward`
+summaries.
+
+For `controller_readiness`, the status export keeps only controller-stage
+booleans, missing gate names, operator-facing review text, next handoff
+condition, and compact gate rows with `id`, `ok`, and `review`. For
+`human_reward`, the status export keeps only `recorded_at`, `decision`,
+`reward`, `reason_summary`, and `follow_up`; richer evidence belongs in private
+run payloads.
 
 ## Display Model
 
@@ -196,7 +226,8 @@ A first useful UI can be built from the export alone:
 - Watch lane: items with `waiting_on=external_evidence`.
 - Health panel: contract `errors`, `warnings`, and `checks`.
 - Run detail panel: selected goal from the attention queue, compact
-  classifications, health checks, and artifact availability.
+  classifications, controller readiness, health checks, reward signals, and
+  artifact availability.
 
 Suggested badge mapping:
 

@@ -38,6 +38,7 @@ import {
 import { dashboardRoute } from "../router";
 import {
   QueueItem,
+  ControllerReadiness,
   HumanReward,
   RunGoal,
   RunRecord,
@@ -255,6 +256,16 @@ function rewardVariant(value?: string | null): "success" | "danger" | "warning" 
   return "info";
 }
 
+function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
+  if (readiness.decision_advisor_ready) {
+    return "success";
+  }
+  if (readiness.read_only_observer_ready) {
+    return "info";
+  }
+  return "warning";
+}
+
 function HumanRewardSummary({ reward }: { reward: HumanReward }) {
   return (
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950">
@@ -273,6 +284,43 @@ function HumanRewardSummary({ reward }: { reward: HumanReward }) {
   );
 }
 
+function ControllerReadinessSummary({ readiness }: { readiness: ControllerReadiness }) {
+  const missing = readiness.missing_gates ?? [];
+  return (
+    <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm dark:border-sky-900 dark:bg-sky-950">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={readinessVariant(readiness)}>Controller readiness</Badge>
+        {readiness.classification ? <span className="font-medium text-sky-950 dark:text-sky-100">{readiness.classification}</span> : null}
+        {missing.length > 0 ? <Badge variant="warning">{missing.length} missing</Badge> : <Badge variant="success">gates clear</Badge>}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+        <Badge variant={readiness.read_only_observer_ready ? "success" : "neutral"}>Observer</Badge>
+        <Badge variant={readiness.decision_advisor_ready ? "success" : "neutral"}>Decision</Badge>
+        <Badge variant={readiness.write_controller_ready ? "success" : "neutral"}>Write</Badge>
+      </div>
+      {readiness.review_judgment ? (
+        <p className="mt-2 leading-6 text-sky-900 dark:text-sky-100">{readiness.review_judgment}</p>
+      ) : null}
+      {readiness.next_handoff_condition ? (
+        <p className="mt-1 text-xs leading-5 text-sky-800 dark:text-sky-200">{readiness.next_handoff_condition}</p>
+      ) : null}
+      {readiness.gates.length > 0 ? (
+        <div className="mt-3 space-y-1">
+          {readiness.gates.map((gate) => (
+            <div className="flex gap-2 text-xs leading-5 text-sky-900 dark:text-sky-100" key={`${gate.id}-${gate.ok}`}>
+              <Badge variant={gate.ok ? "success" : "warning"}>{gate.ok ? "PASS" : "MISS"}</Badge>
+              <span className="break-words">
+                {gate.id}
+                {gate.review ? `: ${gate.review}` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function LatestRun({ run }: { run: RunRecord }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
@@ -281,12 +329,14 @@ function LatestRun({ run }: { run: RunRecord }) {
         <Badge variant="info">{formatNullable(run.classification, "unclassified")}</Badge>
         {run.health_check ? <Badge variant="success">{run.health_check}</Badge> : null}
         {run.human_reward ? <Badge variant={rewardVariant(run.human_reward.reward)}>Reward</Badge> : null}
+        {run.controller_readiness ? <Badge variant={readinessVariant(run.controller_readiness)}>Readiness</Badge> : null}
         <Badge variant={artifactVariant(run.json_exists)}>JSON</Badge>
         <Badge variant={artifactVariant(run.markdown_exists)}>Markdown</Badge>
       </div>
       {run.recommended_action ? (
         <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{run.recommended_action}</p>
       ) : null}
+      {run.controller_readiness ? <ControllerReadinessSummary readiness={run.controller_readiness} /> : null}
       {run.human_reward ? <HumanRewardSummary reward={run.human_reward} /> : null}
     </div>
   );
@@ -302,6 +352,7 @@ function RunHistoryPanel({
   const latestRuns = goal?.latest_runs ?? [];
   const artifactReady = latestRuns.filter((run) => run.json_exists && run.markdown_exists).length;
   const rewardReady = latestRuns.filter((run) => Boolean(run.human_reward)).length;
+  const readinessReady = latestRuns.filter((run) => Boolean(run.controller_readiness)).length;
   return (
     <Card>
       <CardHeader className="flex-wrap">
@@ -325,7 +376,7 @@ function RunHistoryPanel({
             </div>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
               <div className="text-xs text-slate-500 dark:text-zinc-400">Records</div>
               <div className="mt-1 text-lg font-semibold">{goal?.raw_index_records ?? 0}</div>
@@ -341,7 +392,11 @@ function RunHistoryPanel({
               </div>
               <div className="mt-1 text-lg font-semibold">{artifactReady}/{latestRuns.length}</div>
             </div>
-            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800 sm:col-span-3">
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
+              <div className="text-xs text-slate-500 dark:text-zinc-400">Readiness</div>
+              <div className="mt-1 text-lg font-semibold">{readinessReady}/{latestRuns.length}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800 sm:col-span-4">
               <div className="text-xs text-slate-500 dark:text-zinc-400">Human Reward</div>
               <div className="mt-1 text-lg font-semibold">{rewardReady}/{latestRuns.length}</div>
             </div>

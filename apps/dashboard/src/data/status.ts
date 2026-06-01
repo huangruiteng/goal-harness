@@ -18,6 +18,23 @@ export const humanRewardSchema = z.object({
   follow_up: z.string().optional().nullable(),
 });
 
+export const controllerReadinessGateSchema = z.object({
+  id: z.string().optional().nullable(),
+  ok: z.boolean().optional().nullable(),
+  review: z.string().optional().nullable(),
+});
+
+export const controllerReadinessSchema = z.object({
+  classification: z.string().optional().nullable(),
+  read_only_observer_ready: z.boolean().optional().nullable(),
+  decision_advisor_ready: z.boolean().optional().nullable(),
+  write_controller_ready: z.boolean().optional().nullable(),
+  missing_gates: z.array(z.string()).optional().default([]),
+  review_judgment: z.string().optional().nullable(),
+  next_handoff_condition: z.string().optional().nullable(),
+  gates: z.array(controllerReadinessGateSchema).optional().default([]),
+});
+
 export const runRecordSchema = z.object({
   generated_at: z.string(),
   goal_id: z.string(),
@@ -30,6 +47,7 @@ export const runRecordSchema = z.object({
   json_exists: z.boolean().optional().default(false),
   markdown_exists: z.boolean().optional().default(false),
   human_reward: humanRewardSchema.optional().nullable(),
+  controller_readiness: controllerReadinessSchema.optional().nullable(),
 });
 
 export const runGoalSchema = z.object({
@@ -91,6 +109,7 @@ export const statusPayloadSchema = z.object({
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
+export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 

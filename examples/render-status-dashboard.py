@@ -82,6 +82,7 @@ def render_item(item: dict[str, Any]) -> str:
 
 def render_run(run: dict[str, Any]) -> str:
     reward = run.get("human_reward") if isinstance(run.get("human_reward"), dict) else {}
+    readiness = run.get("controller_readiness") if isinstance(run.get("controller_readiness"), dict) else {}
     reward_block = ""
     if reward:
         reward_block = f"""
@@ -89,6 +90,22 @@ def render_run(run: dict[str, Any]) -> str:
             <strong>Human reward</strong>
             <span>{esc(reward.get("decision"))} · {esc(reward.get("reward"))}</span>
             <p>{esc(reward.get("reason_summary"))}</p>
+          </div>
+        """
+    readiness_block = ""
+    if readiness:
+        gates = readiness.get("gates") if isinstance(readiness.get("gates"), list) else []
+        gate_rows = "\n".join(
+            f"<li>{'PASS' if gate.get('ok') else 'MISS'} · {esc(gate.get('id'))}: {esc(gate.get('review'))}</li>"
+            for gate in gates
+            if isinstance(gate, dict)
+        )
+        readiness_block = f"""
+          <div class="readiness">
+            <strong>Controller readiness</strong>
+            <span>{esc(readiness.get("classification"))}</span>
+            <p>{esc(readiness.get("review_judgment"))}</p>
+            <ul>{gate_rows}</ul>
           </div>
         """
     return f"""
@@ -103,6 +120,7 @@ def render_run(run: dict[str, Any]) -> str:
             <dt>Files</dt><dd>{esc(run.get("json_exists"))}/{esc(run.get("markdown_exists"))}</dd>
           </dl>
           <p>{esc(run.get("recommended_action"))}</p>
+          {readiness_block}
           {reward_block}
         </article>
     """
@@ -315,6 +333,18 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     }}
     .reward strong, .reward span {{ display: block; }}
     .reward p {{ margin-top: 6px; color: #065f46; }}
+    .readiness {{
+      margin-top: 10px;
+      border: 1px solid #bae6fd;
+      border-radius: 8px;
+      background: #f0f9ff;
+      padding: 10px;
+      color: #0c4a6e;
+      font-size: 13px;
+    }}
+    .readiness strong, .readiness span {{ display: block; }}
+    .readiness p {{ margin-top: 6px; color: #075985; }}
+    .readiness ul {{ margin: 8px 0 0; padding-left: 18px; }}
     .health {{
       margin-top: 18px;
       background: var(--panel);

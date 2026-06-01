@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T13:13:04+08:00
+updated_at: 2026-06-01T13:32:10+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,10 +26,9 @@ private project context.
 
 ## Next Action
 
-- Build a private experiment-controller readiness probe using the public
-  `human_reward` contract, then decide whether the real main controller has
-  enough durable context, reward signal, and multi-project visibility to
-  connect.
+- Add a generic operator feedback writer so local adapters can append compact
+  `human_reward` events without hand-editing run indexes or copying private
+  evidence into public-safe status exports.
 
 ## Recent Progress
 
@@ -83,6 +82,11 @@ private project context.
   `blocked_by_safety` classifications into the attention queue, and the React
   dashboard plus static HTML fallback show human reward signals in run history.
   Added sanitized experiment-controller run and reward examples.
+- 2026-06-01T13:32:10+08:00: Added compact `controller_readiness` to the
+  public status contract, React dashboard, and static HTML fallback. Run
+  history can now show whether an experiment controller is ready for read-only
+  observation, decision advice, or write control, plus the missing gate names
+  and compact gate reviews. Updated sanitized examples and milestone docs.
 
 ## Validation
 
@@ -112,6 +116,10 @@ private project context.
   whitelist behavior and does not export unapproved reward keys
 - Browser smoke: select `experiment-controller-goal` and verify the dashboard
   shows Human reward without private fields
+- `python3 -m goal_harness.cli --format markdown status` shows the latest run
+  `controller_readiness` classification when present in the compact index
+- Browser smoke: select `experiment-controller-goal` and verify the dashboard
+  shows Controller readiness and Human reward without private fields
 
 ## Guards
 

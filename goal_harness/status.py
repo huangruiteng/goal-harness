@@ -52,6 +52,20 @@ HUMAN_REWARD_COMPACT_FIELDS = (
     "reason_summary",
     "follow_up",
 )
+CONTROLLER_READINESS_COMPACT_FIELDS = (
+    "classification",
+    "read_only_observer_ready",
+    "decision_advisor_ready",
+    "write_controller_ready",
+    "missing_gates",
+    "review_judgment",
+    "next_handoff_condition",
+)
+CONTROLLER_READINESS_GATE_FIELDS = (
+    "id",
+    "ok",
+    "review",
+)
 
 
 def attention_item(
@@ -206,11 +220,32 @@ def compact_human_reward(reward: Any) -> dict[str, Any] | None:
     return compact or None
 
 
+def compact_controller_readiness(readiness: Any) -> dict[str, Any] | None:
+    if not isinstance(readiness, dict):
+        return None
+    compact = {
+        field: readiness[field]
+        for field in CONTROLLER_READINESS_COMPACT_FIELDS
+        if field in readiness
+    }
+    gates = []
+    for gate in readiness.get("gates") or []:
+        if not isinstance(gate, dict):
+            continue
+        gates.append({field: gate[field] for field in CONTROLLER_READINESS_GATE_FIELDS if field in gate})
+    if gates:
+        compact["gates"] = gates
+    return compact or None
+
+
 def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     compact = {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
     reward = compact_human_reward(run.get("human_reward"))
     if reward:
         compact["human_reward"] = reward
+    readiness = compact_controller_readiness(run.get("controller_readiness"))
+    if readiness:
+        compact["controller_readiness"] = readiness
     return compact
 
 
@@ -379,12 +414,23 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     if reward
                     else ""
                 )
+                readiness = (
+                    latest.get("controller_readiness")
+                    if isinstance(latest.get("controller_readiness"), dict)
+                    else {}
+                )
+                readiness_text = (
+                    f" readiness={readiness.get('classification')}"
+                    if readiness
+                    else ""
+                )
                 lines.append(
                     "  - latest: "
                     f"{latest.get('generated_at')} "
                     f"classification={latest.get('classification')} "
                     f"artifacts={latest.get('json_exists')}/{latest.get('markdown_exists')}"
                     f"{reward_text}"
+                    f"{readiness_text}"
                 )
 
     for title, key in (("Errors", "errors"), ("Warnings", "warnings"), ("Checks", "checks")):

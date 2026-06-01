@@ -116,13 +116,39 @@
           {
             "generated_at": "2026-06-01T00:00:00+00:00",
             "goal_id": "experiment-controller-goal",
-            "classification": "design_next_experiment",
-            "recommended_action": "use the latest human reward signal to design the next comparable experiment",
-            "health_check": "7/7",
-            "human_reward": {
-              "recorded_at": "2026-06-01T00:05:00+00:00",
-              "decision": "continue_route",
-              "reward": "positive",
+          "classification": "design_next_experiment",
+          "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+          "health_check": "7/7",
+          "controller_readiness": {
+            "classification": "ready_for_decision_advisor",
+            "read_only_observer_ready": true,
+            "decision_advisor_ready": true,
+            "write_controller_ready": false,
+            "missing_gates": [],
+            "review_judgment": "controller can advise the next experiment because durable context, comparable evidence, and human reward are present",
+            "next_handoff_condition": "operator approval is still required before launching or stopping experiments",
+            "gates": [
+              {
+                "id": "durable_goal_context",
+                "ok": true,
+                "review": "goal state, experiment board, and run history are available"
+              },
+              {
+                "id": "human_reward_capture",
+                "ok": true,
+                "review": "operator reward was recorded as a compact signal"
+              },
+              {
+                "id": "aligned_eval_decision_evidence",
+                "ok": true,
+                "review": "comparable validation evidence is present"
+              }
+            ]
+          },
+          "human_reward": {
+            "recorded_at": "2026-06-01T00:05:00+00:00",
+            "decision": "continue_route",
+            "reward": "positive",
               "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
               "follow_up": "promote the route to a longer-window check"
             },
@@ -148,13 +174,39 @@
       {
         "generated_at": "2026-06-01T00:00:00+00:00",
         "goal_id": "experiment-controller-goal",
-        "classification": "design_next_experiment",
-        "recommended_action": "use the latest human reward signal to design the next comparable experiment",
-        "health_check": "7/7",
-        "human_reward": {
-          "recorded_at": "2026-06-01T00:05:00+00:00",
-          "decision": "continue_route",
-          "reward": "positive",
+      "classification": "design_next_experiment",
+      "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+      "health_check": "7/7",
+      "controller_readiness": {
+        "classification": "ready_for_decision_advisor",
+        "read_only_observer_ready": true,
+        "decision_advisor_ready": true,
+        "write_controller_ready": false,
+        "missing_gates": [],
+        "review_judgment": "controller can advise the next experiment because durable context, comparable evidence, and human reward are present",
+        "next_handoff_condition": "operator approval is still required before launching or stopping experiments",
+        "gates": [
+          {
+            "id": "durable_goal_context",
+            "ok": true,
+            "review": "goal state, experiment board, and run history are available"
+          },
+          {
+            "id": "human_reward_capture",
+            "ok": true,
+            "review": "operator reward was recorded as a compact signal"
+          },
+          {
+            "id": "aligned_eval_decision_evidence",
+            "ok": true,
+            "review": "comparable validation evidence is present"
+          }
+        ]
+      },
+      "human_reward": {
+        "recorded_at": "2026-06-01T00:05:00+00:00",
+        "decision": "continue_route",
+        "reward": "positive",
           "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
           "follow_up": "promote the route to a longer-window check"
         },
