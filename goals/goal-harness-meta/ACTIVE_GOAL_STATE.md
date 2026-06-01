@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:25:27+08:00
+updated_at: 2026-06-02T05:33:24+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- Document or surface the Review Packet source-of-truth boundary as a
-  public-safe contract note: the dashboard/operator view owns the human
-  decision, while the project-agent command is only the after-approval dry-run
-  execution path. Keep this to docs/status-contract wording unless a UI gap is
-  found; do not append a real gate or run a real map.
+- Audit and tighten the dashboard selected-action microcopy for the Review
+  Packet path. It should say the operator decides in the dashboard/operator
+  view first, and the copied packet/project-agent command is only the
+  after-approval dry-run execution path. Keep the change to wording and source
+  checks; do not append a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:33:24+08:00: Added the Review Packet source-of-truth boundary
+  to the public status data contract and extended `review-packet-smoke` to
+  assert that contract text. The contract now says the dashboard/operator view
+  owns the human decision, the copied packet is only a bridge, the local
+  `operator_gate_dry_run` belongs to the user/controller, and the
+  project-agent command is only the after-approval dry-run execution path.
+  Validation: direct Review Packet smoke passed; aggregate public smokes
+  passed; Python compile passed; public contract check passed; `git diff
+  --check` passed. Critic: the docs contract is now explicit, but the dashboard
+  selected-action microcopy should be audited next so the first-screen UI does
+  not suggest sending the packet to a project agent before the operator
+  decision.
 - 2026-06-02T05:25:27+08:00: Validated the live planned high-complexity
   opt-in status against the public Review Packet smoke contract. Live status
   exposes one operator question, the local `operator-gate --dry-run` draft

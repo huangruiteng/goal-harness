@@ -14,6 +14,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_PAGE = REPO_ROOT / "apps/dashboard/src/views/dashboard-page.tsx"
+STATUS_CONTRACT = REPO_ROOT / "docs/status-data-contract.md"
 
 
 def command_block(command: str) -> str:
@@ -86,6 +87,23 @@ def build_sanitized_controller_packet() -> str:
 
 def main() -> int:
     source = DASHBOARD_PAGE.read_text(encoding="utf-8")
+    contract = STATUS_CONTRACT.read_text(encoding="utf-8")
+    controller_contract = source_between(
+        contract,
+        "For controller opt-in packets",
+        "`status=read_only_project_map`",
+    )
+    assert "the dashboard/operator view owns the human decision" in contract
+    assert "the project-agent command is only the after-approval dry-run execution path" in contract
+    assert_order(
+        controller_contract,
+        [
+            "operator question must appear before any",
+            "local gate preview must appear before any",
+            "project-agent command",
+        ],
+    )
+
     packet_builder = source_between(source, "function buildReviewPacket", "function ReviewLinkPanel")
     assert_order(packet_builder, ["【人只需判断】", "【用户本地 Gate 记录草稿】", "【给项目 Agent】"])
 

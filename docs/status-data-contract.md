@@ -287,6 +287,21 @@ The human-readable Markdown status view may also render an
 user-owned gate recording preview, not a JSON contract field or project-agent
 command.
 
+Review Packet source-of-truth rule:
+
+- the dashboard/operator view owns the human decision;
+- the copied Review Packet is a bridge from that decision surface to a local
+  operator preview and a target project-agent instruction;
+- the local `operator_gate_dry_run` preview belongs to the user or controller,
+  not the target project agent;
+- the project-agent command is only the after-approval dry-run execution path.
+
+For controller opt-in packets, the operator question must appear before any
+local gate preview, and the local gate preview must appear before any
+project-agent command. A dashboard, script, or agent must not infer approval,
+reward, write-control, or a real map run from the presence of a copied packet,
+review URL, selected `goal_id`, or `agent_command`.
+
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready
 work with a map-specific badge or drill-down: the project is connected and has
@@ -601,6 +616,11 @@ A first useful UI can be built from the export alone:
   path, reward/default hint, and local dry-run preview. For reward actions, the
   project-agent section should point to the run history lookup, not ask the
   target project agent to append or dry-run user reward on the user's behalf.
+  For controller opt-in actions, the packet must keep this order: human
+  question, user/controller-owned local gate dry-run preview, then
+  project-agent dry-run instruction. The dashboard/operator view owns the human
+  decision; the project-agent command is only the after-approval dry-run
+  execution path.
   It is still browser UI state and must not be parsed as durable reward,
   approval, controller opt-in, or write-control.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
