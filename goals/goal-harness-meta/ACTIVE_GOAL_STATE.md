@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:00:56+08:00
+updated_at: 2026-06-02T05:07:45+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,25 @@ private project context.
 
 ## Next Action
 
-- Inspect whether `goal-harness check` should call the lightweight public smoke
-  scripts, starting with `examples/status-markdown-smoke.py`, or keep them as
-  explicit commands documented in README. If useful, add one aggregate smoke
-  runner; do not expand into a full test framework.
+- Validate the planned high-complexity opt-in review package with a sanitized
+  example or live status path: it should show one Chinese operator question,
+  the `operator-gate --dry-run` recording draft, and the target-agent
+  `read-only-map --dry-run` command in the right order. If this is not covered
+  by a public-safe fixture, add the smallest fixture or smoke; do not append a
+  real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:07:45+08:00: Added a tiny aggregate public smoke runner at
+  `examples/run-smokes.py`. The runner discovers dependency-free
+  `examples/*-smoke.py` scripts, prints each script label before execution, and
+  exits on the first failure. README now documents `python3 examples/run-smokes.py`
+  as the stable smoke entry while keeping `goal-harness check` focused on
+  registry, runtime, and public-boundary contract health. Validation: aggregate
+  smoke runner passed and executed the status Markdown smoke; Python compile
+  passed; public contract check passed; `git diff --check` passed. Critic: this
+  closes the smoke discoverability question without creating a framework, so
+  the next P0 slice should return to the planned opt-in human decision loop.
 - 2026-06-02T05:00:56+08:00: Added a dependency-free status Markdown smoke for
   planned high-complexity read-only-map adapters. The example builds a temporary
   planned `*_read_only_map_v0` registry, asserts the JSON attention item stays

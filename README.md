@@ -132,10 +132,12 @@ Run the contract check:
 goal-harness check --scan-root .
 ```
 
-Run the planned-adapter status Markdown smoke:
+Run the public smoke scripts. These stay explicit instead of hidden inside
+`goal-harness check`, so the contract check remains focused on registry,
+runtime, and public-boundary health:
 
 ```bash
-python3 examples/status-markdown-smoke.py
+python3 examples/run-smokes.py
 ```
 
 Read recent run history:
