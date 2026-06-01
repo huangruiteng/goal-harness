@@ -102,6 +102,12 @@ Read recent run history:
 goal-harness history --goal-id your-project-goal
 ```
 
+See the first-screen status and attention queue:
+
+```bash
+goal-harness status
+```
+
 Use JSON output from scripts, heartbeats, or pre-tick adapters:
 
 ```bash
@@ -147,6 +153,12 @@ sub-agent owns a scoped probe, implementation slice, or validation surface. See
 For large repos with many docs, TODOs, run reports, branches, and validation
 surfaces, start with a read-only adapter map before allowing edits. See
 [docs/complex-project-readonly-adapter.md](docs/complex-project-readonly-adapter.md).
+
+For multi-project control, `goal-harness status` derives a sanitized attention
+queue from registry, run history, and contract health. It answers which goals
+need user/controller action, which are ready for Codex work, and which are only
+watching external evidence. See
+[docs/attention-queue.md](docs/attention-queue.md).
 
 ## Public / Private Boundary
 

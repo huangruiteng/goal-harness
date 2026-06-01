@@ -14,6 +14,7 @@ from .contract import check_contract, render_contract_markdown
 from .history import collect_history, load_registry, render_history_markdown
 from .paths import default_registry_path, resolve_runtime_root
 from .registry import inspect_registry, render_registry_markdown
+from .status import collect_status, render_status_markdown
 
 
 def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> None:
@@ -68,6 +69,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
     )
     check_parser.add_argument("--limit", type=int, default=5)
+
+    status_parser = sub.add_parser("status", help="Show a first-screen goal status and attention queue.")
+    status_parser.add_argument("--scan-root", default=".", help="Public files to scan for obvious private material.")
+    status_parser.add_argument(
+        "--scan-path",
+        action="append",
+        default=[],
+        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
+    )
+    status_parser.add_argument("--limit", type=int, default=5)
 
     args = parser.parse_args(argv)
     registry_path = Path(args.registry).expanduser()
@@ -154,6 +165,44 @@ def main(argv: list[str] | None = None) -> int:
                 "checks": [],
             }
         print_payload(payload, args.format, render_contract_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "status":
+        try:
+            scan_roots = [Path(item).expanduser() for item in args.scan_path]
+            if not scan_roots:
+                scan_roots = [Path(args.scan_root).expanduser()]
+            payload = collect_status(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                scan_roots=scan_roots,
+                limit=max(0, args.limit),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "error": str(exc),
+                "attention_queue": {
+                    "available": False,
+                    "item_count": 1,
+                    "needs_user_or_controller": 0,
+                    "needs_codex": 1,
+                    "watching_external_evidence": 0,
+                    "items": [
+                        {
+                            "goal_id": "goal-harness-status",
+                            "status": "status_collection_failed",
+                            "waiting_on": "codex",
+                            "severity": "high",
+                            "recommended_action": str(exc),
+                            "source": "status",
+                        }
+                    ],
+                },
+            }
+        print_payload(payload, args.format, render_status_markdown)
         return 0 if payload.get("ok") else 1
 
     return 2

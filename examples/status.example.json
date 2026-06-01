@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "registry": ".goal-harness/registry.json",
+  "runtime_root": "./runtime",
+  "goal_count": 3,
+  "run_count": 2,
+  "contract": {
+    "ok": true,
+    "summary": {
+      "errors": 0,
+      "warnings": 0,
+      "checks": 4
+    },
+    "errors": [],
+    "warnings": []
+  },
+  "attention_queue": {
+    "available": true,
+    "item_count": 2,
+    "needs_user_or_controller": 1,
+    "needs_codex": 1,
+    "watching_external_evidence": 0,
+    "items": [
+      {
+        "goal_id": "complex-project-main-control",
+        "status": "ready_for_controller_opt_in",
+        "waiting_on": "user_or_controller",
+        "severity": "action",
+        "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
+        "source": "latest_run"
+      },
+      {
+        "goal_id": "docs-maintenance-goal",
+        "status": "connected_without_run",
+        "waiting_on": "codex",
+        "severity": "action",
+        "recommended_action": "run the first read-only adapter tick and save a compact run record",
+        "source": "run_history"
+      }
+    ]
+  }
+}

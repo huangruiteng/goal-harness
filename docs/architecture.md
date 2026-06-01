@@ -1,12 +1,13 @@
 # Architecture
 
-Goal Harness has five layers.
+Goal Harness has six layers.
 
 1. **Registry**: lists known goals, their repos, adapters, status, and guards.
 2. **Goal state**: the active state file for one goal.
 3. **Adapter pre-tick**: a read-only project-specific probe.
 4. **Run log**: JSON and Markdown reports saved per goal.
 5. **Run history**: compact indexes consumed by agents, heartbeats, and UI.
+6. **Status / attention queue**: first-screen summary of who needs to act next.
 
 ```text
 project goal state
@@ -18,6 +19,9 @@ shared runtime root
         |
         v
 goal-harness history/check
+        |
+        v
+goal-harness status
         |
         v
 agent tick / heartbeat / future UI
@@ -50,3 +54,16 @@ claims, run history, and boundary checks so controller/sub-agent work remains
 inspectable instead of becoming hidden background activity.
 
 See [codex-subagent-orchestration.md](codex-subagent-orchestration.md).
+
+## Status / Attention Queue
+
+The status layer derives a compact queue from registry, run history, and
+contract health. It should be the first thing a controller or future UI reads:
+
+- contract failures block adapter work,
+- goals waiting on user/controller opt-in are surfaced explicitly,
+- goals ready for Codex work are separated from external evidence watches,
+- already-connected read-only goals with valid runs do not keep demanding
+  redundant review.
+
+See [attention-queue.md](attention-queue.md).

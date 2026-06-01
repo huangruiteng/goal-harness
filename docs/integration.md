@@ -17,6 +17,7 @@ Then projects can call:
 ```bash
 goal-harness --registry <private-registry> registry
 goal-harness --registry <private-registry> history
+goal-harness --registry <private-registry> status
 goal-harness --registry <private-registry> check --scan-root <project-root>
 ```
 
@@ -124,6 +125,23 @@ All adapters should save compact run history under:
 
 This gives the app, CLI, heartbeats, and future UI one place to inspect goal
 history.
+
+## First-Screen Status
+
+Use `goal-harness status` as the entrypoint for the next controller tick or UI
+refresh:
+
+```bash
+goal-harness status --scan-path README.md --scan-path docs/
+goal-harness --format json status
+```
+
+The status command combines contract health and run history into an attention
+queue. Each queue item says which goal needs attention, who it is waiting on,
+how severe the item is, and exactly one recommended action.
+
+Keep adapter output sanitized before it enters the compact index. The status
+queue is meant for control-plane display, not for raw private evidence.
 
 ## Public Repo vs Project Repo
 
