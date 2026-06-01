@@ -348,6 +348,28 @@ def append_human_reward(
     }
 
 
+def describe_active_state_effect(state_update: dict[str, Any], *, dry_run: bool) -> str:
+    if not state_update or not state_update.get("requested"):
+        return "未请求 active-state 摘要写回"
+    state_file = state_update.get("state_file") or "unknown state file"
+    if state_update.get("already_present"):
+        return f"摘要已存在，未重复写入 `{state_file}`"
+    if dry_run and state_update.get("would_write"):
+        return f"预览：会把摘要写入 `{state_file}` 的 Progress Ledger"
+    if state_update.get("written"):
+        return f"已把摘要写入 `{state_file}` 的 Progress Ledger"
+    return f"未写入 active state；检查 `{state_file}`"
+
+
+def describe_run_overlay_effect(*, appended: bool, dry_run: bool, index_path: str | None) -> str:
+    target = f"`{index_path}`" if index_path else "run index"
+    if dry_run:
+        return f"预览：不会写 {target}"
+    if appended:
+        return f"已追加 human_reward overlay 到 {target}"
+    return f"未写 {target}"
+
+
 def render_reward_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Goal Harness Human Reward",
@@ -364,6 +386,19 @@ def render_reward_markdown(payload: dict[str, Any]) -> str:
 
     selected = payload.get("selected_run") if isinstance(payload.get("selected_run"), dict) else {}
     reward = payload.get("human_reward") if isinstance(payload.get("human_reward"), dict) else {}
+    state_update = payload.get("active_state_update") if isinstance(payload.get("active_state_update"), dict) else {}
+    visibility = payload.get("project_agent_visibility") if isinstance(payload.get("project_agent_visibility"), dict) else {}
+    lines.extend(
+        [
+            "",
+            "## Write Effect",
+            f"- selected_run: `{selected.get('generated_at')}`",
+            f"- run_overlay: {describe_run_overlay_effect(appended=bool(payload.get('appended')), dry_run=bool(payload.get('dry_run')), index_path=payload.get('index_path'))}",
+            f"- active_state: {describe_active_state_effect(state_update, dry_run=bool(payload.get('dry_run')))}",
+        ]
+    )
+    if visibility.get("history_command"):
+        lines.append(f"- project_agent_visibility: `{visibility.get('history_command')}`")
     lines.extend(
         [
             "",
@@ -383,7 +418,6 @@ def render_reward_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- follow_up: {reward.get('follow_up')}")
     if payload.get("active_state_summary"):
         lines.extend(["", "## Active-State Summary", str(payload.get("active_state_summary"))])
-    state_update = payload.get("active_state_update") if isinstance(payload.get("active_state_update"), dict) else {}
     if state_update:
         lines.extend(
             [
@@ -396,7 +430,6 @@ def render_reward_markdown(payload: dict[str, Any]) -> str:
                 f"- already_present: `{state_update.get('already_present')}`",
             ]
         )
-    visibility = payload.get("project_agent_visibility") if isinstance(payload.get("project_agent_visibility"), dict) else {}
     if visibility:
         lines.extend(
             [

@@ -273,6 +273,10 @@ The run-bound `human_reward` overlay remains the source of truth. Active state
 is only the human-readable pointer and next-action summary; a dashboard Review
 Packet is only an immediate handoff artifact.
 
+The Markdown output includes a `Write Effect` section that summarizes the
+selected run, run-overlay write or preview state, active-state writeback state,
+and the project-agent history lookup before the detailed reward fields.
+
 When the operator has explicitly approved recording the reward, Codex can close
 the durable loop in one CLI call:
 

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:07:01+08:00
+updated_at: 2026-06-02T04:11:09+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,22 @@ private project context.
 ## Next Action
 
 - Continue the P0 human-decision loop pass from fresh `goal-harness status`.
-  Next inspect the reward writeback CLI/markdown output: after a dry-run or
-  real append, the user should see the exact run, whether anything was written,
-  and the one project-agent history lookup. Pick the smallest CLI/status/docs
-  fix; do not add browser-side reward append, quota write commands, or a
-  scheduler.
+  Next inspect whether rewarded runs appear clearly in `goal-harness status`
+  and dashboard run detail after a real append. Pick the smallest
+  status/dashboard/docs fix; do not add browser-side reward append, quota write
+  commands, or a scheduler.
 
 ## Recent Progress
 
+- 2026-06-02T04:11:09+08:00: Made reward CLI Markdown easier to judge at a
+  glance by adding a `Write Effect` section near the top. Dry-runs and real
+  appends now summarize the selected run, whether the run overlay was written
+  or only previewed, active-state writeback effect, and the one project-agent
+  `goal-harness history --goal-id ... --limit 3` lookup before the detailed
+  reward fields. Updated status/integration docs. Validation covered Python
+  compile, a live reward dry-run bound to an exact `goal-harness-meta`
+  `state_refreshed` run, public contract check, grep for the new write-effect
+  contract, and `git diff --check`.
 - 2026-06-02T04:07:01+08:00: Tightened the dashboard Review Packet handoff for
   reward actions. The UI may still show a local reward dry-run preview, but the
   copied packet no longer asks the target project agent to run reward dry-run

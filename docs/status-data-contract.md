@@ -520,6 +520,11 @@ Agents should treat `history_command` as the standard visibility path. Active
 state can repeat the summary and next action for context, but it is not the
 durable reward store.
 
+The Markdown response should also show a short `Write Effect` section near the
+top so the operator can see the selected run, whether the overlay was actually
+appended or only previewed, whether active-state writeback would happen, and
+the one project-agent history lookup.
+
 The CLI can also preview or perform the active-state summary write when the
 operator explicitly asks for it:
 
