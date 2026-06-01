@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T18:51:00+08:00
+updated_at: 2026-06-01T18:58:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,10 +29,9 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should make the dashboard's selected-goal detail more explicitly
-  answer the operator question: judge, authorize, wait for evidence, or let
-  Codex continue. Keep `goal-harness status` as the terse agent-facing machine
-  contract.
+  slice should make the selected-goal detail support the next user action:
+  recording reward or approval through the existing dry-run and CLI paths
+  without enabling browser writes by default.
 
 ## Recent Progress
 
@@ -217,6 +216,12 @@ private project context.
   states separately from raw adapter classifications. The docs now clarify that
   CLI status is agent-facing machine state, while the dashboard is the
   operator-facing interpretation layer.
+- 2026-06-01T18:58:00+08:00: Added a selected-goal `Operator Decision` panel
+  to the React dashboard. The panel derives a human stance from queue item,
+  lifecycle phase, readiness gates, and recommended action: review or authorize,
+  let Codex continue, wait for evidence, or fix health first. This keeps
+  `goal-harness status` as an agent-facing contract while making the dashboard
+  answer the user question before showing run-history details.
 
 ## Validation
 
@@ -228,6 +233,10 @@ private project context.
 - `python3 -m goal_harness.cli --format json status` includes
   `lifecycle_phase` and `lifecycle_flags` on attention items, run-history
   goals, and compact runs
+- Browser DOM smoke: selected-goal detail shows `Operator Decision`; default
+  mapped goal shows `Let Codex use the map`; `tiger-team-maiduidui-regauc`
+  shows `Wait for evidence` plus missing gate copy; `agent-harness-main-control`
+  shows `Review controller opt-in` and `Needs approval`
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load

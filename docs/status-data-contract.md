@@ -429,6 +429,11 @@ A first useful UI can be built from the export alone:
   server, it may validate the same draft through `POST /reward/dry-run` and
   display the compact result. This is still a validation path, not a browser
   write path.
+- Operator decision: selected goal detail should translate `waiting_on`,
+  `severity`, `lifecycle_phase`, `missing_gates`, and `recommended_action`
+  into a human stance such as review/authorize, let Codex continue, wait for
+  evidence, or fix health first. Raw classifications remain drill-down
+  details.
 
 Browser-side reward append is intentionally outside the default status server.
 If a future local server enables it, it must follow the explicit opt-in boundary

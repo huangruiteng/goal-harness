@@ -673,6 +673,8 @@ function rewardVariant(value?: string | null): "success" | "danger" | "warning" 
   return "info";
 }
 
+type BadgeVariant = "neutral" | "success" | "warning" | "info" | "danger";
+
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
   if (readiness.decision_advisor_ready) {
     return "success";
@@ -681,6 +683,188 @@ function readinessVariant(readiness: ControllerReadiness): "success" | "warning"
     return "info";
   }
   return "warning";
+}
+
+function humanizeIdentifier(value: string) {
+  return value
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function gateLabel(value: string) {
+  const labels: Record<string, string> = {
+    human_reward_capture: "Record human reward",
+    aligned_eval_decision_evidence: "Wait for comparable evidence",
+    durable_goal_context: "Keep durable goal context",
+  };
+  return labels[value] ?? humanizeIdentifier(value);
+}
+
+function buildOperatorDecision({
+  goal,
+  queueItem,
+}: {
+  goal?: RunGoal;
+  queueItem?: QueueItem;
+}) {
+  const latestRun = goal?.latest_runs[0];
+  const phase = goal?.lifecycle_phase
+    ?? queueItem?.lifecycle_phase
+    ?? latestRun?.lifecycle_phase
+    ?? inferLifecyclePhase(queueItem?.status ?? goal?.status, latestRun);
+  const waitingOn = queueItem?.waiting_on ?? "clear";
+  const missingGates = queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? [];
+  const action = queueItem?.recommended_action
+    ?? latestRun?.recommended_action
+    ?? "No immediate operator action.";
+
+  if (queueItem?.severity === "high") {
+    return {
+      title: "Fix health first",
+      badge: "Blocking",
+      variant: "danger" as BadgeVariant,
+      action,
+      reason: "A high-severity status item is active, so other decisions should wait.",
+      needs: missingGates.map(gateLabel),
+      phase,
+      waitingOn,
+    };
+  }
+
+  if (waitingOn === "external_evidence") {
+    return {
+      title: "Wait for evidence",
+      badge: phase === "controller_gated" ? "Gate missing" : "Watching",
+      variant: "info" as BadgeVariant,
+      action,
+      reason: phase === "controller_gated"
+        ? "Controller evidence exists, but the goal is still missing a decision gate."
+        : "The next useful signal is outside the agent loop.",
+      needs: missingGates.map(gateLabel),
+      phase,
+      waitingOn,
+    };
+  }
+
+  if (waitingOn === "user_or_controller" || waitingOn === "controller") {
+    const controllerCopy = phase === "planned"
+      ? {
+          title: "Review controller opt-in",
+          badge: "Needs approval",
+          reason: "The goal is known, but controller connection has not been authorized yet.",
+        }
+      : {
+          title: "Review or authorize",
+          badge: "User decision",
+          reason: "A human or target controller decision is the next gate.",
+        };
+    return {
+      ...controllerCopy,
+      variant: "warning" as BadgeVariant,
+      action,
+      needs: missingGates.map(gateLabel),
+      phase,
+      waitingOn,
+    };
+  }
+
+  if (waitingOn === "codex") {
+    const codexCopy = phase === "mapped"
+      ? {
+          title: "Let Codex use the map",
+          badge: "Codex can continue",
+          reason: "The project has a read-only map; the next agent turn can choose the handoff.",
+        }
+      : phase === "refreshed"
+        ? {
+            title: "Let Codex continue",
+            badge: "State refreshed",
+            reason: "Goal state changed and the agent can resume from the refreshed action.",
+          }
+        : phase === "connected"
+          ? {
+              title: "Let Codex create the first run",
+              badge: "Needs first run",
+              reason: "The goal is connected but has not produced a compact run yet.",
+            }
+          : {
+              title: "Let Codex continue",
+              badge: "Codex can act",
+              reason: "No human decision gate is active for this goal.",
+            };
+    return {
+      ...codexCopy,
+      variant: "success" as BadgeVariant,
+      action,
+      needs: missingGates.map(gateLabel),
+      phase,
+      waitingOn,
+    };
+  }
+
+  if (phase === "reward_judged") {
+    return {
+      title: "Reward captured",
+      badge: "Judged",
+      variant: "success" as BadgeVariant,
+      action,
+      reason: "Human feedback is attached to the latest run.",
+      needs: missingGates.map(gateLabel),
+      phase,
+      waitingOn,
+    };
+  }
+
+  return {
+    title: "No immediate user action",
+    badge: "Clear",
+    variant: "neutral" as BadgeVariant,
+    action,
+    reason: "The selected goal has no active attention item.",
+    needs: missingGates.map(gateLabel),
+    phase,
+    waitingOn,
+  };
+}
+
+function OperatorDecisionPanel({
+  goal,
+  queueItem,
+}: {
+  goal?: RunGoal;
+  queueItem?: QueueItem;
+}) {
+  const decision = buildOperatorDecision({ goal, queueItem });
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-medium uppercase text-slate-500 dark:text-zinc-400">Operator Decision</div>
+          <div className="mt-1 text-base font-semibold text-slate-950 dark:text-zinc-50">{decision.title}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={decision.variant}>{decision.badge}</Badge>
+          <PhaseBadges compact phase={decision.phase} />
+          {decision.waitingOn !== "clear" ? (
+            <Badge variant="neutral">{waitingLabel[decision.waitingOn] ?? decision.waitingOn}</Badge>
+          ) : null}
+        </div>
+      </div>
+      <p className="mt-3 leading-6 text-slate-700 dark:text-zinc-300">{decision.action}</p>
+      <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{decision.reason}</p>
+      {decision.needs.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {decision.needs.map((need) => (
+            <Badge key={need} variant="warning">
+              {need}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function HumanRewardSummary({ reward }: { reward: HumanReward }) {
@@ -957,6 +1141,8 @@ function RunHistoryPanel({
               <PhaseBadges flags={lifecycleFlags} phase={lifecyclePhase} />
             </div>
           </div>
+
+          <OperatorDecisionPanel goal={goal} queueItem={queueItem} />
 
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">

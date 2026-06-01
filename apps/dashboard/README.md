@@ -18,6 +18,10 @@ JSON, but the first screen is a human operator view: `User Review Map` translate
 registry/run/reward/controller signals into review states, while `Goal
 Directory` remains the multi-project switcher with public-safe domain,
 attention state, latest run, and run counts.
+The selected-goal detail starts with `Operator Decision`, which turns the
+selected goal's queue item, lifecycle phase, and readiness gates into one of
+the user-level stances: review or authorize, let Codex continue, wait for
+evidence, or fix health first.
 
 When a selected goal has a compact run record, the run-history panel also shows
 a `Reward CLI Draft`. It is intentionally local-only and defaults to

@@ -224,6 +224,8 @@ First screen:
 Goal detail:
 
 - goal identity and authority sources,
+- operator decision: review or authorize, let Codex continue, wait for
+  evidence, or fix health first,
 - active state freshness,
 - run timeline,
 - controller readiness gates,
@@ -235,6 +237,7 @@ User review surface:
 
 - show the run being judged,
 - show why the system thinks a human decision is needed,
+- show the selected goal's current operator stance before raw run history,
 - generate a CLI reward draft or dry-run request,
 - never imply that reward equals write authorization.
 - keep schemas, routes, and component structure stable in English, but allow
