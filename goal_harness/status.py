@@ -44,6 +44,9 @@ CONNECTED_ADAPTER_STATUSES = {
     "connected-read-only",
     "pre-tick-runnable",
 }
+PLANNED_CONTROLLER_OPT_IN_RECOMMENDED_ACTION = (
+    "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run"
+)
 RUN_COMPACT_FIELDS = (
     "generated_at",
     "goal_id",
@@ -548,7 +551,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
                 status=str(goal.get("status") or "planned"),
                 waiting_on="user_or_controller",
                 severity="action",
-                recommended_action="先审阅 Goal Harness operator gate；同意后再发送项目 agent 命令",
+                recommended_action=PLANNED_CONTROLLER_OPT_IN_RECOMMENDED_ACTION,
                 operator_question=default_operator_question(goal_id, DEFAULT_OPERATOR_GATE),
                 agent_command=command,
                 source="registry",

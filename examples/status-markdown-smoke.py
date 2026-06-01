@@ -20,6 +20,10 @@ if str(REPO_ROOT) not in sys.path:
 from goal_harness.status import collect_status, render_status_markdown  # noqa: E402
 
 
+OLD_PLANNED_ACTION = "先审阅 Goal Harness operator gate；同意后再发送项目 agent 命令"
+NEW_PLANNED_ACTION = "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run"
+
+
 def write_planned_registry(root: Path) -> Path:
     project = root / "project"
     runtime = root / "runtime"
@@ -83,8 +87,12 @@ def main() -> int:
     item = items[0]
     assert item["goal_id"] == "planned-main-control", item
     assert item["waiting_on"] == "user_or_controller", item
+    assert item["recommended_action"] == NEW_PLANNED_ACTION, item
     assert item["agent_command"] == "goal-harness read-only-map --goal-id planned-main-control --dry-run", item
     assert "operator_gate_dry_run" not in item, item
+    assert OLD_PLANNED_ACTION not in json.dumps(payload, ensure_ascii=False), payload
+    assert OLD_PLANNED_ACTION not in markdown, markdown
+    assert NEW_PLANNED_ACTION in markdown, markdown
 
     gate_index = markdown.index("operator_gate_dry_run")
     agent_index = markdown.index("agent_command")

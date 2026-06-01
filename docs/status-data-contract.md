@@ -212,7 +212,7 @@ Item shape:
   ],
   "waiting_on": "user_or_controller",
   "severity": "action",
-  "recommended_action": "先审阅 Goal Harness operator gate；同意后再发送项目 agent 命令",
+  "recommended_action": "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
   "operator_question": "是否同意 `complex-project-main-control` 先执行 read-only map opt-in？",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
   "quota": {

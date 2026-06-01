@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T05:54:31+08:00
+updated_at: 2026-06-02T05:59:47+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,29 @@ private project context.
 
 ## Next Action
 
-- Tighten the planned controller opt-in `recommended_action` wording used by
-  status/attention queue rows so it matches the Review Packet boundary: the
-  operator decides in Goal Harness first, and the project-agent command is only
-  an after-approval dry-run execution path. Keep this to status wording and
-  source checks; do not append a real gate or run a real map.
+- Do a browser-level check that the attention queue and selected controller
+  action card now show the tightened planned opt-in `recommended_action`:
+  operator judgment happens in Goal Harness first, and the project-agent
+  command is only the after-approval read-only map dry-run path. Keep this to
+  UI verification or tiny wording follow-up; do not append a real gate or run a
+  real map.
 
 ## Recent Progress
 
+- 2026-06-02T05:59:47+08:00: Tightened the planned controller opt-in
+  `recommended_action` emitted by `goal-harness status` for planned
+  `*_read_only_map_v0` adapters with no run yet. The status layer now says the
+  operator judgment happens in Goal Harness first and the project agent only
+  executes the read-only map dry-run after approval. Updated the attention queue
+  and status data contract examples to match, and extended
+  `status-markdown-smoke` to reject the old "review gate, then send project
+  agent command" wording in both JSON and Markdown status output. Validation:
+  direct status Markdown smoke passed; aggregate public smokes passed; Python
+  compile passed; public contract check passed; live global status assertion
+  passed for `agent-harness-main-control`; dashboard local status JSON was
+  refreshed; `git diff --check` passed. Critic: the source and live JSON are now
+  aligned, but a browser-level check should confirm the attention queue and
+  selected controller card render the new wording.
 - 2026-06-02T05:54:31+08:00: Completed a browser-level first-screen check of
   the dashboard Review Packet path with Playwright against the local static
   dashboard at `127.0.0.1:5173`. The selected `agent-harness-main-control`
