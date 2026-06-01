@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:01:56+08:00
+updated_at: 2026-06-02T04:07:01+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,13 +28,25 @@ private project context.
 ## Next Action
 
 - Continue the P0 human-decision loop pass from fresh `goal-harness status`.
-  Next inspect the Review Packet and reward writeback path: the user should see
-  one clear Chinese decision, and the target project agent should receive one
-  clear command or history lookup. Pick the smallest CLI/status/dashboard fix;
-  do not start quota write commands or a scheduler.
+  Next inspect the reward writeback CLI/markdown output: after a dry-run or
+  real append, the user should see the exact run, whether anything was written,
+  and the one project-agent history lookup. Pick the smallest CLI/status/docs
+  fix; do not add browser-side reward append, quota write commands, or a
+  scheduler.
 
 ## Recent Progress
 
+- 2026-06-02T04:07:01+08:00: Tightened the dashboard Review Packet handoff for
+  reward actions. The UI may still show a local reward dry-run preview, but the
+  copied packet no longer asks the target project agent to run reward dry-run
+  or append reward on the user's behalf. For reward actions, the project-agent
+  section now says not to write reward and provides the standard
+  `goal-harness history --goal-id ... --limit 3` lookup through
+  `agentVisibilityCommand`; controller and Codex paths still expose their safe
+  read-only/dry-run commands. Updated the status contract and state interaction
+  model to preserve this source-of-truth boundary. Validation covered
+  dashboard production build, Python compile, contract check, text grep for the
+  new history-lookup wording, and `git diff --check`.
 - 2026-06-02T04:01:56+08:00: Made default operator-gate review text
   human-facing Chinese. Planned read-only map opt-in status now asks
   `是否同意 ... 先执行 read-only map opt-in？` and recommends reviewing the

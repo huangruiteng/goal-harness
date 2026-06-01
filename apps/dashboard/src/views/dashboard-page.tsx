@@ -676,6 +676,7 @@ type OperatorTransitionPreview = {
   summary: string;
   effects: string[];
   command?: string;
+  agentVisibilityCommand?: string;
 };
 
 type UserActionKind = "reward" | "controller" | "codex" | "evidence" | "health";
@@ -754,16 +755,31 @@ function actionKindLabel(kind: UserActionFilter) {
   return kind === "all" ? "All actions" : userActionKindConfig[kind].label;
 }
 
-function buildTransitionPreviewText(preview: OperatorTransitionPreview) {
-  const lines = [
-    `预览：${preview.transition}`,
-    preview.runGeneratedAt ? `绑定 run：${preview.runGeneratedAt}` : "绑定 run：none",
-    `说明：${preview.summary}`,
-  ];
-  if (preview.command) {
-    lines.push("```bash", preview.command, "```");
+function commandBlock(command?: string) {
+  return command ? ["```bash", command, "```"].join("\n") : "（当前没有可执行命令；先读取 status/history。）";
+}
+
+function buildProjectAgentPacketText(kind: UserActionKind | undefined, preview: OperatorTransitionPreview) {
+  if (kind === "reward") {
+    return [
+      "要求：不要替用户写 reward。reward 的权威来源是 run-bound human_reward overlay；active state 只做摘要。",
+      "如果用户尚未明确执行真实 reward append，停下等待；如果已经记录，只用下面 history 路径读取。",
+      "",
+      commandBlock(preview.agentVisibilityCommand),
+    ].join("\n");
   }
-  return lines.join("\n");
+  if (kind === "controller") {
+    return [
+      "要求：只执行下面只读或 dry-run 项目路径；需要真实 approval/write-control 时停下等明确授权。",
+      "",
+      commandBlock(preview.command),
+    ].join("\n");
+  }
+  return [
+    "要求：读取本项目 status/history 后，只执行下面只读或 dry-run 路径；需要真实写 reward/approval/write-control 时停下等明确授权。",
+    "",
+    commandBlock(preview.command),
+  ].join("\n");
 }
 
 function humanReviewPrompt(kind?: UserActionKind) {
@@ -1035,9 +1051,7 @@ function buildReviewPacket({
     `边界：${prompt.boundary}`,
     "",
     "【给项目 Agent】",
-    "要求：读取本项目 status/history 后，只执行下面只读或 dry-run 路径；需要真实写 reward/approval/write-control 时停下等明确授权。",
-    "",
-    buildTransitionPreviewText(transitionPreview),
+    buildProjectAgentPacketText(kind, transitionPreview),
     "",
     "回报：用中文说明 changed files、validation 和 next safe action。",
   ];
@@ -1279,10 +1293,12 @@ function buildOperatorTransitionPreview({
           "先让项目 agent 产生或同步一条 compact run，再回到 reward dry-run。",
         ],
         command: buildHistoryCommand({ goalId, registry, runtimeRoot }),
+        agentVisibilityCommand: buildHistoryCommand({ goalId, registry, runtimeRoot }),
       };
     }
 
     const draft = buildRewardDraftDefaults({ goal, queueItem });
+    const historyCommand = buildHistoryCommand({ goalId, registry, runtimeRoot });
     return {
       title: "Local Dry-run Preview",
       badge: "reward dry-run",
@@ -1306,6 +1322,7 @@ function buildOperatorTransitionPreview({
         reasonSummary: draft.reasonSummary,
         followUp: draft.followUp,
       }),
+      agentVisibilityCommand: historyCommand,
     };
   }
 

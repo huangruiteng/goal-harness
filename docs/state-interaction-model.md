@@ -320,9 +320,11 @@ User review surface:
 - expose one copyable Review Packet for the selected action rather than several
   competing copy formats. The packet should combine the review link, Chinese
   agree/disagree/reason/next-step prompt, project-agent instructions,
-  reward/default hint, and local dry-run preview. It is for user-to-agent
-  collaboration and must not be parsed as durable reward, approval, controller
-  opt-in, or write-control,
+  reward/default hint, and local dry-run preview. For reward actions, the
+  project-agent section should provide the history lookup for a recorded
+  run-bound reward rather than asking the project agent to write reward. It is
+  for user-to-agent collaboration and must not be parsed as durable reward,
+  approval, controller opt-in, or write-control,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,

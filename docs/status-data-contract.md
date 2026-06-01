@@ -583,9 +583,11 @@ A first useful UI can be built from the export alone:
   the selected action card rather than separate link, reply, handoff, and agent
   prompt buttons. The packet may include the review link, Chinese
   agree/disagree/reason/next-step prompt, project-agent instructions, safe local
-  path, reward/default hint, and local dry-run preview. It is still browser UI
-  state and must not be parsed as durable reward, approval, controller opt-in,
-  or write-control.
+  path, reward/default hint, and local dry-run preview. For reward actions, the
+  project-agent section should point to the run history lookup, not ask the
+  target project agent to append or dry-run user reward on the user's behalf.
+  It is still browser UI state and must not be parsed as durable reward,
+  approval, controller opt-in, or write-control.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.
@@ -623,8 +625,9 @@ A first useful UI can be built from the export alone:
 - Reward source of truth: durable user reward belongs in a run-bound
   `human_reward` overlay appended through `goal-harness reward`. Active goal
   state can summarize that such a reward was recorded, and the Review Packet can
-  be forwarded to another project agent for immediate coordination, but neither
-  replaces the compact run overlay as the multi-agent reward signal.
+  be forwarded to another project agent for immediate coordination through the
+  returned history lookup, but neither replaces the compact run overlay as the
+  multi-agent reward signal.
 - Operator decision: selected goal detail should translate `waiting_on`,
   `severity`, `lifecycle_phase`, `missing_gates`, and `recommended_action`
   into a human stance such as review/authorize, let Codex continue, wait for
