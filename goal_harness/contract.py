@@ -53,6 +53,8 @@ def iter_scan_files(scan_root: Path) -> list[Path]:
     for path in scan_root.rglob("*"):
         if any(part in DEFAULT_SKIP_DIRS or part.endswith(".egg-info") for part in path.parts):
             continue
+        if path.name.endswith(".local.json"):
+            continue
         if path.is_file() and path.suffix in DEFAULT_SCAN_SUFFIXES:
             files.append(path)
     return sorted(files)
