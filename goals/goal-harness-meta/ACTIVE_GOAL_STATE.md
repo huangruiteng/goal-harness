@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T20:12:51+08:00
+updated_at: 2026-06-01T20:30:15+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,10 +29,10 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should add a dashboard-side "copy agent prompt" variant for the same
-  operator handoff packet, so the user can forward a precise instruction to a
-  project agent while still keeping approval, reward append, and write-control
-  as separate explicit actions.
+  slice should make the first-screen action dock more decision-oriented: add
+  explicit Chinese operator-response templates for reward/controller cards
+  while keeping reward append, approval, controller opt-in, and write-control
+  as separate durable transitions.
 
 ## Recent Progress
 
@@ -295,6 +295,15 @@ private project context.
   README, status data contract, and state interaction docs now describe the
   packet as a user-facing project-agent handoff artifact, not a durable state
   transition.
+- 2026-06-01T20:30:15+08:00: Moved user-required interaction to the dashboard
+  first screen. `User Actions` and `Selected action share` now render before
+  source controls, metrics, directory, maps, and raw queues; the share panel
+  can copy a review link, operator handoff packet, or project-agent prompt.
+  The selected share target now follows the current action filter rather than
+  a stale run-history selection, so switching to `Reward` selects the reward
+  card's goal. The project-agent prompt tells receiving Codex sessions to run
+  `goal-harness doctor`, read the project registry, active state, and run
+  history, follow only the safe local path, and report in Chinese.
 
 ## Validation
 
@@ -352,6 +361,16 @@ private project context.
   review link, and explicit no-write boundary; after switching to the reward
   filter and selecting `tiger-team-maiduidui-regauc`, the packet updates to the
   reward goal and `record_human_reward_gate / neutral`.
+- Browser DOM smoke: with no explicit `goalId`, `User Actions` appears before
+  `Source`, the share target defaults to the first user-required action
+  (`tiger-team-maiduidui-regauc`, `Reward`), and `Copy Agent Prompt` is present.
+- Browser DOM smoke: with a stale selected goal and `actionKind=reward`, the
+  share target follows the reward card and rewrites the review link to
+  `goalId=tiger-team-maiduidui-regauc`.
+- Browser DOM smoke: agent prompt text includes `goal-harness doctor`,
+  `.goal-harness/registry.json`, the selected safe local path, and the
+  boundary that the prompt is not reward append, approval, controller opt-in,
+  or write-control.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load

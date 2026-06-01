@@ -211,6 +211,11 @@ It should not expose the CLI status contract as the primary mental model.
 
 First screen:
 
+- user actions that need the operator before auxiliary source controls or raw
+  status drill-down,
+- selected action share controls next to those actions, so review links,
+  handoff packets, and project-agent prompts are visible without hunting
+  through the page,
 - contract health and global registry health,
 - lanes by `waiting_on`: user/controller, Codex-ready, external evidence,
   blocking health,
@@ -254,6 +259,11 @@ User review surface:
   selected goal, current action kind, safe local path, reward/default hint, and
   a localized human review action; this packet is for project-agent handoff and
   must not be treated as a durable state transition,
+- expose a copyable project-agent prompt variant for the same selected action;
+  it may tell the receiving Codex agent to run `goal-harness doctor`, read the
+  project registry, active state, and run history, then follow the safe local
+  path, but it must explicitly keep reward append, approval, controller opt-in,
+  and write-control as separate user-authorized transitions,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,

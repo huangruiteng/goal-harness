@@ -817,7 +817,46 @@ function buildOperatorHandoffPacket({
   return lines.join("\n");
 }
 
+function buildAgentPromptPacket({
+  actionKind,
+  item,
+  reviewUrl,
+  selectedGoalId,
+}: {
+  actionKind: UserActionFilter;
+  item?: UserActionSummaryItem;
+  reviewUrl: string;
+  selectedGoalId: string;
+}) {
+  const goalId = (item?.goalId ?? selectedGoalId) || "<goal-id>";
+  const lines = [
+    "你是该项目的 Codex agent。请按以下 Goal Harness handoff 继续推进，但不要把本消息当成写权限授权。",
+    "",
+    `目标：${goalId}`,
+    `当前动作类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
+    `Dashboard 审阅链接：${reviewUrl}`,
+    `用户审阅动作：${chineseReviewAction(item, actionKind)}`,
+    `当前判断：${item?.title ?? "No active user-facing action"}`,
+    `上下文摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
+    `Reward/default hint：${item?.rewardHint ?? "none"}`,
+    "",
+    "执行要求：",
+    "1. 先运行 `goal-harness doctor`，确认 CLI、PATH、wrapper 和 Python import 正常。",
+    "2. 读取本项目 `.goal-harness/registry.json`、active goal state、最近 run history；不要只依赖聊天上下文。",
+    "3. 只沿下面 safe local path 或等价 read-only/dry-run 路径行动；若需要写 reward、approval、controller opt-in 或 write-control，先回报并等待明确授权。",
+    "4. 完成后用中文汇报 changed files、validation、dashboard/attention queue 状态和 next safe action。",
+    "",
+    `Safe local path：${item?.safePathLabel ?? "Inspect status"}`,
+  ];
+  if (item?.safePathCommand) {
+    lines.push("```bash", item.safePathCommand, "```");
+  }
+  lines.push("", "边界：本 prompt 只是 operator handoff；不是 reward append、approval、controller opt-in 或 write-control。");
+  return lines.join("\n");
+}
+
 function ReviewLinkPanel({
+  agentPrompt,
   actionKind,
   goalId,
   handoffPacket,
@@ -826,6 +865,7 @@ function ReviewLinkPanel({
   severity,
   statusUrl,
 }: {
+  agentPrompt: string;
   actionKind: UserActionFilter;
   goalId: string;
   handoffPacket: string;
@@ -834,8 +874,17 @@ function ReviewLinkPanel({
   severity: string;
   statusUrl: string;
 }) {
+  const [agentPromptCopyState, setAgentPromptCopyState] = useState<CopyState>("idle");
   const [linkCopyState, setLinkCopyState] = useState<CopyState>("idle");
   const [handoffCopyState, setHandoffCopyState] = useState<CopyState>("idle");
+
+  useEffect(() => {
+    if (agentPromptCopyState === "idle") {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setAgentPromptCopyState("idle"), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [agentPromptCopyState, agentPrompt]);
 
   useEffect(() => {
     if (linkCopyState === "idle") {
@@ -861,13 +910,17 @@ function ReviewLinkPanel({
     setHandoffCopyState((await copyTextToClipboard(handoffPacket)) ? "copied" : "failed");
   }
 
+  async function copyAgentPrompt() {
+    setAgentPromptCopyState((await copyTextToClipboard(agentPrompt)) ? "copied" : "failed");
+  }
+
   return (
     <Card>
       <CardContent className="pt-4">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="info">Review link</Badge>
+              <Badge variant="info">Selected action share</Badge>
               <Badge variant="neutral">UI state only</Badge>
               <Badge variant={actionKind === "all" ? "neutral" : userActionKindConfig[actionKind].variant}>
                 {actionKindLabel(actionKind)}
@@ -883,17 +936,24 @@ function ReviewLinkPanel({
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <Button aria-label="Copy review link" onClick={() => void copyReviewLink()} variant="primary">
               {linkCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {linkCopyState === "copied" ? "Copied" : "Copy Link"}
+              {linkCopyState === "copied" ? "Copied" : "Copy Review Link"}
             </Button>
             <Button aria-label="Copy operator handoff" onClick={() => void copyHandoffPacket()}>
               {handoffCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               {handoffCopyState === "copied" ? "Copied" : "Copy Handoff"}
             </Button>
-            {linkCopyState === "failed" || handoffCopyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
+            <Button aria-label="Copy agent prompt" onClick={() => void copyAgentPrompt()}>
+              {agentPromptCopyState === "copied" ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {agentPromptCopyState === "copied" ? "Copied" : "Copy Agent Prompt"}
+            </Button>
+            {linkCopyState === "failed" || handoffCopyState === "failed" || agentPromptCopyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
           </div>
         </div>
         <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
           {handoffPacket}
+        </pre>
+        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          {agentPrompt}
         </pre>
       </CardContent>
     </Card>
@@ -2353,7 +2413,6 @@ export function DashboardPage() {
       return;
     }
     const goalIds = new Set(goalRows.map((row) => row.goal.id));
-    const fallbackGoalId = goalRows[0]?.goal.id ?? "";
     if (goalRows.length === 0) {
       if (search.goalId) {
         void navigate({
@@ -2365,11 +2424,11 @@ export function DashboardPage() {
       }
       return;
     }
-    if (!search.goalId || !goalIds.has(search.goalId)) {
+    if (search.goalId && !goalIds.has(search.goalId)) {
       void navigate({
         search: (current) => ({
           ...current,
-          goalId: fallbackGoalId,
+          goalId: "",
         }),
       });
     }
@@ -2399,18 +2458,19 @@ export function DashboardPage() {
     const focusedItems = search.actionKind === "all"
       ? userActionItems
       : userActionItems.filter((item) => item.kind === search.actionKind);
-    return focusedItems.find((item) => item.goalId === selectedGoalId)
-      ?? userActionItems.find((item) => item.goalId === selectedGoalId)
+    return (search.goalId ? focusedItems.find((item) => item.goalId === selectedGoalId) : undefined)
       ?? focusedItems[0]
+      ?? (search.goalId ? userActionItems.find((item) => item.goalId === selectedGoalId) : undefined)
       ?? userActionItems[0];
-  }, [search.actionKind, selectedGoalId, userActionItems]);
+  }, [search.actionKind, search.goalId, selectedGoalId, userActionItems]);
+  const selectedReviewGoalId = selectedActionItem?.goalId ?? selectedGoalId;
   const reviewUrl = useMemo(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("actionKind", search.actionKind);
     url.searchParams.set("lane", search.lane);
     url.searchParams.set("severity", search.severity);
-    if (selectedGoalId) {
-      url.searchParams.set("goalId", selectedGoalId);
+    if (selectedReviewGoalId) {
+      url.searchParams.set("goalId", selectedReviewGoalId);
     } else {
       url.searchParams.delete("goalId");
     }
@@ -2420,15 +2480,24 @@ export function DashboardPage() {
       url.searchParams.delete("statusUrl");
     }
     return url.toString();
-  }, [search.actionKind, search.lane, search.severity, search.statusUrl, selectedGoalId]);
+  }, [search.actionKind, search.lane, search.severity, search.statusUrl, selectedReviewGoalId]);
   const handoffPacket = useMemo(
     () => buildOperatorHandoffPacket({
       actionKind: search.actionKind,
       item: selectedActionItem,
       reviewUrl,
-      selectedGoalId,
+      selectedGoalId: selectedReviewGoalId,
     }),
-    [reviewUrl, search.actionKind, selectedActionItem, selectedGoalId],
+    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId],
+  );
+  const agentPrompt = useMemo(
+    () => buildAgentPromptPacket({
+      actionKind: search.actionKind,
+      item: selectedActionItem,
+      reviewUrl,
+      selectedGoalId: selectedReviewGoalId,
+    }),
+    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId],
   );
 
   function selectGoal(goalId: string) {
@@ -2486,6 +2555,36 @@ export function DashboardPage() {
             </header>
 
             <div className="space-y-5 p-4 sm:p-6">
+              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+                <UserActionSummary
+                  selectedKind={search.actionKind}
+                  onSelectKind={(actionKind) =>
+                    navigate({
+                      search: (current) => ({
+                        ...current,
+                        actionKind,
+                      }),
+                    })
+                  }
+                  registry={payload.registry}
+                  rows={goalRows}
+                  runtimeRoot={payload.runtime_root}
+                  onSelectGoal={selectGoal}
+                  selectedGoalId={selectedGoalId}
+                />
+
+                <ReviewLinkPanel
+                  agentPrompt={agentPrompt}
+                  actionKind={search.actionKind}
+                  goalId={selectedReviewGoalId}
+                  handoffPacket={handoffPacket}
+                  lane={search.lane}
+                  reviewUrl={reviewUrl}
+                  severity={search.severity}
+                  statusUrl={search.statusUrl}
+                />
+              </section>
+
               <Card>
                 <CardContent className="pt-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2539,33 +2638,6 @@ export function DashboardPage() {
                 <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
-
-              <ReviewLinkPanel
-                actionKind={search.actionKind}
-                goalId={selectedGoalId}
-                handoffPacket={handoffPacket}
-                lane={search.lane}
-                reviewUrl={reviewUrl}
-                severity={search.severity}
-                statusUrl={search.statusUrl}
-              />
-
-              <UserActionSummary
-                selectedKind={search.actionKind}
-                onSelectKind={(actionKind) =>
-                  navigate({
-                    search: (current) => ({
-                      ...current,
-                      actionKind,
-                    }),
-                  })
-                }
-                registry={payload.registry}
-                rows={goalRows}
-                runtimeRoot={payload.runtime_root}
-                onSelectGoal={selectGoal}
-                selectedGoalId={selectedGoalId}
-              />
 
               <GoalDirectory rows={goalRows} onSelectGoal={selectGoal} selectedGoalId={selectedGoalId} />
 

@@ -18,7 +18,9 @@ JSON, but the first screen is a human operator view: `User Review Map` translate
 registry/run/reward/controller signals into review states, while `Goal
 Directory` remains the multi-project switcher with public-safe domain,
 attention state, latest run, and run counts.
-`User Actions` lifts the selected-detail operator logic into the first screen:
+`User Actions` is the first content region because the dashboard is for the
+human operator, not for raw status inspection. It lifts the selected-detail
+operator logic into the first screen:
 reward gates, controller opt-ins, evidence watches, Codex handoffs, and health
 blocks are grouped as operator cards before the user opens a goal detail. Each
 card also exposes the matching safe local path and reward-draft hint, so the
@@ -29,12 +31,14 @@ the underlying status export. The filter is backed by the `actionKind` URL
 search parameter, so focused review links survive refresh and can be shared
 with another local operator or agent. The selected goal is also URL-backed via
 `goalId`, which lets a shared link preserve both the review lane and the
-selected goal detail. The first screen exposes a compact `Review link` control
-that copies the current `actionKind`, selected `goalId`, source `statusUrl`,
-and queue filters as browser UI state only. The same control can copy an
-operator handoff packet with the selected goal, current action kind, review
-link, safe local path, reward/default hint, and Chinese review action for a
-project agent.
+selected goal detail. The adjacent first-screen `Selected action share`
+control copies the current `actionKind`,
+selected `goalId`, source `statusUrl`, and queue filters as browser UI state
+only. The same control can copy either an operator handoff packet or a
+project-agent prompt with the selected goal, current action kind, review link,
+safe local path, reward/default hint, and Chinese review action. The project
+agent prompt is deliberately still a handoff artifact; it is not approval,
+reward append, controller opt-in, or write-control.
 The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for

@@ -401,7 +401,10 @@ without rewriting the original run JSON or Markdown payload.
 
 A first useful UI can be built from the export alone:
 
-- Header: `ok`, `goal_count`, `run_count`, and contract summary.
+- Header: operator actions and selected-action sharing should be above
+  auxiliary source controls, metrics, and raw drill-down, because the
+  dashboard is a user decision surface rather than an agent CLI mirror.
+- Metrics: `ok`, `goal_count`, `run_count`, and contract summary.
 - User action summary: first-screen cards should derive from the same selected
   operator decision and reward-default logic, grouping reward gates, controller
   opt-ins, evidence watches, Codex handoffs, and blocking health items before
@@ -424,6 +427,12 @@ A first useful UI can be built from the export alone:
   derived from the selected action card. It can include the review link, action
   kind, selected goal, safe local path, and reward/default hint, but it remains
   a user-facing handoff artifact and must not be parsed as approval or reward.
+- Project-agent prompt: the dashboard may copy a localized instruction prompt
+  derived from the same selected action card and review link. It can tell the
+  receiving agent to inspect `goal-harness doctor`, the project registry,
+  active state, and run history before following the safe local path, but it is
+  still copy-only UI state and must not be parsed as approval, reward,
+  controller opt-in, or write-control.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.
