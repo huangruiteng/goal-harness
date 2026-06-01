@@ -198,6 +198,11 @@ For large repos with many docs, TODOs, run reports, branches, and validation
 surfaces, start with a read-only adapter map before allowing edits. See
 [docs/complex-project-readonly-adapter.md](docs/complex-project-readonly-adapter.md).
 
+For long-running experiment controllers, connect the target only when Goal
+Harness can improve on bare Codex goal mode through durable experiment context,
+explicit gates, human reward capture, and cross-project queueing. See
+[docs/experiment-controller-milestone.md](docs/experiment-controller-milestone.md).
+
 For multi-project control, `goal-harness status` derives a sanitized attention
 queue from registry, run history, and contract health. It answers which goals
 need user/controller action, which are ready for Codex work, and which are only

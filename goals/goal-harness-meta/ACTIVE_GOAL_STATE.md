@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T12:47:47+08:00
+updated_at: 2026-06-01T13:00:03+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,10 @@ private project context.
 
 ## Next Action
 
-- Add a contract-health detail surface to the dashboard so an operator can see
-  blocking errors, non-blocking warnings, and recent check evidence before
-  choosing the next goal action.
+- Implement the experiment-controller milestone slice: define the read-only
+  adapter vocabulary, compact reward-event schema, and dashboard signal needed
+  to decide when a real long-running experiment controller should be connected
+  instead of left in bare Codex goal mode.
 
 ## Recent Progress
 
@@ -71,6 +72,11 @@ private project context.
   recent classifications, health check summaries, and JSON/Markdown artifact
   availability. The React dashboard now lets an operator select an attention
   queue row and inspect the corresponding run-history detail panel.
+- 2026-06-01T13:00:03+08:00: Added `contract.checks` to the public status data
+  contract, rendered contract health detail in the React dashboard and the
+  static HTML fallback, refreshed the dashboard visual baseline toward a
+  product control-plane UI, and recorded the next experiment-controller
+  milestone in `docs/experiment-controller-milestone.md`.
 
 ## Validation
 
@@ -91,6 +97,11 @@ private project context.
   without local path keys
 - Browser smoke: click `docs-maintenance-goal` in the attention queue and
   verify the run-history panel switches to the no-run state
+- `python3 -m goal_harness.cli --format json status` includes
+  `contract.checks`
+- `python3 examples/render-status-dashboard.py examples/status.example.json /tmp/goal-status-dashboard.html`
+- Browser smoke: verify Contract Health, Checks, and non-wrapping source
+  controls in the React dashboard
 
 ## Guards
 

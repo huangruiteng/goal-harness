@@ -12,7 +12,13 @@
       "checks": 4
     },
     "errors": [],
-    "warnings": []
+    "warnings": [],
+    "checks": [
+      "registry goals checked: 3",
+      "runtime indexes checked: 3",
+      "run-history goals=3 runs=2",
+      "public boundary scan clean: 12 files"
+    ]
   },
   "attention_queue": {
     "available": true,

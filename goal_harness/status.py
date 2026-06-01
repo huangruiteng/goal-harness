@@ -254,6 +254,7 @@ def collect_status(
             "summary": contract.get("summary"),
             "errors": contract.get("errors") or [],
             "warnings": contract.get("warnings") or [],
+            "checks": contract.get("checks") or [],
         },
         "attention_queue": queue,
         "run_history": run_history,
@@ -347,7 +348,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     f"artifacts={latest.get('json_exists')}/{latest.get('markdown_exists')}"
                 )
 
-    for title, key in (("Errors", "errors"), ("Warnings", "warnings")):
+    for title, key in (("Errors", "errors"), ("Warnings", "warnings"), ("Checks", "checks")):
         entries = contract.get(key) if isinstance(contract.get(key), list) else []
         if entries:
             lines.extend(["", f"## {title}"])

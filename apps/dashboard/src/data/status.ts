@@ -59,6 +59,7 @@ export const statusPayloadSchema = z.object({
     }),
     errors: z.array(z.string()),
     warnings: z.array(z.string()),
+    checks: z.array(z.string()).optional().default([]),
   }),
   attention_queue: z.object({
     available: z.boolean(),

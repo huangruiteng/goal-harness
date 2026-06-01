@@ -14,6 +14,7 @@ import {
   Upload,
   Radar,
   RefreshCw,
+  ShieldCheck,
   Sun,
   Users,
 } from "lucide-react";
@@ -329,6 +330,74 @@ function RunHistoryPanel({
   );
 }
 
+function HealthFindingList({
+  title,
+  items,
+  emptyLabel,
+  variant,
+}: {
+  title: string;
+  items: string[];
+  emptyLabel: string;
+  variant: "success" | "warning" | "danger" | "info";
+}) {
+  return (
+    <div className="min-w-0 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-slate-500 dark:text-zinc-500">{title}</h3>
+        <Badge variant={items.length > 0 ? variant : "neutral"}>{items.length}</Badge>
+      </div>
+      <div className="mt-3 space-y-2">
+        {items.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-zinc-400">{emptyLabel}</p>
+        ) : (
+          items.map((item) => (
+            <div className="text-sm leading-6 text-slate-700 dark:text-zinc-300" key={item}>
+              {item}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ContractHealthPanel({ contract }: { contract: StatusPayload["contract"] }) {
+  const checks = contract.checks ?? [];
+  return (
+    <Card className={cn(!contract.ok && "border-rose-200 dark:border-rose-900")}>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            Contract Health
+          </CardTitle>
+          <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
+            {contract.ok ? "Public boundary clear" : "Blocking contract issue"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={contract.ok ? "success" : "danger"}>{contract.ok ? "Healthy" : "Blocked"}</Badge>
+          <Badge variant={contract.errors.length > 0 ? "danger" : "neutral"}>
+            {contract.summary.errors} errors
+          </Badge>
+          <Badge variant={contract.warnings.length > 0 ? "warning" : "neutral"}>
+            {contract.summary.warnings} warnings
+          </Badge>
+          <Badge variant="info">{contract.summary.checks} checks</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y divide-slate-200 dark:divide-zinc-800 lg:grid lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          <HealthFindingList emptyLabel="No blocking errors" items={contract.errors} title="Errors" variant="danger" />
+          <HealthFindingList emptyLabel="No warnings" items={contract.warnings} title="Warnings" variant="warning" />
+          <HealthFindingList emptyLabel="No recent checks" items={checks} title="Checks" variant="info" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
@@ -438,20 +507,20 @@ export function DashboardPage() {
 
   return (
     <div className={theme === "dark" ? "dark" : ""}>
-      <div className="min-h-screen bg-slate-100 text-slate-950 dark:bg-zinc-950 dark:text-zinc-50">
+      <div className="min-h-screen bg-[#f6f7f9] text-slate-950 dark:bg-[#09090b] dark:text-zinc-50">
         <div className="grid min-h-screen lg:grid-cols-[240px_1fr]">
-          <aside className="border-b border-slate-200 bg-white lg:border-b-0 lg:border-r dark:border-zinc-800 dark:bg-zinc-950">
+          <aside className="border-b border-black/10 bg-[#0b0d12] text-white lg:border-b-0 lg:border-r dark:border-zinc-800">
             <div className="flex h-16 items-center gap-3 px-5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-950 text-white dark:border-zinc-800 dark:bg-zinc-50 dark:text-zinc-950">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white text-slate-950">
                 <GitBranch className="h-4 w-4" />
               </div>
               <div>
                 <div className="text-sm font-semibold">Goal Harness</div>
-                <div className="text-xs text-slate-500 dark:text-zinc-500">Local control plane</div>
+                <div className="text-xs text-zinc-400">Local control plane</div>
               </div>
             </div>
             <nav className="flex gap-1 px-3 pb-3 lg:block lg:space-y-1 lg:pb-0">
-              <a className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm font-medium dark:bg-zinc-900" href="/">
+              <a className="flex items-center gap-2 rounded-md bg-white/10 px-3 py-2 text-sm font-medium text-white" href="/">
                 <LayoutDashboard className="h-4 w-4" />
                 Dashboard
               </a>
@@ -459,7 +528,7 @@ export function DashboardPage() {
           </aside>
 
           <main className="min-w-0">
-            <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
+            <header className="sticky top-0 z-10 flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 sm:px-6">
               <div>
                 <h1 className="text-2xl font-semibold">Goal Operations</h1>
                 <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
@@ -490,10 +559,10 @@ export function DashboardPage() {
                       <span className="break-all text-sm font-medium">{source.label}</span>
                       {loadError ? <Badge variant="danger">{loadError.slice(0, 120)}</Badge> : null}
                     </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                       <input
                         aria-label="Status URL"
-                        className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500 sm:w-80"
+                        className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500 sm:min-w-72 sm:flex-1 lg:w-80 lg:flex-none"
                         onChange={(event) => setStatusUrl(event.target.value)}
                         placeholder={defaultLiveStatusUrl}
                         value={statusUrl}
@@ -535,6 +604,8 @@ export function DashboardPage() {
                 <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
+
+              <ContractHealthPanel contract={payload.contract} />
 
               <section className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
                 <Card>

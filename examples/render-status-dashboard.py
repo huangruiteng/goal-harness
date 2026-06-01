@@ -94,13 +94,29 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     lanes = "\n".join(render_lane(title, values, items) for _, title, values in LANES)
     errors = contract.get("errors") if isinstance(contract.get("errors"), list) else []
     warnings = contract.get("warnings") if isinstance(contract.get("warnings"), list) else []
+    checks = contract.get("checks") if isinstance(contract.get("checks"), list) else []
+
+    def render_health_column(title: str, entries: list[Any], empty: str) -> str:
+        rows = "\n".join(f"<li>{esc(entry)}</li>" for entry in entries)
+        if not rows:
+            rows = f"<li class=\"empty-row\">{esc(empty)}</li>"
+        return f"""
+          <div class="health-column">
+            <div class="health-column-top">
+              <h3>{esc(title)}</h3>
+              <strong>{len(entries)}</strong>
+            </div>
+            <ul>{rows}</ul>
+          </div>
+        """
+
     health_details = "\n".join(
-        f"<li>{esc(kind)}: {esc(entry)}</li>"
-        for kind, entries in (("error", errors), ("warning", warnings))
-        for entry in entries
+        [
+            render_health_column("Errors", errors, "No blocking errors"),
+            render_health_column("Warnings", warnings, "No warnings"),
+            render_health_column("Checks", checks, "No recent checks"),
+        ]
     )
-    if not health_details:
-        health_details = "<li>No contract errors or warnings.</li>"
 
     return f"""<!doctype html>
 <html lang="en">
@@ -111,15 +127,15 @@ def render_dashboard(payload: dict[str, Any]) -> str:
   <style>
     :root {{
       color-scheme: light;
-      --bg: #f7f7f4;
-      --ink: #1f2520;
-      --muted: #657068;
-      --line: #d9ded8;
+      --bg: #f6f7f9;
+      --ink: #101014;
+      --muted: #667085;
+      --line: #d9dee7;
       --panel: #ffffff;
-      --green: #3d7c54;
-      --blue: #386b8f;
-      --amber: #9a6a22;
-      --red: #aa3f3f;
+      --green: #047857;
+      --blue: #0369a1;
+      --amber: #b45309;
+      --red: #be123c;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -128,6 +144,7 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       background: var(--bg);
       color: var(--ink);
       line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
     }}
     main {{
       width: min(1180px, calc(100vw - 32px));
@@ -156,6 +173,7 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 12px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
     }}
     .metric span {{ color: var(--muted); font-size: 12px; display: block; }}
     .metric strong {{ font-size: 22px; }}
@@ -166,7 +184,7 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       align-items: start;
     }}
     .lane {{
-      background: rgba(255, 255, 255, 0.55);
+      background: rgba(255, 255, 255, 0.78);
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 12px;
@@ -197,6 +215,7 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 10px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
     }}
     .item.high {{ border-left-color: var(--red); }}
     .item.action {{ border-left-color: var(--amber); }}
@@ -228,14 +247,48 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 14px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
     }}
-    .health h2 {{ font-size: 16px; margin-bottom: 8px; }}
+    .health-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .health h2, .health h3 {{ font-size: 16px; margin: 0; }}
+    .health-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }}
+    .health-column {{ padding: 14px; border-right: 1px solid var(--line); }}
+    .health-column:last-child {{ border-right: 0; }}
+    .health-column-top {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }}
+    .health-column-top h3 {{
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }}
+    .health-column-top strong {{
+      color: var(--muted);
+      font-size: 13px;
+    }}
     .health ul {{ margin: 0; padding-left: 18px; color: var(--muted); }}
+    .health li {{ margin: 6px 0; overflow-wrap: anywhere; }}
+    .empty-row {{ list-style: none; margin-left: -18px; }}
     @media (max-width: 860px) {{
       .topbar {{ display: block; }}
       .summary {{ margin-top: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .lanes {{ grid-template-columns: 1fr; }}
+      .health-grid {{ grid-template-columns: 1fr; }}
+      .health-column {{ border-right: 0; border-bottom: 1px solid var(--line); }}
+      .health-column:last-child {{ border-bottom: 0; }}
     }}
   </style>
 </head>
@@ -258,9 +311,11 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       {lanes}
     </section>
     <section class="health">
-      <h2>Contract Health</h2>
-      <p class="meta">ok={esc(contract.get("ok"))}, errors={esc(summary.get("errors"))}, warnings={esc(summary.get("warnings"))}, checks={esc(summary.get("checks"))}</p>
-      <ul>{health_details}</ul>
+      <div class="health-head">
+        <h2>Contract Health</h2>
+        <p class="meta">ok={esc(contract.get("ok"))}, errors={esc(summary.get("errors"))}, warnings={esc(summary.get("warnings"))}, checks={esc(summary.get("checks"))}</p>
+      </div>
+      <div class="health-grid">{health_details}</div>
     </section>
   </main>
 </body>

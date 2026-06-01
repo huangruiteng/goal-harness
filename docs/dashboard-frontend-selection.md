@@ -10,7 +10,7 @@ report.
 
 ## Product Benchmarks
 
-The useful reference products cluster around five capabilities:
+The useful reference products cluster around three product surfaces:
 
 - AI observability tools such as Langfuse, LangSmith, and Braintrust emphasize
   trace/session inspection, eval comparison, filters, score summaries, prompt
@@ -19,6 +19,12 @@ The useful reference products cluster around five capabilities:
   detail pages, event histories, lineage, dependency graphs, and replayability.
 - Monitoring tools such as Grafana emphasize composable panels, dashboard
   variables, transformations, links, and shareable views.
+- Modern developer products such as Vercel and Linear set the visual bar:
+  restrained typography, sharp command surfaces, compact rows, calm contrast,
+  strong empty states, and status accents rather than decorative color.
+- Observability products such as Datadog and Grafana set the density bar:
+  reusable widgets, health panels, filters, dashboard links, and drill-downs
+  that turn a first screen into an operator cockpit.
 
 For Goal Harness, the common lesson is not "more charts." The first screen
 needs an action-oriented queue and trustworthy drill-downs:
@@ -32,10 +38,11 @@ needs an action-oriented queue and trustworthy drill-downs:
 
 ## Decision
 
-Build the official dashboard as `apps/dashboard` with:
+Build the official dashboard as `apps/dashboard` with a static-build-first
+frontend:
 
 - **Vite + React + TypeScript** for a local-first single-page app that can read
-  exported JSON and later call a small local API.
+  exported JSON, build to static HTML/assets, and later call a small local API.
 - **shadcn/ui + Tailwind CSS + Radix primitives + lucide-react** for a polished,
   accessible, owned component system with good defaults.
 - **TanStack Router** for typed routes and URL-backed filters such as selected
@@ -50,9 +57,10 @@ Build the official dashboard as `apps/dashboard` with:
   boundary.
 - **Vitest + Playwright** for component and browser-level checks.
 
-The first implementation should load `examples/status.example.json`, render the
-same data contract as the current static renderer, and prove the stack with a
-real build. A later CLI command can serve or export the built dashboard.
+This means "static HTML dashboard" should not mean hand-written HTML forever.
+The Python renderer remains the no-dependency diagnostic fallback. The product
+dashboard should be a Vite static build with owned shadcn-style components and
+typed data boundaries.
 
 ## Why This Stack
 
@@ -65,6 +73,11 @@ shadcn/ui is preferable to a heavy all-in component library because the
 dashboard needs strong defaults but should still own the code. Goal Harness can
 adapt cards, sidebars, tables, command menus, charts, and badges without
 fighting a closed design system.
+
+The visual baseline should borrow from Vercel/Linear rather than generic admin
+templates: a dark utility rail, quiet white or near-black work surfaces, 8px
+cards, monospaced or tabular status values where useful, dense tables, and only
+small status color accents.
 
 TanStack Router and Table fit the shape of the data. The core UI states are
 filters, search params, sort order, selected rows, and stable drill-down URLs,
@@ -89,6 +102,9 @@ added only when controller/sub-agent relationships need a dedicated graph view.
   make feel owned.
 - **Build with Tailwind alone**: visually flexible, but slower to reach
   accessible menus, dialogs, tabs, tables, tooltips, and charts.
+- **Adopt a prebuilt admin template as the primary product**: fast initially,
+  but the generic CRM/SaaS look would fight the Goal Harness model of queue,
+  run history, contract health, and controller handoff.
 
 ## UX Direction
 
@@ -109,6 +125,7 @@ The first dashboard scaffold lives in `apps/dashboard`. It uses the selected
 stack and renders a real screen from `examples/status.example.json`:
 
 - contract health summary,
+- contract health detail for errors, warnings, and successful checks,
 - attention queue lanes,
 - sortable queue table,
 - goal/run counters,
@@ -135,3 +152,6 @@ React dashboard can be built and opened in one command.
 - TanStack Router docs: <https://tanstack.com/router/latest/docs/framework/react/guide/type-safety>
 - TanStack Table docs: <https://tanstack.com/table/v7/docs/overview>
 - Recharts docs: <https://recharts.github.io/>
+- Vercel Geist design system: <https://vercel.com/geist/introduction>
+- Linear changelog and interface direction: <https://linear.app/changelog>
+- Datadog dashboard widgets docs: <https://docs.datadoghq.com/dashboards/widgets/>

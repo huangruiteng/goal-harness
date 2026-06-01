@@ -49,7 +49,13 @@ goal-harness --format json status \
       "checks": 4
     },
     "errors": [],
-    "warnings": []
+    "warnings": [],
+    "checks": [
+      "registry goals checked: 3",
+      "runtime indexes checked: 3",
+      "run-history goals=3 runs=2",
+      "public boundary scan clean: 12 files"
+    ]
   },
   "attention_queue": {
     "available": true,
@@ -84,8 +90,10 @@ The summary counters are intentionally small:
 - `warnings`: non-blocking issues worth showing in a secondary health panel.
 - `checks`: successful observations, useful for audit trails.
 
-`errors` and `warnings` are short strings. They must be public-safe before a
-project exposes this export outside the local machine.
+`errors`, `warnings`, and `checks` are short strings. Checks should be concrete
+enough to support an operator decision without exposing local paths or private
+evidence. They must be public-safe before a project exposes this export outside
+the local machine.
 
 ## Attention Queue
 
@@ -176,7 +184,7 @@ A first useful UI can be built from the export alone:
 - User lane: items with `waiting_on=user_or_controller` or `controller`.
 - Codex lane: items with `waiting_on=codex`.
 - Watch lane: items with `waiting_on=external_evidence`.
-- Health panel: contract `errors`, `warnings`, and recent check count.
+- Health panel: contract `errors`, `warnings`, and `checks`.
 - Run detail panel: selected goal from the attention queue, compact
   classifications, health checks, and artifact availability.
 
