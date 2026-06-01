@@ -132,6 +132,12 @@ Run the contract check:
 goal-harness check --scan-root .
 ```
 
+Run the planned-adapter status Markdown smoke:
+
+```bash
+python3 examples/status-markdown-smoke.py
+```
+
 Read recent run history:
 
 ```bash
@@ -175,6 +181,8 @@ In multi-project status, planned opt-in goals keep the human decision in the
 Goal Harness operator view: `recommended_action` asks for the operator gate,
 while `agent_command` carries the dry-run command for the target project agent
 after approval.
+The Markdown status view also prints `operator_gate_dry_run` before
+`agent_command` so CLI-facing agents see the user-owned gate preview first.
 
 Record that operator answer before handing the command to a project agent:
 

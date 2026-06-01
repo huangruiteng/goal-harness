@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:53:03+08:00
+updated_at: 2026-06-02T05:00:56+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,24 @@ private project context.
 
 ## Next Action
 
-- Add a small regression smoke for the planned high-complexity status Markdown:
-  a planned `*_read_only_map_v0` goal with no runs should print
-  `operator_gate_dry_run` before `agent_command`, while JSON status remains
-  unchanged. Keep it as a CLI/status test or example-level check; do not append
-  a real gate or run the real map.
+- Inspect whether `goal-harness check` should call the lightweight public smoke
+  scripts, starting with `examples/status-markdown-smoke.py`, or keep them as
+  explicit commands documented in README. If useful, add one aggregate smoke
+  runner; do not expand into a full test framework.
 
 ## Recent Progress
 
+- 2026-06-02T05:00:56+08:00: Added a dependency-free status Markdown smoke for
+  planned high-complexity read-only-map adapters. The example builds a temporary
+  planned `*_read_only_map_v0` registry, asserts the JSON attention item stays
+  unchanged, and asserts Markdown prints `operator_gate_dry_run` before
+  `agent_command` with a public-safe reason placeholder. README now documents
+  the smoke command near the contract check and clarifies the gate-preview line
+  is shown before target-agent handoff. Validation: the smoke script passed;
+  Python compile passed; public contract check passed; `git diff --check`
+  passed. Critic: this protects the immediate Markdown/JSON boundary, but the
+  public repo still needs a small decision on whether smoke scripts should stay
+  explicit or be reachable through one aggregate runner.
 - 2026-06-02T04:53:03+08:00: Added the agent-facing status boundary hint for
   planned high-complexity read-only-map adapters. Markdown `goal-harness status`
   now prints `operator_gate_dry_run` before `agent_command` when a queue item has
