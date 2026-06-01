@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:31:09+08:00
+updated_at: 2026-06-02T06:41:59+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- Add a tiny project-agent prompt/contract note for the quota guard: project
-  agents should treat `quota should-run` as the compute gate, skip quietly when
-  `should_run=false`, and only execute an `agent_command` when `should_run=true`
-  and that command is present. Keep it docs/prompt-only; do not append a real
-  gate or run a real map.
+- Add a tiny CLI-level smoke for `goal-harness new-project-prompt` so the
+  actual command output, not only the Python prompt builder, preserves the quota
+  guard rule. Keep it fixture-only; do not append a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:41:59+08:00: Added the project-agent quota guard rule to the
+  new-project handoff prompt and public prompt contract. Project agents are now
+  told that `quota should-run` is the compute gate: if `should_run=false`, skip
+  implementation/adapter work and do not execute any `agent_command`; only when
+  `should_run=true` and the payload contains `agent_command` should that command
+  be executed; if `should_run=true` without a command, follow
+  `recommended_action` for the next safe read-only action. Added
+  `examples/project-prompt-smoke.py`, which verifies both the Python prompt
+  builder and `docs/new-project-codex-prompt.md` carry the same rule. Validation:
+  direct project-prompt smoke passed; aggregate public smokes passed with 3
+  scripts; Python compile passed; public contract check passed; `git diff
+  --check` passed. Critic: the prompt builder and static doc are now protected,
+  but the actual CLI-rendered `new-project-prompt` output should get a tiny
+  smoke so the executable path cannot drift from the builder.
 - 2026-06-02T06:31:09+08:00: Added quota `should-run` fixture coverage for the
   operator-gate split. The status smoke now calls `build_quota_should_run()` on
   the same temporary approved/rejected/deferred fixtures: approved gates must

@@ -105,7 +105,11 @@ goal-harness new-project-prompt \
    ```
 
    如果返回 `should_run=false`，本轮不要做实现或 adapter 工作，只记录
-   public-safe reason；如果命令非零，fail closed，先修
+   public-safe reason；不要执行任何 `agent_command`，即使 status 或 review
+   packet 里提到过命令。只有当返回 `should_run=true` 且 payload 里包含
+   `agent_command` 时，才执行该命令。如果 `should_run=true` 但没有
+   `agent_command`，只按 `recommended_action` 选择下一个安全只读动作。
+   如果命令非零，fail closed，先修
    `goal-harness doctor` / `goal-harness status`。这个 guard 不等于写权限、
    不绕过 operator gate、也不替代 human reward。
 5. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、
