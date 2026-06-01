@@ -14,6 +14,8 @@ REWARD_VALUES = {"positive", "negative", "mixed", "neutral"}
 PRIVATE_TEXT_PATTERNS = (
     re.compile(r"/" + r"Users/"),
     re.compile(r"/" + r"ext_data/"),
+    re.compile("la" + "rk" + "office", re.I),
+    re.compile("docs" + r"\." + "internal", re.I),
     re.compile(r"\bt-20\d{12}-[a-z0-9]+\b"),
     re.compile(r"\b" + "Bear" + r"er\b", re.I),
     re.compile(r"\b" + "Author" + r"ization\b", re.I),

@@ -184,6 +184,9 @@ refresh payload under the shared runtime root, and appends a compact
 `state_refreshed` index record. The compact index should contain only
 public-safe classification, action, health-check, and artifact pointers; raw
 evidence belongs in the project-local state file or private runtime payload.
+When `--recommended-action` is omitted, the command derives the compact action
+from the first public-safe line in the active state's `## Next Action`, falling
+back to a generic refresh action if that line contains private-looking content.
 
 If a runtime directory belongs to an old goal that is no longer in the registry,
 preview archive cleanup before changing anything:

@@ -17,6 +17,7 @@ from .runtime import validate_goal_id_path_segment
 
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
 DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the next bounded progress segment"
+BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 
 
 def now_local() -> str:
@@ -58,6 +59,23 @@ def extract_section_lines(text: str, heading: str, limit: int = 8) -> list[str]:
             if len(collected) >= limit:
                 break
     return collected
+
+
+def clean_action_line(line: str) -> str:
+    return BULLET_PREFIX_RE.sub("", line.strip()).strip()
+
+
+def derive_recommended_action(state_text: str) -> str:
+    for line in extract_section_lines(state_text, "Next Action", limit=8):
+        action = clean_action_line(line)
+        if not action:
+            continue
+        try:
+            validate_public_safe_text("derived recommended_action", action)
+        except ValueError:
+            continue
+        return action
+    return DEFAULT_REFRESH_ACTION
 
 
 def resolve_goal_state(
@@ -173,7 +191,7 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
         values = state.get(key) if isinstance(state.get(key), list) else []
         if values:
             lines.extend(["", f"## {heading}"])
-            lines.extend(f"- {value}" for value in values)
+            lines.extend(f"- {clean_action_line(value)}" for value in values)
     return "\n".join(lines)
 
 
@@ -191,8 +209,6 @@ def refresh_state_run(
 ) -> dict[str, Any]:
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     validate_public_safe_text("classification", classification)
-    action = recommended_action or DEFAULT_REFRESH_ACTION
-    validate_public_safe_text("recommended_action", action)
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     registry_goal, resolved_project, resolved_state_file = resolve_goal_state(
@@ -204,6 +220,8 @@ def refresh_state_run(
     if not resolved_state_file.exists():
         raise FileNotFoundError(f"state file does not exist: {resolved_state_file}")
     state_text = resolved_state_file.read_text(encoding="utf-8")
+    action = recommended_action or derive_recommended_action(state_text)
+    validate_public_safe_text("recommended_action", action)
     generated_at = now_local()
     record = build_state_refresh_record(
         goal_id=safe_goal_id,

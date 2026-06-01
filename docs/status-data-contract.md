@@ -232,6 +232,10 @@ without entering the queue.
 run came from `goal-harness refresh-state`. Dashboard consumers should show it
 as Codex-ready work: the controller state changed, and the next agent turn
 should inspect the refreshed active state before continuing.
+If the refresh command was run without `--recommended-action`, the compact
+`recommended_action` should be the first public-safe line from the refreshed
+active state's `## Next Action`; otherwise it falls back to a generic refresh
+notice.
 
 The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
 defaults to dry-run and requires `--execute` before moving the runtime directory

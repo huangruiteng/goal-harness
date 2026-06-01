@@ -139,6 +139,12 @@ without running a project adapter:
 goal-harness refresh-state --goal-id your-project-goal
 ```
 
+By default the refresh run uses the first public-safe line from the active
+state's `## Next Action` as its compact `recommended_action`, so dashboards can
+show the actual next move instead of a generic refresh notice. Use
+`--recommended-action` when the state contains only private or overly detailed
+next-action text.
+
 `connect` and `refresh-state` automatically merge the project registry into the
 shared local global registry at `~/.codex/goal-harness/registry.global.json`.
 If a command is run outside any project registry, Goal Harness falls back to

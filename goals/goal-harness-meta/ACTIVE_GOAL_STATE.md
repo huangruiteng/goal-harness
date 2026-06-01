@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T17:55:00+08:00
+updated_at: 2026-06-01T18:02:32+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,11 +27,10 @@ private project context.
 
 ## Next Action
 
-- Use `goal-harness status` as the multi-project first screen. Its default
-  contract scan now stays on the Goal Harness install root, so running status
-  from a private project directory does not accidentally scan that project's
-  local state. Keep explicit `--scan-root` / `--scan-path` for public-safe
-  project surfaces only.
+- Make state-only refreshes produce dashboard-ready action text by default:
+  `goal-harness refresh-state` now derives compact `recommended_action` from the
+  first public-safe line in the refreshed state's `## Next Action`, with
+  `--recommended-action` reserved for explicit override.
 
 ## Recent Progress
 
@@ -185,6 +184,14 @@ private project context.
   checkout while still checking the public Goal Harness install root by
   default; operators must opt in with `--scan-root` or `--scan-path` before
   scanning a project-specific public surface.
+- 2026-06-01T18:02:32+08:00: Improved state-only refresh action quality after
+  inspecting the real `premium-ui-ai-search-rec-migration` zero-start project.
+  The latest premium state had a precise next action, but the compact dashboard
+  run still showed the generic refresh notice. `refresh-state` now derives the
+  compact `recommended_action` from the first public-safe `## Next Action` line,
+  skips private-looking lines such as internal document URLs, and falls back to
+  the generic refresh notice only when needed. The rendered refresh Markdown
+  also normalizes bullet prefixes.
 
 ## Validation
 
@@ -316,6 +323,11 @@ private project context.
 - `goal-harness --registry ~/.codex/goal-harness/registry.global.json --format
   json status` run from a private project directory returns `ok=true`,
   `contract.summary.errors=0`, and `global_registry.summary.findings=0`
+- Synthetic refresh dry-runs prove a public `## Next Action` line becomes the
+  compact `recommended_action`, while an internal-document URL line is skipped
+  in favor of the next public-safe action
+- Real premium refresh at `2026-06-01T18:01:37+08:00` now shows the concrete
+  GZXMT evidence-template action in global status and dashboard local JSON
 
 ## Guards
 
