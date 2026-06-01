@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T13:44:00+08:00
+updated_at: 2026-06-01T14:45:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,9 +26,9 @@ private project context.
 
 ## Next Action
 
-- Add a dashboard-side operator action design for recording human reward, but
-  keep the first implementation CLI-first until the browser flow can preserve
-  the local-only boundary and avoid accidental private evidence entry.
+- Add a local-only dashboard operator action design for recording human reward,
+  reusing the new Goal Directory selection model while preserving the CLI-first
+  safety boundary for private evidence.
 
 ## Recent Progress
 
@@ -93,6 +93,11 @@ private project context.
   merge later overlay rows for the same run key, documented the command in
   README / integration / status contract / experiment-controller milestone,
   and added private-looking text rejection for reward summaries.
+- 2026-06-01T14:45:00+08:00: Added the first multi-project dashboard
+  navigation surface. `goal-harness status` now exposes public-safe goal
+  `domain` in compact run history, the React dashboard renders a first-screen
+  `Goal Directory` across all known goals, and the old queue mix chart was
+  removed so attention lanes and run-history drill-down stay focused.
 
 ## Validation
 
@@ -129,6 +134,9 @@ private project context.
   `controller_readiness` classification when present in the compact index
 - Browser smoke: select `experiment-controller-goal` and verify the dashboard
   shows Controller readiness and Human reward without private fields
+- Browser smoke: verify `Goal Directory` renders bundled examples, hides the
+  old `Queue Mix`, switches run history when selecting `docs-maintenance-goal`,
+  and renders the live local 5-goal status export with public-safe domains
 
 ## Guards
 

@@ -61,6 +61,7 @@
     "goals": [
       {
         "id": "complex-project-main-control",
+        "domain": "complex-project-control",
         "status": "active-read-only",
         "registry_member": true,
         "legacy_runtime_goal": false,
@@ -92,6 +93,7 @@
       },
       {
         "id": "docs-maintenance-goal",
+        "domain": "knowledge-base-maintenance",
         "status": "active",
         "registry_member": true,
         "legacy_runtime_goal": false,
@@ -104,6 +106,7 @@
       },
       {
         "id": "experiment-controller-goal",
+        "domain": "long-running-experiment-control",
         "status": "active-read-only",
         "registry_member": true,
         "legacy_runtime_goal": false,
@@ -159,6 +162,7 @@
       },
       {
         "id": "release-watch-goal",
+        "domain": "release-monitoring",
         "status": "watching",
         "registry_member": true,
         "legacy_runtime_goal": false,

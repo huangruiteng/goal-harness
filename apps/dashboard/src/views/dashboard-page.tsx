@@ -19,14 +19,6 @@ import {
   Users,
 } from "lucide-react";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-} from "recharts";
-import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
@@ -115,6 +107,15 @@ type DataSource =
 
 const defaultLiveStatusUrl = "http://127.0.0.1:8765/status.json";
 
+type GoalDirectoryRow = {
+  goal: RunGoal;
+  queueItem?: QueueItem;
+  latestRun?: RunRecord;
+  status: string;
+  waitingOn: string;
+  severity: string;
+};
+
 function laneFor(item: QueueItem) {
   return laneConfig.find((lane) => lane.waitingOn.includes(item.waiting_on));
 }
@@ -125,6 +126,139 @@ function ShortText({ children }: { children: string }) {
 
 function StatusBadge({ value }: { value: string }) {
   return <Badge variant={severityVariant[value] ?? "neutral"}>{value}</Badge>;
+}
+
+function latestRunSortValue(run?: RunRecord) {
+  return run?.generated_at ? Date.parse(run.generated_at) || 0 : 0;
+}
+
+function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]) {
+  const queueByGoal = new Map(queueItems.map((item) => [item.goal_id, item]));
+  const seen = new Set<string>();
+  const rows: GoalDirectoryRow[] = goals.map((goal) => {
+    seen.add(goal.id);
+    const queueItem = queueByGoal.get(goal.id);
+    const latestRun = goal.latest_runs[0];
+    return {
+      goal,
+      queueItem,
+      latestRun,
+      status: queueItem?.status ?? latestRun?.classification ?? goal.status ?? "no_status",
+      waitingOn: queueItem?.waiting_on ?? "clear",
+      severity: queueItem?.severity ?? "clear",
+    };
+  });
+
+  for (const item of queueItems) {
+    if (seen.has(item.goal_id)) {
+      continue;
+    }
+    rows.push({
+      goal: {
+        id: item.goal_id,
+        status: item.status,
+        registry_member: false,
+        legacy_runtime_goal: false,
+        adapter_kind: null,
+        adapter_status: null,
+        index_exists: false,
+        raw_index_records: 0,
+        unique_runs: 0,
+        latest_runs: [],
+      },
+      queueItem: item,
+      status: item.status,
+      waitingOn: item.waiting_on,
+      severity: item.severity,
+    });
+  }
+
+  const severityOrder: Record<string, number> = {
+    high: 0,
+    action: 1,
+    watch: 2,
+    clear: 3,
+  };
+  return rows.sort((a, b) => {
+    const severityDelta = (severityOrder[a.severity] ?? 4) - (severityOrder[b.severity] ?? 4);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+    return latestRunSortValue(b.latestRun) - latestRunSortValue(a.latestRun);
+  });
+}
+
+function GoalDirectory({
+  rows,
+  selectedGoalId,
+  onSelectGoal,
+}: {
+  rows: GoalDirectoryRow[];
+  selectedGoalId: string;
+  onSelectGoal: (goalId: string) => void;
+}) {
+  const actionCount = rows.filter((row) => row.queueItem && row.waitingOn !== "external_evidence").length;
+  const watchCount = rows.filter((row) => row.waitingOn === "external_evidence").length;
+  const clearCount = rows.length - actionCount - watchCount;
+
+  return (
+    <Card>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4" />
+            Goal Directory
+          </CardTitle>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="warning">{actionCount} action</Badge>
+          <Badge variant="info">{watchCount} watch</Badge>
+          <Badge variant="success">{clearCount} clear</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="divide-y divide-slate-200 dark:divide-zinc-800">
+            {rows.map((row) => (
+              <button
+                className={cn(
+                  "grid w-full gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-zinc-900 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(180px,0.7fr)]",
+                  row.goal.id === selectedGoalId && "bg-slate-100 dark:bg-zinc-900",
+                )}
+                key={row.goal.id}
+                onClick={() => onSelectGoal(row.goal.id)}
+                type="button"
+              >
+                <div className="min-w-0">
+                  <div className="break-all text-sm font-semibold text-slate-950 dark:text-zinc-50">{row.goal.id}</div>
+                  <div className="mt-1 line-clamp-1 text-xs text-slate-500 dark:text-zinc-400">
+                    {row.goal.domain ?? "No domain"}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge>{row.status}</Badge>
+                    {row.severity === "clear" ? <Badge variant="success">Clear</Badge> : <StatusBadge value={row.severity} />}
+                  </div>
+                  <div className="mt-1 line-clamp-1 text-xs text-slate-500 dark:text-zinc-400">
+                    {row.waitingOn === "clear" ? "No attention item" : waitingLabel[row.waitingOn] ?? row.waitingOn}
+                  </div>
+                </div>
+                <div className="min-w-0 md:text-right">
+                  <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">
+                    {row.goal.unique_runs} runs · {row.goal.raw_index_records} records
+                  </div>
+                  <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">
+                    {row.latestRun?.generated_at ?? "No run yet"}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function QueueTable({
@@ -505,6 +639,10 @@ export function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
+  const goalRows = useMemo(
+    () => buildGoalDirectoryRows(runHistory.goals, queue.items),
+    [runHistory.goals, queue.items],
+  );
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -573,14 +711,11 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const goalIds = new Set([
-      ...queue.items.map((item) => item.goal_id),
-      ...runHistory.goals.map((goal) => goal.id),
-    ]);
+    const goalIds = new Set(goalRows.map((row) => row.goal.id));
     if (!selectedGoalId || !goalIds.has(selectedGoalId)) {
-      setSelectedGoalId(queue.items[0]?.goal_id ?? runHistory.goals[0]?.id ?? "");
+      setSelectedGoalId(goalRows[0]?.goal.id ?? "");
     }
-  }, [payload, queue.items, runHistory.goals, selectedGoalId]);
+  }, [goalRows, selectedGoalId]);
 
   const filteredItems = queue.items.filter((item) => {
     const lane = laneFor(item)?.key ?? "all";
@@ -588,16 +723,9 @@ export function DashboardPage() {
     const severityMatches = search.severity === "all" || search.severity === item.severity;
     return laneMatches && severityMatches;
   });
-  const chartData = [
-    { name: "User", count: queue.needs_user_or_controller },
-    { name: "Codex", count: queue.needs_codex },
-    { name: "Watch", count: queue.watching_external_evidence },
-  ];
   const selectedGoal = runHistory.goals.find((goal) => goal.id === selectedGoalId);
   const selectedQueueItem = queue.items.find((item) => item.goal_id === selectedGoalId);
-  const runHistoryOptions = Array.from(
-    new Set([...queue.items.map((item) => item.goal_id), ...runHistory.goals.map((goal) => goal.id)]),
-  );
+  const runHistoryOptions = goalRows.map((row) => row.goal.id);
 
   return (
     <div className={theme === "dark" ? "dark" : ""}>
@@ -699,71 +827,56 @@ export function DashboardPage() {
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
 
+              <GoalDirectory rows={goalRows} onSelectGoal={setSelectedGoalId} selectedGoalId={selectedGoalId} />
+
               <ContractHealthPanel contract={payload.contract} />
 
-              <section className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-                <Card>
-                  <CardHeader>
-                    <div>
-                      <CardTitle>Attention Lanes</CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-3 lg:grid-cols-3">
-                      {laneConfig.map((lane) => {
-                        const Icon = lane.icon;
-                        const items = queue.items.filter((item) => lane.waitingOn.includes(item.waiting_on));
-                        return (
-                          <div className={cn("min-h-52 rounded-lg border p-3", lane.accent)} key={lane.key}>
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 text-sm font-semibold">
-                                <Icon className="h-4 w-4" />
-                                {lane.label}
-                              </div>
-                              <Badge>{items.length}</Badge>
+              <Card>
+                <CardHeader>
+                  <div>
+                    <CardTitle>Attention Lanes</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    {laneConfig.map((lane) => {
+                      const Icon = lane.icon;
+                      const items = queue.items.filter((item) => lane.waitingOn.includes(item.waiting_on));
+                      return (
+                        <div className={cn("min-h-52 rounded-lg border p-3", lane.accent)} key={lane.key}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                              <Icon className="h-4 w-4" />
+                              {lane.label}
                             </div>
-                            <div className="mt-3 space-y-2">
-                              {items.length === 0 ? (
-                                <p className="text-sm opacity-70">Clear</p>
-                              ) : (
-                                items.map((item) => (
-                                  <div className="rounded-md border border-current/15 bg-white/65 p-3 text-sm dark:bg-zinc-950/55" key={item.goal_id}>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className="font-medium">{item.goal_id}</span>
-                                      <StatusBadge value={item.severity} />
-                                    </div>
-                                    <p className="mt-2 text-xs leading-5 opacity-80">{item.recommended_action}</p>
-                                  </div>
-                                ))
-                              )}
-                            </div>
+                            <Badge>{items.length}</Badge>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <div>
-                      <CardTitle>Queue Mix</CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-64">
-                      <ResponsiveContainer height="100%" width="100%">
-                        <BarChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                          <XAxis dataKey="name" tickLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(148, 163, 184, 0.12)" }} />
-                          <Bar dataKey="count" fill="#0f766e" radius={[6, 6, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
+                          <div className="mt-3 space-y-2">
+                            {items.length === 0 ? (
+                              <p className="text-sm opacity-70">Clear</p>
+                            ) : (
+                              items.map((item) => (
+                                <button
+                                  className="w-full rounded-md border border-current/15 bg-white/65 p-3 text-left text-sm transition hover:bg-white dark:bg-zinc-950/55 dark:hover:bg-zinc-950"
+                                  key={item.goal_id}
+                                  onClick={() => setSelectedGoalId(item.goal_id)}
+                                  type="button"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="break-all font-medium">{item.goal_id}</span>
+                                    <StatusBadge value={item.severity} />
+                                  </div>
+                                  <p className="mt-2 text-xs leading-5 opacity-80">{item.recommended_action}</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
 
               <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
                 <Card>

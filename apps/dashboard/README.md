@@ -13,7 +13,10 @@ npm run dev
 
 The default screen uses the sanitized repository example at
 `examples/status.example.json`, including the attention queue and compact run
-history drill-down.
+history drill-down. The first-screen `Goal Directory` is the multi-project
+switcher: it lists every known goal, its public-safe domain, attention state,
+latest run, and run counts before the operator drills into queue or history
+detail.
 
 ## Load Live Status
 

@@ -52,6 +52,7 @@ export const runRecordSchema = z.object({
 
 export const runGoalSchema = z.object({
   id: z.string(),
+  domain: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
   registry_member: z.boolean().optional().default(false),
   legacy_runtime_goal: z.boolean().optional().default(false),

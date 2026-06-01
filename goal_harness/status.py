@@ -257,6 +257,7 @@ def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
         goals.append(
             {
                 "id": goal.get("id"),
+                "domain": goal.get("domain"),
                 "status": goal.get("status"),
                 "registry_member": goal.get("registry_member"),
                 "legacy_runtime_goal": goal.get("legacy_runtime_goal"),

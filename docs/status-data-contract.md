@@ -146,6 +146,7 @@ Goal shape:
 ```json
 {
   "id": "complex-project-main-control",
+  "domain": "complex-project-control",
   "status": "active-read-only",
   "registry_member": true,
   "legacy_runtime_goal": false,
@@ -234,6 +235,8 @@ without rewriting the original run JSON or Markdown payload.
 A first useful UI can be built from the export alone:
 
 - Header: `ok`, `goal_count`, `run_count`, and contract summary.
+- Goal directory: all `run_history.goals`, grouped mentally by `domain` and
+  enriched with matching attention items when a goal needs action.
 - Primary queue: `attention_queue.items`.
 - User lane: items with `waiting_on=user_or_controller` or `controller`.
 - Codex lane: items with `waiting_on=codex`.
