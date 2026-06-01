@@ -140,6 +140,9 @@ The status command combines contract health and run history into an attention
 queue. Each queue item says which goal needs attention, who it is waiting on,
 how severe the item is, and exactly one recommended action.
 
+For dashboards, heartbeat summaries, or any script that reads JSON output, use
+the [status data contract](status-data-contract.md).
+
 Keep adapter output sanitized before it enters the compact index. The status
 queue is meant for control-plane display, not for raw private evidence.
 

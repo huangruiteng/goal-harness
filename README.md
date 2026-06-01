@@ -158,7 +158,9 @@ For multi-project control, `goal-harness status` derives a sanitized attention
 queue from registry, run history, and contract health. It answers which goals
 need user/controller action, which are ready for Codex work, and which are only
 watching external evidence. See
-[docs/attention-queue.md](docs/attention-queue.md).
+[docs/attention-queue.md](docs/attention-queue.md). For dashboards and scripts
+that consume `goal-harness --format json status`, see the
+[status data contract](docs/status-data-contract.md).
 
 ## Public / Private Boundary
 

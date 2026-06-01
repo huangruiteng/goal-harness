@@ -67,3 +67,6 @@ contract health. It should be the first thing a controller or future UI reads:
   redundant review.
 
 See [attention-queue.md](attention-queue.md).
+
+The JSON export is the boundary for dashboards, heartbeat summaries, and future
+UI work. See [status-data-contract.md](status-data-contract.md).
