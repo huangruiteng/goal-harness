@@ -28,6 +28,27 @@ Do not connect if the adapter can only mirror a chat summary, if the current
 experiment result is not comparable, or if the next action depends on private
 production evidence that cannot be safely summarized.
 
+## Experiment Board
+
+Long-window experiment controllers should have a project-local experiment
+board. The board is the current evidence surface for the adapter; it is not a
+raw log dump.
+
+The board should separate:
+
+- objective and primary decision metric;
+- decision window and comparable baseline window;
+- guardrail metrics;
+- non-goals and unsafe shortcuts;
+- active tasks and what to watch;
+- completed anchors and route history;
+- launch or compute quota;
+- next handoff condition.
+
+Adapters should anchor the goal identity in the decisive evidence named by the
+board. Runtime risks, training-only movement, or non-comparable metrics may be
+guardrails, but they should not replace the primary goal.
+
 ## Better Than Bare Goal Mode
 
 The comparison target is the default Codex App goal loop with one thread and

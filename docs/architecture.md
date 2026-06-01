@@ -34,6 +34,11 @@ The core repository intentionally avoids domain logic. A data experiment goal,
 a note-maintenance goal, and a harness self-improvement goal should share the
 same runtime and contract, but use different adapters.
 
+Goal Harness should still absorb field-tested project-control mechanisms such
+as authority registries, current-belief TODOs, managed external-source
+manifests, experiment boards, validation surface maps, and gated handoff
+packets. See [field-derived-patterns.md](field-derived-patterns.md).
+
 ## State Interaction Model
 
 Goal Harness has four product actors:

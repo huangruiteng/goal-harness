@@ -335,6 +335,9 @@ sub-agent owns a scoped probe, implementation slice, or validation surface. See
 For large repos with many docs, TODOs, run reports, branches, and validation
 surfaces, start with a read-only adapter map before allowing edits. See
 [docs/complex-project-readonly-adapter.md](docs/complex-project-readonly-adapter.md).
+For the reusable patterns behind complex-project maps, experiment boards,
+authority registries, and gated handoff packets, see
+[docs/field-derived-patterns.md](docs/field-derived-patterns.md).
 
 For long-running experiment controllers, connect the target only when Goal
 Harness can improve on bare Codex goal mode through durable experiment context,

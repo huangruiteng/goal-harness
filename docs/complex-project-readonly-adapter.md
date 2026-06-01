@@ -47,6 +47,27 @@ List the files or systems that define project truth. Examples:
 - test or CI entrypoints,
 - managed external-doc manifest.
 
+For documentation-heavy projects, prefer an explicit authority registry over a
+flat list of files. The registry should name default entry docs, topic
+authority, document status, conflict rules, and update rules. A read-only map
+should report authority coverage before proposing sub-agent work:
+
+```json
+{
+  "authority_registry": {
+    "path": "docs/meta/DOC_REGISTRY.yaml",
+    "read_status": "read",
+    "default_entry_docs_checked": 3,
+    "topic_authority_count": 24,
+    "deprecated_sources_seen": 2,
+    "conflict_risk": "low"
+  }
+}
+```
+
+This prevents a complex project from being driven by whichever old design doc
+or diagnostic report the agent happened to read first.
+
 Each source should include:
 
 - `path` or stable identifier,
@@ -65,6 +86,10 @@ Group active work by the type of evidence needed to finish it:
 - external-doc sync,
 - PR or CI work,
 - governance or public/private boundary work.
+
+The current-priority source should be written as current belief, not only as a
+chronological task dump. The most useful shape is: what we believe now, why,
+what changes the decision, and the next bounded action.
 
 Each cluster should include:
 
