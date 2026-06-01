@@ -3,6 +3,7 @@
 node_modules/
 __pycache__/
 *.pyc
+*.tsbuildinfo
 *.egg-info/
 build/
 dist/
