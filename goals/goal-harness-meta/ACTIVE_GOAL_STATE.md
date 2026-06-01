@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T23:00:12+08:00
+updated_at: 2026-06-01T23:18:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,26 @@ private project context.
 
 ## Next Action
 
-- Use the first real operator judgment to validate the reward submission loop
-  end-to-end with the new explicit state writeback path:
+- Use the simplified Review Packet for the next real operator judgment. The
+  operator should only supply one Chinese decision sentence; the target project
+  Agent should read status/history and run only the packet's read-only or
+  `--dry-run` command. For reward, keep the first pass on
   `goal-harness reward --write-active-state-summary --dry-run`, then rerun
-  without `--dry-run` only after explicit operator approval. Confirm the target
-  project agent can see the reward through `goal-harness history --goal-id ...`
-  and that active state contains only the summary, not raw evidence.
+  without `--dry-run` only after explicit operator approval.
 
 ## Recent Progress
 
+- 2026-06-01T23:18:40+08:00: Simplified the dashboard Review Packet around
+  the actual multi-Agent collaboration loop: one copy button, one human
+  decision prompt, one target-Agent execution path. Removed the old verbose
+  user-fill template, repeated Codex instructions, reward hint noise, and
+  visible transition effect bullet list. The copied packet now keeps only
+  goal/link/summary, `人只需判断`, `给项目 Agent`, the exact read-only or
+  dry-run command, and the write-boundary. Reward packets still include
+  `--write-active-state-summary --dry-run`. Validation covered TypeScript/Vite
+  build, Python compile, public contract check, refreshed local dashboard JSON,
+  and an in-app Browser smoke check proving the old packet sections are gone
+  while the simplified human/Agent sections and reward dry-run flags remain.
 - 2026-06-01T23:00:12+08:00: Added an explicit active-state summary writeback
   path to `goal-harness reward`. The default behavior is unchanged: reward
   appends only the run-bound `human_reward` overlay. Passing

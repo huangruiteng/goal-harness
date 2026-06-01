@@ -781,41 +781,59 @@ function actionKindLabel(kind: UserActionFilter) {
   return kind === "all" ? "All actions" : userActionKindConfig[kind].label;
 }
 
-function chineseReviewAction(item?: UserActionSummaryItem, selectedKind?: UserActionFilter) {
-  const kind = item?.kind ?? (selectedKind === "all" ? undefined : selectedKind);
-  if (kind === "reward") {
-    return "请用户判断这条 run 是否值得记录 human reward；这不是写权限批准。";
-  }
-  if (kind === "controller") {
-    return "请用户或目标 controller 审阅是否允许 read-only/controller opt-in；不要视为 write-control。";
-  }
-  if (kind === "codex") {
-    return "可以让 Codex 沿 safe local path 继续推进；写操作仍需单独授权。";
-  }
-  if (kind === "evidence") {
-    return "继续等待外部证据，不要把观察状态升级成决策建议。";
-  }
-  if (kind === "health") {
-    return "先修复健康阻塞，再讨论 reward、approval 或 controller handoff。";
-  }
-  return "请先查看 dashboard 当前审阅状态，再决定是否转给项目 agent。";
-}
-
 function buildTransitionPreviewText(preview: OperatorTransitionPreview) {
   const lines = [
-    `transition：${preview.transition}`,
-    `目标：${preview.goalId}`,
-    preview.runGeneratedAt ? `run：${preview.runGeneratedAt}` : "run：none",
-    "dry_run：true",
-    "appended：false",
+    `预览：${preview.transition}`,
+    preview.runGeneratedAt ? `绑定 run：${preview.runGeneratedAt}` : "绑定 run：none",
     `说明：${preview.summary}`,
-    "将要发生：",
-    ...preview.effects.map((effect) => `- ${effect}`),
   ];
   if (preview.command) {
     lines.push("```bash", preview.command, "```");
   }
   return lines.join("\n");
+}
+
+function humanReviewPrompt(kind?: UserActionKind) {
+  if (kind === "reward") {
+    return {
+      question: "是否把这次判断记录为 run-bound human_reward？",
+      reply: "同意记录 / 暂不同意 + 一句话原因。",
+      boundary: "只有去掉 --dry-run 才会写 human_reward 和 active-state 摘要；这不是 write-control、controller opt-in 或生产动作授权。",
+    };
+  }
+  if (kind === "controller") {
+    return {
+      question: "是否允许目标项目进入 read-only/controller opt-in？",
+      reply: "同意继续 read-only / 暂不同意 + 一句话原因。",
+      boundary: "这不是 write-control；任何写入、实验控制或生产动作都需要再次明确授权。",
+    };
+  }
+  if (kind === "codex") {
+    return {
+      question: "是否让项目 Agent 沿 safe local path 继续？",
+      reply: "同意继续 / 暂不同意 + 一句话原因。",
+      boundary: "如果下一步需要写入、reward append、approval 或 write-control，项目 Agent 必须先停下等明确授权。",
+    };
+  }
+  if (kind === "evidence") {
+    return {
+      question: "是否继续等待外部证据，而不升级成决策建议？",
+      reply: "继续等待 / 不继续等待 + 一句话原因。",
+      boundary: "观察状态不是 reward、approval 或 controller opt-in。",
+    };
+  }
+  if (kind === "health") {
+    return {
+      question: "是否先修健康阻塞，再讨论 reward/controller/codex handoff？",
+      reply: "先修阻塞 / 暂不处理 + 一句话原因。",
+      boundary: "健康修复不等于授权 reward append、approval 或 write-control。",
+    };
+  }
+  return {
+    question: "当前是否需要转给项目 Agent 继续处理？",
+    reply: "继续 / 不继续 / 继续观察 + 一句话原因。",
+    boundary: "本回复不自动写 reward、approval、controller opt-in 或 write-control。",
+  };
 }
 
 function buildReviewPacket({
@@ -832,76 +850,27 @@ function buildReviewPacket({
   transitionPreview: OperatorTransitionPreview;
 }) {
   const goalId = (item?.goalId ?? selectedGoalId) || "<goal-id>";
+  const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
+  const prompt = humanReviewPrompt(kind);
   const lines = [
     "【Goal Harness Review Packet】",
     `目标：${goalId}`,
-    `动作类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
-    `Dashboard 审阅链接：${reviewUrl}`,
-    `用户审阅动作：${chineseReviewAction(item, actionKind)}`,
-    `当前判断：${item?.title ?? "No active user-facing action"}`,
-    `上下文摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
-    `Reward/default hint：${item?.rewardHint ?? "none"}`,
+    `类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
+    `链接：${reviewUrl}`,
+    `摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
     "",
-    "【用户需要填写】",
-  ];
-
-  const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
-  if (kind === "reward") {
-    lines.push(
-      "我的判断：同意记录这次 human reward / 暂不同意记录这次 human reward。",
-      "理由：<请写一句中文原因。>",
-      "下一步：<请写希望项目 agent 做什么，例如：按下面 dry-run preview 先验证，不要直接写入。>",
-      "边界：这只是 human reward 判断；不是 write-control、controller opt-in 或生产动作授权。",
-    );
-  } else if (kind === "controller") {
-    lines.push(
-      "我的判断：同意继续 read-only/controller opt-in / 暂不同意，原因如下。",
-      "理由：<请写一句中文原因。>",
-      "下一步：<请写希望项目 agent 做什么，例如：运行下面 dry-run preview，回报 changed files、validation 和 next safe action。>",
-      "边界：这不是 write-control；任何写入、实验控制、生产动作都需要再次明确授权。",
-    );
-  } else if (kind === "codex") {
-    lines.push(
-      "我的判断：可以让 Codex 沿 safe local path 继续推进。",
-      "理由：<请写一句中文原因。>",
-      "下一步：<请写希望项目 agent 做什么。>",
-      "边界：如果下一步需要写入、reward append、approval 或 write-control，先回报再等我确认。",
-    );
-  } else if (kind === "evidence") {
-    lines.push(
-      "我的判断：继续等待外部证据，不升级为决策建议。",
-      "理由：<请写一句中文原因。>",
-      "下一步：<请写观察条件。>",
-      "边界：观察状态不是 reward、approval 或 controller opt-in。",
-    );
-  } else if (kind === "health") {
-    lines.push(
-      "我的判断：先修复健康阻塞，再讨论 reward/controller/codex handoff。",
-      "理由：<请写一句中文原因。>",
-      "下一步：<请写希望项目 agent 做什么。>",
-      "边界：健康修复不等于授权 reward append、approval 或 write-control。",
-    );
-  } else {
-    lines.push(
-      "我的判断：<请写同意/不同意/继续观察，以及一句原因。>",
-      "下一步：<请写希望项目 agent 做什么。>",
-      "边界：本回复不自动写 reward、approval、controller opt-in 或 write-control。",
-    );
-  }
-
-  lines.push(
+    "【人只需判断】",
+    `问题：${prompt.question}`,
+    `回复：${prompt.reply}`,
+    `边界：${prompt.boundary}`,
     "",
-    "【给项目 Codex 的执行要求】",
-    "1. 先运行 `goal-harness doctor`，确认 CLI、PATH、wrapper 和 Python import 正常。",
-    "2. 读取本项目 `.goal-harness/registry.json`、active goal state、最近 run history；不要只依赖聊天上下文。",
-    "3. 只执行下面 local dry-run preview 或等价 read-only/dry-run 路径；若需要写 reward、approval、controller opt-in 或 write-control，先回报并等待明确授权。",
-    "4. 完成后用中文汇报 changed files、validation、dashboard/attention queue 状态和 next safe action。",
+    "【给项目 Agent】",
+    "要求：读取本项目 status/history 后，只执行下面只读或 dry-run 路径；需要真实写 reward/approval/write-control 时停下等明确授权。",
     "",
-    "【本地 dry-run preview】",
     buildTransitionPreviewText(transitionPreview),
     "",
-    "边界：这是唯一推荐复制给项目 agent / 自己审阅的 packet；它不是 reward append、approval、controller opt-in 或 write-control。",
-  );
+    "回报：用中文说明 changed files、validation 和 next safe action。",
+  ];
   return lines.join("\n");
 }
 
@@ -954,7 +923,7 @@ function ReviewLinkPanel({
               {lane !== "all" || severity !== "all" ? <Badge variant="neutral">{lane} / {severity}</Badge> : null}
             </div>
             <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
-              One selected action drives one canonical packet. Click another action card to switch the packet target.
+              复制后直接发给对应项目 Agent；人只补一句判断。
             </p>
             <code className="mt-3 block truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
               {reviewUrl}
@@ -978,11 +947,6 @@ function ReviewLinkPanel({
             {transitionPreview.runGeneratedAt ? <Badge variant="info">{transitionPreview.runGeneratedAt}</Badge> : null}
           </div>
           <p className="mt-2">{transitionPreview.summary}</p>
-          <ul className="mt-2 list-disc space-y-1 pl-4">
-            {transitionPreview.effects.map((effect) => (
-              <li key={effect}>{effect}</li>
-            ))}
-          </ul>
           {transitionPreview.command ? (
             <pre className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-emerald-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-emerald-900">
               {transitionPreview.command}
