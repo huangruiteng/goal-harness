@@ -134,3 +134,14 @@ agent:
 Acceptance criterion: a project can receive a dreaming proposal without the
 project agent being interrupted, and the user can approve, reject, or defer it
 from Goal Harness.
+
+## References
+
+- Anthropic, "New in Claude Managed Agents: dreaming, outcomes, and
+  multiagent orchestration":
+  <https://claude.com/blog/new-in-claude-managed-agents>
+- Auto-Dreamer: Learning Offline Memory Consolidation for Language Agents:
+  <https://arxiv.org/abs/2605.20616>
+- Memory for Autonomous LLM Agents: Mechanisms, Evaluation, and Emerging
+  Frontiers:
+  <https://arxiv.org/abs/2603.07670>
