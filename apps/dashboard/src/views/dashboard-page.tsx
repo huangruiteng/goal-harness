@@ -35,6 +35,7 @@ import {
   ControllerReadiness,
   GlobalRegistryHealth,
   HumanReward,
+  OperatorGate,
   ProjectMap,
   RewardDryRunResponse,
   RunGoal,
@@ -112,6 +113,8 @@ const lifecycleLabel: Record<string, string> = {
   refreshed: "Refreshed",
   adapter_inspected: "Adapter inspected",
   reward_judged: "Reward judged",
+  operator_approved: "Operator approved",
+  operator_gated: "Operator gated",
   controller_gated: "Controller gated",
   controller_ready: "Controller ready",
   registered: "Registered",
@@ -125,6 +128,8 @@ const lifecycleOperatorText: Record<string, string> = {
   refreshed: "Goal state changed; an agent should continue from the update.",
   adapter_inspected: "An adapter has inspected project evidence.",
   reward_judged: "Your judgment has been captured for a run.",
+  operator_approved: "The operator gate is approved; send only the approved agent command.",
+  operator_gated: "The operator answered the gate, but the goal should stay gated.",
   controller_gated: "Controller evidence exists, but a gate is still missing.",
   controller_ready: "Controller handoff or advice can be reviewed.",
   registered: "The goal is known but not yet operational.",
@@ -138,6 +143,8 @@ const lifecycleVariant: Record<string, "neutral" | "success" | "warning" | "info
   refreshed: "warning",
   adapter_inspected: "info",
   reward_judged: "success",
+  operator_approved: "success",
+  operator_gated: "warning",
   controller_gated: "warning",
   controller_ready: "success",
   registered: "neutral",
@@ -151,7 +158,9 @@ const lifecycleDisplayOrder = [
   "refreshed",
   "adapter_inspected",
   "reward_judged",
+  "operator_approved",
   "controller_gated",
+  "operator_gated",
   "controller_ready",
   "planned",
   "registered",
@@ -202,6 +211,12 @@ function inferLifecyclePhase(status?: string | null, run?: RunRecord) {
   }
   if (run?.human_reward) {
     return "reward_judged";
+  }
+  if (run?.operator_gate?.decision === "approve") {
+    return "operator_approved";
+  }
+  if (run?.operator_gate) {
+    return "operator_gated";
   }
   const value = status || run?.classification || "";
   if (value === "connected_without_run") {
@@ -1825,11 +1840,14 @@ function buildOperatorActionBridge({
   }
 
   if (waitingOn === "codex") {
-    const command = phase === "refreshed"
+    const fallbackCommand = phase === "refreshed"
       ? buildRefreshStateDryRunCommand({ goalId, registry, runtimeRoot })
       : phase === "connected"
         ? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot })
         : buildHistoryCommand({ goalId, registry, runtimeRoot });
+    const command = queueItem?.agent_command
+      ?? fallbackCommand;
+    const commandIsGateApproved = Boolean(queueItem?.agent_command);
     return {
       title: "Safe CLI Path",
       badge: "handoff",
@@ -1837,8 +1855,10 @@ function buildOperatorActionBridge({
       body: "This goal is ready for an agent turn; the dashboard should hand off context, not perform the agent step.",
       items: [
         {
-          label: phase === "mapped" ? "Read latest map" : "Preview next run",
-          body: phase === "mapped"
+          label: commandIsGateApproved ? "Approved agent command" : phase === "mapped" ? "Read latest map" : "Preview next run",
+          body: commandIsGateApproved
+            ? "This command is valid because the operator gate was recorded as approved."
+            : phase === "mapped"
             ? "Use the compact map and recent history as the agent-facing context."
             : "Dry-run the next state or map command before appending a run.",
           command,
@@ -1968,6 +1988,43 @@ function HumanRewardSummary({ reward }: { reward: HumanReward }) {
   );
 }
 
+function operatorGateVariant(gate: OperatorGate): BadgeVariant {
+  if (gate.decision === "approve") {
+    return "success";
+  }
+  if (gate.decision === "reject") {
+    return "danger";
+  }
+  return "warning";
+}
+
+function OperatorGateSummary({ gate }: { gate: OperatorGate }) {
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/30">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={operatorGateVariant(gate)}>Operator gate</Badge>
+        {gate.gate ? <span className="font-medium text-amber-950 dark:text-amber-100">{gate.gate}</span> : null}
+        {gate.decision ? <Badge variant={operatorGateVariant(gate)}>{gate.decision}</Badge> : null}
+        {gate.recorded_at ? <Badge variant="neutral">{gate.recorded_at}</Badge> : null}
+      </div>
+      {gate.operator_question ? (
+        <p className="mt-2 leading-6 text-amber-950 dark:text-amber-100">{gate.operator_question}</p>
+      ) : null}
+      {gate.reason_summary ? (
+        <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-100">{gate.reason_summary}</p>
+      ) : null}
+      {gate.follow_up ? (
+        <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">{gate.follow_up}</p>
+      ) : null}
+      {gate.agent_command ? (
+        <code className="mt-2 block overflow-x-auto whitespace-pre-wrap rounded-md bg-slate-950 p-2 text-xs leading-5 text-slate-50">
+          {gate.agent_command}
+        </code>
+      ) : null}
+    </div>
+  );
+}
+
 function ControllerReadinessSummary({ readiness }: { readiness: ControllerReadiness }) {
   const missing = readiness.missing_gates ?? [];
   return (
@@ -2037,6 +2094,7 @@ function LatestRun({ run }: { run: RunRecord }) {
         <PhaseBadges compact flags={run.lifecycle_flags} phase={lifecyclePhase} />
         {run.health_check ? <Badge variant="success">{run.health_check}</Badge> : null}
         {run.human_reward ? <Badge variant={rewardVariant(run.human_reward.reward)}>Reward</Badge> : null}
+        {run.operator_gate ? <Badge variant={operatorGateVariant(run.operator_gate)}>Gate</Badge> : null}
         {run.controller_readiness ? <Badge variant={readinessVariant(run.controller_readiness)}>Readiness</Badge> : null}
         <Badge variant={artifactVariant(run.json_exists)}>JSON</Badge>
         <Badge variant={artifactVariant(run.markdown_exists)}>Markdown</Badge>
@@ -2046,6 +2104,7 @@ function LatestRun({ run }: { run: RunRecord }) {
       ) : null}
       {run.controller_readiness ? <ControllerReadinessSummary readiness={run.controller_readiness} /> : null}
       {run.human_reward ? <HumanRewardSummary reward={run.human_reward} /> : null}
+      {run.operator_gate ? <OperatorGateSummary gate={run.operator_gate} /> : null}
       {run.project_map ? <ProjectMapSummary projectMap={run.project_map} /> : null}
     </div>
   );

@@ -16,6 +16,12 @@ from .doctor import collect_doctor, render_doctor_markdown
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
 from .history import collect_history, load_registry, render_history_markdown
+from .operator_gate import (
+    DEFAULT_OPERATOR_GATE,
+    OPERATOR_GATE_DECISIONS,
+    record_operator_gate,
+    render_operator_gate_markdown,
+)
 from .paths import DEFAULT_RUNTIME_ROOT, default_registry_path, global_registry_path, resolve_runtime_root
 from .project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_KIND,
@@ -249,6 +255,41 @@ def main(argv: list[str] | None = None) -> int:
         help="After a real append, also add the returned active_state_summary to the active state's Progress Ledger. With --dry-run, preview only.",
     )
     reward_parser.add_argument("--dry-run", action="store_true", help="Print the overlay without appending it.")
+
+    gate_parser = sub.add_parser(
+        "operator-gate",
+        help="Record an operator gate decision such as read-only map opt-in.",
+    )
+    gate_parser.add_argument("--goal-id", required=True, help="Goal id whose operator gate is being judged.")
+    gate_parser.add_argument("--gate", default=DEFAULT_OPERATOR_GATE, help=f"Gate id. Defaults to {DEFAULT_OPERATOR_GATE}.")
+    gate_parser.add_argument(
+        "--decision",
+        required=True,
+        choices=sorted(OPERATOR_GATE_DECISIONS),
+        help="Operator decision for this gate.",
+    )
+    gate_parser.add_argument("--recorded-at", help="Decision timestamp. Defaults to current local time.")
+    gate_parser.add_argument(
+        "--operator-question",
+        help="Human-facing question being answered. Defaults from --gate and --goal-id.",
+    )
+    gate_parser.add_argument(
+        "--reason-summary",
+        required=True,
+        help="Short public-safe reason. Do not include raw private evidence.",
+    )
+    gate_parser.add_argument("--follow-up", help="Optional next handoff or evidence condition.")
+    gate_parser.add_argument(
+        "--agent-command",
+        help="Target-agent command that becomes valid after approval. Defaults for read_only_map_opt_in approvals.",
+    )
+    gate_parser.add_argument("--recommended-action", help="Public-safe next action for status/dashboard.")
+    gate_parser.add_argument("--dry-run", action="store_true", help="Print the decision run without appending it.")
+    gate_parser.add_argument(
+        "--no-global-sync",
+        action="store_true",
+        help="Do not refresh the shared global registry after writing the gate decision.",
+    )
 
     check_parser = sub.add_parser("check", help="Run a read-only contract and public/private boundary check.")
     check_parser.add_argument("--scan-root", default=".", help="Public files to scan for obvious private material.")
@@ -517,6 +558,36 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_reward_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "operator-gate":
+        try:
+            payload = record_operator_gate(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                goal_id=args.goal_id,
+                gate=args.gate,
+                decision=args.decision,
+                operator_question=args.operator_question,
+                reason_summary=args.reason_summary,
+                follow_up=args.follow_up,
+                agent_command=args.agent_command,
+                recommended_action=args.recommended_action,
+                recorded_at=args.recorded_at,
+                dry_run=bool(args.dry_run),
+                sync_global=not bool(args.no_global_sync),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "goal_id": args.goal_id,
+                "appended": False,
+                "dry_run": bool(args.dry_run),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_operator_gate_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "check":

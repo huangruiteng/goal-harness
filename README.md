@@ -174,6 +174,19 @@ Goal Harness operator view: `recommended_action` asks for the operator gate,
 while `agent_command` carries the dry-run command for the target project agent
 after approval.
 
+Record that operator answer before handing the command to a project agent:
+
+```bash
+goal-harness operator-gate \
+  --goal-id your-project-goal \
+  --decision approve \
+  --reason-summary "operator approved read-only map opt-in" \
+  --dry-run
+```
+
+Remove `--dry-run` only when the operator intentionally wants the approval,
+rejection, or deferral appended as a compact `operator_gate_*` run.
+
 `connect` and `refresh-state` automatically merge the project registry into the
 shared local global registry at `~/.codex/goal-harness/registry.global.json`.
 If a command is run outside any project registry, Goal Harness falls back to

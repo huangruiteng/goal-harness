@@ -386,6 +386,10 @@ state interaction stages from adapter-specific classifications:
 - `refreshed`: the latest run is a state-only `state_refreshed` update.
 - `adapter_inspected`: a project adapter produced a compact run.
 - `reward_judged`: a human reward overlay is attached to the run.
+- `operator_approved`: an operator gate was approved and the approved
+  `agent_command` may be handed to the target project agent.
+- `operator_gated`: an operator gate was rejected or deferred, so the goal stays
+  gated.
 - `controller_gated`: controller readiness evidence is present, but the goal is
   still missing a gate such as human reward or comparable evidence.
 - `controller_ready`: decision-advisor or write-controller readiness is present.
@@ -393,16 +397,35 @@ state interaction stages from adapter-specific classifications:
   are not yet connected or have an unclassified run.
 
 `lifecycle_flags` may contain more than one phase. For example, a run can be
-both `adapter_inspected` and `reward_judged`, or both `adapter_inspected` and
-`controller_gated`. UIs should show the primary phase first and use flags as
-secondary badges.
+both `adapter_inspected` and `reward_judged`, both `adapter_inspected` and
+`operator_approved`, or both `adapter_inspected` and `controller_gated`. UIs
+should show the primary phase first and use flags as secondary badges.
 
 For `controller_readiness`, the status export keeps only controller-stage
 booleans, missing gate names, operator-facing review text, next handoff
 condition, and compact gate rows with `id`, `ok`, and `review`. For
 `human_reward`, the status export keeps only `recorded_at`, `decision`,
-`reward`, `reason_summary`, and `follow_up`; richer evidence belongs in private
-run payloads.
+`reward`, `reason_summary`, and `follow_up`. For `operator_gate`, the status
+export keeps only `recorded_at`, `gate`, `decision`, `operator_question`,
+`reason_summary`, `follow_up`, and `agent_command`; richer evidence belongs in
+private run payloads.
+
+Operator gate decisions answer "may the project agent cross this gate?" and are
+separate from reward signals. Use them for approvals such as read-only map
+opt-in:
+
+```bash
+goal-harness operator-gate \
+  --goal-id complex-project-main-control \
+  --decision approve \
+  --reason-summary "operator approved read-only map opt-in"
+```
+
+The dry-run form appends nothing. A real append writes an
+`operator_gate_approved`, `operator_gate_rejected`, or
+`operator_gate_deferred` compact run. Approved gates are surfaced as
+Codex-ready with the approved `agent_command`; rejected/deferred gates stay in
+the user/controller lane with the recorded reason.
 
 Operators can append `human_reward` with the CLI:
 

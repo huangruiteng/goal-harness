@@ -21,6 +21,7 @@ CODEX_READY_CLASSIFICATIONS = {
     "read_only_project_map",
     "run_validation",
     "state_refreshed",
+    "operator_gate_approved",
 }
 USER_OR_CONTROLLER_CLASSIFICATIONS = {
     "needs_human_reward",
@@ -28,6 +29,8 @@ USER_OR_CONTROLLER_CLASSIFICATIONS = {
     "needs_user_relay",
     "ready_for_controller_opt_in",
     "ready_for_user_relay",
+    "operator_gate_deferred",
+    "operator_gate_rejected",
 }
 WATCH_CLASSIFICATION_PREFIXES = ("await_", "monitor_")
 BLOCKING_CLASSIFICATIONS = {
@@ -60,6 +63,15 @@ HUMAN_REWARD_COMPACT_FIELDS = (
     "reason_summary",
     "follow_up",
 )
+OPERATOR_GATE_COMPACT_FIELDS = (
+    "recorded_at",
+    "gate",
+    "decision",
+    "operator_question",
+    "reason_summary",
+    "follow_up",
+    "agent_command",
+)
 CONTROLLER_READINESS_COMPACT_FIELDS = (
     "classification",
     "read_only_observer_ready",
@@ -77,7 +89,9 @@ CONTROLLER_READINESS_GATE_FIELDS = (
 LIFECYCLE_PRIORITY = (
     "controller_ready",
     "reward_judged",
+    "operator_approved",
     "controller_gated",
+    "operator_gated",
     "adapter_inspected",
     "mapped",
     "refreshed",
@@ -361,6 +375,13 @@ def run_lifecycle_flags(run: dict[str, Any] | None) -> list[str]:
     if compact_human_reward(run.get("human_reward")):
         flags.append("reward_judged")
 
+    operator_gate = compact_operator_gate(run.get("operator_gate"))
+    if operator_gate:
+        if operator_gate.get("decision") == "approve":
+            flags.append("operator_approved")
+        else:
+            flags.append("operator_gated")
+
     readiness = compact_controller_readiness(run.get("controller_readiness"))
     if readiness:
         if readiness.get("decision_advisor_ready") or readiness.get("write_controller_ready"):
@@ -415,6 +436,22 @@ def readiness_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]:
             fields["missing_gates"] = public_missing
     if readiness.get("next_handoff_condition"):
         fields["next_handoff_condition"] = readiness.get("next_handoff_condition")
+    return fields
+
+
+def operator_gate_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(run, dict):
+        return {}
+    operator_gate = compact_operator_gate(run.get("operator_gate"))
+    if not operator_gate:
+        return {}
+    fields: dict[str, Any] = {}
+    if operator_gate.get("decision") != "approve" and operator_gate.get("operator_question"):
+        fields["operator_question"] = operator_gate.get("operator_question")
+    if operator_gate.get("decision") == "approve" and operator_gate.get("agent_command"):
+        fields["agent_command"] = operator_gate.get("agent_command")
+    if operator_gate.get("follow_up"):
+        fields["next_handoff_condition"] = operator_gate.get("follow_up")
     return fields
 
 
@@ -479,6 +516,8 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
     adapter_kind = str(goal.get("adapter_kind") or "")
     current_run = latest_run(goal)
     readiness_fields = readiness_attention_fields(current_run)
+    operator_gate_fields = operator_gate_attention_fields(current_run)
+    attention_fields = {**readiness_fields, **operator_gate_fields}
     lifecycle_fields = goal_lifecycle_fields(goal, current_run)
 
     if goal.get("legacy_runtime_goal"):
@@ -528,7 +567,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             severity="high",
             recommended_action="repair or regenerate the latest run artifacts before trusting status",
             source="run_history",
-            **readiness_fields,
+            **attention_fields,
             **lifecycle_fields,
         )
 
@@ -542,7 +581,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             severity="high",
             recommended_action=action,
             source="latest_run",
-            **readiness_fields,
+            **attention_fields,
             **lifecycle_fields,
         )
     if classification in USER_OR_CONTROLLER_CLASSIFICATIONS:
@@ -553,7 +592,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             severity="action",
             recommended_action=action,
             source="latest_run",
-            **readiness_fields,
+            **attention_fields,
             **lifecycle_fields,
         )
     if classification in CODEX_READY_CLASSIFICATIONS:
@@ -564,7 +603,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             severity="action",
             recommended_action=action,
             source="latest_run",
-            **readiness_fields,
+            **attention_fields,
             **lifecycle_fields,
         )
     if classification.startswith(WATCH_CLASSIFICATION_PREFIXES):
@@ -575,7 +614,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             severity="watch",
             recommended_action=action,
             source="latest_run",
-            **readiness_fields,
+            **attention_fields,
             **lifecycle_fields,
         )
     return None
@@ -643,6 +682,13 @@ def compact_human_reward(reward: Any) -> dict[str, Any] | None:
     return compact or None
 
 
+def compact_operator_gate(operator_gate: Any) -> dict[str, Any] | None:
+    if not isinstance(operator_gate, dict):
+        return None
+    compact = {field: operator_gate[field] for field in OPERATOR_GATE_COMPACT_FIELDS if field in operator_gate}
+    return compact or None
+
+
 def compact_controller_readiness(readiness: Any) -> dict[str, Any] | None:
     if not isinstance(readiness, dict):
         return None
@@ -669,6 +715,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     reward = compact_human_reward(run.get("human_reward"))
     if reward:
         compact["human_reward"] = reward
+    operator_gate = compact_operator_gate(run.get("operator_gate"))
+    if operator_gate:
+        compact["operator_gate"] = operator_gate
     readiness = compact_controller_readiness(run.get("controller_readiness"))
     if readiness:
         compact["controller_readiness"] = readiness
@@ -889,6 +938,16 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     if reward
                     else ""
                 )
+                operator_gate = (
+                    latest.get("operator_gate")
+                    if isinstance(latest.get("operator_gate"), dict)
+                    else {}
+                )
+                operator_gate_text = (
+                    f" operator_gate={operator_gate.get('gate')}:{operator_gate.get('decision')}"
+                    if operator_gate
+                    else ""
+                )
                 readiness = (
                     latest.get("controller_readiness")
                     if isinstance(latest.get("controller_readiness"), dict)
@@ -906,6 +965,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     f"phase={latest.get('lifecycle_phase')} "
                     f"artifacts={latest.get('json_exists')}/{latest.get('markdown_exists')}"
                     f"{reward_text}"
+                    f"{operator_gate_text}"
                     f"{readiness_text}"
                 )
 

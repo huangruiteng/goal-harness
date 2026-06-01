@@ -92,6 +92,22 @@ the user or target controller has moved the adapter to `read-only-map-ready`,
 `connected-read-only`, or `connected`. Relay the returned `residual_risks`
 labels directly; do not invent a separate free-form risk summary.
 
+When the user or target controller answers the opt-in gate, record that answer
+before handing the command to another project agent:
+
+```bash
+goal-harness operator-gate \
+  --goal-id <STABLE_GOAL_ID> \
+  --decision approve \
+  --reason-summary "<PUBLIC_SAFE_CHINESE_REASON>" \
+  --dry-run
+```
+
+Use `approve`, `reject`, or `defer`. The dry-run writes nothing; the real append
+creates an `operator_gate_*` compact run so `goal-harness status` and the
+dashboard can tell whether the project agent may run the approved command. This
+is not a human reward signal and does not grant write-control.
+
 ## Refresh State After Non-Adapter Work
 
 If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,

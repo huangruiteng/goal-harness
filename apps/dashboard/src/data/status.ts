@@ -25,6 +25,16 @@ export const humanRewardSchema = z.object({
   follow_up: z.string().optional().nullable(),
 });
 
+export const operatorGateSchema = z.object({
+  recorded_at: z.string().optional().nullable(),
+  gate: z.string().optional().nullable(),
+  decision: z.string().optional().nullable(),
+  operator_question: z.string().optional().nullable(),
+  reason_summary: z.string().optional().nullable(),
+  follow_up: z.string().optional().nullable(),
+  agent_command: z.string().optional().nullable(),
+});
+
 export const controllerReadinessGateSchema = z.object({
   id: z.string().optional().nullable(),
   ok: z.boolean().optional().nullable(),
@@ -67,6 +77,7 @@ export const runRecordSchema = z.object({
   json_exists: z.boolean().optional().default(false),
   markdown_exists: z.boolean().optional().default(false),
   human_reward: humanRewardSchema.optional().nullable(),
+  operator_gate: operatorGateSchema.optional().nullable(),
   controller_readiness: controllerReadinessSchema.optional().nullable(),
   project_map: projectMapSchema.optional().nullable(),
 });
@@ -206,6 +217,7 @@ export const rewardDryRunResponseSchema = z.object({
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
+export type OperatorGate = z.infer<typeof operatorGateSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;

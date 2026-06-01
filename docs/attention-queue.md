@@ -122,6 +122,12 @@ and exposes `goal-harness read-only-map --goal-id <goal> --dry-run` as
 appends nothing; a real map run still waits for the target controller to move
 the adapter to `read-only-map-ready` or `connected-read-only`.
 
+After the operator answers that gate, record it with `goal-harness
+operator-gate`. Approved gates produce `operator_gate_approved` and move the
+next action to Codex with the approved `agent_command`; rejected or deferred
+gates produce `operator_gate_rejected` or `operator_gate_deferred` and keep the
+goal in the user/controller lane with the recorded reason.
+
 If runtime contains an actionable goal that is not in the registry, status emits
 `unregistered_runtime_goal`. This is a controller action: either add the goal to
 the registry so it becomes part of the multi-project surface, or archive the

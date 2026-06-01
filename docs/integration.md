@@ -209,6 +209,24 @@ so a controller can inspect the bounded map shape before moving the adapter to
 `read-only-map-ready`, `connected-read-only`, or `connected`. Running the same
 command without `--dry-run` still fails until that opt-in status change happens.
 
+Record the operator's answer as a durable gate decision before treating the
+handoff as approved:
+
+```bash
+goal-harness operator-gate \
+  --goal-id project-goal \
+  --decision approve \
+  --reason-summary "operator approved read-only map opt-in" \
+  --dry-run
+```
+
+The dry-run writes nothing. A real append creates an `operator_gate_approved`,
+`operator_gate_rejected`, or `operator_gate_deferred` compact run with JSON and
+Markdown artifacts. Approval makes the goal Codex-ready and exposes the
+approved `agent_command`; reject/defer keeps the goal gated with the recorded
+reason. This records operator gate decisions separately from `human_reward`,
+which remains reserved for judging an exact run or route outcome.
+
 If a runtime directory belongs to an old goal that is no longer in the registry,
 preview archive cleanup before changing anything:
 
