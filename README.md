@@ -28,6 +28,7 @@ Use it when you want an agent to manage:
 
 - a multi-week engineering or research goal,
 - several local projects with different adapters,
+- local compute quota across projects and agent turns,
 - Codex-style controller runs that spawn scoped sub-agents,
 - recurring heartbeat runs,
 - experiment progress and decision gates,
@@ -352,6 +353,9 @@ that consume `goal-harness --format json status`, see the
 [status data contract](docs/status-data-contract.md). For the official
 dashboard frontend direction, see
 [docs/dashboard-frontend-selection.md](docs/dashboard-frontend-selection.md).
+Goal Harness should also own simple compute quota across projects, rather than
+making automation cadence the only way to express priority. See
+[docs/quota-allocation.md](docs/quota-allocation.md).
 For background exploration, memory consolidation, and refactor-warning work
 that should not interrupt active project agents, see
 [docs/dreaming-exploration-lane.md](docs/dreaming-exploration-lane.md).

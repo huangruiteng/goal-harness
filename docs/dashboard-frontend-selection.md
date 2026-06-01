@@ -19,6 +19,9 @@ The useful reference products cluster around three product surfaces:
   detail pages, event histories, lineage, dependency graphs, and replayability.
 - Monitoring tools such as Grafana emphasize composable panels, dashboard
   variables, transformations, links, and shareable views.
+- Work management tools such as Linear emphasize priority, cycle capacity,
+  triage queues, and explicit pause/resume states instead of hiding compute
+  allocation inside notification cadence.
 - Modern developer products such as Vercel and Linear set the visual bar:
   restrained typography, sharp command surfaces, compact rows, calm contrast,
   strong empty states, and status accents rather than decorative color.
@@ -30,6 +33,8 @@ For Goal Harness, the common lesson is not "more charts." The first screen
 needs an action-oriented queue and trustworthy drill-downs:
 
 - at-a-glance health and attention lanes,
+- compute quota lanes that show which goals are eligible, throttled, waiting,
+  paused, or asking for a burst,
 - a human operator view that translates agent-facing status into review,
   approval, waiting, and reward-capture decisions,
 - filterable goal and run tables,
@@ -116,6 +121,8 @@ The dashboard should be dense, calm, and operational:
 - top controls for registry, runtime root, scan scope, and refresh state;
 - first-screen lanes for user/controller, Codex-ready, external-watch, and
   blocking health;
+- a compact quota strip for compute quota, spent agent turns, and next
+  eligible time;
 - table-first drill-downs instead of oversized hero sections;
 - subdued color with status accents, not a one-hue brand wash;
 - light and dark modes from the beginning;

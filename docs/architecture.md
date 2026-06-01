@@ -1,6 +1,6 @@
 # Architecture
 
-Goal Harness has six layers.
+Goal Harness has seven layers.
 
 1. **Registry**: lists known goals, their repos, adapters, authority sources,
    status, and guards.
@@ -9,6 +9,8 @@ Goal Harness has six layers.
 4. **Run log**: JSON and Markdown reports saved per goal.
 5. **Run history**: compact indexes consumed by agents, heartbeats, and UI.
 6. **Status / attention queue**: first-screen summary of who needs to act next.
+7. **Compute quota**: local policy for how much automatic agent compute each
+   goal may consume.
 
 ```text
 project goal state
@@ -25,7 +27,7 @@ goal-harness history/check
 goal-harness status
         |
         v
-agent tick / heartbeat / future UI
+quota-aware agent tick / heartbeat / future UI
 ```
 
 The core repository intentionally avoids domain logic. A data experiment goal,
@@ -69,9 +71,12 @@ Sub-agents own bounded child work:
 - one validation or benchmark surface,
 - one risk or boundary check.
 
-Goal Harness does not execute a scheduler by itself. It records contracts,
-claims, run history, and boundary checks so controller/sub-agent work remains
-inspectable instead of becoming hidden background activity.
+Goal Harness does not replace the operating-system scheduler or Codex App
+executor. It should, however, own the simple compute quota that those executors
+read before running more work. Timer cadence is an execution mechanism, not the
+product source of truth for project priority.
+
+See [quota-allocation.md](quota-allocation.md).
 
 See [codex-subagent-orchestration.md](codex-subagent-orchestration.md).
 

@@ -26,7 +26,8 @@ Goal-owned state:
 - active goal state file,
 - compact run index,
 - private run payloads,
-- optional human reward overlays attached to exact runs.
+- optional human reward overlays attached to exact runs,
+- optional compute quota and spend ledger for this goal.
 
 ### Codex App Executor
 
@@ -56,7 +57,9 @@ judgment that the executor cannot infer safely:
 - whether a route, result, or tradeoff was good,
 - whether a controller may move from observation to advice,
 - whether write or production actions are allowed,
-- whether a project should stay active, pause, or archive.
+- whether a project should stay active, pause, or archive,
+- whether a goal should receive more compute quota, less compute quota, or a
+  temporary burst.
 
 The user's feedback should be recorded close to the run being judged. A
 structured `human_reward` overlay is better than burying the judgment in chat,
@@ -79,6 +82,7 @@ By default it reads the status export and optional loopback status server:
 - compact run history,
 - controller readiness,
 - human reward summaries,
+- compute quota state,
 - artifact availability.
 
 The dashboard can help the user review, filter, and dry-run feedback. Direct
@@ -101,6 +105,7 @@ details.
 | Shared global registry | Local control plane | Status, dashboard, any project shell | `connect`, `refresh-state`, `sync-global` | Multi-project discovery without manually copying registry entries. |
 | Run payloads | Goal runtime | Executor, local reviewer | Adapters, `refresh-state`, `read-only-map` | Rich private evidence for one run. |
 | Compact run index | Goal runtime | Status, dashboard, heartbeats | Adapters, reward overlay writer | Public-safe timeline and latest status. |
+| Compute quota / spend ledger | Goal runtime or registry | Status, dashboard, automations | `quota` commands, controller writeback, operator decisions | Local duty-cycle or weighted-share policy for automatic agent turns. |
 | Status export | CLI/status layer | Dashboard, pre-tick, heartbeats | `goal-harness status` | Agent-facing machine contract and dashboard input. |
 | Dashboard UI state | Browser session | User | Browser URL/search state | Filters, selected goal, selected run; not durable goal truth. |
 
@@ -116,8 +121,10 @@ flowchart LR
   Executor -->|"adapter tick"| RunPayload
   RunPayload -->|"compact fields"| RunIndex["Run index"]
   User -->|"goal-harness reward"| RunIndex
+  User -->|"compute share, pause, burst"| Quota["Compute quota"]
   GlobalRegistry --> Status["Status export"]
   RunIndex --> Status
+  Quota --> Status
   Status --> Dashboard["Dashboard"]
   Dashboard -->|"review / dry-run only by default"| User
 ```
@@ -176,6 +183,26 @@ Dashboard effect: latest dashboard state catches up with active state changes.
 This prevents a project from looking stale after the user or executor updated
 the goal document, ledger, or next action.
 
+### Compute Quota
+
+Purpose: decide how much automatic agent compute a goal may consume.
+
+Writer: user-authorized `quota` command, controller state writeback, or a
+derived status planner.
+
+Writes:
+
+- per-goal compute quota such as `1.0`, `0.5`, `0.3`, or `0`,
+- optional spend ledger entries for automatic ticks or agent turns,
+- compact allocation state such as `eligible`, `throttled`, `waiting`,
+  `operator_gate`, `paused`, or `blocked_health`.
+
+Dashboard effect: the operator can see why a project is active, throttled,
+waiting, paused, or asking for a burst. Automations should treat timer cadence
+as an execution detail and read Goal Harness compute quota before running work.
+
+See [quota-allocation.md](quota-allocation.md).
+
 ### Adapter Tick
 
 Purpose: inspect project-specific evidence and emit a compact decision surface.
@@ -214,6 +241,8 @@ It should not expose the CLI status contract as the primary mental model.
 
 First screen:
 
+- compute quota summary: which goals are eligible, throttled, waiting, paused,
+  or over budget;
 - user actions that need the operator before auxiliary source controls or raw
   status drill-down,
 - selected action share controls next to those actions, so review links,
@@ -244,8 +273,8 @@ Goal detail:
 User review surface:
 
 - show first-screen operator actions before raw goal detail: reward gates,
-  controller opt-ins, evidence watches, Codex handoffs, and blocking health
-  items,
+  controller opt-ins, compute quota changes, evidence watches, Codex handoffs,
+  and blocking health items,
 - include the safe local CLI path or reward-draft hint on first-screen action
   cards when it helps the user move from judgment to an agent-facing command,
 - allow local action-kind focus such as reward, controller, Codex, evidence,
@@ -280,6 +309,7 @@ User review surface:
 Executor surface:
 
 - show the next allowed transition,
+- show whether the goal is eligible under compute quota,
 - show missing gates,
 - show whether the next action is read-only, state refresh, adapter tick,
   reward capture, controller opt-in, or explicit write approval.
@@ -307,6 +337,9 @@ CLI surface:
   only reward source that other project agents rely on.
 - The global registry is synced from project-local registries; agents should
   not manually paste project entries into a separate queue.
+- Automation cadence is not the compute quota source of truth. It may wake an
+  executor, but Goal Harness should decide whether the goal is eligible,
+  throttled, paused, or waiting.
 - UI filters and selected rows are browser state, not goal state.
 - Unknown status fields are additive; changing the meaning of existing compact
   fields requires a contract update.
@@ -323,6 +356,7 @@ stage, answer:
 - Is the transition read-only, advisory, reward capture, or write control?
 - What compact field will status export?
 - What should the dashboard show on the first screen?
+- Does this transition spend or change compute quota?
 - What private evidence must stay out of compact history?
 - What validation proves the state changed correctly?
 - What stale-state failure does this prevent?
@@ -338,6 +372,8 @@ make the dashboard and status contract reflect this model:
   reward-judged, controller-gated, or controller-ready;
 - make the user/controller lane distinct from Codex-ready work;
 - make human reward capture a first-class review action;
+- make compute quota visible so project priority is not hidden inside
+  automation intervals;
 - make stale dashboard state obvious and recoverable;
 - make multi-project management possible without asking each project agent to
   manually maintain a global queue.

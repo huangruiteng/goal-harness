@@ -11,6 +11,8 @@ The main controller owns the goal:
 
 - reads the active goal state,
 - chooses the bounded progress segment,
+- checks the goal's current compute quota before spawning or continuing child
+  work,
 - decides which sub-agents are worth starting,
 - assigns disjoint scopes,
 - integrates or rejects their results,
@@ -37,6 +39,8 @@ pressure when mixed into the delivery lane.
 Goal Harness should model this as a separate dreaming / exploration lane:
 
 - it reads run history and project state over a wider time window;
+- it has its own compute quota so background exploration cannot starve delivery
+  work;
 - it proposes options, warnings, and memory-consolidation patches;
 - it does not mutate project truth or imply user approval;
 - its outputs enter the operator gate for review before becoming project work.
@@ -92,7 +96,13 @@ Controller/sub-agent fields should stay minimal in v0.1:
   "spawn_policy": {
     "allowed": true,
     "max_children": 3,
-    "allowed_domains": ["docs-map", "validation-map", "implementation-slice"]
+    "allowed_domains": ["docs-map", "validation-map", "implementation-slice"],
+    "max_child_agent_turns_per_window": 3
+  },
+  "quota": {
+    "compute": 0.5,
+    "window_hours": 24,
+    "max_agent_turns": 12
   },
   "coordination": {
     "write_scope": ["docs/**", "examples/**"],
@@ -116,7 +126,9 @@ For a child goal:
 ```
 
 These fields describe permission and coordination expectations. They do not
-turn Goal Harness into a scheduler or lock service.
+turn Goal Harness into a lock service. They do make compute quota explicit so
+the main controller and automations do not encode priority only through timer
+cadence.
 
 ## Run Record Shape
 
@@ -179,10 +191,11 @@ not confuse overlapping work with duplicate index records.
 ## UI Implication
 
 A future multi-project UI should not show only one status per goal. It should
-show the controller run plus child sub-agent runs:
+show the controller run, child sub-agent runs, and compute quota state:
 
 ```text
 goal
+  quota: eligible, compute=0.5, 4/12 slots spent today
   controller run
     subagent: docs-map       completed
     subagent: validation-map completed

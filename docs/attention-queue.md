@@ -42,6 +42,14 @@ small queue model.
   "recommended_action": "review the Goal Harness operator gate before sending any project-agent command",
   "operator_question": "Approve a read-only map opt-in for `complex-project-main-control`?",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
+  "quota": {
+    "compute": 0.5,
+    "window_hours": 24,
+    "allowed_slots": 12,
+    "spent_slots": 0,
+    "state": "operator_gate",
+    "reason": "planned goal needs operator opt-in before spending agent turns"
+  },
   "source": "latest_run"
 }
 ```
@@ -62,6 +70,9 @@ Fields:
   first-screen question when it is present.
 - `agent_command`: optional target-agent command or instruction that becomes
   valid only after the operator gate is approved.
+- `quota`: optional compact compute-quota state. It should explain whether a
+  goal is eligible, throttled, waiting, paused, or operator-gated before an
+  automation spends another agent turn.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 
 ## Summary Counters

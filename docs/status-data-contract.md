@@ -207,6 +207,14 @@ Item shape:
   "recommended_action": "review the Goal Harness operator gate before sending any project-agent command",
   "operator_question": "Approve a read-only map opt-in for `complex-project-main-control`?",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
+  "quota": {
+    "compute": 0.5,
+    "window_hours": 24,
+    "allowed_slots": 12,
+    "spent_slots": 0,
+    "state": "operator_gate",
+    "reason": "planned goal needs operator opt-in before spending agent turns"
+  },
   "source": "latest_run",
   "controller_stage": "ready_for_read_only_not_decision",
   "missing_gates": [
@@ -233,6 +241,10 @@ Item fields:
 - `agent_command`: optional command or instruction for the target project agent
   after the operator gate is approved. Dashboard consumers should not treat it
   as approval by itself.
+- `quota`: optional compact compute-quota state. It should summarize the
+  compute share (`1.0`, `0.5`, `0.3`, or `0`), eligibility, recent spend, and
+  a public-safe reason without exposing private evidence. See
+  [quota-allocation.md](quota-allocation.md).
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 - `controller_stage`: optional compact controller-readiness classification from
   the latest run.
@@ -496,6 +508,10 @@ A first useful UI can be built from the export alone:
   auxiliary source controls, metrics, and raw drill-down, because the
   dashboard is a user decision surface rather than an agent CLI mirror.
 - Metrics: `ok`, `goal_count`, `run_count`, and contract summary.
+- Compute quota summary: goals eligible for the next agent turn, throttled
+  goals, waiting goals, paused goals, and operator-gated goals should be
+  visible on the first screen once quota fields are present. Automation cadence
+  should be treated as execution detail, not the only priority signal.
 - User action summary: first-screen cards should derive from the same selected
   operator decision and reward-default logic, grouping reward gates, controller
   opt-ins, evidence watches, Codex handoffs, and blocking health items before
