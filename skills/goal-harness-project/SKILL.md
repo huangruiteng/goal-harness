@@ -79,6 +79,18 @@ inventory, then appends a `read_only_project_map` run. Use it before writing a
 project-specific adapter when the dashboard would otherwise stay on
 `state_refreshed` or `connected_without_run`.
 
+For a planned high-complexity adapter, preview the same bounded map before
+controller opt-in:
+
+```bash
+goal-harness read-only-map --goal-id <STABLE_GOAL_ID> --dry-run
+```
+
+If the adapter status is `planned`, only the `--dry-run` preview is allowed and
+the result should include `opt_in_required=true`. Do not append a real map until
+the user or target controller has moved the adapter to `read-only-map-ready`,
+`connected-read-only`, or `connected`.
+
 ## Refresh State After Non-Adapter Work
 
 If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,

@@ -146,4 +146,10 @@ Use staged adapter status:
 4. `selective-assist`: controller may ask Goal Harness for bounded edits with
    explicit write scopes.
 
+`goal-harness read-only-map --dry-run` is allowed at `planned` as a controller
+opt-in preview. It reads only registry metadata, active-state sections, and the
+bounded file inventory, returns `opt_in_required=true`, and appends no run.
+Running without `--dry-run` still requires `read-only-map-ready`,
+`connected-read-only`, or `connected`.
+
 Skipping directly to editing creates avoidable coordination risk.

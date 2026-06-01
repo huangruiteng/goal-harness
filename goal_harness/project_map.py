@@ -26,6 +26,9 @@ READ_ONLY_MAP_ADAPTER_STATUSES = {
     "connected-read-only",
     "read-only-map-ready",
 }
+READ_ONLY_MAP_DRY_RUN_PREVIEW_STATUSES = {
+    "planned",
+}
 PROJECT_INVENTORY_PATHS = (
     "README.md",
     "AGENTS.md",
@@ -195,6 +198,7 @@ def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
         f"- classification: `{payload.get('classification')}`",
         f"- generated_at: `{payload.get('generated_at')}`",
         f"- health_check: `{payload.get('health_check')}`",
+        f"- opt_in_required: `{payload.get('opt_in_required')}`",
     ]
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
@@ -276,9 +280,11 @@ def read_only_project_map_run(
         raise ValueError(
             f"{safe_goal_id} adapter.kind must be `{READ_ONLY_MAP_ADAPTER_KIND}` or end with `_read_only_map_v0`"
         )
-    if adapter_status not in READ_ONLY_MAP_ADAPTER_STATUSES:
+    opt_in_required = adapter_status in READ_ONLY_MAP_DRY_RUN_PREVIEW_STATUSES
+    if adapter_status not in READ_ONLY_MAP_ADAPTER_STATUSES and not (dry_run and opt_in_required):
         raise ValueError(
             f"{safe_goal_id} adapter.status must be one of {sorted(READ_ONLY_MAP_ADAPTER_STATUSES)}"
+            f"; planned adapters may only run read-only-map with --dry-run for opt-in preview"
         )
     if not resolved_state_file.exists():
         raise FileNotFoundError(f"state file does not exist: {resolved_state_file}")
@@ -318,6 +324,7 @@ def read_only_project_map_run(
         "ok": True,
         "dry_run": dry_run,
         "appended": not dry_run,
+        "opt_in_required": opt_in_required,
         "registry": str(registry_path),
         "runtime_root": str(runtime_root),
         "project": str(resolved_project) if resolved_project else None,

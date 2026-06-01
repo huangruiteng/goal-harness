@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T23:18:40+08:00
+updated_at: 2026-06-01T23:24:05+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,28 @@ private project context.
 
 ## Next Action
 
-- Use the simplified Review Packet for the next real operator judgment. The
-  operator should only supply one Chinese decision sentence; the target project
-  Agent should read status/history and run only the packet's read-only or
-  `--dry-run` command. For reward, keep the first pass on
-  `goal-harness reward --write-active-state-summary --dry-run`, then rerun
-  without `--dry-run` only after explicit operator approval.
+- Use the simplified controller Review Packet for `agent-harness-main-control`
+  as the next opt-in handoff. The target Agent can now run
+  `goal-harness read-only-map --goal-id agent-harness-main-control --dry-run`
+  while the adapter is still `planned`; it should append a real map only after
+  the operator or target controller moves the adapter to
+  `read-only-map-ready`, `connected-read-only`, or `connected`.
 
 ## Recent Progress
 
+- 2026-06-01T23:24:05+08:00: Fixed the agent-facing opt-in path for planned
+  complex adapters. `goal-harness read-only-map --dry-run` now succeeds for
+  `adapter.status=planned` and returns `opt_in_required=true`, so a copied
+  controller packet no longer hands the target Agent a failing command. The
+  real append path is still guarded: the same command without `--dry-run` keeps
+  failing until the adapter status moves to `read-only-map-ready`,
+  `connected-read-only`, or `connected`. README, integration docs, and the
+  complex-project read-only adapter doc now state this opt-in preview rule.
+  Validation used the live `agent-harness-main-control` global registry entry:
+  planned dry-run succeeded with `appended=false`, `opt_in_required=true`, and
+  bounded map counts; non-dry-run on the same planned adapter failed with the
+  explicit opt-in error. Python compile, public contract check, and
+  `git diff --check` passed.
 - 2026-06-01T23:18:40+08:00: Simplified the dashboard Review Packet around
   the actual multi-Agent collaboration loop: one copy button, one human
   decision prompt, one target-Agent execution path. Removed the old verbose

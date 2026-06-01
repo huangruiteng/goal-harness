@@ -162,6 +162,12 @@ adapter. It reads the registry, active state, and a small file-existence
 inventory, then writes a compact `read_only_project_map` run without mutating
 the project.
 
+For a high-complexity goal whose adapter is still `planned`, use
+`goal-harness read-only-map --goal-id ... --dry-run` as the opt-in preview.
+That preview reads the same bounded surfaces and reports `opt_in_required=true`,
+but appending a map run still requires the adapter to move to
+`read-only-map-ready`, `connected-read-only`, or `connected`.
+
 `connect` and `refresh-state` automatically merge the project registry into the
 shared local global registry at `~/.codex/goal-harness/registry.global.json`.
 If a command is run outside any project registry, Goal Harness falls back to

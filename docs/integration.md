@@ -203,6 +203,12 @@ sections, and a bounded file-existence inventory. The compact run index records
 artifact availability, and map counts; raw project evidence stays in the local
 private runtime payload.
 
+For planned high-complexity adapters, `read-only-map --dry-run` is allowed as
+the opt-in preview path. It returns `opt_in_required=true` and appends nothing,
+so a controller can inspect the bounded map shape before moving the adapter to
+`read-only-map-ready`, `connected-read-only`, or `connected`. Running the same
+command without `--dry-run` still fails until that opt-in status change happens.
+
 If a runtime directory belongs to an old goal that is no longer in the registry,
 preview archive cleanup before changing anything:
 
