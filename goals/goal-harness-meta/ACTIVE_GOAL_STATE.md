@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T16:12:12+08:00
+updated_at: 2026-06-01T16:22:59+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,10 +27,12 @@ private project context.
 
 ## Next Action
 
-- Use `goal-harness new-project-prompt --project <PROJECT_ROOT> --goal-doc
-  <GOAL_DOC_PATH>` for the next real project handoff. The receiving shell should
-  pass `goal-harness doctor`, connect with `--goal-doc`, and then verify
-  registry, status, check, and dashboard attention queue visibility.
+- For the next real project handoff, use `goal-harness new-project-prompt
+  --project <PROJECT_ROOT> --goal-doc <GOAL_DOC_PATH>`. The receiving shell
+  should pass `goal-harness doctor`, connect with `--goal-doc`, and verify that
+  registry, status, check, and the dashboard attention queue show the new goal.
+  If a runtime goal appears before registry connection, classify it as controller
+  work: register it if active or archive it if obsolete.
 
 ## Recent Progress
 
@@ -141,6 +143,11 @@ private project context.
   health. The installer and new-project handoff now call `goal-harness doctor`
   instead of `--help`, so future connection failures expose a structured fix
   rather than stopping at a missing command.
+- 2026-06-01T16:22:59+08:00: Made actionable unregistered runtime goals visible
+  in the public attention queue as `unregistered_runtime_goal`. This keeps
+  multi-project dashboard status authoritative when a new project has saved run
+  history before registry connection, while watch-only legacy records remain in
+  run history without becoming queue work.
 
 ## Validation
 
@@ -207,6 +214,13 @@ private project context.
   reports `ok=false`, `command_on_path=false`, and a concrete install/PATH fix
 - `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` now validates the
   installed wrapper with `goal-harness doctor`
+- `goal-harness status` for the local multi-project registry shows
+  `premium-ui-ai-search-rec-migration` as `unregistered_runtime_goal` with
+  controller readiness gates, while `tiger-team-data-worker-cache` remains out
+  of the attention queue as a watch-only legacy runtime record
+- `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` writes the
+  `export PATH="$HOME/.local/bin:$PATH"` shell profile block and the installed
+  wrapper passes `goal-harness doctor`
 - `goal-harness connect --goal-doc docs/GOAL.md` records
   `authority_sources[0].path == "docs/GOAL.md"` in the registry and renders
   `Primary goal document: docs/GOAL.md` in the initial state

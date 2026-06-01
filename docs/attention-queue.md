@@ -94,6 +94,13 @@ If a connected goal has no saved run yet, status emits `connected_without_run`
 so the next Codex action is clear: run the first read-only adapter tick and save
 a compact run record.
 
+If runtime contains an actionable goal that is not in the registry, status emits
+`unregistered_runtime_goal`. This is a controller action: either add the goal to
+the registry so it becomes part of the multi-project surface, or archive the
+runtime record so old experiments do not look like active work. Watch-only
+legacy records such as `await_*` and `monitor_*` stay in run history without
+becoming queue items.
+
 If the contract check fails, status prepends a high-severity
 `goal-harness-contract` item before project goals.
 

@@ -152,6 +152,12 @@ Item fields:
 - `next_handoff_condition`: optional public-safe condition for advancing the
   controller handoff.
 
+`status=unregistered_runtime_goal` is emitted when runtime has an actionable
+goal that is not present in the registry. Dashboard consumers should show this
+as controller work: register the goal if it is active, or archive the runtime
+record if it is old. Watch-only legacy records remain visible in run history
+without entering the queue.
+
 ## Run History
 
 `run_history` is a compact, public-safe drill-down surface for the dashboard.

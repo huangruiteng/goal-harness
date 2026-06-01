@@ -124,6 +124,54 @@ def readiness_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]:
     return fields
 
 
+def legacy_runtime_goal_attention(
+    goal: dict[str, Any],
+    current_run: dict[str, Any] | None,
+    readiness_fields: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not goal.get("legacy_runtime_goal") or not current_run:
+        return None
+
+    goal_id = str(goal.get("id") or "unknown-goal")
+    json_exists = bool(current_run.get("json_exists"))
+    markdown_exists = bool(current_run.get("markdown_exists"))
+    classification = str(current_run.get("classification") or "unknown")
+
+    actionable_classification = (
+        classification in BLOCKING_CLASSIFICATIONS
+        or classification in USER_OR_CONTROLLER_CLASSIFICATIONS
+        or classification in CODEX_READY_CLASSIFICATIONS
+    )
+    if not actionable_classification and json_exists and markdown_exists:
+        return None
+
+    if not json_exists or not markdown_exists:
+        severity = "high"
+        action = "repair or archive this unregistered runtime goal before trusting multi-project status"
+    elif classification in BLOCKING_CLASSIFICATIONS:
+        severity = "high"
+        action = (
+            f"latest classification is {classification}; add this runtime goal to the registry "
+            "or archive it so multi-project status stays authoritative"
+        )
+    else:
+        severity = "action"
+        action = (
+            f"latest classification is {classification}; add this runtime goal to the registry "
+            "or archive it so multi-project status stays authoritative"
+        )
+
+    return attention_item(
+        goal_id=goal_id,
+        status="unregistered_runtime_goal",
+        waiting_on="controller",
+        severity=severity,
+        recommended_action=action,
+        source="run_history",
+        **readiness_fields,
+    )
+
+
 def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
     goal_id = str(goal.get("id") or "unknown-goal")
     adapter_status = str(goal.get("adapter_status") or "")
@@ -131,7 +179,7 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
     readiness_fields = readiness_attention_fields(current_run)
 
     if goal.get("legacy_runtime_goal"):
-        return None
+        return legacy_runtime_goal_attention(goal, current_run, readiness_fields)
 
     if not current_run:
         if adapter_status in CONNECTED_ADAPTER_STATUSES:
