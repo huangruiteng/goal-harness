@@ -131,9 +131,11 @@ private project context.
   command is provided.
 - 2026-06-01T16:04:18+08:00: Added `scripts/install-local.sh` so a fresh local
   checkout can install `goal-harness` into `~/.local/bin` and add that directory
-  to the shell profile. Also added `connect --goal-doc` as a primary authority
-  source in registry and initial state, and updated `new-project-prompt` to run
-  a CLI preflight before project connection.
+  to the shell profile; `scripts/goal-harness` now resolves symlink targets so
+  the installed wrapper still finds the real repository root. Also added
+  `connect --goal-doc` as a primary authority source in registry and initial
+  state, and updated `new-project-prompt` to run a CLI preflight before project
+  connection.
 
 ## Validation
 
@@ -191,8 +193,9 @@ private project context.
 - `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` creates a
   `~/.local/bin/goal-harness` symlink, adds a Goal Harness PATH block to
   `.zshrc`, and the installed wrapper runs `goal-harness --help`
-- `scripts/install-local.sh && command -v goal-harness` verifies the current
-  user shell can resolve the CLI from any project directory
+- `scripts/install-local.sh && command -v goal-harness && goal-harness --help`
+  verifies the current user shell can resolve and execute the CLI from any
+  project directory
 - `goal-harness connect --goal-doc docs/GOAL.md` records
   `authority_sources[0].path == "docs/GOAL.md"` in the registry and renders
   `Primary goal document: docs/GOAL.md` in the initial state
