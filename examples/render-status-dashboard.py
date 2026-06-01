@@ -44,6 +44,16 @@ def queue_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in items if isinstance(item, dict)]
 
 
+def recent_runs(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    history = payload.get("run_history")
+    if not isinstance(history, dict):
+        return []
+    runs = history.get("recent_runs")
+    if not isinstance(runs, list):
+        return []
+    return [run for run in runs if isinstance(run, dict)]
+
+
 def severity_class(item: dict[str, Any]) -> str:
     severity = str(item.get("severity") or "action")
     return severity if severity in {"high", "action", "watch"} else "action"
@@ -70,6 +80,34 @@ def render_item(item: dict[str, Any]) -> str:
     """
 
 
+def render_run(run: dict[str, Any]) -> str:
+    reward = run.get("human_reward") if isinstance(run.get("human_reward"), dict) else {}
+    reward_block = ""
+    if reward:
+        reward_block = f"""
+          <div class="reward">
+            <strong>Human reward</strong>
+            <span>{esc(reward.get("decision"))} · {esc(reward.get("reward"))}</span>
+            <p>{esc(reward.get("reason_summary"))}</p>
+          </div>
+        """
+    return f"""
+        <article class="run">
+          <div class="item-top">
+            <h3>{esc(run.get("goal_id"))}</h3>
+            <span>{esc(run.get("health_check"))}</span>
+          </div>
+          <dl>
+            <dt>Run</dt><dd>{esc(run.get("generated_at"))}</dd>
+            <dt>Class</dt><dd>{esc(run.get("classification"))}</dd>
+            <dt>Files</dt><dd>{esc(run.get("json_exists"))}/{esc(run.get("markdown_exists"))}</dd>
+          </dl>
+          <p>{esc(run.get("recommended_action"))}</p>
+          {reward_block}
+        </article>
+    """
+
+
 def render_lane(title: str, waiting_values: set[str], items: list[dict[str, Any]]) -> str:
     lane_items = [item for item in items if str(item.get("waiting_on")) in waiting_values]
     body = "\n".join(render_item(item) for item in lane_items)
@@ -92,6 +130,10 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     queue = payload.get("attention_queue") if isinstance(payload.get("attention_queue"), dict) else {}
     items = queue_items(payload)
     lanes = "\n".join(render_lane(title, values, items) for _, title, values in LANES)
+    runs = recent_runs(payload)
+    run_details = "\n".join(render_run(run) for run in runs[:5])
+    if not run_details:
+        run_details = '<p class="empty">No recent runs.</p>'
     errors = contract.get("errors") if isinstance(contract.get("errors"), list) else []
     warnings = contract.get("warnings") if isinstance(contract.get("warnings"), list) else []
     checks = contract.get("checks") if isinstance(contract.get("checks"), list) else []
@@ -242,6 +284,37 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     dt {{ color: var(--muted); }}
     dd {{ margin: 0; overflow-wrap: anywhere; }}
     .item p, .empty {{ color: var(--muted); font-size: 13px; }}
+    .run-section {{
+      margin-top: 18px;
+    }}
+    .run-section h2 {{
+      font-size: 16px;
+      margin: 0 0 10px;
+    }}
+    .runs {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }}
+    .run {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+    }}
+    .run p {{ color: var(--muted); font-size: 13px; }}
+    .reward {{
+      margin-top: 10px;
+      border: 1px solid #a7f3d0;
+      border-radius: 8px;
+      background: #ecfdf5;
+      padding: 10px;
+      color: #064e3b;
+      font-size: 13px;
+    }}
+    .reward strong, .reward span {{ display: block; }}
+    .reward p {{ margin-top: 6px; color: #065f46; }}
     .health {{
       margin-top: 18px;
       background: var(--panel);
@@ -286,6 +359,7 @@ def render_dashboard(payload: dict[str, Any]) -> str:
       .topbar {{ display: block; }}
       .summary {{ margin-top: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .lanes {{ grid-template-columns: 1fr; }}
+      .runs {{ grid-template-columns: 1fr; }}
       .health-grid {{ grid-template-columns: 1fr; }}
       .health-column {{ border-right: 0; border-bottom: 1px solid var(--line); }}
       .health-column:last-child {{ border-bottom: 0; }}
@@ -309,6 +383,10 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     </section>
     <section class="lanes">
       {lanes}
+    </section>
+    <section class="run-section">
+      <h2>Recent Runs</h2>
+      <div class="runs">{run_details}</div>
     </section>
     <section class="health">
       <div class="health-head">

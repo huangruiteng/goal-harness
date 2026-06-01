@@ -70,6 +70,7 @@ The queue summary keeps controller handoff visible:
 Status treats these as user/controller attention:
 
 - `needs_controller_opt_in`
+- `needs_human_reward`
 - `needs_user_relay`
 - `ready_for_controller_opt_in`
 - `ready_for_user_relay`
@@ -79,9 +80,12 @@ Status treats these as Codex-ready action:
 - `controller_opted_in_waiting_for_run`
 - `design_next_experiment`
 - `inspect_eval_result`
+- `inspect_result`
 - `needs_more_read_only_evidence`
 - `needs_validation`
 - `run_validation`
+
+Status treats `blocked_by_safety` as high-severity user/controller attention.
 
 Status treats classifications prefixed with `await_` or `monitor_` as external
 evidence watches.

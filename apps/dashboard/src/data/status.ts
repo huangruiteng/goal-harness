@@ -10,6 +10,14 @@ export const queueItemSchema = z.object({
   source: z.string().optional(),
 });
 
+export const humanRewardSchema = z.object({
+  recorded_at: z.string().optional().nullable(),
+  decision: z.string().optional().nullable(),
+  reward: z.string().optional().nullable(),
+  reason_summary: z.string().optional().nullable(),
+  follow_up: z.string().optional().nullable(),
+});
+
 export const runRecordSchema = z.object({
   generated_at: z.string(),
   goal_id: z.string(),
@@ -21,6 +29,7 @@ export const runRecordSchema = z.object({
   cache_check: z.string().optional().nullable(),
   json_exists: z.boolean().optional().default(false),
   markdown_exists: z.boolean().optional().default(false),
+  human_reward: humanRewardSchema.optional().nullable(),
 });
 
 export const runGoalSchema = z.object({
@@ -81,6 +90,7 @@ export const statusPayloadSchema = z.object({
 
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
+export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 

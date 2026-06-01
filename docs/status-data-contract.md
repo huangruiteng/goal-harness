@@ -167,13 +167,23 @@ Run shape:
   "classification": "ready_for_controller_opt_in",
   "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
   "health_check": "8/8",
+  "human_reward": {
+    "recorded_at": "2026-06-01T00:05:00+00:00",
+    "decision": "continue_route",
+    "reward": "positive",
+    "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
+    "follow_up": "promote the route to a longer-window check"
+  },
   "json_exists": true,
   "markdown_exists": true
 }
 ```
 
 Optional compact fields such as `active_task_count`, `active_priorities`, and
-`cache_check` may appear when an adapter records them.
+`cache_check` may appear when an adapter records them. Experiment-controller
+adapters may also include a compact `human_reward` summary. The status export
+keeps only `recorded_at`, `decision`, `reward`, `reason_summary`, and
+`follow_up`; richer evidence belongs in private run payloads.
 
 ## Display Model
 
@@ -225,9 +235,9 @@ Adapters should write compact run index records that include:
 - `markdown_path`
 
 Project adapters may add compact public-safe fields such as `health_check`,
-`active_task_count`, or `active_priorities`. Raw logs, prompts, private metrics,
-workspace paths, and internal document links belong in private run payloads, not
-in compact index records.
+`active_task_count`, `active_priorities`, or a compact `human_reward` summary.
+Raw logs, prompts, private metrics, workspace paths, and internal document
+links belong in private run payloads, not in compact index records.
 
 ## Boundary
 

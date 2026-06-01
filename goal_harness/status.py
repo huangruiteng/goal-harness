@@ -12,17 +12,22 @@ CODEX_READY_CLASSIFICATIONS = {
     "controller_opted_in_waiting_for_run",
     "design_next_experiment",
     "inspect_eval_result",
+    "inspect_result",
     "needs_more_read_only_evidence",
     "needs_validation",
     "run_validation",
 }
 USER_OR_CONTROLLER_CLASSIFICATIONS = {
+    "needs_human_reward",
     "needs_controller_opt_in",
     "needs_user_relay",
     "ready_for_controller_opt_in",
     "ready_for_user_relay",
 }
 WATCH_CLASSIFICATION_PREFIXES = ("await_", "monitor_")
+BLOCKING_CLASSIFICATIONS = {
+    "blocked_by_safety",
+}
 CONNECTED_ADAPTER_STATUSES = {
     "connected",
     "connected-read-only",
@@ -39,6 +44,13 @@ RUN_COMPACT_FIELDS = (
     "cache_check",
     "json_exists",
     "markdown_exists",
+)
+HUMAN_REWARD_COMPACT_FIELDS = (
+    "recorded_at",
+    "decision",
+    "reward",
+    "reason_summary",
+    "follow_up",
 )
 
 
@@ -110,6 +122,15 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
 
     classification = str(current_run.get("classification") or "unknown")
     action = str(current_run.get("recommended_action") or "inspect the latest run and choose one next action")
+    if classification in BLOCKING_CLASSIFICATIONS:
+        return attention_item(
+            goal_id=goal_id,
+            status=classification,
+            waiting_on="user_or_controller",
+            severity="high",
+            recommended_action=action,
+            source="latest_run",
+        )
     if classification in USER_OR_CONTROLLER_CLASSIFICATIONS:
         return attention_item(
             goal_id=goal_id,
@@ -178,8 +199,19 @@ def build_attention_queue(
     }
 
 
+def compact_human_reward(reward: Any) -> dict[str, Any] | None:
+    if not isinstance(reward, dict):
+        return None
+    compact = {field: reward[field] for field in HUMAN_REWARD_COMPACT_FIELDS if field in reward}
+    return compact or None
+
+
 def compact_run(run: dict[str, Any]) -> dict[str, Any]:
-    return {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
+    compact = {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
+    reward = compact_human_reward(run.get("human_reward"))
+    if reward:
+        compact["human_reward"] = reward
+    return compact
 
 
 def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
@@ -341,11 +373,18 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         if latest_runs:
             latest = latest_runs[0]
             if isinstance(latest, dict):
+                reward = latest.get("human_reward") if isinstance(latest.get("human_reward"), dict) else {}
+                reward_text = (
+                    f" reward={reward.get('decision')}:{reward.get('reward')}"
+                    if reward
+                    else ""
+                )
                 lines.append(
                     "  - latest: "
                     f"{latest.get('generated_at')} "
                     f"classification={latest.get('classification')} "
                     f"artifacts={latest.get('json_exists')}/{latest.get('markdown_exists')}"
+                    f"{reward_text}"
                 )
 
     for title, key in (("Errors", "errors"), ("Warnings", "warnings"), ("Checks", "checks")):

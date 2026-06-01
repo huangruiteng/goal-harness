@@ -1,0 +1,9 @@
+{
+  "recorded_at": "2026-06-01T00:05:00+00:00",
+  "goal_id": "experiment-controller-goal",
+  "run_id": "2026-06-01T00-00-00Z",
+  "decision": "continue_route",
+  "reward": "positive",
+  "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
+  "follow_up": "promote the route to a longer-window check"
+}

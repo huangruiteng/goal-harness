@@ -65,14 +65,16 @@ shape:
   "run_id": "2026-06-01T00-00-00Z",
   "decision": "continue_route",
   "reward": "positive",
-  "reason": "latest comparable metric beat the previous route and validation was aligned",
+  "reason_summary": "latest comparable metric beat the previous route and validation was aligned",
   "follow_up": "promote the route to the next longer-window check"
 }
 ```
 
 The public index should keep only compact, non-sensitive fields. Private
-payloads may keep richer evidence, but the dashboard should still show that a
-human reward signal exists and what class of decision it judged.
+payloads may keep richer evidence. `goal-harness status` keeps only
+`recorded_at`, `decision`, `reward`, `reason_summary`, and `follow_up` under
+`human_reward`, so the dashboard can show that a human reward signal exists and
+what class of decision it judged.
 
 ## Readiness Checklist
 
@@ -89,15 +91,17 @@ Before connecting a real experiment controller, validate:
 - A reward event can be written and later summarized without copying private
   production evidence into public files.
 
-## First Implementation Slice
+## Current Implementation Slice
 
-The next useful public slice is a read-only experiment-controller contract:
+The current public slice is a read-only experiment-controller contract:
 
 - adapter classification vocabulary for `await_eval`, `inspect_result`,
   `design_next_experiment`, `needs_human_reward`, and `blocked_by_safety`;
-- compact reward-event schema;
-- dashboard badge or panel showing whether the latest run has human reward;
+- compact reward-event schema and status export field;
+- dashboard badge and run-history panel showing whether the latest run has
+  human reward;
 - example sanitized run and reward files.
 
-After that slice exists, private projects can opt into the adapter by writing a
-project-local state file and one compact run record.
+Private projects can opt into the adapter by writing a project-local state file
+and one compact run record. They should connect a real controller only after
+the readiness checklist above is true.

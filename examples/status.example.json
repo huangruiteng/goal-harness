@@ -2,8 +2,8 @@
   "ok": true,
   "registry": ".goal-harness/registry.json",
   "runtime_root": "./runtime",
-  "goal_count": 3,
-  "run_count": 2,
+  "goal_count": 4,
+  "run_count": 3,
   "contract": {
     "ok": true,
     "summary": {
@@ -14,18 +14,18 @@
     "errors": [],
     "warnings": [],
     "checks": [
-      "registry goals checked: 3",
-      "runtime indexes checked: 3",
-      "run-history goals=3 runs=2",
-      "public boundary scan clean: 12 files"
+      "registry goals checked: 4",
+      "runtime indexes checked: 4",
+      "run-history goals=4 runs=3",
+      "public boundary scan clean: 14 files"
     ]
   },
   "attention_queue": {
     "available": true,
-    "item_count": 2,
+    "item_count": 3,
     "needs_user_or_controller": 1,
     "needs_controller": 0,
-    "needs_codex": 1,
+    "needs_codex": 2,
     "watching_external_evidence": 0,
     "items": [
       {
@@ -43,13 +43,21 @@
         "severity": "action",
         "recommended_action": "run the first read-only adapter tick and save a compact run record",
         "source": "run_history"
+      },
+      {
+        "goal_id": "experiment-controller-goal",
+        "status": "design_next_experiment",
+        "waiting_on": "codex",
+        "severity": "action",
+        "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+        "source": "latest_run"
       }
     ]
   },
   "run_history": {
     "available": true,
-    "goal_count": 3,
-    "run_count": 2,
+    "goal_count": 4,
+    "run_count": 3,
     "goals": [
       {
         "id": "complex-project-main-control",
@@ -95,6 +103,35 @@
         "latest_runs": []
       },
       {
+        "id": "experiment-controller-goal",
+        "status": "active-read-only",
+        "registry_member": true,
+        "legacy_runtime_goal": false,
+        "adapter_kind": "experiment_controller_v0",
+        "adapter_status": "connected-read-only",
+        "index_exists": true,
+        "raw_index_records": 1,
+        "unique_runs": 1,
+        "latest_runs": [
+          {
+            "generated_at": "2026-06-01T00:00:00+00:00",
+            "goal_id": "experiment-controller-goal",
+            "classification": "design_next_experiment",
+            "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+            "health_check": "7/7",
+            "human_reward": {
+              "recorded_at": "2026-06-01T00:05:00+00:00",
+              "decision": "continue_route",
+              "reward": "positive",
+              "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
+              "follow_up": "promote the route to a longer-window check"
+            },
+            "json_exists": true,
+            "markdown_exists": true
+          }
+        ]
+      },
+      {
         "id": "release-watch-goal",
         "status": "watching",
         "registry_member": true,
@@ -108,6 +145,22 @@
       }
     ],
     "recent_runs": [
+      {
+        "generated_at": "2026-06-01T00:00:00+00:00",
+        "goal_id": "experiment-controller-goal",
+        "classification": "design_next_experiment",
+        "recommended_action": "use the latest human reward signal to design the next comparable experiment",
+        "health_check": "7/7",
+        "human_reward": {
+          "recorded_at": "2026-06-01T00:05:00+00:00",
+          "decision": "continue_route",
+          "reward": "positive",
+          "reason_summary": "operator accepted the route because the comparable metric improved and validation was aligned",
+          "follow_up": "promote the route to a longer-window check"
+        },
+        "json_exists": true,
+        "markdown_exists": true
+      },
       {
         "generated_at": "2026-05-31T21:15:00+00:00",
         "goal_id": "complex-project-main-control",

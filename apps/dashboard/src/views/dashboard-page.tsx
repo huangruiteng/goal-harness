@@ -38,6 +38,7 @@ import {
 import { dashboardRoute } from "../router";
 import {
   QueueItem,
+  HumanReward,
   RunGoal,
   RunRecord,
   StatusPayload,
@@ -241,6 +242,37 @@ function artifactVariant(value?: boolean) {
   return value ? "success" : "neutral";
 }
 
+function rewardVariant(value?: string | null): "success" | "danger" | "warning" | "info" {
+  if (value === "positive") {
+    return "success";
+  }
+  if (value === "negative") {
+    return "danger";
+  }
+  if (value === "mixed") {
+    return "warning";
+  }
+  return "info";
+}
+
+function HumanRewardSummary({ reward }: { reward: HumanReward }) {
+  return (
+    <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={rewardVariant(reward.reward)}>Human reward</Badge>
+        {reward.decision ? <span className="font-medium text-emerald-950 dark:text-emerald-100">{reward.decision}</span> : null}
+        {reward.recorded_at ? <span className="text-xs text-emerald-700 dark:text-emerald-300">{reward.recorded_at}</span> : null}
+      </div>
+      {reward.reason_summary ? (
+        <p className="mt-2 leading-6 text-emerald-900 dark:text-emerald-100">{reward.reason_summary}</p>
+      ) : null}
+      {reward.follow_up ? (
+        <p className="mt-1 text-xs leading-5 text-emerald-800 dark:text-emerald-200">{reward.follow_up}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function LatestRun({ run }: { run: RunRecord }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
@@ -248,12 +280,14 @@ function LatestRun({ run }: { run: RunRecord }) {
         <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">{run.generated_at}</span>
         <Badge variant="info">{formatNullable(run.classification, "unclassified")}</Badge>
         {run.health_check ? <Badge variant="success">{run.health_check}</Badge> : null}
+        {run.human_reward ? <Badge variant={rewardVariant(run.human_reward.reward)}>Reward</Badge> : null}
         <Badge variant={artifactVariant(run.json_exists)}>JSON</Badge>
         <Badge variant={artifactVariant(run.markdown_exists)}>Markdown</Badge>
       </div>
       {run.recommended_action ? (
         <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{run.recommended_action}</p>
       ) : null}
+      {run.human_reward ? <HumanRewardSummary reward={run.human_reward} /> : null}
     </div>
   );
 }
@@ -267,6 +301,7 @@ function RunHistoryPanel({
 }) {
   const latestRuns = goal?.latest_runs ?? [];
   const artifactReady = latestRuns.filter((run) => run.json_exists && run.markdown_exists).length;
+  const rewardReady = latestRuns.filter((run) => Boolean(run.human_reward)).length;
   return (
     <Card>
       <CardHeader className="flex-wrap">
@@ -305,6 +340,10 @@ function RunHistoryPanel({
                 Artifacts
               </div>
               <div className="mt-1 text-lg font-semibold">{artifactReady}/{latestRuns.length}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800 sm:col-span-3">
+              <div className="text-xs text-slate-500 dark:text-zinc-400">Human Reward</div>
+              <div className="mt-1 text-lg font-semibold">{rewardReady}/{latestRuns.length}</div>
             </div>
           </div>
 

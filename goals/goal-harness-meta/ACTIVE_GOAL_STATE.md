@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T13:00:03+08:00
+updated_at: 2026-06-01T13:13:04+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -26,10 +26,10 @@ private project context.
 
 ## Next Action
 
-- Implement the experiment-controller milestone slice: define the read-only
-  adapter vocabulary, compact reward-event schema, and dashboard signal needed
-  to decide when a real long-running experiment controller should be connected
-  instead of left in bare Codex goal mode.
+- Build a private experiment-controller readiness probe using the public
+  `human_reward` contract, then decide whether the real main controller has
+  enough durable context, reward signal, and multi-project visibility to
+  connect.
 
 ## Recent Progress
 
@@ -77,6 +77,12 @@ private project context.
   static HTML fallback, refreshed the dashboard visual baseline toward a
   product control-plane UI, and recorded the next experiment-controller
   milestone in `docs/experiment-controller-milestone.md`.
+- 2026-06-01T13:13:04+08:00: Added the first public experiment-controller
+  contract slice: `goal-harness status` now whitelists compact `human_reward`
+  fields, maps `needs_human_reward`, `inspect_result`, and
+  `blocked_by_safety` classifications into the attention queue, and the React
+  dashboard plus static HTML fallback show human reward signals in run history.
+  Added sanitized experiment-controller run and reward examples.
 
 ## Validation
 
@@ -102,6 +108,10 @@ private project context.
 - `python3 examples/render-status-dashboard.py examples/status.example.json /tmp/goal-status-dashboard.html`
 - Browser smoke: verify Contract Health, Checks, and non-wrapping source
   controls in the React dashboard
+- `goal-harness status` with a synthetic runtime verifies `human_reward`
+  whitelist behavior and does not export unapproved reward keys
+- Browser smoke: select `experiment-controller-goal` and verify the dashboard
+  shows Human reward without private fields
 
 ## Guards
 
