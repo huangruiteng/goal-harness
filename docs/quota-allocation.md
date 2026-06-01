@@ -92,6 +92,29 @@ Quota is applied after hard gates:
 
 This keeps the model small. Quota does not become a second permission system.
 
+## Allocation Contract
+
+`quota plan` reports an advisory next automatic turn. It does not grant
+permission, clear an operator gate, record human reward, or authorize a project
+agent to run work that would otherwise be blocked.
+
+The allocation rule is intentionally small:
+
+1. derive quota groups from the same status payload used by `goal-harness
+   status`;
+2. keep `blocked_health`, `operator_gate`, `waiting`, `throttled`, and `paused`
+   goals in their own lanes, even when they have a high `quota.compute`;
+3. only goals with `state=eligible` enter the eligible lane;
+4. sort eligible goals by effective `quota.compute`, highest first;
+5. set `summary.next_automatic_turn` to the first eligible goal, or `none` when
+   the eligible lane is empty.
+
+Automations and controllers should treat `next_automatic_turn` as a scheduling
+hint, then ask `quota should-run --goal-id <goal-id>` immediately before
+spending compute. If the guard returns `should_run=false`, the executor should
+skip delivery work and follow the reported health, operator, evidence, pause, or
+throttle reason.
+
 ## Compute States
 
 Recommended compact states:

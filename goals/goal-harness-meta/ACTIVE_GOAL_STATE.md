@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:59:21+08:00
+updated_at: 2026-06-02T07:06:47+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- Add a compact public contract note for quota plan allocation: `quota plan`
-  picks the highest-compute eligible goal as an advisory next turn, while
-  operator-gated, waiting, throttled, paused, and health-blocked goals stay out
-  of the eligible lane. Keep it docs-only; do not append a real gate or run a
-  real map.
+- Add a tiny public smoke assertion that the quota allocation contract and
+  README entry point keep `next_automatic_turn` advisory and keep gated,
+  waiting, throttled, paused, and health-blocked goals out of the eligible lane.
+  Keep it fixture/text-only; do not change planner logic, append a real gate, or
+  run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T07:06:47+08:00: Added the public quota allocation contract note to
+  `docs/quota-allocation.md` and the README quota CLI entry point. The contract
+  states that `quota plan` reports an advisory `next_automatic_turn`, does not
+  grant permission or clear operator gates, keeps `blocked_health`,
+  `operator_gate`, `waiting`, `throttled`, and `paused` goals outside the
+  eligible lane, and sorts only eligible goals by effective `quota.compute`.
+  Validation: direct quota-plan smoke passed; aggregate public smokes passed
+  with 4 scripts; public contract check passed; `git diff --check` passed; `rg`
+  confirmed the new allocation-contract and README entry text. Critic: behavior
+  and docs now agree, but a tiny smoke assertion should protect the public docs
+  wording so future README or contract edits do not imply that quota allocation
+  is permission.
 - 2026-06-02T06:59:21+08:00: Extended `examples/quota-plan-smoke.py` to cover
   the executable CLI path. The smoke now writes a temporary public-safe
   registry/runtime/project fixture, runs `python -m goal_harness.cli --format
