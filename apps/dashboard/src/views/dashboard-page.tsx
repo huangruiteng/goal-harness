@@ -2304,6 +2304,24 @@ function RunHistoryPanel({
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
               <div className="font-medium">Queue action</div>
               <p className="mt-1 leading-6 text-slate-700 dark:text-zinc-300">{queueItem.recommended_action}</p>
+              {queueItem.operator_question ? (
+                <div className="mt-3">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-zinc-400">
+                    Operator gate
+                  </div>
+                  <p className="mt-1 leading-6 text-slate-800 dark:text-zinc-200">{queueItem.operator_question}</p>
+                </div>
+              ) : null}
+              {queueItem.agent_command ? (
+                <div className="mt-3">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-zinc-400">
+                    Agent command
+                  </div>
+                  <code className="mt-1 block overflow-x-auto whitespace-pre rounded-md bg-white px-2 py-1.5 text-xs text-slate-700 dark:bg-zinc-950 dark:text-zinc-300">
+                    {queueItem.agent_command}
+                  </code>
+                </div>
+              ) : null}
               <QueueGateSummary item={queueItem} />
             </div>
           ) : null}

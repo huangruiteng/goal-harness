@@ -8,6 +8,8 @@ export const queueItemSchema = z.object({
   severity: z.string(),
   recommended_action: z.string(),
   source: z.string().optional(),
+  operator_question: z.string().optional().nullable(),
+  agent_command: z.string().optional().nullable(),
   lifecycle_phase: z.string().optional().nullable(),
   lifecycle_flags: z.array(z.string()).optional().default([]),
   controller_stage: z.string().optional().nullable(),

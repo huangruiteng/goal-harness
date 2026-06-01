@@ -169,6 +169,10 @@ For a high-complexity goal whose adapter is still `planned`, use
 That preview reads the same bounded surfaces and reports `opt_in_required=true`,
 but appending a map run still requires the adapter to move to
 `read-only-map-ready`, `connected-read-only`, or `connected`.
+In multi-project status, planned opt-in goals keep the human decision in the
+Goal Harness operator view: `recommended_action` asks for the operator gate,
+while `agent_command` carries the dry-run command for the target project agent
+after approval.
 
 `connect` and `refresh-state` automatically merge the project registry into the
 shared local global registry at `~/.codex/goal-harness/registry.global.json`.
@@ -335,6 +339,9 @@ that consume `goal-harness --format json status`, see the
 [status data contract](docs/status-data-contract.md). For the official
 dashboard frontend direction, see
 [docs/dashboard-frontend-selection.md](docs/dashboard-frontend-selection.md).
+For background exploration, memory consolidation, and refactor-warning work
+that should not interrupt active project agents, see
+[docs/dreaming-exploration-lane.md](docs/dreaming-exploration-lane.md).
 Browser-side reward writes are intentionally not part of the default dashboard;
 the opt-in safety boundary is described in
 [docs/dashboard-reward-write-boundary.md](docs/dashboard-reward-write-boundary.md).

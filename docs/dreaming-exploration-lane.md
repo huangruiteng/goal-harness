@@ -1,0 +1,136 @@
+# Dreaming Exploration Lane
+
+Goal Harness should eventually support a separate dreaming / exploration lane
+for long-running projects. This lane is not the same as the project agent that
+is actively shipping work. Its job is to spend low-pressure background time on
+cross-run learning, option discovery, and refactor warnings.
+
+## Why This Exists
+
+Project agents are optimized for the current task:
+
+- preserve local context,
+- execute the next bounded change,
+- avoid scope creep,
+- respect active worktree and delivery pressure.
+
+That makes them a poor fit for broad exploration. The same agent that is trying
+to land a fix should not also be asked to freely rethink architecture, search
+for alternatives, or propose large refactors. Those activities are valuable,
+but they need a separate lane with different permissions and output rules.
+
+Recent agent-platform and research signals point in the same direction:
+
+- Anthropic's Managed Agents dreaming feature frames dreaming as scheduled
+  review of previous sessions and memory stores, extracting patterns and
+  curating memory so agents improve between sessions.
+- Auto-Dreamer frames the same idea as offline memory consolidation: separate
+  fast per-session acquisition from slower cross-session abstraction, pruning,
+  and replacement.
+- Agent-memory surveys identify continual consolidation, trustworthy
+  reflection, learned forgetting, and privacy governance as open engineering
+  problems for autonomous agents.
+
+Goal Harness should adopt the useful shape, not the hype: dreaming is a
+governed background lane for consolidation and proposals, not autonomous
+permission to rewrite project truth.
+
+## Priority
+
+Priority: **P1 after the operator gate and reward loop are stable**.
+
+This lane should not block v0.1 bootstrap, registry sync, status contract,
+operator dashboard, or project-local refresh. It becomes important once several
+real projects are connected and Goal Harness has enough run history for
+cross-project learning to be useful.
+
+## Role
+
+The dreaming / exploration agent can act as:
+
+- **Explorer**: search alternatives, compare designs, read adjacent docs,
+  inspect slow-moving background questions, and prepare options.
+- **Memory consolidator**: compress repeated run lessons into project-local
+  playbooks, proposed skill updates, or active-state suggestions.
+- **Refactor applicant**: identify when repeated local fixes suggest a larger
+  refactor, but file it as an application for review rather than making the
+  change directly.
+- **Warning agent**: flag risks that busy project agents may normalize away:
+  duplicated state, stale docs, unsafe public/private boundary drift,
+  recurring validation failures, or accumulating local-only glue.
+
+## Permissions
+
+Default permissions are intentionally narrow:
+
+- read project state, run history, public docs, and explicit private local
+  state only when the owner project allows it;
+- do not mutate project files by default;
+- do not append human reward or controller opt-in;
+- do not rewrite active project truth without an operator gate;
+- never publish private evidence into public docs or examples.
+
+The output of dreaming is a proposal, warning, or candidate patch plan. The
+operator or project controller decides whether it becomes normal project work.
+
+## Run Record Shape
+
+Dreaming runs should be visible but not mixed with delivery runs:
+
+```json
+{
+  "goal_id": "example-project-main-control",
+  "classification": "dreaming_exploration_proposal",
+  "recommended_action": "review the proposed refactor warning in the operator gate",
+  "operator_question": "Should this project open a refactor task for duplicate state handling?",
+  "agent_command": null,
+  "dreaming": {
+    "lane": "exploration",
+    "evidence_window": "last_20_runs",
+    "proposal_type": "refactor_warning",
+    "confidence": "medium",
+    "requires_project_controller": true
+  }
+}
+```
+
+Candidate classifications:
+
+- `dreaming_exploration_proposal`
+- `dreaming_memory_consolidation`
+- `dreaming_refactor_warning`
+- `dreaming_archive_suggestion`
+
+These should normally enter `waiting_on=user_or_controller` with
+`operator_question`, not `waiting_on=codex`, because the lane is advisory by
+default.
+
+## UI Implication
+
+The dashboard should show dreaming output as a separate lane or badge:
+
+```text
+Goal
+  Operator gate: approve / reject / defer proposal
+  Delivery lane: latest project-agent run
+  Dreaming lane: refactor warning or memory consolidation proposal
+```
+
+This keeps project-agent work clean while still giving the user a central place
+to review broader learning and refactor requests.
+
+## First Implementation Slice
+
+The first useful slice is documentation and status schema, not an autonomous
+agent:
+
+1. Add public vocabulary for dreaming classifications and proposal fields.
+2. Let `goal-harness status` surface dreaming proposals as operator gates.
+3. Add a local-only command or script that reads recent run history and emits a
+   dry-run proposal without writing project files.
+4. Only after real proposals prove useful, add scheduled heartbeats or
+   automation.
+
+Acceptance criterion: a project can receive a dreaming proposal without the
+project agent being interrupted, and the user can approve, reject, or defer it
+from Goal Harness.

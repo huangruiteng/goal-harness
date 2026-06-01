@@ -39,7 +39,9 @@ small queue model.
   "lifecycle_flags": ["controller_gated", "adapter_inspected"],
   "waiting_on": "user_or_controller",
   "severity": "action",
-  "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
+  "recommended_action": "review the Goal Harness operator gate before sending any project-agent command",
+  "operator_question": "Approve a read-only map opt-in for `complex-project-main-control`?",
+  "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
   "source": "latest_run"
 }
 ```
@@ -53,8 +55,12 @@ Fields:
 - `waiting_on`: one of `user_or_controller`, `codex`, `external_evidence`, or
   `controller`.
 - `severity`: `high`, `action`, or `watch`.
-- `recommended_action`: exactly one next action from the adapter or status
-  layer.
+- `recommended_action`: exactly one user-facing next action from the adapter or
+  status layer.
+- `operator_question`: optional human-facing gate to show in the Goal Harness
+  operator view.
+- `agent_command`: optional target-agent command or instruction that becomes
+  valid only after the operator gate is approved.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 
 ## Summary Counters
@@ -109,11 +115,11 @@ so the next Codex action is clear: run the first read-only adapter tick and save
 a compact run record.
 
 If a planned high-complexity read-only-map adapter has no saved run yet, status
-keeps it in user/controller attention and recommends
-`goal-harness read-only-map --goal-id <goal> --dry-run` as the opt-in preview.
-The preview appends nothing; a real map run still waits for the target
-controller to move the adapter to `read-only-map-ready` or
-`connected-read-only`.
+keeps it in user/controller attention, asks the operator gate in Goal Harness,
+and exposes `goal-harness read-only-map --goal-id <goal> --dry-run` as
+`agent_command`. The command is execution context, not approval. The preview
+appends nothing; a real map run still waits for the target controller to move
+the adapter to `read-only-map-ready` or `connected-read-only`.
 
 If runtime contains an actionable goal that is not in the registry, status emits
 `unregistered_runtime_goal`. This is a controller action: either add the goal to

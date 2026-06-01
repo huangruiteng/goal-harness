@@ -204,7 +204,9 @@ Item shape:
   ],
   "waiting_on": "user_or_controller",
   "severity": "action",
-  "recommended_action": "ask the target controller to opt into a read-only map before any mutation",
+  "recommended_action": "review the Goal Harness operator gate before sending any project-agent command",
+  "operator_question": "Approve a read-only map opt-in for `complex-project-main-control`?",
+  "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
   "source": "latest_run",
   "controller_stage": "ready_for_read_only_not_decision",
   "missing_gates": [
@@ -226,6 +228,11 @@ Item fields:
   `external_evidence`.
 - `severity`: `high`, `action`, or `watch`.
 - `recommended_action`: exactly one next action.
+- `operator_question`: optional human-facing gate to show in the Goal Harness
+  operator view. This is the canonical place for user/controller judgment.
+- `agent_command`: optional command or instruction for the target project agent
+  after the operator gate is approved. Dashboard consumers should not treat it
+  as approval by itself.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 - `controller_stage`: optional compact controller-readiness classification from
   the latest run.
@@ -251,10 +258,10 @@ notice.
 
 For registered planned high-complexity goals with a compatible
 `*_read_only_map_v0` adapter and no run yet, status keeps the queue item in
-`waiting_on=user_or_controller` and recommends
-`goal-harness read-only-map --goal-id <goal> --dry-run` as the opt-in preview.
-That preview should report `opt_in_required=true` and append nothing; dashboard
-consumers must not treat it as controller opt-in or a durable map run.
+`waiting_on=user_or_controller`, emits an `operator_question` for the Goal
+Harness operator view, and puts the dry-run preview in `agent_command`. The
+preview should report `opt_in_required=true` and append nothing; dashboard
+consumers must not treat the command as controller opt-in or a durable map run.
 
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready

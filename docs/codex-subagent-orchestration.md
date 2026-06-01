@@ -27,6 +27,23 @@ Sub-agents own scoped work:
 Sub-agents should not independently redefine the goal, widen scope, force-push,
 publish private state, or launch production actions.
 
+## Dreaming / Exploration Lane
+
+Some Codex work should not run inside the project agent that is actively
+shipping changes. Broad exploration, slow memory consolidation, refactor
+warnings, and cross-project pattern mining are useful, but they create scope
+pressure when mixed into the delivery lane.
+
+Goal Harness should model this as a separate dreaming / exploration lane:
+
+- it reads run history and project state over a wider time window;
+- it proposes options, warnings, and memory-consolidation patches;
+- it does not mutate project truth or imply user approval;
+- its outputs enter the operator gate for review before becoming project work.
+
+See [dreaming-exploration-lane.md](dreaming-exploration-lane.md) for priority,
+permissions, and proposed run shape.
+
 ## When To Spawn
 
 Spawn sub-agents when parallelism reduces uncertainty or latency:

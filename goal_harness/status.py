@@ -96,6 +96,8 @@ def attention_item(
     severity: str,
     recommended_action: str,
     source: str,
+    operator_question: str | None = None,
+    agent_command: str | None = None,
     controller_stage: str | None = None,
     missing_gates: list[str] | None = None,
     next_handoff_condition: str | None = None,
@@ -110,6 +112,10 @@ def attention_item(
         "recommended_action": recommended_action,
         "source": source,
     }
+    if operator_question:
+        item["operator_question"] = operator_question
+    if agent_command:
+        item["agent_command"] = agent_command
     if controller_stage:
         item["controller_stage"] = controller_stage
     if missing_gates:
@@ -490,16 +496,15 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
                 **lifecycle_fields,
             )
         if adapter_status == "planned" and adapter_kind.endswith("_read_only_map_v0"):
+            command = f"goal-harness read-only-map --goal-id {goal_id} --dry-run"
             return attention_item(
                 goal_id=goal_id,
                 status=str(goal.get("status") or "planned"),
                 waiting_on="user_or_controller",
                 severity="action",
-                recommended_action=(
-                    f"run `goal-harness read-only-map --goal-id {goal_id} --dry-run` "
-                    "as the opt-in preview; append a real map only after adapter status moves "
-                    "to read-only-map-ready or connected-read-only"
-                ),
+                recommended_action="review the Goal Harness operator gate before sending any project-agent command",
+                operator_question=f"Approve a read-only map opt-in for `{goal_id}`?",
+                agent_command=command,
                 source="registry",
                 **lifecycle_fields,
             )
@@ -830,6 +835,12 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         )
         if action:
             lines.append(f"  - action: {action}")
+        operator_question = item.get("operator_question")
+        agent_command = item.get("agent_command")
+        if operator_question:
+            lines.append(f"  - operator_question: {operator_question}")
+        if agent_command:
+            lines.append(f"  - agent_command: `{agent_command}`")
         gates = item.get("missing_gates") if isinstance(item.get("missing_gates"), list) else []
         gate_text = ", ".join(str(gate) for gate in gates if gate)
         controller_stage = item.get("controller_stage")
