@@ -675,6 +675,21 @@ function rewardVariant(value?: string | null): "success" | "danger" | "warning" 
 
 type BadgeVariant = "neutral" | "success" | "warning" | "info" | "danger";
 
+type OperatorActionBridgeItem = {
+  label: string;
+  body: string;
+  command?: string;
+  variant?: BadgeVariant;
+};
+
+type OperatorActionBridge = {
+  title: string;
+  badge: string;
+  variant: BadgeVariant;
+  body: string;
+  items: OperatorActionBridgeItem[];
+};
+
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
   if (readiness.decision_advisor_ready) {
     return "success";
@@ -700,6 +715,79 @@ function gateLabel(value: string) {
     durable_goal_context: "Keep durable goal context",
   };
   return labels[value] ?? humanizeIdentifier(value);
+}
+
+function buildStatusCommand({
+  registry,
+  runtimeRoot,
+}: {
+  registry: string;
+  runtimeRoot: string;
+}) {
+  return [
+    "goal-harness \\",
+    `  --registry ${shellQuote(registry)} \\`,
+    `  --runtime-root ${shellQuote(runtimeRoot)} \\`,
+    "  --format json \\",
+    "  status",
+  ].join("\n");
+}
+
+function buildHistoryCommand({
+  goalId,
+  registry,
+  runtimeRoot,
+}: {
+  goalId: string;
+  registry: string;
+  runtimeRoot: string;
+}) {
+  return [
+    "goal-harness \\",
+    `  --registry ${shellQuote(registry)} \\`,
+    `  --runtime-root ${shellQuote(runtimeRoot)} \\`,
+    "  history \\",
+    `  --goal-id ${shellQuote(goalId)} \\`,
+    "  --limit 3",
+  ].join("\n");
+}
+
+function buildReadOnlyMapDryRunCommand({
+  goalId,
+  registry,
+  runtimeRoot,
+}: {
+  goalId: string;
+  registry: string;
+  runtimeRoot: string;
+}) {
+  return [
+    "goal-harness \\",
+    `  --registry ${shellQuote(registry)} \\`,
+    `  --runtime-root ${shellQuote(runtimeRoot)} \\`,
+    "  read-only-map \\",
+    `  --goal-id ${shellQuote(goalId)} \\`,
+    "  --dry-run",
+  ].join("\n");
+}
+
+function buildRefreshStateDryRunCommand({
+  goalId,
+  registry,
+  runtimeRoot,
+}: {
+  goalId: string;
+  registry: string;
+  runtimeRoot: string;
+}) {
+  return [
+    "goal-harness \\",
+    `  --registry ${shellQuote(registry)} \\`,
+    `  --runtime-root ${shellQuote(runtimeRoot)} \\`,
+    "  refresh-state \\",
+    `  --goal-id ${shellQuote(goalId)} \\`,
+    "  --dry-run",
+  ].join("\n");
 }
 
 function buildOperatorDecision({
@@ -829,14 +917,171 @@ function buildOperatorDecision({
   };
 }
 
-function OperatorDecisionPanel({
+function buildOperatorActionBridge({
   goal,
   queueItem,
+  registry,
+  runtimeRoot,
 }: {
   goal?: RunGoal;
   queueItem?: QueueItem;
+  registry: string;
+  runtimeRoot: string;
+}): OperatorActionBridge | null {
+  const goalId = goal?.id ?? queueItem?.goal_id;
+  if (!goalId) {
+    return null;
+  }
+  const latestRun = goal?.latest_runs[0];
+  const phase = goal?.lifecycle_phase
+    ?? queueItem?.lifecycle_phase
+    ?? latestRun?.lifecycle_phase
+    ?? inferLifecyclePhase(queueItem?.status ?? goal?.status, latestRun);
+  const waitingOn = queueItem?.waiting_on ?? "clear";
+  const missingGates = new Set(queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []);
+  const statusCommand = buildStatusCommand({ registry, runtimeRoot });
+
+  if (queueItem?.severity === "high") {
+    return {
+      title: "Safe CLI Path",
+      badge: "inspect",
+      variant: "danger",
+      body: "Resolve the blocking health item before rewarding, approving, or handing off this goal.",
+      items: [
+        {
+          label: "Inspect status",
+          body: "Use the machine-readable status contract to identify the active blocker.",
+          command: statusCommand,
+          variant: "danger",
+        },
+      ],
+    };
+  }
+
+  if (waitingOn === "external_evidence") {
+    const items: OperatorActionBridgeItem[] = [
+      {
+        label: "Watch gate",
+        body: "Keep this goal in observation until comparable evidence arrives.",
+        command: statusCommand,
+        variant: "info",
+      },
+    ];
+    if (missingGates.has("human_reward_capture")) {
+      items.push({
+        label: "Reward gate",
+        body: "Use the Reward CLI Draft below after judging the selected run; keep the draft in dry-run until the operator intentionally records it.",
+        variant: "warning",
+      });
+    }
+    if (queueItem?.next_handoff_condition) {
+      items.push({
+        label: "Handoff condition",
+        body: queueItem.next_handoff_condition,
+        variant: "neutral",
+      });
+    }
+    return {
+      title: "Safe CLI Path",
+      badge: "watch",
+      variant: "info",
+      body: "The dashboard can validate the next reward draft, but it should not turn missing evidence into approval.",
+      items,
+    };
+  }
+
+  if (waitingOn === "user_or_controller" || waitingOn === "controller") {
+    return {
+      title: "Safe CLI Path",
+      badge: phase === "planned" ? "opt-in" : "approval",
+      variant: "warning",
+      body: "Approval remains a human/controller decision outside the browser; the safe local command is a dry-run.",
+      items: [
+        {
+          label: "Read-only map dry-run",
+          body: "Preview the controller handoff surface before any run is appended.",
+          command: buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot }),
+          variant: "warning",
+        },
+        {
+          label: "Approval boundary",
+          body: "A reward signal or dashboard review does not grant write control by itself.",
+          variant: "neutral",
+        },
+      ],
+    };
+  }
+
+  if (waitingOn === "codex") {
+    const command = phase === "refreshed"
+      ? buildRefreshStateDryRunCommand({ goalId, registry, runtimeRoot })
+      : phase === "connected"
+        ? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot })
+        : buildHistoryCommand({ goalId, registry, runtimeRoot });
+    return {
+      title: "Safe CLI Path",
+      badge: "handoff",
+      variant: "success",
+      body: "This goal is ready for an agent turn; the dashboard should hand off context, not perform the agent step.",
+      items: [
+        {
+          label: phase === "mapped" ? "Read latest map" : "Preview next run",
+          body: phase === "mapped"
+            ? "Use the compact map and recent history as the agent-facing context."
+            : "Dry-run the next state or map command before appending a run.",
+          command,
+          variant: "success",
+        },
+      ],
+    };
+  }
+
+  if (phase === "reward_judged") {
+    return {
+      title: "Safe CLI Path",
+      badge: "recorded",
+      variant: "success",
+      body: "The selected run already has a compact human reward overlay.",
+      items: [
+        {
+          label: "Review history",
+          body: "Use recent history as the next agent-facing context.",
+          command: buildHistoryCommand({ goalId, registry, runtimeRoot }),
+          variant: "success",
+        },
+      ],
+    };
+  }
+
+  return {
+    title: "Safe CLI Path",
+    badge: "status",
+    variant: "neutral",
+    body: "No direct user action is active; keep the current status contract as the source for agents.",
+    items: [
+      {
+        label: "Inspect status",
+        body: "Read the compact agent-facing status before starting a new action.",
+        command: statusCommand,
+        variant: "neutral",
+      },
+    ],
+  };
+}
+
+function OperatorDecisionPanel({
+  goal,
+  queueItem,
+  registry,
+  runtimeRoot,
+}: {
+  goal?: RunGoal;
+  queueItem?: QueueItem;
+  registry: string;
+  runtimeRoot: string;
 }) {
   const decision = buildOperatorDecision({ goal, queueItem });
+  const bridge = buildOperatorActionBridge({ goal, queueItem, registry, runtimeRoot });
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -861,6 +1106,32 @@ function OperatorDecisionPanel({
               {need}
             </Badge>
           ))}
+        </div>
+      ) : null}
+      {bridge ? (
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-slate-500 dark:text-zinc-400" />
+            <span className="font-medium text-slate-950 dark:text-zinc-50">{bridge.title}</span>
+            <Badge variant={bridge.variant}>{bridge.badge}</Badge>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{bridge.body}</p>
+          <div className="mt-3 space-y-2">
+            {bridge.items.map((item) => (
+              <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950" key={`${item.label}-${item.command ?? item.body}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={item.variant ?? "neutral"}>{item.label}</Badge>
+                  {item.command ? <Badge variant="info">dry path</Badge> : null}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.body}</p>
+                {item.command ? (
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
+                    {item.command}
+                  </pre>
+                ) : null}
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>
@@ -1142,7 +1413,12 @@ function RunHistoryPanel({
             </div>
           </div>
 
-          <OperatorDecisionPanel goal={goal} queueItem={queueItem} />
+          <OperatorDecisionPanel
+            goal={goal}
+            queueItem={queueItem}
+            registry={registry}
+            runtimeRoot={runtimeRoot}
+          />
 
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">

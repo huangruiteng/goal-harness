@@ -238,6 +238,9 @@ User review surface:
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,
+- show a safe CLI path for the stance: status/history inspection,
+  read-only-map or refresh-state dry-run, or reward dry-run through the Reward
+  CLI Draft,
 - generate a CLI reward draft or dry-run request,
 - never imply that reward equals write authorization.
 - keep schemas, routes, and component structure stable in English, but allow

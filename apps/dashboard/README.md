@@ -22,6 +22,9 @@ The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for
 evidence, or fix health first.
+That same panel now includes a `Safe CLI Path`: a local dry-run, history, or
+status command that matches the current stance. It is a bridge from
+user-facing review to agent-facing CLI execution, not a browser write path.
 
 When a selected goal has a compact run record, the run-history panel also shows
 a `Reward CLI Draft`. It is intentionally local-only and defaults to

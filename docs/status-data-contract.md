@@ -434,6 +434,11 @@ A first useful UI can be built from the export alone:
   into a human stance such as review/authorize, let Codex continue, wait for
   evidence, or fix health first. Raw classifications remain drill-down
   details.
+- Safe CLI path: selected goal detail should also show the next safe local
+  command class for that stance: status/history inspection, read-only-map or
+  refresh-state dry-run, or reward dry-run through the Reward CLI Draft. This
+  is a dashboard-to-agent bridge; it must not imply browser-side approval,
+  reward append, or write-controller execution.
 
 Browser-side reward append is intentionally outside the default status server.
 If a future local server enables it, it must follow the explicit opt-in boundary

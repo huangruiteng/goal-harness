@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T18:58:00+08:00
+updated_at: 2026-06-01T19:12:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,9 +29,9 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should make the selected-goal detail support the next user action:
-  recording reward or approval through the existing dry-run and CLI paths
-  without enabling browser writes by default.
+  slice should make the Reward CLI Draft derive better defaults from the
+  selected Operator Decision and missing gates, while keeping browser writes
+  disabled by default.
 
 ## Recent Progress
 
@@ -222,6 +222,12 @@ private project context.
   let Codex continue, wait for evidence, or fix health first. This keeps
   `goal-harness status` as an agent-facing contract while making the dashboard
   answer the user question before showing run-history details.
+- 2026-06-01T19:12:00+08:00: Connected `Operator Decision` to a selected-goal
+  `Safe CLI Path`. The dashboard now shows the safe local command class for the
+  current stance: status/history inspection, `read-only-map --dry-run`,
+  `refresh-state --dry-run`, or a reward-gate handoff to the existing Reward CLI
+  Draft. The bridge is explicitly read/dry-run oriented and does not add
+  browser-side reward append or approval writes.
 
 ## Validation
 
@@ -237,6 +243,10 @@ private project context.
   mapped goal shows `Let Codex use the map`; `tiger-team-maiduidui-regauc`
   shows `Wait for evidence` plus missing gate copy; `agent-harness-main-control`
   shows `Review controller opt-in` and `Needs approval`
+- Browser DOM smoke: selected-goal detail shows `Safe CLI Path`; default mapped
+  goal shows a history handoff command; `tiger-team-maiduidui-regauc` shows a
+  watch/status command, reward gate, and handoff condition; `agent-harness-main-control`
+  shows `read-only-map --dry-run` and an approval boundary.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load
