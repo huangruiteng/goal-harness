@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:47:35+08:00
+updated_at: 2026-06-02T06:53:21+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,26 @@ private project context.
 
 ## Next Action
 
-- Add a tiny quota-plan fixture for multi-project allocation: when several
-  goals are eligible, the next automatic turn should choose the highest
-  `quota.compute` goal, while operator-gated goals stay out of the eligible
-  lane. Keep it fixture-only; do not append a real gate or run a real map.
+- Add a tiny CLI-level quota plan fixture so `goal-harness quota plan` output
+  preserves the same multi-project allocation rule as `build_quota_plan()`:
+  highest eligible `quota.compute` wins, and operator-gated goals stay out of
+  the eligible lane. Keep it fixture-only; do not append a real gate or run a
+  real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:53:21+08:00: Added `examples/quota-plan-smoke.py`, a pure
+  fixture smoke for multi-project allocation. The fixture creates three
+  eligible goals with compute shares `1.0`, `0.5`, and `0.3`, plus one
+  `operator_gate` goal with compute `1.0`. It verifies `build_quota_plan()`
+  selects the `1.0` eligible goal as `next_automatic_turn`, keeps eligible goals
+  sorted by compute, and leaves the operator-gated goal in the
+  `operator_gate` lane rather than the eligible lane. Validation: direct quota
+  plan smoke passed; aggregate public smokes passed with 4 scripts; Python
+  compile passed; public contract check passed; `git diff --check` passed.
+  Critic: the Python quota planner is now covered by a multi-project fixture,
+  but the actual `goal-harness quota plan` CLI output should get the same
+  executable-path coverage.
 - 2026-06-02T06:47:35+08:00: Extended `examples/project-prompt-smoke.py` so the
   actual CLI output path is covered, not only the Python prompt builder. The
   smoke now runs `python -m goal_harness.cli --format json new-project-prompt`

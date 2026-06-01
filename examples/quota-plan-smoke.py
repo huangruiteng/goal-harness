@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Smoke-test multi-project quota plan ordering."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from goal_harness.quota import build_quota_plan, render_quota_markdown  # noqa: E402
+
+
+def goal(goal_id: str, *, compute: float) -> dict:
+    return {
+        "id": goal_id,
+        "status": "active",
+        "registry_member": True,
+        "lifecycle_phase": "refreshed",
+        "adapter_kind": "read_only_project_map_v0",
+        "adapter_status": "connected-read-only",
+        "quota": {
+            "compute": compute,
+            "window_hours": 24,
+            "allowed_slots": round(24 * compute),
+            "spent_slots": 0,
+        },
+        "latest_runs": [
+            {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "classification": "state_refreshed",
+                "recommended_action": f"continue {goal_id}",
+            }
+        ],
+    }
+
+
+def attention(
+    goal_id: str,
+    *,
+    compute: float,
+    state: str = "eligible",
+    waiting_on: str = "codex",
+) -> dict:
+    reason = (
+        "human or target-controller gate must clear before spending compute"
+        if state == "operator_gate"
+        else f"{compute:g} compute quota; eligible for the next automatic agent turn"
+    )
+    return {
+        "goal_id": goal_id,
+        "status": "state_refreshed" if waiting_on == "codex" else "operator_gate_deferred",
+        "waiting_on": waiting_on,
+        "severity": "action",
+        "recommended_action": f"continue {goal_id}",
+        "source": "fixture",
+        "quota": {
+            "compute": compute,
+            "window_hours": 24,
+            "allowed_slots": round(24 * compute),
+            "spent_slots": 0,
+            "state": state,
+            "reason": reason,
+        },
+    }
+
+
+def build_status_fixture() -> dict:
+    goals = [
+        goal("half-speed", compute=0.5),
+        goal("full-speed", compute=1.0),
+        goal("low-speed", compute=0.3),
+        goal("needs-operator", compute=1.0),
+    ]
+    queue_items = [
+        attention("half-speed", compute=0.5),
+        attention("full-speed", compute=1.0),
+        attention("low-speed", compute=0.3),
+        attention(
+            "needs-operator",
+            compute=1.0,
+            state="operator_gate",
+            waiting_on="user_or_controller",
+        ),
+    ]
+    return {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": len(goals),
+        "run_count": len(goals),
+        "attention_queue": {"items": queue_items},
+        "run_history": {"goals": goals},
+    }
+
+
+def main() -> int:
+    plan = build_quota_plan(build_status_fixture(), mode="plan")
+    markdown = render_quota_markdown(plan)
+
+    eligible_ids = [item["goal_id"] for item in plan["groups"]["eligible"]]
+    operator_gate_ids = [item["goal_id"] for item in plan["groups"]["operator_gate"]]
+
+    assert plan["summary"]["next_automatic_turn"] == "full-speed", plan
+    assert plan["next_automatic_turn"]["goal_id"] == "full-speed", plan
+    assert eligible_ids == ["full-speed", "half-speed", "low-speed"], eligible_ids
+    assert operator_gate_ids == ["needs-operator"], operator_gate_ids
+    assert "needs-operator" not in eligible_ids, eligible_ids
+    assert "next_automatic_turn=full-speed" in markdown, markdown
+    assert "### operator_gate" in markdown, markdown
+    print("quota-plan-smoke ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
