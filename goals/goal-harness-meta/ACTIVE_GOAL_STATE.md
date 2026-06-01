@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:17:37+08:00
+updated_at: 2026-06-02T06:24:46+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,29 @@ private project context.
 
 ## Next Action
 
-- Add the complementary fixture smoke for rejected/deferred operator gates:
-  after an operator gate records `reject` or `defer`, status should keep the
-  goal in the user/controller lane and must not expose a project-agent
-  `agent_command`. Keep it fixture-based; do not append a real gate or run a
-  real map.
+- Add a tiny quota `should-run` fixture for the same operator-gate split:
+  `operator_gate_approved` should be eligible for the next project-agent dry-run
+  turn, while `operator_gate_rejected` and `operator_gate_deferred` should stay
+  quiet with a user/controller gate reason. Keep it fixture-based; do not append
+  a real gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:24:46+08:00: Added the complementary fixture smoke for
+  rejected/deferred operator gates. `examples/status-markdown-smoke.py` now uses
+  one generic operator-gate fixture helper and verifies all three branches:
+  planned goals show the local operator-gate dry-run preview before
+  `agent_command`; approved gates move to `waiting_on=codex` with the approved
+  read-only-map dry-run command; rejected and deferred gates stay in
+  `waiting_on=user_or_controller`, keep the operator question visible, and do
+  not expose a project-agent `agent_command` or operator-gate dry-run helper.
+  All fixtures write only inside a temporary runtime; no real gate is appended
+  and no real map is run. Validation: direct status Markdown smoke passed;
+  aggregate public smokes passed; Python compile passed; public contract check
+  passed; `git diff --check` passed. Critic: status now protects the
+  approve/reject/defer split, but automatic agents spend compute through
+  `quota should-run`, so that gate split should get a tiny quota-level fixture
+  next.
 - 2026-06-02T06:17:37+08:00: Added a fixture-backed status smoke for the
   `operator_gate_approved` path. `examples/status-markdown-smoke.py` now first
   verifies the planned high-complexity adapter still shows the operator-gate

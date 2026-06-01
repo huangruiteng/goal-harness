@@ -24,6 +24,8 @@ OLD_PLANNED_ACTION = "先审阅 Goal Harness operator gate；同意后再发送�
 NEW_PLANNED_ACTION = "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run"
 APPROVED_ACTION = "把已批准的 agent_command 发给目标项目 agent；这不是写权限授权"
 APPROVED_COMMAND = "goal-harness read-only-map --goal-id planned-main-control --dry-run"
+REJECTED_ACTION = "保持 goal 在 gate 状态，修改 handoff 后再请求 operator 判断"
+DEFERRED_ACTION = "保持 goal 在 gate 状态，先补齐要求的证据后再请求判断"
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -72,26 +74,41 @@ def write_planned_registry(root: Path) -> Path:
     return registry_path
 
 
-def append_approved_operator_gate_fixture(root: Path) -> None:
+def append_operator_gate_fixture(
+    root: Path,
+    *,
+    decision: str,
+    generated_at: str,
+    recommended_action: str,
+) -> None:
     run_dir = root / "runtime" / "goals" / "planned-main-control" / "runs"
     run_dir.mkdir(parents=True, exist_ok=True)
-    generated_at = "2026-01-01T00:01:00+00:00"
-    json_path = run_dir / "20260101T000100-operator-gate.json"
-    markdown_path = run_dir / "20260101T000100-operator-gate.md"
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-operator-gate.json"
+    markdown_path = run_dir / f"{compact_time}-operator-gate.md"
     operator_gate = {
         "recorded_at": generated_at,
         "gate": "read_only_map_opt_in",
-        "decision": "approve",
+        "decision": decision,
         "operator_question": "是否同意 `planned-main-control` 先执行 read-only map opt-in？",
-        "reason_summary": "同意先做只读地图 dry-run",
-        "agent_command": APPROVED_COMMAND,
+        "reason_summary": f"{decision} fixture reason",
     }
+    if decision == "approve":
+        operator_gate["agent_command"] = APPROVED_COMMAND
+    classification = {
+        "approve": "operator_gate_approved",
+        "reject": "operator_gate_rejected",
+        "defer": "operator_gate_deferred",
+    }[decision]
     record = {
         "generated_at": generated_at,
         "goal_id": "planned-main-control",
-        "classification": "operator_gate_approved",
-        "recommended_action": APPROVED_ACTION,
-        "health_check": "fixture operator_gate decision=approve; agent_command 1/1",
+        "classification": classification,
+        "recommended_action": recommended_action,
+        "health_check": (
+            f"fixture operator_gate decision={decision}; "
+            f"agent_command {1 if decision == 'approve' else 0}/1"
+        ),
         "operator_gate": operator_gate,
     }
     json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -110,25 +127,56 @@ def append_approved_operator_gate_fixture(root: Path) -> None:
         )
 
 
+def collect_fixture_status(root: Path, registry_path: Path) -> tuple[dict, str]:
+    payload = collect_status(
+        registry_path=registry_path,
+        runtime_root_override=str(root / "runtime"),
+        scan_roots=[root / "project"],
+        limit=3,
+    )
+    return payload, render_status_markdown(payload)
+
+
+def assert_operator_gate_waits_for_user(payload: dict, markdown: str, *, status: str, action: str) -> None:
+    items = payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    item = items[0]
+    assert item["goal_id"] == "planned-main-control", item
+    assert item["status"] == status, item
+    assert item["waiting_on"] == "user_or_controller", item
+    assert item["recommended_action"] == action, item
+    assert "agent_command" not in item, item
+    assert "operator_question" in item, item
+    assert "agent_command:" not in markdown, markdown
+    assert "operator_gate_dry_run" not in markdown, markdown
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
         registry_path = write_planned_registry(root)
-        payload = collect_status(
-            registry_path=registry_path,
-            runtime_root_override=str(root / "runtime"),
-            scan_roots=[root / "project"],
-            limit=3,
+        payload, markdown = collect_fixture_status(root, registry_path)
+        append_operator_gate_fixture(
+            root,
+            decision="approve",
+            generated_at="2026-01-01T00:01:00+00:00",
+            recommended_action=APPROVED_ACTION,
         )
-        markdown = render_status_markdown(payload)
-        append_approved_operator_gate_fixture(root)
-        approved_payload = collect_status(
-            registry_path=registry_path,
-            runtime_root_override=str(root / "runtime"),
-            scan_roots=[root / "project"],
-            limit=3,
+        approved_payload, approved_markdown = collect_fixture_status(root, registry_path)
+        append_operator_gate_fixture(
+            root,
+            decision="reject",
+            generated_at="2026-01-01T00:02:00+00:00",
+            recommended_action=REJECTED_ACTION,
         )
-        approved_markdown = render_status_markdown(approved_payload)
+        rejected_payload, rejected_markdown = collect_fixture_status(root, registry_path)
+        append_operator_gate_fixture(
+            root,
+            decision="defer",
+            generated_at="2026-01-01T00:03:00+00:00",
+            recommended_action=DEFERRED_ACTION,
+        )
+        deferred_payload, deferred_markdown = collect_fixture_status(root, registry_path)
 
     items = payload["attention_queue"]["items"]
     assert len(items) == 1, items
@@ -158,6 +206,18 @@ def main() -> int:
     assert "operator_question" not in approved_item, approved_item
     assert "operator_gate_dry_run" not in approved_markdown, approved_markdown
     assert f"agent_command: `{APPROVED_COMMAND}`" in approved_markdown, approved_markdown
+    assert_operator_gate_waits_for_user(
+        rejected_payload,
+        rejected_markdown,
+        status="operator_gate_rejected",
+        action=REJECTED_ACTION,
+    )
+    assert_operator_gate_waits_for_user(
+        deferred_payload,
+        deferred_markdown,
+        status="operator_gate_deferred",
+        action=DEFERRED_ACTION,
+    )
     print("status-markdown-smoke ok")
     return 0
 
