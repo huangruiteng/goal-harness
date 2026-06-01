@@ -22,6 +22,7 @@ from .project_prompt import (
     render_new_project_prompt_markdown,
 )
 from .registry import inspect_registry, render_registry_markdown
+from .runtime import archive_runtime_goal, render_archive_runtime_markdown
 from .status import collect_status, render_status_markdown
 from .status_server import (
     DEFAULT_STATUS_HOST,
@@ -92,6 +93,26 @@ def main(argv: list[str] | None = None) -> int:
     history_parser = sub.add_parser("history", help="Read compact run history from the shared runtime root.")
     history_parser.add_argument("--goal-id", help="Only show one goal.")
     history_parser.add_argument("--limit", type=int, default=10)
+
+    archive_runtime_parser = sub.add_parser(
+        "archive-runtime",
+        help="Move an obsolete runtime goal directory into the archive area. Defaults to dry-run.",
+    )
+    archive_runtime_parser.add_argument("--goal-id", required=True, help="Runtime goal id to archive.")
+    archive_runtime_parser.add_argument(
+        "--archive-root",
+        help="Archive directory. Defaults to <runtime-root>/archived-goals.",
+    )
+    archive_runtime_parser.add_argument(
+        "--allow-registered",
+        action="store_true",
+        help="Allow archiving a goal that is still present in the registry.",
+    )
+    archive_runtime_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually move the runtime directory. Without this flag the command is a dry-run.",
+    )
 
     reward_parser = sub.add_parser(
         "reward",
@@ -236,6 +257,29 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_history_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "archive-runtime":
+        try:
+            payload = archive_runtime_goal(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                goal_id=args.goal_id,
+                archive_root=Path(args.archive_root).expanduser() if args.archive_root else None,
+                allow_registered=bool(args.allow_registered),
+                execute=bool(args.execute),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "goal_id": args.goal_id,
+                "dry_run": not bool(args.execute),
+                "archived": False,
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_archive_runtime_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "reward":

@@ -59,3 +59,15 @@ The public repo should answer: "How does a goal harness work?"
 The project repo should answer: "What is this specific goal currently doing?"
 
 The runtime root should answer: "What happened in recent goal ticks?"
+
+If a runtime-only goal is obsolete, archive its directory rather than copying
+private run payloads into public notes:
+
+```bash
+goal-harness archive-runtime --goal-id old-experiment-goal
+goal-harness archive-runtime --goal-id old-experiment-goal --execute
+```
+
+The first command is a dry-run. The second moves the local runtime directory
+under `<runtime-root>/archived-goals/`; it does not sanitize or publish the
+payload.

@@ -158,6 +158,10 @@ as controller work: register the goal if it is active, or archive the runtime
 record if it is old. Watch-only legacy records remain visible in run history
 without entering the queue.
 
+The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
+defaults to dry-run and requires `--execute` before moving the runtime directory
+under `<runtime-root>/archived-goals/`.
+
 ## Run History
 
 `run_history` is a compact, public-safe drill-down surface for the dashboard.

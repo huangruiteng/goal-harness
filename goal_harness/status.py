@@ -147,18 +147,23 @@ def legacy_runtime_goal_attention(
 
     if not json_exists or not markdown_exists:
         severity = "high"
-        action = "repair or archive this unregistered runtime goal before trusting multi-project status"
+        action = (
+            "repair this unregistered runtime goal or preview cleanup with "
+            f"`goal-harness archive-runtime --goal-id {goal_id}` before trusting multi-project status"
+        )
     elif classification in BLOCKING_CLASSIFICATIONS:
         severity = "high"
         action = (
             f"latest classification is {classification}; add this runtime goal to the registry "
-            "or archive it so multi-project status stays authoritative"
+            f"or preview cleanup with `goal-harness archive-runtime --goal-id {goal_id}` "
+            "so multi-project status stays authoritative"
         )
     else:
         severity = "action"
         action = (
             f"latest classification is {classification}; add this runtime goal to the registry "
-            "or archive it so multi-project status stays authoritative"
+            f"or preview cleanup with `goal-harness archive-runtime --goal-id {goal_id}` "
+            "so multi-project status stays authoritative"
         )
 
     return attention_item(

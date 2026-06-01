@@ -101,6 +101,10 @@ runtime record so old experiments do not look like active work. Watch-only
 legacy records such as `await_*` and `monitor_*` stay in run history without
 becoming queue items.
 
+Use `goal-harness archive-runtime --goal-id <goal-id>` to preview cleanup of an
+obsolete runtime-only goal. The command only moves files when rerun with
+`--execute`.
+
 If the contract check fails, status prepends a high-severity
 `goal-harness-contract` item before project goals.
 

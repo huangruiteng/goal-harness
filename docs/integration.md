@@ -151,6 +151,18 @@ All adapters should save compact run history under:
 This gives the app, CLI, heartbeats, and future UI one place to inspect goal
 history.
 
+If a runtime directory belongs to an old goal that is no longer in the registry,
+preview archive cleanup before changing anything:
+
+```bash
+goal-harness archive-runtime --goal-id old-experiment-goal
+```
+
+The command defaults to dry-run. After review, pass `--execute` to move the
+directory into `<runtime-root>/archived-goals/`. Goals still present in the
+registry are protected by default; archiving one requires the explicit
+`--allow-registered` flag.
+
 ## Human Reward Overlays
 
 When an operator judges a run, append a compact reward overlay instead of

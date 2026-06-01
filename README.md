@@ -130,6 +130,13 @@ Read recent run history:
 goal-harness history --goal-id your-project-goal
 ```
 
+Preview cleanup for an obsolete runtime-only goal:
+
+```bash
+goal-harness archive-runtime --goal-id old-experiment-goal
+goal-harness archive-runtime --goal-id old-experiment-goal --execute
+```
+
 Append compact operator feedback to the latest run:
 
 ```bash
@@ -245,7 +252,10 @@ explicit gates, human reward capture, and cross-project queueing. See
 For multi-project control, `goal-harness status` derives a sanitized attention
 queue from registry, run history, and contract health. It answers which goals
 need user/controller action, which are ready for Codex work, and which are only
-watching external evidence. See
+watching external evidence. If a runtime-only goal becomes actionable, status
+surfaces it as `unregistered_runtime_goal`; register it if active, or use
+`goal-harness archive-runtime` to move obsolete run history out of the active
+runtime list. See
 [docs/attention-queue.md](docs/attention-queue.md). For dashboards and scripts
 that consume `goal-harness --format json status`, see the
 [status data contract](docs/status-data-contract.md). For the official

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T16:22:59+08:00
+updated_at: 2026-06-01T16:32:48+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -17,8 +17,8 @@ private project context.
 ## Current Scope
 
 - Keep `scripts/install-local.sh`, `goal-harness bootstrap`,
-  `goal-harness check`, `goal-harness status`, and
-  `goal-harness serve-status` runnable from a fresh clone.
+  `goal-harness check`, `goal-harness status`, `goal-harness archive-runtime`,
+  and `goal-harness serve-status` runnable from a fresh clone.
 - Keep docs and examples aligned with the current CLI surface.
 - Keep public examples sanitized: no local user paths, private documents,
   credentials, raw logs, or internal task identifiers.
@@ -31,8 +31,10 @@ private project context.
   --project <PROJECT_ROOT> --goal-doc <GOAL_DOC_PATH>`. The receiving shell
   should pass `goal-harness doctor`, connect with `--goal-doc`, and verify that
   registry, status, check, and the dashboard attention queue show the new goal.
-  If a runtime goal appears before registry connection, classify it as controller
-  work: register it if active or archive it if obsolete.
+  If a runtime goal appears before registry connection, classify it as
+  controller work: register it if active, or preview cleanup with
+  `goal-harness archive-runtime --goal-id <GOAL_ID>` and archive it only after
+  review with `--execute`.
 
 ## Recent Progress
 
@@ -148,6 +150,10 @@ private project context.
   multi-project dashboard status authoritative when a new project has saved run
   history before registry connection, while watch-only legacy records remain in
   run history without becoming queue work.
+- 2026-06-01T16:32:48+08:00: Added `goal-harness archive-runtime` as the
+  cleanup path for obsolete runtime-only goals. It defaults to dry-run, requires
+  `--execute` before moving files, protects registry members by default, and
+  moves reviewed runtime directories under `<runtime-root>/archived-goals/`.
 
 ## Validation
 
@@ -221,6 +227,14 @@ private project context.
 - `HOME=$(mktemp -d) SHELL=/bin/zsh scripts/install-local.sh` writes the
   `export PATH="$HOME/.local/bin:$PATH"` shell profile block and the installed
   wrapper passes `goal-harness doctor`
+- `goal-harness archive-runtime --goal-id orphan-goal` against a synthetic
+  runtime returns `dry_run=true` and leaves the source directory in place
+- `goal-harness archive-runtime --goal-id orphan-goal --execute` moves the
+  synthetic runtime directory under `<runtime-root>/archived-goals/`
+- `goal-harness archive-runtime --goal-id registered-goal` rejects a synthetic
+  registry member unless `--allow-registered` is explicitly supplied
+- `goal-harness archive-runtime --goal-id premium-ui-ai-search-rec-migration`
+  dry-runs the current unregistered runtime goal cleanup without moving files
 - `goal-harness connect --goal-doc docs/GOAL.md` records
   `authority_sources[0].path == "docs/GOAL.md"` in the registry and renders
   `Primary goal document: docs/GOAL.md` in the initial state
