@@ -217,7 +217,7 @@ handoff as approved:
 goal-harness operator-gate \
   --goal-id project-goal \
   --decision approve \
-  --reason-summary "operator approved read-only map opt-in" \
+  --reason-summary "同意先执行 read-only map opt-in" \
   --dry-run
 ```
 

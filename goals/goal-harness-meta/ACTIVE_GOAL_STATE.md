@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T03:56:50+08:00
+updated_at: 2026-06-02T04:01:56+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,25 @@ private project context.
 
 ## Next Action
 
-- Use fresh `goal-harness status` to inspect the P0 human-decision loop:
-  operator gates, Review Packet wording, and reward writeback should give the
-  user one clear Chinese decision and give project agents one clear next
-  command. Pick the smallest status/dashboard/CLI fix; do not start quota write
-  commands or a scheduler.
+- Continue the P0 human-decision loop pass from fresh `goal-harness status`.
+  Next inspect the Review Packet and reward writeback path: the user should see
+  one clear Chinese decision, and the target project agent should receive one
+  clear command or history lookup. Pick the smallest CLI/status/dashboard fix;
+  do not start quota write commands or a scheduler.
 
 ## Recent Progress
 
+- 2026-06-02T04:01:56+08:00: Made default operator-gate review text
+  human-facing Chinese. Planned read-only map opt-in status now asks
+  `是否同意 ... 先执行 read-only map opt-in？` and recommends reviewing the
+  gate before sending the project-agent command. New `operator-gate` dry-runs
+  also default to Chinese questions and Chinese recommended actions. Status
+  localizes legacy default English operator questions from existing compact
+  runs, so current dashboard items become Chinese without rewriting history.
+  Updated README and status/attention/integration docs. Validation covered
+  Python compile, live status assertions for planned and legacy operator gates,
+  `operator-gate --dry-run`, state refresh, dashboard status refresh, public
+  contract check, `git diff --check`, and a stale-English text scan.
 - 2026-06-02T03:56:50+08:00: Fixed a state-truth issue in
   `refresh-state`: deriving `recommended_action` now uses the first
   public-safe `## Next Action` item and joins wrapped continuation lines

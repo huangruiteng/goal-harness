@@ -212,8 +212,8 @@ Item shape:
   ],
   "waiting_on": "user_or_controller",
   "severity": "action",
-  "recommended_action": "review the Goal Harness operator gate before sending any project-agent command",
-  "operator_question": "Approve a read-only map opt-in for `complex-project-main-control`?",
+  "recommended_action": "先审阅 Goal Harness operator gate；同意后再发送项目 agent 命令",
+  "operator_question": "是否同意 `complex-project-main-control` 先执行 read-only map opt-in？",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
   "quota": {
     "compute": 0.5,
@@ -479,7 +479,7 @@ opt-in:
 goal-harness operator-gate \
   --goal-id complex-project-main-control \
   --decision approve \
-  --reason-summary "operator approved read-only map opt-in"
+  --reason-summary "同意先执行 read-only map opt-in"
 ```
 
 The dry-run form appends nothing. A real append writes an

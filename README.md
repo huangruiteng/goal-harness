@@ -182,7 +182,7 @@ Record that operator answer before handing the command to a project agent:
 goal-harness operator-gate \
   --goal-id your-project-goal \
   --decision approve \
-  --reason-summary "operator approved read-only map opt-in" \
+  --reason-summary "同意先执行 read-only map opt-in" \
   --dry-run
 ```
 

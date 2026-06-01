@@ -7,6 +7,7 @@ from typing import Any
 
 from .contract import check_contract
 from .history import collect_history, load_registry
+from .operator_gate import DEFAULT_OPERATOR_GATE, default_operator_question, normalize_operator_question
 from .paths import global_registry_path, resolve_runtime_root
 from .quota import quota_status
 from .registry import registry_goals
@@ -449,7 +450,11 @@ def operator_gate_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]
         return {}
     fields: dict[str, Any] = {}
     if operator_gate.get("decision") != "approve" and operator_gate.get("operator_question"):
-        fields["operator_question"] = operator_gate.get("operator_question")
+        fields["operator_question"] = normalize_operator_question(
+            str(operator_gate.get("operator_question") or ""),
+            goal_id=str(run.get("goal_id") or ""),
+            gate=str(operator_gate.get("gate") or DEFAULT_OPERATOR_GATE),
+        )
     if operator_gate.get("decision") == "approve" and operator_gate.get("agent_command"):
         fields["agent_command"] = operator_gate.get("agent_command")
     if operator_gate.get("follow_up"):
@@ -543,8 +548,8 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
                 status=str(goal.get("status") or "planned"),
                 waiting_on="user_or_controller",
                 severity="action",
-                recommended_action="review the Goal Harness operator gate before sending any project-agent command",
-                operator_question=f"Approve a read-only map opt-in for `{goal_id}`?",
+                recommended_action="先审阅 Goal Harness operator gate；同意后再发送项目 agent 命令",
+                operator_question=default_operator_question(goal_id, DEFAULT_OPERATOR_GATE),
                 agent_command=command,
                 source="registry",
                 **lifecycle_fields,

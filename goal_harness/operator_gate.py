@@ -26,8 +26,20 @@ def find_registry_goal(registry: dict[str, Any], goal_id: str) -> dict[str, Any]
 
 def default_operator_question(goal_id: str, gate: str) -> str:
     if gate == DEFAULT_OPERATOR_GATE:
-        return f"Approve a read-only map opt-in for `{goal_id}`?"
-    return f"Approve operator gate `{gate}` for `{goal_id}`?"
+        return f"是否同意 `{goal_id}` 先执行 read-only map opt-in？"
+    return f"是否同意 `{goal_id}` 的 operator gate `{gate}`？"
+
+
+def normalize_operator_question(question: str | None, *, goal_id: str, gate: str) -> str | None:
+    if not question:
+        return question
+    legacy_defaults = {
+        f"Approve a read-only map opt-in for `{goal_id}`?",
+        f"Approve operator gate `{gate}` for `{goal_id}`?",
+    }
+    if question in legacy_defaults:
+        return default_operator_question(goal_id, gate)
+    return question
 
 
 def default_agent_command(goal_id: str, gate: str) -> str | None:
@@ -49,12 +61,12 @@ def classification_for_decision(decision: str) -> str:
 def default_recommended_action(*, decision: str, agent_command: str | None) -> str:
     if decision == "approve":
         if agent_command:
-            return "send the approved agent command to the target project agent; this is not write-control"
-        return "continue with the approved operator gate; this is not write-control"
+            return "把已批准的 agent_command 发给目标项目 agent；这不是写权限授权"
+        return "继续执行已批准的 operator gate；这不是写权限授权"
     if decision == "reject":
-        return "keep the goal gated and revise the handoff before asking the operator again"
+        return "保持 goal 在 gate 状态，修改 handoff 后再请求 operator 判断"
     if decision == "defer":
-        return "keep the goal gated and gather the requested evidence before asking again"
+        return "保持 goal 在 gate 状态，先补齐要求的证据后再请求判断"
     raise ValueError(f"decision must be one of: {', '.join(sorted(OPERATOR_GATE_DECISIONS))}")
 
 
