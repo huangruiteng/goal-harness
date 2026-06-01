@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:26:13+08:00
+updated_at: 2026-06-02T04:31:05+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,27 @@ private project context.
 
 ## Next Action
 
-- Fix the small `refresh-state` Markdown preview wart where wrapped `## Next
-  Action` continuation lines render as separate bullets in the command output.
-  Keep the existing full `Recommended Action` behavior unchanged, and validate
-  with a wrapped-bullet smoke plus `quota should-run`.
+- From fresh `goal-harness status` and the dashboard Review Packet, inspect the
+  `agent-harness-main-control` planned opt-in path as the next P0 human-decision
+  loop. If it still asks the user or project agent to reason across too many
+  surfaces, make one small status/dashboard wording or layout fix; do not append
+  an operator gate or run the real map.
 
 ## Recent Progress
 
+- 2026-06-02T04:31:05+08:00: Fixed the `refresh-state` Markdown preview wart
+  for wrapped `## Next Action` items. `render_state_refresh_markdown()` now
+  renders section previews through logical list items, so a bullet plus wrapped
+  continuation lines becomes one Markdown bullet instead of several misleading
+  bullets. The existing full `Recommended Action` derivation path is unchanged.
+  Validation: Python compile passed; synthetic wrapped-bullet smoke passed;
+  live `goal-harness refresh-state --goal-id goal-harness-meta --dry-run` shows
+  a single full Next Action bullet; public contract check passed;
+  `git diff --check` passed; real `refresh-state` appended a
+  `state_refreshed` run whose Markdown output also has one full Next Action
+  bullet; dashboard local status JSON was refreshed. Critic: this is a small
+  but useful agent-facing correctness fix that prevents automatic heartbeats or
+  project agents from misreading continuation lines as separate actions.
 - 2026-06-02T04:26:13+08:00: Reduced dashboard first-screen review clutter.
   The selected-action share panel now keeps a single primary `Copy Review
   Packet` action visible, shows only the transition summary by default, and

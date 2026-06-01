@@ -82,6 +82,26 @@ def first_action_item(lines: list[str], start: int) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
+def section_list_items(lines: list[str]) -> list[str]:
+    items: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if is_bullet_line(line):
+            item = first_action_item(lines, index)
+            if item:
+                items.append(item)
+            index += 1
+            while index < len(lines) and not is_bullet_line(lines[index]):
+                index += 1
+            continue
+        cleaned = clean_action_line(line)
+        if cleaned:
+            items.append(cleaned)
+        index += 1
+    return items
+
+
 def derive_recommended_action(state_text: str) -> str:
     lines = extract_section_lines(state_text, "Next Action", limit=8)
     for index, line in enumerate(lines):
@@ -209,7 +229,7 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
         values = state.get(key) if isinstance(state.get(key), list) else []
         if values:
             lines.extend(["", f"## {heading}"])
-            lines.extend(f"- {clean_action_line(value)}" for value in values)
+            lines.extend(f"- {value}" for value in section_list_items(values))
     return "\n".join(lines)
 
 
