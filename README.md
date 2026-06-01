@@ -238,11 +238,16 @@ from the same status contract:
 ```bash
 goal-harness quota status
 goal-harness quota plan
+goal-harness quota should-run --goal-id <goal-id>
 ```
 
 `quota status` shows every registered goal by quota state. `quota plan` keeps
 the same read-only inputs but emphasizes the non-empty groups and the next
-automatic turn. It does not mutate registry, run history, rewards, or gates.
+automatic turn. `quota should-run` is the per-goal automation guard: it returns
+`should_run=true` only when the goal is eligible for the next automatic turn,
+otherwise it returns `should_run=false` with the gate, evidence, health, or
+quota reason. These commands do not mutate registry, run history, rewards, or
+gates.
 
 `status` and `serve-status` default their public/private contract scan to the
 Goal Harness install root, not the shell's current project directory. Pass

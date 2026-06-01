@@ -34,7 +34,12 @@ from .project_map import (
     read_only_project_map_run,
     render_read_only_project_map_markdown,
 )
-from .quota import build_quota_plan, render_quota_markdown
+from .quota import (
+    build_quota_plan,
+    build_quota_should_run,
+    render_quota_markdown,
+    render_quota_should_run_markdown,
+)
 from .registry import inspect_registry, render_registry_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
 from .state_refresh import (
@@ -323,10 +328,11 @@ def main(argv: list[str] | None = None) -> int:
     quota_parser.add_argument(
         "quota_command",
         nargs="?",
-        choices=["status", "plan"],
+        choices=["status", "plan", "should-run"],
         default="status",
-        help="Use status for all groups, or plan for non-empty next-turn groups.",
+        help="Use status for all groups, plan for non-empty next-turn groups, or should-run for one goal.",
     )
+    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run`.")
     quota_parser.add_argument(
         "--scan-root",
         default=default_public_scan_root(),
@@ -689,33 +695,54 @@ def main(argv: list[str] | None = None) -> int:
                 scan_roots=scan_roots,
                 limit=max(0, args.limit),
             )
-            payload = build_quota_plan(status_payload, mode=args.quota_command)
+            if args.quota_command == "should-run":
+                if not args.goal_id:
+                    raise ValueError("`goal-harness quota should-run` requires --goal-id")
+                payload = build_quota_should_run(status_payload, goal_id=args.goal_id)
+            else:
+                payload = build_quota_plan(status_payload, mode=args.quota_command)
         except Exception as exc:
-            payload = {
-                "ok": False,
-                "mode": args.quota_command,
-                "registry": str(registry_path),
-                "runtime_root": args.runtime_root,
-                "error": str(exc),
-                "summary": {
-                    "registered_goals": 0,
-                    "health_blockers": 1,
-                    "next_automatic_turn": None,
-                    "states": {},
-                },
-                "groups": {},
-                "health_items": [
-                    {
-                        "goal_id": "goal-harness-quota",
-                        "status": "quota_collection_failed",
-                        "waiting_on": "codex",
-                        "severity": "high",
-                        "recommended_action": str(exc),
-                        "source": "quota",
-                    }
-                ],
-            }
-        print_payload(payload, args.format, render_quota_markdown)
+            if args.quota_command == "should-run":
+                payload = {
+                    "ok": False,
+                    "mode": "should-run",
+                    "goal_id": args.goal_id,
+                    "decision": "skip",
+                    "should_run": False,
+                    "reason": str(exc),
+                    "state": "blocked_health",
+                    "waiting_on": "codex",
+                    "status": "quota_collection_failed",
+                    "source": "quota",
+                    "recommended_action": "fix quota/status collection before spending automatic compute",
+                }
+            else:
+                payload = {
+                    "ok": False,
+                    "mode": args.quota_command,
+                    "registry": str(registry_path),
+                    "runtime_root": args.runtime_root,
+                    "error": str(exc),
+                    "summary": {
+                        "registered_goals": 0,
+                        "health_blockers": 1,
+                        "next_automatic_turn": None,
+                        "states": {},
+                    },
+                    "groups": {},
+                    "health_items": [
+                        {
+                            "goal_id": "goal-harness-quota",
+                            "status": "quota_collection_failed",
+                            "waiting_on": "codex",
+                            "severity": "high",
+                            "recommended_action": str(exc),
+                            "source": "quota",
+                        }
+                    ],
+                }
+        renderer = render_quota_should_run_markdown if args.quota_command == "should-run" else render_quota_markdown
+        print_payload(payload, args.format, renderer)
         return 0 if payload.get("ok") else 1
 
     if args.command == "serve-status":

@@ -209,6 +209,87 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
     }
 
 
+def _quota_plan_items(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    groups = plan.get("groups") if isinstance(plan.get("groups"), dict) else {}
+    items: list[dict[str, Any]] = []
+    for state_items in groups.values():
+        if not isinstance(state_items, list):
+            continue
+        items.extend(item for item in state_items if isinstance(item, dict))
+    return items
+
+
+def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> dict[str, Any]:
+    safe_goal_id = str(goal_id or "").strip()
+    plan = build_quota_plan(status_payload, mode="should-run")
+    item = next((candidate for candidate in _quota_plan_items(plan) if candidate.get("goal_id") == safe_goal_id), None)
+    health_items = plan.get("health_items") if isinstance(plan.get("health_items"), list) else []
+    health_item = next(
+        (
+            candidate
+            for candidate in health_items
+            if isinstance(candidate, dict) and candidate.get("goal_id") == safe_goal_id
+        ),
+        None,
+    )
+
+    if item:
+        quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+        state = str(quota.get("state") or "unknown")
+        should_run = bool(plan.get("ok")) and state == "eligible"
+        reason = str(quota.get("reason") or "quota state is not eligible")
+        if not plan.get("ok"):
+            reason = "status or contract health is not ok; skip automatic compute"
+        return {
+            "ok": bool(plan.get("ok")),
+            "mode": "should-run",
+            "goal_id": safe_goal_id,
+            "decision": "run" if should_run else "skip",
+            "should_run": should_run,
+            "reason": reason,
+            "quota": quota,
+            "state": state,
+            "waiting_on": item.get("waiting_on"),
+            "status": item.get("status"),
+            "source": item.get("source"),
+            "recommended_action": item.get("recommended_action"),
+            "next_handoff_condition": item.get("next_handoff_condition"),
+            "agent_command": item.get("agent_command"),
+            "plan_summary": plan.get("summary"),
+        }
+
+    if health_item:
+        return {
+            "ok": False,
+            "mode": "should-run",
+            "goal_id": safe_goal_id,
+            "decision": "skip",
+            "should_run": False,
+            "reason": str(health_item.get("recommended_action") or "health item blocks automatic compute"),
+            "state": "blocked_health",
+            "waiting_on": health_item.get("waiting_on"),
+            "status": health_item.get("status"),
+            "source": health_item.get("source"),
+            "recommended_action": health_item.get("recommended_action"),
+            "plan_summary": plan.get("summary"),
+        }
+
+    return {
+        "ok": False,
+        "mode": "should-run",
+        "goal_id": safe_goal_id,
+        "decision": "skip",
+        "should_run": False,
+        "reason": "goal is not present in the registered quota plan",
+        "state": "unknown",
+        "waiting_on": None,
+        "status": "goal_not_found",
+        "source": "quota",
+        "recommended_action": "run `goal-harness registry` and connect or sync the goal before spending compute",
+        "plan_summary": plan.get("summary"),
+    }
+
+
 def render_quota_markdown(payload: dict[str, Any]) -> str:
     title = "Quota Plan" if payload.get("mode") == "plan" else "Quota Status"
     lines = [
@@ -295,4 +376,43 @@ def render_quota_markdown(payload: dict[str, Any]) -> str:
                 lines.append(f"  - agent_command: `{item.get('agent_command')}`")
             if item.get("next_handoff_condition"):
                 lines.append(f"  - next_handoff_condition: {item.get('next_handoff_condition')}")
+    return "\n".join(lines)
+
+
+def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
+    quota = payload.get("quota") if isinstance(payload.get("quota"), dict) else {}
+    lines = [
+        "# Goal Harness Quota Should Run",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- decision: `{payload.get('decision')}`",
+        f"- should_run: `{payload.get('should_run')}`",
+        f"- state: `{payload.get('state')}`",
+        f"- waiting_on: `{payload.get('waiting_on')}`",
+        f"- status: `{payload.get('status')}`",
+    ]
+    if quota:
+        lines.append(
+            "- quota: "
+            f"compute={quota.get('compute')} "
+            f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')}"
+        )
+    if payload.get("reason"):
+        lines.append(f"- reason: {payload.get('reason')}")
+    if payload.get("recommended_action"):
+        lines.append(f"- recommended_action: {payload.get('recommended_action')}")
+    if payload.get("agent_command"):
+        lines.append(f"- agent_command: `{payload.get('agent_command')}`")
+    if payload.get("next_handoff_condition"):
+        lines.append(f"- next_handoff_condition: {payload.get('next_handoff_condition')}")
+    summary = payload.get("plan_summary") if isinstance(payload.get("plan_summary"), dict) else {}
+    states = summary.get("states") if isinstance(summary.get("states"), dict) else {}
+    if summary:
+        state_text = ", ".join(f"{state}={states.get(state, 0)}" for state in QUOTA_STATE_ORDER)
+        lines.append(
+            "- plan_summary: "
+            f"next_automatic_turn={summary.get('next_automatic_turn') or 'none'} "
+            f"{state_text}"
+        )
     return "\n".join(lines)

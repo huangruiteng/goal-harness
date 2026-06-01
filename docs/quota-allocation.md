@@ -135,6 +135,7 @@ The first read-only commands are:
 ```bash
 goal-harness quota status
 goal-harness quota plan
+goal-harness quota should-run --goal-id <goal-id>
 ```
 
 Both commands reuse the status contract, including contract health, global
@@ -149,6 +150,24 @@ goal under `blocked_health`, `operator_gate`, `eligible`, `waiting`,
 markdown output and highlights `next_automatic_turn` when a goal is eligible.
 If that value is `none`, the automation should skip delivery compute and follow
 the displayed gate, evidence, or health reason.
+
+`quota should-run` is the per-goal guard for heartbeat jobs. It returns a small
+JSON or Markdown decision:
+
+```json
+{
+  "goal_id": "project-main-control",
+  "decision": "skip",
+  "should_run": false,
+  "state": "operator_gate",
+  "reason": "human or target-controller gate must clear before spending compute"
+}
+```
+
+Only `state=eligible` returns `should_run=true`. Known goals that are gated,
+waiting, throttled, paused, or health-blocked return `ok=true` only when the
+status export itself is healthy, but still return `should_run=false`. Unknown
+goals or status collection failures return non-zero so automations fail closed.
 
 Future write commands can stay behind explicit operator approval:
 

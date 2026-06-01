@@ -53,9 +53,11 @@ goal-harness --format json status \
 
 For compute allocation, `goal-harness quota status` and
 `goal-harness quota plan` derive an agent-facing grouping from this same status
-payload. They are read-only views, not a separate source of truth. Scripts
-should treat `summary.next_automatic_turn` in the quota-plan JSON as advisory
-and still respect the displayed health, operator, and evidence gates.
+payload. `goal-harness quota should-run --goal-id <goal-id>` derives a per-goal
+automation guard from that grouping. These are read-only views, not a separate
+source of truth. Scripts should treat `summary.next_automatic_turn` in the
+quota-plan JSON as advisory and still respect the displayed health, operator,
+and evidence gates.
 
 ## Top-Level Shape
 

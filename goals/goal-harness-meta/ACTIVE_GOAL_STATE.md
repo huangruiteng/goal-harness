@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T02:39:24+08:00
+updated_at: 2026-06-02T02:47:28+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- Continue the compute quota v0.1 slice by adding a per-goal automation guard,
-  such as `goal-harness quota should-run --goal-id <goal-id>` or a filtered
-  `quota plan --goal-id <goal-id>`, so heartbeat jobs can skip a tick with a
-  compact public-safe reason before spending compute. Keep it read-only and do
-  not add quota writes or a scheduler yet.
+- Continue the compute quota v0.1 slice by wiring the per-goal guard into the
+  hourly heartbeat/control prompt: call
+  `goal-harness quota should-run --goal-id goal-harness-meta` before spending
+  delivery compute, skip quietly when it returns `should_run=false`, and keep
+  operator/evidence gates ahead of compute. Do not add quota writes or a
+  scheduler yet.
 
 ## Recent Progress
 
+- 2026-06-02T02:47:28+08:00: Added the per-goal automation guard for compute
+  quota. `goal-harness quota should-run --goal-id <goal-id>` now reads the
+  same status-derived quota plan and returns a compact `run` or `skip`
+  decision. It returns `should_run=true` only for `state=eligible`; known goals
+  blocked by operator gates, external evidence, throttling, pause, or health
+  issues return `should_run=false` with a public-safe reason. Unknown goals and
+  quota/status collection failures fail closed with a non-zero exit code.
+  Updated README and quota/status docs. Validation covered Python compile,
+  live operator-gate skip, live external-evidence skip, missing-goal non-zero
+  skip, missing-argument non-zero skip, synthetic eligible `run`, public
+  contract check, and `git diff --check`.
 - 2026-06-02T02:39:24+08:00: Added the first agent-facing quota planner CLI.
   `goal-harness quota status` and `goal-harness quota plan` now derive
   compute groups from the existing status contract instead of inventing a
