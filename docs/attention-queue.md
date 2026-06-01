@@ -50,6 +50,18 @@ Fields:
   layer.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 
+## Summary Counters
+
+The queue summary keeps controller handoff visible:
+
+- `needs_user_or_controller`: counts both `waiting_on=user_or_controller` and
+  `waiting_on=controller`.
+- `needs_controller`: counts only goals waiting for a target controller or
+  adapter connection.
+- `needs_codex`: counts goals ready for Codex action.
+- `watching_external_evidence`: counts goals waiting on outside evidence or
+  metrics.
+
 ## Classification Mapping
 
 Status treats these as user/controller attention:

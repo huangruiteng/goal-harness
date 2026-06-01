@@ -156,7 +156,10 @@ def build_attention_queue(
     return {
         "available": True,
         "item_count": len(items),
-        "needs_user_or_controller": sum(1 for item in items if item["waiting_on"] == "user_or_controller"),
+        "needs_user_or_controller": sum(
+            1 for item in items if item["waiting_on"] in {"user_or_controller", "controller"}
+        ),
+        "needs_controller": sum(1 for item in items if item["waiting_on"] == "controller"),
         "needs_codex": sum(1 for item in items if item["waiting_on"] == "codex"),
         "watching_external_evidence": sum(1 for item in items if item["waiting_on"] == "external_evidence"),
         "items": items,
@@ -230,6 +233,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             "- summary: "
             f"items={queue.get('item_count')}, "
             f"needs_user_or_controller={queue.get('needs_user_or_controller')}, "
+            f"needs_controller={queue.get('needs_controller')}, "
             f"needs_codex={queue.get('needs_codex')}, "
             f"watching_external_evidence={queue.get('watching_external_evidence')}",
         ]

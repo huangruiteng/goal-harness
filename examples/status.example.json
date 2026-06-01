@@ -18,6 +18,7 @@
     "available": true,
     "item_count": 2,
     "needs_user_or_controller": 1,
+    "needs_controller": 0,
     "needs_codex": 1,
     "watching_external_evidence": 0,
     "items": [
