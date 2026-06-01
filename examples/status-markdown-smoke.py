@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test agent-facing Markdown status hints.
+"""Smoke-test agent-facing status and quota hints.
 
 This stays dependency-free and uses the public status collector against a
 temporary planned read-only-map goal.
@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from goal_harness.status import collect_status, render_status_markdown  # noqa: E402
+from goal_harness.quota import build_quota_should_run, render_quota_should_run_markdown  # noqa: E402
 
 
 OLD_PLANNED_ACTION = "先审阅 Goal Harness operator gate；同意后再发送项目 agent 命令"
@@ -151,6 +152,24 @@ def assert_operator_gate_waits_for_user(payload: dict, markdown: str, *, status:
     assert "operator_gate_dry_run" not in markdown, markdown
 
 
+def assert_quota_should_run(payload: dict, *, expected: bool, state: str, waiting_on: str) -> dict:
+    quota_payload = build_quota_should_run(payload, goal_id="planned-main-control")
+    quota_markdown = render_quota_should_run_markdown(quota_payload)
+    assert quota_payload["should_run"] is expected, quota_payload
+    assert quota_payload["state"] == state, quota_payload
+    assert quota_payload["waiting_on"] == waiting_on, quota_payload
+    if expected:
+        assert quota_payload["decision"] == "run", quota_payload
+        assert quota_payload["agent_command"] == APPROVED_COMMAND, quota_payload
+        assert f"agent_command: `{APPROVED_COMMAND}`" in quota_markdown, quota_markdown
+    else:
+        assert quota_payload["decision"] == "skip", quota_payload
+        assert quota_payload["reason"] == "human or target-controller gate must clear before spending compute", quota_payload
+        assert "agent_command" not in quota_payload, quota_payload
+        assert "agent_command:" not in quota_markdown, quota_markdown
+    return quota_payload
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
@@ -206,17 +225,35 @@ def main() -> int:
     assert "operator_question" not in approved_item, approved_item
     assert "operator_gate_dry_run" not in approved_markdown, approved_markdown
     assert f"agent_command: `{APPROVED_COMMAND}`" in approved_markdown, approved_markdown
+    assert_quota_should_run(
+        approved_payload,
+        expected=True,
+        state="eligible",
+        waiting_on="codex",
+    )
     assert_operator_gate_waits_for_user(
         rejected_payload,
         rejected_markdown,
         status="operator_gate_rejected",
         action=REJECTED_ACTION,
     )
+    assert_quota_should_run(
+        rejected_payload,
+        expected=False,
+        state="operator_gate",
+        waiting_on="user_or_controller",
+    )
     assert_operator_gate_waits_for_user(
         deferred_payload,
         deferred_markdown,
         status="operator_gate_deferred",
         action=DEFERRED_ACTION,
+    )
+    assert_quota_should_run(
+        deferred_payload,
+        expected=False,
+        state="operator_gate",
+        waiting_on="user_or_controller",
     )
     print("status-markdown-smoke ok")
     return 0

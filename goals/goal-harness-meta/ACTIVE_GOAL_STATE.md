@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T06:24:46+08:00
+updated_at: 2026-06-02T06:31:09+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,29 @@ private project context.
 
 ## Next Action
 
-- Add a tiny quota `should-run` fixture for the same operator-gate split:
-  `operator_gate_approved` should be eligible for the next project-agent dry-run
-  turn, while `operator_gate_rejected` and `operator_gate_deferred` should stay
-  quiet with a user/controller gate reason. Keep it fixture-based; do not append
-  a real gate or run a real map.
+- Add a tiny project-agent prompt/contract note for the quota guard: project
+  agents should treat `quota should-run` as the compute gate, skip quietly when
+  `should_run=false`, and only execute an `agent_command` when `should_run=true`
+  and that command is present. Keep it docs/prompt-only; do not append a real
+  gate or run a real map.
 
 ## Recent Progress
 
+- 2026-06-02T06:31:09+08:00: Added quota `should-run` fixture coverage for the
+  operator-gate split. The status smoke now calls `build_quota_should_run()` on
+  the same temporary approved/rejected/deferred fixtures: approved gates must
+  return `should_run=true`, `state=eligible`, `waiting_on=codex`, and the
+  approved read-only-map dry-run `agent_command`; rejected and deferred gates
+  must return `should_run=false`, `state=operator_gate`,
+  `waiting_on=user_or_controller`, the gate reason, and no `agent_command`.
+  `build_quota_should_run()` now omits optional `agent_command` and
+  `next_handoff_condition` fields unless they have values, so skip payloads do
+  not expose null command slots to project agents. Validation: direct status
+  smoke passed; aggregate public smokes passed; Python compile passed; public
+  contract check passed; `git diff --check` passed. Critic: the status/quota
+  mechanics now protect the gate split, but project-agent-facing docs/prompts
+  should state this rule plainly so agents do not infer permission from status
+  previews.
 - 2026-06-02T06:24:46+08:00: Added the complementary fixture smoke for
   rejected/deferred operator gates. `examples/status-markdown-smoke.py` now uses
   one generic operator-gate fixture helper and verifies all three branches:

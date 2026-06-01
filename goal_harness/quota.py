@@ -240,7 +240,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         reason = str(quota.get("reason") or "quota state is not eligible")
         if not plan.get("ok"):
             reason = "status or contract health is not ok; skip automatic compute"
-        return {
+        payload = {
             "ok": bool(plan.get("ok")),
             "mode": "should-run",
             "goal_id": safe_goal_id,
@@ -253,10 +253,13 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "status": item.get("status"),
             "source": item.get("source"),
             "recommended_action": item.get("recommended_action"),
-            "next_handoff_condition": item.get("next_handoff_condition"),
-            "agent_command": item.get("agent_command"),
             "plan_summary": plan.get("summary"),
         }
+        if item.get("next_handoff_condition"):
+            payload["next_handoff_condition"] = item.get("next_handoff_condition")
+        if item.get("agent_command"):
+            payload["agent_command"] = item.get("agent_command")
+        return payload
 
     if health_item:
         return {
