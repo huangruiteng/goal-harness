@@ -690,6 +690,25 @@ type OperatorActionBridge = {
   items: OperatorActionBridgeItem[];
 };
 
+type OperatorDecision = {
+  title: string;
+  badge: string;
+  variant: BadgeVariant;
+  action: string;
+  reason: string;
+  needs: string[];
+  phase: string;
+  waitingOn: string;
+};
+
+type RewardDraftDefaults = {
+  decision: string;
+  reward: RewardValue;
+  reasonSummary: string;
+  followUp: string;
+  label: string;
+};
+
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
   if (readiness.decision_advisor_ready) {
     return "success";
@@ -796,7 +815,7 @@ function buildOperatorDecision({
 }: {
   goal?: RunGoal;
   queueItem?: QueueItem;
-}) {
+}): OperatorDecision {
   const latestRun = goal?.latest_runs[0];
   const phase = goal?.lifecycle_phase
     ?? queueItem?.lifecycle_phase
@@ -914,6 +933,105 @@ function buildOperatorDecision({
     needs: missingGates.map(gateLabel),
     phase,
     waitingOn,
+  };
+}
+
+function existingRewardValue(reward?: HumanReward | null): RewardValue {
+  const value = reward?.reward;
+  return rewardOptions.includes(value as RewardValue) ? value as RewardValue : "neutral";
+}
+
+function buildRewardDraftDefaults({
+  goal,
+  queueItem,
+}: {
+  goal?: RunGoal;
+  queueItem?: QueueItem;
+}): RewardDraftDefaults {
+  const latestRun = goal?.latest_runs[0];
+  const operatorDecision = buildOperatorDecision({ goal, queueItem });
+  const missingGates = new Set(queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []);
+  const handoffCondition = queueItem?.next_handoff_condition
+    ?? latestRun?.controller_readiness?.next_handoff_condition
+    ?? "";
+
+  if (latestRun?.human_reward) {
+    return {
+      decision: "review_existing_reward",
+      reward: existingRewardValue(latestRun.human_reward),
+      reasonSummary: "Human reward already exists; review it before adding another overlay.",
+      followUp: "Use the latest rewarded run as the next agent-facing context.",
+      label: "existing reward",
+    };
+  }
+
+  if (queueItem?.severity === "high") {
+    return {
+      decision: "fix_health_first",
+      reward: "negative",
+      reasonSummary: "Blocking health issue prevents approval or handoff.",
+      followUp: "Fix the blocking status item before recording approval or launching follow-up work.",
+      label: "blocking status",
+    };
+  }
+
+  if (operatorDecision.waitingOn === "external_evidence") {
+    const needsReward = missingGates.has("human_reward_capture");
+    return {
+      decision: needsReward ? "record_human_reward_gate" : "watch_external_evidence",
+      reward: "neutral",
+      reasonSummary: needsReward
+        ? "Operator judgment is required before controller decision advice."
+        : "External evidence is still pending; no approval is implied.",
+      followUp: handoffCondition || "Wait for comparable evidence before decision advice or write control.",
+      label: needsReward ? "reward gate" : "evidence watch",
+    };
+  }
+
+  if (operatorDecision.waitingOn === "controller" || operatorDecision.waitingOn === "user_or_controller") {
+    return {
+      decision: operatorDecision.phase === "planned" ? "review_controller_opt_in" : "review_or_authorize",
+      reward: "neutral",
+      reasonSummary: "Operator is reviewing a controller gate; reward does not grant write approval.",
+      followUp: "Run the safe dry-run path before appending controller or write-control state.",
+      label: operatorDecision.phase === "planned" ? "controller opt-in" : "operator gate",
+    };
+  }
+
+  if (operatorDecision.waitingOn === "codex") {
+    if (operatorDecision.phase === "mapped") {
+      return {
+        decision: "use_read_only_map",
+        reward: "positive",
+        reasonSummary: "Read-only map is useful enough for the next Codex handoff.",
+        followUp: "Let Codex use the latest map and history; keep writes separately approved.",
+        label: "map handoff",
+      };
+    }
+    if (operatorDecision.phase === "refreshed") {
+      return {
+        decision: "continue_from_refreshed_state",
+        reward: "positive",
+        reasonSummary: "Refreshed goal state gives Codex a usable next action.",
+        followUp: "Let Codex continue from the refreshed state before asking for approval.",
+        label: "state refresh",
+      };
+    }
+    return {
+      decision: "continue_codex_action",
+      reward: "neutral",
+      reasonSummary: "Codex can continue, but this reward is only a dry-run draft.",
+      followUp: "Use the safe CLI path as the next agent-facing context.",
+      label: "codex handoff",
+    };
+  }
+
+  return {
+    decision: "review_latest_run",
+    reward: "neutral",
+    reasonSummary: operatorDecision.reason,
+    followUp: "Inspect status before recording a real reward.",
+    label: "operator default",
   };
 }
 
@@ -1241,20 +1359,46 @@ function LatestRun({ run }: { run: RunRecord }) {
 
 function RewardCommandDraft({
   goal,
+  queueItem,
   registry,
   runtimeRoot,
   dryRunUrl,
 }: {
   goal?: RunGoal;
+  queueItem?: QueueItem;
   registry: string;
   runtimeRoot: string;
   dryRunUrl: string | null;
 }) {
   const latestRun = goal?.latest_runs[0];
-  const [decision, setDecision] = useState("review_latest_run");
-  const [reward, setReward] = useState<RewardValue>("neutral");
-  const [reasonSummary, setReasonSummary] = useState("Dashboard dry-run validation only");
-  const [followUp, setFollowUp] = useState("Replace before recording a real reward");
+  const missingGateKey = (queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []).join("|");
+  const draftDefaults = useMemo(
+    () => buildRewardDraftDefaults({ goal, queueItem }),
+    [
+      goal?.id,
+      goal?.status,
+      goal?.lifecycle_phase,
+      latestRun?.generated_at,
+      latestRun?.classification,
+      latestRun?.lifecycle_phase,
+      latestRun?.human_reward?.recorded_at,
+      latestRun?.human_reward?.decision,
+      latestRun?.human_reward?.reward,
+      latestRun?.controller_readiness?.classification,
+      latestRun?.controller_readiness?.next_handoff_condition,
+      queueItem?.status,
+      queueItem?.waiting_on,
+      queueItem?.severity,
+      queueItem?.recommended_action,
+      queueItem?.lifecycle_phase,
+      queueItem?.next_handoff_condition,
+      missingGateKey,
+    ],
+  );
+  const [decision, setDecision] = useState(draftDefaults.decision);
+  const [reward, setReward] = useState<RewardValue>(draftDefaults.reward);
+  const [reasonSummary, setReasonSummary] = useState(draftDefaults.reasonSummary);
+  const [followUp, setFollowUp] = useState(draftDefaults.followUp);
   const [dryRunResult, setDryRunResult] = useState<RewardDryRunResponse | null>(null);
   const [dryRunError, setDryRunError] = useState<string | null>(null);
   const [isDryRunning, setIsDryRunning] = useState(false);
@@ -1273,9 +1417,20 @@ function RewardCommandDraft({
   const canDryRun = Boolean(command && dryRunUrl && decision.trim() && reasonSummary.trim());
 
   useEffect(() => {
+    setDecision(draftDefaults.decision);
+    setReward(draftDefaults.reward);
+    setReasonSummary(draftDefaults.reasonSummary);
+    setFollowUp(draftDefaults.followUp);
     setDryRunResult(null);
     setDryRunError(null);
-  }, [goal?.id, latestRun?.generated_at]);
+  }, [
+    draftDefaults.decision,
+    draftDefaults.reward,
+    draftDefaults.reasonSummary,
+    draftDefaults.followUp,
+    goal?.id,
+    latestRun?.generated_at,
+  ]);
 
   async function runDryRunCheck() {
     if (!goal || !latestRun || !dryRunUrl) {
@@ -1316,10 +1471,28 @@ function RewardCommandDraft({
         <span className="font-medium">Reward CLI Draft</span>
         <Badge variant="info">local-only</Badge>
         <Badge variant={command ? "warning" : "neutral"}>{command ? "dry-run" : "needs run"}</Badge>
+        <Badge variant="neutral">{draftDefaults.label}</Badge>
         {dryRunResult?.ok ? <Badge variant="success">validated</Badge> : null}
       </div>
       {command ? (
         <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            <span>Defaults derive from the selected Operator Decision and missing gates.</span>
+            <Button
+              onClick={() => {
+                setDecision(draftDefaults.decision);
+                setReward(draftDefaults.reward);
+                setReasonSummary(draftDefaults.reasonSummary);
+                setFollowUp(draftDefaults.followUp);
+                setDryRunResult(null);
+                setDryRunError(null);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              Reset defaults
+            </Button>
+          </div>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px]">
             <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
               <span>Decision</span>
@@ -1457,6 +1630,7 @@ function RunHistoryPanel({
           <RewardCommandDraft
             dryRunUrl={rewardDryRunUrl}
             goal={goal}
+            queueItem={queueItem}
             registry={registry}
             runtimeRoot={runtimeRoot}
           />

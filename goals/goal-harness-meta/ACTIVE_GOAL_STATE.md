@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T19:08:36+08:00
+updated_at: 2026-06-01T19:15:23+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,9 +29,9 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should make the Reward CLI Draft derive better defaults from the
-  selected Operator Decision and missing gates, while keeping browser writes
-  disabled by default.
+  slice should promote the same operator-derived actions into a first-screen
+  user action summary, so reward gates, controller opt-ins, evidence watches,
+  and Codex handoffs are visible before the user opens a selected-goal detail.
 
 ## Recent Progress
 
@@ -228,6 +228,14 @@ private project context.
   `refresh-state --dry-run`, or a reward-gate handoff to the existing Reward CLI
   Draft. The bridge is explicitly read/dry-run oriented and does not add
   browser-side reward append or approval writes.
+- 2026-06-01T19:15:23+08:00: Made the dashboard `Reward CLI Draft` derive
+  scenario-specific defaults from the selected `Operator Decision` and missing
+  gates. Mapped Codex-ready goals default to `use_read_only_map` with a positive
+  handoff reward; external-evidence goals missing `human_reward_capture` default
+  to `record_human_reward_gate` with the compact handoff condition; controller
+  opt-in goals show their gate label but still avoid a reward command when no
+  compact run exists. The panel can reset to these defaults after user edits,
+  and browser writes remain disabled.
 
 ## Validation
 
@@ -247,6 +255,13 @@ private project context.
   goal shows a history handoff command; `tiger-team-maiduidui-regauc` shows a
   watch/status command, reward gate, and handoff condition; `agent-harness-main-control`
   shows `read-only-map --dry-run` and an approval boundary.
+- Browser DOM smoke: mapped goal reward draft defaults to
+  `use_read_only_map` / `positive`; `tiger-team-maiduidui-regauc` defaults to
+  `record_human_reward_gate` / `neutral` with the compact handoff condition;
+  `agent-harness-main-control` keeps `needs run` while showing the
+  controller-opt-in default source.
+- CLI dry-run smoke: `goal-harness reward --dry-run` accepts the derived tiger
+  reward-gate fields and returns `ok=True`, `dry_run=True`, `appended=False`.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load

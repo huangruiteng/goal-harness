@@ -422,9 +422,11 @@ A first useful UI can be built from the export alone:
   classifications, controller readiness, health checks, reward signals, and
   artifact availability.
 - Reward CLI draft: selected goal plus latest compact run timestamp should be
-  enough to generate a local `goal-harness reward --dry-run` command. The
-  dashboard should not append feedback directly until the local-only evidence
-  boundary is explicitly implemented.
+  enough to generate a local `goal-harness reward --dry-run` command. Draft
+  fields should default from the selected operator decision and missing gates,
+  while remaining editable before validation. The dashboard should not append
+  feedback directly until the local-only evidence boundary is explicitly
+  implemented.
 - Reward dry-run check: when the dashboard is loaded from a loopback status
   server, it may validate the same draft through `POST /reward/dry-run` and
   display the compact result. This is still a validation path, not a browser

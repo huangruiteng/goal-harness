@@ -241,7 +241,8 @@ User review surface:
 - show a safe CLI path for the stance: status/history inspection,
   read-only-map or refresh-state dry-run, or reward dry-run through the Reward
   CLI Draft,
-- generate a CLI reward draft or dry-run request,
+- generate a CLI reward draft or dry-run request whose defaults derive from
+  the selected operator stance and missing gates,
 - never imply that reward equals write authorization.
 - keep schemas, routes, and component structure stable in English, but allow
   operator-facing review summaries and handoff judgments to be localized for

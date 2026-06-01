@@ -29,7 +29,10 @@ user-facing review to agent-facing CLI execution, not a browser write path.
 When a selected goal has a compact run record, the run-history panel also shows
 a `Reward CLI Draft`. It is intentionally local-only and defaults to
 `--dry-run`; browser writes to private runtime indexes are not part of this
-surface yet.
+surface yet. Draft defaults are derived from the selected `Operator Decision`
+and missing gates, so an evidence watch, controller opt-in, mapped handoff, and
+already-rewarded run start with different decision/reward/reason/follow-up
+values. The operator can still edit or reset the draft before validation.
 
 When the dashboard is loaded from the loopback `Live` source, the same panel can
 send that draft to `POST /reward/dry-run` for local validation. The endpoint
