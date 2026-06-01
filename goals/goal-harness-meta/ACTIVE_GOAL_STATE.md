@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T07:37:58+08:00
+updated_at: 2026-06-02T07:46:31+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,28 @@ private project context.
 
 ## Next Action
 
-- Add a tiny browser-level dashboard smoke with a public-safe throttled status
-  fixture, verifying the quota chip is visible while User Actions excludes the
-  throttled Codex item. Keep it fixture-only; do not add a settings panel,
-  append a real gate, run a real map, or change registry state.
+- Add a tiny public dry-run fixture for quota slot accounting: preview one
+  automatic turn consuming one slot for a goal near its limit, and show that
+  the next `quota should-run` would become `throttled`. Keep it dry-run and
+  fixture-only; do not mutate the real registry, append a real gate, or run a
+  real map.
 
 ## Recent Progress
 
+- 2026-06-02T07:46:31+08:00: Added
+  `examples/dashboard-throttled-browser-smoke.mjs`, a standalone browser-level
+  smoke that creates a temporary public-safe throttled status fixture, starts
+  the dashboard dev server, opens it through Playwright CLI, and verifies the
+  first screen shows the throttled quota chip/review line while User Actions
+  stays at `0 actions`. The script deletes its temporary fixture and
+  `.playwright-cli/` output; `.gitignore` now ignores that generated output
+  directory. Validation: the new browser smoke passed; aggregate public smokes
+  passed with 5 scripts; Python compile passed; dashboard production build
+  passed with the existing >500 kB chunk warning; public contract check passed;
+  `git diff --check` passed. Critic: throttled quota is now protected from
+  planner to CLI to source-level dashboard logic to real browser rendering; the
+  next P0 gap is actual slot accounting, because `should-run` can only throttle
+  if spent slots are updated by a standard accounting path.
 - 2026-06-02T07:37:58+08:00: Tightened the dashboard User Actions builder so a
   `waiting_on=codex` item with `quota.state=throttled` is treated as quiet
   scheduling state instead of a human-facing Codex action. The selected goal can
