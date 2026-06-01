@@ -9,6 +9,7 @@ import { z } from "zod";
 import { DashboardPage } from "./views/dashboard-page";
 
 const searchSchema = z.object({
+  actionKind: z.enum(["all", "reward", "controller", "codex", "evidence", "health"]).optional().default("all"),
   lane: z.enum(["all", "user", "codex", "watch"]).optional().default("all"),
   severity: z.enum(["all", "high", "action", "watch"]).optional().default("all"),
   statusUrl: z.string().optional().default(""),

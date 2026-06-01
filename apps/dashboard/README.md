@@ -25,7 +25,9 @@ card also exposes the matching safe local path and reward-draft hint, so the
 first screen stays user-facing while still pointing agents toward the CLI
 contract. A compact action-kind filter lets the operator focus the first
 screen on reward, controller, Codex, evidence, or health work without changing
-the underlying status export.
+the underlying status export. The filter is backed by the `actionKind` URL
+search parameter, so focused review links survive refresh and can be shared
+with another local operator or agent.
 The selected-goal detail starts with `Operator Decision`, which turns the
 selected goal's queue item, lifecycle phase, and readiness gates into one of
 the user-level stances: review or authorize, let Codex continue, wait for

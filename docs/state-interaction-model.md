@@ -243,6 +243,8 @@ User review surface:
 - allow local action-kind focus such as reward, controller, Codex, evidence,
   or health while treating that filter as dashboard UI state rather than
   durable goal truth,
+- keep that action-kind focus URL-backed when useful, so a human can reload or
+  share the current review lane without mutating goal, run, or status state,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,

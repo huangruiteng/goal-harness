@@ -410,6 +410,8 @@ A first useful UI can be built from the export alone:
   the agent-facing status export, not browser-side writes. The dashboard can
   derive local action-kind filters from these cards, such as reward,
   controller, Codex, evidence, and health, without adding new status fields.
+  Persisting that focus in a URL search parameter is dashboard UI state; it
+  does not change the status contract or durable goal truth.
 - Goal directory: all `run_history.goals`, grouped mentally by `domain` and
   enriched with matching attention items and lifecycle phase badges when a
   goal needs action.

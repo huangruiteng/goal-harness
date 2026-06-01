@@ -1192,17 +1192,20 @@ function UserActionSummary({
   rows,
   selectedGoalId,
   onSelectGoal,
+  selectedKind,
+  onSelectKind,
   registry,
   runtimeRoot,
 }: {
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
   onSelectGoal: (goalId: string) => void;
+  selectedKind: UserActionFilter;
+  onSelectKind: (kind: UserActionFilter) => void;
   registry: string;
   runtimeRoot: string;
 }) {
   const items = buildUserActionSummaryItems({ rows, registry, runtimeRoot });
-  const [selectedKind, setSelectedKind] = useState<UserActionFilter>("all");
   const kindCounts = items.reduce<Record<UserActionKind, number>>((counts, item) => {
     counts[item.kind] += 1;
     return counts;
@@ -1214,14 +1217,9 @@ function UserActionSummary({
     reward: 0,
   });
   const selectedKindCount = selectedKind === "all" ? items.length : kindCounts[selectedKind];
-  const kindOptions = userActionKindOrder.filter((kind) => kindCounts[kind] > 0);
+  const kindOptions = userActionKindOrder.filter((kind) => kindCounts[kind] > 0 || kind === selectedKind);
   const visibleItems = selectedKind === "all" ? items : items.filter((item) => item.kind === selectedKind);
-
-  useEffect(() => {
-    if (selectedKind !== "all" && selectedKindCount === 0) {
-      setSelectedKind("all");
-    }
-  }, [selectedKind, selectedKindCount]);
+  const selectedKindLabel = selectedKind === "all" ? "All" : userActionKindConfig[selectedKind].label;
 
   return (
     <Card>
@@ -1252,7 +1250,7 @@ function UserActionSummary({
             <div aria-label="User action kind filter" className="flex flex-wrap gap-2">
               <Button
                 aria-pressed={selectedKind === "all"}
-                onClick={() => setSelectedKind("all")}
+                onClick={() => onSelectKind("all")}
                 size="sm"
                 variant={selectedKind === "all" ? "primary" : "secondary"}
               >
@@ -1263,7 +1261,7 @@ function UserActionSummary({
                 <Button
                   aria-pressed={selectedKind === kind}
                   key={kind}
-                  onClick={() => setSelectedKind(kind)}
+                  onClick={() => onSelectKind(kind)}
                   size="sm"
                   variant={selectedKind === kind ? "primary" : "secondary"}
                 >
@@ -1272,54 +1270,60 @@ function UserActionSummary({
                 </Button>
               ))}
             </div>
-            <div className="grid gap-3 lg:grid-cols-3">
-              {visibleItems.map((item) => (
-              <button
-                className={cn(
-                  "min-w-0 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900",
-                  item.goalId === selectedGoalId && "border-slate-400 bg-slate-50 dark:border-zinc-600 dark:bg-zinc-900",
-                )}
-                key={`${item.goalId}-${item.title}`}
-                onClick={() => onSelectGoal(item.goalId)}
-                type="button"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={userActionKindConfig[item.kind].variant}>{userActionKindConfig[item.kind].label}</Badge>
-                  <Badge variant={item.variant}>{item.badge}</Badge>
-                  <PhaseBadges compact phase={item.phase} />
-                  {item.waitingOn !== "clear" ? (
-                    <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
-                  ) : null}
-                  {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
-                </div>
-                <div className="mt-3 break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
-                <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
-                <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.summary}</p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
-                <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-zinc-800">
-                  <div className="rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+            {visibleItems.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-zinc-800 dark:text-zinc-400">
+                No {selectedKindLabel.toLowerCase()} action is active for this status source.
+              </div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-3">
+                {visibleItems.map((item) => (
+                  <button
+                    className={cn(
+                      "min-w-0 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900",
+                      item.goalId === selectedGoalId && "border-slate-400 bg-slate-50 dark:border-zinc-600 dark:bg-zinc-900",
+                    )}
+                    key={`${item.goalId}-${item.title}`}
+                    onClick={() => onSelectGoal(item.goalId)}
+                    type="button"
+                  >
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="neutral">Safe path</Badge>
-                      <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
-                        {item.safePathLabel}
-                      </span>
+                      <Badge variant={userActionKindConfig[item.kind].variant}>{userActionKindConfig[item.kind].label}</Badge>
+                      <Badge variant={item.variant}>{item.badge}</Badge>
+                      <PhaseBadges compact phase={item.phase} />
+                      {item.waitingOn !== "clear" ? (
+                        <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
+                      ) : null}
+                      {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
                     </div>
-                    {item.safePathCommand ? (
-                      <code className="mt-2 block max-h-16 overflow-hidden whitespace-pre-wrap break-words rounded border border-slate-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-zinc-800">
-                        {item.safePathCommand}
-                      </code>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
-                    <Badge variant="info">Reward draft</Badge>
-                    <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
-                      {item.rewardHint}
-                    </span>
-                  </div>
-                </div>
-              </button>
-              ))}
-            </div>
+                    <div className="mt-3 break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
+                    <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
+                    <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.summary}</p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
+                    <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-zinc-800">
+                      <div className="rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="neutral">Safe path</Badge>
+                          <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
+                            {item.safePathLabel}
+                          </span>
+                        </div>
+                        {item.safePathCommand ? (
+                          <code className="mt-2 block max-h-16 overflow-hidden whitespace-pre-wrap break-words rounded border border-slate-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-zinc-800">
+                            {item.safePathCommand}
+                          </code>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+                        <Badge variant="info">Reward draft</Badge>
+                        <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
+                          {item.rewardHint}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardContent>
@@ -2301,6 +2305,15 @@ export function DashboardPage() {
               </section>
 
               <UserActionSummary
+                selectedKind={search.actionKind}
+                onSelectKind={(actionKind) =>
+                  navigate({
+                    search: (current) => ({
+                      ...current,
+                      actionKind,
+                    }),
+                  })
+                }
                 registry={payload.registry}
                 rows={goalRows}
                 runtimeRoot={payload.runtime_root}

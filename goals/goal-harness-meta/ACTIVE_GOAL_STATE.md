@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T19:37:04+08:00
+updated_at: 2026-06-01T19:43:08+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,10 +29,10 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should make the first-screen `User Actions` review flow URL-backed, so
-  an operator can reload or share a focused reward/controller/Codex/evidence
-  view while the filter remains dashboard UI state rather than durable goal
-  truth.
+  slice should let first-screen `User Actions` select and persist the focused
+  goal in the URL as well, so a shared multi-project review link can preserve
+  both the review lane and the selected goal detail without writing durable
+  goal state.
 
 ## Recent Progress
 
@@ -261,6 +261,13 @@ private project context.
   action cards, and keeps the raw status export unchanged. README, status
   contract, and state-interaction docs now clarify that action-kind focus is
   dashboard UI state over the agent-facing status contract.
+- 2026-06-01T19:43:08+08:00: Made the `User Actions` action-kind focus
+  URL-backed. The dashboard router now accepts `actionKind=all|reward|controller|codex|evidence|health`,
+  and the first-screen action filter is driven by that search parameter instead
+  of component-local state. Focused review views survive refresh and can be
+  shared, including empty focused views such as `actionKind=evidence`, while
+  remaining dashboard UI state only. README, status contract, and
+  state-interaction docs now describe the URL-backed focus boundary.
 
 ## Validation
 
@@ -299,6 +306,10 @@ private project context.
   buttons `All`, `Reward`, `Controller`, and `Codex`; clicking each focused
   filter reduces visible cards to the corresponding single action and preserves
   the safe path / reward draft hints.
+- Browser DOM smoke: loading `?actionKind=controller` focuses the
+  `User Actions` card list on controller work, keeps the URL stable after
+  refresh, and clicking `Reward` updates the search parameter to
+  `actionKind=reward` while preserving status URL state.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load
