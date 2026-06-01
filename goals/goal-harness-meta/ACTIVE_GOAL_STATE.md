@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T04:18:41+08:00
+updated_at: 2026-06-02T04:26:13+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,26 @@ private project context.
 
 ## Next Action
 
-- From fresh `goal-harness status` and the dashboard first screen, audit the
-  operator surface for redundant panels or copy affordances. Keep the single
-  Review Packet / history lookup path, and only remove or fold UI that does not
-  reduce user decision cost. Do not add browser-side reward append, quota write
-  commands, or a scheduler.
+- Fix the small `refresh-state` Markdown preview wart where wrapped `## Next
+  Action` continuation lines render as separate bullets in the command output.
+  Keep the existing full `Recommended Action` behavior unchanged, and validate
+  with a wrapped-bullet smoke plus `quota should-run`.
 
 ## Recent Progress
 
+- 2026-06-02T04:26:13+08:00: Reduced dashboard first-screen review clutter.
+  The selected-action share panel now keeps a single primary `Copy Review
+  Packet` action visible, shows only the transition summary by default, and
+  folds the raw review URL, transition command, and full packet body under a
+  collapsed `Packet details` disclosure. This preserves the single Review
+  Packet / history lookup path while removing a large always-open technical
+  preview from the operator surface. Validation: dashboard production build
+  passed with the existing >500 kB chunk warning; local dashboard HTTP returned
+  200; public contract check passed; `git diff --check` passed;
+  `refresh-state` appended a `state_refreshed` run and dashboard local status
+  JSON was refreshed. Critic: this is the right direction for human attention
+  cost, but visual screenshot verification was skipped because Codex's own
+  window is blocked for computer-use inspection.
 - 2026-06-02T04:18:41+08:00: Made rewarded runs easier for project agents to
   notice from CLI status. `goal-harness status` Markdown now expands compact
   `human_reward` fields under the latest run in `Run History`, including

@@ -1121,9 +1121,6 @@ function ReviewLinkPanel({
             {quotaView ? (
               <p className="mt-1 text-xs leading-5 text-slate-700 dark:text-zinc-300">{quotaView.reviewLine}</p>
             ) : null}
-            <code className="mt-3 block truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-              {reviewUrl}
-            </code>
           </div>
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <Button aria-label="Copy review packet" onClick={() => void copyReviewPacket()} variant="primary">
@@ -1143,15 +1140,23 @@ function ReviewLinkPanel({
             {transitionPreview.runGeneratedAt ? <Badge variant="info">{transitionPreview.runGeneratedAt}</Badge> : null}
           </div>
           <p className="mt-2">{transitionPreview.summary}</p>
-          {transitionPreview.command ? (
-            <pre className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-emerald-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-emerald-900">
-              {transitionPreview.command}
-            </pre>
-          ) : null}
         </div>
-        <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
-          {reviewPacket}
-        </pre>
+        <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          <summary className="cursor-pointer px-3 py-2 font-medium">Packet details</summary>
+          <div className="space-y-3 border-t border-slate-200 p-3 dark:border-zinc-800">
+            <code className="block truncate rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+              {reviewUrl}
+            </code>
+            {transitionPreview.command ? (
+              <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-slate-200 bg-slate-950 p-2 text-[11px] leading-4 text-slate-50 dark:border-zinc-800">
+                {transitionPreview.command}
+              </pre>
+            ) : null}
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800">
+              {reviewPacket}
+            </pre>
+          </div>
+        </details>
       </CardContent>
     </Card>
   );
