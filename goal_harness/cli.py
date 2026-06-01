@@ -37,8 +37,10 @@ from .project_map import (
 from .quota import (
     build_quota_plan,
     build_quota_should_run,
+    build_quota_slot_preview,
     render_quota_markdown,
     render_quota_should_run_markdown,
+    render_quota_slot_preview_markdown,
 )
 from .registry import inspect_registry, render_registry_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
@@ -328,11 +330,13 @@ def main(argv: list[str] | None = None) -> int:
     quota_parser.add_argument(
         "quota_command",
         nargs="?",
-        choices=["status", "plan", "should-run"],
+        choices=["status", "plan", "should-run", "spend-slot"],
         default="status",
-        help="Use status for all groups, plan for non-empty next-turn groups, or should-run for one goal.",
+        help="Use status for all groups, plan for next-turn groups, should-run for one goal, or spend-slot for a dry-run slot preview.",
     )
-    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run`.")
+    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run` and `quota spend-slot`.")
+    quota_parser.add_argument("--slots", type=int, default=1, help="Slots to preview for `quota spend-slot --dry-run`.")
+    quota_parser.add_argument("--dry-run", action="store_true", help="Required for `quota spend-slot`; no registry/runtime mutation.")
     quota_parser.add_argument(
         "--scan-root",
         default=default_public_scan_root(),
@@ -699,13 +703,19 @@ def main(argv: list[str] | None = None) -> int:
                 if not args.goal_id:
                     raise ValueError("`goal-harness quota should-run` requires --goal-id")
                 payload = build_quota_should_run(status_payload, goal_id=args.goal_id)
+            elif args.quota_command == "spend-slot":
+                if not args.goal_id:
+                    raise ValueError("`goal-harness quota spend-slot` requires --goal-id")
+                if not args.dry_run:
+                    raise ValueError("`goal-harness quota spend-slot` is preview-only; pass --dry-run")
+                payload = build_quota_slot_preview(status_payload, goal_id=args.goal_id, slots=args.slots)
             else:
                 payload = build_quota_plan(status_payload, mode=args.quota_command)
         except Exception as exc:
-            if args.quota_command == "should-run":
+            if args.quota_command in {"should-run", "spend-slot"}:
                 payload = {
                     "ok": False,
-                    "mode": "should-run",
+                    "mode": args.quota_command,
                     "goal_id": args.goal_id,
                     "decision": "skip",
                     "should_run": False,
@@ -741,7 +751,13 @@ def main(argv: list[str] | None = None) -> int:
                         }
                     ],
                 }
-        renderer = render_quota_should_run_markdown if args.quota_command == "should-run" else render_quota_markdown
+        renderer = (
+            render_quota_should_run_markdown
+            if args.quota_command == "should-run"
+            else render_quota_slot_preview_markdown
+            if args.quota_command == "spend-slot"
+            else render_quota_markdown
+        )
         print_payload(payload, args.format, renderer)
         return 0 if payload.get("ok") else 1
 

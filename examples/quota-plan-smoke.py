@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.quota import build_quota_plan, build_quota_should_run, render_quota_markdown  # noqa: E402
+from goal_harness.quota import build_quota_plan, build_quota_should_run, build_quota_slot_preview, render_quota_markdown  # noqa: E402
 
 
 def goal(
@@ -85,6 +85,7 @@ def attention(
 def build_status_fixture() -> dict:
     goals = [
         goal("half-speed", compute=0.5),
+        goal("near-limit-half", compute=0.5, spent_slots=11, allowed_slots=12),
         goal("full-speed", compute=1.0),
         goal("low-speed", compute=0.3),
         goal("throttled-half", compute=0.5, spent_slots=12, allowed_slots=12),
@@ -92,6 +93,7 @@ def build_status_fixture() -> dict:
     ]
     queue_items = [
         attention("half-speed", compute=0.5),
+        attention("near-limit-half", compute=0.5, spent_slots=11, allowed_slots=12),
         attention("full-speed", compute=1.0),
         attention("low-speed", compute=0.3),
         attention(
@@ -125,6 +127,7 @@ def write_cli_fixture(root: Path) -> tuple[Path, Path, Path]:
     registry_path = project / ".goal-harness" / "registry.json"
     goal_specs = [
         ("half-speed", 0.5, "state_refreshed", 0, None),
+        ("near-limit-half", 0.5, "state_refreshed", 11, 12),
         ("full-speed", 1.0, "state_refreshed", 0, None),
         ("low-speed", 0.3, "state_refreshed", 0, None),
         ("throttled-half", 0.5, "state_refreshed", 12, 12),
@@ -277,6 +280,54 @@ def run_cli_throttled_should_run(root: Path) -> dict:
     return json.loads(result.stdout)
 
 
+def run_cli_slot_preview(root: Path) -> tuple[dict, dict]:
+    registry_path, runtime, project = write_cli_fixture(root)
+    base_args = [
+        sys.executable,
+        "-m",
+        "goal_harness.cli",
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "quota",
+    ]
+    preview_result = subprocess.run(
+        [
+            *base_args,
+            "spend-slot",
+            "--goal-id",
+            "near-limit-half",
+            "--slots",
+            "1",
+            "--dry-run",
+            "--scan-path",
+            str(project),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    should_run_result = subprocess.run(
+        [
+            *base_args,
+            "should-run",
+            "--goal-id",
+            "near-limit-half",
+            "--scan-path",
+            str(project),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(preview_result.stdout), json.loads(should_run_result.stdout)
+
+
 def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
     eligible_ids = [item["goal_id"] for item in plan["groups"]["eligible"]]
     operator_gate_ids = [item["goal_id"] for item in plan["groups"]["operator_gate"]]
@@ -284,7 +335,7 @@ def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
 
     assert plan["summary"]["next_automatic_turn"] == "full-speed", plan
     assert plan["next_automatic_turn"]["goal_id"] == "full-speed", plan
-    assert eligible_ids == ["full-speed", "half-speed", "low-speed"], eligible_ids
+    assert eligible_ids == ["full-speed", "half-speed", "near-limit-half", "low-speed"], eligible_ids
     assert operator_gate_ids == ["needs-operator"], operator_gate_ids
     assert throttled_ids == ["throttled-half"], throttled_ids
     assert "needs-operator" not in eligible_ids, eligible_ids
@@ -294,7 +345,7 @@ def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
         assert "### operator_gate" in markdown, markdown
         assert "### throttled" in markdown, markdown
         assert "`throttled-half`" in markdown, markdown
-        assert markdown.index("`full-speed`") < markdown.index("`half-speed`") < markdown.index("`low-speed`"), markdown
+        assert markdown.index("`full-speed`") < markdown.index("`half-speed`") < markdown.index("`near-limit-half`") < markdown.index("`low-speed`"), markdown
 
 
 def assert_throttled_should_run(status_payload: dict) -> None:
@@ -328,17 +379,53 @@ def assert_throttled_cli_should_run(payload: dict) -> None:
     assert "agent_command" not in payload, payload
 
 
+def assert_slot_preview(payload: dict) -> None:
+    before = payload["before"]
+    after = payload["after"]
+
+    assert payload["ok"] is True, payload
+    assert payload["dry_run"] is True, payload
+    assert payload["appended"] is False, payload
+    assert payload["registry_mutated"] is False, payload
+    assert payload["goal_id"] == "near-limit-half", payload
+    assert payload["slots"] == 1, payload
+    assert payload["would_throttle"] is True, payload
+    assert before["state"] == "eligible", payload
+    assert before["should_run"] is True, payload
+    assert before["quota"]["spent_slots"] == 11, payload
+    assert before["quota"]["allowed_slots"] == 12, payload
+    assert after["state"] == "throttled", payload
+    assert after["should_run"] is False, payload
+    assert after["decision"] == "skip", payload
+    assert after["quota"]["spent_slots"] == 12, payload
+    assert after["quota"]["allowed_slots"] == 12, payload
+    assert after["plan_summary"]["next_automatic_turn"] == "full-speed", payload
+
+
+def assert_dry_run_left_cli_fixture_unchanged(payload: dict) -> None:
+    assert payload["goal_id"] == "near-limit-half", payload
+    assert payload["state"] == "eligible", payload
+    assert payload["should_run"] is True, payload
+    assert payload["quota"]["spent_slots"] == 11, payload
+    assert payload["quota"]["allowed_slots"] == 12, payload
+
+
 def main() -> int:
     status_payload = build_status_fixture()
     plan = build_quota_plan(status_payload, mode="plan")
     markdown = render_quota_markdown(plan)
     assert_plan_shape(plan, markdown)
     assert_throttled_should_run(status_payload)
+    assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:
         cli_plan, cli_markdown = run_cli_quota_plan(Path(tmp))
     assert_plan_shape(cli_plan, cli_markdown)
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-should-run-smoke-") as tmp:
         assert_throttled_cli_should_run(run_cli_throttled_should_run(Path(tmp)))
+    with tempfile.TemporaryDirectory(prefix="goal-harness-quota-slot-smoke-") as tmp:
+        slot_preview, should_run_after_preview = run_cli_slot_preview(Path(tmp))
+    assert_slot_preview(slot_preview)
+    assert_dry_run_left_cli_fixture_unchanged(should_run_after_preview)
     print("quota-plan-smoke ok")
     return 0
 

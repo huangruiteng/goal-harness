@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T07:46:31+08:00
+updated_at: 2026-06-02T07:56:55+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,30 @@ private project context.
 
 ## Next Action
 
-- Add a tiny public dry-run fixture for quota slot accounting: preview one
-  automatic turn consuming one slot for a goal near its limit, and show that
-  the next `quota should-run` would become `throttled`. Keep it dry-run and
-  fixture-only; do not mutate the real registry, append a real gate, or run a
-  real map.
+- Define the smallest public runtime event contract for a future real quota
+  slot spend write path. Keep it as docs plus fixture smoke first: name the
+  compact fields, public/private boundary, and validation rule before adding
+  any mutation command.
 
 ## Recent Progress
 
+- 2026-06-02T07:56:55+08:00: Added a preview-only quota slot accounting path.
+  `goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --dry-run`
+  now reports the before/after `quota should-run` decision for an eligible
+  goal without mutating registry, runtime history, reward overlays, or operator
+  gates. The public smoke fixture adds a `near-limit-half` goal at 11/12 slots
+  and verifies that a one-slot dry-run would move it from `eligible` to
+  `throttled`, while a follow-up real `quota should-run` over the same fixture
+  remains `eligible` at 11/12 slots. Changed files:
+  `goal_harness/quota.py`, `goal_harness/cli.py`,
+  `examples/quota-plan-smoke.py`, and `docs/quota-allocation.md`. Validation:
+  direct quota-plan smoke passed; aggregate public smokes passed with 5
+  scripts; Python compile passed; dashboard production build passed with the
+  existing >500 kB chunk warning; public contract check passed; `git diff
+  --check` passed. Critic: quota accounting now has a safe preview surface, but
+  real slot spending still lacks a compact runtime event contract and write
+  path, so controllers cannot yet update `spent_slots` durably after a real
+  automatic turn.
 - 2026-06-02T07:46:31+08:00: Added
   `examples/dashboard-throttled-browser-smoke.mjs`, a standalone browser-level
   smoke that creates a temporary public-safe throttled status fixture, starts

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 
@@ -293,6 +294,105 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
     }
 
 
+def _queue_item_for_goal(status_payload: dict[str, Any], *, goal_id: str) -> dict[str, Any]:
+    queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
+    queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    return next(
+        (
+            item
+            for item in queue_items
+            if isinstance(item, dict) and str(item.get("goal_id") or "") == goal_id
+        ),
+        {},
+    )
+
+
+def _set_quota_for_goal(status_payload: dict[str, Any], *, goal_id: str, quota: dict[str, Any]) -> None:
+    run_history = status_payload.get("run_history") if isinstance(status_payload.get("run_history"), dict) else {}
+    run_goals = run_history.get("goals") if isinstance(run_history.get("goals"), list) else []
+    for goal in run_goals:
+        if isinstance(goal, dict) and str(goal.get("id") or "") == goal_id:
+            goal["quota"] = dict(quota)
+
+    queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
+    queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    for item in queue_items:
+        if isinstance(item, dict) and str(item.get("goal_id") or "") == goal_id:
+            item["quota"] = dict(quota)
+
+
+def build_quota_slot_preview(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    slots: int = 1,
+) -> dict[str, Any]:
+    safe_goal_id = str(goal_id or "").strip()
+    safe_slots = max(1, _int_number(slots, default=1))
+    before = build_quota_should_run(status_payload, goal_id=safe_goal_id)
+    if not before.get("ok") or not before.get("should_run"):
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "slots": safe_slots,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": before.get("reason") or "goal is not eligible for quota accounting preview",
+            "before": before,
+            "after": None,
+        }
+
+    before_quota = before.get("quota") if isinstance(before.get("quota"), dict) else {}
+    if not before_quota:
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "slots": safe_slots,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": "goal has no quota payload to preview",
+            "before": before,
+            "after": None,
+        }
+
+    queue_item = _queue_item_for_goal(status_payload, goal_id=safe_goal_id)
+    after_status = deepcopy(status_payload)
+    after_goal = {
+        "quota": {
+            **before_quota,
+            "spent_slots": _int_number(before_quota.get("spent_slots"), default=0) + safe_slots,
+        }
+    }
+    after_quota = quota_status(
+        after_goal,
+        waiting_on=str(before.get("waiting_on") or ""),
+        severity=str(queue_item.get("severity") or ""),
+    )
+    _set_quota_for_goal(after_status, goal_id=safe_goal_id, quota=after_quota)
+    after = build_quota_should_run(after_status, goal_id=safe_goal_id)
+
+    return {
+        "ok": True,
+        "mode": "spend-slot",
+        "dry_run": True,
+        "goal_id": safe_goal_id,
+        "slots": safe_slots,
+        "appended": False,
+        "registry_mutated": False,
+        "before": before,
+        "after": after,
+        "would_throttle": after.get("state") == "throttled",
+        "reason": (
+            f"dry-run preview: spending {safe_slots} slot(s) would move "
+            f"{safe_goal_id} from {before.get('state')} to {after.get('state')}"
+        ),
+    }
+
+
 def render_quota_markdown(payload: dict[str, Any]) -> str:
     title = "Quota Plan" if payload.get("mode") == "plan" else "Quota Status"
     lines = [
@@ -379,6 +479,44 @@ def render_quota_markdown(payload: dict[str, Any]) -> str:
                 lines.append(f"  - agent_command: `{item.get('agent_command')}`")
             if item.get("next_handoff_condition"):
                 lines.append(f"  - next_handoff_condition: {item.get('next_handoff_condition')}")
+    return "\n".join(lines)
+
+
+def render_quota_slot_preview_markdown(payload: dict[str, Any]) -> str:
+    before = payload.get("before") if isinstance(payload.get("before"), dict) else {}
+    after = payload.get("after") if isinstance(payload.get("after"), dict) else {}
+    before_quota = before.get("quota") if isinstance(before.get("quota"), dict) else {}
+    after_quota = after.get("quota") if isinstance(after.get("quota"), dict) else {}
+    lines = [
+        "# Goal Harness Quota Slot Preview",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- dry_run: `{payload.get('dry_run')}`",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- slots: `{payload.get('slots')}`",
+        f"- appended: `{payload.get('appended')}`",
+        f"- registry_mutated: `{payload.get('registry_mutated')}`",
+        f"- would_throttle: `{payload.get('would_throttle')}`",
+    ]
+    if payload.get("reason"):
+        lines.append(f"- reason: {payload.get('reason')}")
+    if before:
+        lines.append(
+            "- before: "
+            f"state={before.get('state')} "
+            f"should_run={before.get('should_run')} "
+            f"slots={before_quota.get('spent_slots')}/{before_quota.get('allowed_slots')}"
+        )
+    if after:
+        lines.append(
+            "- after: "
+            f"state={after.get('state')} "
+            f"should_run={after.get('should_run')} "
+            f"slots={after_quota.get('spent_slots')}/{after_quota.get('allowed_slots')}"
+        )
+        summary = after.get("plan_summary") if isinstance(after.get("plan_summary"), dict) else {}
+        if summary:
+            lines.append(f"- after_plan_next_automatic_turn: {summary.get('next_automatic_turn') or 'none'}")
     return "\n".join(lines)
 
 

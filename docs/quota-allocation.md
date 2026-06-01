@@ -153,15 +153,16 @@ The first screen should make it obvious why a project is quiet:
 
 ## CLI Surface
 
-The first read-only commands are:
+The first read-only or preview commands are:
 
 ```bash
 goal-harness quota status
 goal-harness quota plan
 goal-harness quota should-run --goal-id <goal-id>
+goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --dry-run
 ```
 
-Both commands reuse the status contract, including contract health, global
+These commands reuse the status contract, including contract health, global
 registry health, attention queue, run history, and derived quota state. They do
 not mutate registry, runtime history, reward overlays, or operator gates.
 
@@ -191,6 +192,12 @@ Only `state=eligible` returns `should_run=true`. Known goals that are gated,
 waiting, throttled, paused, or health-blocked return `ok=true` only when the
 status export itself is healthy, but still return `should_run=false`. Unknown
 goals or status collection failures return non-zero so automations fail closed.
+
+`quota spend-slot` is a preview-only accounting helper. It shows the before and
+after `should-run` decision for consuming slots and must be run with
+`--dry-run`; it does not mutate registry, runtime history, reward overlays, or
+operator gates. Use it to verify slot accounting before adding a real spend
+write path.
 
 Future write commands can stay behind explicit operator approval:
 
