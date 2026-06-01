@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T01:46:00+08:00
+updated_at: 2026-06-02T02:06:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,25 @@ private project context.
 
 ## Next Action
 
-- Surface `authority_registry` coverage in the dashboard Review Packet and
-  selected run detail. The CLI/status contract now reports whether a complex
-  project declared an authority registry, whether the registry path exists, how
-  many default entry docs were found, topic authority count, and conflict risk;
-  the user-facing view should translate those fields into one simple
-  "authority coverage" line before asking for controller or reward decisions.
+- Start the compute quota v0.1 slice. Add a compact `quota.compute` field to
+  registry/status with simple values such as `1.0`, `0.5`, `0.3`, or `0`, then
+  show a small quota chip in the dashboard without adding a complex settings
+  page.
 
 ## Recent Progress
 
+- 2026-06-02T02:06:00+08:00: Surfaced authority-registry coverage in the user
+  dashboard path. Status now carries registry-level `authority_registry` on
+  `run_history.goals`, so coverage remains visible even when the latest run is
+  an operator gate rather than a fresh project map. The dashboard schema,
+  User Actions card, Copy Review Packet, run detail, and project-map summary
+  all render the same authority coverage line; the bundled example and status
+  contract document the goal-level field. Global sync now resolves default
+  entries relative to the project repo before writing compact registry
+  coverage. Validation covered Python compile, dashboard build, JSON example
+  parse, `goal-harness check --scan-root .`, refreshed local status JSON, and
+  Playwright smoke on the local dashboard for `Authority coverage`, `default
+  entries 7/7`, `risk medium`, and `Copy Review Packet`.
 - 2026-06-02T01:46:00+08:00: Added compact authority-registry coverage to the
   read-only map path. Registry inspection now summarizes optional
   `authority_registry`, global sync keeps a compact public-safe summary, and

@@ -742,6 +742,7 @@ def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
                 "legacy_runtime_goal": goal.get("legacy_runtime_goal"),
                 "adapter_kind": goal.get("adapter_kind"),
                 "adapter_status": goal.get("adapter_status"),
+                "authority_registry": goal.get("authority_registry"),
                 "index_exists": goal.get("index_exists"),
                 "raw_index_records": goal.get("raw_index_records"),
                 "unique_runs": goal.get("unique_runs"),

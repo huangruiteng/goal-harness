@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .authority import authority_registry_summary
+from .authority import compact_authority_registry
 from .history import load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from .registry import registry_goals
@@ -34,7 +34,9 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 def sanitize_goal_for_global(goal: dict[str, Any], *, source_registry: Path, synced_at: str) -> dict[str, Any]:
     copied = copy.deepcopy(goal)
     authority_sources = copied.pop("authority_sources", [])
-    authority_registry = authority_registry_summary(copied)
+    repo = Path(str(copied.get("repo"))).expanduser() if copied.get("repo") else None
+    authority_registry = compact_authority_registry(copied, project=repo)
+    authority_registry.pop("default_entries", None)
     copied.pop("authority_registry", None)
     copied["source_registry"] = str(source_registry.expanduser().resolve())
     copied["synced_at"] = synced_at

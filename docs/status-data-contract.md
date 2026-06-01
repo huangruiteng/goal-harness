@@ -337,12 +337,29 @@ Goal shape:
   "legacy_runtime_goal": false,
   "adapter_kind": "complex_project_read_only_map_v0",
   "adapter_status": "connected-read-only",
+  "authority_registry": {
+    "declared": true,
+    "path": "docs/meta/DOC_REGISTRY.yaml",
+    "path_exists": true,
+    "default_entry_count": 3,
+    "default_entries_checked": 3,
+    "default_entries_present": 3,
+    "topic_authority_count": 8,
+    "deprecated_source_count": 0,
+    "conflict_risk": "low"
+  },
   "index_exists": true,
   "raw_index_records": 2,
   "unique_runs": 2,
   "latest_runs": []
 }
 ```
+
+`authority_registry` on the goal comes from the registry and stays visible even
+when the latest run is an operator gate or reward overlay rather than a fresh
+project map. Dashboard consumers should translate it into one human-facing line
+such as "default entries 3/3, topic 8, risk low" before asking for operator
+decisions.
 
 Run shape:
 
@@ -567,8 +584,8 @@ A first useful UI can be built from the export alone:
 - Watch lane: items with `waiting_on=external_evidence`.
 - Health panel: contract `errors`, `warnings`, and `checks`.
 - Run detail panel: selected goal from the attention queue, compact
-  classifications, controller readiness, health checks, reward signals, and
-  artifact availability.
+  classifications, authority coverage, controller readiness, health checks,
+  reward signals, and artifact availability.
 - Reward CLI draft: selected goal plus latest compact run timestamp should be
   enough to generate a local `goal-harness reward --dry-run` command. Draft
   fields should default from the selected operator decision and missing gates,

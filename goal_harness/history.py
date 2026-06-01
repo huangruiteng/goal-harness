@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .authority import goal_authority_registry_summary
 from .registry import read_json, registry_goals
 
 
@@ -93,6 +94,7 @@ def collect_history(
                 "legacy_runtime_goal": not registry_member,
                 "adapter_kind": adapter.get("kind"),
                 "adapter_status": adapter.get("status"),
+                "authority_registry": goal_authority_registry_summary(meta) if registry_member else None,
                 "index_path": str(index_path),
                 "index_exists": index_path.exists(),
                 "raw_index_records": raw_count,

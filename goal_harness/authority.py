@@ -3,6 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+AUTHORITY_REGISTRY_SUMMARY_FIELDS = (
+    "declared",
+    "required",
+    "path",
+    "path_exists",
+    "read_status",
+    "default_entry_count",
+    "default_entries_checked",
+    "default_entries_present",
+    "topic_authority_count",
+    "deprecated_source_count",
+    "conflict_risk",
+)
+
 
 def _path_text(value: Any) -> str | None:
     if not value:
@@ -84,6 +98,15 @@ def compact_authority_registry(goal: dict[str, Any] | None, *, project: Path | N
             "default_entries": [],
         }
 
+    compact = authority_registry_from_compact(raw)
+    if compact:
+        path_text = _path_text(compact.get("path"))
+        resolved_path = _resolve_project_path(project, path_text)
+        if resolved_path:
+            compact["path_exists"] = resolved_path.exists()
+        compact["default_entries"] = []
+        return compact
+
     path_text = _path_text(raw.get("path"))
     resolved_path = _resolve_project_path(project, path_text)
     default_entries = authority_registry_default_entries(raw.get("default_entry_docs"))
@@ -119,3 +142,27 @@ def authority_registry_summary(goal: dict[str, Any] | None) -> dict[str, Any]:
     compact = compact_authority_registry(goal, project=None)
     compact.pop("default_entries", None)
     return compact
+
+
+def authority_registry_from_compact(raw: dict[str, Any]) -> dict[str, Any] | None:
+    if "declared" not in raw or "default_entry_count" not in raw:
+        return None
+    return {
+        "declared": bool(raw.get("declared")),
+        "required": bool(raw.get("required")),
+        "path": raw.get("path"),
+        "path_exists": raw.get("path_exists"),
+        "read_status": raw.get("read_status"),
+        "default_entry_count": int(raw.get("default_entry_count") or 0),
+        "default_entries_checked": int(raw.get("default_entries_checked") or 0),
+        "default_entries_present": int(raw.get("default_entries_present") or 0),
+        "topic_authority_count": int(raw.get("topic_authority_count") or 0),
+        "deprecated_source_count": int(raw.get("deprecated_source_count") or 0),
+        "conflict_risk": str(raw.get("conflict_risk") or "unknown"),
+    }
+
+
+def goal_authority_registry_summary(goal: dict[str, Any] | None) -> dict[str, Any]:
+    raw = goal.get("authority_registry") if goal and isinstance(goal.get("authority_registry"), dict) else {}
+    compact = authority_registry_from_compact(raw) if raw else None
+    return compact or authority_registry_summary(goal)

@@ -32,6 +32,7 @@ import {
 import { dashboardRoute } from "../router";
 import {
   QueueItem,
+  AuthorityRegistry,
   ControllerReadiness,
   GlobalRegistryHealth,
   HumanReward,
@@ -754,6 +755,7 @@ type UserActionSummaryItem = {
   safePathLabel: string;
   safePathCommand?: string;
   rewardHint: string;
+  authorityCoverage?: AuthorityCoverage;
   phase: string;
   waitingOn: string;
   draftLabel?: string;
@@ -770,6 +772,13 @@ const userActionKindConfig: Record<UserActionKind, { label: string; variant: Bad
 };
 
 type CopyState = "idle" | "copied" | "failed";
+
+type AuthorityCoverage = {
+  badge: string;
+  reviewLine: string;
+  shortLine: string;
+  variant: BadgeVariant;
+};
 
 async function copyTextToClipboard(value: string) {
   if (navigator.clipboard?.writeText) {
@@ -853,18 +862,146 @@ function humanReviewPrompt(kind?: UserActionKind) {
   };
 }
 
+function normalizeConflictRisk(value?: string | null) {
+  return (value || "unknown").toLowerCase();
+}
+
+function authorityCoverageVariant({
+  declared,
+  conflictRisk,
+  deprecatedCount,
+  present,
+  total,
+}: {
+  declared: boolean;
+  conflictRisk?: string | null;
+  deprecatedCount: number;
+  present: number;
+  total: number;
+}): BadgeVariant {
+  if (!declared) {
+    return "neutral";
+  }
+  const risk = normalizeConflictRisk(conflictRisk);
+  if (risk === "high" || deprecatedCount > 0 || (total > 0 && present < total)) {
+    return "warning";
+  }
+  if (risk === "medium") {
+    return "warning";
+  }
+  return "success";
+}
+
+function buildAuthorityCoverageFromCounts({
+  declared,
+  pathExists,
+  present,
+  total,
+  topics,
+  deprecatedCount,
+  conflictRisk,
+}: {
+  declared?: boolean | null;
+  pathExists?: boolean | null;
+  present?: number | null;
+  total?: number | null;
+  topics?: number | null;
+  deprecatedCount?: number | null;
+  conflictRisk?: string | null;
+}): AuthorityCoverage | undefined {
+  const isDeclared = Boolean(declared);
+  if (!isDeclared && !total && !topics) {
+    return undefined;
+  }
+  const presentCount = present ?? 0;
+  const totalCount = total ?? 0;
+  const topicCount = topics ?? 0;
+  const deprecated = deprecatedCount ?? 0;
+  const risk = normalizeConflictRisk(conflictRisk);
+  const pathText = pathExists == null ? "path unchecked" : pathExists ? "path ok" : "path missing";
+  const entryText = totalCount > 0 ? `default entries ${presentCount}/${totalCount}` : "default entries not declared";
+  const riskText = risk === "unknown" ? "risk unknown" : `risk ${risk}`;
+  const badge = !isDeclared
+    ? "No registry"
+    : risk === "high" || risk === "medium" || deprecated > 0 || (totalCount > 0 && presentCount < totalCount)
+      ? "Needs review"
+      : "Covered";
+  return {
+    badge,
+    reviewLine: isDeclared
+      ? `权威源：已声明；${pathText}；${entryText}；topic ${topicCount}；${riskText}${deprecated ? `；deprecated ${deprecated}` : ""}。`
+      : "权威源：未声明 authority registry；只能看到普通 authority sources。",
+    shortLine: isDeclared
+      ? `${entryText}; topic ${topicCount}; ${riskText}`
+      : "authority registry not declared",
+    variant: authorityCoverageVariant({
+      declared: isDeclared,
+      conflictRisk: risk,
+      deprecatedCount: deprecated,
+      present: presentCount,
+      total: totalCount,
+    }),
+  };
+}
+
+function buildAuthorityCoverage({
+  goal,
+  run,
+}: {
+  goal?: RunGoal;
+  run?: RunRecord;
+}): AuthorityCoverage | undefined {
+  const projectMap = run?.project_map;
+  if (projectMap?.authority_registry_declared != null || projectMap?.authority_registry_default_entry_count != null) {
+    return buildAuthorityCoverageFromCounts({
+      declared: projectMap.authority_registry_declared,
+      pathExists: projectMap.authority_registry_path_exists,
+      present: projectMap.authority_registry_default_entries_present,
+      total: projectMap.authority_registry_default_entry_count,
+      topics: projectMap.topic_authority_count,
+      conflictRisk: projectMap.authority_registry_conflict_risk,
+    });
+  }
+  const registry: AuthorityRegistry | null | undefined = goal?.authority_registry;
+  if (!registry) {
+    return undefined;
+  }
+  return buildAuthorityCoverageFromCounts({
+    declared: registry.declared,
+    pathExists: registry.path_exists,
+    present: registry.default_entries_present,
+    total: registry.default_entry_count,
+    topics: registry.topic_authority_count,
+    deprecatedCount: registry.deprecated_source_count,
+    conflictRisk: registry.conflict_risk,
+  });
+}
+
+function buildAuthorityCoverageFromProjectMap(projectMap: ProjectMap): AuthorityCoverage | undefined {
+  return buildAuthorityCoverageFromCounts({
+    declared: projectMap.authority_registry_declared,
+    pathExists: projectMap.authority_registry_path_exists,
+    present: projectMap.authority_registry_default_entries_present,
+    total: projectMap.authority_registry_default_entry_count,
+    topics: projectMap.topic_authority_count,
+    conflictRisk: projectMap.authority_registry_conflict_risk,
+  });
+}
+
 function buildReviewPacket({
   actionKind,
   item,
   reviewUrl,
   selectedGoalId,
   transitionPreview,
+  authorityCoverage,
 }: {
   actionKind: UserActionFilter;
   item?: UserActionSummaryItem;
   reviewUrl: string;
   selectedGoalId: string;
   transitionPreview: OperatorTransitionPreview;
+  authorityCoverage?: AuthorityCoverage;
 }) {
   const goalId = (item?.goalId ?? selectedGoalId) || "<goal-id>";
   const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
@@ -875,6 +1012,7 @@ function buildReviewPacket({
     `类型：${item ? userActionKindConfig[item.kind].label : actionKindLabel(actionKind)}`,
     `链接：${reviewUrl}`,
     `摘要：${item?.summary ?? "当前状态源没有对应的 action card。"}`,
+    authorityCoverage?.reviewLine ?? item?.authorityCoverage?.reviewLine ?? "权威源：当前 status 没有 authority registry coverage。",
     "",
     "【人只需判断】",
     `问题：${item?.operatorQuestion ?? prompt.question}`,
@@ -893,6 +1031,7 @@ function buildReviewPacket({
 
 function ReviewLinkPanel({
   actionKind,
+  authorityCoverage,
   goalId,
   lane,
   reviewPacket,
@@ -902,6 +1041,7 @@ function ReviewLinkPanel({
   transitionPreview,
 }: {
   actionKind: UserActionFilter;
+  authorityCoverage?: AuthorityCoverage;
   goalId: string;
   lane: string;
   reviewPacket: string;
@@ -936,12 +1076,16 @@ function ReviewLinkPanel({
                 {actionKindLabel(actionKind)}
               </Badge>
               {goalId ? <Badge variant="neutral">{goalId}</Badge> : <Badge variant="neutral">No goal</Badge>}
+              {authorityCoverage ? <Badge variant={authorityCoverage.variant}>{authorityCoverage.badge}</Badge> : null}
               {statusUrl ? <Badge variant="success">Status URL</Badge> : <Badge variant="neutral">Example source</Badge>}
               {lane !== "all" || severity !== "all" ? <Badge variant="neutral">{lane} / {severity}</Badge> : null}
             </div>
             <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">
               复制后直接发给对应项目 Agent；人只补一句判断。
             </p>
+            {authorityCoverage ? (
+              <p className="mt-2 text-xs leading-5 text-slate-700 dark:text-zinc-300">{authorityCoverage.reviewLine}</p>
+            ) : null}
             <code className="mt-3 block truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
               {reviewUrl}
             </code>
@@ -1475,6 +1619,7 @@ function buildUserActionSummaryItems({
     });
     const bridgeItem = bridge?.items.find((item) => item.command) ?? bridge?.items[0];
     const latestRun = row.latestRun;
+    const authorityCoverage = buildAuthorityCoverage({ goal: row.goal, run: latestRun });
     const missingGates = new Set(row.queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []);
     const handoffCondition = row.queueItem?.next_handoff_condition
       ?? latestRun?.controller_readiness?.next_handoff_condition
@@ -1490,6 +1635,7 @@ function buildUserActionSummaryItems({
       rewardHint: latestRun
         ? `${draftDefaults.decision} / ${draftDefaults.reward}`
         : `${draftDefaults.label} / needs run`,
+      authorityCoverage,
     };
 
     if (row.severity === "high") {
@@ -1730,6 +1876,14 @@ function UserActionSummary({
                           {item.rewardHint}
                         </span>
                       </div>
+                      {item.authorityCoverage ? (
+                        <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-zinc-900">
+                          <Badge variant={item.authorityCoverage.variant}>Authority</Badge>
+                          <span className="break-words text-xs font-medium text-slate-700 dark:text-zinc-300">
+                            {item.authorityCoverage.shortLine}
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
                   </button>
                 ))}
@@ -2065,6 +2219,7 @@ function ControllerReadinessSummary({ readiness }: { readiness: ControllerReadin
 function ProjectMapSummary({ projectMap }: { projectMap: ProjectMap }) {
   const sections = `${projectMap.sections_found ?? 0}/${projectMap.sections_checked ?? 0}`;
   const files = `${projectMap.files_present ?? 0}/${projectMap.files_checked ?? 0}`;
+  const authorityCoverage = buildAuthorityCoverageFromProjectMap(projectMap);
   return (
     <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm dark:border-indigo-900 dark:bg-indigo-950">
       <div className="flex flex-wrap items-center gap-2">
@@ -2076,10 +2231,14 @@ function ProjectMapSummary({ projectMap }: { projectMap: ProjectMap }) {
       </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
         <Badge variant="neutral">sources {projectMap.authority_source_count ?? 0}</Badge>
+        {authorityCoverage ? <Badge variant={authorityCoverage.variant}>{authorityCoverage.badge}</Badge> : null}
         <Badge variant="neutral">guards {projectMap.guard_count ?? 0}</Badge>
         <Badge variant="info">sections {sections}</Badge>
         <Badge variant="info">files {files}</Badge>
       </div>
+      {authorityCoverage ? (
+        <p className="mt-2 text-xs leading-5 text-indigo-900 dark:text-indigo-100">{authorityCoverage.reviewLine}</p>
+      ) : null}
     </div>
   );
 }
@@ -2318,6 +2477,7 @@ function RunHistoryPanel({
   rewardDryRunUrl: string | null;
 }) {
   const latestRuns = goal?.latest_runs ?? [];
+  const authorityCoverage = buildAuthorityCoverage({ goal, run: latestRuns[0] });
   const artifactReady = latestRuns.filter((run) => run.json_exists && run.markdown_exists).length;
   const rewardReady = latestRuns.filter((run) => Boolean(run.human_reward)).length;
   const readinessReady = latestRuns.filter((run) => Boolean(run.controller_readiness)).length;
@@ -2347,6 +2507,15 @@ function RunHistoryPanel({
             <div className="mt-2">
               <PhaseBadges flags={lifecycleFlags} phase={lifecyclePhase} />
             </div>
+            {authorityCoverage ? (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={authorityCoverage.variant}>Authority coverage</Badge>
+                  <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">{authorityCoverage.shortLine}</span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-zinc-300">{authorityCoverage.reviewLine}</p>
+              </div>
+            ) : null}
           </div>
 
           <OperatorDecisionPanel
@@ -2766,15 +2935,20 @@ export function DashboardPage() {
 	      selectedReviewGoalId,
 	    ],
 	  );
+  const selectedAuthorityCoverage = useMemo(
+    () => buildAuthorityCoverage({ goal: selectedActionGoal, run: selectedActionGoal?.latest_runs[0] }),
+    [selectedActionGoal],
+  );
 	  const reviewPacket = useMemo(
 	    () => buildReviewPacket({
 	      actionKind: search.actionKind,
+        authorityCoverage: selectedAuthorityCoverage,
 	      item: selectedActionItem,
 	      reviewUrl,
 	      selectedGoalId: selectedReviewGoalId,
 	      transitionPreview,
 	    }),
-	    [reviewUrl, search.actionKind, selectedActionItem, selectedReviewGoalId, transitionPreview],
+	    [reviewUrl, search.actionKind, selectedActionItem, selectedAuthorityCoverage, selectedReviewGoalId, transitionPreview],
 	  );
 
   function selectGoal(goalId: string) {
@@ -2852,6 +3026,7 @@ export function DashboardPage() {
 
                 <ReviewLinkPanel
                   actionKind={search.actionKind}
+                  authorityCoverage={selectedAuthorityCoverage}
                   goalId={selectedReviewGoalId}
                   lane={search.lane}
                   reviewPacket={reviewPacket}

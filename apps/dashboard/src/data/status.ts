@@ -52,10 +52,30 @@ export const controllerReadinessSchema = z.object({
   gates: z.array(controllerReadinessGateSchema).optional().default([]),
 });
 
+export const authorityRegistrySchema = z.object({
+  declared: z.boolean().optional().default(false),
+  required: z.boolean().optional().default(false),
+  path: z.string().optional().nullable(),
+  path_exists: z.boolean().optional().nullable(),
+  read_status: z.string().optional().nullable(),
+  default_entry_count: z.number().optional().default(0),
+  default_entries_checked: z.number().optional().default(0),
+  default_entries_present: z.number().optional().default(0),
+  topic_authority_count: z.number().optional().default(0),
+  deprecated_source_count: z.number().optional().default(0),
+  conflict_risk: z.string().optional().nullable(),
+});
+
 export const projectMapSchema = z.object({
   adapter_kind: z.string().optional().nullable(),
   adapter_status: z.string().optional().nullable(),
   authority_source_count: z.number().optional().nullable(),
+  authority_registry_declared: z.boolean().optional().nullable(),
+  authority_registry_path_exists: z.boolean().optional().nullable(),
+  authority_registry_default_entry_count: z.number().optional().nullable(),
+  authority_registry_default_entries_present: z.number().optional().nullable(),
+  topic_authority_count: z.number().optional().nullable(),
+  authority_registry_conflict_risk: z.string().optional().nullable(),
   guard_count: z.number().optional().nullable(),
   sections_found: z.number().optional().nullable(),
   sections_checked: z.number().optional().nullable(),
@@ -92,6 +112,7 @@ export const runGoalSchema = z.object({
   legacy_runtime_goal: z.boolean().optional().default(false),
   adapter_kind: z.string().optional().nullable(),
   adapter_status: z.string().optional().nullable(),
+  authority_registry: authorityRegistrySchema.optional().nullable(),
   index_exists: z.boolean().optional().default(false),
   raw_index_records: z.number().optional().default(0),
   unique_runs: z.number().optional().default(0),
@@ -219,6 +240,7 @@ export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type OperatorGate = z.infer<typeof operatorGateSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
+export type AuthorityRegistry = z.infer<typeof authorityRegistrySchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
