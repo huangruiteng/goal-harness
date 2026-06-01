@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T23:24:05+08:00
+updated_at: 2026-06-01T23:26:41+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,27 @@ private project context.
 ## Next Action
 
 - Use the simplified controller Review Packet for `agent-harness-main-control`
-  as the next opt-in handoff. The target Agent can now run
-  `goal-harness read-only-map --goal-id agent-harness-main-control --dry-run`
-  while the adapter is still `planned`; it should append a real map only after
-  the operator or target controller moves the adapter to
-  `read-only-map-ready`, `connected-read-only`, or `connected`.
+  as the next opt-in handoff. The attention queue now says exactly what to run:
+  `goal-harness read-only-map --goal-id agent-harness-main-control --dry-run`.
+  The target Agent should report the preview, and a real map append should wait
+  until the operator or target controller moves the adapter to
+  `read-only-map-ready` or `connected-read-only`.
 
 ## Recent Progress
 
+- 2026-06-01T23:26:41+08:00: Aligned the public status/attention queue with
+  the planned-adapter dry-run preview behavior. For a registered
+  high-complexity `*_read_only_map_v0` goal with `adapter.status=planned` and
+  no run yet, `goal-harness status` now keeps the item in
+  `waiting_on=user_or_controller` and recommends
+  `goal-harness read-only-map --goal-id <goal> --dry-run` as the opt-in
+  preview. This replaces the stale generic action "connect an adapter or run a
+  read-only map" without adding a new `waiting_on` value. The attention-queue
+  and status-data-contract docs now state that this preview appends nothing and
+  is not controller opt-in. Validation proved that `agent-harness-main-control`
+  now renders the new action in both JSON and Markdown status, queue summary
+  counts it as user/controller work, and Python compile, public contract check,
+  and `git diff --check` passed. Refreshed local dashboard status JSON.
 - 2026-06-01T23:24:05+08:00: Fixed the agent-facing opt-in path for planned
   complex adapters. `goal-harness read-only-map --dry-run` now succeeds for
   `adapter.status=planned` and returns `opt_in_required=true`, so a copied

@@ -470,6 +470,7 @@ def legacy_runtime_goal_attention(
 def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
     goal_id = str(goal.get("id") or "unknown-goal")
     adapter_status = str(goal.get("adapter_status") or "")
+    adapter_kind = str(goal.get("adapter_kind") or "")
     current_run = latest_run(goal)
     readiness_fields = readiness_attention_fields(current_run)
     lifecycle_fields = goal_lifecycle_fields(goal, current_run)
@@ -486,6 +487,20 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
                 severity="action",
                 recommended_action="run the first read-only adapter tick and save a compact run record",
                 source="run_history",
+                **lifecycle_fields,
+            )
+        if adapter_status == "planned" and adapter_kind.endswith("_read_only_map_v0"):
+            return attention_item(
+                goal_id=goal_id,
+                status=str(goal.get("status") or "planned"),
+                waiting_on="user_or_controller",
+                severity="action",
+                recommended_action=(
+                    f"run `goal-harness read-only-map --goal-id {goal_id} --dry-run` "
+                    "as the opt-in preview; append a real map only after adapter status moves "
+                    "to read-only-map-ready or connected-read-only"
+                ),
+                source="registry",
                 **lifecycle_fields,
             )
         return attention_item(

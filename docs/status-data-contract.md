@@ -249,6 +249,13 @@ If the refresh command was run without `--recommended-action`, the compact
 active state's `## Next Action`; otherwise it falls back to a generic refresh
 notice.
 
+For registered planned high-complexity goals with a compatible
+`*_read_only_map_v0` adapter and no run yet, status keeps the queue item in
+`waiting_on=user_or_controller` and recommends
+`goal-harness read-only-map --goal-id <goal> --dry-run` as the opt-in preview.
+That preview should report `opt_in_required=true` and append nothing; dashboard
+consumers must not treat it as controller opt-in or a durable map run.
+
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready
 work with a map-specific badge or drill-down: the project is connected and has
