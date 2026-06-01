@@ -709,8 +709,12 @@ type RewardDraftDefaults = {
   label: string;
 };
 
+type UserActionKind = "reward" | "controller" | "codex" | "evidence" | "health";
+type UserActionFilter = "all" | UserActionKind;
+
 type UserActionSummaryItem = {
   goalId: string;
+  kind: UserActionKind;
   title: string;
   badge: string;
   variant: BadgeVariant;
@@ -723,6 +727,15 @@ type UserActionSummaryItem = {
   waitingOn: string;
   draftLabel?: string;
   priority: number;
+};
+
+const userActionKindOrder: UserActionKind[] = ["reward", "controller", "codex", "evidence", "health"];
+const userActionKindConfig: Record<UserActionKind, { label: string; variant: BadgeVariant }> = {
+  reward: { label: "Reward", variant: "warning" },
+  controller: { label: "Controller", variant: "warning" },
+  codex: { label: "Codex", variant: "success" },
+  evidence: { label: "Evidence", variant: "info" },
+  health: { label: "Health", variant: "danger" },
 };
 
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {
@@ -1089,6 +1102,7 @@ function buildUserActionSummaryItems({
     if (row.severity === "high") {
       return [{
         ...base,
+        kind: "health",
         title: "Fix health first",
         badge: "Blocking",
         variant: "danger",
@@ -1101,6 +1115,7 @@ function buildUserActionSummaryItems({
     if (missingGates.has("human_reward_capture")) {
       return [{
         ...base,
+        kind: "reward",
         title: "Record human reward",
         badge: "Reward gate",
         variant: "warning",
@@ -1114,6 +1129,7 @@ function buildUserActionSummaryItems({
     if (decision.waitingOn === "controller" || decision.waitingOn === "user_or_controller") {
       return [{
         ...base,
+        kind: "controller",
         title: decision.title,
         badge: decision.badge,
         variant: decision.variant,
@@ -1127,6 +1143,7 @@ function buildUserActionSummaryItems({
     if (decision.waitingOn === "external_evidence") {
       return [{
         ...base,
+        kind: "evidence",
         title: "Watch evidence",
         badge: decision.badge,
         variant: "info",
@@ -1140,6 +1157,7 @@ function buildUserActionSummaryItems({
     if (decision.waitingOn === "codex") {
       return [{
         ...base,
+        kind: "codex",
         title: decision.title,
         badge: decision.badge,
         variant: "success",
@@ -1153,6 +1171,7 @@ function buildUserActionSummaryItems({
     if (decision.phase === "reward_judged") {
       return [{
         ...base,
+        kind: "reward",
         title: "Reward captured",
         badge: "Judged",
         variant: "success",
@@ -1183,6 +1202,27 @@ function UserActionSummary({
   runtimeRoot: string;
 }) {
   const items = buildUserActionSummaryItems({ rows, registry, runtimeRoot });
+  const [selectedKind, setSelectedKind] = useState<UserActionFilter>("all");
+  const kindCounts = items.reduce<Record<UserActionKind, number>>((counts, item) => {
+    counts[item.kind] += 1;
+    return counts;
+  }, {
+    codex: 0,
+    controller: 0,
+    evidence: 0,
+    health: 0,
+    reward: 0,
+  });
+  const selectedKindCount = selectedKind === "all" ? items.length : kindCounts[selectedKind];
+  const kindOptions = userActionKindOrder.filter((kind) => kindCounts[kind] > 0);
+  const visibleItems = selectedKind === "all" ? items : items.filter((item) => item.kind === selectedKind);
+
+  useEffect(() => {
+    if (selectedKind !== "all" && selectedKindCount === 0) {
+      setSelectedKind("all");
+    }
+  }, [selectedKind, selectedKindCount]);
+
   return (
     <Card>
       <CardHeader className="flex-wrap">
@@ -1197,6 +1237,9 @@ function UserActionSummary({
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant={items.length > 0 ? "warning" : "success"}>{items.length} actions</Badge>
+          {selectedKind !== "all" ? (
+            <Badge variant={userActionKindConfig[selectedKind].variant}>{userActionKindConfig[selectedKind].label}</Badge>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent>
@@ -1205,8 +1248,32 @@ function UserActionSummary({
             No user-facing action is active.
           </div>
         ) : (
-          <div className="grid gap-3 lg:grid-cols-3">
-            {items.map((item) => (
+          <div className="space-y-3">
+            <div aria-label="User action kind filter" className="flex flex-wrap gap-2">
+              <Button
+                aria-pressed={selectedKind === "all"}
+                onClick={() => setSelectedKind("all")}
+                size="sm"
+                variant={selectedKind === "all" ? "primary" : "secondary"}
+              >
+                All
+                <Badge variant="neutral">{items.length}</Badge>
+              </Button>
+              {kindOptions.map((kind) => (
+                <Button
+                  aria-pressed={selectedKind === kind}
+                  key={kind}
+                  onClick={() => setSelectedKind(kind)}
+                  size="sm"
+                  variant={selectedKind === kind ? "primary" : "secondary"}
+                >
+                  {userActionKindConfig[kind].label}
+                  <Badge variant={userActionKindConfig[kind].variant}>{kindCounts[kind]}</Badge>
+                </Button>
+              ))}
+            </div>
+            <div className="grid gap-3 lg:grid-cols-3">
+              {visibleItems.map((item) => (
               <button
                 className={cn(
                   "min-w-0 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900",
@@ -1217,6 +1284,7 @@ function UserActionSummary({
                 type="button"
               >
                 <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={userActionKindConfig[item.kind].variant}>{userActionKindConfig[item.kind].label}</Badge>
                   <Badge variant={item.variant}>{item.badge}</Badge>
                   <PhaseBadges compact phase={item.phase} />
                   {item.waitingOn !== "clear" ? (
@@ -1250,7 +1318,8 @@ function UserActionSummary({
                   </div>
                 </div>
               </button>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </CardContent>

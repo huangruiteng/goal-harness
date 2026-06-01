@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-01T19:30:27+08:00
+updated_at: 2026-06-01T19:37:04+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,10 +29,10 @@ private project context.
 
 - Use `docs/state-interaction-model.md` as the gate before adding more
   controller, reward, adapter, or dashboard features. The next implementation
-  slice should turn the first-screen `User Actions` cards into a review flow:
-  filterable by action kind, still sourced only from the status contract, and
-  still explicit that reward hints and safe CLI paths are operator aids rather
-  than browser-side approval or write control.
+  slice should make the first-screen `User Actions` review flow URL-backed, so
+  an operator can reload or share a focused reward/controller/Codex/evidence
+  view while the filter remains dashboard UI state rather than durable goal
+  truth.
 
 ## Recent Progress
 
@@ -254,6 +254,13 @@ private project context.
   into a writer. README, status contract, and state-interaction docs now state
   that these first-screen hints are user-facing affordances over the
   agent-facing status export.
+- 2026-06-01T19:37:04+08:00: Turned first-screen `User Actions` into a focused
+  review flow by deriving a local action kind for each card: reward,
+  controller, Codex, evidence, or health. The React dashboard now renders a
+  compact segmented filter with per-kind counts, filters only the first-screen
+  action cards, and keeps the raw status export unchanged. README, status
+  contract, and state-interaction docs now clarify that action-kind focus is
+  dashboard UI state over the agent-facing status contract.
 
 ## Validation
 
@@ -288,6 +295,10 @@ private project context.
   `read-only-map --dry-run`, `goal-harness history`, and the reward decisions
   `record_human_reward_gate`, `controller opt-in / needs run`, and
   `use_read_only_map`.
+- Browser DOM smoke: first-screen `User Actions` exposes action-kind filter
+  buttons `All`, `Reward`, `Controller`, and `Codex`; clicking each focused
+  filter reduces visible cards to the corresponding single action and preserves
+  the safe path / reward draft hints.
 - `python3 -m goal_harness.cli --format json check --scan-path README.md --scan-path docs/dashboard-frontend-selection.md --scan-path docs/status-data-contract.md`
 - `cd apps/dashboard && npm run build`
 - Browser DOM smoke: load

@@ -240,6 +240,9 @@ User review surface:
   items,
 - include the safe local CLI path or reward-draft hint on first-screen action
   cards when it helps the user move from judgment to an agent-facing command,
+- allow local action-kind focus such as reward, controller, Codex, evidence,
+  or health while treating that filter as dashboard UI state rather than
+  durable goal truth,
 - show the run being judged,
 - show why the system thinks a human decision is needed,
 - show the selected goal's current operator stance before raw run history,
