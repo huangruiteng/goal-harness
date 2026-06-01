@@ -128,13 +128,31 @@ The first screen should make it obvious why a project is quiet:
 - it is paused;
 - or it is eligible and should run next.
 
-## CLI Implication
+## CLI Surface
 
-Possible near-term commands:
+The first read-only commands are:
 
 ```bash
 goal-harness quota status
-goal-harness quota plan --window 24h
+goal-harness quota plan
+```
+
+Both commands reuse the status contract, including contract health, global
+registry health, attention queue, run history, and derived quota state. They do
+not mutate registry, runtime history, reward overlays, or operator gates.
+
+`quota status` is the broad inventory for agents: it shows every registered
+goal under `blocked_health`, `operator_gate`, `eligible`, `waiting`,
+`throttled`, or `paused`.
+
+`quota plan` is the next-turn view for automations: it hides empty groups in
+markdown output and highlights `next_automatic_turn` when a goal is eligible.
+If that value is `none`, the automation should skip delivery compute and follow
+the displayed gate, evidence, or health reason.
+
+Future write commands can stay behind explicit operator approval:
+
+```bash
 goal-harness quota set --goal-id <goal-id> --compute 0.5
 goal-harness quota pause --goal-id <goal-id>
 goal-harness quota burst --goal-id <goal-id> --slots 2 --dry-run

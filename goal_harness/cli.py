@@ -34,6 +34,7 @@ from .project_map import (
     read_only_project_map_run,
     render_read_only_project_map_markdown,
 )
+from .quota import build_quota_plan, render_quota_markdown
 from .registry import inspect_registry, render_registry_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
 from .state_refresh import (
@@ -314,6 +315,30 @@ def main(argv: list[str] | None = None) -> int:
         help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
     )
     status_parser.add_argument("--limit", type=int, default=5)
+
+    quota_parser = sub.add_parser(
+        "quota",
+        help="Show agent-facing compute quota status or next-turn plan.",
+    )
+    quota_parser.add_argument(
+        "quota_command",
+        nargs="?",
+        choices=["status", "plan"],
+        default="status",
+        help="Use status for all groups, or plan for non-empty next-turn groups.",
+    )
+    quota_parser.add_argument(
+        "--scan-root",
+        default=default_public_scan_root(),
+        help="Public files to scan for obvious private material. Defaults to the Goal Harness install root.",
+    )
+    quota_parser.add_argument(
+        "--scan-path",
+        action="append",
+        default=[],
+        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
+    )
+    quota_parser.add_argument("--limit", type=int, default=5)
 
     serve_status_parser = sub.add_parser("serve-status", help="Serve live status JSON for the local dashboard.")
     serve_status_parser.add_argument("--host", default=DEFAULT_STATUS_HOST, help="Bind host. Defaults to localhost only.")
@@ -651,6 +676,46 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }
         print_payload(payload, args.format, render_status_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "quota":
+        try:
+            scan_roots = [Path(item).expanduser() for item in args.scan_path]
+            if not scan_roots:
+                scan_roots = [Path(args.scan_root).expanduser()]
+            status_payload = collect_status(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                scan_roots=scan_roots,
+                limit=max(0, args.limit),
+            )
+            payload = build_quota_plan(status_payload, mode=args.quota_command)
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "mode": args.quota_command,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "error": str(exc),
+                "summary": {
+                    "registered_goals": 0,
+                    "health_blockers": 1,
+                    "next_automatic_turn": None,
+                    "states": {},
+                },
+                "groups": {},
+                "health_items": [
+                    {
+                        "goal_id": "goal-harness-quota",
+                        "status": "quota_collection_failed",
+                        "waiting_on": "codex",
+                        "severity": "high",
+                        "recommended_action": str(exc),
+                        "source": "quota",
+                    }
+                ],
+            }
+        print_payload(payload, args.format, render_quota_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "serve-status":

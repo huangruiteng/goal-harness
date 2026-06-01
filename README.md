@@ -232,6 +232,18 @@ See the first-screen status and attention queue:
 goal-harness status
 ```
 
+For agent-facing compute allocation, read the quota grouping that is derived
+from the same status contract:
+
+```bash
+goal-harness quota status
+goal-harness quota plan
+```
+
+`quota status` shows every registered goal by quota state. `quota plan` keeps
+the same read-only inputs but emphasizes the non-empty groups and the next
+automatic turn. It does not mutate registry, run history, rewards, or gates.
+
 `status` and `serve-status` default their public/private contract scan to the
 Goal Harness install root, not the shell's current project directory. Pass
 `--scan-root` or `--scan-path` only when you intentionally want to scan a

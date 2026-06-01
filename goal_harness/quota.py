@@ -5,6 +5,14 @@ from typing import Any
 
 DEFAULT_COMPUTE_QUOTA = 1.0
 DEFAULT_WINDOW_HOURS = 24
+QUOTA_STATE_ORDER = (
+    "blocked_health",
+    "operator_gate",
+    "eligible",
+    "waiting",
+    "throttled",
+    "paused",
+)
 
 
 def _number(value: Any, *, default: float) -> float:
@@ -95,3 +103,196 @@ def quota_status(
     payload["state"] = state
     payload["reason"] = reason
     return payload
+
+
+def _latest_run(goal: dict[str, Any]) -> dict[str, Any]:
+    latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
+    if latest_runs and isinstance(latest_runs[0], dict):
+        return latest_runs[0]
+    return {}
+
+
+def _quota_sort_key(item: dict[str, Any]) -> tuple[int, float, int, str]:
+    quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+    state = str(quota.get("state") or "waiting")
+    state_index = QUOTA_STATE_ORDER.index(state) if state in QUOTA_STATE_ORDER else len(QUOTA_STATE_ORDER)
+    compute = _number(quota.get("compute"), default=DEFAULT_COMPUTE_QUOTA)
+    spent_slots = _int_number(quota.get("spent_slots"), default=0)
+    return (state_index, -compute, spent_slots, str(item.get("goal_id") or ""))
+
+
+def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
+    queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
+    queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    queue_by_goal = {
+        str(item.get("goal_id")): item
+        for item in queue_items
+        if isinstance(item, dict) and item.get("goal_id")
+    }
+    health_items = [
+        item
+        for item in queue_items
+        if isinstance(item, dict) and not isinstance(item.get("quota"), dict)
+    ]
+
+    run_history = (
+        status_payload.get("run_history")
+        if isinstance(status_payload.get("run_history"), dict)
+        else {}
+    )
+    run_goals = run_history.get("goals") if isinstance(run_history.get("goals"), list) else []
+    groups: dict[str, list[dict[str, Any]]] = {state: [] for state in QUOTA_STATE_ORDER}
+    groups["unknown"] = []
+
+    for goal in run_goals:
+        if not isinstance(goal, dict) or not goal.get("registry_member"):
+            continue
+        goal_id = str(goal.get("id") or "")
+        attention = queue_by_goal.get(goal_id, {})
+        latest = _latest_run(goal)
+        quota = attention.get("quota") if isinstance(attention.get("quota"), dict) else goal.get("quota")
+        quota = quota if isinstance(quota, dict) else quota_status(goal)
+        state = str(quota.get("state") or "waiting")
+        item: dict[str, Any] = {
+            "goal_id": goal_id,
+            "status": attention.get("status") or goal.get("status"),
+            "lifecycle_phase": attention.get("lifecycle_phase") or goal.get("lifecycle_phase"),
+            "waiting_on": attention.get("waiting_on") or "none",
+            "severity": attention.get("severity") or "info",
+            "source": attention.get("source") or "run_history",
+            "recommended_action": attention.get("recommended_action") or latest.get("recommended_action"),
+            "adapter_kind": goal.get("adapter_kind"),
+            "adapter_status": goal.get("adapter_status"),
+            "latest_run_generated_at": latest.get("generated_at"),
+            "quota": quota,
+        }
+        for optional_field in (
+            "operator_question",
+            "agent_command",
+            "controller_stage",
+            "missing_gates",
+            "next_handoff_condition",
+        ):
+            if optional_field in attention:
+                item[optional_field] = attention[optional_field]
+        groups.setdefault(state, []).append(item)
+
+    for state_items in groups.values():
+        state_items.sort(key=_quota_sort_key)
+
+    ordered_items = [
+        item
+        for state in QUOTA_STATE_ORDER
+        for item in groups.get(state, [])
+    ] + groups.get("unknown", [])
+    next_automatic_turn = (groups.get("eligible") or [None])[0]
+    summary = {
+        "registered_goals": len(ordered_items),
+        "health_blockers": len(health_items),
+        "next_automatic_turn": next_automatic_turn.get("goal_id") if next_automatic_turn else None,
+        "states": {state: len(groups.get(state, [])) for state in QUOTA_STATE_ORDER},
+    }
+    if groups.get("unknown"):
+        summary["states"]["unknown"] = len(groups["unknown"])
+
+    return {
+        "ok": status_payload.get("ok"),
+        "mode": mode,
+        "registry": status_payload.get("registry"),
+        "runtime_root": status_payload.get("runtime_root"),
+        "goal_count": status_payload.get("goal_count"),
+        "run_count": status_payload.get("run_count"),
+        "summary": summary,
+        "next_automatic_turn": next_automatic_turn,
+        "groups": groups,
+        "health_items": health_items,
+    }
+
+
+def render_quota_markdown(payload: dict[str, Any]) -> str:
+    title = "Quota Plan" if payload.get("mode") == "plan" else "Quota Status"
+    lines = [
+        f"# Goal Harness {title}",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- registry: `{payload.get('registry')}`",
+        f"- runtime_root: `{payload.get('runtime_root')}`",
+        f"- goals: `{payload.get('goal_count')}`",
+        f"- runs: `{payload.get('run_count')}`",
+    ]
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    states = summary.get("states") if isinstance(summary.get("states"), dict) else {}
+    state_text = ", ".join(f"{state}={states.get(state, 0)}" for state in QUOTA_STATE_ORDER)
+    lines.append(
+        "- summary: "
+        f"registered_goals={summary.get('registered_goals')}, "
+        f"health_blockers={summary.get('health_blockers')}, "
+        f"next_automatic_turn={summary.get('next_automatic_turn') or 'none'}"
+    )
+    lines.append(f"- states: {state_text}")
+
+    next_turn = payload.get("next_automatic_turn") if isinstance(payload.get("next_automatic_turn"), dict) else {}
+    lines.extend(["", "## Next Automatic Turn"])
+    if next_turn:
+        quota = next_turn.get("quota") if isinstance(next_turn.get("quota"), dict) else {}
+        lines.append(
+            "- "
+            f"`{next_turn.get('goal_id')}` "
+            f"compute={quota.get('compute')} "
+            f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')} "
+            f"action={next_turn.get('recommended_action') or 'inspect latest run'}"
+        )
+    else:
+        lines.append("- none")
+
+    health_items = payload.get("health_items") if isinstance(payload.get("health_items"), list) else []
+    if health_items:
+        lines.extend(["", "## Health Items"])
+        for item in health_items:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                "- "
+                f"`{item.get('goal_id')}` "
+                f"severity={item.get('severity')} "
+                f"waiting_on={item.get('waiting_on')} "
+                f"action={item.get('recommended_action')}"
+            )
+
+    groups = payload.get("groups") if isinstance(payload.get("groups"), dict) else {}
+    lines.extend(["", "## Groups"])
+    render_states = list(QUOTA_STATE_ORDER)
+    if groups.get("unknown"):
+        render_states.append("unknown")
+    for state in render_states:
+        items = groups.get(state) if isinstance(groups.get(state), list) else []
+        if payload.get("mode") == "plan" and not items:
+            continue
+        lines.extend(["", f"### {state}"])
+        if not items:
+            lines.append("- none")
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+            action = str(item.get("recommended_action") or "").replace("|", "\\|")
+            lines.append(
+                "- "
+                f"`{item.get('goal_id')}`: "
+                f"compute={quota.get('compute')} "
+                f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')} "
+                f"waiting_on={item.get('waiting_on')} "
+                f"status={item.get('status')} "
+                f"phase={item.get('lifecycle_phase')}"
+            )
+            reason = quota.get("reason")
+            if reason:
+                lines.append(f"  - reason: {reason}")
+            if action:
+                lines.append(f"  - action: {action}")
+            if item.get("agent_command"):
+                lines.append(f"  - agent_command: `{item.get('agent_command')}`")
+            if item.get("next_handoff_condition"):
+                lines.append(f"  - next_handoff_condition: {item.get('next_handoff_condition')}")
+    return "\n".join(lines)

@@ -51,6 +51,12 @@ goal-harness --format json status \
   --scan-path examples/
 ```
 
+For compute allocation, `goal-harness quota status` and
+`goal-harness quota plan` derive an agent-facing grouping from this same status
+payload. They are read-only views, not a separate source of truth. Scripts
+should treat `summary.next_automatic_turn` in the quota-plan JSON as advisory
+and still respect the displayed health, operator, and evidence gates.
+
 ## Top-Level Shape
 
 ```json

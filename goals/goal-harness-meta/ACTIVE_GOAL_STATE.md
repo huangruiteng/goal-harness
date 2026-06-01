@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T02:25:00+08:00
+updated_at: 2026-06-02T02:39:24+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,26 @@ private project context.
 
 ## Next Action
 
-- Continue the compute quota v0.1 slice by adding the first agent-facing quota
-  planner command, such as `goal-harness quota status` or
-  `goal-harness quota plan`, that groups goals into `eligible`, `throttled`,
-  `waiting`, `operator_gate`, `paused`, and `blocked_health` using the same
-  compact status fields. Keep it read-only and do not add a settings page or
-  scheduler.
+- Continue the compute quota v0.1 slice by adding a per-goal automation guard,
+  such as `goal-harness quota should-run --goal-id <goal-id>` or a filtered
+  `quota plan --goal-id <goal-id>`, so heartbeat jobs can skip a tick with a
+  compact public-safe reason before spending compute. Keep it read-only and do
+  not add quota writes or a scheduler yet.
 
 ## Recent Progress
 
+- 2026-06-02T02:39:24+08:00: Added the first agent-facing quota planner CLI.
+  `goal-harness quota status` and `goal-harness quota plan` now derive
+  compute groups from the existing status contract instead of inventing a
+  separate scheduler truth source. The commands group registered goals under
+  `blocked_health`, `operator_gate`, `eligible`, `waiting`, `throttled`, and
+  `paused`, expose `summary.next_automatic_turn`, and keep health/operator/
+  evidence gates ahead of compute quota. `quota plan` hides empty groups in
+  Markdown so automations and project agents get a shorter next-turn view.
+  Updated README and quota/status docs. Validation covered Python compile,
+  `goal-harness quota status`, `goal-harness quota plan`, JSON quota-plan
+  parsing, unchanged status JSON parsing, public contract check, and
+  `git diff --check`.
 - 2026-06-02T02:25:00+08:00: Added compact compute quota to registry/status and
   trimmed dashboard attention load. Registry inspection now exposes a default
   `quota.compute=1.0` when no project declares one, and status attaches compact
