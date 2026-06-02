@@ -131,8 +131,12 @@ The allocation rule is intentionally small:
 Automations and controllers should treat `next_automatic_turn` as a scheduling
 hint, then ask `quota should-run --goal-id <goal-id>` immediately before
 spending compute. If the guard returns `should_run=false`, the executor should
-skip delivery work and follow the reported health, operator, evidence, pause, or
-throttle reason.
+skip the blocked delivery work and follow the reported health, operator,
+evidence, pause, or throttle reason. When `state=operator_gate` also returns
+`safe_bypass_allowed=true`, the target heartbeat may do one bounded read-only
+steering or analysis step that does not depend on that gate, but it must not
+execute `agent_command`, adapter work, write-control, production actions, or the
+gated path.
 
 ## Compute States
 
@@ -206,14 +210,19 @@ JSON or Markdown decision:
   "decision": "skip",
   "should_run": false,
   "state": "operator_gate",
-  "reason": "human or target-controller gate must clear before spending compute"
+  "reason": "operator gate blocks gated delivery; safe non-gated steering may continue",
+  "blocked_action_scope": "gated_delivery",
+  "safe_bypass_allowed": true
 }
 ```
 
 Only `state=eligible` returns `should_run=true`. Known goals that are gated,
 waiting, throttled, paused, or health-blocked return `ok=true` only when the
-status export itself is healthy, but still return `should_run=false`. Unknown
-goals or status collection failures return non-zero so automations fail closed.
+status export itself is healthy, but still return `should_run=false`.
+`safe_bypass_allowed=true` is not permission to clear the gate; it only says the
+agent can spend a bounded turn on independent read-only steering/analysis.
+Unknown goals or status collection failures return non-zero so automations fail
+closed.
 
 `quota spend-slot` is an accounting helper. By default it is dry-run only: it
 shows the before and after `should-run` decision for consuming slots and writes
@@ -230,8 +239,10 @@ Post-turn accounting protocol:
 - do the bounded automatic turn, validation, and required state refresh;
 - append exactly one `quota spend-slot --execute` event for that completed
   turn;
-- do not append spend for `should_run=false` skips, preflight failures, pure
-  dry-run previews, or duplicate accounting attempts.
+- do not append spend for quiet `should_run=false` skips, preflight failures,
+  pure dry-run previews, or duplicate accounting attempts;
+- if `should_run=false` but `safe_bypass_allowed=true` and the agent actually
+  completes bounded safe-bypass work, append one spend event for that work.
 
 ## Slot Spend Event Contract
 
@@ -275,7 +286,9 @@ The public fixture is
 
 Validation rule:
 
-- write only after a fresh `quota should-run` returned `should_run=true`;
+- write only after a fresh `quota should-run` returned `should_run=true`, or
+  after it returned `safe_bypass_allowed=true` and the agent completed one
+  bounded safe-bypass step;
 - `slots` must be positive, and `after.spent_slots` must equal
   `before.spent_slots + slots`;
 - if `after.spent_slots >= after.allowed_slots`, `after.state` should be

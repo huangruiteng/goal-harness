@@ -48,9 +48,20 @@ Before spending delivery compute, run:
 
 goal-harness --format json quota should-run --goal-id <GOAL_ID>
 
-If the result says should_run=false, do not do implementation work, adapter
-work, file edits, research, or project exploration in this turn. Return a quiet
-heartbeat DONT_NOTIFY response with the skip reason.
+If the result says should_run=false:
+
+- If the payload says state=operator_gate and safe_bypass_allowed=true, the
+  gate blocks only the gated delivery path. Do not execute agent_command,
+  adapter work, write-control, production actions, or the specific action that
+  needs the human/controller decision. You may still read the active state and
+  do exactly one bounded safe-bypass step from the Priority Stack, such as
+  read-only steering analysis, documentation, or another P0/P1 item that does
+  not depend on that gate. If you do a safe-bypass step, validate it, write back
+  progress/critic/next action, optionally refresh state, append exactly one
+  spend event, and report compactly.
+- Otherwise, do not do implementation work, adapter work, file edits, research,
+  or project exploration in this turn. Return a quiet heartbeat DONT_NOTIFY
+  response with the skip reason.
 
 If the result says should_run=true:
 
@@ -78,8 +89,11 @@ If the result says should_run=true:
    If the automation reserves a coarser fixed interval, set `--slots` to the
    number of scheduler minutes consumed by that completed turn.
 
-   Do not append spend for should_run=false skips, preflight failures, pure
-   dry-run previews, or duplicate accounting attempts.
+   Do not append spend for quiet should_run=false skips, preflight failures,
+   pure dry-run previews, or duplicate accounting attempts. If
+   should_run=false but safe_bypass_allowed=true and you actually completed a
+   bounded safe-bypass step, append this same spend event once after
+   validation/writeback.
 
 9. Return a compact final report. Use heartbeat NOTIFY only for meaningful user
    visibility, such as a committed artifact, a user gate, or a real blocker.
@@ -100,14 +114,17 @@ Create a heartbeat automation every <INTERVAL> for the current thread.
 Task:
 Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work, run
 `goal-harness --format json quota should-run --goal-id <GOAL_ID>`. If it returns
-`should_run=false`, skip quietly with DONT_NOTIFY. If it returns
-`should_run=true`, first compare candidate next actions across the priority
-stack, apply a continuation check for repeated topics, then do one bounded
-verifiable step, validate it, write back changed files / validation / critic /
-next action, refresh state if needed, and append exactly one `goal-harness quota
-spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute` event
-after the completed turn. Use `--slots 1` for minute-based heartbeats; for
-coarser intervals, spend the scheduler minutes consumed by that turn.
+`should_run=false`, skip quietly with DONT_NOTIFY unless it returns
+`state=operator_gate` plus `safe_bypass_allowed=true`; in that case, avoid the
+gated command and do at most one independent read-only steering/analysis step.
+If it returns `should_run=true`, first compare candidate next actions across
+the priority stack, apply a continuation check for repeated topics, then do one
+bounded verifiable step, validate it, write back changed files / validation /
+critic / next action, refresh state if needed, and append exactly one
+`goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat
+--execute` event after the completed turn. Use `--slots 1` for minute-based
+heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
+turn.
 ```
 
 ## Agent Checklist
@@ -115,7 +132,8 @@ coarser intervals, spend the scheduler minutes consumed by that turn.
 For every automatic heartbeat turn, the agent-facing checklist is:
 
 1. Guard first: `quota should-run`.
-2. Skip without compute when `should_run=false`.
+2. If `should_run=false`, either skip quietly or take one safe-bypass step when
+   `safe_bypass_allowed=true`.
 3. Run the steering audit before choosing the work.
 4. Work small when `should_run=true`.
 5. Validate before reporting.

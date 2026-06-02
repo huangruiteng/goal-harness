@@ -104,11 +104,16 @@ goal-harness new-project-prompt \
    goal-harness --format json quota should-run --goal-id <STABLE_GOAL_ID>
    ```
 
-   如果返回 `should_run=false`，本轮不要做实现或 adapter 工作，只记录
-   public-safe reason；不要执行任何 `agent_command`，即使 status 或 review
-   packet 里提到过命令。只有当返回 `should_run=true` 且 payload 里包含
-   `agent_command` 时，才执行该命令。如果 `should_run=true` 但没有
-   `agent_command`，只按 `recommended_action` 选择下一个安全只读动作。
+   如果返回 `should_run=false` 且不是 `safe_bypass_allowed=true`，本轮不要做实现或
+   adapter 工作，只记录 public-safe reason；不要执行任何 `agent_command`，即使
+   status 或 review packet 里提到过命令。如果返回 `state=operator_gate` 且
+   `safe_bypass_allowed=true`，该 gate 只阻塞被 gate 覆盖的 delivery path：不要执行
+   `agent_command`、adapter work、write-control、生产动作或该 gated action；但可以从
+   active state / Priority Stack 里选择一个不依赖该 gate 的 bounded 只读分析、
+   steering、文档或 P0/P1 工作。若实际完成 safe-bypass 工作，仍需验证、写回进展，
+   并 append 一次 quota spend。只有当返回 `should_run=true` 且 payload 里包含
+   `agent_command` 时，才执行该命令。如果 `should_run=true` 但没有 `agent_command`，
+   只按 `recommended_action` 选择下一个安全只读动作。
    如果命令非零，fail closed，先修
    `goal-harness doctor` / `goal-harness status`。这个 guard 不等于写权限、
    不绕过 operator gate、也不替代 human reward。
@@ -149,8 +154,9 @@ goal-harness new-project-prompt \
    goal-harness quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
    ```
 
-   不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账；
-   不要重复执行。
+   不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账；
+   如果 `should_run=false` 但实际完成了 `safe_bypass_allowed=true` 的 bounded
+   safe-bypass 工作，要记一次账。不要重复执行。
 10. 最后用中文汇报：
    - changed files；
    - validation output；

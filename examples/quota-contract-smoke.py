@@ -60,7 +60,12 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
-        "If the guard returns `should_run=false`, the executor should skip delivery work",
+        "skip the blocked delivery work and follow the reported health, operator",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "`safe_bypass_allowed=true`, the target heartbeat may do one bounded read-only steering or analysis step",
         label="quota doc",
     )
     assert_contains(
@@ -75,7 +80,7 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
-        "write only after a fresh `quota should-run` returned `should_run=true`",
+        "write only after a fresh `quota should-run` returned `should_run=true`, or after it returned `safe_bypass_allowed=true`",
         label="quota doc",
     )
     assert_contains(
@@ -100,7 +105,12 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
-        "do not append spend for `should_run=false` skips, preflight failures, pure dry-run previews",
+        "do not append spend for quiet `should_run=false` skips, preflight failures",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "if `should_run=false` but `safe_bypass_allowed=true` and the agent actually completes bounded safe-bypass work",
         label="quota doc",
     )
 
@@ -121,6 +131,11 @@ def main() -> int:
     )
     assert_contains(
         readme,
+        "`safe_bypass_allowed=true`, the target heartbeat may still do one bounded read-only steering or analysis step",
+        label="README",
+    )
+    assert_contains(
+        readme,
         "See `docs/quota-allocation.md` for the full allocation contract",
         label="README",
     )
@@ -131,7 +146,7 @@ def main() -> int:
     )
     assert_contains(
         readme,
-        "Do not append spend for `should_run=false` skips, preflight failures, or pure dry-run previews",
+        "Do not append spend for quiet `should_run=false` skips, preflight failures, or pure dry-run previews",
         label="README",
     )
     assert_contains(

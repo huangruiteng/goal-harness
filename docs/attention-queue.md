@@ -125,7 +125,10 @@ A registry entry can explicitly override first-screen attention with
 `next_handoff_condition`. This lets a controller keep a refreshed goal in the
 operator lane when the latest run is fresh but the real next step is still a
 human or target-controller decision. The override changes status and quota
-eligibility, but does not grant project-agent execution.
+eligibility, but does not grant project-agent execution. If quota later reports
+`safe_bypass_allowed=true`, the target heartbeat may work on another bounded
+read-only steering or analysis item from the active state, but it still must not
+execute the gated command or any adapter/write/production path.
 
 For complex goals, avoid encoding a whole reading queue in one long
 `recommended_action`. Keep `recommended_action` as one routing sentence, then
@@ -168,6 +171,9 @@ Agent executors should use `goal-harness quota should-run --goal-id <goal>`
 as the hard compute gate. While the item is still planned, that guard stays
 `should_run=false` and omits `agent_command`, even though status displays the
 preview command for the human operator.
+If the guard also reports `safe_bypass_allowed=true`, the agent can do one
+independent read-only steering or analysis step that does not depend on this
+operator gate; it cannot run the preview command until the gate is approved.
 Markdown status output also prints an `operator_gate_dry_run` helper before
 `agent_command`, so CLI-facing agents see that the operator gate is a
 user-owned dry-run preview before any project-agent handoff.

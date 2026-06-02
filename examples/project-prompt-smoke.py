@@ -21,16 +21,22 @@ GOAL_ID = "new-project-main-control"
 PROJECT = Path("/tmp/public-example-project")
 GOAL_DOC = Path("/tmp/public-example-project/GOAL.md")
 MUST_HAVE = (
+    "如果返回 `should_run=false` 且不是 `safe_bypass_allowed=true`",
     "不要执行任何 `agent_command`",
+    "如果返回 `state=operator_gate` 且 `safe_bypass_allowed=true`",
+    "该 gate 只阻塞被 gate 覆盖的 delivery path",
+    "选择一个不依赖该 gate 的 bounded 只读分析",
     "只有当返回 `should_run=true` 且 payload 里包含 `agent_command` 时，才执行该命令。",
-    "如果 `should_run=true` 但没有 `agent_command`，只按 `recommended_action` 选择下一个安全只读动作。",
+    "如果 `should_run=true` 但没有 `agent_command`",
+    "只按 `recommended_action` 选择下一个安全只读动作。",
 )
 SPEND_MUST_HAVE = (
     "validation 和必要的 `refresh-state` 完成后",
     "只 append 一次 quota spend",
     "goal-harness quota spend-slot --goal-id",
     "--source adapter --execute",
-    "不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账",
+    "不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账",
+    "实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账",
     "不要重复执行。",
 )
 HEARTBEAT_PROMPT_MUST_HAVE = (

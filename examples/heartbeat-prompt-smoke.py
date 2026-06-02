@@ -57,8 +57,10 @@ def main() -> int:
         "<GOAL_ID>",
         "goal-harness --format json quota should-run --goal-id <GOAL_ID>",
         "should_run=false",
+        "safe_bypass_allowed=true",
+        "gate blocks only the gated delivery path",
+        "one bounded safe-bypass step",
         "DONT_NOTIFY",
-        "do not do implementation work, adapter work, file edits, research, or project exploration",
         "should_run=true",
         "Run a short steering audit before choosing work",
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
@@ -70,7 +72,8 @@ def main() -> int:
         "goal-harness refresh-state --goal-id <GOAL_ID>",
         "goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute",
         "append exactly one",
-        "Do not append spend for should_run=false skips, preflight failures, pure dry-run previews, or duplicate accounting attempts",
+        "Do not append spend for quiet should_run=false skips, preflight failures, pure dry-run previews, or duplicate accounting attempts",
+        "safe_bypass_allowed=true and you actually completed a bounded safe-bypass step",
         "Return a compact final report",
     )
     compact_doc = normalized(doc)
@@ -79,6 +82,9 @@ def main() -> int:
     for phrase in (
         "goal-harness --format json quota should-run --goal-id public-heartbeat-goal",
         "should_run=false",
+        "safe_bypass_allowed=true",
+        "gate blocks only the gated delivery path",
+        "one bounded safe-bypass step",
         "DONT_NOTIFY",
         "Run a short steering audit before choosing work",
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
@@ -87,7 +93,7 @@ def main() -> int:
         "Choose exactly one bounded, verifiable step from that audit",
         "goal-harness refresh-state --goal-id public-heartbeat-goal",
         "goal-harness quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute",
-        "Do not append spend for `should_run=false` skips",
+        "Do not append spend for quiet `should_run=false` skips",
     ):
         assert phrase in compact_generated, phrase
 
@@ -96,6 +102,7 @@ def main() -> int:
         (
             "Before spending delivery compute, run:",
             "If the result says should_run=false",
+            "safe_bypass_allowed=true",
             "If the result says should_run=true",
             "Run a short steering audit before choosing work",
             "Choose exactly one bounded, verifiable step from that audit",

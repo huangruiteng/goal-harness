@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T17:49:00+08:00
+updated_at: 2026-06-02T18:03:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,12 +28,33 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit and choose one bounded P0 step. Compare
-  `todo add`, packet goal-id mismatch guard, and agent-harness project-local
-  state connection; prefer the mismatch guard if another agent sees the wrong
-  goal id.
+  packet goal-id mismatch guard, safe-bypass dashboard/prompt visibility, and
+  `todo add`; prefer the mismatch guard if another agent sees the wrong goal
+  id, otherwise keep polishing safe-bypass guidance for gated goals.
 
 ## Recent Progress
 
+- 2026-06-02T18:03:00+08:00: User challenged the platform migration guard
+  wording: `human or target-controller gate must clear before spending compute`
+  was too strict because an operator gate should not freeze unrelated high-value
+  P0 analysis while the user is deciding. Refined the contract from a global
+  freeze to a scoped blocker. `quota should-run` still returns
+  `should_run=false` for `state=operator_gate` and still omits
+  `agent_command`, but now includes `safe_bypass_allowed=true`,
+  `blocked_action_scope=gated_delivery`, and a policy saying the heartbeat may
+  do one independent read-only steering/analysis/documentation step that does
+  not depend on the gate. Updated heartbeat/new-project prompts, README, quota
+  docs, attention/status contracts, repo skill, and the installed local skill.
+  Changed files: `goal_harness/quota.py`, `goal_harness/heartbeat_prompt.py`,
+  `goal_harness/project_prompt.py`, `skills/goal-harness-project/SKILL.md`,
+  docs, and smoke tests. Validation: `python examples/run-smokes.py`,
+  `goal-harness check --scan-root .`, `npm --prefix apps/dashboard run build`,
+  and live `quota should-run --goal-id premium-ui-ai-search-rec-migration`
+  showing `should_run=false`, `state=operator_gate`,
+  `safe_bypass_allowed=true`, and no `agent_command`. Critic: this fixes the
+  overly conservative executor policy, but dashboard should eventually make
+  the safe-bypass lane visible so the user can see that a gated project is not
+  completely frozen.
 - 2026-06-02T17:49:00+08:00: Recorded the user's approval for
   `agent-harness-main-control` to run only `read-only-map --dry-run`, with no
   write-control or main-control takeover. The durable operator gate appended

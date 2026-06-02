@@ -59,9 +59,20 @@ Before spending delivery compute, run:
 {quota_guard_command}
 ```
 
-If the result says `should_run=false`, do not do implementation work, adapter
-work, file edits, research, or project exploration in this turn. Return a quiet
-heartbeat `DONT_NOTIFY` response with the skip reason.
+If the result says `should_run=false`:
+
+- If the payload says `state=operator_gate` and `safe_bypass_allowed=true`, the
+  gate blocks only the gated delivery path. Do not execute `agent_command`,
+  adapter work, write-control, production actions, or the specific action that
+  needs the human/controller decision. You may still read the active state and
+  do exactly one bounded safe-bypass step from the Priority Stack, such as
+  read-only steering analysis, documentation, or another P0/P1 item that does
+  not depend on that gate. If you do a safe-bypass step, validate it, write back
+  progress/critic/next action, optionally refresh state, append exactly one
+  spend event, and report compactly.
+- Otherwise, do not do implementation work, adapter work, file edits, research,
+  or project exploration in this turn. Return a quiet heartbeat `DONT_NOTIFY`
+  response with the skip reason.
 
 If the result says `should_run=true`:
 
@@ -90,8 +101,11 @@ If the result says `should_run=true`:
    {quota_spend_command}
    ```
 
-   Do not append spend for `should_run=false` skips, preflight failures, pure
-   dry-run previews, or duplicate accounting attempts.
+   Do not append spend for quiet `should_run=false` skips, preflight failures,
+   pure dry-run previews, or duplicate accounting attempts. If
+   `should_run=false` but `safe_bypass_allowed=true` and you actually completed
+   a bounded safe-bypass step, append this same spend event once after
+   validation/writeback.
 
 9. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
    user visibility, such as a committed artifact, a user gate, or a real

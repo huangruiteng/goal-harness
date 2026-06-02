@@ -329,7 +329,10 @@ Executor-facing guards are stricter than status display: `quota should-run`
 must keep these planned items at `should_run=false`, `state=operator_gate`, and
 must not include `agent_command` until an approved operator-gate run makes the
 goal eligible. This keeps a preview command from becoming an automatic project
-agent handoff.
+agent handoff. When the quota payload includes `safe_bypass_allowed=true`, that
+permission only covers independent read-only steering or analysis from the
+active state's priority stack; it still must not execute the gated preview
+command, adapter work, write-control, or production actions.
 
 Review Packet source-of-truth rule:
 
@@ -438,7 +441,9 @@ Goal shape:
     "allowed_slots": 720,
     "spent_slots": 0,
     "state": "operator_gate",
-    "reason": "human or target-controller gate must clear before spending compute"
+    "reason": "operator gate blocks gated delivery; safe non-gated steering may continue",
+    "blocked_action_scope": "gated_delivery",
+    "safe_bypass_allowed": true
   },
   "index_exists": true,
   "raw_index_records": 2,

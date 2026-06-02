@@ -203,7 +203,14 @@ def quota_status(
         reason = "health or contract blocker must clear before compute is spent"
     elif waiting_on in {"user_or_controller", "controller"}:
         state = "operator_gate"
-        reason = "human or target-controller gate must clear before spending compute"
+        reason = "operator gate blocks gated delivery; safe non-gated steering may continue"
+        payload["blocked_action_scope"] = "gated_delivery"
+        payload["safe_bypass_allowed"] = True
+        payload["safe_bypass_policy"] = (
+            "Do not execute agent_command, adapter work, write-control, production actions, "
+            "or the gated path. A heartbeat may spend one bounded turn on read-only steering, "
+            "analysis, documentation, or another priority-stack item that does not depend on this gate."
+        )
     elif waiting_on == "external_evidence":
         state = "waiting"
         reason = "external evidence is still pending; do not spend delivery compute yet"
@@ -367,6 +374,9 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "reason": reason,
             "quota": quota,
             "state": state,
+            "blocked_action_scope": quota.get("blocked_action_scope"),
+            "safe_bypass_allowed": bool(quota.get("safe_bypass_allowed")),
+            "safe_bypass_policy": quota.get("safe_bypass_policy"),
             "waiting_on": item.get("waiting_on"),
             "status": item.get("status"),
             "source": item.get("source"),
@@ -779,6 +789,12 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")
+    if payload.get("safe_bypass_allowed"):
+        lines.append(f"- safe_bypass_allowed: `{payload.get('safe_bypass_allowed')}`")
+    if payload.get("blocked_action_scope"):
+        lines.append(f"- blocked_action_scope: `{payload.get('blocked_action_scope')}`")
+    if payload.get("safe_bypass_policy"):
+        lines.append(f"- safe_bypass_policy: {payload.get('safe_bypass_policy')}")
     if payload.get("recommended_action"):
         lines.append(f"- recommended_action: {payload.get('recommended_action')}")
     if payload.get("agent_command"):

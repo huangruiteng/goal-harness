@@ -274,8 +274,11 @@ still choose its next action from the priority stack in
 `next_automatic_turn` reported by `quota plan` is only an advisory scheduling
 hint: it chooses the highest-compute eligible goal, while
 operator-gated, waiting, throttled, paused, and health-blocked goals stay out of
-the eligible lane. See `docs/quota-allocation.md` for the full allocation
-contract.
+the eligible lane. If `quota should-run` returns `state=operator_gate` with
+`safe_bypass_allowed=true`, the target heartbeat may still do one bounded
+read-only steering or analysis step that does not depend on that gate; it must
+not execute `agent_command`, adapter work, write-control, production actions, or
+the gated path. See `docs/quota-allocation.md` for the full allocation contract.
 
 After an automatic turn actually spends delivery compute, append one spend
 event after validation and any required state refresh:
@@ -288,8 +291,10 @@ Quota slots are minute-granularity by default. A minute-based heartbeat spends
 `--slots 1`; a coarser fixed-interval automation should spend the number of
 scheduler minutes consumed by the completed turn.
 
-Do not append spend for `should_run=false` skips, preflight failures, or pure
-dry-run previews. Do not run it more than once for the same completed turn.
+Do not append spend for quiet `should_run=false` skips, preflight failures, or
+pure dry-run previews. If `should_run=false` but `safe_bypass_allowed=true` and
+the heartbeat actually completes a bounded safe-bypass step, append one spend
+event for that work. Do not run it more than once for the same completed turn.
 For a reusable Codex App heartbeat task body, use
 [docs/heartbeat-automation-prompt.md](docs/heartbeat-automation-prompt.md), or
 generate one from the CLI:

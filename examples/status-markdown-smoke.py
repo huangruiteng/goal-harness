@@ -252,7 +252,11 @@ def assert_quota_should_run(payload: dict, *, expected: bool, state: str, waitin
         assert f"agent_command: `{APPROVED_COMMAND}`" in quota_markdown, quota_markdown
     else:
         assert quota_payload["decision"] == "skip", quota_payload
-        assert quota_payload["reason"] == "human or target-controller gate must clear before spending compute", quota_payload
+        if state == "operator_gate":
+            assert quota_payload["reason"] == "operator gate blocks gated delivery; safe non-gated steering may continue", quota_payload
+            assert quota_payload["safe_bypass_allowed"] is True, quota_payload
+            assert quota_payload["blocked_action_scope"] == "gated_delivery", quota_payload
+            assert "safe_bypass_allowed: `True`" in quota_markdown, quota_markdown
         assert "agent_command" not in quota_payload, quota_payload
         assert "agent_command:" not in quota_markdown, quota_markdown
     return quota_payload

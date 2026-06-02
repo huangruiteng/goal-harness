@@ -53,16 +53,25 @@ eligible:
 goal-harness --format json quota should-run --goal-id <STABLE_GOAL_ID>
 ```
 
-If the response has `should_run=false`, do not run implementation or adapter
-work for that goal in this turn. Quietly report or record the public-safe
-`reason` instead. If the command exits non-zero, fail closed: run
-`goal-harness doctor` / `goal-harness status` and fix status collection before
-spending compute.
+If the response has `should_run=false` and not `safe_bypass_allowed=true`, do
+not run implementation or adapter work for that goal in this turn. Quietly
+report or record the public-safe `reason` instead. If the command exits
+non-zero, fail closed: run `goal-harness doctor` / `goal-harness status` and fix
+status collection before spending compute.
+
+If the response has `state=operator_gate` and `safe_bypass_allowed=true`, the
+gate blocks only the gated delivery path. Do not execute `agent_command`,
+adapter work, write-control, production actions, or the specific action that
+needs the human/controller decision. You may still read the active state and do
+one bounded safe-bypass step from the Priority Stack, such as read-only steering
+analysis, documentation, or another P0/P1 item that does not depend on that
+gate. If that safe-bypass step actually spends automatic compute, validate it,
+write back progress/critic/next action, optionally refresh state, and append one
+quota spend event.
 
 This guard is only a compute-allocation check. It does not grant write
-permission, bypass operator gates, or replace run-bound human reward. Keep the
-hard order: health/safety -> operator gate -> evidence wait -> compute quota ->
-project-agent execution.
+permission, bypass operator gates, or replace run-bound human reward. Operator
+gates block the gated delivery path, not unrelated safe steering work.
 
 If `should_run=true`, do not simply continue the nearest previous TODO. Read the
 active state's Priority Stack, recent progress, and critic, then run a short

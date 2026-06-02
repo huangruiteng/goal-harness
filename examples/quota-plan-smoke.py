@@ -67,7 +67,7 @@ def attention(
 ) -> dict:
     allowed_slots = round(24 * 60 * compute) if allowed_slots is None else allowed_slots
     if state == "operator_gate":
-        reason = "human or target-controller gate must clear before spending compute"
+        reason = "operator gate blocks gated delivery; safe non-gated steering may continue"
     elif state == "throttled":
         reason = f"{compute:g} compute quota spent {spent_slots}/{allowed_slots} slots in this window"
     else:
@@ -87,6 +87,15 @@ def attention(
             "spent_slots": spent_slots,
             "state": state,
             "reason": reason,
+            **(
+                {
+                    "blocked_action_scope": "gated_delivery",
+                    "safe_bypass_allowed": True,
+                    "safe_bypass_policy": "Do not execute agent_command; safe steering only.",
+                }
+                if state == "operator_gate"
+                else {}
+            ),
         },
     }
 
@@ -481,6 +490,9 @@ def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
     assert operator_gate_ids == ["needs-operator"], operator_gate_ids
     assert throttled_ids == ["throttled-half"], throttled_ids
     assert "needs-operator" not in eligible_ids, eligible_ids
+    gated = plan["groups"]["operator_gate"][0]
+    assert gated["quota"]["safe_bypass_allowed"] is True, gated
+    assert gated["quota"]["blocked_action_scope"] == "gated_delivery", gated
     assert "throttled-half" not in eligible_ids, eligible_ids
     if markdown is not None:
         assert "next_automatic_turn=full-speed" in markdown, markdown
