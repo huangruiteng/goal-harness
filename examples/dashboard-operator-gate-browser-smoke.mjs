@@ -11,7 +11,9 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/dashboard");
 const fixtureName = "status.operator-gate.browser-smoke.json";
+const approvedFixtureName = "status.operator-gate-approved.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
+const approvedFixturePath = resolve(dashboardDir, "public", approvedFixtureName);
 const playwrightCliOutputDir = resolve(repoRoot, ".playwright-cli");
 const port = Number(process.env.GOAL_HARNESS_DASHBOARD_OPERATOR_GATE_SMOKE_PORT ?? "5192");
 const session = `ghog${process.pid}`;
@@ -21,6 +23,8 @@ const goalId = "planned-main-control";
 const operatorQuestion = "是否同意 `planned-main-control` 先执行 read-only map opt-in？";
 const recommendedAction = "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run";
 const previewCommand = "goal-harness read-only-map --goal-id planned-main-control --dry-run";
+const approvedAction = "operator approved read-only map; project agent can execute the approved dry-run";
+const approvedCommand = "goal-harness read-only-map --goal-id planned-main-control --dry-run --approved";
 
 const operatorGateQuota = {
   compute: 0.5,
@@ -116,6 +120,92 @@ const statusFixture = {
   },
 };
 
+const approvedStatusFixture = {
+  ...statusFixture,
+  run_count: 1,
+  attention_queue: {
+    ...statusFixture.attention_queue,
+    needs_user_or_controller: 0,
+    needs_codex: 1,
+    items: [
+      {
+        goal_id: goalId,
+        status: "operator_gate_approved",
+        lifecycle_phase: "mapped",
+        lifecycle_flags: ["mapped", "operator_approved"],
+        waiting_on: "codex",
+        severity: "action",
+        recommended_action: approvedAction,
+        agent_command: approvedCommand,
+        quota: {
+          compute: 0.5,
+          window_hours: 24,
+          allowed_slots: 12,
+          spent_slots: 0,
+          state: "eligible",
+          reason: "operator gate approved; eligible for the next agent turn",
+        },
+        source: "latest_run",
+      },
+    ],
+  },
+  run_history: {
+    ...statusFixture.run_history,
+    run_count: 1,
+    goals: [
+      {
+        ...statusFixture.run_history.goals[0],
+        status: "operator_gate_approved",
+        lifecycle_phase: "mapped",
+        lifecycle_flags: ["mapped", "operator_approved"],
+        index_exists: true,
+        raw_index_records: 1,
+        unique_runs: 1,
+        latest_runs: [
+          {
+            generated_at: "2026-01-01T00:01:00+00:00",
+            goal_id: goalId,
+            classification: "operator_gate_approved",
+            lifecycle_phase: "mapped",
+            lifecycle_flags: ["mapped", "operator_approved"],
+            recommended_action: approvedAction,
+            health_check: "fixture operator gate approved; agent_command 1/1",
+            json_exists: true,
+            markdown_exists: true,
+            operator_gate: {
+              recorded_at: "2026-01-01T00:01:00+00:00",
+              gate: "read_only_map_opt_in",
+              decision: "approve",
+              reason_summary: "approved read-only map dry-run only",
+              agent_command: approvedCommand,
+            },
+          },
+        ],
+      },
+    ],
+    recent_runs: [
+      {
+        generated_at: "2026-01-01T00:01:00+00:00",
+        goal_id: goalId,
+        classification: "operator_gate_approved",
+        lifecycle_phase: "mapped",
+        lifecycle_flags: ["mapped", "operator_approved"],
+        recommended_action: approvedAction,
+        health_check: "fixture operator gate approved; agent_command 1/1",
+        json_exists: true,
+        markdown_exists: true,
+        operator_gate: {
+          recorded_at: "2026-01-01T00:01:00+00:00",
+          gate: "read_only_map_opt_in",
+          decision: "approve",
+          reason_summary: "approved read-only map dry-run only",
+          agent_command: approvedCommand,
+        },
+      },
+    ],
+  },
+};
+
 function runPw(args, { allowFailure = false } = {}) {
   const result = spawnSync("bash", [pwcli, ...args], {
     cwd: repoRoot,
@@ -170,6 +260,7 @@ async function main() {
   }
 
   await writeFile(fixturePath, JSON.stringify(statusFixture, null, 2) + "\n", "utf-8");
+  await writeFile(approvedFixturePath, JSON.stringify(approvedStatusFixture, null, 2) + "\n", "utf-8");
 
   const server = spawn("npm", ["run", "dev", "--", "--port", String(port), "--strictPort"], {
     cwd: dashboardDir,
@@ -231,10 +322,55 @@ async function main() {
         };
       }`,
     ]);
+    runPw(["open", `${baseUrl}/?statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`]);
+    runPw([
+      "run-code",
+      String.raw`async (page) => {
+        await page.waitForLoadState("networkidle");
+        await page.getByText("User Actions").waitFor();
+        const body = await page.locator("body").innerText();
+        const required = [
+          "1 actions",
+          "Codex",
+          "Let Codex use the map",
+          "Codex can continue",
+          "Approved agent command",
+          "This command is valid because the operator gate was recorded as approved.",
+          "goal-harness read-only-map --goal-id planned-main-control --dry-run --approved",
+          "Operator approved",
+          "approve",
+          "Copy Review Packet",
+        ];
+        const missing = required.filter((text) => !body.includes(text));
+        if (missing.length) {
+          throw new Error("Missing approved dashboard text: " + missing.join(", "));
+        }
+        const forbidden = [
+          "Review controller opt-in",
+          "Needs approval",
+          "Operator question",
+          "Agent command ready after approval",
+          "Operator gate dry-run draft",
+        ];
+        const present = forbidden.filter((text) => body.includes(text));
+        if (present.length) {
+          throw new Error("Approved operator gate still looks user-gated: " + present.join(", "));
+        }
+        if (body.indexOf("Approved agent command") > body.indexOf("goal-harness read-only-map --goal-id planned-main-control --dry-run --approved")) {
+          throw new Error("Approved command should be visible directly under the approved handoff label.");
+        }
+        return {
+          ok: true,
+          approvedCommandVisible: body.includes("Approved agent command"),
+          operatorQuestionAbsent: !body.includes("Operator question"),
+        };
+      }`,
+    ]);
     console.log("dashboard-operator-gate-browser-smoke ok");
   } finally {
     server.kill("SIGTERM");
     await rm(fixturePath, { force: true });
+    await rm(approvedFixturePath, { force: true });
     runPw(["close"], { allowFailure: true });
     await removeWithRetry(playwrightCliOutputDir);
   }

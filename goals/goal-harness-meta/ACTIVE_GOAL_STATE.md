@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T11:52:53+08:00
+updated_at: 2026-06-02T12:00:21+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,13 +28,35 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. The controller review packet now includes a single suggested
-  decision line, so compare approved-gate transition coverage, project-agent
-  packet legibility, and real adapter proof once controller opt-in exists; do
-  not add more dashboard panels unless they reduce human review cost.
+  choosing work. Browser coverage now protects both the pending controller
+  gate and the approved agent-command handoff; next compare project-agent
+  packet legibility, real adapter proof once controller opt-in exists, and
+  attention-cost reduction. Do not add more dashboard panels unless they reduce
+  human review cost.
 
 ## Recent Progress
 
+- 2026-06-02T12:00:21+08:00: Used the required steering audit after the
+  suggested-decision dashboard slice. Candidates considered: P0 approved-gate
+  transition coverage, P0 real adapter proof, and P0 project-agent packet
+  legibility. Chose approved-gate transition coverage because real adapter
+  proof still requires a controller opt-in, while the dashboard contract needed
+  to prove that an approved operator gate becomes a Codex-ready handoff rather
+  than remaining user-gated. Extended
+  `examples/dashboard-operator-gate-browser-smoke.mjs` with an approved
+  operator-gate fixture. The smoke now loads both pending and approved status
+  payloads: pending must show controller approval copy and hide Codex-ready
+  copy; approved must show a Codex action, the approved agent command, and hide
+  operator-question / approval copy. Losing high-value candidate: project-agent
+  packet legibility remains the next P0 slice if no controller opt-in arrives.
+  Changed files: `examples/dashboard-operator-gate-browser-smoke.mjs` and this
+  active state. Validation: `node
+  examples/dashboard-operator-gate-browser-smoke.mjs` passed; `python3
+  examples/run-smokes.py` passed with 8 scripts; `goal-harness check
+  --scan-root .` passed; `git diff --check` passed. Critic: this improves
+  confidence in the human-decision state transition without expanding the UI;
+  the next work should either make the packet easier for project agents or wait
+  for a real controller opt-in.
 - 2026-06-02T11:52:53+08:00: Used the required steering audit after the
   global-registry sync slice. Candidates considered: P0 human-decision
   dashboard simplification, P0 real adapter proof, and P0 project-agent packet
