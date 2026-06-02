@@ -89,6 +89,12 @@ contains the pre-turn `quota should-run` guard, quiet `should_run=false` skip,
 bounded work, validation/writeback, optional `refresh-state`, and exactly one
 post-turn `quota spend-slot --source heartbeat --execute` event.
 
+Keep the Codex App visible goal text short, for example
+`按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short
+text as the automation body. Across projects, the automation body should be the
+same generated lifecycle prompt with only `goal_id`, `active_state`, and narrow
+project boundary rules changed.
+
 ## Generate A Review Packet
 
 When a project agent, controller thread, or local shell needs the current

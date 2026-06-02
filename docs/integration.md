@@ -83,6 +83,12 @@ Copy the generated task body into the heartbeat automation. The timer only
 wakes Codex; the task body asks Goal Harness whether the goal should spend
 delivery compute on that tick.
 
+The Codex App visible goal text can stay short, such as
+`按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. It is only a label for
+the human and the executor. The recurring automation prompt should use the
+generated heartbeat body above, so every project shares the same quota, gate,
+steering-audit, writeback, refresh, and spend lifecycle.
+
 In most real projects these files should be private. If they contain current
 work state or local evidence, add them to `.gitignore`:
 

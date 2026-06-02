@@ -110,8 +110,15 @@ def main() -> int:
     assert "goal-harness heartbeat-prompt" in readme, readme
     assert "goal-harness heartbeat-prompt" in doc, doc
     assert "goal-harness heartbeat-prompt" in integration_doc, integration_doc
+    assert "visible goal text can stay short" in integration_doc, integration_doc
+    assert "shares the same quota, gate," in integration_doc, integration_doc
+    assert "steering-audit, writeback, refresh, and spend lifecycle" in integration_doc, integration_doc
+    assert "Two Prompt Layers" in doc, doc
+    assert "Visible goal text" in doc, doc
+    assert "Heartbeat automation task body" in doc, doc
     assert "goal-harness heartbeat-prompt" in project_skill, project_skill
     assert "Set Up Recurring Heartbeats" in project_skill, project_skill
+    assert "visible goal text short" in project_skill, project_skill
     assert "--source heartbeat --execute" in project_skill, project_skill
 
     cli_json = subprocess.run(
