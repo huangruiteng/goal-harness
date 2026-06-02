@@ -104,15 +104,18 @@ goal-harness new-project-prompt \
    goal-harness --format json quota should-run --goal-id <STABLE_GOAL_ID>
    ```
 
-   如果返回 `should_run=false` 且不是 `safe_bypass_allowed=true`，本轮不要做实现或
-   adapter 工作，只记录 public-safe reason；不要执行任何 `agent_command`，即使
-   status 或 review packet 里提到过命令。如果返回 `state=operator_gate` 且
-   `safe_bypass_allowed=true`，该 gate 只阻塞被 gate 覆盖的 delivery path：不要执行
-   `agent_command`、adapter work、write-control、生产动作或该 gated action；但可以从
-   active state / Priority Stack 里选择一个不依赖该 gate 的 bounded 只读分析、
-   steering、文档或 P0/P1 工作。若实际完成 safe-bypass 工作，仍需验证、写回进展，
-   并 append 一次 quota spend。只有当返回 `should_run=true` 且 payload 里包含
-   `agent_command` 时，才执行该命令。如果 `should_run=true` 但没有 `agent_command`，
+   如果返回 `state=operator_gate`，把它当成人/控制器交互，而不是安静 skip：优先读取
+   payload 里的 `gate_prompt`、`operator_question`、`recommended_action`、
+   `next_handoff_condition`、`missing_gates` 和 `user_todo_summary`，用中文主动告诉用户
+   当前卡在哪个 gate、期望怎样回复。不要执行任何 `agent_command`、adapter work、
+   write-control、生产动作或该 gated action。如果同一个未决 gate 最近已经问过，且返回
+   `safe_bypass_allowed=true`，该 gate 只阻塞被 gate 覆盖的 delivery path；可以从
+   active state / Priority Stack 里选择一个不依赖该 gate 的 bounded 只读分析、steering、
+   文档或 P0/P1 工作。若实际完成 safe-bypass 工作，仍需验证、写回进展，并 append 一次
+   quota spend。如果返回 `should_run=false` 且不是 operator gate，本轮不要做实现或 adapter
+   工作，只记录 public-safe reason；不要执行任何 `agent_command`，即使 status 或 review
+   packet 里提到过命令。只有当返回 `should_run=true` 且 payload 里包含 `agent_command` 时，
+   才执行该命令。如果 `should_run=true` 但没有 `agent_command`，
    只按 `recommended_action` 选择下一个安全只读动作。
    如果命令非零，fail closed，先修
    `goal-harness doctor` / `goal-harness status`。这个 guard 不等于写权限、

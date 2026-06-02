@@ -256,6 +256,11 @@ def assert_quota_should_run(payload: dict, *, expected: bool, state: str, waitin
             assert quota_payload["reason"] == "operator gate blocks gated delivery; safe non-gated steering may continue", quota_payload
             assert quota_payload["safe_bypass_allowed"] is True, quota_payload
             assert quota_payload["blocked_action_scope"] == "gated_delivery", quota_payload
+            assert quota_payload["operator_question"], quota_payload
+            assert quota_payload["gate_prompt"], quota_payload
+            assert quota_payload["notify_user_on_gate"] is True, quota_payload
+            assert "Gate Prompt" in quota_markdown, quota_markdown
+            assert "建议回复格式" in quota_markdown, quota_markdown
             assert "safe_bypass_allowed: `True`" in quota_markdown, quota_markdown
         assert "agent_command" not in quota_payload, quota_payload
         assert "agent_command:" not in quota_markdown, quota_markdown

@@ -246,6 +246,71 @@ def _quota_sort_key(item: dict[str, Any]) -> tuple[int, float, int, str]:
     return (state_index, -compute, spent_slots, str(item.get("goal_id") or ""))
 
 
+def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    items = value.get("items") if isinstance(value.get("items"), list) else []
+    open_items: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("done") is True:
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        open_items.append(
+            {
+                "index": item.get("index"),
+                "text": text,
+            }
+        )
+    return {
+        "source_section": value.get("source_section"),
+        "total_count": value.get("total_count"),
+        "open_count": value.get("open_count", len(open_items)),
+        "done_count": value.get("done_count"),
+        "first_open_items": open_items[:3],
+    }
+
+
+def _build_gate_prompt(item: dict[str, Any]) -> str | None:
+    question = str(item.get("operator_question") or "").strip()
+    recommended_action = str(item.get("recommended_action") or "").strip()
+    next_handoff_condition = str(item.get("next_handoff_condition") or "").strip()
+    missing_gates = [
+        str(gate).strip()
+        for gate in (item.get("missing_gates") if isinstance(item.get("missing_gates"), list) else [])
+        if str(gate).strip()
+    ]
+    user_todo_summary = _summarize_user_todos(item.get("user_todos"))
+    first_open = (
+        user_todo_summary.get("first_open_items")
+        if isinstance(user_todo_summary, dict) and isinstance(user_todo_summary.get("first_open_items"), list)
+        else []
+    )
+
+    if not any([question, recommended_action, next_handoff_condition, missing_gates, first_open]):
+        return None
+
+    lines = ["请用户/控制器确认当前 gate："]
+    if question:
+        lines.append(f"- 问题：{question}")
+    if recommended_action:
+        lines.append(f"- 当前建议：{recommended_action}")
+    if next_handoff_condition:
+        lines.append(f"- 放行条件：{next_handoff_condition}")
+    if missing_gates:
+        lines.append(f"- 缺失 gate：{', '.join(missing_gates)}")
+    if isinstance(user_todo_summary, dict) and first_open:
+        open_count = user_todo_summary.get("open_count")
+        lines.append(f"- 用户待办：{open_count} 项未完成，优先确认：")
+        for todo in first_open:
+            index = todo.get("index")
+            prefix = f"  {index}. " if index is not None else "  - "
+            lines.append(f"{prefix}{todo.get('text')}")
+    lines.append("- 建议回复格式：同意 / 不同意 / 已完成 / 仍待确认 + 一句话原因。")
+    return "\n".join(lines)
+
+
 def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
     queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
     queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
@@ -297,6 +362,7 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "controller_stage",
             "missing_gates",
             "next_handoff_condition",
+            "user_todos",
         ):
             if optional_field in attention:
                 item[optional_field] = attention[optional_field]
@@ -383,6 +449,16 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "recommended_action": item.get("recommended_action"),
             "plan_summary": plan.get("summary"),
         }
+        if item.get("operator_question"):
+            payload["operator_question"] = item.get("operator_question")
+        if item.get("missing_gates"):
+            payload["missing_gates"] = item.get("missing_gates")
+        if item.get("user_todos"):
+            payload["user_todo_summary"] = _summarize_user_todos(item.get("user_todos"))
+        gate_prompt = _build_gate_prompt(item) if state == "operator_gate" else None
+        if gate_prompt:
+            payload["gate_prompt"] = gate_prompt
+            payload["notify_user_on_gate"] = True
         if item.get("next_handoff_condition"):
             payload["next_handoff_condition"] = item.get("next_handoff_condition")
         if should_run and item.get("agent_command"):
@@ -457,7 +533,11 @@ def build_quota_slot_preview(
     safe_goal_id = str(goal_id or "").strip()
     safe_slots = max(1, _int_number(slots, default=1))
     before = build_quota_should_run(status_payload, goal_id=safe_goal_id)
-    if not before.get("ok") or not before.get("should_run"):
+    safe_bypass_spend = (
+        before.get("state") == "operator_gate"
+        and before.get("safe_bypass_allowed") is True
+    )
+    if not before.get("ok") or (not before.get("should_run") and not safe_bypass_spend):
         return {
             "ok": False,
             "mode": "spend-slot",
@@ -517,6 +597,7 @@ def build_quota_slot_preview(
             f"dry-run preview: spending {safe_slots} slot(s) would move "
             f"{safe_goal_id} from {before.get('state')} to {after.get('state')}"
         ),
+        "safe_bypass_spend": safe_bypass_spend,
     }
 
 
@@ -525,6 +606,8 @@ def _compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
     return {
         "should_run": bool(decision.get("should_run")),
         "state": str(decision.get("state") or ""),
+        "safe_bypass_allowed": bool(decision.get("safe_bypass_allowed")),
+        "blocked_action_scope": decision.get("blocked_action_scope"),
         "compute": quota.get("compute"),
         "window_hours": quota.get("window_hours"),
         "slot_minutes": quota.get("slot_minutes"),
@@ -549,24 +632,37 @@ def build_quota_slot_spend_event(
     slots = max(1, _int_number(preview.get("slots"), default=1))
     before_compact = _compact_quota_decision(before)
     after_compact = _compact_quota_decision(after)
-    if before_compact["should_run"] is not True or before_compact["state"] != "eligible":
-        raise ValueError("quota slot spend requires a fresh eligible quota should-run decision")
     if _int_number(after_compact.get("spent_slots"), default=0) != _int_number(
         before_compact.get("spent_slots"), default=0
     ) + slots:
         raise ValueError("after.spent_slots must equal before.spent_slots + slots")
+    eligible_spend = before_compact["should_run"] is True and before_compact["state"] == "eligible"
+    safe_bypass_spend = (
+        before_compact["state"] == "operator_gate"
+        and before_compact["safe_bypass_allowed"] is True
+    )
+    if not eligible_spend and not safe_bypass_spend:
+        raise ValueError("quota slot spend requires an eligible or safe-bypass quota should-run decision")
 
     return {
         "generated_at": generated_at or _now_local(),
         "goal_id": preview.get("goal_id"),
         "classification": QUOTA_SLOT_SPENT_CLASSIFICATION,
         "recommended_action": after.get("recommended_action") or "inspect next quota should-run decision",
-        "health_check": "quota should-run eligible; quota slot spend event public-safe",
+        "health_check": (
+            "quota should-run eligible; quota slot spend event public-safe"
+            if eligible_spend
+            else "quota safe-bypass operator gate; quota slot spend event public-safe"
+        ),
         "quota_event": {
             "event_type": QUOTA_SLOT_SPENT_CLASSIFICATION,
             "source": safe_source,
             "slots": slots,
-            "reason_summary": f"{slots} automatic agent slot(s) completed under an eligible quota guard",
+            "reason_summary": (
+                f"{slots} automatic agent slot(s) completed under an eligible quota guard"
+                if eligible_spend
+                else f"{slots} automatic agent slot(s) completed as safe-bypass work under an operator gate"
+            ),
             "before": before_compact,
             "after": after_compact,
         },
@@ -795,6 +891,21 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- blocked_action_scope: `{payload.get('blocked_action_scope')}`")
     if payload.get("safe_bypass_policy"):
         lines.append(f"- safe_bypass_policy: {payload.get('safe_bypass_policy')}")
+    if payload.get("operator_question"):
+        lines.append(f"- operator_question: {payload.get('operator_question')}")
+    if payload.get("notify_user_on_gate"):
+        lines.append(f"- notify_user_on_gate: `{payload.get('notify_user_on_gate')}`")
+    if payload.get("gate_prompt"):
+        lines.extend(["", "## Gate Prompt", str(payload.get("gate_prompt"))])
+    user_todo_summary = (
+        payload.get("user_todo_summary") if isinstance(payload.get("user_todo_summary"), dict) else {}
+    )
+    if user_todo_summary:
+        lines.append(
+            "- user_todo_summary: "
+            f"open={user_todo_summary.get('open_count')} "
+            f"total={user_todo_summary.get('total_count')}"
+        )
     if payload.get("recommended_action"):
         lines.append(f"- recommended_action: {payload.get('recommended_action')}")
     if payload.get("agent_command"):

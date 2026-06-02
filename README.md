@@ -275,10 +275,13 @@ still choose its next action from the priority stack in
 hint: it chooses the highest-compute eligible goal, while
 operator-gated, waiting, throttled, paused, and health-blocked goals stay out of
 the eligible lane. If `quota should-run` returns `state=operator_gate` with
-`safe_bypass_allowed=true`, the target heartbeat may still do one bounded
-read-only steering or analysis step that does not depend on that gate; it must
-not execute `agent_command`, adapter work, write-control, production actions, or
-the gated path. See `docs/quota-allocation.md` for the full allocation contract.
+`gate_prompt` or `operator_question`, the target heartbeat should proactively
+ask that concrete user/controller gate unless the same unresolved question was
+already surfaced recently. If it also returns `safe_bypass_allowed=true`, the
+heartbeat may still do one bounded read-only steering or analysis step that
+does not depend on that gate; it must not execute `agent_command`, adapter work,
+write-control, production actions, or the gated path. See
+`docs/quota-allocation.md` for the full allocation contract.
 
 After an automatic turn actually spends delivery compute, append one spend
 event after validation and any required state refresh:

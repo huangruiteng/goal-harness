@@ -212,7 +212,9 @@ JSON or Markdown decision:
   "state": "operator_gate",
   "reason": "operator gate blocks gated delivery; safe non-gated steering may continue",
   "blocked_action_scope": "gated_delivery",
-  "safe_bypass_allowed": true
+  "safe_bypass_allowed": true,
+  "operator_question": "是否同意 project-main-control 先做 read-only map dry-run？",
+  "gate_prompt": "请用户/控制器确认当前 gate：..."
 }
 ```
 
@@ -221,6 +223,12 @@ waiting, throttled, paused, or health-blocked return `ok=true` only when the
 status export itself is healthy, but still return `should_run=false`.
 `safe_bypass_allowed=true` is not permission to clear the gate; it only says the
 agent can spend a bounded turn on independent read-only steering/analysis.
+For `state=operator_gate`, `quota should-run` should also surface
+`gate_prompt`, `operator_question`, `next_handoff_condition`, `missing_gates`,
+or `user_todo_summary` when those fields are available. A heartbeat should use
+that prompt to ask the user or target controller the concrete gate question
+instead of silently skipping, unless the same unresolved gate was already asked
+in the recent visible thread.
 Unknown goals or status collection failures return non-zero so automations fail
 closed.
 
@@ -298,8 +306,9 @@ Validation rule:
   event.
 
 This event is accounting, not permission. It records that compute was spent
-after the normal health, operator, evidence, and quota gates had already
-allowed the turn.
+after the normal health/evidence/quota checks allowed the turn, or after an
+operator gate explicitly scoped its block to the gated delivery path and allowed
+one independent safe-bypass step.
 
 Other write commands can stay behind explicit operator approval:
 

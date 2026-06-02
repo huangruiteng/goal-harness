@@ -21,12 +21,18 @@ GOAL_ID = "new-project-main-control"
 PROJECT = Path("/tmp/public-example-project")
 GOAL_DOC = Path("/tmp/public-example-project/GOAL.md")
 MUST_HAVE = (
-    "如果返回 `should_run=false` 且不是 `safe_bypass_allowed=true`",
+    "如果返回 `state=operator_gate`",
+    "把它当成人/控制器交互，而不是安静 skip",
+    "`gate_prompt`、`operator_question`、`recommended_action`",
+    "`next_handoff_condition`、`missing_gates`",
+    "`user_todo_summary`",
     "不要执行任何 `agent_command`",
-    "如果返回 `state=operator_gate` 且 `safe_bypass_allowed=true`",
+    "如果同一个未决 gate 最近已经问过，且返回 `safe_bypass_allowed=true`",
     "该 gate 只阻塞被 gate 覆盖的 delivery path",
     "选择一个不依赖该 gate 的 bounded 只读分析",
-    "只有当返回 `should_run=true` 且 payload 里包含 `agent_command` 时，才执行该命令。",
+    "如果返回 `should_run=false` 且不是 operator gate",
+    "只有当返回 `should_run=true` 且 payload 里包含 `agent_command` 时",
+    "才执行该命令。",
     "如果 `should_run=true` 但没有 `agent_command`",
     "只按 `recommended_action` 选择下一个安全只读动作。",
 )

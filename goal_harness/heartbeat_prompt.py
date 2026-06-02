@@ -61,15 +61,22 @@ Before spending delivery compute, run:
 
 If the result says `should_run=false`:
 
-- If the payload says `state=operator_gate` and `safe_bypass_allowed=true`, the
-  gate blocks only the gated delivery path. Do not execute `agent_command`,
-  adapter work, write-control, production actions, or the specific action that
-  needs the human/controller decision. You may still read the active state and
-  do exactly one bounded safe-bypass step from the Priority Stack, such as
-  read-only steering analysis, documentation, or another P0/P1 item that does
-  not depend on that gate. If you do a safe-bypass step, validate it, write back
-  progress/critic/next action, optionally refresh state, append exactly one
-  spend event, and report compactly.
+- If the payload says `state=operator_gate`, treat the gate as a user/controller
+  interaction, not as a silent skip. Read `gate_prompt`, `operator_question`,
+  `recommended_action`, `next_handoff_condition`, `missing_gates`, and
+  `user_todo_summary` from the payload. If the same unresolved gate has not
+  already been asked in the recent visible thread, return heartbeat `NOTIFY`
+  with one concise Chinese question that lists the gate and the expected reply
+  format. Do not execute `agent_command`, adapter work, write-control,
+  production actions, or the gated path while asking.
+- If the payload also says `safe_bypass_allowed=true` and the same gate has
+  already been surfaced, the gate blocks only the gated delivery path. You may
+  read the active state and do exactly one bounded safe-bypass step from the
+  Priority Stack, such as read-only steering analysis, documentation, or another
+  P0/P1 item that does not depend on that gate. If you do a safe-bypass step,
+  validate it, write back progress/critic/next action, optionally refresh state,
+  append exactly one spend event, and report compactly. If no useful safe-bypass
+  step exists, report the pending gate compactly instead of doing work.
 - Otherwise, do not do implementation work, adapter work, file edits, research,
   or project exploration in this turn. Return a quiet heartbeat `DONT_NOTIFY`
   response with the skip reason.

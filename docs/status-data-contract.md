@@ -332,7 +332,11 @@ goal eligible. This keeps a preview command from becoming an automatic project
 agent handoff. When the quota payload includes `safe_bypass_allowed=true`, that
 permission only covers independent read-only steering or analysis from the
 active state's priority stack; it still must not execute the gated preview
-command, adapter work, write-control, or production actions.
+command, adapter work, write-control, or production actions. When the payload
+also includes `gate_prompt`, `operator_question`, or `user_todo_summary`, the
+executor should ask that concrete gate in the visible thread with `NOTIFY`
+unless the same unresolved gate was already asked recently; the guard should not
+collapse a user decision into a silent skip.
 
 Review Packet source-of-truth rule:
 

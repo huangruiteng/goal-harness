@@ -174,6 +174,12 @@ preview command for the human operator.
 If the guard also reports `safe_bypass_allowed=true`, the agent can do one
 independent read-only steering or analysis step that does not depend on this
 operator gate; it cannot run the preview command until the gate is approved.
+Before taking that safe-bypass step, the agent should surface the current gate
+to the user/controller if the same unresolved question was not already asked in
+the recent visible thread. `quota should-run` exposes `gate_prompt`,
+`operator_question`, and `user_todo_summary` so the agent can ask one concrete
+Chinese question instead of silently skipping or forcing the user to inspect the
+dashboard manually.
 Markdown status output also prints an `operator_gate_dry_run` helper before
 `agent_command`, so CLI-facing agents see that the operator gate is a
 user-owned dry-run preview before any project-agent handoff.

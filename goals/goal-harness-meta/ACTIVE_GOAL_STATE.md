@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T18:03:00+08:00
+updated_at: 2026-06-02T18:21:18+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,12 +28,36 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit and choose one bounded P0 step. Compare
-  packet goal-id mismatch guard, safe-bypass dashboard/prompt visibility, and
-  `todo add`; prefer the mismatch guard if another agent sees the wrong goal
-  id, otherwise keep polishing safe-bypass guidance for gated goals.
+  Review Packet goal-id mismatch guard, `goal-harness todo add --role
+  user|agent`, and dashboard gate/todo first-screen simplification; prefer the
+  mismatch guard if another project agent still sees a packet for the wrong
+  goal, otherwise add the todo CLI because user/agent todo injection is now the
+  next lowest-friction project-agent loop gap.
 
 ## Recent Progress
 
+- 2026-06-02T18:21:18+08:00: User pointed out that the platform migration
+  heartbeat UX was still poor: when a real gate exists, the agent should
+  proactively ask the user which gate decision or todo progress is needed,
+  instead of silently saying `should_run=false`. Refined the operator-gate
+  contract again. `quota should-run` now carries `operator_question`,
+  `gate_prompt`, `notify_user_on_gate`, and a compact `user_todo_summary` for
+  `state=operator_gate`, while still omitting `agent_command` and returning
+  `should_run=false`. Heartbeat and new-project prompts now say to send a
+  concise Chinese `NOTIFY` gate question unless the same unresolved gate was
+  already asked recently; safe-bypass work is only the follow-up path after the
+  gate has already been surfaced. Also fixed quota accounting so a completed
+  safe-bypass turn can preview/spend a quota slot even though the goal remains
+  `state=operator_gate`. Updated README, quota/status/attention/heartbeat/new
+  project docs, repo skill, installed local skill, and smoke tests. Validation:
+  `python examples/run-smokes.py`, `goal-harness check --scan-root .`, live
+  `quota should-run --goal-id premium-ui-ai-search-rec-migration` showing
+  `notify_user_on_gate=true`, the real owner/SOP `gate_prompt`, and
+  `user_todo_summary.open_count=9`; live `quota spend-slot --source heartbeat`
+  dry-run for that gated goal now returns `ok=true` and
+  `safe_bypass_spend=true`. Critic: this fixes the thread-level gate UX, but
+  the dashboard still needs pruning so the same gate/todo is visible without
+  extra panels or copy affordances.
 - 2026-06-02T18:03:00+08:00: User challenged the platform migration guard
   wording: `human or target-controller gate must clear before spending compute`
   was too strict because an operator gate should not freeze unrelated high-value

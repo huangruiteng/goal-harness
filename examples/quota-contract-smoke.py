@@ -70,6 +70,16 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
+        "`gate_prompt`, `operator_question`, `next_handoff_condition`, `missing_gates`, or `user_todo_summary`",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "ask the user or target controller the concrete gate question instead of silently skipping",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
         "## Slot Spend Event Contract",
         label="quota doc",
     )
@@ -131,7 +141,12 @@ def main() -> int:
     )
     assert_contains(
         readme,
-        "`safe_bypass_allowed=true`, the target heartbeat may still do one bounded read-only steering or analysis step",
+        "`gate_prompt` or `operator_question`, the target heartbeat should proactively ask that concrete user/controller gate",
+        label="README",
+    )
+    assert_contains(
+        readme,
+        "`safe_bypass_allowed=true`, the heartbeat may still do one bounded read-only steering or analysis step",
         label="README",
     )
     assert_contains(
@@ -182,6 +197,11 @@ def main() -> int:
     assert_contains(
         status_contract,
         "operator-gated, waiting, throttled, paused, and health-blocked goals must stay out of the eligible lane",
+        label="status contract",
+    )
+    assert_contains(
+        status_contract,
+        "ask that concrete gate in the visible thread with `NOTIFY`",
         label="status contract",
     )
 

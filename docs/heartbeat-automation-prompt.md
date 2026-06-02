@@ -50,15 +50,23 @@ goal-harness --format json quota should-run --goal-id <GOAL_ID>
 
 If the result says should_run=false:
 
-- If the payload says state=operator_gate and safe_bypass_allowed=true, the
-  gate blocks only the gated delivery path. Do not execute agent_command,
-  adapter work, write-control, production actions, or the specific action that
-  needs the human/controller decision. You may still read the active state and
-  do exactly one bounded safe-bypass step from the Priority Stack, such as
-  read-only steering analysis, documentation, or another P0/P1 item that does
-  not depend on that gate. If you do a safe-bypass step, validate it, write back
-  progress/critic/next action, optionally refresh state, append exactly one
-  spend event, and report compactly.
+- If the payload says state=operator_gate, treat the gate as a user/controller
+  interaction, not as a silent skip. Read gate_prompt, operator_question,
+  recommended_action, next_handoff_condition, missing_gates, and
+  user_todo_summary from the payload. If the same unresolved gate has not
+  already been asked in the recent visible thread, return heartbeat NOTIFY with
+  one concise Chinese question that lists the gate and the expected reply
+  format. Do not execute agent_command, adapter work, write-control, production
+  actions, or the gated path while asking.
+- If the payload also says safe_bypass_allowed=true and the same gate has
+  already been surfaced, the gate blocks only the gated delivery path. You may
+  still read the active state and do exactly one bounded safe-bypass step from
+  the Priority Stack, such as read-only steering analysis, documentation, or
+  another P0/P1 item that does not depend on that gate. If you do a safe-bypass
+  step, validate it, write back progress/critic/next action, optionally refresh
+  state, append exactly one spend event, and report compactly. If no useful
+  safe-bypass step exists, report the pending gate compactly instead of doing
+  work.
 - Otherwise, do not do implementation work, adapter work, file edits, research,
   or project exploration in this turn. Return a quiet heartbeat DONT_NOTIFY
   response with the skip reason.
@@ -114,9 +122,11 @@ Create a heartbeat automation every <INTERVAL> for the current thread.
 Task:
 Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work, run
 `goal-harness --format json quota should-run --goal-id <GOAL_ID>`. If it returns
-`should_run=false`, skip quietly with DONT_NOTIFY unless it returns
-`state=operator_gate` plus `safe_bypass_allowed=true`; in that case, avoid the
-gated command and do at most one independent read-only steering/analysis step.
+`should_run=false`, ask about operator gates with NOTIFY using `gate_prompt`
+unless the same unresolved gate was already surfaced recently. If it returns
+`state=operator_gate` plus `safe_bypass_allowed=true`, avoid the gated command
+and do at most one independent read-only steering/analysis step after the gate
+has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
 the priority stack, apply a continuation check for repeated topics, then do one
 bounded verifiable step, validate it, write back changed files / validation /
@@ -132,14 +142,16 @@ turn.
 For every automatic heartbeat turn, the agent-facing checklist is:
 
 1. Guard first: `quota should-run`.
-2. If `should_run=false`, either skip quietly or take one safe-bypass step when
-   `safe_bypass_allowed=true`.
-3. Run the steering audit before choosing the work.
-4. Work small when `should_run=true`.
-5. Validate before reporting.
-6. Refresh state when the run is state-only.
-7. Spend exactly once after the completed turn.
-8. Report compactly.
+2. If `should_run=false` with `state=operator_gate`, ask the user/controller the
+   current gate unless the same unresolved gate was already surfaced recently.
+3. If the gate was already surfaced and `safe_bypass_allowed=true`, either take
+   one independent safe-bypass step or report the pending gate compactly.
+4. Run the steering audit before choosing the work.
+5. Work small when `should_run=true`.
+6. Validate before reporting.
+7. Refresh state when the run is state-only.
+8. Spend exactly once after the completed turn.
+9. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode

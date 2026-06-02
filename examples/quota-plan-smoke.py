@@ -79,6 +79,27 @@ def attention(
         "severity": "action",
         "recommended_action": f"continue {goal_id}",
         "source": "fixture",
+        **(
+            {
+                "operator_question": f"是否同意 {goal_id} 继续 gated delivery？",
+                "next_handoff_condition": "operator decision recorded",
+                "user_todos": {
+                    "source_section": "User Todo",
+                    "total_count": 1,
+                    "open_count": 1,
+                    "done_count": 0,
+                    "items": [
+                        {
+                            "index": 1,
+                            "done": False,
+                            "text": "Confirm the operator gate.",
+                        }
+                    ],
+                },
+            }
+            if state == "operator_gate"
+            else {}
+        ),
         "quota": {
             "compute": compute,
             "window_hours": 24,
@@ -493,6 +514,9 @@ def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
     gated = plan["groups"]["operator_gate"][0]
     assert gated["quota"]["safe_bypass_allowed"] is True, gated
     assert gated["quota"]["blocked_action_scope"] == "gated_delivery", gated
+    assert "operator_question" in gated, gated
+    if "user_todos" in gated:
+        assert gated["user_todos"]["open_count"] == 1, gated
     assert "throttled-half" not in eligible_ids, eligible_ids
     if markdown is not None:
         assert "next_automatic_turn=full-speed" in markdown, markdown
@@ -525,6 +549,32 @@ def assert_throttled_should_run(status_payload: dict) -> None:
     assert quota["spent_slots"] == 12, payload
     assert quota["allowed_slots"] == 12, payload
     assert "spent 12/12" in payload["reason"], payload
+
+
+def assert_operator_gate_should_run(status_payload: dict) -> None:
+    payload = build_quota_should_run(status_payload, goal_id="needs-operator")
+
+    assert payload["ok"] is True, payload
+    assert payload["decision"] == "skip", payload
+    assert payload["should_run"] is False, payload
+    assert payload["state"] == "operator_gate", payload
+    assert payload["safe_bypass_allowed"] is True, payload
+    assert payload["notify_user_on_gate"] is True, payload
+    assert payload["operator_question"] == "是否同意 needs-operator 继续 gated delivery？", payload
+    assert payload["user_todo_summary"]["open_count"] == 1, payload
+    assert "请用户/控制器确认当前 gate" in payload["gate_prompt"], payload
+    assert "Confirm the operator gate." in payload["gate_prompt"], payload
+
+
+def assert_safe_bypass_slot_preview(status_payload: dict) -> None:
+    payload = build_quota_slot_preview(status_payload, goal_id="needs-operator", slots=1)
+
+    assert payload["ok"] is True, payload
+    assert payload["safe_bypass_spend"] is True, payload
+    assert payload["before"]["state"] == "operator_gate", payload
+    assert payload["before"]["safe_bypass_allowed"] is True, payload
+    assert payload["after"]["state"] == "operator_gate", payload
+    assert payload["after"]["quota"]["spent_slots"] == payload["before"]["quota"]["spent_slots"] + 1, payload
 
 
 def assert_throttled_cli_should_run(payload: dict) -> None:
@@ -625,6 +675,8 @@ def main() -> int:
     markdown = render_quota_markdown(plan)
     assert_plan_shape(plan, markdown)
     assert_throttled_should_run(status_payload)
+    assert_operator_gate_should_run(status_payload)
+    assert_safe_bypass_slot_preview(status_payload)
     assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:
         cli_plan, cli_markdown = run_cli_quota_plan(Path(tmp))
