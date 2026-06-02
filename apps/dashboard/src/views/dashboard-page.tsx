@@ -1723,25 +1723,18 @@ function UserActionSummary({
                     )}
                     key={actionKey}
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={userActionKindConfig[item.kind].variant}>{userActionKindConfig[item.kind].label}</Badge>
-                      <Badge variant={item.variant}>{item.badge}</Badge>
-                      {item.goalId === selectedGoalId ? <Badge variant="success">Selected</Badge> : null}
-                      <PhaseBadges compact phase={item.phase} />
-                      {item.waitingOn !== "clear" ? (
-                        <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
-                      ) : null}
-                      <QuotaChip quota={item.quota} />
-                      {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
                       <button
-                        className="min-w-0 text-left"
+                        className="min-w-0 flex-1 text-left"
                         onClick={() => onSelectGoal(item.goalId)}
                         type="button"
                       >
-                        <div className="break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
-                        <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="neutral">Project</Badge>
+                          {item.goalId === selectedGoalId ? <Badge variant="success">Selected</Badge> : null}
+                        </div>
+                        <div className="mt-1 break-all text-base font-semibold leading-6 text-slate-950 dark:text-zinc-50">{item.goalId}</div>
+                        <div className="mt-1 break-words text-sm font-medium text-slate-600 dark:text-zinc-300">{item.title}</div>
                       </button>
                       <div className="flex flex-wrap items-center gap-2">
                         {copyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
@@ -1758,6 +1751,16 @@ function UserActionSummary({
                           {copyState === "copied" ? "Copied" : "Copy"}
                         </Button>
                       </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Badge variant={userActionKindConfig[item.kind].variant}>{userActionKindConfig[item.kind].label}</Badge>
+                      <Badge variant={item.variant}>{item.badge}</Badge>
+                      <PhaseBadges compact phase={item.phase} />
+                      {item.waitingOn !== "clear" ? (
+                        <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
+                      ) : null}
+                      <QuotaChip quota={item.quota} />
+                      {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
                     </div>
                     <UserTodoCallout blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))} todos={item.userTodos} />
                     {item.operatorQuestion ? (

@@ -34,7 +34,9 @@ with another local operator or agent. The selected goal is also URL-backed via
 selected goal detail. The adjacent first-screen `Selected action share`
 control copies the current `actionKind`, selected `goalId`, source
 `statusUrl`, and queue filters as browser UI state only. Each first-screen
-action card intentionally has one canonical copy affordance: `Copy`. The
+action card leads with the project id before the action title, because
+operators usually choose by project first and then inspect the requested
+action. Each card intentionally has one canonical copy affordance: `Copy`. The
 copied handoff starts as a short `【GH Packet】` with the selected card's user
 todo, gate, safety boundary, safe path, command, and project-agent stop rule, so
 an operator can click a different card to switch the target instead of choosing

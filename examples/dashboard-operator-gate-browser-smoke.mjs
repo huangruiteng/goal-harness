@@ -318,6 +318,20 @@ function requireExactTextCount(body, text, expected, label) {
   }
 }
 
+function requireTextOrder(body, texts, label) {
+  let cursor = -1;
+  for (const text of texts) {
+    const next = body.indexOf(text, cursor + 1);
+    if (next < 0) {
+      throw new Error(`Missing ${label} ordered text: ${text}`);
+    }
+    if (next < cursor) {
+      throw new Error(`${label}: expected ${texts.join(" -> ")}`);
+    }
+    cursor = next;
+  }
+}
+
 async function readBodyText({ requiredText = "User Actions", timeoutMs = 15_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let body = "";
@@ -419,6 +433,8 @@ async function main() {
     let body = await readBodyText({ requiredText: "Copy" });
     requireTexts(body, [
       "1 actions",
+      "Project",
+      goalId,
       "Controller",
       "Review controller opt-in",
       "Needs approval",
@@ -446,6 +462,7 @@ async function main() {
     ], "Operator-gated goal leaked into confusing UI");
     requireExactTextCount(body, "Review controller opt-in", 1, "All-actions controller action card count");
     requireExactTextCount(body, "Copy", 1, "All-actions review-packet copy count");
+    requireTextOrder(body, ["Project", goalId, "Review controller opt-in"], "All-actions project-first card identity");
     if (body.indexOf("Operator question") > body.indexOf("Agent command ready after approval")) {
       throw new Error("Operator question should appear before the after-approval agent command hint.");
     }
@@ -454,6 +471,8 @@ async function main() {
     body = await readBodyText({ requiredText: "Copy" });
     requireTexts(body, [
       "1 actions",
+      "Project",
+      goalId,
       "Controller",
       "Review controller opt-in",
       "Needs approval",
@@ -473,11 +492,14 @@ async function main() {
     ], "Focused controller view rendered confusing stale UI");
     requireExactTextCount(body, "Review controller opt-in", 1, "Focused controller action card count");
     requireExactTextCount(body, "Copy", 1, "Focused controller review-packet copy count");
+    requireTextOrder(body, ["Project", goalId, "Review controller opt-in"], "Focused controller project-first card identity");
 
     navigateTo(`${baseUrl}/?statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`);
     body = await readBodyText({ requiredText: "Copy" });
     requireTexts(body, [
       "1 actions",
+      "Project",
+      goalId,
       "Codex",
       "Let Codex use the map",
       "Codex can continue",
@@ -496,6 +518,7 @@ async function main() {
     ], "Approved operator gate still looks user-gated");
     requireExactTextCount(body, "Let Codex use the map", 1, "Approved Codex-ready action card count");
     requireExactTextCount(body, "Copy", 1, "Approved review-packet copy count");
+    requireTextOrder(body, ["Project", goalId, "Let Codex use the map"], "Approved project-first card identity");
     console.log("dashboard-operator-gate-browser-smoke ok");
   } finally {
     server.kill("SIGTERM");
