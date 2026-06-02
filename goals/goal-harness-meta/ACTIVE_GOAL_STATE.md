@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T11:11:23+08:00
+updated_at: 2026-06-02T11:17:38+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,12 +27,29 @@ private project context.
 
 ## Next Action
 
-- Let the next automatic tick use the new steering audit: compare at least
-  three P0/P1/P2 candidates before selecting the next bounded slice, and record
-  the losing high-value candidate if continuing the same subtopic still wins.
+- Run the next tick's steering audit across at least three lanes before
+  choosing work: compare human-decision/dashboard simplification, real adapter
+  proof, and project-agent loop hardening; do not continue prompt/skill work
+  unless it still wins that comparison.
 
 ## Recent Progress
 
+- 2026-06-02T11:17:38+08:00: Used the new steering audit on the first automatic
+  tick after `3b1083f`. Candidates considered: P0 project-agent loop
+  hardening, P0 human-decision/dashboard simplification, and P1 public
+  storytelling. Chose project-agent loop hardening because installed project
+  agents still needed to learn that `quota should-run` is compute quota only;
+  `should_run=true` must trigger a cross-lane steering audit before work. Added
+  that rule to `skills/goal-harness-project/SKILL.md` and extended
+  `examples/install-local-smoke.py` so temporary installs verify the shipped
+  skill contains steering-audit, continuation-check, and compute-vs-focus quota
+  guidance. Losing high-value candidate: dashboard/review-packet simplification
+  remains important for the human decision loop, but should be re-compared on
+  the next tick rather than selected by inertia. Validation:
+  `python3 examples/install-local-smoke.py` passed; `python3
+  examples/heartbeat-prompt-smoke.py` passed; `python3 -m py_compile
+  examples/install-local-smoke.py` passed; `goal-harness check --scan-root .`
+  passed; `git diff --check` passed.
 - 2026-06-02T11:11:23+08:00: Operationalized the steering audit in the
   heartbeat prompt path. `goal_harness/heartbeat_prompt.py` now tells automatic
   ticks to read recent progress and critic, list at least three plausible

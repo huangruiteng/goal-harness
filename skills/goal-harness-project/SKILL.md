@@ -64,6 +64,15 @@ permission, bypass operator gates, or replace run-bound human reward. Keep the
 hard order: health/safety -> operator gate -> evidence wait -> compute quota ->
 project-agent execution.
 
+If `should_run=true`, do not simply continue the nearest previous TODO. Read the
+active state's Priority Stack, recent progress, and critic, then run a short
+steering audit before choosing work: list at least three plausible next-action
+candidates across different P0/P1/P2 lanes when useful; if the same topic has
+consumed several recent delivery slices, apply a continuation check and state
+why continuing still wins; keep compute quota separate from focus quota; record
+any losing high-value candidate that should not be forgotten. Then choose
+exactly one bounded, verifiable step from that audit.
+
 ## Set Up Recurring Heartbeats
 
 When a user or controller wants a recurring Codex App heartbeat for a connected

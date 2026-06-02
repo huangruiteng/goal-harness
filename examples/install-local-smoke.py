@@ -52,12 +52,17 @@ def main() -> int:
 
         skill = codex_home / "skills" / "goal-harness-project" / "SKILL.md"
         skill_text = skill.read_text(encoding="utf-8")
+        compact_skill_text = " ".join(skill_text.split())
         for phrase in (
             "Set Up Recurring Heartbeats",
             "goal-harness heartbeat-prompt",
+            "run a short steering audit before choosing work",
+            "at least three plausible next-action candidates",
+            "continuation check",
+            "compute quota separate from focus quota",
             "--source heartbeat --execute",
         ):
-            assert phrase in skill_text, phrase
+            assert phrase in compact_skill_text, phrase
 
         cli_env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
         cli = subprocess.run(
