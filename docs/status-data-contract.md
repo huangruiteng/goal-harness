@@ -62,6 +62,9 @@ For spend accounting, status derives `spent_slots` from compact
 `quota_slot_spent` runtime events in the current quota window. The registry
 remains the policy source for compute share and window size, not the spend
 ledger.
+`quota_slot_spent` is status-neutral accounting: it must remain visible in run
+history for quota audit, but status and attention queues should use the latest
+non-accounting run as the current work state.
 In lane terms, `next_automatic_turn` may only name the first eligible goal;
 operator-gated, waiting, throttled, paused, and health-blocked goals must stay
 out of the eligible lane even when they have a high `quota.compute`.

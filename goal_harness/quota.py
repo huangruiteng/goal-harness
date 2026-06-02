@@ -43,6 +43,20 @@ def _run_file_stem(generated_at: str) -> str:
     return re.sub(r"[^0-9A-Za-z-]+", "-", generated_at).strip("-")
 
 
+def _unique_run_artifact_paths(runs_dir: Path, stem: str, suffix: str) -> tuple[Path, Path]:
+    candidate = runs_dir / f"{stem}-{suffix}.json"
+    markdown_candidate = runs_dir / f"{stem}-{suffix}.md"
+    if not candidate.exists() and not markdown_candidate.exists():
+        return candidate, markdown_candidate
+    index = 2
+    while True:
+        candidate = runs_dir / f"{stem}-{suffix}-{index}.json"
+        markdown_candidate = runs_dir / f"{stem}-{suffix}-{index}.md"
+        if not candidate.exists() and not markdown_candidate.exists():
+            return candidate, markdown_candidate
+        index += 1
+
+
 def _validate_goal_id_path_segment(goal_id: str) -> str:
     value = goal_id.strip()
     if not value:
@@ -565,8 +579,7 @@ def spend_quota_slot(
     runtime_root = Path(str(raw_runtime_root)).expanduser()
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
     stem = _run_file_stem(generated_at)
-    json_path = runs_dir / f"{stem}.json"
-    markdown_path = runs_dir / f"{stem}.md"
+    json_path, markdown_path = _unique_run_artifact_paths(runs_dir, stem, "quota-slot-spent")
     index_path = runs_dir / "index.jsonl"
     index_record = {
         "generated_at": generated_at,

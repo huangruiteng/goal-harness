@@ -203,7 +203,10 @@ goals or status collection failures return non-zero so automations fail closed.
 shows the before and after `should-run` decision for consuming slots and writes
 nothing. With `--execute`, it appends one compact `quota_slot_spent` runtime
 event. It never mutates registry, reward overlays, operator gates, write
-control, private evidence, or production state.
+control, private evidence, or production state. The event is status-neutral:
+it remains in run history for audit and quota counting, but it should not
+become the current work classification in status, quota `should-run`, or the
+dashboard attention queue.
 
 Post-turn accounting protocol:
 

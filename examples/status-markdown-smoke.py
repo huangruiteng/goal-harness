@@ -128,6 +128,40 @@ def append_operator_gate_fixture(
         )
 
 
+def append_quota_slot_spend_fixture(root: Path, *, generated_at: str) -> None:
+    run_dir = root / "runtime" / "goals" / "planned-main-control" / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-quota-slot-spent.json"
+    markdown_path = run_dir / f"{compact_time}-quota-slot-spent.md"
+    record = {
+        "generated_at": generated_at,
+        "goal_id": "planned-main-control",
+        "classification": "quota_slot_spent",
+        "recommended_action": "account for one automatic heartbeat slot",
+        "health_check": "fixture quota slot spend event",
+        "quota_event": {
+            "event_type": "quota_slot_spent",
+            "source": "heartbeat",
+            "slots": 1,
+        },
+    }
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture quota slot spend\n", encoding="utf-8")
+    with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    **record,
+                    "json_path": str(json_path),
+                    "markdown_path": str(markdown_path),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+
 def collect_fixture_status(root: Path, registry_path: Path) -> tuple[dict, str]:
     payload = collect_status(
         registry_path=registry_path,
@@ -209,6 +243,8 @@ def main() -> int:
             recommended_action=APPROVED_ACTION,
         )
         approved_payload, approved_markdown = collect_fixture_status(root, registry_path)
+        append_quota_slot_spend_fixture(root, generated_at="2026-01-01T00:01:30+00:00")
+        post_spend_payload, post_spend_markdown = collect_fixture_status(root, registry_path)
         append_operator_gate_fixture(
             root,
             decision="reject",
@@ -242,6 +278,13 @@ def main() -> int:
         state="eligible",
         waiting_on="codex",
     )
+    post_spend_items = post_spend_payload["attention_queue"]["items"]
+    assert len(post_spend_items) == 1, post_spend_items
+    post_spend_item = post_spend_items[0]
+    assert post_spend_item["status"] == "operator_gate_approved", post_spend_item
+    assert post_spend_item["recommended_action"] == APPROVED_ACTION, post_spend_item
+    assert "quota_slot_spent" in json.dumps(post_spend_payload["run_history"], ensure_ascii=False), post_spend_payload
+    assert "quota_slot_spent" not in post_spend_markdown.split("## Run History")[0], post_spend_markdown
     assert_operator_gate_waits_for_user(
         rejected_payload,
         rejected_markdown,

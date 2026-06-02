@@ -193,7 +193,7 @@ def main() -> int:
         )
         assert follow_up["should_run"] is True, follow_up
         assert follow_up["state"] == "eligible", follow_up
-        assert follow_up["status"] == "quota_slot_spent", follow_up
+        assert follow_up["status"] == "state_refreshed", follow_up
         assert follow_up["quota"]["spent_slots"] == 1, follow_up
         assert follow_up["quota"]["allowed_slots"] == 2, follow_up
         assert registry_path.read_text(encoding="utf-8") == registry_before

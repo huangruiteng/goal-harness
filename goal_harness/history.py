@@ -9,6 +9,11 @@ from .quota import goal_quota_with_spend_ledger
 from .registry import read_json, registry_goals
 
 
+STATUS_NEUTRAL_CLASSIFICATIONS = {
+    "quota_slot_spent",
+}
+
+
 def load_registry(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -63,6 +68,14 @@ def load_index(path: Path) -> tuple[list[dict[str, Any]], int]:
     return records, raw_count
 
 
+def latest_status_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for run in runs:
+        if str(run.get("classification") or "") in STATUS_NEUTRAL_CLASSIFICATIONS:
+            continue
+        return run
+    return None
+
+
 def collect_history(
     *,
     registry_path: Path,
@@ -102,6 +115,7 @@ def collect_history(
                 "index_exists": index_path.exists(),
                 "raw_index_records": raw_count,
                 "unique_runs": len(runs),
+                "latest_status_run": latest_status_run(runs),
                 "latest_runs": runs[:limit],
             }
         )

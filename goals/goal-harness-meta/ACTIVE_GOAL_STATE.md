@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T11:17:38+08:00
+updated_at: 2026-06-02T11:40:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,12 +28,44 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work: compare human-decision/dashboard simplification, real adapter
-  proof, and project-agent loop hardening; do not continue prompt/skill work
-  unless it still wins that comparison.
+  choosing work. Now that quota spend accounting no longer masks the current
+  work state, compare P0 human-decision/dashboard simplification, P0 real
+  adapter proof, and project-agent execution loop hardening; do not continue
+  quota/status work unless another state-truth break appears.
 
 ## Recent Progress
 
+- 2026-06-02T11:40:00+08:00: Ran the required steering audit after two P1
+  intro-writing slices and recent prompt/skill work. Candidates considered:
+  P0 state truth/safety (`quota_slot_spent` was masking current status in
+  `quota should-run` and dashboard attention), P0 human-decision/dashboard
+  simplification, and P0 real adapter proof. Chose state truth/safety because
+  accounting events were becoming the visible current work classification,
+  which pollutes both operator-facing dashboard state and agent-facing quota
+  guards. Made `quota_slot_spent` status-neutral: run history and quota
+  counting still see the event, but status/attention/`should-run` use the
+  latest non-accounting run. Also fixed the deeper same-second artifact
+  collision by writing quota spend artifacts with a `-quota-slot-spent`
+  suffix and a unique fallback, so a post-refresh spend cannot overwrite the
+  refresh run. Losing high-value candidate: dashboard/review-packet
+  simplification remains the next likely P0 slice now that the state source is
+  trustworthy. Changed files: `goal_harness/status.py`,
+  `goal_harness/history.py`, `goal_harness/quota.py`,
+  `examples/status-markdown-smoke.py`,
+  `examples/heartbeat-quota-flow-smoke.py`,
+  `docs/status-data-contract.md`, and `docs/quota-allocation.md`.
+  Validation: `python3 examples/status-markdown-smoke.py` passed; `python3
+  examples/heartbeat-quota-flow-smoke.py` passed; `python3
+  examples/quota-plan-smoke.py` passed; `python3 examples/run-smokes.py`
+  passed with 8 scripts; `python3 -m py_compile goal_harness/status.py
+  goal_harness/history.py goal_harness/quota.py
+  examples/status-markdown-smoke.py examples/heartbeat-quota-flow-smoke.py`
+  passed; `goal-harness check --scan-root .` passed; `goal-harness --format
+  json quota should-run --goal-id goal-harness-meta` now reports
+  `status=state_refreshed` while retaining `spent_slots=13/24`; `git diff
+  --check` passed. Critic: this closes a real state-truth bug uncovered by the
+  heartbeat flow; next work should move back to human-decision/dashboard or
+  real adapter proof rather than keep polishing quota internals.
 - 2026-06-02T11:17:38+08:00: Used the new steering audit on the first automatic
   tick after `3b1083f`. Candidates considered: P0 project-agent loop
   hardening, P0 human-decision/dashboard simplification, and P1 public

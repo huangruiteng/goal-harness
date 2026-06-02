@@ -25,6 +25,8 @@ CODEX_READY_CLASSIFICATIONS = {
     "run_validation",
     "state_refreshed",
     "operator_gate_approved",
+}
+STATUS_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
 }
 USER_OR_CONTROLLER_CLASSIFICATIONS = {
@@ -344,12 +346,25 @@ def collect_global_registry_health(
     }
 
 
+def is_status_neutral_run(run: dict[str, Any]) -> bool:
+    return str(run.get("classification") or "") in STATUS_NEUTRAL_CLASSIFICATIONS
+
+
 def latest_run(goal: dict[str, Any]) -> dict[str, Any] | None:
+    status_run = goal.get("latest_status_run")
+    if isinstance(status_run, dict) and not is_status_neutral_run(status_run):
+        return status_run
+
     runs = goal.get("latest_runs")
     if not isinstance(runs, list) or not runs:
         return None
-    run = runs[0]
-    return run if isinstance(run, dict) else None
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        if is_status_neutral_run(run):
+            continue
+        return run
+    return None
 
 
 def ordered_lifecycle_flags(flags: list[str]) -> list[str]:
@@ -790,6 +805,7 @@ def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
                 "index_exists": goal.get("index_exists"),
                 "raw_index_records": goal.get("raw_index_records"),
                 "unique_runs": goal.get("unique_runs"),
+                "latest_status_run": compact_run(current_run) if current_run else None,
                 "latest_runs": [
                     compact_run(run)
                     for run in goal.get("latest_runs") or []
