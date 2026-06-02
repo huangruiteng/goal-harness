@@ -45,7 +45,7 @@ MUST_HAVE = (
 SPEND_MUST_HAVE = (
     "validation 和必要的 `refresh-state` 完成后",
     "只 append 一次 quota spend",
-    "goal-harness quota spend-slot --goal-id",
+    'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id',
     "--source adapter --execute",
     "不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账",
     "实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账",
@@ -64,7 +64,7 @@ def assert_quota_guard(text: str) -> None:
     assert 'export PATH="$HOME/.local/bin:$PATH"' in text, text
     assert 'install_script="$HOME/goal-harness/scripts/install-local.sh"' in text, text
     assert "goal-harness doctor >/dev/null" in text, text
-    assert "goal-harness --format json quota should-run --goal-id" in text, text
+    assert 'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id' in text, text
     positions = []
     for phrase in MUST_HAVE:
         assert phrase in normalized, text
@@ -118,10 +118,12 @@ def main() -> int:
         write_scope=None,
     )
     assert payload["quota_guard_command"] == (
-        "goal-harness --format json quota should-run --goal-id new-project-main-control"
+        'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" '
+        "quota should-run --goal-id new-project-main-control"
     ), payload
     assert payload["quota_spend_command"] == (
-        "goal-harness quota spend-slot --goal-id new-project-main-control --slots 1 --source adapter --execute"
+        'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" '
+        "quota spend-slot --goal-id new-project-main-control --slots 1 --source adapter --execute"
     ), payload
     assert_quota_guard(payload["prompt"])
     assert_quota_guard(DOC.read_text(encoding="utf-8"))

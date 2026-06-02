@@ -201,7 +201,7 @@ def main() -> int:
     )
     assert_contains(
         status_contract,
-        "`goal-harness quota should-run --goal-id <goal-id>` derives a per-goal automation guard from that grouping",
+        'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <goal-id>',
         label="status contract",
     )
     assert_contains(

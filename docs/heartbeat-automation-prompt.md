@@ -59,7 +59,7 @@ if ! command -v goal-harness >/dev/null 2>&1; then
   fi
 fi
 goal-harness doctor >/dev/null
-goal-harness --format json quota should-run --goal-id <GOAL_ID>
+goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <GOAL_ID>
 
 If that preflight still fails, do not do implementation work, adapter work,
 file edits, research, project exploration, or quota spend in this turn. Return
@@ -120,7 +120,7 @@ If the result says should_run=true:
 8. After validation and required state refresh are complete, append exactly one
    spend event. For a minute-based heartbeat, spend one slot:
 
-   goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
+   goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
 
    If the automation reserves a coarser fixed interval, set `--slots` to the
    number of scheduler minutes consumed by that completed turn.
@@ -151,7 +151,7 @@ Task:
 Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work,
 export `$HOME/.local/bin` onto PATH and run `goal-harness doctor`; if the CLI is
 still unavailable, quietly report that preflight failure and do no work. Then
-run `goal-harness --format json quota should-run --goal-id <GOAL_ID>`. If it
+run `goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <GOAL_ID>`. If it
 returns `should_run=false`, ask about operator gates with NOTIFY using
 `gate_prompt` unless the same unresolved gate was already surfaced recently. If
 it returns `state=operator_gate` plus `safe_bypass_allowed=true`, avoid the
@@ -161,8 +161,8 @@ If it returns `should_run=true`, first compare candidate next actions across
 the priority stack, apply a continuation check for repeated topics, then do one
 bounded verifiable step, validate it, write back changed files / validation /
 critic / next action, refresh state if needed, and append exactly one
-`goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat
---execute` event after the completed turn. Use `--slots 1` for minute-based
+`goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
+event after the completed turn. Use `--slots 1` for minute-based
 heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
 turn.
 ```

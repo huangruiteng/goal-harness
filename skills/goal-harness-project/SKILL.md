@@ -51,7 +51,7 @@ agent spends another delivery turn, ask Goal Harness whether this goal is
 eligible:
 
 ```bash
-goal-harness --format json quota should-run --goal-id <STABLE_GOAL_ID>
+goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <STABLE_GOAL_ID>
 ```
 
 If the response has `state=operator_gate`, treat it as a user/controller
@@ -84,6 +84,13 @@ action".
 This guard is only a compute-allocation check. It does not grant write
 permission, bypass operator gates, or replace run-bound human reward. Operator
 gates block the gated delivery path, not unrelated safe steering work.
+Use the shared global registry for this guard so the project agent reads the
+same operator gates, user todos, and quota state as the dashboard. This does
+not mean all project work is global: `todo add`, `refresh-state`, adapter runs,
+and project-file reads still use the project-local state/registry and then sync
+the public-safe projection back into the global control plane. If two projects
+share a `goal_id`, treat that as a registry health bug and fix the id/source
+mapping.
 
 If `should_run=true`, do not simply continue the nearest previous TODO. Read the
 active state's Priority Stack, recent progress, and critic, then run a short
@@ -109,8 +116,11 @@ Copy the generated task body into the Codex App heartbeat automation. It already
 contains the pre-turn `quota should-run` guard, operator-gate notification,
 quiet non-gate `should_run=false` skip, bounded work, validation/writeback,
 optional `refresh-state`, and exactly one post-turn
-`quota spend-slot --source heartbeat --execute` event. Quota slots are
-minute-granularity by default: minute heartbeats spend `--slots 1`, while
+`quota spend-slot --source heartbeat --execute` event. The generated guard and
+spend commands explicitly use the shared global registry so project heartbeats
+read the same operator gates and user todos as the dashboard, regardless of
+their current repo. Quota slots are minute-granularity by default: minute
+heartbeats spend `--slots 1`, while
 coarser fixed-interval automations should spend the scheduler minutes consumed
 by that completed turn.
 

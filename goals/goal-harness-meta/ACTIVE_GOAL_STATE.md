@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T20:37:40+08:00
+updated_at: 2026-06-02T20:52:33+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,14 +45,44 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should verify the newly updated heartbeat notification loop on a
-  real connected goal. If it now surfaces existing open user todos clearly,
-  continue with the smallest public-safe dashboard/status projection slice for
-  project assets; if it still hides todos behind a generic gate message, fix
-  that renderer before adding new UI.
+- Next tick should observe the updated real project heartbeat once more. If it
+  now reads the global operator gate and surfaces open user todos instead of
+  running from project-local eligible state, return to the smallest dashboard /
+  status projection slice for project assets. If it still reports an eligible
+  local state, treat global/local registry divergence as the next state-truth
+  bug.
 
 ## Recent Progress
 
+- 2026-06-02T20:52:33+08:00: Verified the previous user-todo notification fix
+  against the real connected project thread and found a smaller state-truth
+  root cause: the heartbeat ran from the target project cwd, so its unqualified
+  `quota should-run` read the project-local registry and returned
+  `should_run=true`, while the dashboard/operator view uses the shared global
+  registry and still reports `state=operator_gate` with open user todos. Fixed
+  the heartbeat/new-project generator so quota guard and quota spend commands
+  explicitly use `--registry "$HOME/.codex/goal-harness/registry.global.json"`.
+  Kept the boundary narrow: compute/operator guard reads global control-plane
+  state, while `todo add`, `refresh-state`, adapter runs, and project-file reads
+  still use the project-local state and sync public-safe projections back to
+  global. Updated the live project heartbeat automation and re-ran the local
+  install script so the installed `goal-harness-project` skill matches the repo
+  skill. Changed files: `goal_harness/project_prompt.py`,
+  `docs/heartbeat-automation-prompt.md`, `docs/new-project-codex-prompt.md`,
+  `docs/quota-allocation.md`, `docs/status-data-contract.md`,
+  `docs/attention-queue.md`, `README.md`,
+  `skills/goal-harness-project/SKILL.md`,
+  `examples/heartbeat-prompt-smoke.py`, `examples/project-prompt-smoke.py`,
+  `examples/install-local-smoke.py`, `examples/quota-contract-smoke.py`, and
+  this active state. Validation: `python examples/heartbeat-prompt-smoke.py`,
+  `python examples/project-prompt-smoke.py`, `python
+  examples/install-local-smoke.py`, `python examples/quota-contract-smoke.py`,
+  `python -m compileall -q goal_harness`, `goal-harness check --scan-root .`,
+  `git diff --check`, installed-skill diff clean, live guard from the target
+  project cwd with the explicit global registry returning `operator_gate`,
+  `should_run=False`, `notify_user_on_gate=True`, and open user todos. Critic:
+  this is the right state-truth fix, but the next proof should be the actual
+  heartbeat thread output, not another local command replay.
 - 2026-06-02T20:32:20+08:00: Fixed a field failure in the user-todo
   notification loop: `quota should-run` already exposed open user todos for a
   real operator-gated goal, but an existing heartbeat prompt could still

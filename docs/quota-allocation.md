@@ -183,14 +183,19 @@ The first read-only or preview commands are:
 ```bash
 goal-harness quota status
 goal-harness quota plan
-goal-harness quota should-run --goal-id <goal-id>
-goal-harness quota spend-slot --goal-id <goal-id> --slots 1
-goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --execute
+goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <goal-id>
+goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <goal-id> --slots 1
+goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <goal-id> --slots 1 --execute
 ```
 
 These commands reuse the status contract, including contract health, global
 registry health, attention queue, run history, and derived quota state. They do
 not mutate registry, runtime history, reward overlays, or operator gates.
+Project heartbeat prompts should use the shared global registry for
+`should-run` and `spend-slot` so they see the same operator gates, user todos,
+and quota state as the dashboard. Project-local state writes such as
+`refresh-state` and `todo add` still happen in the source project and sync their
+public-safe projection back to the global registry.
 
 `quota status` is the broad inventory for agents: it shows every registered
 goal under `blocked_health`, `operator_gate`, `eligible`, `waiting`,

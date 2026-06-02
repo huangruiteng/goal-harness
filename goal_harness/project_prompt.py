@@ -12,6 +12,7 @@ DEFAULT_HANDOFF_DOMAIN = "<DOMAIN>"
 DEFAULT_HANDOFF_ADAPTER_KIND = "read_only_project_map_v0"
 DEFAULT_HANDOFF_ADAPTER_STATUS = "connected-read-only"
 DEFAULT_HANDOFF_NEXT_PROBE = "(omit --next-probe until a read-only pre-tick command exists)"
+SHARED_GLOBAL_REGISTRY = '"$HOME/.codex/goal-harness/registry.global.json"'
 
 
 def shell_arg(value: str) -> str:
@@ -34,12 +35,18 @@ goal-harness doctor >/dev/null"""
 
 
 def render_quota_guard_command(goal_id: str) -> str:
-    return f"goal-harness --format json quota should-run --goal-id {shell_arg(goal_id)}"
+    return (
+        "goal-harness --format json "
+        f"--registry {SHARED_GLOBAL_REGISTRY} "
+        f"quota should-run --goal-id {shell_arg(goal_id)}"
+    )
 
 
 def render_quota_spend_command(goal_id: str, *, source: str = "adapter") -> str:
     return (
-        "goal-harness quota spend-slot "
+        "goal-harness "
+        f"--registry {SHARED_GLOBAL_REGISTRY} "
+        "quota spend-slot "
         f"--goal-id {shell_arg(goal_id)} "
         f"--slots 1 --source {shell_arg(source)} --execute"
     )

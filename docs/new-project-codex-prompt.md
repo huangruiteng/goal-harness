@@ -102,7 +102,7 @@ goal-harness new-project-prompt \
    先问 compute guard：
 
    ```bash
-   goal-harness --format json quota should-run --goal-id <STABLE_GOAL_ID>
+   goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <STABLE_GOAL_ID>
    ```
 
    如果返回 `state=operator_gate`，把它当成人/控制器交互，而不是安静 skip：优先读取
@@ -165,7 +165,7 @@ goal-harness new-project-prompt \
    append 一次 quota spend：
 
    ```bash
-   goal-harness quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
+   goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
    ```
 
    不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账；

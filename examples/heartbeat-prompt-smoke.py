@@ -39,10 +39,12 @@ def assert_ordered(text: str, phrases: tuple[str, ...]) -> None:
 def main() -> int:
     payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE)
     assert payload["quota_guard_command"] == (
-        "goal-harness --format json quota should-run --goal-id public-heartbeat-goal"
+        'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" '
+        "quota should-run --goal-id public-heartbeat-goal"
     ), payload
     assert payload["quota_spend_command"] == (
-        "goal-harness quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute"
+        'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" '
+        "quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute"
     ), payload
 
     doc = DOC.read_text(encoding="utf-8")
@@ -58,7 +60,7 @@ def main() -> int:
         'export PATH="$HOME/.local/bin:$PATH"',
         'install_script="$HOME/goal-harness/scripts/install-local.sh"',
         "goal-harness doctor >/dev/null",
-        "goal-harness --format json quota should-run --goal-id <GOAL_ID>",
+        'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <GOAL_ID>',
         "If that preflight still fails",
         "should_run=false",
         "state=operator_gate",
@@ -86,7 +88,7 @@ def main() -> int:
         "goal-harness todo add --goal-id <GOAL_ID> --role user --text \"<public-safe user/owner action>\"",
         "Use `--role agent` for project-agent follow-up work",
         "goal-harness refresh-state --goal-id <GOAL_ID>",
-        "goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute",
+        'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
         "append exactly one",
         "Do not append spend for quiet should_run=false skips, preflight failures, pure dry-run previews, or duplicate accounting attempts",
         "safe_bypass_allowed=true and you actually completed a bounded safe-bypass step",
@@ -99,7 +101,7 @@ def main() -> int:
         'export PATH="$HOME/.local/bin:$PATH"',
         'install_script="$HOME/goal-harness/scripts/install-local.sh"',
         "goal-harness doctor >/dev/null",
-        "goal-harness --format json quota should-run --goal-id public-heartbeat-goal",
+        'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "If that preflight still fails",
         "should_run=false",
         "state=operator_gate",
@@ -122,7 +124,7 @@ def main() -> int:
         "If the step discovers a concrete user/owner action",
         "goal-harness todo add --goal-id public-heartbeat-goal --role user --text \"<public-safe user/owner action>\"",
         "goal-harness refresh-state --goal-id public-heartbeat-goal",
-        "goal-harness quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute",
+        'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "Do not append spend for quiet `should_run=false` skips",
     ):
         assert phrase in compact_generated, phrase
@@ -133,7 +135,7 @@ def main() -> int:
             "Before spending delivery compute, first make the Goal Harness CLI reachable",
             'export PATH="$HOME/.local/bin:$PATH"',
             "goal-harness doctor >/dev/null",
-            "goal-harness --format json quota should-run --goal-id <GOAL_ID>",
+            'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <GOAL_ID>',
             "If that preflight still fails",
             "If the result says should_run=false",
             "state=operator_gate",
@@ -144,7 +146,7 @@ def main() -> int:
             "Choose exactly one bounded, verifiable step from that audit",
             "Run the smallest useful validation",
             "goal-harness refresh-state --goal-id <GOAL_ID>",
-            "goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute",
+            'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
             "Return a compact final report",
         ),
     )

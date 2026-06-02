@@ -259,7 +259,7 @@ from the same status contract:
 ```bash
 goal-harness quota status
 goal-harness quota plan
-goal-harness quota should-run --goal-id <goal-id>
+goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <goal-id>
 ```
 
 `quota status` shows every registered goal by quota state. `quota plan` keeps
@@ -292,7 +292,7 @@ After an automatic turn actually spends delivery compute, append one spend
 event after validation and any required state refresh:
 
 ```bash
-goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --source heartbeat --execute
+goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <goal-id> --slots 1 --source heartbeat --execute
 ```
 
 Quota slots are minute-granularity by default. A minute-based heartbeat spends

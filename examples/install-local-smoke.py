@@ -90,10 +90,12 @@ def main() -> int:
         payload = json.loads(cli.stdout)
         assert payload["ok"] is True, payload
         assert payload["quota_guard_command"] == (
-            "goal-harness --format json quota should-run --goal-id installer-smoke-goal"
+            'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" '
+            "quota should-run --goal-id installer-smoke-goal"
         ), payload
         assert payload["quota_spend_command"] == (
-            "goal-harness quota spend-slot --goal-id installer-smoke-goal --slots 1 --source heartbeat --execute"
+            'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" '
+            "quota spend-slot --goal-id installer-smoke-goal --slots 1 --source heartbeat --execute"
         ), payload
         assert "DONT_NOTIFY" in payload["task_body"], payload
 
