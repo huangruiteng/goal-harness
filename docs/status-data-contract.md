@@ -687,8 +687,13 @@ That response includes `active_state_update`, for example:
 }
 ```
 
-The loopback dashboard endpoint remains dry-run only and does not expose state
-file paths in its compact response.
+The loopback dashboard write path is opt-in. By default `serve-status` exposes
+only `POST /reward/dry-run`; when started with `--enable-reward-write-api` on a
+loopback host, it also exposes `POST /reward/append`. The append request must
+reuse the `preview_id` returned by the dry-run response, so a changed payload,
+changed selected run, or changed raw index count forces the operator to preview
+again. The compact browser response does not expose index paths, state file
+paths, or raw private evidence.
 
 ## Display Model
 
@@ -760,14 +765,19 @@ A first useful UI can be built from the export alone:
 - Reward CLI draft: selected goal plus latest compact run timestamp should be
   enough to generate a local `goal-harness reward --dry-run` command. Draft
   fields should default from the selected operator decision and missing gates,
-  while remaining editable before validation. The dashboard should not append
-  feedback directly until the local-only evidence boundary is explicitly
-  implemented.
+  while remaining editable before validation. The dashboard should append
+  feedback only when the live loopback status server explicitly exposes the
+  reward write API.
 - Reward dry-run check: when the dashboard is loaded from a loopback status
   server, it may validate the same draft through `POST /reward/dry-run` and
   display the compact result, including the Chinese active-state summary and
-  project-agent history command. This is still a validation path, not a browser
-  write path.
+  project-agent history command. The response includes `preview_id`.
+- Reward append: when the same loopback server is started with
+  `--enable-reward-write-api`, the dashboard may send that exact preview to
+  `POST /reward/append`. A successful append writes one run-bound
+  `human_reward` overlay, refreshes status, and makes the next project-agent
+  automation able to see the feedback through `goal-harness status` or
+  `goal-harness history`.
 - Reward source of truth: durable user reward belongs in a run-bound
   `human_reward` overlay appended through `goal-harness reward`. Active goal
   state can summarize that such a reward was recorded, and the Review Packet can
@@ -785,9 +795,9 @@ A first useful UI can be built from the export alone:
   is a dashboard-to-agent bridge; it must not imply browser-side approval,
   reward append, or write-controller execution.
 
-Browser-side reward append is intentionally outside the default status server.
-If a future local server enables it, it must follow the explicit opt-in boundary
-in [dashboard-reward-write-boundary.md](dashboard-reward-write-boundary.md).
+Browser-side reward append is outside the default status server behavior. If a
+local server enables it, it must follow the explicit opt-in boundary in
+[dashboard-reward-write-boundary.md](dashboard-reward-write-boundary.md).
 
 Suggested badge mapping:
 

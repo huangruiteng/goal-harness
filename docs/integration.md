@@ -341,14 +341,16 @@ control. The command binds to `127.0.0.1` by default and is meant for local
 operator dashboards, not public hosting.
 
 The same loopback server exposes `POST /reward/dry-run` so the dashboard can
-validate a selected goal/run reward draft before any write path exists. The
-dry-run response is compact and does not append to `index.jsonl`; recording a
-real reward still uses the `goal-harness reward` CLI command.
+validate a selected goal/run reward draft. The dry-run response is compact and
+does not append to `index.jsonl`; it returns a `preview_id` for the exact
+goal/run/reward payload and current raw index count.
 
-A browser append endpoint would be a separate explicit opt-in capability. Do
-not infer write permission from running the dashboard or status server; follow
-[dashboard-reward-write-boundary.md](dashboard-reward-write-boundary.md) before
-adding any browser-side reward writer.
+Direct dashboard reward submission is an explicit opt-in capability. Start the
+status server with `--enable-reward-write-api` to expose `POST /reward/append`
+on loopback only. The dashboard can then submit the dry-run `preview_id`; a
+successful append writes one run-bound `human_reward` overlay and refreshes
+status, so future project agents can discover the feedback through
+`goal-harness status` or `goal-harness history`.
 
 The status command combines contract health and run history into an attention
 queue. Each queue item says which goal needs attention, who it is waiting on,

@@ -6,19 +6,23 @@ must stay opt-in. The default dashboard must remain read-mostly: status export,
 run-history inspection, and dry-run validation are allowed; writing compact
 reward overlays is not enabled by loading the dashboard.
 
-This document defines the boundary for a future `POST /reward/append` endpoint.
-It is a design gate, not an implementation promise.
+This document defines the boundary for the opt-in `POST /reward/append`
+endpoint. It is implemented only for loopback `goal-harness serve-status`
+sessions started with the explicit write flag.
 
 ## Current State
 
 - `goal-harness reward` is the canonical writer.
 - `goal-harness serve-status` serves `GET /status.json` and
-  `POST /reward/dry-run` on loopback.
+  `POST /reward/dry-run` on loopback by default.
+- `goal-harness serve-status --enable-reward-write-api` also serves
+  `POST /reward/append` on loopback.
 - The dry-run endpoint validates goal id, selected run timestamp, reward value,
   public-safe text, and run artifact availability.
-- Dry-run responses are compact and return `appended=false`.
-- The dashboard can show the CLI command and the dry-run result, but cannot
-  append to `index.jsonl`.
+- Dry-run responses are compact, return `appended=false`, and include a
+  `preview_id`.
+- The dashboard can show the CLI command and the dry-run result. With the
+  explicit write flag, it can append the reviewed preview to `index.jsonl`.
 
 ## Append Preconditions
 
@@ -28,8 +32,7 @@ A browser append endpoint may be implemented only when all of these are true:
   `--enable-reward-write-api`. The flag must default to off.
 - The server binds to loopback only. A non-loopback bind should reject enabling
   reward writes.
-- The operator supplies or confirms a capability token for the browser session.
-  The token must not appear in public examples, status JSON, or logs.
+- The server rejects append requests from non-loopback browser origins.
 - The append request targets an exact `goal_id` and `run_generated_at`; appending
   to an implicit latest run from the browser is not allowed.
 - The payload has already passed the same validation as `/reward/dry-run`.
@@ -78,10 +81,10 @@ The write path needs stricter browser checks than the dry-run path:
 
 - Allow CORS for the append endpoint only from configured loopback dashboard
   origins, such as `http://127.0.0.1:5173`.
-- Require a write capability token in a header or explicit field.
-- Do not expose the token through `GET /`, `GET /status.json`, dashboard demo
-  JSON, or generated static artifacts.
-- Return `403` for missing capability and `409` for stale preview.
+- Require the explicit `--enable-reward-write-api` server flag and reject
+  non-loopback browser origins.
+- Return `403` when the write API is disabled or the browser origin is not
+  loopback, and `409` for stale preview.
 - Keep `GET /status.json` and `POST /reward/dry-run` usable without enabling
   append writes.
 
@@ -103,9 +106,9 @@ The dashboard should not make reward writes feel like ordinary form submission:
 
 An implementation PR should prove:
 
-- Starting `serve-status` without the write flag exposes no append endpoint.
+- Starting `serve-status` without the write flag rejects append requests and
+  leaves the index unchanged.
 - Starting with the write flag on a non-loopback host fails.
-- Append without capability fails and leaves the index unchanged.
 - Append with a stale preview fails and leaves the index unchanged.
 - Append with a changed payload fails and leaves the index unchanged.
 - Append with public-safe text writes exactly one JSONL overlay row.
@@ -114,4 +117,5 @@ An implementation PR should prove:
 - The dashboard can complete dry-run -> append -> refresh in a browser smoke
   test.
 
-Until those checks exist, the CLI remains the only reward writer.
+The CLI remains the canonical reward writer. The dashboard append path is a
+local operator convenience over the same run-bound `human_reward` overlay.

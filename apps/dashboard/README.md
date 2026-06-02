@@ -53,8 +53,9 @@ user-facing review to agent-facing CLI execution, not a browser write path.
 
 When a selected goal has a compact run record, the run-history panel also shows
 a `Reward CLI Draft`. It is intentionally local-only and defaults to
-`--dry-run`; browser writes to private runtime indexes are not part of this
-surface yet. Draft defaults are derived from the selected `Operator Decision`
+`--dry-run`; browser writes to private runtime indexes remain disabled unless
+the local status server explicitly enables the reward write API. Draft defaults
+are derived from the selected `Operator Decision`
 and missing gates, so an evidence watch, controller opt-in, mapped handoff, and
 already-rewarded run start with different decision/reward/reason/follow-up
 values. The operator can still edit or reset the draft before validation.
@@ -63,13 +64,19 @@ When the dashboard is loaded from the loopback `Live` source, the same panel can
 send that draft to `POST /reward/dry-run` for local validation. The endpoint
 returns a compact validation result, the Chinese active-state summary Codex can
 write after a real reward append, and the project-agent history command. It
-never appends to the run index.
+also returns a `preview_id` that locks the selected goal, run, reward payload,
+and current raw index count.
+If the live server was started with `--enable-reward-write-api`, the dashboard
+can then call `POST /reward/append` for that exact preview. The append writes
+one run-bound `human_reward` overlay, refreshes status, and leaves the compact
+overlay as the source of truth future agents read through `status` or
+`history`.
 Durable reward should be recorded as a run-bound `human_reward` overlay through
 `goal-harness reward`; active state may summarize the reward afterward, but it
 should not be the only source of truth for multi-agent reward signals.
 When a real CLI append should also update the active goal state, use
-`goal-harness reward --write-active-state-summary`; the dashboard endpoint
-remains dry-run only.
+`goal-harness reward --write-active-state-summary`; the dashboard append path
+sets the same summary-write intent after the operator confirms the preview.
 
 ## Load Live Status
 
@@ -90,8 +97,15 @@ The status server binds to `127.0.0.1` by default and sends no-store JSON with
 local CORS headers for the Vite dashboard.
 
 It also serves `POST /reward/dry-run` for validating the selected goal/run and
-public-safe reward text. This is a dry-run endpoint only; recording feedback
-still goes through `goal-harness reward`.
+public-safe reward text. To allow direct local dashboard submission, start the
+server with the explicit write flag:
+
+```bash
+goal-harness serve-status --port 8765 --enable-reward-write-api
+```
+
+The write flag is loopback-only. Without it, the dashboard can validate a
+reward draft but cannot append feedback.
 
 ## Load Static Status
 

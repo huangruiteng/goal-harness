@@ -455,6 +455,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
     )
     serve_status_parser.add_argument("--limit", type=int, default=5)
+    serve_status_parser.add_argument(
+        "--enable-reward-write-api",
+        action="store_true",
+        help="Enable POST /reward/append on loopback only so the dashboard can append human_reward overlays.",
+    )
     serve_status_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
 
     args = parser.parse_args(argv)
@@ -954,6 +959,7 @@ def main(argv: list[str] | None = None) -> int:
                 host=args.host,
                 port=args.port,
                 status_path=args.path,
+                enable_reward_write_api=bool(args.enable_reward_write_api),
                 verbose=bool(args.verbose),
             )
         except Exception as exc:

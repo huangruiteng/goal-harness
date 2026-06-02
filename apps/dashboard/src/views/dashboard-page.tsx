@@ -315,16 +315,18 @@ function buildRewardCommand({
   return lines.join("\n");
 }
 
-function buildRewardDryRunUrl(source: DataSource) {
+function buildRewardApiUrls(source: DataSource) {
   if (source.kind !== "url" || !/^https?:\/\//i.test(source.label)) {
-    return null;
+    return { dryRunUrl: null, appendUrl: null };
   }
   try {
     const url = new URL(source.label);
     const isLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
-    return isLoopback ? `${url.origin}/reward/dry-run` : null;
+    return isLoopback
+      ? { dryRunUrl: `${url.origin}/reward/dry-run`, appendUrl: `${url.origin}/reward/append` }
+      : { dryRunUrl: null, appendUrl: null };
   } catch {
-    return null;
+    return { dryRunUrl: null, appendUrl: null };
   }
 }
 
@@ -2199,12 +2201,16 @@ function RewardCommandDraft({
   registry,
   runtimeRoot,
   dryRunUrl,
+  appendUrl,
+  onStatusRefresh,
 }: {
   goal?: RunGoal;
   queueItem?: QueueItem;
   registry: string;
   runtimeRoot: string;
   dryRunUrl: string | null;
+  appendUrl: string | null;
+  onStatusRefresh: () => Promise<void>;
 }) {
   const latestRun = goal?.latest_runs[0];
   const missingGateKey = (queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []).join("|");
@@ -2236,8 +2242,11 @@ function RewardCommandDraft({
   const [reasonSummary, setReasonSummary] = useState(draftDefaults.reasonSummary);
   const [followUp, setFollowUp] = useState(draftDefaults.followUp);
   const [dryRunResult, setDryRunResult] = useState<RewardDryRunResponse | null>(null);
+  const [appendResult, setAppendResult] = useState<RewardDryRunResponse | null>(null);
   const [dryRunError, setDryRunError] = useState<string | null>(null);
   const [isDryRunning, setIsDryRunning] = useState(false);
+  const [appendError, setAppendError] = useState<string | null>(null);
+  const [isAppending, setIsAppending] = useState(false);
   const command = goal && latestRun
     ? buildRewardCommand({
         goalId: goal.id,
@@ -2251,6 +2260,13 @@ function RewardCommandDraft({
       })
     : "";
   const canDryRun = Boolean(command && dryRunUrl && decision.trim() && reasonSummary.trim());
+  const canAppend = Boolean(
+    appendUrl
+    && dryRunResult?.ok
+    && dryRunResult.preview_id
+    && !dryRunResult.appended
+    && !appendResult?.appended,
+  );
 
   useEffect(() => {
     setDecision(draftDefaults.decision);
@@ -2258,7 +2274,9 @@ function RewardCommandDraft({
     setReasonSummary(draftDefaults.reasonSummary);
     setFollowUp(draftDefaults.followUp);
     setDryRunResult(null);
+    setAppendResult(null);
     setDryRunError(null);
+    setAppendError(null);
   }, [
     draftDefaults.decision,
     draftDefaults.reward,
@@ -2268,6 +2286,20 @@ function RewardCommandDraft({
     latestRun?.generated_at,
   ]);
 
+  function rewardRequestBody() {
+    if (!goal || !latestRun) {
+      return null;
+    }
+    return {
+      goal_id: goal.id,
+      run_generated_at: latestRun.generated_at,
+      decision,
+      reward,
+      reason_summary: reasonSummary,
+      follow_up: followUp.trim() || undefined,
+    };
+  }
+
   async function runDryRunCheck() {
     if (!goal || !latestRun || !dryRunUrl) {
       return;
@@ -2275,18 +2307,13 @@ function RewardCommandDraft({
     setIsDryRunning(true);
     setDryRunError(null);
     setDryRunResult(null);
+    setAppendResult(null);
+    setAppendError(null);
     try {
       const response = await fetch(dryRunUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal_id: goal.id,
-          run_generated_at: latestRun.generated_at,
-          decision,
-          reward,
-          reason_summary: reasonSummary,
-          follow_up: followUp.trim() || undefined,
-        }),
+        body: JSON.stringify(rewardRequestBody()),
       });
       const payload = parseRewardDryRunResponse(await response.json());
       if (!response.ok || !payload.ok) {
@@ -2297,6 +2324,37 @@ function RewardCommandDraft({
       setDryRunError(formatStatusError(error));
     } finally {
       setIsDryRunning(false);
+    }
+  }
+
+  async function appendRewardOverlay() {
+    const requestBody = rewardRequestBody();
+    if (!appendUrl || !requestBody || !dryRunResult?.preview_id) {
+      return;
+    }
+    setIsAppending(true);
+    setAppendError(null);
+    try {
+      const response = await fetch(appendUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...requestBody,
+          preview_id: dryRunResult.preview_id,
+          write_active_state_summary: true,
+        }),
+      });
+      const payload = parseRewardDryRunResponse(await response.json());
+      if (!response.ok || !payload.ok || !payload.appended) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setAppendResult(payload);
+      setDryRunResult(payload);
+      await onStatusRefresh();
+    } catch (error) {
+      setAppendError(formatStatusError(error));
+    } finally {
+      setIsAppending(false);
     }
   }
 
@@ -2321,7 +2379,9 @@ function RewardCommandDraft({
                 setReasonSummary(draftDefaults.reasonSummary);
                 setFollowUp(draftDefaults.followUp);
                 setDryRunResult(null);
+                setAppendResult(null);
                 setDryRunError(null);
+                setAppendError(null);
               }}
               size="sm"
               variant="ghost"
@@ -2359,7 +2419,9 @@ function RewardCommandDraft({
               Dry-run Check
             </Button>
             <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "local API" : "manual CLI"}</Badge>
+            <Badge variant={appendUrl ? "warning" : "neutral"}>{appendUrl ? "append API" : "copy/CLI only"}</Badge>
             {dryRunError ? <Badge variant="danger">{dryRunError.slice(0, 96)}</Badge> : null}
+            {appendError ? <Badge variant="danger">{appendError.slice(0, 96)}</Badge> : null}
           </div>
           {dryRunResult?.ok ? (
             <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
@@ -2373,6 +2435,20 @@ function RewardCommandDraft({
                 <code className="block rounded border border-emerald-200 bg-white/60 p-2 text-[11px] leading-4 dark:border-emerald-900 dark:bg-zinc-950/50">
                   {dryRunResult.project_agent_visibility.history_command}
                 </code>
+              ) : null}
+              {dryRunResult.preview_id && !appendResult?.appended ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-200 bg-white/70 p-2 dark:border-emerald-900 dark:bg-zinc-950/50">
+                  <span>Preview locked to this goal/run/reward payload. Append writes one run-bound human_reward overlay.</span>
+                  <Button disabled={!canAppend || isAppending} onClick={() => void appendRewardOverlay()} size="sm">
+                    {isAppending ? <RefreshCw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Append reward overlay
+                  </Button>
+                </div>
+              ) : null}
+              {appendResult?.appended ? (
+                <div className="rounded border border-emerald-300 bg-emerald-100 p-2 font-medium dark:border-emerald-800 dark:bg-emerald-900">
+                  Reward appended and status refreshed. The next agent run can read it from run history.
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -2393,12 +2469,16 @@ function RunHistoryPanel({
   registry,
   runtimeRoot,
   rewardDryRunUrl,
+  rewardAppendUrl,
+  onStatusRefresh,
 }: {
   goal?: RunGoal;
   queueItem?: QueueItem;
   registry: string;
   runtimeRoot: string;
   rewardDryRunUrl: string | null;
+  rewardAppendUrl: string | null;
+  onStatusRefresh: () => Promise<void>;
 }) {
   const latestRuns = goal?.latest_runs ?? [];
   const authorityCoverage = buildAuthorityCoverage({ goal, run: latestRuns[0] });
@@ -2502,8 +2582,10 @@ function RunHistoryPanel({
           ) : null}
 
           <RewardCommandDraft
+            appendUrl={rewardAppendUrl}
             dryRunUrl={rewardDryRunUrl}
             goal={goal}
+            onStatusRefresh={onStatusRefresh}
             queueItem={queueItem}
             registry={registry}
             runtimeRoot={runtimeRoot}
@@ -2696,7 +2778,7 @@ export function DashboardPage() {
     () => buildGoalDirectoryRows(runHistory.goals, queue.items),
     [runHistory.goals, queue.items],
   );
-  const rewardDryRunUrl = useMemo(() => buildRewardDryRunUrl(source), [source]);
+  const rewardApiUrls = useMemo(() => buildRewardApiUrls(source), [source]);
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -3063,9 +3145,15 @@ export function DashboardPage() {
                   ) : null}
                   <RunHistoryPanel
                     goal={selectedGoal}
+                    onStatusRefresh={async () => {
+                      if (source.kind === "url") {
+                        await loadFromUrl(source.label);
+                      }
+                    }}
                     queueItem={selectedQueueItem}
                     registry={payload.registry}
-                    rewardDryRunUrl={rewardDryRunUrl}
+                    rewardAppendUrl={rewardApiUrls.appendUrl}
+                    rewardDryRunUrl={rewardApiUrls.dryRunUrl}
                     runtimeRoot={payload.runtime_root}
                   />
                 </div>

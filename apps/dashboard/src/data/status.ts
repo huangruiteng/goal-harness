@@ -271,6 +271,7 @@ export const rewardDryRunResponseSchema = z.object({
   appended: z.boolean().optional().default(false),
   goal_id: z.string().optional().nullable(),
   raw_index_records_before: z.number().optional().nullable(),
+  preview_id: z.string().optional().nullable(),
   selected_run: z.object({
     generated_at: z.string().optional().nullable(),
     classification: z.string().optional().nullable(),
