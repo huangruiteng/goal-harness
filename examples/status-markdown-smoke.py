@@ -170,6 +170,33 @@ def assert_quota_should_run(payload: dict, *, expected: bool, state: str, waitin
     return quota_payload
 
 
+def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None:
+    items = payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    item = items[0]
+    assert item["goal_id"] == "planned-main-control", item
+    assert item["waiting_on"] == "user_or_controller", item
+    assert item["recommended_action"] == NEW_PLANNED_ACTION, item
+    assert item["agent_command"] == APPROVED_COMMAND, item
+    assert "operator_gate_dry_run" not in item, item
+    assert OLD_PLANNED_ACTION not in json.dumps(payload, ensure_ascii=False), payload
+    assert OLD_PLANNED_ACTION not in markdown, markdown
+    assert NEW_PLANNED_ACTION in markdown, markdown
+
+    gate_index = markdown.index("operator_gate_dry_run")
+    agent_index = markdown.index("agent_command")
+    assert gate_index < agent_index, markdown
+    assert "<public-safe reason>" in markdown, markdown
+
+    quota_payload = assert_quota_should_run(
+        payload,
+        expected=False,
+        state="operator_gate",
+        waiting_on="user_or_controller",
+    )
+    assert quota_payload["status"] == "planned-high-complexity", quota_payload
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
@@ -197,23 +224,7 @@ def main() -> int:
         )
         deferred_payload, deferred_markdown = collect_fixture_status(root, registry_path)
 
-    items = payload["attention_queue"]["items"]
-    assert len(items) == 1, items
-    item = items[0]
-    assert item["goal_id"] == "planned-main-control", item
-    assert item["waiting_on"] == "user_or_controller", item
-    assert item["recommended_action"] == NEW_PLANNED_ACTION, item
-    assert item["agent_command"] == "goal-harness read-only-map --goal-id planned-main-control --dry-run", item
-    assert "operator_gate_dry_run" not in item, item
-    assert OLD_PLANNED_ACTION not in json.dumps(payload, ensure_ascii=False), payload
-    assert OLD_PLANNED_ACTION not in markdown, markdown
-    assert NEW_PLANNED_ACTION in markdown, markdown
-
-    gate_index = markdown.index("operator_gate_dry_run")
-    agent_index = markdown.index("agent_command")
-    assert gate_index < agent_index, markdown
-    assert "<public-safe reason>" in markdown, markdown
-
+    assert_planned_preview_is_not_runnable(payload, markdown)
     approved_items = approved_payload["attention_queue"]["items"]
     assert len(approved_items) == 1, approved_items
     approved_item = approved_items[0]

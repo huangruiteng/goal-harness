@@ -357,7 +357,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         }
         if item.get("next_handoff_condition"):
             payload["next_handoff_condition"] = item.get("next_handoff_condition")
-        if item.get("agent_command"):
+        if should_run and item.get("agent_command"):
             payload["agent_command"] = item.get("agent_command")
         return payload
 

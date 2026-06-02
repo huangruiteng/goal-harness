@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T09:10:47+08:00
+updated_at: 2026-06-02T09:22:14+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,12 +27,29 @@ private project context.
 
 ## Next Action
 
-- Add a small public smoke or contract note for operator-gate opt-in visibility:
-  a planned high-complexity goal should keep the human/controller decision in
-  the status/review surface before any project agent runs a real read-only map.
+- Add a small dashboard/browser smoke for the same operator-gate opt-in
+  boundary: a planned high-complexity goal should appear as a first-screen
+  human/controller action, while `quota should-run` remains the agent-facing
+  hard gate and no project-agent command becomes runnable before approval.
 
 ## Recent Progress
 
+- 2026-06-02T09:22:14+08:00: Tightened the planned high-complexity opt-in
+  contract so preview commands stay human-facing and do not leak into
+  executor-facing skip payloads. `build_quota_should_run()` now returns
+  `agent_command` only when `should_run=true`; `examples/status-markdown-smoke.py`
+  now asserts that the initial planned read-only-map preview stays
+  `waiting_on=user_or_controller`, renders `operator_gate_dry_run` before
+  `agent_command`, and still returns `should_run=false`, `state=operator_gate`,
+  with no `agent_command` in the quota guard. Updated
+  `docs/status-data-contract.md` and `docs/attention-queue.md` to name the
+  status-display versus executor-guard split. Validation: direct status
+  markdown smoke passed; review packet smoke passed; quota plan smoke passed;
+  quota contract smoke passed; aggregate public smokes passed with 8 scripts;
+  Python compile passed; public contract check passed; `git diff --check`
+  passed. Critic: the CLI/agent-facing guard is now cleaner, but the dashboard
+  first screen should get a browser-level smoke so the human UI cannot collapse
+  planned opt-in preview into Codex-ready work.
 - 2026-06-02T09:10:47+08:00: Added
   `examples/install-local-smoke.py`, a temp-HOME installer smoke. The smoke
   runs `scripts/install-local.sh` with isolated `HOME`, `CODEX_HOME`,

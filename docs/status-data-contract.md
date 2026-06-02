@@ -293,6 +293,11 @@ The human-readable Markdown status view may also render an
 `operator_gate_dry_run` helper before `agent_command`; that helper is a
 user-owned gate recording preview, not a JSON contract field or project-agent
 command.
+Executor-facing guards are stricter than status display: `quota should-run`
+must keep these planned items at `should_run=false`, `state=operator_gate`, and
+must not include `agent_command` until an approved operator-gate run makes the
+goal eligible. This keeps a preview command from becoming an automatic project
+agent handoff.
 
 Review Packet source-of-truth rule:
 
