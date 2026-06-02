@@ -119,40 +119,18 @@ local project. This does not touch production systems or external services:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-
-mkdir -p /tmp/goal-harness-demo
-cd /tmp/goal-harness-demo
-printf "Keep this demo goal organized and verifiable.\n" > GOAL.md
-
-goal-harness bootstrap \
-  --project /tmp/goal-harness-demo \
-  --goal-id demo-goal \
-  --objective "Keep this demo goal organized and verifiable." \
-  --goal-doc GOAL.md \
-  --no-global-sync
-
-registry="$PWD/.goal-harness/registry.json"
-
-goal-harness --registry "$registry" todo add \
-  --goal-id demo-goal \
-  --role user \
-  --text "Decide whether this demo goal is worth wiring into a real project."
-
-goal-harness --registry "$registry" todo add \
-  --goal-id demo-goal \
-  --role agent \
-  --text "Run one read-only project map before making any code changes."
-
-goal-harness --registry "$registry" refresh-state --goal-id demo-goal --no-global-sync
-goal-harness --registry "$registry" status --scan-root "$PWD"
-goal-harness --registry "$registry" --format json quota should-run --goal-id demo-goal
+goal-harness demo
 ```
 
-After that, open
-`.codex/goals/demo-goal/ACTIVE_GOAL_STATE.md` in the demo project. The important
-thing to check is not the formatting; it is whether the next action, user todo,
-agent todo, gate state, and quota decision are visible enough that a later agent
-turn can continue without relying on chat memory.
+The command creates `/tmp/goal-harness-demo`, writes a small `GOAL.md`, connects
+a local `demo-goal`, adds one user todo and one agent todo, refreshes state, and
+prints the status/quota result. It uses the demo project's local registry and
+does not sync the demo goal into your global multi-project registry.
+
+After that, open the printed `ACTIVE_GOAL_STATE.md`. The important thing to
+check is not the formatting; it is whether the next action, user todo, agent
+todo, gate state, and quota decision are visible enough that a later agent turn
+can continue without relying on chat memory.
 
 ## Daily Use
 

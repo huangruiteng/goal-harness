@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T23:18:37+08:00
+updated_at: 2026-06-02T23:34:46+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,39 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should reduce first-run friction one more step only if the open
-  source trial path still feels too copy-paste heavy: consider a tiny
-  `goal-harness demo` command or demo script that creates the disposable goal,
-  adds user/agent todos, refreshes state, and prints the status/quota checks.
+- Next tick should do a fresh-clone trial audit only if public first-run
+  usability remains the top priority: clone/install in a temp HOME, run
+  `goal-harness demo`, and record any remaining first-user friction before
+  adding more features.
 
 ## Recent Progress
 
+- 2026-06-02T23:34:46+08:00: Steering audit candidates were: P1 first-run
+  `goal-harness demo` command, P0 live connected-goal adoption check, and P2
+  richer dashboard/demo polish. Continuation check: first-run usability has now
+  consumed two consecutive slices, but the previous slice explicitly left the
+  path as copy-paste heavy; implementing a one-command demo is the smallest
+  direct reduction in public trial friction and stays within the current PR
+  usability goal. Added `goal_harness/demo.py` and `goal-harness demo`, which
+  creates a disposable local project, writes `GOAL.md`, bootstraps `demo-goal`
+  without global sync, adds one user todo and one agent todo, refreshes state,
+  summarizes status/quota, and prints next commands. Updated `README.md`
+  `Try It In 10 Minutes` from a long copy-paste block to `goal-harness demo`.
+  Added `examples/demo-cli-smoke.py` so the public smoke runner validates the
+  one-command path, local registry use, user/agent todo projection, refresh,
+  quota eligibility, and no global-registry sync. Changed files: `README.md`,
+  `goal_harness/cli.py`, `goal_harness/demo.py`, `examples/demo-cli-smoke.py`,
+  plus this active state; private `.local` state also updated. Validation:
+  `python3 examples/demo-cli-smoke.py`, `python3 examples/run-smokes.py` now
+  passes 14 smoke scripts, `python3 -m compileall -q goal_harness`,
+  installed-wrapper smoke `goal-harness --runtime-root <tmp> demo --project
+  <tmp>/project --goal-id wrapper-demo-goal`, `goal-harness check --scan-root
+  .`, and `git diff --check`. A manual default-runtime demo was archived and
+  its temp project removed. Critic: the public try path is now one command, but
+  it has not yet been tested from a clean clone/HOME after install; the next
+  quality step should be a fresh-clone trial audit rather than more feature
+  work. Losing candidate to remember: live connected-goal adoption remains a
+  stronger P0 control-plane proof after first-run UX is no longer embarrassing.
 - 2026-06-02T23:18:37+08:00: User feedback after the open-source PR draft
   shifted this slice from internal prompt polish to external usability: willing
   first-time users should feel Goal Harness is "usable enough" after a quick

@@ -12,6 +12,15 @@ from .bootstrap import (
     render_bootstrap_markdown,
 )
 from .contract import check_contract, render_contract_markdown
+from .demo import (
+    DEFAULT_DEMO_AGENT_TODO,
+    DEFAULT_DEMO_GOAL_ID,
+    DEFAULT_DEMO_OBJECTIVE,
+    DEFAULT_DEMO_PROJECT,
+    DEFAULT_DEMO_USER_TODO,
+    render_demo_markdown,
+    run_demo,
+)
 from .doctor import collect_doctor, render_doctor_markdown
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
@@ -148,6 +157,20 @@ def main(argv: list[str] | None = None) -> int:
         "--permission-rule",
         help="Optional trusted-session permission rule appended to the task body.",
     )
+
+    demo_parser = sub.add_parser(
+        "demo",
+        help="Create a disposable local demo goal and show status/quota output.",
+    )
+    demo_parser.add_argument(
+        "--project",
+        default=str(DEFAULT_DEMO_PROJECT),
+        help=f"Disposable demo project directory. Defaults to {DEFAULT_DEMO_PROJECT}.",
+    )
+    demo_parser.add_argument("--goal-id", default=DEFAULT_DEMO_GOAL_ID)
+    demo_parser.add_argument("--objective", default=DEFAULT_DEMO_OBJECTIVE)
+    demo_parser.add_argument("--user-todo", default=DEFAULT_DEMO_USER_TODO)
+    demo_parser.add_argument("--agent-todo", default=DEFAULT_DEMO_AGENT_TODO)
 
     sub.add_parser("doctor", help="Diagnose local CLI installation, PATH, wrapper, and import health.")
 
@@ -438,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     registry_path = Path(args.registry).expanduser()
     if (
         args.command
-        not in {"bootstrap", "connect", "doctor", "new-project-prompt", "heartbeat-prompt", "sync-global"}
+        not in {"bootstrap", "connect", "demo", "doctor", "new-project-prompt", "heartbeat-prompt", "sync-global"}
         and not user_supplied_registry(argv)
         and not registry_path.exists()
     ):
@@ -510,6 +533,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         print_payload(payload, args.format, render_heartbeat_prompt_markdown)
         return 0
+
+    if args.command == "demo":
+        try:
+            payload = run_demo(
+                project=Path(args.project).expanduser(),
+                runtime_root=Path(args.runtime_root).expanduser() if args.runtime_root else None,
+                goal_id=args.goal_id,
+                objective=args.objective,
+                user_todo=args.user_todo,
+                agent_todo=args.agent_todo,
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "project": args.project,
+                "goal_id": args.goal_id,
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_demo_markdown)
+        return 0 if payload.get("ok") else 1
 
     if args.command == "doctor":
         payload = collect_doctor()
