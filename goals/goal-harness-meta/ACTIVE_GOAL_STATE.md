@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T20:52:33+08:00
+updated_at: 2026-06-02T21:01:21+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,15 +45,29 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should observe the updated real project heartbeat once more. If it
-  now reads the global operator gate and surfaces open user todos instead of
-  running from project-local eligible state, return to the smallest dashboard /
-  status projection slice for project assets. If it still reports an eligible
-  local state, treat global/local registry divergence as the next state-truth
-  bug.
+- Next tick should return to the smallest dashboard/status projection slice for
+  project assets. Focus on making `owner`, `gate`, `next_action`,
+  `stop_condition`, `user_todos`, `agent_todos`, quota, and latest validation
+  easy for the user to scan without reading project-agent threads.
 
 ## Recent Progress
 
+- 2026-06-02T21:01:21+08:00: Steering audit candidates were: P0 real-heartbeat
+  adoption proof for the newly globalized quota guard, P0 dashboard/status
+  project-asset projection, and P1 internal-introduction polish. Chose the
+  real-heartbeat proof because the previous slice's critic required evidence
+  from the actual connected project thread, not another local command replay.
+  The real project heartbeat now runs its guard with the shared global registry,
+  reads `state=operator_gate` instead of the project-local eligible state, and
+  sends a concise operator notification listing the existing open user todos.
+  Changed files: this active state only. Validation: inspected the connected
+  thread session after the updated automation ran; the guard command included
+  `--registry "$HOME/.codex/goal-harness/registry.global.json"`, the JSON
+  returned `should_run=false`, `notify_user_on_gate=true`, and open user todos,
+  and the final heartbeat message surfaced those todos in Chinese. Critic: the
+  state-truth/user-todo adoption issue is now proven on a real connected goal;
+  the next value is the project-asset status/dashboard surface, not more
+  prompt churn.
 - 2026-06-02T20:52:33+08:00: Verified the previous user-todo notification fix
   against the real connected project thread and found a smaller state-truth
   root cause: the heartbeat ran from the target project cwd, so its unqualified
