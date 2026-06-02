@@ -24,7 +24,9 @@ Compute quota answers one question:
 Examples:
 
 - `1.0`: full duty cycle. If the controller checks hourly, this goal is
-  eligible on every healthy check.
+  eligible on every healthy check until its current window slot budget is
+  spent. With the default 24-hour window, `1.0` means 24 automatic compute
+  slots, not infinity.
 - `0.5`: half duty cycle, roughly 12 hours per day or half of scheduling slots.
 - `0.3`: 30% duty cycle, roughly 7.2 hours per day or 30% of scheduling slots.
 - `0`: compute-paused. The goal remains visible but should not receive
@@ -68,6 +70,23 @@ Registry entries may declare the same policy directly:
 
 If `quota.compute` is missing, status treats the goal as `1.0` by default so a
 newly connected project remains eligible unless a harder gate blocks it.
+
+If an operator wants a controller to be effectively unbounded by compute quota,
+keep `compute: 1.0` for prioritization and set an explicit high
+`allowed_slots`, for example:
+
+```json
+{
+  "quota": {
+    "compute": 1.0,
+    "window_hours": 24,
+    "allowed_slots": 1000000
+  }
+}
+```
+
+This only removes compute throttling. Health checks, operator gates, evidence
+waits, write-control, and production permissions still apply.
 
 For the first implementation, `spent_slots` can count automatic Goal Harness
 ticks, adapter runs, heartbeat continuations, or controller-selected Codex
@@ -143,6 +162,8 @@ The dashboard should show compute quota as a compact control surface:
 
 - quota chips: `1.0`, `0.5`, `0.3`, `0`;
 - spent/allowed slots for the current window;
+- a "full / unbounded by quota" state when `allowed_slots` is intentionally
+  much larger than the normal window-derived default;
 - next eligible time when throttled;
 - simple operator actions: set quota, pause, resume, or grant a temporary
   burst;

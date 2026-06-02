@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T13:47:48+08:00
+updated_at: 2026-06-02T16:05:52+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,16 +28,29 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. The platform migration heartbeat has now actually fired,
-  stayed ACTIVE, and produced `premium-ui-ai-search-rec-migration`
-  state-refresh plus operator-gate-deferred runs without quota spend. Prefer
-  comparing: fixing the CS-Notes wrapper registry's legacy-runtime view of
-  premium-ui, observing one more heartbeat for automation stability, or
-  dashboard attention-cost reduction. Keep the complex
-  `agent-harness-main-control` automation on its original path.
+  choosing work. `goal-harness-meta` is now intentionally full-quota via
+  `allowed_slots=1000000`, so it should not be throttled by the default 24-slot
+  window. Prefer comparing: fixing the CS-Notes wrapper registry's
+  legacy-runtime view of premium-ui, dashboard attention-cost reduction, or
+  one more platform heartbeat stability observation. Keep hard gates intact.
 
 ## Recent Progress
 
+- 2026-06-02T16:05:52+08:00: User clarified that the meta controller should be
+  full quota and effectively never compute-throttled. Root cause: in the
+  current quota model, `compute=1.0` means full duty cycle for the default
+  24-hour window, which derives 24 allowed automatic compute slots; it does
+  not mean infinite. The local source registry and shared global registry now
+  set `goal-harness-meta.quota.allowed_slots=1000000` while preserving
+  `compute=1.0`, so priority semantics remain full-duty and quota should no
+  longer throttle the meta controller. Updated `docs/quota-allocation.md` to
+  document this distinction and the explicit high `allowed_slots` override.
+  Validation: `goal-harness --format json quota should-run --goal-id
+  goal-harness-meta` returns `should_run=true`, `allowed_slots=1000000`,
+  `spent_slots=24`; `goal-harness status` reports global registry health
+  ok with no findings; `goal-harness check --scan-root .` passed. Critic:
+  compute quota is now unbounded for the meta controller, but health,
+  operator, evidence, write-control, and production gates still apply.
 - 2026-06-02T13:47:48+08:00: Ran the required steering audit after the
   platform migration heartbeat was re-activated. Candidates considered: P0
   state/safety observation of the actual platform migration heartbeat firing,
