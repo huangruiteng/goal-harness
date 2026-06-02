@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T19:38:12+08:00
+updated_at: 2026-06-02T19:53:50+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,17 +27,39 @@ private project context.
 
 ## Next Action
 
-- Next tick should stay in the P0 project-agent execution loop, but shift from
-  writing more copy to adoption proof: verify, with a sanitized fixture or live
-  public-safe status output, that target agents see `todo_write_hint`, use
-  `goal-harness todo add --role user` for newly discovered owner/user work,
-  and only receive approved `agent_command` after an `operator_gate_approved`
-  run. Keep it read-only/smoke-tested; do not touch real project repos. Losing
-  candidate to remember: dashboard one-click durable operator-gate append is
-  still useful, but secondary to proving agents actually write user todos.
+- Next tick should move from sanitized adoption proof to one live, public-safe
+  adoption check: inspect the platform-migration goal's current status/guard
+  surfaces and confirm whether the next user/owner todo is now represented in
+  `user_todos` rather than only in `Next Action` or review-doc prose. If the
+  live check still exposes a contract gap, improve the public contract or
+  generated prompt; do not edit target project code or take over its controller.
+  Losing candidate to remember: dashboard one-click durable operator-gate append
+  remains useful but should wait until live adoption is verified.
 
 ## Recent Progress
 
+- 2026-06-02T19:53:50+08:00: Steering audit candidates: P0 state/safety live
+  check that `todo_write_hint` is present in guard output, P0 project-agent loop
+  adoption proof across guard -> todo CLI -> status projection -> approved
+  handoff, and P1 dashboard display polish. Chose the adoption-proof smoke
+  because the previous slice added the contract, but had not proved an executor
+  could actually follow it end to end. Added
+  `examples/project-agent-adoption-smoke.py`, a sanitized temporary project
+  fixture that starts as a planned read-only-map goal, verifies
+  `quota should-run` exposes `todo_write_hint`, uses `goal-harness todo add
+  --role user` to write an owner/user action, confirms `goal-harness status`
+  projects that checkbox into `user_todos`, records an approved operator gate,
+  and confirms `review-packet` emits only the short approved handoff with the
+  approved read-only/dry-run `agent_command` and no local gate draft. Changed
+  files: `examples/project-agent-adoption-smoke.py` and this active state.
+  Validation: `python examples/project-agent-adoption-smoke.py`, `python
+  examples/todo-cli-smoke.py`, `python examples/review-packet-cli-smoke.py`,
+  `python examples/quota-plan-smoke.py`, `python examples/run-smokes.py`
+  showing 13 smoke scripts, `python -m compileall -q goal_harness`,
+  `goal-harness check --scan-root .`, and `git diff --check`. Critic: the
+  public sanitized adoption path is now covered; next value is one live
+  public-safe adoption check on a real connected goal, without touching target
+  project code or taking over its controller.
 - 2026-06-02T19:38:12+08:00: Steering audit candidates: P0 approved-command
   handoff after durable operator gate approval, P0 user-todo writeback
   friendliness for project agents, and P1 dashboard affordance polish. I began

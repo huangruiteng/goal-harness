@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Smoke-test the project-agent Goal Harness adoption path.
+
+This fixture proves the executor-facing loop, not just isolated helpers:
+
+1. `quota should-run` exposes a concrete todo write hint.
+2. A project agent can use `goal-harness todo add --role user`.
+3. `status` projects that user todo into the attention queue.
+4. After an approved operator gate, `review-packet` gives only the short,
+   goal-guarded approved handoff to the target agent.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+GOAL_ID = "adoption-main-control"
+USER_TODO = "Review the P0 owner-risk checklist before approving delivery."
+APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
+
+
+def write_planned_fixture(root: Path) -> Path:
+    project = root / "project"
+    runtime = root / "runtime"
+    state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    registry_path = project / ".goal-harness" / "registry.json"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text(
+        "---\n"
+        "status: planned-high-complexity\n"
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Adoption Main Control\n\n"
+        "## Objective\n\n"
+        "Keep this fixture public-safe.\n\n"
+        "## Next Action\n\n"
+        "- Analyze the P0 owner-risk scene.\n",
+        encoding="utf-8",
+    )
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "adoption-fixture",
+                        "status": "planned-high-complexity",
+                        "repo": str(project),
+                        "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
+                        "adapter": {
+                            "kind": "complex_project_read_only_map_v0",
+                            "status": "planned",
+                        },
+                        "authority_sources": [],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return registry_path
+
+
+def run_cli(root: Path, registry_path: Path, *args: str) -> dict:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "goal_harness.cli",
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(root / "runtime"),
+            "--format",
+            "json",
+            *args,
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
+def attention_item(status_payload: dict) -> dict:
+    items = status_payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    return items[0]
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="goal-harness-project-agent-adoption-") as tmp:
+        root = Path(tmp)
+        registry_path = write_planned_fixture(root)
+        project = root / "project"
+
+        first_quota = run_cli(
+            root,
+            registry_path,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(project),
+        )
+        assert first_quota["state"] == "operator_gate", first_quota
+        assert first_quota["should_run"] is False, first_quota
+        assert first_quota["todo_write_hint"]["section"] == "User Todo / Owner Review Reading Queue", first_quota
+        assert first_quota["todo_write_hint"]["user_todo_command_template"] == (
+            f"goal-harness todo add --goal-id {GOAL_ID} --role user --text '<public-safe user/owner action>'"
+        ), first_quota
+
+        todo_payload = run_cli(
+            root,
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "user",
+            "--text",
+            USER_TODO,
+        )
+        assert todo_payload["ok"] is True, todo_payload
+        assert todo_payload["added"] is True, todo_payload
+        assert todo_payload["section"] == "User Todo / Owner Review Reading Queue", todo_payload
+
+        status_after_todo = run_cli(root, registry_path, "status", "--scan-root", str(project))
+        item_after_todo = attention_item(status_after_todo)
+        assert item_after_todo["waiting_on"] == "user_or_controller", item_after_todo
+        assert item_after_todo["user_todos"]["open_count"] == 1, item_after_todo
+        assert item_after_todo["user_todos"]["items"][0]["text"] == USER_TODO, item_after_todo
+
+        quota_after_todo = run_cli(
+            root,
+            registry_path,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(project),
+        )
+        assert quota_after_todo["user_todo_summary"]["open_count"] == 1, quota_after_todo
+        assert USER_TODO in quota_after_todo["gate_prompt"], quota_after_todo
+
+        gate_payload = run_cli(
+            root,
+            registry_path,
+            "operator-gate",
+            "--goal-id",
+            GOAL_ID,
+            "--decision",
+            "approve",
+            "--reason-summary",
+            f"同意 {GOAL_ID} 先做 read-only map dry-run，不授权写入或生产动作",
+            "--no-global-sync",
+        )
+        assert gate_payload["ok"] is True, gate_payload
+        assert gate_payload["appended"] is True, gate_payload
+        assert gate_payload["operator_gate"]["agent_command"] == APPROVED_COMMAND, gate_payload
+
+        approved_quota = run_cli(
+            root,
+            registry_path,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(project),
+        )
+        assert approved_quota["should_run"] is True, approved_quota
+        assert approved_quota["state"] == "eligible", approved_quota
+        assert approved_quota["agent_command"] == APPROVED_COMMAND, approved_quota
+        assert approved_quota["todo_write_hint"]["agent_todo_command_template"].startswith(
+            f"goal-harness todo add --goal-id {GOAL_ID} --role agent "
+        ), approved_quota
+
+        packet = run_cli(root, registry_path, "review-packet", "--goal-id", GOAL_ID, "--scan-root", str(project))
+        assert packet["ok"] is True, packet
+        assert packet["kind"] == "codex", packet
+        assert packet["operator_gate_approved_handoff"] is True, packet
+        assert packet["project_agent_command"] == APPROVED_COMMAND, packet
+        assert "operator gate 已记录为 approve" in packet["project_agent_handoff"], packet
+        assert "【用户本地 Gate 记录草稿】" not in packet["packet"], packet
+
+    print("project-agent-adoption-smoke ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
