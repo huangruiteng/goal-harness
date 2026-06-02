@@ -22,6 +22,9 @@ const pwcli = process.env.PWCLI ?? resolve(homedir(), ".codex/skills/playwright/
 const goalId = "planned-main-control";
 const operatorQuestion = "是否同意 `planned-main-control` 先执行 read-only map opt-in？";
 const recommendedAction = "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run";
+const assetNextAction = "Project asset: handle owner todo before approving the gate";
+const assetStopCondition = "Project asset stop: record or defer the owner todo before approval";
+const userTodoText = "Read owner review worksheet first.";
 const previewCommand = "goal-harness read-only-map --goal-id planned-main-control --dry-run";
 const approvedAction = "operator approved read-only map; project agent can execute the approved dry-run";
 const approvedCommand = "goal-harness read-only-map --goal-id planned-main-control --dry-run --approved";
@@ -78,6 +81,24 @@ const statusFixture = {
         waiting_on: "user_or_controller",
         severity: "action",
         recommended_action: recommendedAction,
+        project_asset: {
+          owner: "user_or_controller",
+          gate: "operator_question",
+          next_action: assetNextAction,
+          stop_condition: assetStopCondition,
+          user_todos: {
+            open: 1,
+            done: 0,
+            total: 1,
+            next: userTodoText,
+          },
+          quota: operatorGateQuota,
+          latest_validation: {
+            generated_at: "2026-01-01T00:00:00+00:00",
+            classification: "planned-high-complexity",
+            summary: "fixture planned controller opt-in",
+          },
+        },
         operator_question: operatorQuestion,
         agent_command: previewCommand,
         quota: operatorGateQuota,
@@ -137,6 +158,25 @@ const approvedStatusFixture = {
         waiting_on: "codex",
         severity: "action",
         recommended_action: approvedAction,
+        project_asset: {
+          owner: "codex",
+          gate: "none",
+          next_action: approvedAction,
+          stop_condition: "Project asset stop: stop if the approved dry-run command fails",
+          quota: {
+            compute: 0.5,
+            window_hours: 24,
+            allowed_slots: 12,
+            spent_slots: 0,
+            state: "eligible",
+            reason: "operator gate approved; eligible for the next agent turn",
+          },
+          latest_validation: {
+            generated_at: "2026-01-01T00:01:00+00:00",
+            classification: "operator_gate_approved",
+            summary: "fixture operator gate approved; agent_command 1/1",
+          },
+        },
         agent_command: approvedCommand,
         quota: {
           compute: 0.5,
@@ -288,6 +328,9 @@ async function main() {
           "User / Controller",
           "Operator question",
           "是否同意 \`planned-main-control\` 先执行 read-only map opt-in？",
+          "先做用户待办",
+          "Read owner review worksheet first.",
+          "Project asset stop: record or defer the owner todo before approval",
           "Agent command ready after approval",
           "Quota 0.5",
           "等待人或控制器决策",

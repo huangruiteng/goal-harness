@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T21:04:34+08:00
+updated_at: 2026-06-02T21:18:31+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,40 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should inspect the existing dashboard WIP before editing it. If the
-  WIP is still aligned with the new `project_asset` status shape, wire the
-  first-screen action cards to prefer that single compact projection; otherwise
-  leave dashboard changes alone and add a CLI/status contract smoke first.
+- Next tick should verify the dashboard first-screen behavior against the live
+  `/status.local.json` or current in-app view. If user todos, agent todos,
+  quota, next action, and stop condition are now cleanly read from
+  `project_asset`, stop adding UI and reduce duplicate packet/panel surfaces.
+  Keep `User Todo` counts separate from project-local production-write
+  blockers.
 
 ## Recent Progress
 
+- 2026-06-02T21:18:31+08:00: Steering audit candidates were: P0 dashboard
+  project-asset consumption, P0 human-decision loop/copy surface cleanup, and
+  P1 internal-introduction polish. Chose dashboard project-asset consumption
+  because the previous slice created the compact status projection and the
+  existing dashboard WIP was aligned with the user-todo-before-gate problem.
+  Dashboard schemas now preserve `project_asset`; first-screen action cards
+  prefer `project_asset.quota`, `project_asset.user_todos`,
+  `project_asset.agent_todos`, `project_asset.next_action`, and
+  `project_asset.stop_condition` before falling back to detailed queue fields.
+  The browser smoke fixture now proves that a user todo present only in
+  `project_asset` still appears before an operator gate. Clarified the field
+  distinction exposed by the platform-migration case: `User Todo` is the
+  operator-facing checklist, while project-local production blockers are
+  write-safety gates and must not be counted as user todos. Changed files:
+  `apps/dashboard/src/data/status.ts`,
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `examples/dashboard-operator-gate-browser-smoke.mjs`,
+  `examples/review-packet-smoke.py`, and this active state. Validation: `npm
+  run build`, `python examples/review-packet-smoke.py`, `python
+  examples/status-markdown-smoke.py`, `python examples/quota-contract-smoke.py`,
+  `node examples/dashboard-operator-gate-browser-smoke.mjs`, `python -m
+  compileall -q goal_harness`, `goal-harness check --scan-root .`, and `git
+  diff --check`. Critic: the data and first-screen UI now consume the compact
+  project asset; remaining work should reduce duplicate panels/copy surfaces
+  and avoid wording that makes production-write blockers look like user todos.
 - 2026-06-02T21:04:34+08:00: Steering audit candidates were: P0 status
   project-asset projection, P0 human decision loop dashboard polish, and P1
   internal-introduction polish. Chose the status projection because it is the

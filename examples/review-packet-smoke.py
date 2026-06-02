@@ -73,6 +73,42 @@ def build_sanitized_controller_packet() -> str:
     )
 
 
+def build_sanitized_controller_packet_with_user_todo() -> str:
+    goal_id = "planned-main-control"
+    project_agent_command = multiline_command(
+        "goal-harness \\",
+        "  --registry ./examples/registry.example.json \\",
+        "  --runtime-root ./tmp/runtime \\",
+        "  read-only-map \\",
+        f"  --goal-id {goal_id} \\",
+        "  --dry-run",
+    )
+    return "\n".join(
+        [
+            "【Goal Harness Action】",
+            f"目标：{goal_id}",
+            "动作：Review or authorize",
+            "",
+            "【请你判断】",
+            "先处理用户待办：Read the owner review worksheet first.",
+            "再判断 Gate：是否允许目标项目进入 read-only/controller opt-in？",
+            f"建议回复：先说明用户待办是否已完成；完成后再回复：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
+            "建议判断：先完成/确认用户待办，再判断是否同意 gate；不授权写入或生产动作。",
+            "边界：这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
+            "记录规则：如需持久记录本次判断，先用本地 operator-gate dry-run 预览；确认写入时去掉 --dry-run；拒绝/暂缓用 reject/defer + public-safe 原因。",
+            "",
+            "【当前状态】",
+            "摘要：planned opt-in review fixture",
+            "下一步：先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
+            "",
+            "【同意后给项目 Agent】",
+            "只允许 safe path：Read-only map dry-run",
+            f"命令：{project_agent_command.replace(chr(10), ' ')}",
+            "要求：用中文回报 changed files、validation、next safe action；需要写入/生产/进一步授权时停下。",
+        ]
+    )
+
+
 def main() -> int:
     source = DASHBOARD_PAGE.read_text(encoding="utf-8")
     contract = STATUS_CONTRACT.read_text(encoding="utf-8")
@@ -102,6 +138,9 @@ def main() -> int:
     packet_builder = source_between(source, "function buildHumanFriendlyActionPacket", "function ReviewLinkPanel")
     assert_order(packet_builder, ["【请你判断】", "【当前状态】", "【同意后给项目 Agent】"])
     assert "operatorGateDraftCommand" not in packet_builder
+    assert "先处理用户待办：" in packet_builder
+    assert "再判断 Gate：" in packet_builder
+    assert "先说明用户待办是否已完成" in packet_builder
 
     controller_prompt = source_between(source, "if (kind === \"controller\")", "if (kind === \"codex\")")
     assert "是否允许目标项目进入 read-only/controller opt-in？" in controller_prompt
@@ -132,7 +171,11 @@ def main() -> int:
     assert "本窗口配额已用完" in quota_state_labels
 
     user_action_builder = source_between(source, "function buildUserActionSummaryItems", "function UserActionSummary")
-    assert "const quota = row.queueItem?.quota ?? row.goal.quota;" in user_action_builder
+    assert "const projectAsset = row.queueItem?.project_asset;" in user_action_builder
+    assert "const quota = projectAsset?.quota ?? row.queueItem?.quota ?? row.goal.quota;" in user_action_builder
+    assert "todosFromProjectAssetSummary(projectAsset?.user_todos" in user_action_builder
+    assert "const nextAction = projectAsset?.next_action ?? decision.action;" in user_action_builder
+    assert "const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action;" in user_action_builder
     assert "const quotaState = quota?.state ?? \"waiting\";" in user_action_builder
     assert "decision.waitingOn === \"codex\" && quotaState === \"throttled\"" in user_action_builder
     assert_order(
@@ -148,6 +191,9 @@ def main() -> int:
     assert "aria-label={`Copy action packet for ${item.goalId}`}" in user_action_summary
     assert "const primaryOperatorGate" not in user_action_summary
     assert "Needs decision" not in user_action_summary
+    assert "blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))}" in user_action_summary
+    assert "先做用户待办" in source
+    assert "完成或明确暂缓这个用户待办后，再审批下面的 gate。" in source
 
     packet = build_sanitized_controller_packet()
     assert_order(
@@ -168,6 +214,23 @@ def main() -> int:
     assert packet.count("read-only-map") == 1, packet
     assert len(packet.splitlines()) <= 21, packet
     assert "不授权写入或主控接管" in packet
+
+    packet_with_todo = build_sanitized_controller_packet_with_user_todo()
+    assert_order(
+        packet_with_todo,
+        [
+            "【请你判断】",
+            "先处理用户待办：",
+            "再判断 Gate：",
+            "建议回复：先说明用户待办是否已完成",
+            "建议判断：先完成/确认用户待办",
+            "【当前状态】",
+            "【同意后给项目 Agent】",
+        ],
+    )
+    assert "Read the owner review worksheet first." in packet_with_todo
+    assert "operator-gate \\" not in packet_with_todo, packet_with_todo
+    assert len(packet_with_todo.splitlines()) <= 22, packet_with_todo
     print("review-packet-smoke ok")
     return 0
 

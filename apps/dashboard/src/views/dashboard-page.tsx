@@ -44,6 +44,7 @@ import {
   RunGoal,
   RunRecord,
   StatusPayload,
+  ProjectAssetTodoSummary,
   TodoGroup,
   exampleStatusPayload,
   formatStatusError,
@@ -720,6 +721,26 @@ function firstOpenTodo(todos?: TodoGroup | null) {
   return todos?.items.find((item) => !item.done);
 }
 
+function todosFromProjectAssetSummary(
+  summary?: ProjectAssetTodoSummary | null,
+  fallback?: TodoGroup | null,
+  sourceSection = "project_asset",
+): TodoGroup | null {
+  if (!summary) {
+    return fallback ?? null;
+  }
+  const next = summary.next?.trim();
+  return {
+    source_section: fallback?.source_section ?? sourceSection,
+    total_count: summary.total ?? fallback?.total_count ?? 0,
+    open_count: summary.open ?? fallback?.open_count ?? 0,
+    done_count: summary.done ?? fallback?.done_count ?? 0,
+    items: next
+      ? [{ index: 1, done: false, text: next }]
+      : (fallback?.items ?? []),
+  };
+}
+
 function todoCountLabel(todos?: TodoGroup | null) {
   if (!todos || todos.total_count === 0) {
     return null;
@@ -727,7 +748,7 @@ function todoCountLabel(todos?: TodoGroup | null) {
   return `${todos.open_count}/${todos.total_count} open`;
 }
 
-function UserTodoCallout({ todos }: { todos?: TodoGroup | null }) {
+function UserTodoCallout({ blocksGate, todos }: { blocksGate?: boolean; todos?: TodoGroup | null }) {
   const todo = firstOpenTodo(todos);
   const count = todoCountLabel(todos);
   if (!todo) {
@@ -737,12 +758,17 @@ function UserTodoCallout({ todos }: { todos?: TodoGroup | null }) {
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
       <div className="flex flex-wrap items-center gap-2">
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
-        <Badge variant="success">Next user todo</Badge>
+        <Badge variant="success">{blocksGate ? "先做用户待办" : "Next user todo"}</Badge>
         {count ? <Badge variant="neutral">{count}</Badge> : null}
       </div>
       <p className="mt-2 line-clamp-3 break-words text-sm font-medium leading-6 text-emerald-950 dark:text-emerald-100">
         {todo.text}
       </p>
+      {blocksGate ? (
+        <p className="mt-1 text-xs font-medium leading-5 text-emerald-800 dark:text-emerald-200">
+          完成或明确暂缓这个用户待办后，再审批下面的 gate。
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -882,6 +908,9 @@ function durableOperatorGateRecordRule(kind?: UserActionKind) {
 
 function suggestedDecisionLine(kind?: UserActionKind, item?: UserActionSummaryItem, goalId?: string) {
   if (kind === "controller") {
+    if (item?.operatorQuestion && firstOpenTodo(item.userTodos)) {
+      return "先完成/确认用户待办，再判断是否同意 gate；不授权写入或生产动作。";
+    }
     const targetGoalId = goalId ?? item?.goalId;
     const lead = targetGoalId ? `同意 ${targetGoalId} 先做` : "同意先做";
     const question = item?.operatorQuestion ?? "";
@@ -1162,15 +1191,24 @@ function buildHumanFriendlyActionPacket({
   const question = item.operatorQuestion ?? (todo ? todo.text : prompt.question);
   const reply = item.kind === "controller" ? controllerReplyLine(item.goalId) : prompt.reply;
   const command = item.safePathCommand ?? buildStatusCommand({ registry, runtimeRoot });
+  const todoBlocksGate = Boolean(todo && item.operatorQuestion);
+  const decisionLines = todoBlocksGate
+    ? [
+      `先处理用户待办：${todo?.text}`,
+      `再判断 Gate：${item.operatorQuestion}`,
+      `建议回复：先说明用户待办是否已完成；完成后再回复：${reply}`,
+    ]
+    : [
+      question,
+      `建议回复：${reply}`,
+    ];
   return [
     "【Goal Harness Action】",
     `目标：${item.goalId}`,
     `动作：${item.title}`,
     "",
     "【请你判断】",
-    question,
-    todo && item.operatorQuestion ? `用户待办：${todo.text}` : null,
-    `建议回复：${reply}`,
+    ...decisionLines,
     `建议判断：${suggestedDecisionLine(item.kind, item, item.goalId)}`,
     `边界：${prompt.boundary}`,
     durableOperatorGateRecordRule(item.kind),
@@ -1830,8 +1868,13 @@ function buildUserActionSummaryItems({
     const handoffCondition = row.queueItem?.next_handoff_condition
       ?? latestRun?.controller_readiness?.next_handoff_condition
       ?? "";
-    const quota = row.queueItem?.quota ?? row.goal.quota;
+    const projectAsset = row.queueItem?.project_asset;
+    const quota = projectAsset?.quota ?? row.queueItem?.quota ?? row.goal.quota;
     const quotaState = quota?.state ?? "waiting";
+    const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos, row.queueItem?.user_todos, "project_asset.user_todos");
+    const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos, row.queueItem?.agent_todos, "project_asset.agent_todos");
+    const nextAction = projectAsset?.next_action ?? decision.action;
+    const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action;
     const base = {
       goalId: row.goal.id,
       phase: decision.phase,
@@ -1845,8 +1888,8 @@ function buildUserActionSummaryItems({
         : `${draftDefaults.label} / needs run`,
       authorityCoverage,
       quota,
-      userTodos: row.queueItem?.user_todos ?? undefined,
-      agentTodos: row.queueItem?.agent_todos ?? undefined,
+      userTodos,
+      agentTodos,
     };
 
     if (row.severity === "high") {
@@ -1856,7 +1899,7 @@ function buildUserActionSummaryItems({
         title: "Fix health first",
         badge: "Blocking",
         variant: "danger",
-        summary: decision.action,
+        summary: nextAction,
         detail: decision.reason,
         priority: 0,
       }];
@@ -1870,7 +1913,7 @@ function buildUserActionSummaryItems({
         badge: "Reward gate",
         variant: "warning",
         summary: draftDefaults.reasonSummary,
-        detail: draftDefaults.followUp || handoffCondition || decision.action,
+        detail: draftDefaults.followUp || stopCondition,
         draftLabel: draftDefaults.label,
         priority: 1,
       }];
@@ -1884,7 +1927,7 @@ function buildUserActionSummaryItems({
         badge: decision.badge,
         variant: decision.variant,
         summary: row.queueItem?.operator_question ?? decision.reason,
-        detail: decision.action,
+        detail: stopCondition,
         draftLabel: draftDefaults.label,
         priority: 2,
       }];
@@ -1898,7 +1941,7 @@ function buildUserActionSummaryItems({
         badge: decision.badge,
         variant: "info",
         summary: decision.reason,
-        detail: handoffCondition || decision.action,
+        detail: stopCondition,
         draftLabel: draftDefaults.label,
         priority: 3,
       }];
@@ -1916,7 +1959,7 @@ function buildUserActionSummaryItems({
         badge: decision.badge,
         variant: "success",
         summary: draftDefaults.reasonSummary,
-        detail: draftDefaults.followUp || decision.action,
+        detail: draftDefaults.followUp || stopCondition,
         draftLabel: draftDefaults.label,
         priority: 4,
       }];
@@ -1930,7 +1973,7 @@ function buildUserActionSummaryItems({
         badge: "Judged",
         variant: "success",
         summary: decision.reason,
-        detail: draftDefaults.followUp || decision.action,
+        detail: draftDefaults.followUp || stopCondition,
         draftLabel: draftDefaults.label,
         priority: 5,
       }];
@@ -2096,7 +2139,7 @@ function UserActionSummary({
                         </Button>
                       </div>
                     </div>
-                    <UserTodoCallout todos={item.userTodos} />
+                    <UserTodoCallout blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))} todos={item.userTodos} />
                     {item.operatorQuestion ? (
                       <div className="mt-3">
                         <div className="flex flex-wrap items-center gap-2">
