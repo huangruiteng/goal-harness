@@ -88,6 +88,21 @@ def main() -> int:
         "do not include human reward, operator-gate approval, write-control, private evidence",
         label="quota doc",
     )
+    assert_contains(
+        quota_doc,
+        "Post-turn accounting protocol",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "append exactly one `quota spend-slot --execute` event for that completed turn",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "do not append spend for `should_run=false` skips, preflight failures, pure dry-run previews",
+        label="quota doc",
+    )
 
     assert_contains(
         readme,
@@ -107,6 +122,16 @@ def main() -> int:
     assert_contains(
         readme,
         "See `docs/quota-allocation.md` for the full allocation contract",
+        label="README",
+    )
+    assert_contains(
+        readme,
+        "After an automatic turn actually spends delivery compute, append one spend event",
+        label="README",
+    )
+    assert_contains(
+        readme,
+        "Do not append spend for `should_run=false` skips, preflight failures, or pure dry-run previews",
         label="README",
     )
     assert_contains(

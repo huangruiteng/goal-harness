@@ -132,7 +132,17 @@ goal-harness new-project-prompt \
    - `goal-harness registry`
    - `goal-harness status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `goal-harness check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
-8. 最后用中文汇报：
+8. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、
+   实现推进或验证推进），在 validation 和必要的 `refresh-state` 完成后，只
+   append 一次 quota spend：
+
+   ```bash
+   goal-harness quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
+   ```
+
+   不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账；
+   不要重复执行。
+9. 最后用中文汇报：
    - changed files；
    - validation output；
    - 当前 goal 在 dashboard/attention queue 里会怎么显示；

@@ -36,6 +36,14 @@ def render_quota_guard_command(goal_id: str) -> str:
     return f"goal-harness --format json quota should-run --goal-id {shell_arg(goal_id)}"
 
 
+def render_quota_spend_command(goal_id: str, *, source: str = "adapter") -> str:
+    return (
+        "goal-harness quota spend-slot "
+        f"--goal-id {shell_arg(goal_id)} "
+        f"--slots 1 --source {shell_arg(source)} --execute"
+    )
+
+
 def render_connect_command(
     *,
     project: str,
@@ -111,6 +119,7 @@ def build_new_project_prompt(
         write_scope=write_scope,
     )
     quota_guard_command = render_quota_guard_command(resolved_goal_id)
+    quota_spend_command = render_quota_spend_command(resolved_goal_id)
     prompt = render_prompt_text(
         project=project_text,
         goal_doc=goal_doc_text,
@@ -123,6 +132,7 @@ def build_new_project_prompt(
         cli_preflight=render_cli_preflight(),
         connect_command=connect_command,
         quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
         spawn_allowed=spawn_allowed,
         allowed_domains=allowed_domains,
         write_scope=write_scope,
@@ -142,6 +152,7 @@ def build_new_project_prompt(
         "write_scope": write_scope,
         "connect_command": connect_command,
         "quota_guard_command": quota_guard_command,
+        "quota_spend_command": quota_spend_command,
         "cli_preflight": render_cli_preflight(),
         "prompt": prompt,
     }
@@ -160,6 +171,7 @@ def render_prompt_text(
     cli_preflight: str,
     connect_command: str,
     quota_guard_command: str,
+    quota_spend_command: str,
     spawn_allowed: bool,
     allowed_domains: list[str],
     write_scope: list[str],
@@ -247,7 +259,14 @@ goal-harness refresh-state --goal-id {goal_id}
    - `goal-harness registry`
    - `goal-harness status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `goal-harness check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
-9. 最后用中文汇报：
+9. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、实现推进或验证推进），在 validation 和必要的 `refresh-state` 完成后，只 append 一次 quota spend：
+
+```bash
+{quota_spend_command}
+```
+
+   不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账；不要重复执行。
+10. 最后用中文汇报：
    - changed files；
    - validation output；
    - 当前 goal 在 dashboard / attention queue 里会怎么显示；

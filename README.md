@@ -264,6 +264,16 @@ operator-gated, waiting, throttled, paused, and health-blocked goals stay out of
 the eligible lane. See `docs/quota-allocation.md` for the full allocation
 contract.
 
+After an automatic turn actually spends delivery compute, append one spend
+event after validation and any required state refresh:
+
+```bash
+goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --source heartbeat --execute
+```
+
+Do not append spend for `should_run=false` skips, preflight failures, or pure
+dry-run previews. Do not run it more than once for the same completed turn.
+
 `status` and `serve-status` default their public/private contract scan to the
 Goal Harness install root, not the shell's current project directory. Pass
 `--scan-root` or `--scan-path` only when you intentionally want to scan a

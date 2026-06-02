@@ -205,6 +205,15 @@ nothing. With `--execute`, it appends one compact `quota_slot_spent` runtime
 event. It never mutates registry, reward overlays, operator gates, write
 control, private evidence, or production state.
 
+Post-turn accounting protocol:
+
+- call `quota should-run` before spending delivery compute;
+- do the bounded automatic turn, validation, and required state refresh;
+- append exactly one `quota spend-slot --execute` event for that completed
+  turn;
+- do not append spend for `should_run=false` skips, preflight failures, pure
+  dry-run previews, or duplicate accounting attempts.
+
 ## Slot Spend Event Contract
 
 A real spend write path appends one compact runtime event after an automatic

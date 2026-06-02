@@ -25,6 +25,14 @@ MUST_HAVE = (
     "只有当返回 `should_run=true` 且 payload 里包含 `agent_command` 时，才执行该命令。",
     "如果 `should_run=true` 但没有 `agent_command`，只按 `recommended_action` 选择下一个安全只读动作。",
 )
+SPEND_MUST_HAVE = (
+    "validation 和必要的 `refresh-state` 完成后",
+    "只 append 一次 quota spend",
+    "goal-harness quota spend-slot --goal-id",
+    "--source adapter --execute",
+    "不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账",
+    "不要重复执行。",
+)
 
 
 def assert_quota_guard(text: str) -> None:
@@ -35,6 +43,8 @@ def assert_quota_guard(text: str) -> None:
         assert phrase in normalized, text
         positions.append(normalized.index(phrase))
     assert positions == sorted(positions), positions
+    for phrase in SPEND_MUST_HAVE:
+        assert phrase in normalized, text
 
 
 def run_cli(*extra_args: str) -> str:
@@ -80,6 +90,9 @@ def main() -> int:
     )
     assert payload["quota_guard_command"] == (
         "goal-harness --format json quota should-run --goal-id new-project-main-control"
+    ), payload
+    assert payload["quota_spend_command"] == (
+        "goal-harness quota spend-slot --goal-id new-project-main-control --slots 1 --source adapter --execute"
     ), payload
     assert_quota_guard(payload["prompt"])
     assert_quota_guard(DOC.read_text(encoding="utf-8"))

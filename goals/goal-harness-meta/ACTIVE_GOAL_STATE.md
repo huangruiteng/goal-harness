@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T08:23:25+08:00
+updated_at: 2026-06-02T08:31:45+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,29 @@ private project context.
 
 ## Next Action
 
-- Standardize the post-turn spend accounting protocol for automatic ticks:
-  after validation and state writeback, an executor should append
-  `quota spend-slot --execute` exactly once for the completed automatic turn.
-  Keep this in agent-facing prompts/docs first, then prove the heartbeat flow
-  can consume quota without changing registry policy.
+- Add one executable heartbeat-flow smoke for the full quota lifecycle:
+  `quota should-run` guard, bounded work marker, validation/state refresh,
+  exactly one `quota spend-slot --execute`, and a follow-up `should-run`
+  showing derived spend while registry policy remains unchanged.
 
 ## Recent Progress
 
+- 2026-06-02T08:31:45+08:00: Standardized the post-turn spend accounting
+  protocol in agent-facing prompts and public docs. The generated
+  `new-project-prompt` now includes both the pre-turn `quota should-run` guard
+  and the post-turn `quota spend-slot --execute` rule: only append one spend
+  event after the turn actually spent delivery compute and after validation
+  plus any needed `refresh-state`; do not account `should_run=false` skips,
+  preflight failures, pure dry-run previews, or duplicate attempts. Updated the
+  copy-paste prompt doc, README, and quota allocation contract with the same
+  boundary. Extended `examples/project-prompt-smoke.py` and
+  `examples/quota-contract-smoke.py` so the generated prompt, CLI markdown,
+  docs, README, and contract text all preserve the protocol. Validation:
+  direct project-prompt smoke passed; direct quota-contract smoke passed;
+  aggregate public smokes passed with 5 scripts; Python compile passed; public
+  contract check passed; `git diff --check` passed. Critic: the protocol is
+  now visible to project agents, but it is still text-level guidance; next
+  step should prove a full heartbeat lifecycle in an executable smoke.
 - 2026-06-02T08:23:25+08:00: Taught status/quota planning to derive current
   `spent_slots` from compact `quota_slot_spent` runtime events. Added
   `goal_quota_with_spend_ledger()` so `collect_history()` builds per-goal quota
