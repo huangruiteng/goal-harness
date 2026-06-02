@@ -199,6 +199,59 @@ after `should-run` decision for consuming slots and must be run with
 operator gates. Use it to verify slot accounting before adding a real spend
 write path.
 
+## Slot Spend Event Contract
+
+A future real spend write path should append one compact runtime event after an
+automatic Codex turn actually consumes quota. The smallest public-safe event is
+`classification=quota_slot_spent` with a nested `quota_event` object:
+
+```json
+{
+  "goal_id": "project-main-control",
+  "classification": "quota_slot_spent",
+  "quota_event": {
+    "event_type": "quota_slot_spent",
+    "source": "heartbeat",
+    "slots": 1,
+    "reason_summary": "one automatic Codex turn completed under an eligible quota guard",
+    "before": {
+      "should_run": true,
+      "state": "eligible",
+      "compute": 0.5,
+      "window_hours": 24,
+      "spent_slots": 11,
+      "allowed_slots": 12
+    },
+    "after": {
+      "should_run": false,
+      "state": "throttled",
+      "compute": 0.5,
+      "window_hours": 24,
+      "spent_slots": 12,
+      "allowed_slots": 12
+    }
+  }
+}
+```
+
+The public fixture is
+[`examples/quota-slot-spend-event.example.json`](../examples/quota-slot-spend-event.example.json).
+
+Validation rule:
+
+- write only after a fresh `quota should-run` returned `should_run=true`;
+- `slots` must be positive, and `after.spent_slots` must equal
+  `before.spent_slots + slots`;
+- if `after.spent_slots >= after.allowed_slots`, `after.state` should be
+  `throttled` and `after.should_run` should be `false`;
+- do not include human reward, operator-gate approval, write-control, private
+  evidence, internal links, raw logs, or production identifiers in the quota
+  event.
+
+This event is accounting, not permission. It records that compute was spent
+after the normal health, operator, evidence, and quota gates had already
+allowed the turn.
+
 Future write commands can stay behind explicit operator approval:
 
 ```bash

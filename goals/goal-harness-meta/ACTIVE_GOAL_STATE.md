@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T07:56:55+08:00
+updated_at: 2026-06-02T08:03:30+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,30 @@ private project context.
 
 ## Next Action
 
-- Define the smallest public runtime event contract for a future real quota
-  slot spend write path. Keep it as docs plus fixture smoke first: name the
-  compact fields, public/private boundary, and validation rule before adding
-  any mutation command.
+- Implement the smallest append-only quota slot spend writer behind an explicit
+  execute flag. Default to dry-run, require a fresh eligible `quota should-run`
+  decision, append only the compact `quota_slot_spent` event, and keep reward,
+  operator gate, write-control, private evidence, and production identifiers
+  out of the event.
 
 ## Recent Progress
 
+- 2026-06-02T08:03:30+08:00: Defined the public runtime event contract for a
+  future real quota slot spend write path. `docs/quota-allocation.md` now names
+  `classification=quota_slot_spent`, the nested `quota_event` fields, the
+  public/private boundary, and the validation rule: only write after a fresh
+  eligible `quota should-run`, require positive slots, require
+  `after.spent_slots = before.spent_slots + slots`, mark the after state
+  throttled when the window is exhausted, and keep human reward/operator
+  gate/write-control/private evidence out of the event. Added the sanitized
+  fixture `examples/quota-slot-spend-event.example.json`, and extended
+  `examples/quota-contract-smoke.py` to parse and validate that fixture.
+  Validation: direct quota contract smoke passed; aggregate public smokes
+  passed with 5 scripts; fixture JSON parsed through `python3 -m json.tool`;
+  Python compile passed; public contract check passed; `git diff --check`
+  passed. Critic: the write-path contract is now protected, but no command
+  appends this event yet, so real automatic turns still cannot durably advance
+  spent slots.
 - 2026-06-02T07:56:55+08:00: Added a preview-only quota slot accounting path.
   `goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --dry-run`
   now reports the before/after `quota should-run` decision for an eligible
