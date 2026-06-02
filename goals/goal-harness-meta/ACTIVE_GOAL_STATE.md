@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T21:24:10+08:00
+updated_at: 2026-06-02T21:33:01+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,14 +45,36 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should verify the live dashboard/in-app view after the global
-  registry attention override fix. Confirm the platform-migration goal now
-  appears as Codex-ready/eligible from the global control plane, while its
-  remaining user todos and production-write gates stay separately labeled. If
-  this is clean, reduce duplicate packet/panel surfaces instead of adding UI.
+- Next tick should reduce duplicate dashboard/operator surfaces now that the
+  live status path is clean. Prefer one bounded UI cleanup: make the
+  user-facing wording distinguish `User Todo` from production-write gates, or
+  collapse the duplicate yellow review card and lower white packet panel into
+  one action surface. Do not add another panel.
 
 ## Recent Progress
 
+- 2026-06-02T21:33:01+08:00: Steering audit candidates were: P0 live
+  dashboard verification after the global attention-override fix, P0 duplicate
+  dashboard/panel cleanup, and P1 communication polish. Chose live dashboard
+  verification because the previous code fix was correct in CLI but the user
+  was looking at an in-app browser backed by `/status.local.json`. Verified
+  global CLI first: platform migration now reports `status=state_refreshed`,
+  `waiting_on=codex`, `quota_state=eligible`, and `user_todos.open_count=2`.
+  The in-app browser initially still showed stale `owner_sop_review_pending`
+  because `apps/dashboard/public/status.local.json` was an old 18:20 snapshot
+  with 4 open todos. Refreshed `apps/dashboard/public/status.local.json` from
+  live global status, mirrored it to `apps/dashboard/dist/status.local.json`,
+  and reloaded the browser. The visible dashboard now shows the platform
+  migration goal as `state_refreshed / Codex`, not `owner_sop_review_pending`.
+  Changed files: this active state only; refreshed `status.local.json` files are
+  local ignored dashboard snapshots. Validation: global `quota should-run`
+  returned `should_run=true`; curl/JQ against `/status.local.json` showed
+  `state_refreshed`, `waiting_on=codex`, `quota_state=eligible`, and 2 open
+  user todos; in-app browser reload showed no `owner_sop_review_pending` and
+  the platform-migration card under Codex-ready status. Critic: state truth and
+  live snapshot are clean; the remaining product issue is UI duplication and
+  wording, especially preventing production-write gates from looking like user
+  todos.
 - 2026-06-02T21:24:10+08:00: Field bug from the platform-migration controller:
   local status and latest run correctly showed `waiting_on=codex` after the
   owner/SOP gate was approved for safe-local/offline work, but the global
