@@ -41,6 +41,7 @@ MUST_HAVE = (
     "goal-harness todo add --goal-id",
     "--role user --text \"<public-safe user/owner action>\"",
     "agent 自己的后续动作写成 `--role agent`",
+    "docs/project-agent-todo-contract.md",
 )
 SPEND_MUST_HAVE = (
     "validation 和必要的 `refresh-state` 完成后",

@@ -131,6 +131,7 @@ goal-harness new-project-prompt \
 
    agent 自己的后续动作写成 `--role agent`。写入后如果 dashboard 需要看到最新状态，
    运行 `goal-harness refresh-state --goal-id <STABLE_GOAL_ID>`。
+   完整契约见 Goal Harness 仓库里的 `docs/project-agent-todo-contract.md`。
 5. 如果要给这个项目设置 recurring Codex App heartbeat，不要手抄 guard 和
    spend 协议；先生成 task body，再把输出复制进 automation：
 

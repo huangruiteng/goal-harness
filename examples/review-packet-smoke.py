@@ -14,6 +14,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_PAGE = REPO_ROOT / "apps/dashboard/src/views/dashboard-page.tsx"
+ACTION_PACKET = REPO_ROOT / "apps/dashboard/src/data/action-packet.ts"
 STATUS_CONTRACT = REPO_ROOT / "docs/status-data-contract.md"
 
 
@@ -48,22 +49,17 @@ def build_sanitized_controller_packet() -> str:
     )
     return "\n".join(
         [
-            "【Goal Harness Action】",
+            "【Goal Harness Action Packet】",
             f"目标：{goal_id}",
             "动作：Review controller opt-in",
+            "状态：planned opt-in review fixture；配额 Operator gate; 0/1440 slots；权威源 default entries 10/10; topic 10; risk medium",
             "",
-            "【请你判断】",
-            "是否允许目标项目进入 read-only/controller opt-in？",
+            "【用户动作 / Gate】",
+            "用户待办：无。",
+            "Gate：是否允许目标项目进入 read-only/controller opt-in？",
             f"建议回复：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
-            f"建议判断：同意 {goal_id} 先做 read-only map dry-run；不授权写入或主控接管。",
             "边界：这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
             "记录规则：如需持久记录本次判断，先用本地 operator-gate dry-run 预览；确认写入时去掉 --dry-run；拒绝/暂缓用 reject/defer + public-safe 原因。",
-            "",
-            "【当前状态】",
-            "摘要：planned opt-in review fixture",
-            "下一步：先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
-            "配额：Operator gate; 0/1440 slots",
-            "权威源：default entries 10/10; topic 10; risk medium",
             "",
             "【同意后给项目 Agent】",
             "只允许 safe path：Read-only map dry-run",
@@ -85,21 +81,18 @@ def build_sanitized_controller_packet_with_user_todo() -> str:
     )
     return "\n".join(
         [
-            "【Goal Harness Action】",
+            "【Goal Harness Action Packet】",
             f"目标：{goal_id}",
             "动作：Review or authorize",
+            "状态：planned opt-in review fixture",
             "",
-            "【请你判断】",
-            "先处理用户待办：Read the owner review worksheet first.",
-            "再判断 Gate：是否允许目标项目进入 read-only/controller opt-in？",
+            "【用户动作 / Gate】",
+            "用户待办：Read the owner review worksheet first.",
+            "完成或明确暂缓用户待办后，再判断下面的 Gate。",
+            "Gate：是否允许目标项目进入 read-only/controller opt-in？",
             f"建议回复：先说明用户待办是否已完成；完成后再回复：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
-            "建议判断：先完成/确认用户待办，再判断是否同意 gate；不授权写入或生产动作。",
             "边界：这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
             "记录规则：如需持久记录本次判断，先用本地 operator-gate dry-run 预览；确认写入时去掉 --dry-run；拒绝/暂缓用 reject/defer + public-safe 原因。",
-            "",
-            "【当前状态】",
-            "摘要：planned opt-in review fixture",
-            "下一步：先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
             "",
             "【同意后给项目 Agent】",
             "只允许 safe path：Read-only map dry-run",
@@ -111,6 +104,7 @@ def build_sanitized_controller_packet_with_user_todo() -> str:
 
 def main() -> int:
     source = DASHBOARD_PAGE.read_text(encoding="utf-8")
+    action_packet_source = ACTION_PACKET.read_text(encoding="utf-8")
     contract = STATUS_CONTRACT.read_text(encoding="utf-8")
     controller_contract = source_between(
         contract,
@@ -120,12 +114,11 @@ def main() -> int:
     assert "the dashboard/operator view owns the human decision" in contract
     assert "the project-agent command is only the after-approval dry-run execution path" in contract
     assert "复制后直接发给对应项目 Agent；人只补一句判断。" not in source
-    assert "【Goal Harness Action】" in source
+    assert "【Goal Harness Action Packet】" in action_packet_source
+    assert "【用户动作 / Gate】" in action_packet_source
     assert "Copy action packet for" in source
-    assert "项目 Agent 只有在 approval 后才回报 changed files、validation 和 next safe action。" in source
-    assert "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。" in source
-    assert "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。" in source
-    assert "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。" in source
+    assert "需要写入/生产/进一步授权时停下" in action_packet_source
+    assert "input.command ? `命令：" in action_packet_source
     assert_order(
         controller_contract,
         [
@@ -135,12 +128,13 @@ def main() -> int:
         ],
     )
 
-    packet_builder = source_between(source, "function buildHumanFriendlyActionPacket", "function ReviewLinkPanel")
-    assert_order(packet_builder, ["【请你判断】", "【当前状态】", "【同意后给项目 Agent】"])
+    packet_builder = source_between(source, "function buildHumanFriendlyActionPacket", "function readinessVariant")
+    assert "return buildActionPacket({" in packet_builder
+    assert_order(action_packet_source, ["【Goal Harness Action Packet】", "【用户动作 / Gate】", "【同意后给项目 Agent】"])
     assert "operatorGateDraftCommand" not in packet_builder
-    assert "先处理用户待办：" in packet_builder
-    assert "再判断 Gate：" in packet_builder
-    assert "先说明用户待办是否已完成" in packet_builder
+    assert "用户待办：" in action_packet_source
+    assert "Gate：" in action_packet_source
+    assert "先说明用户待办是否已完成" in action_packet_source
 
     controller_prompt = source_between(source, "if (kind === \"controller\")", "if (kind === \"codex\")")
     assert "是否允许目标项目进入 read-only/controller opt-in？" in controller_prompt
@@ -156,7 +150,7 @@ def main() -> int:
     assert "reject/defer + public-safe 原因" in record_rule
     assert "durableOperatorGateRecordRule(item.kind)" in packet_builder
 
-    gate_builder = source_between(source, "function buildOperatorGateDryRunCommand", "function buildOperatorTransitionPreview")
+    gate_builder = source_between(source, "function buildOperatorGateDryRunCommand", "function buildOperatorDecision")
     assert "operator-gate" in gate_builder
     assert "--decision approve" in gate_builder
     assert "controllerApprovalReason(goalId)" in gate_builder
@@ -199,11 +193,10 @@ def main() -> int:
     assert_order(
         packet,
         [
-            "【请你判断】",
-            "是否允许目标项目进入 read-only/controller opt-in？",
+            "【用户动作 / Gate】",
+            "Gate：是否允许目标项目进入 read-only/controller opt-in？",
             "建议回复：同意 planned-main-control 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
             "记录规则：如需持久记录本次判断",
-            "【当前状态】",
             "【同意后给项目 Agent】",
             "read-only-map",
             "需要写入/生产/进一步授权时停下",
@@ -213,18 +206,17 @@ def main() -> int:
     assert "operator-gate \\" not in packet, packet
     assert packet.count("read-only-map") == 1, packet
     assert len(packet.splitlines()) <= 21, packet
-    assert "不授权写入或主控接管" in packet
+    assert "不写 operator gate、run history、write-control、实验控制或生产动作" in packet
 
     packet_with_todo = build_sanitized_controller_packet_with_user_todo()
     assert_order(
         packet_with_todo,
         [
-            "【请你判断】",
-            "先处理用户待办：",
-            "再判断 Gate：",
+            "【用户动作 / Gate】",
+            "用户待办：",
+            "完成或明确暂缓用户待办后",
+            "Gate：",
             "建议回复：先说明用户待办是否已完成",
-            "建议判断：先完成/确认用户待办",
-            "【当前状态】",
             "【同意后给项目 Agent】",
         ],
     )

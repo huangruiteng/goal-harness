@@ -120,6 +120,8 @@ If the result says `should_run=true`:
    ```
 
    Use `--role agent` for project-agent follow-up work.
+   For the full field contract, see `docs/project-agent-todo-contract.md` in
+   the Goal Harness checkout.
 7. If the dashboard or controller needs to see a state-only update, run:
 
    ```bash

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T22:13:39+08:00
+updated_at: 2026-06-02T23:18:37+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,43 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should wire the new project-agent todo contract into the generated
-  project surfaces only where useful, starting with a tiny check or link in the
-  new-project / heartbeat prompt path so target project agents can find the
-  canonical contract without reading the full README.
+- Next tick should reduce first-run friction one more step only if the open
+  source trial path still feels too copy-paste heavy: consider a tiny
+  `goal-harness demo` command or demo script that creates the disposable goal,
+  adds user/agent todos, refreshes state, and prints the status/quota checks.
 
 ## Recent Progress
 
+- 2026-06-02T23:18:37+08:00: User feedback after the open-source PR draft
+  shifted this slice from internal prompt polish to external usability: willing
+  first-time users should feel Goal Harness is "usable enough" after a quick
+  try. Steering audit candidates were: P0 generated-prompt link to the
+  project-agent todo contract, P1 README first-run usability, and P0 public
+  smoke health. Continuation check: the todo contract was useful but too
+  internal-facing for the PR moment, so continuing only on prompts would be
+  locally greedy; the README trial path and green smoke entry reduce real
+  first-user friction. Added `README.md` `Try It In 10 Minutes` with a
+  disposable local project flow that exports PATH, bootstraps with
+  `--no-global-sync`, adds one user todo and one agent todo through the
+  project-local registry, refreshes state, prints status, and checks quota.
+  Also linked `docs/project-agent-todo-contract.md` from generated heartbeat and
+  new-project prompts, updated their smoke assertions, and repaired a stale
+  `examples/review-packet-smoke.py` expectation so the public
+  `examples/run-smokes.py` entry is green after the action-packet extraction.
+  Changed files: `README.md`, `docs/heartbeat-automation-prompt.md`,
+  `docs/new-project-codex-prompt.md`, `goal_harness/heartbeat_prompt.py`,
+  `goal_harness/project_prompt.py`, `examples/heartbeat-prompt-smoke.py`,
+  `examples/project-prompt-smoke.py`, `examples/review-packet-smoke.py`, plus
+  this active state; private `.local` state also updated. Validation: real temp
+  demo ran `bootstrap`, `todo add` for user and agent, `refresh-state`, `status`,
+  and `quota should-run` with a project-local registry, then archived the temp
+  `demo-goal` runtime; `python3 examples/run-smokes.py` passed 13 smoke scripts;
+  `python3 -m compileall -q goal_harness`; `goal-harness check --scan-root .`;
+  `git diff --check`. Critic: the PR-facing path is now copy-paste runnable, but
+  still not one-command; the next usability win is a demo command/script or a
+  fresh-clone trial audit, not another internal contract paragraph. Losing
+  candidate to remember: a live connected-goal adoption check is still useful
+  after first-run UX is less manual.
 - 2026-06-02T22:13:39+08:00: Steering audit candidates were: P0 state/plan
   hygiene because the previous next action partly overlapped already-existing
   todo CLI smokes, P0 project-agent execution loop contract, and P1 docs polish.
