@@ -126,6 +126,9 @@ The command creates `/tmp/goal-harness-demo`, writes a small `GOAL.md`, connects
 a local `demo-goal`, adds one user todo and one agent todo, refreshes state, and
 prints the status/quota result. It uses the demo project's local registry and
 does not sync the demo goal into your global multi-project registry.
+It also prints a `Dashboard Option`: start `serve-status` from the demo project,
+run the dashboard in `~/goal-harness/apps/dashboard`, then use the dashboard
+`Live` source to inspect the same demo goal.
 
 After that, open the printed `ACTIVE_GOAL_STATE.md`. The important thing to
 check is not the formatting; it is whether the next action, user todo, agent

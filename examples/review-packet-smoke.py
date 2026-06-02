@@ -49,22 +49,21 @@ def build_sanitized_controller_packet() -> str:
     )
     return "\n".join(
         [
-            "【Goal Harness Action Packet】",
+            "【GH Packet】",
             f"目标：{goal_id}",
-            "动作：Review controller opt-in",
-            "状态：planned opt-in review fixture；配额 Operator gate; 0/1440 slots；权威源 default entries 10/10; topic 10; risk medium",
+            "状态：planned opt-in review fixture",
             "",
-            "【用户动作 / Gate】",
-            "用户待办：无。",
+            "【用户/Gate】",
+            "待办：无",
             "Gate：是否允许目标项目进入 read-only/controller opt-in？",
-            f"建议回复：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
+            f"建议：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
             "边界：这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
-            "记录规则：如需持久记录本次判断，先用本地 operator-gate dry-run 预览；确认写入时去掉 --dry-run；拒绝/暂缓用 reject/defer + public-safe 原因。",
+            "记录：落盘先 dry-run。",
             "",
-            "【同意后给项目 Agent】",
-            "只允许 safe path：Read-only map dry-run",
+            "【给项目 Agent】",
+            "路径：Read-only map dry-run",
             f"命令：{project_agent_command.replace(chr(10), ' ')}",
-            "要求：用中文回报 changed files、validation、next safe action；需要写入/生产/进一步授权时停下。",
+            "回报：files / validation / next；需授权则停。",
         ]
     )
 
@@ -81,23 +80,21 @@ def build_sanitized_controller_packet_with_user_todo() -> str:
     )
     return "\n".join(
         [
-            "【Goal Harness Action Packet】",
+            "【GH Packet】",
             f"目标：{goal_id}",
-            "动作：Review or authorize",
             "状态：planned opt-in review fixture",
             "",
-            "【用户动作 / Gate】",
-            "用户待办：Read the owner review worksheet first.",
-            "完成或明确暂缓用户待办后，再判断下面的 Gate。",
+            "【用户/Gate】",
+            "待办：Read the owner review worksheet first.（先处理/暂缓再判 gate）",
             "Gate：是否允许目标项目进入 read-only/controller opt-in？",
-            f"建议回复：先说明用户待办是否已完成；完成后再回复：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
+            f"建议：先确认待办；完成后：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
             "边界：这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
-            "记录规则：如需持久记录本次判断，先用本地 operator-gate dry-run 预览；确认写入时去掉 --dry-run；拒绝/暂缓用 reject/defer + public-safe 原因。",
+            "记录：落盘先 dry-run。",
             "",
-            "【同意后给项目 Agent】",
-            "只允许 safe path：Read-only map dry-run",
+            "【给项目 Agent】",
+            "路径：Read-only map dry-run",
             f"命令：{project_agent_command.replace(chr(10), ' ')}",
-            "要求：用中文回报 changed files、validation、next safe action；需要写入/生产/进一步授权时停下。",
+            "回报：files / validation / next；需授权则停。",
         ]
     )
 
@@ -114,10 +111,10 @@ def main() -> int:
     assert "the dashboard/operator view owns the human decision" in contract
     assert "the project-agent command is only the after-approval dry-run execution path" in contract
     assert "复制后直接发给对应项目 Agent；人只补一句判断。" not in source
-    assert "【Goal Harness Action Packet】" in action_packet_source
-    assert "【用户动作 / Gate】" in action_packet_source
+    assert "【GH Packet】" in action_packet_source
+    assert "【用户/Gate】" in action_packet_source
     assert "Copy action packet for" in source
-    assert "需要写入/生产/进一步授权时停下" in action_packet_source
+    assert "需授权则停" in action_packet_source
     assert "input.command ? `命令：" in action_packet_source
     assert_order(
         controller_contract,
@@ -130,11 +127,11 @@ def main() -> int:
 
     packet_builder = source_between(source, "function buildHumanFriendlyActionPacket", "function readinessVariant")
     assert "return buildActionPacket({" in packet_builder
-    assert_order(action_packet_source, ["【Goal Harness Action Packet】", "【用户动作 / Gate】", "【同意后给项目 Agent】"])
+    assert_order(action_packet_source, ["【GH Packet】", "【用户/Gate】", "【给项目 Agent】"])
     assert "operatorGateDraftCommand" not in packet_builder
-    assert "用户待办：" in action_packet_source
+    assert "待办：" in action_packet_source
     assert "Gate：" in action_packet_source
-    assert "先说明用户待办是否已完成" in action_packet_source
+    assert "先确认待办" in action_packet_source
 
     controller_prompt = source_between(source, "if (kind === \"controller\")", "if (kind === \"codex\")")
     assert "是否允许目标项目进入 read-only/controller opt-in？" in controller_prompt
@@ -193,36 +190,36 @@ def main() -> int:
     assert_order(
         packet,
         [
-            "【用户动作 / Gate】",
+            "【用户/Gate】",
             "Gate：是否允许目标项目进入 read-only/controller opt-in？",
-            "建议回复：同意 planned-main-control 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
-            "记录规则：如需持久记录本次判断",
-            "【同意后给项目 Agent】",
+            "建议：同意 planned-main-control 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
+            "记录：落盘先 dry-run。",
+            "【给项目 Agent】",
             "read-only-map",
-            "需要写入/生产/进一步授权时停下",
+            "需授权则停",
         ],
     )
-    assert "operator-gate dry-run 预览" in packet, packet
+    assert "记录：落盘先 dry-run。" in packet, packet
     assert "operator-gate \\" not in packet, packet
     assert packet.count("read-only-map") == 1, packet
-    assert len(packet.splitlines()) <= 21, packet
+    assert len(packet.splitlines()) <= 18, packet
     assert "不写 operator gate、run history、write-control、实验控制或生产动作" in packet
 
     packet_with_todo = build_sanitized_controller_packet_with_user_todo()
     assert_order(
         packet_with_todo,
         [
-            "【用户动作 / Gate】",
-            "用户待办：",
-            "完成或明确暂缓用户待办后",
+            "【用户/Gate】",
+            "待办：",
+            "先处理/暂缓再判 gate",
             "Gate：",
-            "建议回复：先说明用户待办是否已完成",
-            "【同意后给项目 Agent】",
+            "建议：先确认待办",
+            "【给项目 Agent】",
         ],
     )
     assert "Read the owner review worksheet first." in packet_with_todo
     assert "operator-gate \\" not in packet_with_todo, packet_with_todo
-    assert len(packet_with_todo.splitlines()) <= 22, packet_with_todo
+    assert len(packet_with_todo.splitlines()) <= 18, packet_with_todo
     print("review-packet-smoke ok")
     return 0
 

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T01:09:09+08:00
+updated_at: 2026-06-03T01:19:21+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,14 +45,41 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should move to the P1 public first-try usability path: audit the
-  fresh-user flow from install to `demo`, `status`, dashboard, and short copy
-  packet, then fix exactly one bounded friction point. Only return to the P0
-  human-decision loop if a real connected goal shows stale status, hidden user
-  todos, or an overlong gate packet again.
+- Next tick should continue the P1 public first-try usability path by aligning
+  dashboard docs and operator-copy wording with the current first-screen UI:
+  audit `apps/dashboard/README.md`, the README dashboard section, and one
+  browser-smoke output for stale `Copy Review Packet` / old packet names, then
+  fix exactly one docs/UI mismatch. Return to P0 only if a real connected goal
+  shows stale status, hidden user todos, or an overlong gate packet again.
 
 ## Recent Progress
 
+- 2026-06-03T01:19:21+08:00: Steering audit candidates were: P0
+  state/status truth, P1 fresh-user demo-to-dashboard usability, P1 stale
+  dashboard docs/copy wording, and P2 broader dashboard polish. Chose the
+  fresh-user demo-to-dashboard slice because `goal-harness demo` created a demo
+  goal and printed status/quota commands, but did not show a willing first-time
+  user how to inspect the same goal in the dashboard. Bounded fix:
+  `goal_harness/demo.py` now prints a `Dashboard Option` with Terminal 1
+  `serve-status` commands from the demo project, Terminal 2 dashboard startup
+  commands, and the live status URL; `README.md` now tells users the 10-minute
+  demo includes that dashboard bridge; `examples/demo-cli-smoke.py` asserts the
+  dashboard handoff fields. While validating the public smoke suite, the run
+  exposed an old action-packet contract in `examples/review-packet-smoke.py`,
+  so that smoke was aligned with the new compact `【GH Packet】` /
+  `【用户/Gate】` / `【给项目 Agent】` packet shape. Validation: real
+  `goal-harness demo --project /tmp/goal-harness-demo-heartbeat-check`, live
+  `serve-status` curl confirming the demo goal appears in
+  `attention_queue.items`, `python3 examples/demo-cli-smoke.py`, `python3
+  examples/review-packet-smoke.py`, `python3 examples/run-smokes.py` with 15
+  smoke scripts, `python3 -m compileall -q goal_harness`, `git diff --check`,
+  and `goal-harness check --scan-root .`. Changed files: `README.md`,
+  `goal_harness/demo.py`, `examples/demo-cli-smoke.py`,
+  `examples/review-packet-smoke.py`, this active state, and the private
+  CS-Notes state. Critic: this makes the first demo-to-dashboard path much more
+  followable, but it still requires two terminals and npm; next slice should
+  align stale dashboard docs/copy wording before considering a one-command
+  dashboard helper.
 - 2026-06-03T01:09:09+08:00: Steering audit candidates were: P0
   copied-packet length/readability, P0 status/state truth, P1 public first-try
   usability, and P2 broader dashboard cleanup. Continuation check: several

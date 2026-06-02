@@ -147,6 +147,17 @@ def run_demo(
             'goal-harness --registry "$registry" status --scan-root "$PWD"',
             f'goal-harness --registry "$registry" --format json quota should-run --goal-id {goal_id}',
         ],
+        "dashboard_status_commands": [
+            f"cd {project}",
+            'registry="$PWD/.goal-harness/registry.json"',
+            'goal-harness --registry "$registry" serve-status --scan-root "$PWD" --port 8765',
+        ],
+        "dashboard_app_commands": [
+            "cd ~/goal-harness/apps/dashboard",
+            "npm install",
+            "npm run dev",
+        ],
+        "dashboard_status_url": "http://127.0.0.1:8765/status.json",
     }
 
 
@@ -191,4 +202,29 @@ def render_demo_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "## Try Next", ""])
     for command in payload.get("next_commands") or []:
         lines.append(f"- `{command}`")
+    lines.extend(
+        [
+            "",
+            "## Dashboard Option",
+            "",
+            "Terminal 1: start a live status server from the demo project:",
+            "",
+        ]
+    )
+    for command in payload.get("dashboard_status_commands") or []:
+        lines.append(f"- `{command}`")
+    lines.extend(
+        [
+            "",
+            "Terminal 2: start the dashboard app:",
+            "",
+        ]
+    )
+    for command in payload.get("dashboard_app_commands") or []:
+        lines.append(f"- `{command}`")
+    lines.extend(
+        [
+            f"- In the dashboard, use the `Live` source or load `{payload.get('dashboard_status_url')}`.",
+        ]
+    )
     return "\n".join(lines)
