@@ -258,8 +258,11 @@ automatic turn. `quota should-run` is the per-goal automation guard: it returns
 `should_run=true` only when the goal is eligible for the next automatic turn,
 otherwise it returns `should_run=false` with the gate, evidence, health, or
 quota reason. These commands do not mutate registry, run history, rewards, or
-gates. The `next_automatic_turn` reported by `quota plan` is only an advisory
-scheduling hint: it chooses the highest-compute eligible goal, while
+gates. They are compute guards, not strategy selectors; a goal tick should
+still choose its next action from the priority stack in
+[docs/state-interaction-model.md](docs/state-interaction-model.md). The
+`next_automatic_turn` reported by `quota plan` is only an advisory scheduling
+hint: it chooses the highest-compute eligible goal, while
 operator-gated, waiting, throttled, paused, and health-blocked goals stay out of
 the eligible lane. See `docs/quota-allocation.md` for the full allocation
 contract.

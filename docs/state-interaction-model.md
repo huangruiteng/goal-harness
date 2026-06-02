@@ -139,6 +139,35 @@ A controller tick should record why its selected next action won over nearby
 P0/P1/P2 candidates. The reason can be compact, but it should name the priority
 level and the stale-state or operator-cost failure it prevents.
 
+### Steering Audit
+
+`quota should-run` is a compute guard, not a strategy selector. It answers
+"may this goal spend another automatic turn now?" It does not answer "is this
+topic still the best use of attention?"
+
+Before writing a new `Next Action`, an autonomous goal tick should run a small
+steering audit:
+
+1. list at least three plausible candidates from different lanes when they
+   exist, such as state/safety, human decision, project-agent execution,
+   compute allocation, real adapter proof, product/communication, or
+   exploration;
+2. choose by the priority stack above, not by the previous tick's adjacent
+   critic alone;
+3. apply a WIP cap: after two or three consecutive delivery slices in the same
+   topic, stop and ask whether that topic is done enough for the current
+   milestone before continuing;
+4. separate compute quota from focus quota. Compute quota controls how many
+   turns a goal may spend; focus quota controls whether one subtopic deserves
+   the next turn at all;
+5. record the losing high-value candidate when it matters, so the next tick can
+   resume the broader milestone instead of rediscovering only the nearest
+   local gap.
+
+This prevents a chain of individually-correct, easy-to-verify slices from
+crowding out a more important milestone such as real project adapter proof,
+human reward quality, or dashboard attention reduction.
+
 ## State Flow
 
 ```mermaid

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T09:29:11+08:00
+updated_at: 2026-06-02T10:59:10+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,27 @@ private project context.
 
 ## Next Action
 
-- Add the paired approved-operator-gate dashboard smoke: once an
-  `operator_gate_approved` run is present, the first screen may move the goal
-  into the Codex/action lane with the approved dry-run command, while rejected
-  or deferred gates stay in the human/controller lane.
+- Operationalize the steering audit in the heartbeat/goal-tick prompt path:
+  before executing another adjacent slice, require three candidate next actions
+  across different P0/P1/P2 lanes and a WIP-cap check, then choose one
+  non-quota-biased P0 slice.
 
 ## Recent Progress
 
+- 2026-06-02T10:59:10+08:00: Added a steering audit contract to
+  `docs/state-interaction-model.md` and clarified the README quota section.
+  The new rule names the failure observed in the overnight quota chain:
+  `quota should-run` is a compute guard, not a strategy selector. Autonomous
+  goal ticks should list at least three plausible candidates across different
+  lanes, choose by the priority stack rather than the previous adjacent critic,
+  apply a WIP cap after two or three consecutive slices in one topic, separate
+  compute quota from focus quota, and record losing high-value candidates when
+  useful. Validation: README links the quota guard back to the state
+  interaction model; `rg` confirms the steering audit and compute-guard
+  boundary are present; public contract check and smoke validation will run
+  before commit. Critic: documentation fixes the decision boundary, but future
+  heartbeats still need the prompt path to require this audit before executing
+  another local slice.
 - 2026-06-02T09:29:11+08:00: Added
   `examples/dashboard-operator-gate-browser-smoke.mjs`, a browser-level
   dashboard smoke for planned high-complexity operator-gate visibility. The
