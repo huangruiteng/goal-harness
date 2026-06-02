@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T13:40:20+08:00
+updated_at: 2026-06-02T13:47:48+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,15 +28,34 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. First observe whether the platform migration heartbeat stays
-  ACTIVE and quietly skips under the `premium-ui-ai-search-rec-migration`
-  operator gate when it actually fires. If it returns to PAUSED again, treat
-  that as an automation-state stability issue. Keep the complex
-  `agent-harness-main-control` automation on its original path until the
-  read-only-map opt-in is deliberately approved.
+  choosing work. The platform migration heartbeat has now actually fired,
+  stayed ACTIVE, and produced `premium-ui-ai-search-rec-migration`
+  state-refresh plus operator-gate-deferred runs without quota spend. Prefer
+  comparing: fixing the CS-Notes wrapper registry's legacy-runtime view of
+  premium-ui, observing one more heartbeat for automation stability, or
+  dashboard attention-cost reduction. Keep the complex
+  `agent-harness-main-control` automation on its original path.
 
 ## Recent Progress
 
+- 2026-06-02T13:47:48+08:00: Ran the required steering audit after the
+  platform migration heartbeat was re-activated. Candidates considered: P0
+  state/safety observation of the actual platform migration heartbeat firing,
+  P0 registry-truth correction for the CS-Notes wrapper registry still showing
+  `premium-ui-ai-search-rec-migration` as a legacy runtime goal, and P1
+  dashboard attention-cost reduction. Chose the actual heartbeat observation
+  because the previous slice only restored ACTIVE status. Observation result:
+  the platform migration automation is still `ACTIVE`, points at thread
+  `019e822b-7e71-7a32-9dd2-d86b194ba5dd`, and the shared runtime now has
+  `premium-ui-ai-search-rec-migration` runs at 13:45:42
+  (`state_refreshed`) and 13:45:51 (`operator_gate_deferred`). Validation:
+  `goal-harness --format json quota should-run --goal-id
+  premium-ui-ai-search-rec-migration` still returns `should_run=false`,
+  `state=operator_gate`; no `quota_slot_spent` artifact exists for that goal.
+  Critic: this confirms the corrected platform-controller heartbeat path is
+  live and gate-respecting. The next higher-value state-truth slice is to
+  reconcile the local wrapper registry so premium-ui no longer appears as a
+  legacy runtime goal.
 - 2026-06-02T13:40:20+08:00: Ran the required steering audit after reverting
   the premature agent-harness main-control automation migration. Candidates
   considered: P0 state/safety observation of the platform migration heartbeat
