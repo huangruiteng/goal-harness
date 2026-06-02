@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T20:14:23+08:00
+updated_at: 2026-06-02T20:21:44+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -20,6 +20,12 @@ line into a manageable project asset with a visible owner, gate, next action,
 stop condition, user todo, agent todo, quota, review packet, and latest
 validation signal. Features that do not reduce human relay work, improve state
 truth, or make project agents easier to guide should be downgraded.
+
+The corresponding design principle is cognitive-load reduction: the human
+operator should not have to read every project-agent thread, relay every packet,
+or repeatedly restate context. Goal Harness should make the human only provide
+high-value inputs and decisions while the system carries state refresh,
+handoff, validation, and quota bookkeeping.
 
 ## Current Scope
 
@@ -48,6 +54,14 @@ truth, or make project agents easier to guide should be downgraded.
 
 ## Recent Progress
 
+- 2026-06-02T20:21:44+08:00: Promoted cognitive-load reduction from a
+  useful framing into an explicit design principle. Goal Harness should make
+  humans stop reading every project-agent thread, relaying every packet, and
+  restating context; the human should provide high-value decisions while the
+  system carries state refresh, handoff, validation, and quota bookkeeping.
+  Changed files: this active state and the private internal-introduction draft.
+  Validation: targeted grep/readback. Critic: this is a principle/narrative
+  calibration, not a replacement for the next P0 project-asset status slice.
 - 2026-06-02T20:14:23+08:00: Re-centered the meta goal around reducing
   operator coordination load. The product target is now a multi-project control
   plane that turns each line of work into a project asset with explicit owner,
