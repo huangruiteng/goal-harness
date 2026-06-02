@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T17:03:54+08:00
+updated_at: 2026-06-02T17:11:07+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,15 +28,30 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. The latest state-truth slice now keeps registered goals in
-  the operator lane when the registry declares an unresolved controller gate.
-  Compare: 1) dashboard first-screen placement for operator-gated cards; 2)
-  platform heartbeat prompt alignment; 3) real adapter proof. P0 human
-  decision-loop polish should win if the UI still makes the operator gate hard
-  to find or review.
+  choosing work. Compare: 1) platform heartbeat prompt alignment for all
+  connected projects; 2) real adapter proof for a read-only project path; 3)
+  further dashboard review polish. Continue dashboard only if a browser pass or
+  user feedback shows the new operator decision banner still does not make the
+  active gate obvious enough.
 
 ## Recent Progress
 
+- 2026-06-02T17:11:07+08:00: Added a first-screen operator decision banner to
+  the dashboard `User Actions` panel. When any action item is waiting on
+  `user_or_controller` or `controller`, the panel now shows a compact
+  `Needs decision` banner before the filters and cards, including gate count,
+  selected goal id, quota chip, and the first operator question. Clicking the
+  banner switches to the controller filter and selects that goal. Changed file:
+  `apps/dashboard/src/views/dashboard-page.tsx`. Validation: `npm --prefix
+  apps/dashboard run build` passed with the existing chunk-size warning;
+  refreshed local `status.local.json` from live status; the live status source
+  contains the real operator question and `quota.state=operator_gate` for the
+  gated migration goal; source scan confirms the banner text is in the first
+  screen component. Browser automation was unavailable in this tick because
+  local Playwright was not installed and Chrome accessibility timed out.
+  Critic: this improves the human decision loop with one visible banner, but a
+  final browser screenshot/pass would still be useful before considering the
+  dashboard polish fully done.
 - 2026-06-02T17:03:54+08:00: Added registry-level attention overrides for
   registered goals. Optional public-safe registry fields now flow through
   history/status: `waiting_on`, `attention_status`, `recommended_action`,

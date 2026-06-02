@@ -1879,6 +1879,10 @@ function UserActionSummary({
   const kindOptions = userActionKindOrder.filter((kind) => kindCounts[kind] > 0 || kind === selectedKind);
   const visibleItems = selectedKind === "all" ? items : items.filter((item) => item.kind === selectedKind);
   const selectedKindLabel = selectedKind === "all" ? "All" : userActionKindConfig[selectedKind].label;
+  const operatorGateItems = items.filter((item) =>
+    item.kind === "controller" || item.waitingOn === "user_or_controller" || item.waitingOn === "controller"
+  );
+  const primaryOperatorGate = operatorGateItems[0];
 
   return (
     <Card>
@@ -1906,6 +1910,30 @@ function UserActionSummary({
           </div>
         ) : (
           <div className="space-y-3">
+            {primaryOperatorGate ? (
+              <button
+                className="w-full rounded-lg border border-amber-300 bg-amber-50 p-3 text-left transition hover:bg-amber-100 dark:border-amber-900/70 dark:bg-amber-950/40 dark:hover:bg-amber-950"
+                onClick={() => {
+                  onSelectKind("controller");
+                  onSelectGoal(primaryOperatorGate.goalId);
+                }}
+                type="button"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <CircleAlert className="h-4 w-4 text-amber-700 dark:text-amber-300" />
+                  <Badge variant="warning">Needs decision</Badge>
+                  <Badge variant="neutral">{operatorGateItems.length} gates</Badge>
+                  <Badge variant="neutral">{primaryOperatorGate.goalId}</Badge>
+                  <QuotaChip quota={primaryOperatorGate.quota} />
+                </div>
+                <p className="mt-2 break-words text-sm font-semibold leading-6 text-amber-950 dark:text-amber-100">
+                  {primaryOperatorGate.operatorQuestion ?? primaryOperatorGate.summary}
+                </p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                  {primaryOperatorGate.detail}
+                </p>
+              </button>
+            ) : null}
             <div aria-label="User action kind filter" className="flex flex-wrap gap-2">
               <Button
                 aria-pressed={selectedKind === "all"}
