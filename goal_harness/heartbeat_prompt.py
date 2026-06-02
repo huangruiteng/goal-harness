@@ -65,19 +65,25 @@ heartbeat `DONT_NOTIFY` response with the skip reason.
 
 If the result says `should_run=true`:
 
-1. Read the active state and Priority Stack.
-2. Choose exactly one bounded, verifiable step.
-3. Do that step only. Keep public/private boundaries intact.
-4. Run the smallest useful validation.
-5. Write back changed files, validation, critic, and next action to the active
+1. Read the active state, Priority Stack, recent progress, and critic.
+2. Run a short steering audit before choosing work: list at least three
+   plausible next-action candidates across different P0/P1/P2 lanes when
+   useful; if the same topic has consumed several recent delivery slices, apply
+   a continuation check and state why continuing still wins; keep compute quota
+   separate from focus quota; record any losing high-value candidate that should
+   not be forgotten.
+3. Choose exactly one bounded, verifiable step from that audit.
+4. Do that step only. Keep public/private boundaries intact.
+5. Run the smallest useful validation.
+6. Write back changed files, validation, critic, and next action to the active
    state.
-6. If the dashboard or controller needs to see a state-only update, run:
+7. If the dashboard or controller needs to see a state-only update, run:
 
    ```bash
    goal-harness refresh-state --goal-id {goal_id}
    ```
 
-7. After validation and required state refresh are complete, append exactly one
+8. After validation and required state refresh are complete, append exactly one
    spend event:
 
    ```bash
@@ -87,7 +93,7 @@ If the result says `should_run=true`:
    Do not append spend for `should_run=false` skips, preflight failures, pure
    dry-run previews, or duplicate accounting attempts.
 
-8. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
+9. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
    user visibility, such as a committed artifact, a user gate, or a real
    blocker. Otherwise use `DONT_NOTIFY`.
 

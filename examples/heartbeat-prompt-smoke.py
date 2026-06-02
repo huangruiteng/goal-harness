@@ -50,6 +50,7 @@ def main() -> int:
     integration_doc = INTEGRATION_DOC.read_text(encoding="utf-8")
     project_skill = PROJECT_SKILL.read_text(encoding="utf-8")
     generated = str(payload["task_body"])
+    compact_generated = normalized(generated)
 
     must_have = (
         "<ACTIVE_GOAL_STATE_PATH>",
@@ -59,7 +60,11 @@ def main() -> int:
         "DONT_NOTIFY",
         "do not do implementation work, adapter work, file edits, research, or project exploration",
         "should_run=true",
-        "Choose exactly one bounded, verifiable step",
+        "Run a short steering audit before choosing work",
+        "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
+        "apply a continuation check",
+        "keep compute quota separate from focus quota",
+        "Choose exactly one bounded, verifiable step from that audit",
         "Run the smallest useful validation",
         "Write back changed files, validation, critic, and next action",
         "goal-harness refresh-state --goal-id <GOAL_ID>",
@@ -75,12 +80,16 @@ def main() -> int:
         "goal-harness --format json quota should-run --goal-id public-heartbeat-goal",
         "should_run=false",
         "DONT_NOTIFY",
-        "Choose exactly one bounded, verifiable step",
+        "Run a short steering audit before choosing work",
+        "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
+        "apply a continuation check",
+        "keep compute quota separate from focus quota",
+        "Choose exactly one bounded, verifiable step from that audit",
         "goal-harness refresh-state --goal-id public-heartbeat-goal",
         "goal-harness quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute",
         "Do not append spend for `should_run=false` skips",
     ):
-        assert phrase in generated, phrase
+        assert phrase in compact_generated, phrase
 
     assert_ordered(
         doc,
@@ -88,6 +97,8 @@ def main() -> int:
             "Before spending delivery compute, run:",
             "If the result says should_run=false",
             "If the result says should_run=true",
+            "Run a short steering audit before choosing work",
+            "Choose exactly one bounded, verifiable step from that audit",
             "Run the smallest useful validation",
             "goal-harness refresh-state --goal-id <GOAL_ID>",
             "goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute",

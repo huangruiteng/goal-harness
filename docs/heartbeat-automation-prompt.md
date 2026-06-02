@@ -37,17 +37,23 @@ heartbeat DONT_NOTIFY response with the skip reason.
 
 If the result says should_run=true:
 
-1. Read the active state and Priority Stack.
-2. Choose exactly one bounded, verifiable step.
-3. Do that step only. Keep public/private boundaries intact.
-4. Run the smallest useful validation.
-5. Write back changed files, validation, critic, and next action to the active
+1. Read the active state, Priority Stack, recent progress, and critic.
+2. Run a short steering audit before choosing work: list at least three
+   plausible next-action candidates across different P0/P1/P2 lanes when
+   useful; if the same topic has consumed several recent delivery slices, apply
+   a continuation check and state why continuing still wins; keep compute quota
+   separate from focus quota; record any losing high-value candidate that should
+   not be forgotten.
+3. Choose exactly one bounded, verifiable step from that audit.
+4. Do that step only. Keep public/private boundaries intact.
+5. Run the smallest useful validation.
+6. Write back changed files, validation, critic, and next action to the active
    state.
-6. If the dashboard or controller needs to see a state-only update, run:
+7. If the dashboard or controller needs to see a state-only update, run:
 
    goal-harness refresh-state --goal-id <GOAL_ID>
 
-7. After validation and required state refresh are complete, append exactly one
+8. After validation and required state refresh are complete, append exactly one
    spend event:
 
    goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
@@ -55,7 +61,7 @@ If the result says should_run=true:
    Do not append spend for should_run=false skips, preflight failures, pure
    dry-run previews, or duplicate accounting attempts.
 
-8. Return a compact final report. Use heartbeat NOTIFY only for meaningful user
+9. Return a compact final report. Use heartbeat NOTIFY only for meaningful user
    visibility, such as a committed artifact, a user gate, or a real blocker.
    Otherwise use DONT_NOTIFY.
 
@@ -75,10 +81,12 @@ Task:
 Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work, run
 `goal-harness --format json quota should-run --goal-id <GOAL_ID>`. If it returns
 `should_run=false`, skip quietly with DONT_NOTIFY. If it returns
-`should_run=true`, do one bounded verifiable step, validate it, write back
-changed files / validation / critic / next action, refresh state if needed, and
-append exactly one `goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1
---source heartbeat --execute` event after the completed turn.
+`should_run=true`, first compare candidate next actions across the priority
+stack, apply a continuation check for repeated topics, then do one bounded
+verifiable step, validate it, write back changed files / validation / critic /
+next action, refresh state if needed, and append exactly one `goal-harness quota
+spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute` event
+after the completed turn.
 ```
 
 ## Agent Checklist
@@ -87,11 +95,12 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 
 1. Guard first: `quota should-run`.
 2. Skip without compute when `should_run=false`.
-3. Work small when `should_run=true`.
-4. Validate before reporting.
-5. Refresh state when the run is state-only.
-6. Spend exactly once after the completed turn.
-7. Report compactly.
+3. Run the steering audit before choosing the work.
+4. Work small when `should_run=true`.
+5. Validate before reporting.
+6. Refresh state when the run is state-only.
+7. Spend exactly once after the completed turn.
+8. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode

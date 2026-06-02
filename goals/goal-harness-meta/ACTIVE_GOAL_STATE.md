@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T11:03:08+08:00
+updated_at: 2026-06-02T11:11:23+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,29 @@ private project context.
 
 ## Next Action
 
-- Operationalize the steering audit in the heartbeat/goal-tick prompt path:
-  before executing another adjacent slice, require three candidate next actions
-  across different P0/P1/P2 lanes and a continuation check for repeated topics,
-  then choose one priority-justified P0 slice without local-greedy bias.
+- Let the next automatic tick use the new steering audit: compare at least
+  three P0/P1/P2 candidates before selecting the next bounded slice, and record
+  the losing high-value candidate if continuing the same subtopic still wins.
 
 ## Recent Progress
 
+- 2026-06-02T11:11:23+08:00: Operationalized the steering audit in the
+  heartbeat prompt path. `goal_harness/heartbeat_prompt.py` now tells automatic
+  ticks to read recent progress and critic, list at least three plausible
+  P0/P1/P2 candidates when useful, apply a continuation check for repeated
+  topics, keep compute quota separate from focus quota, and record losing
+  high-value candidates before choosing exactly one bounded step. Updated
+  `docs/heartbeat-automation-prompt.md` and
+  `examples/heartbeat-prompt-smoke.py` so the public copy-paste template and
+  smoke protect the same contract. Updated the live
+  `goal-harness-hourly-tick` Codex App heartbeat prompt to the generated
+  steering-audit task body while preserving the one-minute cadence. Validation:
+  `python3 examples/heartbeat-prompt-smoke.py` passed; `python3 -m py_compile
+  goal_harness/heartbeat_prompt.py examples/heartbeat-prompt-smoke.py` passed;
+  CLI JSON generation for `goal-harness-meta` includes the steering audit and
+  spend command. Critic: this closes the prompt-path gap, but future ticks must
+  prove the audit is actually used for cross-lane selection rather than
+  continuing the nearest adjacent cleanup by inertia.
 - 2026-06-02T10:59:10+08:00: Added a steering audit contract to
   `docs/state-interaction-model.md` and clarified the README quota section.
   The new rule names the failure observed in the overnight quota chain:
