@@ -30,6 +30,7 @@ READ_ONLY_MAP_ADAPTER_STATUSES = {
 READ_ONLY_MAP_DRY_RUN_PREVIEW_STATUSES = {
     "planned",
 }
+READ_ONLY_MAP_OPT_IN_GATE = "read_only_map_opt_in"
 PROJECT_INVENTORY_PATHS = (
     "README.md",
     "AGENTS.md",
@@ -253,6 +254,31 @@ def compact_project_map(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def latest_operator_gate(runtime_root: Path, goal_id: str, *, gate: str = READ_ONLY_MAP_OPT_IN_GATE) -> dict[str, Any] | None:
+    runs_dir = runtime_root / "goals" / goal_id / "runs"
+    index_path = runs_dir / "index.jsonl"
+    if index_path.exists():
+        lines = index_path.read_text(encoding="utf-8").splitlines()
+        for line in reversed(lines):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            operator_gate = record.get("operator_gate") if isinstance(record, dict) else None
+            if isinstance(operator_gate, dict) and operator_gate.get("gate") == gate:
+                return operator_gate
+
+    for path in sorted(runs_dir.glob("*.json"), reverse=True):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        operator_gate = record.get("operator_gate") if isinstance(record, dict) else None
+        if isinstance(operator_gate, dict) and operator_gate.get("gate") == gate:
+            return operator_gate
+    return None
+
+
 def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Goal Harness Read-Only Project Map",
@@ -266,6 +292,9 @@ def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
         f"- health_check: `{payload.get('health_check')}`",
         f"- opt_in_required: `{payload.get('opt_in_required')}`",
     ]
+    operator_gate = payload.get("operator_gate") if isinstance(payload.get("operator_gate"), dict) else {}
+    if operator_gate:
+        lines.append(f"- operator_gate: `{operator_gate.get('gate')}:{operator_gate.get('decision')}`")
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
         return "\n".join(lines)
@@ -365,8 +394,11 @@ def read_only_project_map_run(
         raise ValueError(
             f"{safe_goal_id} adapter.kind must be `{READ_ONLY_MAP_ADAPTER_KIND}` or end with `_read_only_map_v0`"
         )
-    opt_in_required = adapter_status in READ_ONLY_MAP_DRY_RUN_PREVIEW_STATUSES
-    if adapter_status not in READ_ONLY_MAP_ADAPTER_STATUSES and not (dry_run and opt_in_required):
+    planned_dry_run_preview = adapter_status in READ_ONLY_MAP_DRY_RUN_PREVIEW_STATUSES
+    operator_gate = latest_operator_gate(runtime_root, safe_goal_id)
+    operator_gate_approved = isinstance(operator_gate, dict) and operator_gate.get("decision") == "approve"
+    opt_in_required = planned_dry_run_preview and not operator_gate_approved
+    if adapter_status not in READ_ONLY_MAP_ADAPTER_STATUSES and not (dry_run and planned_dry_run_preview):
         raise ValueError(
             f"{safe_goal_id} adapter.status must be one of {sorted(READ_ONLY_MAP_ADAPTER_STATUSES)}"
             f"; planned adapters may only run read-only-map with --dry-run for opt-in preview"
@@ -375,7 +407,15 @@ def read_only_project_map_run(
         raise FileNotFoundError(f"state file does not exist: {resolved_state_file}")
 
     state_text = resolved_state_file.read_text(encoding="utf-8")
-    action = recommended_action or derive_recommended_action(state_text)
+    if recommended_action:
+        action = recommended_action
+    elif planned_dry_run_preview and operator_gate_approved:
+        action = (
+            "Report the approved read-only map dry-run to the target project agent; "
+            "do not append real run history or grant write-control."
+        )
+    else:
+        action = derive_recommended_action(state_text)
     validate_public_safe_text("recommended_action", action)
     generated_at = now_local()
     record = build_project_map_record(
@@ -412,6 +452,7 @@ def read_only_project_map_run(
         "dry_run": dry_run,
         "appended": not dry_run,
         "opt_in_required": opt_in_required,
+        "operator_gate": operator_gate,
         "registry": str(registry_path),
         "runtime_root": str(runtime_root),
         "project": str(resolved_project) if resolved_project else None,

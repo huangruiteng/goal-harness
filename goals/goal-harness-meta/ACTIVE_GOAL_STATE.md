@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T17:40:00+08:00
+updated_at: 2026-06-02T17:49:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,17 +27,33 @@ private project context.
 
 ## Next Action
 
-- Run the next tick's steering audit across at least three lanes before
-  choosing work. Compare: 1) adding a first-class `goal-harness todo add`
-  command so project agents can append `user_todos` / `agent_todos` without
-  hand-editing Markdown sections; 2) adding a packet/active-goal mismatch
-  guard so project agents fail closed when a copied Review Packet targets a
-  different `goal_id`; 3) platform heartbeat prompt alignment for connected
-  projects. Prefer the mismatch guard if another project agent reports a gate
-  that does not name its own goal id.
+- Run the next tick's steering audit and choose one bounded P0 step. Compare
+  `todo add`, packet goal-id mismatch guard, and agent-harness project-local
+  state connection; prefer the mismatch guard if another agent sees the wrong
+  goal id.
 
 ## Recent Progress
 
+- 2026-06-02T17:49:00+08:00: Recorded the user's approval for
+  `agent-harness-main-control` to run only `read-only-map --dry-run`, with no
+  write-control or main-control takeover. The durable operator gate appended
+  `operator_gate_approved` at `2026-06-02T17:44:44+08:00`, and live status now
+  reports `waiting_on=codex`, `quota.state=eligible`, and
+  `agent_command=goal-harness read-only-map --goal-id agent-harness-main-control
+  --dry-run`. While validating, found that the dry-run map still emitted
+  `opt_in_required=true` because it only looked at registry adapter status
+  `planned`; fixed `project_map.py` so planned adapter dry-runs read the latest
+  `read_only_map_opt_in` operator gate and clear the opt-in risk after an
+  approval, while real non-dry-run maps remain blocked for planned adapters.
+  Added `examples/project-map-smoke.py`. Validation: `python
+  examples/project-map-smoke.py`, `python examples/run-smokes.py`,
+  `goal-harness check --scan-root .`, and `npm --prefix apps/dashboard run
+  build` passed; a real dry-run for `agent-harness-main-control` now returns
+  `opt_in_required=false`, `appended=false`, and residual risk only
+  `project_local_goal_state_not_detected`. Critic: approval plumbing is now
+  consistent, but agent-harness still needs project-local `.goal-harness` /
+  `.codex/goals` state before it stops looking like a remote-only control
+  target.
 - 2026-06-02T17:40:00+08:00: User noticed the platform migration controller
   thread appeared to be blocked on an agent-harness-style `read-only map`
   user todo. Diagnosis: the platform heartbeat body and CLI Review Packet were
