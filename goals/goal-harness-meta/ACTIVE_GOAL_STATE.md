@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T00:09:18+08:00
+updated_at: 2026-06-03T00:16:08+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,36 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should finish the P0 project-agent consumption proof by inspecting
-  or exercising one real heartbeat/operator-gate report path and verifying that
-  its visible interaction names the relevant `user_todo_summary` and
-  `agent_todo_summary` items, not just that the fields exist in CLI JSON.
+- Next tick should pivot to the P0 human-decision loop by auditing the
+  dashboard/operator view for duplicated action cards and copy-packet
+  ergonomics, now that the CLI report path visibly names user and agent todo
+  items.
 
 ## Recent Progress
 
+- 2026-06-03T00:16:08+08:00: Steering audit candidates were: P0
+  project-agent consumption proof, P0 dashboard/operator-view human-decision
+  loop, P1 public usability polish, and P2 broader UI cleanup. Continuation
+  check: after the last two slices exposed `agent_todo_summary` in JSON and
+  aligned the installed skill, the remaining proof was interaction-level: does
+  the visible report actually name the relevant todo items. The bounded fix
+  updated `render_quota_should_run_markdown()` so `quota should-run` Markdown
+  prints `user_todo_next[...]` and `agent_todo_next[...]` for the first open
+  items, not only open/total counts. Added smoke assertions that an
+  operator-gate quota report names both the user todo and the agent safe
+  follow-up. Real validation on the connected migration goal now shows the
+  default Markdown report listing the first three open user todos and first
+  three open agent todos. Validation: `python3 examples/quota-plan-smoke.py`,
+  `python3 examples/run-smokes.py` with 15 scripts,
+  `python3 -m compileall -q goal_harness`, `git diff --check`,
+  `goal-harness check --scan-root .`, and real global-registry
+  `quota should-run --goal-id premium-ui-ai-search-rec-migration` Markdown.
+  Changed files: `goal_harness/quota.py`,
+  `examples/quota-plan-smoke.py`, this active state, and the private CS-Notes
+  state. Critic: the CLI/report path now consumes and names user/agent todo
+  items, but the dashboard/operator view may still have duplicated yellow/white
+  cards and uneven packet copy affordances; that is the next highest-value
+  human-decision-loop slice.
 - 2026-06-03T00:09:18+08:00: Steering audit candidates were: P0 project-agent
   consumption proof, P0 installed-skill/state truth, P1 public usability polish,
   and P2 dashboard copy cleanup. Continuation check: the previous slice exposed

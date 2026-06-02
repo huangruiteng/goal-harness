@@ -589,6 +589,8 @@ def assert_operator_gate_should_run(status_payload: dict) -> None:
     assert "Confirm the operator gate." in payload["gate_prompt"], payload
     markdown = render_quota_should_run_markdown(payload)
     assert "agent_todo_summary: open=1 total=1" in markdown, markdown
+    assert "user_todo_next[1]: Confirm the operator gate." in markdown, markdown
+    assert "agent_todo_next[1]: Run the safe follow-up after gate approval." in markdown, markdown
     assert "agent_todo_command_template" in markdown, markdown
 
 

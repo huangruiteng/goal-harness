@@ -898,6 +898,24 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         f"- waiting_on: `{payload.get('waiting_on')}`",
         f"- status: `{payload.get('status')}`",
     ]
+
+    def append_todo_summary(label: str, summary: dict[str, Any]) -> None:
+        lines.append(
+            f"- {label}_summary: "
+            f"open={summary.get('open_count')} "
+            f"total={summary.get('total_count')}"
+        )
+        first_open = summary.get("first_open_items") if isinstance(summary.get("first_open_items"), list) else []
+        for todo in first_open[:3]:
+            if not isinstance(todo, dict):
+                continue
+            text = str(todo.get("text") or "").strip()
+            if not text:
+                continue
+            index = todo.get("index")
+            suffix = f"[{index}]" if index is not None else ""
+            lines.append(f"- {label}_next{suffix}: {text}")
+
     if quota:
         lines.append(
             "- quota: "
@@ -923,20 +941,12 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         payload.get("user_todo_summary") if isinstance(payload.get("user_todo_summary"), dict) else {}
     )
     if user_todo_summary:
-        lines.append(
-            "- user_todo_summary: "
-            f"open={user_todo_summary.get('open_count')} "
-            f"total={user_todo_summary.get('total_count')}"
-        )
+        append_todo_summary("user_todo", user_todo_summary)
     agent_todo_summary = (
         payload.get("agent_todo_summary") if isinstance(payload.get("agent_todo_summary"), dict) else {}
     )
     if agent_todo_summary:
-        lines.append(
-            "- agent_todo_summary: "
-            f"open={agent_todo_summary.get('open_count')} "
-            f"total={agent_todo_summary.get('total_count')}"
-        )
+        append_todo_summary("agent_todo", agent_todo_summary)
     todo_write_hint = payload.get("todo_write_hint") if isinstance(payload.get("todo_write_hint"), dict) else {}
     if todo_write_hint:
         lines.append(f"- todo_write_hint: {todo_write_hint.get('rule')}")
