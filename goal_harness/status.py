@@ -196,6 +196,82 @@ def parse_active_state_todos(state_text: str) -> dict[str, Any]:
     return result
 
 
+def project_asset_owner(waiting_on: str) -> str:
+    if waiting_on == "codex":
+        return "codex"
+    if waiting_on == "external_evidence":
+        return "external_evidence"
+    if waiting_on == "controller":
+        return "controller"
+    if waiting_on == "user_or_controller":
+        return "user_or_controller"
+    return waiting_on or "unknown"
+
+
+def project_asset_gate(
+    *,
+    waiting_on: str,
+    operator_question: str | None,
+    missing_gates: list[str] | None,
+    status: str,
+) -> str:
+    if operator_question:
+        return "operator_question"
+    if missing_gates:
+        return str(missing_gates[0])
+    if waiting_on in {"user_or_controller", "controller"}:
+        return status or waiting_on
+    if waiting_on == "external_evidence":
+        return "external_evidence"
+    return "none"
+
+
+def project_asset_stop_condition(
+    *,
+    waiting_on: str,
+    next_handoff_condition: str | None,
+    agent_command: str | None,
+) -> str:
+    if next_handoff_condition:
+        return next_handoff_condition
+    if waiting_on == "user_or_controller":
+        return "stop until the user or controller decision is recorded"
+    if waiting_on == "controller":
+        return "stop until the controller or owner resolves this gate"
+    if waiting_on == "external_evidence":
+        return "stop until external evidence changes"
+    if agent_command:
+        return "stop if the command fails or needs write, production, or additional approval"
+    return "stop if the next action needs reward, gate approval, write control, or production access"
+
+
+def build_project_asset(
+    *,
+    status: str,
+    waiting_on: str,
+    recommended_action: str,
+    operator_question: str | None,
+    agent_command: str | None,
+    missing_gates: list[str] | None,
+    next_handoff_condition: str | None,
+) -> dict[str, str]:
+    return {
+        "owner": project_asset_owner(waiting_on),
+        "gate": project_asset_gate(
+            waiting_on=waiting_on,
+            operator_question=operator_question,
+            missing_gates=missing_gates,
+            status=status,
+        ),
+        "next_action": recommended_action,
+        "stop_condition": project_asset_stop_condition(
+            waiting_on=waiting_on,
+            next_handoff_condition=next_handoff_condition,
+            agent_command=agent_command,
+        ),
+    }
+
+
 def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
     state_path = resolve_goal_local_path(goal.get("state_file"), goal, fallback_base=Path.cwd())
     if state_path is None or not state_path.exists():
@@ -229,12 +305,22 @@ def attention_item(
     agent_todos: dict[str, Any] | None = None,
     todo_state_file: str | None = None,
 ) -> dict[str, Any]:
+    project_asset = build_project_asset(
+        status=status,
+        waiting_on=waiting_on,
+        recommended_action=recommended_action,
+        operator_question=operator_question,
+        agent_command=agent_command,
+        missing_gates=missing_gates,
+        next_handoff_condition=next_handoff_condition,
+    )
     item = {
         "goal_id": goal_id,
         "status": status,
         "waiting_on": waiting_on,
         "severity": severity,
         "recommended_action": recommended_action,
+        "project_asset": project_asset,
         "source": source,
     }
     if operator_question:
@@ -1075,6 +1161,14 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         )
         if action:
             lines.append(f"  - action: {action}")
+        project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+        if project_asset:
+            lines.append(
+                "  - project_asset: "
+                f"owner={_markdown_scalar(project_asset.get('owner') or '')} "
+                f"gate={_markdown_scalar(project_asset.get('gate') or '')} "
+                f"stop={_markdown_scalar(project_asset.get('stop_condition') or '')}"
+            )
         user_todos = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else {}
         if user_todos:
             lines.append(

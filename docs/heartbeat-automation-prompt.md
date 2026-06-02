@@ -73,8 +73,11 @@ If the result says should_run=false:
   user_todo_summary from the payload. If the same unresolved gate has not
   already been asked in the recent visible thread, return heartbeat NOTIFY with
   one concise Chinese question that lists the gate and the expected reply
-  format. Do not execute agent_command, adapter work, write-control, production
-  actions, or the gated path while asking.
+  format. If user_todo_summary.open_count > 0, the notification must list the
+  existing open user todos even when there are no newly discovered user
+  actions; never summarize this case as "no new user action". Do not execute
+  agent_command, adapter work, write-control, production actions, or the gated
+  path while asking.
 - If the payload also says safe_bypass_allowed=true and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   still read the active state and do exactly one bounded safe-bypass step from

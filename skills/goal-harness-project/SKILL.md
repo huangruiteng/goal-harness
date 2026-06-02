@@ -59,8 +59,10 @@ interaction, not a silent skip. Read `gate_prompt`, `operator_question`,
 `recommended_action`, `next_handoff_condition`, `missing_gates`, and
 `user_todo_summary` when present, then ask the concrete gate in Chinese unless
 the same unresolved question was already surfaced in the recent visible thread.
-Do not run `agent_command`, adapter work, write-control, production actions, or
-the gated path while asking.
+If `user_todo_summary.open_count > 0`, list those existing open user todos in
+the notification even when there are no newly discovered user actions; do not
+summarize the turn as "no new user action". Do not run `agent_command`,
+adapter work, write-control, production actions, or the gated path while asking.
 
 If the response has `should_run=false` and not `safe_bypass_allowed=true`, do
 not run implementation or adapter work for that goal in this turn. Quietly

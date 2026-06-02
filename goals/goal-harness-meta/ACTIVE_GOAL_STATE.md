@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T20:21:44+08:00
+updated_at: 2026-06-02T20:32:20+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,15 +45,39 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should implement the smallest public-safe project-asset slice:
-  inspect the current status/dashboard projection for owner, gate, next action,
-  and stop condition coverage, then add the minimal missing field or projection
-  that helps users manage projects without reading every project-agent thread.
-  Do not touch target project code, and do not mix secondary presentation work
-  into this P0 implementation slice.
+- Next tick should verify the newly updated heartbeat notification loop on a
+  real connected goal. If it now surfaces existing open user todos clearly,
+  continue with the smallest public-safe dashboard/status projection slice for
+  project assets; if it still hides todos behind a generic gate message, fix
+  that renderer before adding new UI.
 
 ## Recent Progress
 
+- 2026-06-02T20:32:20+08:00: Fixed a field failure in the user-todo
+  notification loop: `quota should-run` already exposed open user todos for a
+  real operator-gated goal, but an existing heartbeat prompt could still
+  compress the turn into "no new user action" after the gate had been surfaced.
+  Updated the heartbeat generator and installed project skill so
+  `user_todo_summary.open_count > 0` must be reported as existing user-visible
+  work, even when no newly discovered user action exists. Added a compact
+  `project_asset` status projection with `owner`, `gate`, `next_action`, and
+  `stop_condition` so agents and dashboards do not reconstruct that control
+  state from scattered fields. Updated the live heartbeat automation for the
+  connected field goal to the regenerated prompt. Changed files:
+  `goal_harness/status.py`, `goal_harness/heartbeat_prompt.py`,
+  `docs/status-data-contract.md`, `docs/heartbeat-automation-prompt.md`,
+  `docs/quota-allocation.md`, `skills/goal-harness-project/SKILL.md`,
+  `README.md`, `examples/status-markdown-smoke.py`,
+  `examples/heartbeat-prompt-smoke.py`, and `examples/quota-contract-smoke.py`.
+  Validation: `python examples/status-markdown-smoke.py`, `python
+  examples/heartbeat-prompt-smoke.py`, `python examples/quota-contract-smoke.py`,
+  `python -m compileall -q goal_harness`, `goal-harness check --scan-root .`,
+  `git diff --check`, live `quota should-run` confirming
+  `notify_user_on_gate=True`, `user_todo_summary.open_count=5`, and a
+  `gate_prompt` containing user todos. Critic: this fixes the agent-facing and
+  automation-prompt contract; the next useful check is whether the actual
+  heartbeat thread now presents the todos in concise Chinese instead of
+  burying them in a long packet.
 - 2026-06-02T20:21:44+08:00: Promoted cognitive-load reduction from a
   useful framing into an explicit design principle. Goal Harness should make
   humans stop reading every project-agent thread, relaying every packet, and

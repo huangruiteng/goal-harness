@@ -223,6 +223,12 @@ Item shape:
   "waiting_on": "user_or_controller",
   "severity": "action",
   "recommended_action": "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
+  "project_asset": {
+    "owner": "user_or_controller",
+    "gate": "operator_question",
+    "next_action": "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
+    "stop_condition": "record aligned eval evidence and one human reward event"
+  },
   "operator_question": "是否同意 `complex-project-main-control` 先执行 read-only map opt-in？",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
   "quota": {
@@ -255,6 +261,10 @@ Item fields:
   `external_evidence`.
 - `severity`: `high`, `action`, or `watch`.
 - `recommended_action`: exactly one next action.
+- `project_asset`: a compact control-plane projection derived from the same
+  item, with `owner`, `gate`, `next_action`, and `stop_condition`. This is the
+  first-screen project asset surface for agents and dashboards; it lets
+  consumers avoid reconstructing owner/gate/next/stop from scattered fields.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
 - `agent_command`: optional command or instruction for the target project agent

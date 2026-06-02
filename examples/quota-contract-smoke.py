@@ -90,6 +90,11 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
+        "do not report \"no new user action\" while those todos remain open",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
         "## Slot Spend Event Contract",
         label="quota doc",
     )
@@ -156,6 +161,11 @@ def main() -> int:
     )
     assert_contains(
         readme,
+        "do not call the turn \"no new user action\" while they remain open",
+        label="README",
+    )
+    assert_contains(
+        readme,
         "`safe_bypass_allowed=true`, the heartbeat may still do one bounded read-only steering or analysis step",
         label="README",
     )
@@ -212,6 +222,16 @@ def main() -> int:
     assert_contains(
         status_contract,
         "ask that concrete gate in the visible thread with `NOTIFY`",
+        label="status contract",
+    )
+    assert_contains(
+        status_contract,
+        "`project_asset`: a compact control-plane projection",
+        label="status contract",
+    )
+    assert_contains(
+        status_contract,
+        "`owner`, `gate`, `next_action`, and `stop_condition`",
         label="status contract",
     )
 

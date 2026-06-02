@@ -277,7 +277,10 @@ operator-gated, waiting, throttled, paused, and health-blocked goals stay out of
 the eligible lane. If `quota should-run` returns `state=operator_gate` with
 `gate_prompt` or `operator_question`, the target heartbeat should proactively
 ask that concrete user/controller gate unless the same unresolved question was
-already surfaced recently. If it also returns `safe_bypass_allowed=true`, the
+already surfaced recently. If it also returns open `user_todo_summary`, those
+existing todos should be listed as user-visible work; do not call the turn "no
+new user action" while they remain open. If it also returns
+`safe_bypass_allowed=true`, the
 heartbeat may still do one bounded read-only steering or analysis step that
 does not depend on that gate; it must not execute `agent_command`, adapter work,
 write-control, production actions, or the gated path. See
