@@ -1776,7 +1776,7 @@ function UserActionSummary({
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
                     {item.agentCommand ? (
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
-                        <Badge variant="info">Agent command ready after approval</Badge>
+                        <Badge variant="info">{item.operatorQuestion ? "Agent command ready after approval" : "Approved agent command"}</Badge>
                       </div>
                     ) : null}
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 text-xs text-slate-600 dark:border-zinc-800 dark:text-zinc-300">

@@ -247,20 +247,121 @@ const approvedStatusFixture = {
   },
 };
 
-function runPw(args, { allowFailure = false } = {}) {
+function runPw(args, { allowFailure = false, timeoutMs = 30_000 } = {}) {
   const result = spawnSync("bash", [pwcli, ...args], {
     cwd: repoRoot,
     encoding: "utf-8",
     env: { ...process.env, PLAYWRIGHT_CLI_SESSION: session },
+    timeout: timeoutMs,
   });
-  if (!allowFailure && result.status !== 0) {
+  if (!allowFailure && (result.status !== 0 || result.error)) {
     throw new Error([
       `playwright-cli ${args.join(" ")} failed with ${result.status}`,
+      result.error?.message,
       result.stdout,
       result.stderr,
     ].filter(Boolean).join("\n"));
   }
   return result;
+}
+
+function parseRawEvalOutput(stdout) {
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function evalRaw(expression, { timeoutMs = 10_000 } = {}) {
+  const result = runPw(["--raw", "eval", expression], { timeoutMs });
+  return parseRawEvalOutput(result.stdout);
+}
+
+function navigateTo(url) {
+  const gotoResult = runPw(["goto", url], { allowFailure: true, timeoutMs: 5_000 });
+  if (gotoResult.status === 0 && !gotoResult.error) {
+    return;
+  }
+  runPw(["--raw", "eval", `() => {
+    window.location.href = ${JSON.stringify(url)};
+    return window.location.href;
+  }`], { allowFailure: true, timeoutMs: 5_000 });
+}
+
+function countText(body, text) {
+  return body.split(text).length - 1;
+}
+
+function requireTexts(body, texts, label) {
+  const missing = texts.filter((text) => !body.includes(text));
+  if (missing.length) {
+    throw new Error(`Missing ${label} text: ${missing.join(", ")}`);
+  }
+}
+
+function forbidTexts(body, texts, label) {
+  const present = texts.filter((text) => body.includes(text));
+  if (present.length) {
+    throw new Error(`${label}: ${present.join(", ")}`);
+  }
+}
+
+function requireExactTextCount(body, text, expected, label) {
+  const actual = countText(body, text);
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${expected}, got ${actual}.`);
+  }
+}
+
+async function readBodyText({ requiredText = "User Actions", timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let body = "";
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      body = String(evalRaw("() => document.querySelector('main section')?.innerText ?? document.body?.innerText ?? ''", { timeoutMs: 5_000 }));
+      if (!requiredText || body.includes(requiredText)) {
+        return body;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 250));
+  }
+  throw new Error([
+    `Timed out waiting for page text: ${requiredText}`,
+    lastError?.message,
+    body.slice(0, 500),
+  ].filter(Boolean).join("\n"));
+}
+
+function startBrowserSession() {
+  let lastProbe;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    runPw(["open", "about:blank"], { allowFailure: true, timeoutMs: 5_000 });
+    lastProbe = runPw(["eval", "() => location.href"], { allowFailure: true, timeoutMs: 10_000 });
+    if (lastProbe.status === 0 && !lastProbe.error) {
+      return;
+    }
+  }
+  throw new Error([
+    "Unable to start Playwright CLI browser session.",
+    lastProbe?.error?.message,
+    lastProbe?.stdout,
+    lastProbe?.stderr,
+  ].filter(Boolean).join("\n"));
+}
+
+function forceKillBrowserSession() {
+  spawnSync("pkill", ["-f", `cliDaemon.js ${session}`], {
+    encoding: "utf-8",
+    timeout: 5_000,
+  });
 }
 
 async function waitForDashboard(url) {
@@ -312,110 +413,97 @@ async function main() {
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForDashboard(baseUrl);
-    runPw(["open", `${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`]);
-    runPw(["resize", "1280", "900"]);
-    runPw([
-      "run-code",
-      String.raw`async (page) => {
-        await page.waitForLoadState("networkidle");
-        await page.getByText("User Actions").waitFor();
-        const body = await page.locator("body").innerText();
-        const required = [
-          "1 actions",
-          "Controller",
-          "Review controller opt-in",
-          "Needs approval",
-          "User / Controller",
-          "Operator question",
-          "是否同意 \`planned-main-control\` 先执行 read-only map opt-in？",
-          "先做用户待办",
-          "Read owner review worksheet first.",
-          "Project asset stop: record or defer the owner todo before approval",
-          "Agent command ready after approval",
-          "Quota 0.5",
-          "等待人或控制器决策",
-          "0/12 slots",
-          "Suggested decision",
-          "同意先做 read-only map dry-run；不授权写入或主控接管。",
-          "Copy Review Packet",
-        ];
-        const missing = required.filter((text) => !body.includes(text));
-        if (missing.length) {
-          throw new Error("Missing dashboard text: " + missing.join(", "));
-        }
-        const forbidden = [
-          "0 actions",
-          "No user-facing action is active.",
-          "Let Codex continue",
-          "Codex can continue",
-          "Codex can act",
-          "continue_from_refreshed_state",
-          "continue_codex_action",
-        ];
-        const present = forbidden.filter((text) => body.includes(text));
-        if (present.length) {
-          throw new Error("Operator-gated goal leaked into Codex-ready UI: " + present.join(", "));
-        }
-        if (body.indexOf("Operator question") > body.indexOf("Agent command ready after approval")) {
-          throw new Error("Operator question should appear before the after-approval agent command hint.");
-        }
-        return {
-          ok: true,
-          operatorQuestionVisible: body.includes("Operator question"),
-          codexCopyAbsent: !body.includes("Let Codex continue"),
-        };
-      }`,
-    ]);
-    runPw(["open", `${baseUrl}/?statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`]);
-    runPw([
-      "run-code",
-      String.raw`async (page) => {
-        await page.waitForLoadState("networkidle");
-        await page.getByText("User Actions").waitFor();
-        const body = await page.locator("body").innerText();
-        const required = [
-          "1 actions",
-          "Codex",
-          "Let Codex use the map",
-          "Codex can continue",
-          "Approved agent command",
-          "This command is valid because the operator gate was recorded as approved.",
-          "goal-harness read-only-map --goal-id planned-main-control --dry-run --approved",
-          "Operator approved",
-          "approve",
-          "Copy Review Packet",
-        ];
-        const missing = required.filter((text) => !body.includes(text));
-        if (missing.length) {
-          throw new Error("Missing approved dashboard text: " + missing.join(", "));
-        }
-        const forbidden = [
-          "Review controller opt-in",
-          "Needs approval",
-          "Operator question",
-          "Agent command ready after approval",
-          "Operator gate dry-run draft",
-        ];
-        const present = forbidden.filter((text) => body.includes(text));
-        if (present.length) {
-          throw new Error("Approved operator gate still looks user-gated: " + present.join(", "));
-        }
-        if (body.indexOf("Approved agent command") > body.indexOf("goal-harness read-only-map --goal-id planned-main-control --dry-run --approved")) {
-          throw new Error("Approved command should be visible directly under the approved handoff label.");
-        }
-        return {
-          ok: true,
-          approvedCommandVisible: body.includes("Approved agent command"),
-          operatorQuestionAbsent: !body.includes("Operator question"),
-        };
-      }`,
-    ]);
+    startBrowserSession();
+    runPw(["resize", "1280", "900"], { allowFailure: true, timeoutMs: 5_000 });
+    navigateTo(`${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`);
+    let body = await readBodyText({ requiredText: "Copy" });
+    requireTexts(body, [
+      "1 actions",
+      "Controller",
+      "Review controller opt-in",
+      "Needs approval",
+      "User / Controller",
+      "Operator question",
+      "是否同意 `planned-main-control` 先执行 read-only map opt-in？",
+      "先做用户待办",
+      "Read owner review worksheet first.",
+      "Project asset stop: record or defer the owner todo before approval",
+      "Agent command ready after approval",
+      "Quota 0.5",
+      "Copy",
+    ], "pending dashboard");
+    forbidTexts(body, [
+      "No user-facing action is active.",
+      "Let Codex continue",
+      "Codex can continue",
+      "Codex can act",
+      "continue_from_refreshed_state",
+      "continue_codex_action",
+      "Operator Review Packet",
+      "Copy Review Packet",
+      "Suggested decision",
+      "同意先做 read-only map dry-run；不授权写入或主控接管。",
+    ], "Operator-gated goal leaked into confusing UI");
+    requireExactTextCount(body, "Review controller opt-in", 1, "All-actions controller action card count");
+    requireExactTextCount(body, "Copy", 1, "All-actions review-packet copy count");
+    if (body.indexOf("Operator question") > body.indexOf("Agent command ready after approval")) {
+      throw new Error("Operator question should appear before the after-approval agent command hint.");
+    }
+
+    navigateTo(`${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=controller`);
+    body = await readBodyText({ requiredText: "Copy" });
+    requireTexts(body, [
+      "1 actions",
+      "Controller",
+      "Review controller opt-in",
+      "Needs approval",
+      "Operator question",
+      "是否同意 `planned-main-control` 先执行 read-only map opt-in？",
+      "Read owner review worksheet first.",
+      "Copy",
+    ], "focused controller dashboard");
+    forbidTexts(body, [
+      "No user-facing action is active.",
+      "Operator Review Packet",
+      "Let Codex continue",
+      "Codex can continue",
+      "Copy Review Packet",
+      "Suggested decision",
+      "同意先做 read-only map dry-run；不授权写入或主控接管。",
+    ], "Focused controller view rendered confusing stale UI");
+    requireExactTextCount(body, "Review controller opt-in", 1, "Focused controller action card count");
+    requireExactTextCount(body, "Copy", 1, "Focused controller review-packet copy count");
+
+    navigateTo(`${baseUrl}/?statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`);
+    body = await readBodyText({ requiredText: "Copy" });
+    requireTexts(body, [
+      "1 actions",
+      "Codex",
+      "Let Codex use the map",
+      "Codex can continue",
+      "Approved agent command",
+      "approve",
+      "Copy",
+    ], "approved dashboard");
+    forbidTexts(body, [
+      "Review controller opt-in",
+      "Needs approval",
+      "Operator question",
+      "Agent command ready after approval",
+      "Operator gate dry-run draft",
+      "Operator Review Packet",
+      "Copy Review Packet",
+    ], "Approved operator gate still looks user-gated");
+    requireExactTextCount(body, "Let Codex use the map", 1, "Approved Codex-ready action card count");
+    requireExactTextCount(body, "Copy", 1, "Approved review-packet copy count");
     console.log("dashboard-operator-gate-browser-smoke ok");
   } finally {
     server.kill("SIGTERM");
     await rm(fixturePath, { force: true });
     await rm(approvedFixturePath, { force: true });
-    runPw(["close"], { allowFailure: true });
+    runPw(["close"], { allowFailure: true, timeoutMs: 5_000 });
+    runPw(["kill-all"], { allowFailure: true, timeoutMs: 5_000 });
+    forceKillBrowserSession();
     await removeWithRetry(playwrightCliOutputDir);
   }
 }

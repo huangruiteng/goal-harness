@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T00:16:08+08:00
+updated_at: 2026-06-03T00:54:42+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,39 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should pivot to the P0 human-decision loop by auditing the
-  dashboard/operator view for duplicated action cards and copy-packet
-  ergonomics, now that the CLI report path visibly names user and agent todo
-  items.
+- Next tick should continue the P0 human-decision loop by auditing
+  `buildHumanFriendlyActionPacket()` for copied-packet length and readability:
+  make the copied text short enough to paste back to a project agent/controller
+  without losing the gate, todo, and safe-action context. If it is already
+  concise, move to the P1 public first-try usability path.
 
 ## Recent Progress
 
+- 2026-06-03T00:54:42+08:00: Steering audit candidates were: P0
+  dashboard/operator-view human-decision loop, P0 status/state truth, P1 public
+  first-try usability, and P2 broader dashboard cleanup. Continuation check:
+  the last slices fixed CLI/skill/report todo consumption, so continuing on
+  dashboard interaction won because the remaining user pain was visible action
+  duplication and inconsistent packet copy affordances. Bounded fix: hardened
+  `examples/dashboard-operator-gate-browser-smoke.mjs` into a real first-screen
+  User Actions regression: it now checks pending all-actions, focused
+  controller, and approved Codex-ready views for one card-level `Copy`
+  affordance, no legacy `Operator Review Packet` / `Copy Review Packet` panel,
+  no stale suggested-decision white card, and no approved view that still says
+  "Agent command ready after approval". The smoke was also made robust against
+  the Playwright CLI wrapper by using bounded `eval` reads of the User Actions
+  section instead of hanging `run-code` / `networkidle` waits. Dashboard UI now
+  labels approved commands as `Approved agent command` instead of the stale
+  after-approval badge. Validation: `node
+  examples/dashboard-operator-gate-browser-smoke.mjs`, `npm run build` in
+  `apps/dashboard`, `npm run smoke:action-packet` in `apps/dashboard`,
+  `git diff --check`, and `goal-harness check --scan-root .`. Changed files:
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `examples/dashboard-operator-gate-browser-smoke.mjs`, this active state, and
+  the private CS-Notes state. Critic: the visible card duplication/copy-entry
+  regression is now covered, but the copied packet body itself may still be too
+  long for the user to paste comfortably; next slice should trim the packet
+  content rather than add another panel.
 - 2026-06-03T00:16:08+08:00: Steering audit candidates were: P0
   project-agent consumption proof, P0 dashboard/operator-view human-decision
   loop, P1 public usability polish, and P2 broader UI cleanup. Continuation
