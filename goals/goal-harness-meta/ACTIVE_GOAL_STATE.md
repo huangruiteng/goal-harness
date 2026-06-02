@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T08:40:09+08:00
+updated_at: 2026-06-02T08:51:28+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,26 @@ private project context.
 
 ## Next Action
 
-- Add a reusable public heartbeat automation prompt/template that includes the
-  executable lifecycle now protected by smoke: pre-turn `quota should-run`,
-  skip-without-compute, bounded work, validation/state refresh, exactly one
-  post-turn `quota spend-slot --execute`, and a compact final report.
+- Add a small `goal-harness heartbeat-prompt` generator so project agents can
+  create the guarded heartbeat automation task body without copying docs by
+  hand. Keep it public-safe and protect the generated output with a smoke.
 
 ## Recent Progress
 
+- 2026-06-02T08:51:28+08:00: Added
+  `docs/heartbeat-automation-prompt.md`, a public copy-paste Codex App
+  heartbeat template for the guarded quota lifecycle: pre-turn
+  `quota should-run`, `should_run=false` skip-without-compute, exactly one
+  bounded verifiable step, validation, active-state writeback, optional
+  `refresh-state`, exactly one post-turn `quota spend-slot --source heartbeat
+  --execute`, and compact heartbeat reporting. Linked it from README and added
+  `examples/heartbeat-prompt-smoke.py` to protect the prompt structure,
+  ordering, skip boundary, refresh command, and spend-once command. Validation:
+  direct heartbeat prompt smoke passed; aggregate public smokes passed with 7
+  scripts; Python compile passed; public contract check passed; `git diff
+  --check` passed. Critic: the public template now prevents prompt drift, but
+  project agents still need a CLI generator so they can produce the same
+  guarded task body with the right goal id and active-state path.
 - 2026-06-02T08:40:09+08:00: Added
   `examples/heartbeat-quota-flow-smoke.py`, an executable dependency-free smoke
   for the full heartbeat quota lifecycle. The smoke creates a temporary
