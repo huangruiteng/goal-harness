@@ -59,6 +59,7 @@ from .status_server import (
     DEFAULT_STATUS_PORT,
     serve_status,
 )
+from .todos import add_goal_todo, render_todo_markdown
 
 
 def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> None:
@@ -367,6 +368,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
     )
     review_packet_parser.add_argument("--limit", type=int, default=5)
+
+    todo_parser = sub.add_parser(
+        "todo",
+        help="Add a user or agent todo to a goal's active state.",
+    )
+    todo_parser.add_argument(
+        "todo_command",
+        nargs="?",
+        choices=["add"],
+        default="add",
+        help="Use add to append a checkbox todo to the active state.",
+    )
+    todo_parser.add_argument("--goal-id", required=True, help="Goal id whose active state should receive the todo.")
+    todo_parser.add_argument("--role", required=True, choices=["user", "agent"], help="Todo owner.")
+    todo_parser.add_argument("--text", required=True, help="Todo text. Keep it short and public-safe enough for local status.")
+    todo_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
+    todo_parser.add_argument("--state-file", help="Active goal state path. Defaults to the registry goal state_file.")
+    todo_parser.add_argument("--dry-run", action="store_true", help="Preview the active-state edit without writing.")
 
     quota_parser = sub.add_parser(
         "quota",
@@ -770,6 +789,33 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_review_packet_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "todo":
+        try:
+            if args.todo_command != "add":
+                raise ValueError("only `goal-harness todo add` is supported")
+            payload = add_goal_todo(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+                role=args.role,
+                text=args.text,
+                project=Path(args.project).expanduser() if args.project else None,
+                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                dry_run=bool(args.dry_run),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "dry_run": bool(args.dry_run),
+                "added": False,
+                "already_exists": False,
+                "goal_id": args.goal_id,
+                "role": args.role,
+                "todo": args.text,
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_todo_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "quota":

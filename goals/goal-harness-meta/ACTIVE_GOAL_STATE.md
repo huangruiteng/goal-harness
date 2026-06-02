@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T18:32:46+08:00
+updated_at: 2026-06-02T18:42:16+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,15 +27,36 @@ private project context.
 
 ## Next Action
 
-- Run the next tick's steering audit and choose one bounded P0 step. Compare
-  `goal-harness todo add --role user|agent`, a Review Packet goal-id mismatch
-  guard, and one-click operator decision recording. Prefer the todo CLI unless
-  another wrong-goal packet/gate is observed, because user/agent todo injection
-  is now the lowest-friction project-agent loop gap after dashboard copy UX was
-  simplified.
+- Fix the heartbeat/agent prompt PATH preflight so generated automations export
+  `$HOME/.local/bin` or otherwise use an installed CLI path before running
+  `goal-harness`. This outranks the next product feature because the current
+  heartbeat shell missed `goal-harness` on PATH even though the installed
+  wrapper exists.
 
 ## Recent Progress
 
+- 2026-06-02T18:42:16+08:00: Steering audit candidates: P0 state/safety for
+  heartbeat PATH preflight, P0 project-agent execution loop via structured
+  todo injection, and P1 one-click operator decision recording. Chose the todo
+  CLI because the previous dashboard slice already made user todos visible,
+  but project agents still had to know Markdown section names to add them.
+  Added `goal-harness todo add --goal-id <goal> --role user|agent --text ...`,
+  resolving the active state from registry `repo/state_file`, creating
+  canonical `User Todo / Owner Review Reading Queue` or `Agent Todo` sections
+  when absent, avoiding duplicate exact todo text, supporting `--dry-run`, and
+  updating frontmatter `updated_at` on real writes. Updated the attention-queue
+  doc plus the repo skill and installed local skill guidance so agents prefer
+  the CLI over hand-editing sections. Changed files:
+  `goal_harness/todos.py`, `goal_harness/cli.py`,
+  `examples/todo-cli-smoke.py`, `docs/attention-queue.md`, and
+  `skills/goal-harness-project/SKILL.md`. Validation: `python
+  examples/todo-cli-smoke.py`, `python examples/run-smokes.py`, `python -m
+  compileall -q goal_harness`, `goal-harness check --scan-root .`, a real
+  dry-run against `goal-harness-meta`, and `git diff --check` passed. Critic:
+  the first preflight command in this heartbeat failed because the automation
+  shell PATH did not include `~/.local/bin`; I continued with the installed
+  absolute wrapper, but the next slice should fix generated heartbeat prompts
+  or PATH setup before adding more product surface.
 - 2026-06-02T18:32:46+08:00: User pointed out three dashboard UX failures:
   packet copy was not available on every relevant action, the copied packet was
   too long and machine-oriented, and the separate yellow gate box plus lower

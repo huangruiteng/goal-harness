@@ -231,7 +231,23 @@ evidence and private links in the state file, not in that action item.
 
 For complex projects, do not pack a whole user reading queue into
 `## Next Action`. Keep the first Next Action item as one routing sentence, then
-write explicit checkbox sections:
+use the CLI to write explicit checkbox sections instead of hand-editing section
+names:
+
+```bash
+goal-harness todo add \
+  --goal-id <STABLE_GOAL_ID> \
+  --role user \
+  --text "Read the short review packet before approving delivery."
+
+goal-harness todo add \
+  --goal-id <STABLE_GOAL_ID> \
+  --role agent \
+  --text "Build the next read-only worksheet after the user decision is recorded."
+```
+
+The CLI creates the canonical section when needed and avoids duplicate exact
+todo text. The resulting Markdown shape is:
 
 ```md
 ## User Todo / Owner Review Reading Queue

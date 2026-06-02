@@ -132,7 +132,24 @@ execute the gated command or any adapter/write/production path.
 
 For complex goals, avoid encoding a whole reading queue in one long
 `recommended_action`. Keep `recommended_action` as one routing sentence, then
-write explicit checkbox sections in the active state:
+write explicit checkbox sections in the active state. Project agents should
+prefer the CLI helper instead of hand-editing section names:
+
+```bash
+goal-harness todo add \
+  --goal-id <goal-id> \
+  --role user \
+  --text "Read the short review packet before approving delivery."
+
+goal-harness todo add \
+  --goal-id <goal-id> \
+  --role agent \
+  --text "Build the next read-only worksheet after the user decision is recorded."
+```
+
+The helper resolves the goal's active state from the registry, creates the
+canonical section when needed, and avoids duplicate exact todo text. The
+resulting Markdown shape is:
 
 ```md
 ## User Todo / Owner Review Reading Queue
