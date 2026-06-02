@@ -195,8 +195,9 @@ operator gate; it cannot run the preview command until the gate is approved.
 Before taking that safe-bypass step, the agent should surface the current gate
 to the user/controller if the same unresolved question was not already asked in
 the recent visible thread. `quota should-run` exposes `gate_prompt`,
-`operator_question`, and `user_todo_summary` so the agent can ask one concrete
-Chinese question instead of silently skipping or forcing the user to inspect the
+`operator_question`, `user_todo_summary`, and `agent_todo_summary` so the agent
+can ask one concrete Chinese question and still see its own safe follow-up
+checklist instead of silently skipping or forcing the user to inspect the
 dashboard manually.
 Markdown status output also prints an `operator_gate_dry_run` helper before
 `agent_command`, so CLI-facing agents see that the operator gate is a

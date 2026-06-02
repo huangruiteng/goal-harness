@@ -314,7 +314,9 @@ the eligible lane. If `quota should-run` returns `state=operator_gate` with
 ask that concrete user/controller gate unless the same unresolved question was
 already surfaced recently. If it also returns open `user_todo_summary`, those
 existing todos should be listed as user-visible work; do not call the turn "no
-new user action" while they remain open. If it also returns
+new user action" while they remain open. If it returns `agent_todo_summary`,
+the project agent should use that as its safe follow-up checklist instead of
+digging through chat history or an overlong Next Action. If it also returns
 `safe_bypass_allowed=true`, the
 heartbeat may still do one bounded read-only steering or analysis step that
 does not depend on that gate; its report still has to list existing open user

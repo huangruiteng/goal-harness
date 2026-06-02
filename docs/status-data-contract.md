@@ -371,14 +371,17 @@ Executor-facing guards are stricter than status display: `quota should-run`
 must keep these planned items at `should_run=false`, `state=operator_gate`, and
 must not include `agent_command` until an approved operator-gate run makes the
 goal eligible. This keeps a preview command from becoming an automatic project
-agent handoff. When the quota payload includes `safe_bypass_allowed=true`, that
-permission only covers independent read-only steering or analysis from the
-active state's priority stack; it still must not execute the gated preview
-command, adapter work, write-control, or production actions. When the payload
-also includes `gate_prompt`, `operator_question`, or `user_todo_summary`, the
-executor should ask that concrete gate in the visible thread with `NOTIFY`
-unless the same unresolved gate was already asked recently; the guard should not
-collapse a user decision into a silent skip.
+agent handoff. When the quota payload includes `agent_todo_summary`, the target
+project agent can use it as the safe follow-up checklist for its own next action
+instead of re-reading chat history. When the quota payload includes
+`safe_bypass_allowed=true`, that permission only covers independent read-only
+steering or analysis from the active state's priority stack; it still must not
+execute the gated preview command, adapter work, write-control, or production
+actions. When the payload also includes `gate_prompt`, `operator_question`,
+`user_todo_summary`, or `agent_todo_summary`, the executor should ask that
+concrete gate in the visible thread with `NOTIFY` unless the same unresolved
+gate was already asked recently; the guard should not collapse a user decision
+into a silent skip.
 
 Review Packet source-of-truth rule:
 

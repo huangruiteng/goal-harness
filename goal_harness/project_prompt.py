@@ -244,8 +244,9 @@ def render_prompt_text(
 ```
 
    如果返回 `state=operator_gate`，把它当成人/控制器交互，而不是安静 skip：优先读取 payload 里的
-   `gate_prompt`、`operator_question`、`recommended_action`、`next_handoff_condition`、`missing_gates`
-   和 `user_todo_summary`，用中文主动告诉用户当前卡在哪个 gate、期望怎样回复。不要执行任何
+   `gate_prompt`、`operator_question`、`recommended_action`、`next_handoff_condition`、`missing_gates`、
+   `user_todo_summary` 和 `agent_todo_summary`，用中文主动告诉用户当前卡在哪个 gate、期望怎样回复；
+   同时把 `agent_todo_summary` 当作项目 agent 自己的安全后续清单。不要执行任何
    `agent_command`、adapter work、write-control、生产动作或该 gated action。
    如果同一个未决 gate 最近已经问过，且返回 `safe_bypass_allowed=true`，该 gate 只阻塞被 gate 覆盖的
    delivery path；可以从 active state / Priority Stack 里选择一个不依赖该 gate 的 bounded 只读分析、

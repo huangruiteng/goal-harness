@@ -57,7 +57,7 @@ goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global
 If the response has `state=operator_gate`, treat it as a user/controller
 interaction, not a silent skip. Read `gate_prompt`, `operator_question`,
 `recommended_action`, `next_handoff_condition`, `missing_gates`, and
-`user_todo_summary` when present, then ask the concrete gate in Chinese unless
+`user_todo_summary` and `agent_todo_summary` when present, then ask the concrete gate in Chinese unless
 the same unresolved question was already surfaced in the recent visible thread.
 If `user_todo_summary.open_count > 0`, list those existing open user todos in
 the notification even when there are no newly discovered user actions; do not
@@ -79,7 +79,9 @@ safe-bypass step actually spends automatic compute, validate it, write back
 progress/critic/next action, optionally refresh state, and append one quota
 spend event. If `user_todo_summary.open_count > 0`, the safe-bypass report must
 include those existing open user todos and must not say there is "no new user
-action".
+action". If `agent_todo_summary.open_count > 0`, use it as the project agent's
+safe follow-up checklist instead of mining chat history or an overlong Next
+Action.
 
 This guard is only a compute-allocation check. It does not grant write
 permission, bypass operator gates, or replace run-bound human reward. Operator

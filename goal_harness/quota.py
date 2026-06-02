@@ -381,6 +381,7 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "missing_gates",
             "next_handoff_condition",
             "user_todos",
+            "agent_todos",
         ):
             if optional_field in attention:
                 item[optional_field] = attention[optional_field]
@@ -474,6 +475,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["missing_gates"] = item.get("missing_gates")
         if item.get("user_todos"):
             payload["user_todo_summary"] = _summarize_user_todos(item.get("user_todos"))
+        if item.get("agent_todos"):
+            payload["agent_todo_summary"] = _summarize_user_todos(item.get("agent_todos"))
         gate_prompt = _build_gate_prompt(item) if state == "operator_gate" else None
         if gate_prompt:
             payload["gate_prompt"] = gate_prompt
@@ -925,10 +928,20 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"open={user_todo_summary.get('open_count')} "
             f"total={user_todo_summary.get('total_count')}"
         )
+    agent_todo_summary = (
+        payload.get("agent_todo_summary") if isinstance(payload.get("agent_todo_summary"), dict) else {}
+    )
+    if agent_todo_summary:
+        lines.append(
+            "- agent_todo_summary: "
+            f"open={agent_todo_summary.get('open_count')} "
+            f"total={agent_todo_summary.get('total_count')}"
+        )
     todo_write_hint = payload.get("todo_write_hint") if isinstance(payload.get("todo_write_hint"), dict) else {}
     if todo_write_hint:
         lines.append(f"- todo_write_hint: {todo_write_hint.get('rule')}")
         lines.append(f"- user_todo_command_template: `{todo_write_hint.get('user_todo_command_template')}`")
+        lines.append(f"- agent_todo_command_template: `{todo_write_hint.get('agent_todo_command_template')}`")
     if payload.get("recommended_action"):
         lines.append(f"- recommended_action: {payload.get('recommended_action')}")
     if payload.get("agent_command"):

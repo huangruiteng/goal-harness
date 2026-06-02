@@ -22,6 +22,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOAL_ID = "adoption-main-control"
 USER_TODO = "Review the P0 owner-risk checklist before approving delivery."
+AGENT_TODO = "Run the read-only map dry-run after the operator approval is recorded."
 APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
 
 
@@ -40,7 +41,9 @@ def write_planned_fixture(root: Path) -> Path:
         "## Objective\n\n"
         "Keep this fixture public-safe.\n\n"
         "## Next Action\n\n"
-        "- Analyze the P0 owner-risk scene.\n",
+        "- Analyze the P0 owner-risk scene.\n\n"
+        "## Agent Todo\n\n"
+        f"- [ ] {AGENT_TODO}\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True)
@@ -125,6 +128,8 @@ def main() -> int:
         assert first_quota["todo_write_hint"]["user_todo_command_template"] == (
             f"goal-harness todo add --goal-id {GOAL_ID} --role user --text '<public-safe user/owner action>'"
         ), first_quota
+        assert first_quota["agent_todo_summary"]["open_count"] == 1, first_quota
+        assert first_quota["agent_todo_summary"]["first_open_items"][0]["text"] == AGENT_TODO, first_quota
 
         todo_payload = run_cli(
             root,
@@ -147,6 +152,8 @@ def main() -> int:
         assert item_after_todo["waiting_on"] == "user_or_controller", item_after_todo
         assert item_after_todo["user_todos"]["open_count"] == 1, item_after_todo
         assert item_after_todo["user_todos"]["items"][0]["text"] == USER_TODO, item_after_todo
+        assert item_after_todo["agent_todos"]["open_count"] == 1, item_after_todo
+        assert item_after_todo["agent_todos"]["items"][0]["text"] == AGENT_TODO, item_after_todo
 
         quota_after_todo = run_cli(
             root,
@@ -159,6 +166,7 @@ def main() -> int:
             str(project),
         )
         assert quota_after_todo["user_todo_summary"]["open_count"] == 1, quota_after_todo
+        assert quota_after_todo["agent_todo_summary"]["open_count"] == 1, quota_after_todo
         assert USER_TODO in quota_after_todo["gate_prompt"], quota_after_todo
 
         gate_payload = run_cli(

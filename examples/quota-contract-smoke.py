@@ -70,7 +70,7 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
-        "`gate_prompt`, `operator_question`, `next_handoff_condition`, `missing_gates`, or `user_todo_summary`",
+        "`gate_prompt`, `operator_question`, `next_handoff_condition`, `missing_gates`, `user_todo_summary`, or `agent_todo_summary`",
         label="quota doc",
     )
     assert_contains(

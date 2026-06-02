@@ -21,6 +21,7 @@ from goal_harness.quota import (  # noqa: E402
     build_quota_slot_preview,
     goal_quota_config,
     render_quota_markdown,
+    render_quota_should_run_markdown,
 )
 
 
@@ -93,6 +94,19 @@ def attention(
                             "index": 1,
                             "done": False,
                             "text": "Confirm the operator gate.",
+                        }
+                    ],
+                },
+                "agent_todos": {
+                    "source_section": "Agent Todo",
+                    "total_count": 1,
+                    "open_count": 1,
+                    "done_count": 0,
+                    "items": [
+                        {
+                            "index": 1,
+                            "done": False,
+                            "text": "Run the safe follow-up after gate approval.",
                         }
                     ],
                 },
@@ -562,13 +576,20 @@ def assert_operator_gate_should_run(status_payload: dict) -> None:
     assert payload["notify_user_on_gate"] is True, payload
     assert payload["operator_question"] == "是否同意 needs-operator 继续 gated delivery？", payload
     assert payload["user_todo_summary"]["open_count"] == 1, payload
+    assert payload["agent_todo_summary"]["open_count"] == 1, payload
     assert payload["todo_write_hint"]["section"] == "User Todo / Owner Review Reading Queue", payload
     assert "goal-harness todo add --goal-id needs-operator --role user" in payload["todo_write_hint"][
         "user_todo_command_template"
     ], payload
+    assert "goal-harness todo add --goal-id needs-operator --role agent" in payload["todo_write_hint"][
+        "agent_todo_command_template"
+    ], payload
     assert "Next Action" in payload["todo_write_hint"]["rule"], payload
     assert "请用户/控制器确认当前 gate" in payload["gate_prompt"], payload
     assert "Confirm the operator gate." in payload["gate_prompt"], payload
+    markdown = render_quota_should_run_markdown(payload)
+    assert "agent_todo_summary: open=1 total=1" in markdown, markdown
+    assert "agent_todo_command_template" in markdown, markdown
 
 
 def assert_safe_bypass_slot_preview(status_payload: dict) -> None:

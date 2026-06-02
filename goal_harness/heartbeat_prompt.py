@@ -74,9 +74,10 @@ If the result says `should_run=false`:
 
 - If the payload says `state=operator_gate`, treat the gate as a user/controller
   interaction, not as a silent skip. Read `gate_prompt`, `operator_question`,
-  `recommended_action`, `next_handoff_condition`, `missing_gates`, and
-  `user_todo_summary` from the payload. If the same unresolved gate has not
-  already been asked in the recent visible thread, return heartbeat `NOTIFY`
+  `recommended_action`, `next_handoff_condition`, `missing_gates`,
+  `user_todo_summary`, and `agent_todo_summary` from the payload. If the same
+  unresolved gate has not already been asked in the recent visible thread,
+  return heartbeat `NOTIFY`
   with one concise Chinese question that lists the gate and the expected reply
   format. If `user_todo_summary.open_count > 0`, the notification must list the
   existing open user todos even when there are no newly discovered user actions;
@@ -91,9 +92,10 @@ If the result says `should_run=false`:
   validate it, write back progress/critic/next action, optionally refresh state,
   append exactly one spend event, and report compactly. If
   `user_todo_summary.open_count > 0`, that report must include the existing
-  open user todos and must not say there is "no new user action". If no useful
-  safe-bypass step exists, report the pending gate compactly instead of doing
-  work.
+  open user todos and must not say there is "no new user action". If
+  `agent_todo_summary.open_count > 0`, the report should also name the first
+  safe agent todo it can execute next. If no useful safe-bypass step exists,
+  report the pending gate compactly instead of doing work.
 - Otherwise, do not do implementation work, adapter work, file edits, research,
   or project exploration in this turn. Return a quiet heartbeat `DONT_NOTIFY`
   response with the skip reason.

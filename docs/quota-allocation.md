@@ -230,14 +230,17 @@ status export itself is healthy, but still return `should_run=false`.
 agent can spend a bounded turn on independent read-only steering/analysis.
 For `state=operator_gate`, `quota should-run` should also surface
 `gate_prompt`, `operator_question`, `next_handoff_condition`, `missing_gates`,
-or `user_todo_summary` when those fields are available. A heartbeat should use
-that prompt to ask the user or target controller the concrete gate question
-instead of silently skipping, unless the same unresolved gate was already asked
-in the recent visible thread. If `user_todo_summary.open_count > 0`, existing
-open user todos are themselves user-visible action; do not report "no new user
-action" while those todos remain open. This also applies after a bounded
-safe-bypass step: the compact report must still list the existing open user
-todos instead of saying that there is no user action.
+`user_todo_summary`, or `agent_todo_summary` when those fields are available.
+A heartbeat should use that prompt to ask the user or target controller the
+concrete gate question instead of silently skipping, unless the same unresolved
+gate was already asked in the recent visible thread. If
+`user_todo_summary.open_count > 0`, existing open user todos are themselves
+user-visible action; do not report "no new user action" while those todos
+remain open. This also applies after a bounded safe-bypass step: the compact
+report must still list the existing open user todos instead of saying that
+there is no user action. If `agent_todo_summary.open_count > 0`, the agent
+should use that summary as its next safe follow-up checklist instead of mining
+chat history or an overlong `Next Action`.
 For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,

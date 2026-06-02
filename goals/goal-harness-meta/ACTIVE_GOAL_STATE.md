@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T23:47:30+08:00
+updated_at: 2026-06-03T00:03:57+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,42 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should pivot back to P0 project-agent loop proof: verify on one real
-  connected goal that status/quota/todo hints expose explicit user todos and
-  agent todos, so a project agent does not hide user actions in chat-only
-  progress or an overlong Next Action.
+- Next tick should continue the P0 project-agent loop proof by checking that a
+  real project-agent heartbeat or operator-gate report actually consumes the
+  now-visible `user_todo_summary` and `agent_todo_summary`, rather than hiding
+  user or agent work in chat-only progress or an overlong Next Action.
 
 ## Recent Progress
 
+- 2026-06-03T00:03:57+08:00: Steering audit candidates were: P0
+  project-agent loop proof on a real connected goal, P0 state-truth/global
+  registry freshness, P1 first-run/public PR usability, and P2 dashboard copy
+  polish. Continuation check: first-run usability had consumed recent slices,
+  and the state explicitly pointed back to real connected-goal adoption. The
+  bounded proof found a concrete project-agent usability gap: real
+  `premium-ui-ai-search-rec-migration` quota output already exposed
+  `user_todo_summary`, but dropped `agent_todo_summary`, even though status
+  showed five open agent todos. Root cause: `build_quota_plan()` copied
+  `user_todos` from the attention item but did not forward `agent_todos`, so
+  `build_quota_should_run()` never had the field. Fixed the forwarding path,
+  added `agent_todo_summary` to JSON and Markdown `quota should-run` output,
+  updated generated heartbeat/new-project prompts, docs, the project skill, and
+  smoke coverage. Validation: `python3 examples/run-smokes.py` passed 15 smoke
+  scripts, `python3 -m compileall -q goal_harness`, `git diff --check`,
+  `goal-harness check --scan-root .`, and a real global-registry
+  `quota should-run --goal-id premium-ui-ai-search-rec-migration` now returns
+  `agent_todo_summary.open_count=5` alongside the existing open user todos.
+  Changed files: `README.md`, `docs/attention-queue.md`,
+  `docs/heartbeat-automation-prompt.md`, `docs/new-project-codex-prompt.md`,
+  `docs/quota-allocation.md`, `docs/status-data-contract.md`,
+  `examples/project-agent-adoption-smoke.py`,
+  `examples/quota-contract-smoke.py`, `examples/quota-plan-smoke.py`,
+  `goal_harness/heartbeat_prompt.py`, `goal_harness/project_prompt.py`,
+  `goal_harness/quota.py`, `skills/goal-harness-project/SKILL.md`, plus this
+  active state; private state also updated. Critic: the CLI/status contract now
+  exposes both user and agent work, but the next proof should verify a real
+  project agent or operator-gate report consumes those summaries in its
+  visible interaction, not merely that the fields exist.
 - 2026-06-02T23:47:30+08:00: Steering audit candidates were: P1 fresh-clone
   trial audit for first-run usability, P0 live connected-goal adoption and
   user/agent todo projection, and P2 richer dashboard/demo polish. Continuation
