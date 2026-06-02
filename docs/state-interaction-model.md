@@ -154,9 +154,10 @@ steering audit:
    exploration;
 2. choose by the priority stack above, not by the previous tick's adjacent
    critic alone;
-3. apply a WIP cap: after two or three consecutive delivery slices in the same
-   topic, stop and ask whether that topic is done enough for the current
-   milestone before continuing;
+3. apply a continuation check when the same topic has consumed several recent
+   delivery slices. Large topics may continue, but the tick must re-rank them
+   against other P0/P1/P2 candidates and state why continuing is still the
+   highest-priority move;
 4. separate compute quota from focus quota. Compute quota controls how many
    turns a goal may spend; focus quota controls whether one subtopic deserves
    the next turn at all;

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T10:59:10+08:00
+updated_at: 2026-06-02T11:03:08+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -29,8 +29,8 @@ private project context.
 
 - Operationalize the steering audit in the heartbeat/goal-tick prompt path:
   before executing another adjacent slice, require three candidate next actions
-  across different P0/P1/P2 lanes and a WIP-cap check, then choose one
-  non-quota-biased P0 slice.
+  across different P0/P1/P2 lanes and a continuation check for repeated topics,
+  then choose one priority-justified P0 slice without local-greedy bias.
 
 ## Recent Progress
 
@@ -40,9 +40,11 @@ private project context.
   `quota should-run` is a compute guard, not a strategy selector. Autonomous
   goal ticks should list at least three plausible candidates across different
   lanes, choose by the priority stack rather than the previous adjacent critic,
-  apply a WIP cap after two or three consecutive slices in one topic, separate
-  compute quota from focus quota, and record losing high-value candidates when
-  useful. Validation: README links the quota guard back to the state
+  run a continuation check when one topic has consumed several recent slices,
+  separate compute quota from focus quota, and record losing high-value
+  candidates when useful. Follow-up clarification: the continuation check is
+  not a hard WIP cap; large topics may continue when they still win the
+  cross-lane priority comparison. Validation: README links the quota guard back to the state
   interaction model; `rg` confirms the steering audit and compute-guard
   boundary are present; public contract check and smoke validation will run
   before commit. Critic: documentation fixes the decision boundary, but future
