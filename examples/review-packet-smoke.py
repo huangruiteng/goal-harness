@@ -76,7 +76,9 @@ def build_sanitized_controller_packet() -> str:
             command_block(operator_gate_draft),
             "",
             "【给项目 Agent】",
-            "要求：只执行下面只读或 dry-run 项目路径；需要真实 approval/write-control 时停下等明确授权。",
+            "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
+            "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
+            "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
             "",
             command_block(project_agent_command),
             "",
@@ -99,6 +101,9 @@ def main() -> int:
     assert "Operator Review Packet" in source
     assert "先在 dashboard/operator view 做判断；同意后再把 packet 作为项目 Agent 的执行上下文。" in source
     assert "项目 Agent 只有在 approval 后才回报 changed files、validation 和 next safe action。" in source
+    assert "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。" in source
+    assert "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。" in source
+    assert "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。" in source
     assert_order(
         controller_contract,
         [
@@ -151,6 +156,9 @@ def main() -> int:
             "【用户本地 Gate 记录草稿】",
             "operator-gate",
             "【给项目 Agent】",
+            "转发条件",
+            "执行边界",
+            "停止条件",
             "read-only-map",
         ],
     )

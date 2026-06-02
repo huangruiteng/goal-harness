@@ -763,21 +763,26 @@ function commandBlock(command?: string) {
 function buildProjectAgentPacketText(kind: UserActionKind | undefined, preview: OperatorTransitionPreview) {
   if (kind === "reward") {
     return [
-      "要求：不要替用户写 reward。reward 的权威来源是 run-bound human_reward overlay；active state 只做摘要。",
-      "如果用户尚未明确执行真实 reward append，停下等待；如果已经记录，只用下面 history 路径读取。",
+      "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
+      "执行边界：不要替用户写 reward；active state 只做摘要，reward 的权威来源是 run-bound human_reward overlay。",
+      "停止条件：如果 reward 还停留在 dry-run / 草稿 / 口头判断，停下等待用户记录；如果已经记录，只用下面 history 路径读取。",
       "",
       commandBlock(preview.agentVisibilityCommand),
     ].join("\n");
   }
   if (kind === "controller") {
     return [
-      "要求：只执行下面只读或 dry-run 项目路径；需要真实 approval/write-control 时停下等明确授权。",
+      "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
+      "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
+      "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
       "",
       commandBlock(preview.command),
     ].join("\n");
   }
   return [
-    "要求：读取本项目 status/history 后，只执行下面只读或 dry-run 路径；需要真实写 reward/approval/write-control 时停下等明确授权。",
+    "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
+    "执行边界：读取本项目 status/history 后，只执行下面只读或 dry-run 路径。",
+    "停止条件：需要真实写 reward、approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
     "",
     commandBlock(preview.command),
   ].join("\n");

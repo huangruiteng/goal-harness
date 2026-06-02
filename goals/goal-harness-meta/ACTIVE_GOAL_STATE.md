@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T12:00:21+08:00
+updated_at: 2026-06-02T12:04:21+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,37 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. Browser coverage now protects both the pending controller
-  gate and the approved agent-command handoff; next compare project-agent
-  packet legibility, real adapter proof once controller opt-in exists, and
-  attention-cost reduction. Do not add more dashboard panels unless they reduce
-  human review cost.
+  choosing work. The project-agent packet now names forwarding condition,
+  execution boundary, and stop condition; next compare real adapter proof once
+  controller opt-in exists, attention-cost reduction, and whether project
+  agents need a CLI-visible packet formatter. Do not add more dashboard panels
+  unless they reduce human or agent review cost.
 
 ## Recent Progress
 
+- 2026-06-02T12:04:21+08:00: Used the required steering audit after approved
+  gate browser coverage. Candidates considered: P0 project-agent packet
+  legibility, P0 real adapter proof, and P0 attention-cost reduction. Chose
+  project-agent packet legibility because real adapter proof still requires a
+  controller opt-in, while the copied Review Packet could make the target
+  project agent infer too much from the human-facing context. Updated
+  `buildProjectAgentPacketText()` so each project-agent section names a
+  forwarding condition, execution boundary, and stop condition before showing a
+  command. Controller packets now say they are forwarded only after explicit
+  read-only/controller dry-run agreement, the project agent must not run the
+  local gate draft, and it must stop for real approval, write-control,
+  run-history append, production action, or command failure. Updated the
+  Review Packet smoke and status data contract to protect that shape. Losing
+  high-value candidate: real adapter proof should resume only after controller
+  opt-in, and attention-cost reduction needs a deliberate UI deletion/merge
+  decision. Changed files: `apps/dashboard/src/views/dashboard-page.tsx`,
+  `examples/review-packet-smoke.py`, `docs/status-data-contract.md`, and this
+  active state. Validation: `python3 examples/review-packet-smoke.py` passed;
+  dashboard `npm run build` passed; `python3 examples/run-smokes.py` passed
+  with 8 scripts; `goal-harness check --scan-root .` passed; `git diff
+  --check` passed. Critic: this lowers target-agent ambiguity without adding
+  UI. The next adjacent work should only continue packet mechanics if it makes
+  packets available through CLI/status rather than more browser-only text.
 - 2026-06-02T12:00:21+08:00: Used the required steering audit after the
   suggested-decision dashboard slice. Candidates considered: P0 approved-gate
   transition coverage, P0 real adapter proof, and P0 project-agent packet
