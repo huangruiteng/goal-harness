@@ -61,6 +61,11 @@ def main() -> int:
             "continuation check",
             "compute quota separate from focus quota",
             "--source heartbeat --execute",
+            "Generate A Review Packet",
+            "goal-harness review-packet --goal-id",
+            "goal-harness --format json review-packet --goal-id",
+            "target project agent must not run this draft",
+            "This command is read-only",
         ):
             assert phrase in compact_skill_text, phrase
 

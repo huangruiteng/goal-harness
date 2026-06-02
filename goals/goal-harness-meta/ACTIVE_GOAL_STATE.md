@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T12:10:25+08:00
+updated_at: 2026-06-02T12:15:46+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,41 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. Review Packets are now available from both dashboard and
-  `goal-harness review-packet`; next compare real adapter proof once
-  controller opt-in exists, attention-cost reduction, and whether the CLI
-  packet should be referenced from installed project-agent skill guidance. Do
-  not add more dashboard panels unless they reduce human or agent review cost.
+  choosing work. The installed project-agent skill now teaches
+  `goal-harness review-packet`, so do not continue packet mechanics unless a
+  real project handoff exposes a gap. Prefer comparing: real adapter proof once
+  controller opt-in exists, deliberate dashboard attention-cost reduction, or a
+  real connected-project Review Packet dry-run.
 
 ## Recent Progress
 
+- 2026-06-02T12:15:46+08:00: Used the required steering audit after adding the
+  CLI-visible Review Packet. Candidates considered: P0 real adapter proof for
+  `agent-harness-main-control`, P0 dashboard attention-cost reduction, and P0
+  project-agent skill guidance. Real adapter proof still requires user or
+  controller opt-in; attention-cost reduction should be a deliberate UI
+  deletion/merge slice, not another panel. Chose project-agent skill guidance
+  because Review Packet was now available from CLI but new project agents would
+  not discover it during normal Goal Harness setup. Added a `Generate A Review
+  Packet` section to `skills/goal-harness-project/SKILL.md`, documenting
+  `goal-harness review-packet --goal-id <goal>` and
+  `goal-harness --format json review-packet --goal-id <goal>` as read-only
+  packet inspection commands, and clarifying that local gate drafts are for the
+  user/controller rather than the target project agent. Extended
+  `examples/install-local-smoke.py` so the installer must copy this guidance
+  into the installed Codex skill. Reinstalled the local skill copy under
+  `$HOME/.codex/skills/goal-harness-project`. Losing
+  high-value candidate: real adapter proof should resume only after controller
+  opt-in; attention-cost reduction should remove or merge existing UI
+  attention, not add more. Changed files:
+  `skills/goal-harness-project/SKILL.md`, `examples/install-local-smoke.py`,
+  and this active state. Validation: `python3 examples/install-local-smoke.py`
+  passed; `scripts/install-local.sh` synced the installed skill;
+  `rg "Generate A Review Packet|review-packet --goal-id|target project agent must not run" $HOME/.codex/skills/goal-harness-project/SKILL.md`
+  confirmed installed guidance; `python3 examples/run-smokes.py` passed with 9
+  scripts; `goal-harness check --scan-root .` passed; `git diff --check`
+  passed. Critic: this closes the discoverability gap for target project
+  agents. Further packet work should wait for real project usage.
 - 2026-06-02T12:10:25+08:00: Used the required steering audit after clarifying
   project-agent packet boundaries. Candidates considered: P0 real adapter
   proof, P0 attention-cost reduction, and P0 CLI-visible packet formatter.

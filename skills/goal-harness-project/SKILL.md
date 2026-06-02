@@ -89,6 +89,38 @@ contains the pre-turn `quota should-run` guard, quiet `should_run=false` skip,
 bounded work, validation/writeback, optional `refresh-state`, and exactly one
 post-turn `quota spend-slot --source heartbeat --execute` event.
 
+## Generate A Review Packet
+
+When a project agent, controller thread, or local shell needs the current
+operator packet, prefer the CLI packet over asking the user to find a dashboard
+copy button:
+
+```bash
+goal-harness review-packet --goal-id <STABLE_GOAL_ID>
+```
+
+For machine-readable inspection, put the global format flag before the
+subcommand:
+
+```bash
+goal-harness --format json review-packet --goal-id <STABLE_GOAL_ID>
+```
+
+This command is read-only. It packages the current status into the same Review
+Packet shape as the dashboard; it does not append human reward, append an
+operator gate, refresh state, grant write-control, or authorize production
+actions.
+
+Read the packet in order:
+
+- `人只需判断`: the user or controller decides in the dashboard/operator view or
+  trusted local shell. A target project agent cannot self-approve this section.
+- `用户本地 Gate 记录草稿`: a local preview for the user/controller. The target
+  project agent must not run this draft as its own command.
+- `给项目 Agent`: the executable handoff context only after the packet's
+  forwarding condition is already satisfied. If its stop condition fires, stop
+  and report the exact blocker instead of continuing.
+
 ## Connect A New Project
 
 1. Read the project goal document and inspect the repo narrowly.
