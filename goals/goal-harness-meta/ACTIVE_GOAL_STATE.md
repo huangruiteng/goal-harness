@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T16:25:14+08:00
+updated_at: 2026-06-02T16:36:11+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,27 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. Quota semantics are now corrected: `compute=1.0` means the
-  full 24-hour duty cycle (`1440` default minute-slots), while `0.5` means
-  roughly 12 hours. Prefer comparing: fixing the CS-Notes wrapper registry's
-  legacy-runtime view of premium-ui, dashboard attention-cost reduction, or
-  one more platform heartbeat stability observation. Keep hard gates intact.
+  choosing work. Premium-ui is now registered in the CS-Notes private wrapper
+  registry, so the next P0 state-truth question is whether its unresolved
+  owner/SOP decision should surface as operator-gated instead of eligible.
+  Compare that against dashboard attention-cost reduction and platform
+  heartbeat stability. Keep hard gates intact.
 
 ## Recent Progress
 
+- 2026-06-02T16:36:11+08:00: Fixed the CS-Notes private wrapper registry view
+  for the premium-ui migration goal. The private registry now includes
+  `premium-ui-ai-search-rec-migration` as a connected read-only controller with
+  project-local state and source-registry pointers; no private document URL or
+  production evidence was copied into this public active state. Validation:
+  the private registry parses as JSON, `goal-harness sync-global` from that
+  registry succeeded with `source_goal_count=5`, targeted `goal-harness check`
+  passed, local pre-tick now reports premium-ui as `registry_member=True` and
+  `legacy_runtime_goal=False`, and global status reports findings=0. Critic:
+  this resolves the registry truth gap, but the next state-truth issue is that
+  premium-ui still appears as `eligible/codex` in status even though its current
+  action text says owner/SOP decisions are the blocker; the next slice should
+  decide whether that should become an operator-gated status.
 - 2026-06-02T16:25:14+08:00: Corrected compute quota semantics after user
   feedback. `compute=1.0` is now the full 24-hour duty cycle rather than a
   24-event cap: the default slot budget is
