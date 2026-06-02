@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T00:54:42+08:00
+updated_at: 2026-06-03T01:09:09+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,14 +45,37 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should continue the P0 human-decision loop by auditing
-  `buildHumanFriendlyActionPacket()` for copied-packet length and readability:
-  make the copied text short enough to paste back to a project agent/controller
-  without losing the gate, todo, and safe-action context. If it is already
-  concise, move to the P1 public first-try usability path.
+- Next tick should move to the P1 public first-try usability path: audit the
+  fresh-user flow from install to `demo`, `status`, dashboard, and short copy
+  packet, then fix exactly one bounded friction point. Only return to the P0
+  human-decision loop if a real connected goal shows stale status, hidden user
+  todos, or an overlong gate packet again.
 
 ## Recent Progress
 
+- 2026-06-03T01:09:09+08:00: Steering audit candidates were: P0
+  copied-packet length/readability, P0 status/state truth, P1 public first-try
+  usability, and P2 broader dashboard cleanup. Continuation check: several
+  recent slices stayed on the human-decision loop, but the last critic named
+  copied-packet length as the remaining user relay cost, so finishing that
+  slice won before pivoting. Bounded fix: shortened
+  `buildActionPacket()` into a compact transfer packet: `【GH Packet】`, concise
+  goal/status, one `【用户/Gate】` section with todo-before-gate cue, boundary,
+  and one `【给项目 Agent】` handoff with safe path, command, and stop/report
+  rule. The packet now drops quota/authority prose from the copied text and
+  tightens truncation limits while preserving gate, todo, boundary, safe path,
+  command, and validation handoff context. Validation:
+  `npm run smoke:action-packet` in `apps/dashboard` reports
+  `action-packet smoke ok (623 chars)`, `npm run build` in `apps/dashboard`
+  passes with only the known Vite chunk-size warning, `node
+  examples/dashboard-operator-gate-browser-smoke.mjs`, `git diff --check`, and
+  `goal-harness check --scan-root .` all pass. Changed files:
+  `apps/dashboard/src/data/action-packet.ts`,
+  `apps/dashboard/smoke/action-packet-smoke.ts`, this active state, and the
+  private CS-Notes state. Critic: the copied packet is now short and covered by
+  deterministic smoke, but the proof is still synthetic; next slice should
+  shift to public first-try usability unless a real connected goal regresses on
+  status, hidden todos, or packet length.
 - 2026-06-03T00:54:42+08:00: Steering audit candidates were: P0
   dashboard/operator-view human-decision loop, P0 status/state truth, P1 public
   first-try usability, and P2 broader dashboard cleanup. Continuation check:

@@ -16,44 +16,41 @@ export type ActionPacketInput = {
 };
 
 export function buildActionPacket(input: ActionPacketInput) {
+  const needsTodoFirst = Boolean(input.userTodoText && input.todoBlocksGate);
   const userActionLines = input.userTodoText
     ? [
-      `用户待办：${compactPacketText(input.userTodoText)}`,
-      ...(input.todoBlocksGate ? ["完成或明确暂缓用户待办后，再判断下面的 Gate。"] : []),
+      `待办：${compactPacketText(input.userTodoText, 180)}${needsTodoFirst ? "（先处理/暂缓再判 gate）" : ""}`,
     ]
     : [
-      "用户待办：无。",
+      "待办：无",
     ];
   const gateLines = input.operatorQuestion
     ? [
-      `Gate：${compactPacketText(input.operatorQuestion)}`,
-      `建议回复：${input.todoBlocksGate ? `先说明用户待办是否已完成；完成后再回复：${input.suggestedReply}` : input.suggestedReply}`,
+      `Gate：${compactPacketText(input.operatorQuestion, 160)}`,
+      `建议：${needsTodoFirst ? `先确认待办；完成后：${input.suggestedReply}` : input.suggestedReply}`,
     ]
     : [
-      `Gate：无用户 gate；${input.gateFallbackDecision}`,
+      `Gate：无；建议：${input.gateFallbackDecision}`,
     ];
   const stateLine = [
-    compactPacketText(input.summary, 180),
-    input.quotaShortLine ? `配额 ${input.quotaShortLine}` : null,
-    input.authorityShortLine ? `权威源 ${input.authorityShortLine}` : null,
+    compactPacketText(input.summary, 110),
   ].filter(Boolean).join("；");
 
   return [
-    "【Goal Harness Action Packet】",
+    "【GH Packet】",
     `目标：${input.goalId}`,
-    `动作：${input.title}`,
     `状态：${stateLine}`,
     "",
-    "【用户动作 / Gate】",
+    "【用户/Gate】",
     ...userActionLines,
     ...gateLines,
-    `边界：${compactPacketText(input.boundary, 220)}`,
-    input.durableRecordRule,
+    `边界：${compactPacketText(input.boundary, 110)}`,
+    input.durableRecordRule ? "记录：落盘先 dry-run。" : null,
     "",
-    "【同意后给项目 Agent】",
-    `只允许 safe path：${input.safePathLabel}`,
+    "【给项目 Agent】",
+    `路径：${input.safePathLabel}`,
     input.command ? `命令：${input.command.replace(/\s+/g, " ").trim()}` : null,
-    "要求：用中文回报 changed files、validation、next safe action；需要写入/生产/进一步授权时停下。",
+    "回报：files / validation / next；需授权则停。",
   ].filter(Boolean).join("\n");
 }
 
