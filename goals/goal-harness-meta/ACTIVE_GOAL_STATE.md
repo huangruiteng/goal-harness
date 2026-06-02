@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T17:28:00+08:00
+updated_at: 2026-06-02T17:40:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -30,13 +30,34 @@ private project context.
 - Run the next tick's steering audit across at least three lanes before
   choosing work. Compare: 1) adding a first-class `goal-harness todo add`
   command so project agents can append `user_todos` / `agent_todos` without
-  hand-editing Markdown sections; 2) platform heartbeat prompt alignment for
-  all connected projects; 3) real adapter proof for a read-only project path.
-  Prefer the todo command if platform migration continues to need structured
-  human checklist updates from project agents.
+  hand-editing Markdown sections; 2) adding a packet/active-goal mismatch
+  guard so project agents fail closed when a copied Review Packet targets a
+  different `goal_id`; 3) platform heartbeat prompt alignment for connected
+  projects. Prefer the mismatch guard if another project agent reports a gate
+  that does not name its own goal id.
 
 ## Recent Progress
 
+- 2026-06-02T17:40:00+08:00: User noticed the platform migration controller
+  thread appeared to be blocked on an agent-harness-style `read-only map`
+  user todo. Diagnosis: the platform heartbeat body and CLI Review Packet were
+  correctly scoped to `premium-ui-ai-search-rec-migration`, but `read-only map`
+  was a generic Goal Harness controller dry-run phrase and the dashboard
+  first-screen operator banner selected the first global controller gate rather
+  than preferring the selected URL `goalId`. Fixed both confusion sources:
+  the first-screen `Needs decision` banner now prefers the selected goal's
+  controller gate, and controller Review Packet suggestions/replies/operator
+  gate dry-run reasons include the target goal id. Changed files:
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `goal_harness/review_packet.py`, `examples/review-packet-smoke.py`, and
+  `examples/review-packet-cli-smoke.py`. Validation: `python
+  examples/review-packet-smoke.py`, `python examples/review-packet-cli-smoke.py`,
+  `python examples/run-smokes.py`, `goal-harness check --scan-root .`, and
+  `npm --prefix apps/dashboard run build` passed; regenerated
+  `apps/dashboard/public/status.local.json` and `apps/dashboard/dist/status.local.json`.
+  Critic: this fixes visible/copyable cross-goal ambiguity, but the next
+  stronger guard should make project agents reject any Review Packet whose
+  `goal_id` differs from their active goal id.
 - 2026-06-02T17:28:00+08:00: Added structured active-state todo extraction to
   status and dashboard. Registered goals now carry `repo` / `state_file` into
   status collection, `goal-harness status` parses checkbox sections named

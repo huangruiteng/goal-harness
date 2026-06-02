@@ -57,10 +57,18 @@ def build_operator_gate_command(status_payload: dict[str, Any], goal_id: str) ->
             "  operator-gate \\",
             f"  --goal-id {shlex.quote(goal_id)} \\",
             "  --decision approve \\",
-            f"  --reason-summary {shlex.quote('同意先做 read-only map dry-run，不授权写入或生产动作')} \\",
+            f"  --reason-summary {shlex.quote(controller_approval_reason(goal_id))} \\",
             "  --dry-run",
         ]
     )
+
+
+def controller_reply(goal_id: str) -> str:
+    return f"同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。"
+
+
+def controller_approval_reason(goal_id: str) -> str:
+    return f"同意 {goal_id} 先做 read-only map dry-run，不授权写入或生产动作"
 
 
 def find_goal(status_payload: dict[str, Any], goal_id: str) -> dict[str, Any] | None:
@@ -149,12 +157,13 @@ def human_prompt(kind: str) -> dict[str, str]:
     }
 
 
-def suggested_decision(kind: str, item: dict[str, Any] | None) -> str:
+def suggested_decision(kind: str, item: dict[str, Any] | None, goal_id: str | None = None) -> str:
     if kind == "controller":
+        lead = f"同意 {goal_id} 先做" if goal_id else "同意先做"
         question = str(item.get("operator_question") if isinstance(item, dict) else "")
         if "read-only map" in question:
-            return "同意先做 read-only map dry-run；不授权写入或主控接管。"
-        return "同意先做只读 controller dry-run；不授权写入或生产动作。"
+            return f"{lead} read-only map dry-run；不授权写入或生产动作。"
+        return f"{lead}只读 controller dry-run；不授权写入或生产动作。"
     if kind == "reward":
         return "同意记录这次 human reward / 暂不同意，原因是..."
     if kind == "codex":
@@ -228,6 +237,8 @@ def build_review_packet(
     summary = str(item.get("recommended_action") or "当前状态源没有对应的 action card。") if isinstance(item, dict) else "当前状态源没有对应的 action card。"
     command = project_agent_command(status_payload, goal_id, kind, item)
     gate_command = build_operator_gate_command(status_payload, goal_id) if kind == "controller" else None
+    decision = suggested_decision(kind, item, goal_id)
+    reply = controller_reply(goal_id) if kind == "controller" else prompt["reply"]
     agent_text = project_agent_section(kind, command)
     type_label = {
         "reward": "Reward",
@@ -245,8 +256,8 @@ def build_review_packet(
         "",
         "【人只需判断】",
         f"问题：{question}",
-        f"建议判断：{suggested_decision(kind, item)}",
-        f"回复：{prompt['reply']}",
+        f"建议判断：{decision}",
+        f"回复：{reply}",
         f"边界：{prompt['boundary']}",
     ]
     if gate_command:
@@ -275,7 +286,7 @@ def build_review_packet(
         "status": item.get("status") if isinstance(item, dict) else goal.get("status") if isinstance(goal, dict) else None,
         "review_url": review_url,
         "question": question,
-        "suggested_decision": suggested_decision(kind, item),
+        "suggested_decision": decision,
         "project_agent_command": command,
         "operator_gate_dry_run_command": gate_command,
         "packet": "\n".join(lines),

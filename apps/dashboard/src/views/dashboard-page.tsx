@@ -865,13 +865,23 @@ function humanReviewPrompt(kind?: UserActionKind) {
   };
 }
 
-function suggestedDecisionLine(kind?: UserActionKind, item?: UserActionSummaryItem) {
+function controllerReplyLine(goalId: string) {
+  return `同意 ${goalId} 先做 read-only map dry-run / 暂不同意 + 一句话原因。`;
+}
+
+function controllerApprovalReason(goalId: string) {
+  return `同意 ${goalId} 先做 read-only map dry-run，不授权写入或生产动作`;
+}
+
+function suggestedDecisionLine(kind?: UserActionKind, item?: UserActionSummaryItem, goalId?: string) {
   if (kind === "controller") {
+    const targetGoalId = goalId ?? item?.goalId;
+    const lead = targetGoalId ? `同意 ${targetGoalId} 先做` : "同意先做";
     const question = item?.operatorQuestion ?? "";
     if (question.includes("read-only map")) {
-      return "同意先做 read-only map dry-run；不授权写入或主控接管。";
+      return `${lead} read-only map dry-run；不授权写入或生产动作。`;
     }
-    return "同意先做只读 controller dry-run；不授权写入或生产动作。";
+    return `${lead}只读 controller dry-run；不授权写入或生产动作。`;
   }
   if (kind === "reward") {
     return "同意记录这次 human reward / 暂不同意，原因是...";
@@ -1099,7 +1109,8 @@ function buildReviewPacket({
   const goalId = (item?.goalId ?? selectedGoalId) || "<goal-id>";
   const kind = item?.kind ?? (actionKind === "all" ? undefined : actionKind);
   const prompt = humanReviewPrompt(kind);
-  const suggestedDecision = suggestedDecisionLine(kind, item);
+  const suggestedDecision = suggestedDecisionLine(kind, item, goalId);
+  const reply = kind === "controller" ? controllerReplyLine(goalId) : prompt.reply;
   const lines = [
     "【Goal Harness Review Packet】",
     `目标：${goalId}`,
@@ -1112,7 +1123,7 @@ function buildReviewPacket({
     "【人只需判断】",
     `问题：${item?.operatorQuestion ?? prompt.question}`,
     `建议判断：${suggestedDecision}`,
-    `回复：${prompt.reply}`,
+    `回复：${reply}`,
     `边界：${prompt.boundary}`,
     ...(transitionPreview.operatorGateDraftCommand ? [
       "",
@@ -1358,7 +1369,7 @@ function buildOperatorGateDryRunCommand({
     "  operator-gate \\",
     `  --goal-id ${shellQuote(goalId)} \\`,
     "  --decision approve \\",
-    `  --reason-summary ${shellQuote("同意先做 read-only map dry-run，不授权写入或生产动作")} \\`,
+    `  --reason-summary ${shellQuote(controllerApprovalReason(goalId))} \\`,
     "  --dry-run",
   ].join("\n");
 }
@@ -1918,7 +1929,8 @@ function UserActionSummary({
   const operatorGateItems = items.filter((item) =>
     item.kind === "controller" || item.waitingOn === "user_or_controller" || item.waitingOn === "controller"
   );
-  const primaryOperatorGate = operatorGateItems[0];
+  const selectedOperatorGate = operatorGateItems.find((item) => item.goalId === selectedGoalId);
+  const primaryOperatorGate = selectedOperatorGate ?? operatorGateItems[0];
 
   return (
     <Card>
@@ -3092,7 +3104,7 @@ export function DashboardPage() {
   const selectedActionQueueItem = queue.items.find((item) => item.goal_id === selectedReviewGoalId);
   const selectedActionKind = selectedActionItem?.kind
     ?? (search.actionKind === "all" ? undefined : search.actionKind);
-  const selectedSuggestedDecision = suggestedDecisionLine(selectedActionKind, selectedActionItem);
+  const selectedSuggestedDecision = suggestedDecisionLine(selectedActionKind, selectedActionItem, selectedReviewGoalId);
   const reviewUrl = useMemo(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("actionKind", search.actionKind);

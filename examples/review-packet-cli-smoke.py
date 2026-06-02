@@ -100,7 +100,9 @@ def main() -> int:
         packet = markdown_result.stdout
         assert "【Goal Harness Review Packet】" in packet, packet
         assert "类型：Controller" in packet, packet
-        assert "建议判断：同意先做 read-only map dry-run；不授权写入或主控接管。" in packet, packet
+        assert f"建议判断：同意 {GOAL_ID} 先做 read-only map dry-run；不授权写入或生产动作。" in packet, packet
+        assert f"回复：同意 {GOAL_ID} 先做 read-only map dry-run / 暂不同意 + 一句话原因。" in packet, packet
+        assert f"--reason-summary '同意 {GOAL_ID} 先做 read-only map dry-run，不授权写入或生产动作'" in packet, packet
         assert "【用户本地 Gate 记录草稿】" in packet, packet
         assert "operator-gate" in packet, packet
         assert "【给项目 Agent】" in packet, packet

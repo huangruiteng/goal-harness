@@ -45,7 +45,7 @@ def build_sanitized_controller_packet() -> str:
         "  operator-gate \\",
         f"  --goal-id {goal_id} \\",
         "  --decision approve \\",
-        "  --reason-summary '同意先做 read-only map dry-run，不授权写入或生产动作' \\",
+        f"  --reason-summary '同意 {goal_id} 先做 read-only map dry-run，不授权写入或生产动作' \\",
         "  --dry-run",
     )
     project_agent_command = multiline_command(
@@ -68,7 +68,7 @@ def build_sanitized_controller_packet() -> str:
             "",
             "【人只需判断】",
             "问题：是否允许目标项目进入 read-only/controller opt-in？",
-            "回复：同意先做 read-only map dry-run / 暂不同意 + 一句话原因。",
+            f"回复：同意 {goal_id} 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
             "边界：这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
             "",
             "【用户本地 Gate 记录草稿】",
@@ -121,10 +121,14 @@ def main() -> int:
     assert "同意先做 read-only map dry-run / 暂不同意 + 一句话原因。" in controller_prompt
     assert "不写 operator gate、run history、write-control、实验控制或生产动作" in controller_prompt
 
+    controller_reply = source_between(source, "function controllerReplyLine", "function suggestedDecisionLine")
+    assert "同意 ${goalId} 先做 read-only map dry-run / 暂不同意 + 一句话原因。" in controller_reply
+    assert "同意 ${goalId} 先做 read-only map dry-run，不授权写入或生产动作" in controller_reply
+
     gate_builder = source_between(source, "function buildOperatorGateDryRunCommand", "function buildOperatorTransitionPreview")
     assert "operator-gate" in gate_builder
     assert "--decision approve" in gate_builder
-    assert "同意先做 read-only map dry-run，不授权写入或生产动作" in gate_builder
+    assert "controllerApprovalReason(goalId)" in gate_builder
     assert "--dry-run" in gate_builder
 
     read_only_builder = source_between(source, "function buildReadOnlyMapDryRunCommand", "function buildRefreshStateDryRunCommand")
@@ -147,12 +151,16 @@ def main() -> int:
             "if (decision.waitingOn === \"codex\")",
         ],
     )
+    user_action_summary = source_between(source, "function UserActionSummary", "function OperatorDecisionPanel")
+    assert "const selectedOperatorGate = operatorGateItems.find((item) => item.goalId === selectedGoalId);" in user_action_summary
+    assert "const primaryOperatorGate = selectedOperatorGate ?? operatorGateItems[0];" in user_action_summary
 
     packet = build_sanitized_controller_packet()
     assert_order(
         packet,
         [
             "问题：是否允许目标项目进入 read-only/controller opt-in？",
+            "回复：同意 planned-main-control 先做 read-only map dry-run / 暂不同意 + 一句话原因。",
             "【用户本地 Gate 记录草稿】",
             "operator-gate",
             "【给项目 Agent】",
