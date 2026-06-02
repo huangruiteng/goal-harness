@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T12:39:08+08:00
+updated_at: 2026-06-02T13:40:20+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,15 +28,32 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. The premature agent-harness main-control automation migration
-  has been reverted, and the platform-migration controller now has the
-  generated heartbeat lifecycle. Prefer comparing: platform migration heartbeat
-  behavior against its operator gate, whether to ask for/record the
-  `agent-harness-main-control` read-only-map opt-in, or dashboard
-  attention-cost reduction.
+  choosing work. First observe whether the platform migration heartbeat stays
+  ACTIVE and quietly skips under the `premium-ui-ai-search-rec-migration`
+  operator gate when it actually fires. If it returns to PAUSED again, treat
+  that as an automation-state stability issue. Keep the complex
+  `agent-harness-main-control` automation on its original path until the
+  read-only-map opt-in is deliberately approved.
 
 ## Recent Progress
 
+- 2026-06-02T13:40:20+08:00: Ran the required steering audit after reverting
+  the premature agent-harness main-control automation migration. Candidates
+  considered: P0 state/safety observation of the platform migration heartbeat
+  under its operator gate, P0 human-decision recording for the
+  `agent-harness-main-control` read-only-map opt-in, and P1 dashboard
+  attention-cost reduction. Chose the platform migration heartbeat observation
+  because it is the user's latest corrected target and should prove the new
+  heartbeat lifecycle before any complex-controller migration. Observation
+  found that the platform migration automation had returned to PAUSED even
+  though its target thread and generated prompt were correct. Re-activated it
+  through the Codex App automation API and confirmed the local automation file
+  now shows status `ACTIVE`. Validation: `goal-harness --format json quota
+  should-run --goal-id premium-ui-ai-search-rec-migration` returned
+  `should_run=false`, `state=operator_gate`, so the target heartbeat should
+  fail-close and quiet-skip until the human or target controller clears the
+  owner/SOP gate. Critic: this is a state-stability correction rather than new
+  product capability, but it protects the real platform migration integration.
 - 2026-06-02T12:39:08+08:00: User corrected the previous automation migration:
   `agent-harness-main-control` is still too complex to migrate, while the
   platform migration controller should receive the generated Goal Harness
