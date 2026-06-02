@@ -755,6 +755,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root_override=args.runtime_root,
                 scan_roots=scan_roots,
                 limit=max(0, args.limit),
+                allow_missing_registry=not user_supplied_registry(argv),
             )
         except Exception as exc:
             payload = {

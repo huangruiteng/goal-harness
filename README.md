@@ -152,6 +152,10 @@ Run the contract check:
 goal-harness check --scan-root .
 ```
 
+In an unconnected source checkout, this still runs the public/private boundary
+scan and prints a warning that no project registry exists yet. In a real project,
+run `goal-harness connect ...` first or pass `--registry <path>` explicitly.
+
 Run the public smoke scripts. These stay explicit instead of hidden inside
 `goal-harness check`, so the contract check remains focused on registry,
 runtime, and public-boundary health:

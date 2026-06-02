@@ -90,6 +90,7 @@ def check_contract(
     runtime_root_override: str | None,
     scan_roots: list[Path],
     limit: int,
+    allow_missing_registry: bool = False,
 ) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -100,7 +101,11 @@ def check_contract(
         checks.append(f"registry goals checked: {registry_payload.get('goal_count')}")
     else:
         if registry_payload.get("error"):
-            errors.append(str(registry_payload.get("error")))
+            error = str(registry_payload.get("error"))
+            if allow_missing_registry and error == "registry file does not exist":
+                warnings.append(f"{error}: {registry_path}")
+            else:
+                errors.append(error)
         errors.extend(str(item) for item in registry_payload.get("problems") or [])
 
     registry = load_registry(registry_path)
