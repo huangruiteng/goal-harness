@@ -228,7 +228,31 @@ Item shape:
     "owner": "user_or_controller",
     "gate": "operator_question",
     "next_action": "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run",
-    "stop_condition": "record aligned eval evidence and one human reward event"
+    "stop_condition": "record aligned eval evidence and one human reward event",
+    "user_todos": {
+      "open": 1,
+      "done": 2,
+      "total": 3,
+      "next": "Record the owner/SOP conclusion in the review worksheet."
+    },
+    "agent_todos": {
+      "open": 1,
+      "done": 0,
+      "total": 1,
+      "next": "Run the read-only validation map after approval."
+    },
+    "quota": {
+      "compute": 0.5,
+      "state": "operator_gate",
+      "spent_slots": 0,
+      "allowed_slots": 720,
+      "reason": "operator gate blocks gated delivery"
+    },
+    "latest_validation": {
+      "generated_at": "2026-06-02T12:00:00+00:00",
+      "classification": "ready_for_controller_opt_in",
+      "summary": "read-only map available; write-control not approved"
+    }
   },
   "operator_question": "是否同意 `complex-project-main-control` 先执行 read-only map opt-in？",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
@@ -263,9 +287,13 @@ Item fields:
 - `severity`: `high`, `action`, or `watch`.
 - `recommended_action`: exactly one next action.
 - `project_asset`: a compact control-plane projection derived from the same
-  item, with `owner`, `gate`, `next_action`, and `stop_condition`. This is the
-  first-screen project asset surface for agents and dashboards; it lets
-  consumers avoid reconstructing owner/gate/next/stop from scattered fields.
+  item. It must carry `owner`, `gate`, `next_action`, and `stop_condition`, and
+  may include compact `user_todos`, `agent_todos`, `quota`, and
+  `latest_validation` summaries. This is the first-screen project asset surface
+  for agents and dashboards; it lets consumers avoid reconstructing owner,
+  gate, next action, stop condition, todo counts, compute state, and latest
+  validation from scattered fields. The richer top-level `user_todos`,
+  `agent_todos`, and `quota` fields remain available for detailed views.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
 - `agent_command`: optional command or instruction for the target project agent

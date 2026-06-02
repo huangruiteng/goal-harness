@@ -278,12 +278,18 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
     assert item["project_asset"]["gate"] == "operator_question", item
     assert item["project_asset"]["next_action"] == NEW_PLANNED_ACTION, item
     assert "stop until the user or controller decision is recorded" in item["project_asset"]["stop_condition"], item
+    assert item["project_asset"]["user_todos"]["open"] == 1, item
+    assert item["project_asset"]["agent_todos"]["open"] == 1, item
+    assert item["project_asset"]["quota"]["compute"] == 1.0, item
+    assert item["project_asset"]["quota"]["state"] == "operator_gate", item
     assert item["agent_command"] == APPROVED_COMMAND, item
     assert "operator_gate_dry_run" not in item, item
     assert OLD_PLANNED_ACTION not in json.dumps(payload, ensure_ascii=False), payload
     assert OLD_PLANNED_ACTION not in markdown, markdown
     assert NEW_PLANNED_ACTION in markdown, markdown
     assert "project_asset: owner=user_or_controller gate=operator_question" in markdown, markdown
+    assert "asset_todos: user_open=1 agent_open=1" in markdown, markdown
+    assert "asset_quota: compute=1.0 state=operator_gate" in markdown, markdown
 
     gate_index = markdown.index("operator_gate_dry_run")
     agent_index = markdown.index("agent_command")
@@ -312,6 +318,10 @@ def assert_registry_attention_override(payload: dict, markdown: str) -> None:
     assert item["project_asset"]["gate"] == "operator_question", item
     assert item["project_asset"]["next_action"] == REGISTRY_OVERRIDE_ACTION, item
     assert item["project_asset"]["stop_condition"] == REGISTRY_OVERRIDE_HANDOFF, item
+    assert item["project_asset"]["user_todos"]["open"] == 1, item
+    assert item["project_asset"]["agent_todos"]["open"] == 1, item
+    assert item["project_asset"]["quota"]["state"] == "operator_gate", item
+    assert item["project_asset"]["latest_validation"]["classification"] == "state_refreshed", item
     assert item["operator_question"] == REGISTRY_OVERRIDE_QUESTION, item
     assert item["next_handoff_condition"] == REGISTRY_OVERRIDE_HANDOFF, item
     assert item["user_todos"]["open_count"] == 1, item
@@ -323,6 +333,7 @@ def assert_registry_attention_override(payload: dict, markdown: str) -> None:
     assert REGISTRY_OVERRIDE_STATUS in markdown, markdown
     assert REGISTRY_OVERRIDE_ACTION in markdown, markdown
     assert "project_asset: owner=user_or_controller gate=operator_question" in markdown, markdown
+    assert "latest_validation: classification=state_refreshed" in markdown, markdown
     assert f"next_user_todo: {USER_TODO_TEXT}" in markdown, markdown
     assert f"next_agent_todo: {AGENT_TODO_TEXT}" in markdown, markdown
     assert "state_refreshed" in json.dumps(payload["run_history"], ensure_ascii=False), payload
@@ -381,9 +392,11 @@ def main() -> int:
     assert approved_item["project_asset"]["gate"] == "none", approved_item
     assert approved_item["project_asset"]["next_action"] == APPROVED_ACTION, approved_item
     assert "command fails" in approved_item["project_asset"]["stop_condition"], approved_item
+    assert approved_item["project_asset"]["latest_validation"]["classification"] == "operator_gate_approved", approved_item
     assert approved_item["agent_command"] == APPROVED_COMMAND, approved_item
     assert "operator_question" not in approved_item, approved_item
     assert "operator_gate_dry_run" not in approved_markdown, approved_markdown
+    assert "latest_validation: classification=operator_gate_approved" in approved_markdown, approved_markdown
     assert f"agent_command: `{APPROVED_COMMAND}`" in approved_markdown, approved_markdown
     assert_quota_should_run(
         approved_payload,

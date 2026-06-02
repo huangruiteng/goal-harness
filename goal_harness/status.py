@@ -245,6 +245,83 @@ def project_asset_stop_condition(
     return "stop if the next action needs reward, gate approval, write control, or production access"
 
 
+def first_open_todo_text(todos: dict[str, Any] | None) -> str | None:
+    if not isinstance(todos, dict):
+        return None
+    for item in todos.get("items") or []:
+        if not isinstance(item, dict) or item.get("done"):
+            continue
+        text = normalize_todo_text(str(item.get("text") or ""), limit=220)
+        return text or None
+    return None
+
+
+def project_asset_todo_summary(todos: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(todos, dict):
+        return None
+    summary: dict[str, Any] = {
+        "open": todos.get("open_count", 0),
+        "done": todos.get("done_count", 0),
+        "total": todos.get("total_count", 0),
+    }
+    next_item = first_open_todo_text(todos)
+    if next_item:
+        summary["next"] = next_item
+    return summary
+
+
+def project_asset_quota_summary(quota: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(quota, dict):
+        return None
+    summary: dict[str, Any] = {
+        "compute": quota.get("compute"),
+        "state": quota.get("state"),
+        "spent_slots": quota.get("spent_slots"),
+        "allowed_slots": quota.get("allowed_slots"),
+    }
+    if quota.get("reason"):
+        summary["reason"] = normalize_todo_text(str(quota.get("reason") or ""), limit=220)
+    return summary
+
+
+def project_asset_latest_validation(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(run, dict):
+        return None
+    signal: dict[str, Any] = {}
+    for field in ("generated_at", "classification"):
+        value = run.get(field)
+        if value:
+            signal[field] = value
+    summary = run.get("health_check") or run.get("recommended_action")
+    if summary:
+        signal["summary"] = normalize_todo_text(str(summary), limit=260)
+    return signal or None
+
+
+def enrich_project_asset(
+    item: dict[str, Any],
+    *,
+    user_todos: dict[str, Any] | None = None,
+    agent_todos: dict[str, Any] | None = None,
+    quota: dict[str, Any] | None = None,
+    latest_validation: dict[str, Any] | None = None,
+) -> None:
+    project_asset = item.get("project_asset")
+    if not isinstance(project_asset, dict):
+        return
+    user_summary = project_asset_todo_summary(user_todos)
+    if user_summary:
+        project_asset["user_todos"] = user_summary
+    agent_summary = project_asset_todo_summary(agent_todos)
+    if agent_summary:
+        project_asset["agent_todos"] = agent_summary
+    quota_summary = project_asset_quota_summary(quota)
+    if quota_summary:
+        project_asset["quota"] = quota_summary
+    if latest_validation:
+        project_asset["latest_validation"] = latest_validation
+
+
 def build_project_asset(
     *,
     status: str,
@@ -254,7 +331,7 @@ def build_project_asset(
     agent_command: str | None,
     missing_gates: list[str] | None,
     next_handoff_condition: str | None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     return {
         "owner": project_asset_owner(waiting_on),
         "gate": project_asset_gate(
@@ -901,12 +978,19 @@ def build_attention_queue(
             continue
         item = goal_attention(goal)
         if item:
+            enrich_project_asset(item, latest_validation=project_asset_latest_validation(latest_run(goal)))
             if goal.get("registry_member"):
                 item.update(active_state_todo_fields(goal))
                 item["quota"] = quota_status(
                     goal,
                     waiting_on=str(item.get("waiting_on") or ""),
                     severity=str(item.get("severity") or ""),
+                )
+                enrich_project_asset(
+                    item,
+                    user_todos=item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None,
+                    agent_todos=item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None,
+                    quota=item.get("quota") if isinstance(item.get("quota"), dict) else None,
                 )
             items.append(item)
 
@@ -1169,6 +1253,46 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 f"gate={_markdown_scalar(project_asset.get('gate') or '')} "
                 f"stop={_markdown_scalar(project_asset.get('stop_condition') or '')}"
             )
+            asset_user_todos = (
+                project_asset.get("user_todos")
+                if isinstance(project_asset.get("user_todos"), dict)
+                else {}
+            )
+            asset_agent_todos = (
+                project_asset.get("agent_todos")
+                if isinstance(project_asset.get("agent_todos"), dict)
+                else {}
+            )
+            if asset_user_todos or asset_agent_todos:
+                todo_parts = []
+                if asset_user_todos:
+                    todo_parts.append(f"user_open={asset_user_todos.get('open')}")
+                if asset_agent_todos:
+                    todo_parts.append(f"agent_open={asset_agent_todos.get('open')}")
+                lines.append(f"    - asset_todos: {' '.join(todo_parts)}")
+            asset_quota = (
+                project_asset.get("quota")
+                if isinstance(project_asset.get("quota"), dict)
+                else {}
+            )
+            if asset_quota:
+                lines.append(
+                    "    - asset_quota: "
+                    f"compute={asset_quota.get('compute')} "
+                    f"state={asset_quota.get('state')} "
+                    f"slots={asset_quota.get('spent_slots')}/{asset_quota.get('allowed_slots')}"
+                )
+            latest_validation = (
+                project_asset.get("latest_validation")
+                if isinstance(project_asset.get("latest_validation"), dict)
+                else {}
+            )
+            if latest_validation:
+                lines.append(
+                    "    - latest_validation: "
+                    f"classification={_markdown_scalar(latest_validation.get('classification') or '')} "
+                    f"at={_markdown_scalar(latest_validation.get('generated_at') or '')}"
+                )
         user_todos = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else {}
         if user_todos:
             lines.append(

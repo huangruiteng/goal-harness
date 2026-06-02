@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T21:01:21+08:00
+updated_at: 2026-06-02T21:04:34+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,31 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should return to the smallest dashboard/status projection slice for
-  project assets. Focus on making `owner`, `gate`, `next_action`,
-  `stop_condition`, `user_todos`, `agent_todos`, quota, and latest validation
-  easy for the user to scan without reading project-agent threads.
+- Next tick should inspect the existing dashboard WIP before editing it. If the
+  WIP is still aligned with the new `project_asset` status shape, wire the
+  first-screen action cards to prefer that single compact projection; otherwise
+  leave dashboard changes alone and add a CLI/status contract smoke first.
 
 ## Recent Progress
 
+- 2026-06-02T21:04:34+08:00: Steering audit candidates were: P0 status
+  project-asset projection, P0 human decision loop dashboard polish, and P1
+  internal-introduction polish. Chose the status projection because it is the
+  lowest-risk way to make owner, gate, next action, stop condition, todo state,
+  quota, and latest validation available from one public-safe field without
+  touching the dirty dashboard WIP. Extended `project_asset` so attention items
+  keep the existing `owner`, `gate`, `next_action`, and `stop_condition`, and
+  may also carry compact `user_todos`, `agent_todos`, `quota`, and
+  `latest_validation` summaries. Changed files: `goal_harness/status.py`,
+  `examples/status-markdown-smoke.py`, `examples/quota-contract-smoke.py`,
+  `docs/status-data-contract.md`, and this active state. Validation: `python
+  examples/status-markdown-smoke.py`, `python examples/quota-contract-smoke.py`,
+  `python -m compileall -q goal_harness`, `goal-harness check --scan-root .`,
+  `git diff --check`, and live `goal-harness --format json status` showing the
+  field goal's project asset now includes open user todos, agent todos, quota,
+  and latest validation. Critic: this solves the data contract layer; the UI
+  still needs to consume this single projection without adding more panels or
+  copy surfaces.
 - 2026-06-02T21:01:21+08:00: Steering audit candidates were: P0 real-heartbeat
   adoption proof for the newly globalized quota guard, P0 dashboard/status
   project-asset projection, and P1 internal-introduction polish. Chose the
