@@ -69,6 +69,20 @@ goal-harness new-project-prompt \
   --goal-doc /path/to/project/GOAL.md
 ```
 
+If the connected project should later run through a recurring Codex App
+heartbeat, generate the heartbeat task body instead of hand-copying the quota
+guard and spend protocol:
+
+```bash
+goal-harness heartbeat-prompt \
+  --goal-id project-goal \
+  --active-state /path/to/project/.codex/goals/project-goal/ACTIVE_GOAL_STATE.md
+```
+
+Copy the generated task body into the heartbeat automation. The timer only
+wakes Codex; the task body asks Goal Harness whether the goal should spend
+delivery compute on that tick.
+
 In most real projects these files should be private. If they contain current
 work state or local evidence, add them to `.gitignore`:
 

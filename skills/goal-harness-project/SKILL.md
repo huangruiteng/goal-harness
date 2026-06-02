@@ -64,6 +64,22 @@ permission, bypass operator gates, or replace run-bound human reward. Keep the
 hard order: health/safety -> operator gate -> evidence wait -> compute quota ->
 project-agent execution.
 
+## Set Up Recurring Heartbeats
+
+When a user or controller wants a recurring Codex App heartbeat for a connected
+goal, prefer the generator instead of hand-copying the quota lifecycle:
+
+```bash
+goal-harness heartbeat-prompt \
+  --goal-id <STABLE_GOAL_ID> \
+  --active-state <ACTIVE_GOAL_STATE_PATH>
+```
+
+Copy the generated task body into the Codex App heartbeat automation. It already
+contains the pre-turn `quota should-run` guard, quiet `should_run=false` skip,
+bounded work, validation/writeback, optional `refresh-state`, and exactly one
+post-turn `quota spend-slot --source heartbeat --execute` event.
+
 ## Connect A New Project
 
 1. Read the project goal document and inspect the repo narrowly.

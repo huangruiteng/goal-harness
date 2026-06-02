@@ -17,6 +17,8 @@ from goal_harness.heartbeat_prompt import build_heartbeat_prompt  # noqa: E402
 
 DOC = REPO_ROOT / "docs" / "heartbeat-automation-prompt.md"
 README = REPO_ROOT / "README.md"
+INTEGRATION_DOC = REPO_ROOT / "docs" / "integration.md"
+PROJECT_SKILL = REPO_ROOT / "skills" / "goal-harness-project" / "SKILL.md"
 GOAL_ID = "public-heartbeat-goal"
 ACTIVE_STATE = Path("/tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md")
 
@@ -45,6 +47,8 @@ def main() -> int:
 
     doc = DOC.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
+    integration_doc = INTEGRATION_DOC.read_text(encoding="utf-8")
+    project_skill = PROJECT_SKILL.read_text(encoding="utf-8")
     generated = str(payload["task_body"])
 
     must_have = (
@@ -94,6 +98,10 @@ def main() -> int:
     assert "docs/heartbeat-automation-prompt.md" in readme, readme
     assert "goal-harness heartbeat-prompt" in readme, readme
     assert "goal-harness heartbeat-prompt" in doc, doc
+    assert "goal-harness heartbeat-prompt" in integration_doc, integration_doc
+    assert "goal-harness heartbeat-prompt" in project_skill, project_skill
+    assert "Set Up Recurring Heartbeats" in project_skill, project_skill
+    assert "--source heartbeat --execute" in project_skill, project_skill
 
     cli_json = subprocess.run(
         [

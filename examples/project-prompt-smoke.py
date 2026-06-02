@@ -33,6 +33,12 @@ SPEND_MUST_HAVE = (
     "不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账",
     "不要重复执行。",
 )
+HEARTBEAT_PROMPT_MUST_HAVE = (
+    "如果要给这个项目设置 recurring Codex App heartbeat",
+    "goal-harness heartbeat-prompt",
+    "--active-state .codex/goals/",
+    "再把输出复制进 automation",
+)
 
 
 def assert_quota_guard(text: str) -> None:
@@ -44,6 +50,8 @@ def assert_quota_guard(text: str) -> None:
         positions.append(normalized.index(phrase))
     assert positions == sorted(positions), positions
     for phrase in SPEND_MUST_HAVE:
+        assert phrase in normalized, text
+    for phrase in HEARTBEAT_PROMPT_MUST_HAVE:
         assert phrase in normalized, text
 
 

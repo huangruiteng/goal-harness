@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T08:58:10+08:00
+updated_at: 2026-06-02T09:04:50+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,31 @@ private project context.
 
 ## Next Action
 
-- Teach the installed `goal-harness-project` skill and project-connection docs
-  to prefer `goal-harness heartbeat-prompt` when setting up recurring Codex App
-  heartbeats, so future project agents discover the generator without reading
-  the README first.
+- Add or extend an installer smoke that runs `scripts/install-local.sh` in a
+  temporary HOME and verifies the installed `goal-harness-project` skill
+  contains the `goal-harness heartbeat-prompt` guidance.
 
 ## Recent Progress
 
+- 2026-06-02T09:04:50+08:00: Taught project agents and project-connection docs
+  to discover `goal-harness heartbeat-prompt` without reading README first.
+  Added a `Set Up Recurring Heartbeats` section to
+  `skills/goal-harness-project/SKILL.md`, documented the generated task-body
+  workflow in `docs/integration.md`, and updated both the static and generated
+  new-project handoff prompts so connected projects know to generate a Codex
+  App heartbeat task body instead of hand-copying the quota guard and spend
+  protocol. Extended `examples/heartbeat-prompt-smoke.py` and
+  `examples/project-prompt-smoke.py` so the skill, integration doc, static
+  prompt, generated CLI prompt, and heartbeat prompt contract all mention the
+  generator. Ran `scripts/install-local.sh` on the current machine and verified
+  the installed `/Users/bytedance/.codex/skills/goal-harness-project/SKILL.md`
+  includes `Set Up Recurring Heartbeats`, `goal-harness heartbeat-prompt`, and
+  `--source heartbeat --execute`. Validation: direct heartbeat prompt smoke
+  passed; direct project prompt smoke passed; aggregate public smokes passed
+  with 7 scripts; Python compile passed; public contract check passed; `git
+  diff --check` passed. Critic: the current-machine installed skill is synced,
+  but the install-path guarantee should be protected in a temp-HOME installer
+  smoke so future edits cannot silently drop the skill guidance.
 - 2026-06-02T08:58:10+08:00: Added a public
   `goal-harness heartbeat-prompt` CLI generator. The new
   `goal_harness/heartbeat_prompt.py` builder emits a guarded Codex App

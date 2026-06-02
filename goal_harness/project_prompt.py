@@ -241,13 +241,19 @@ def render_prompt_text(
    如果 `should_run=true` 但没有 `agent_command`，只按 `recommended_action` 选择下一个安全只读动作。
    如果命令非零，fail closed，先修 `goal-harness doctor` / `goal-harness status`。
    这个 guard 不等于写权限、不绕过 operator gate、也不替代 human reward。
-6. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、不同步外部系统、不要写生产状态，除非目标文档明确授权。通用接入优先跑：
+6. 如果要给这个项目设置 recurring Codex App heartbeat，不要手抄 guard 和 spend 协议；先生成 task body，再把输出复制进 automation：
+
+```bash
+goal-harness heartbeat-prompt --goal-id {goal_id} --active-state .codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md
+```
+
+7. 生成一个 read-only project map 或 first pre-tick run。不要启动线上任务、不同步外部系统、不要写生产状态，除非目标文档明确授权。通用接入优先跑：
 
 ```bash
 goal-harness read-only-map --goal-id {goal_id}
 ```
 
-7. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的 adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh run：
+8. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的 adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh run：
 
 ```bash
 goal-harness refresh-state --goal-id {goal_id}
@@ -255,18 +261,18 @@ goal-harness refresh-state --goal-id {goal_id}
 
 这个命令也会自动同步全局 registry。
 
-8. 跑验证：
+9. 跑验证：
    - `goal-harness registry`
    - `goal-harness status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `goal-harness check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
-9. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、实现推进或验证推进），在 validation 和必要的 `refresh-state` 完成后，只 append 一次 quota spend：
+10. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、实现推进或验证推进），在 validation 和必要的 `refresh-state` 完成后，只 append 一次 quota spend：
 
 ```bash
 {quota_spend_command}
 ```
 
    不要为 `should_run=false` 的 skip、preflight 失败、或纯 dry-run preview 记账；不要重复执行。
-10. 最后用中文汇报：
+11. 最后用中文汇报：
    - changed files；
    - validation output；
    - 当前 goal 在 dashboard / attention queue 里会怎么显示；
