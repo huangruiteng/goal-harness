@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T19:53:50+08:00
+updated_at: 2026-06-02T20:02:48+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,17 +27,40 @@ private project context.
 
 ## Next Action
 
-- Next tick should move from sanitized adoption proof to one live, public-safe
-  adoption check: inspect the platform-migration goal's current status/guard
-  surfaces and confirm whether the next user/owner todo is now represented in
-  `user_todos` rather than only in `Next Action` or review-doc prose. If the
-  live check still exposes a contract gap, improve the public contract or
-  generated prompt; do not edit target project code or take over its controller.
-  Losing candidate to remember: dashboard one-click durable operator-gate append
-  remains useful but should wait until live adoption is verified.
+- Next tick should move back to the P0 human-decision loop: inspect the live
+  dashboard/operator surface for the platform-migration gate and choose the
+  smallest static-safe improvement that reduces the user's decision/recording
+  cost. Candidate slice: make the action packet or card clearly distinguish
+  "complete/confirm user todo" from "approve owner/SOP gate", and if existing
+  copy is already clear, add the smallest copy-only durable operator-gate
+  approve/defer/reject preview affordance. Do not execute real gate writes from
+  the dashboard, and do not touch target project code.
 
 ## Recent Progress
 
+- 2026-06-02T20:02:48+08:00: Steering audit candidates: P0 live state/safety
+  adoption check for the platform-migration goal, P0 human-decision loop
+  dashboard/operator-gate affordance, and P1 dashboard polish. Chose the live
+  adoption check because the previous slice proved the public fixture, but the
+  real premium-ui migration goal was the field case that originally exposed the
+  gap. Ran live `goal-harness status` and `goal-harness quota should-run
+  --goal-id premium-ui-ai-search-rec-migration` without editing the target
+  project. Result: adoption is now working. The attention item is
+  `owner_sop_review_pending`, `waiting_on=user_or_controller`, and carries
+  `user_todos` from `User Todo / Owner Review Reading Queue` with 12 total,
+  8 done, and 4 open items. The first open items include owner review worksheet
+  recording, ZJXMT P0 column semantics/routing, latest-code invert validation
+  tracking, and item-embedding field/prompt drift. The quota guard also exposes
+  `todo_write_hint` with the exact `goal-harness todo add --role user` command
+  template, plus a `gate_prompt` that lists the first open user todos before
+  asking for the owner/SOP gate decision. Changed files: this active state
+  only. Validation: live `goal-harness --format json status`, live
+  `goal-harness --format json quota should-run --goal-id
+  premium-ui-ai-search-rec-migration`, `git status`, and the global registry
+  entry for the goal. Critic: the agent-facing adoption issue is no longer the
+  current blocker for this real goal; the next higher-value P0 work is the
+  human decision/recording surface, so the user can complete the visible todos
+  and gate judgment with less relay overhead.
 - 2026-06-02T19:53:50+08:00: Steering audit candidates: P0 state/safety live
   check that `todo_write_hint` is present in guard output, P0 project-agent loop
   adoption proof across guard -> todo CLI -> status projection -> approved
