@@ -77,7 +77,9 @@ step from the Priority Stack, such as read-only steering analysis,
 documentation, or another P0/P1 item that does not depend on that gate. If that
 safe-bypass step actually spends automatic compute, validate it, write back
 progress/critic/next action, optionally refresh state, and append one quota
-spend event.
+spend event. If `user_todo_summary.open_count > 0`, the safe-bypass report must
+include those existing open user todos and must not say there is "no new user
+action".
 
 This guard is only a compute-allocation check. It does not grant write
 permission, bypass operator gates, or replace run-bound human reward. Operator

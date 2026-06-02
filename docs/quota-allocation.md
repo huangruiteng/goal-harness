@@ -230,7 +230,9 @@ that prompt to ask the user or target controller the concrete gate question
 instead of silently skipping, unless the same unresolved gate was already asked
 in the recent visible thread. If `user_todo_summary.open_count > 0`, existing
 open user todos are themselves user-visible action; do not report "no new user
-action" while those todos remain open.
+action" while those todos remain open. This also applies after a bounded
+safe-bypass step: the compact report must still list the existing open user
+todos instead of saying that there is no user action.
 For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,

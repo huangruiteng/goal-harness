@@ -89,8 +89,11 @@ If the result says `should_run=false`:
   Priority Stack, such as read-only steering analysis, documentation, or another
   P0/P1 item that does not depend on that gate. If you do a safe-bypass step,
   validate it, write back progress/critic/next action, optionally refresh state,
-  append exactly one spend event, and report compactly. If no useful safe-bypass
-  step exists, report the pending gate compactly instead of doing work.
+  append exactly one spend event, and report compactly. If
+  `user_todo_summary.open_count > 0`, that report must include the existing
+  open user todos and must not say there is "no new user action". If no useful
+  safe-bypass step exists, report the pending gate compactly instead of doing
+  work.
 - Otherwise, do not do implementation work, adapter work, file edits, research,
   or project exploration in this turn. Return a quiet heartbeat `DONT_NOTIFY`
   response with the skip reason.

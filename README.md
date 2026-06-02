@@ -282,8 +282,10 @@ existing todos should be listed as user-visible work; do not call the turn "no
 new user action" while they remain open. If it also returns
 `safe_bypass_allowed=true`, the
 heartbeat may still do one bounded read-only steering or analysis step that
-does not depend on that gate; it must not execute `agent_command`, adapter work,
-write-control, production actions, or the gated path. See
+does not depend on that gate; its report still has to list existing open user
+todos when `user_todo_summary.open_count > 0`. It must not execute
+`agent_command`, adapter work, write-control, production actions, or the gated
+path. See
 `docs/quota-allocation.md` for the full allocation contract.
 
 After an automatic turn actually spends delivery compute, append one spend

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T20:32:20+08:00
+updated_at: 2026-06-02T20:37:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -74,10 +74,13 @@ handoff, validation, and quota bookkeeping.
   `python -m compileall -q goal_harness`, `goal-harness check --scan-root .`,
   `git diff --check`, live `quota should-run` confirming
   `notify_user_on_gate=True`, `user_todo_summary.open_count=5`, and a
-  `gate_prompt` containing user todos. Critic: this fixes the agent-facing and
-  automation-prompt contract; the next useful check is whether the actual
-  heartbeat thread now presents the todos in concise Chinese instead of
-  burying them in a long packet.
+  `gate_prompt` containing user todos. Follow-up refinement in the same slice:
+  the safe-bypass report path now has the same rule, so an agent that spends a
+  bounded non-gated steering turn after a surfaced gate must still list
+  existing open user todos instead of saying there is no user action. Critic:
+  this fixes the agent-facing and automation-prompt contract; the next useful
+  check is whether the actual heartbeat thread now presents the todos in
+  concise Chinese instead of burying them in a long packet.
 - 2026-06-02T20:21:44+08:00: Promoted cognitive-load reduction from a
   useful framing into an explicit design principle. Goal Harness should make
   humans stop reading every project-agent thread, relaying every packet, and

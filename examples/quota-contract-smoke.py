@@ -95,6 +95,11 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
+        "This also applies after a bounded safe-bypass step",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
         "## Slot Spend Event Contract",
         label="quota doc",
     )
@@ -162,6 +167,11 @@ def main() -> int:
     assert_contains(
         readme,
         "do not call the turn \"no new user action\" while they remain open",
+        label="README",
+    )
+    assert_contains(
+        readme,
+        "its report still has to list existing open user todos",
         label="README",
     )
     assert_contains(
