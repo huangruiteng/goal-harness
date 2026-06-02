@@ -27,6 +27,10 @@ APPROVED_ACTION = "把已批准的 agent_command 发给目标项目 agent；这�
 APPROVED_COMMAND = "goal-harness read-only-map --goal-id planned-main-control --dry-run"
 REJECTED_ACTION = "保持 goal 在 gate 状态，修改 handoff 后再请求 operator 判断"
 DEFERRED_ACTION = "保持 goal 在 gate 状态，先补齐要求的证据后再请求判断"
+REGISTRY_OVERRIDE_STATUS = "owner_sop_review_pending"
+REGISTRY_OVERRIDE_ACTION = "请先完成 owner/SOP 判断；未决前不要让项目 agent 继续推进"
+REGISTRY_OVERRIDE_QUESTION = "是否同意 owner/SOP review 完成后继续推进？"
+REGISTRY_OVERRIDE_HANDOFF = "owner/SOP decision recorded"
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -162,6 +166,49 @@ def append_quota_slot_spend_fixture(root: Path, *, generated_at: str) -> None:
         )
 
 
+def append_state_refreshed_fixture(root: Path, *, generated_at: str) -> None:
+    run_dir = root / "runtime" / "goals" / "planned-main-control" / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-state-refreshed.json"
+    markdown_path = run_dir / f"{compact_time}-state-refreshed.md"
+    record = {
+        "generated_at": generated_at,
+        "goal_id": "planned-main-control",
+        "classification": "state_refreshed",
+        "recommended_action": "inspect refreshed active goal state and continue",
+        "health_check": "fixture state refresh",
+    }
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture state refresh\n", encoding="utf-8")
+    with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    **record,
+                    "json_path": str(json_path),
+                    "markdown_path": str(markdown_path),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+
+def set_registry_attention_override(registry_path: Path) -> None:
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    payload["goals"][0].update(
+        {
+            "waiting_on": "user_or_controller",
+            "attention_status": REGISTRY_OVERRIDE_STATUS,
+            "recommended_action": REGISTRY_OVERRIDE_ACTION,
+            "operator_question": REGISTRY_OVERRIDE_QUESTION,
+            "next_handoff_condition": REGISTRY_OVERRIDE_HANDOFF,
+        }
+    )
+    registry_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def collect_fixture_status(root: Path, registry_path: Path) -> tuple[dict, str]:
     payload = collect_status(
         registry_path=registry_path,
@@ -231,6 +278,29 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
     assert quota_payload["status"] == "planned-high-complexity", quota_payload
 
 
+def assert_registry_attention_override(payload: dict, markdown: str) -> None:
+    items = payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    item = items[0]
+    assert item["goal_id"] == "planned-main-control", item
+    assert item["status"] == REGISTRY_OVERRIDE_STATUS, item
+    assert item["waiting_on"] == "user_or_controller", item
+    assert item["source"] == "registry", item
+    assert item["recommended_action"] == REGISTRY_OVERRIDE_ACTION, item
+    assert item["operator_question"] == REGISTRY_OVERRIDE_QUESTION, item
+    assert item["next_handoff_condition"] == REGISTRY_OVERRIDE_HANDOFF, item
+    assert "agent_command" not in item, item
+    assert REGISTRY_OVERRIDE_STATUS in markdown, markdown
+    assert REGISTRY_OVERRIDE_ACTION in markdown, markdown
+    assert "state_refreshed" in json.dumps(payload["run_history"], ensure_ascii=False), payload
+    assert_quota_should_run(
+        payload,
+        expected=False,
+        state="operator_gate",
+        waiting_on="user_or_controller",
+    )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
@@ -259,6 +329,12 @@ def main() -> int:
             recommended_action=DEFERRED_ACTION,
         )
         deferred_payload, deferred_markdown = collect_fixture_status(root, registry_path)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-status-registry-override-smoke-") as tmp:
+        root = Path(tmp)
+        registry_path = write_planned_registry(root)
+        append_state_refreshed_fixture(root, generated_at="2026-01-01T00:04:00+00:00")
+        set_registry_attention_override(registry_path)
+        override_payload, override_markdown = collect_fixture_status(root, registry_path)
 
     assert_planned_preview_is_not_runnable(payload, markdown)
     approved_items = approved_payload["attention_queue"]["items"]
@@ -309,6 +385,7 @@ def main() -> int:
         state="operator_gate",
         waiting_on="user_or_controller",
     )
+    assert_registry_attention_override(override_payload, override_markdown)
     print("status-markdown-smoke ok")
     return 0
 

@@ -287,6 +287,17 @@ If the refresh command was run without `--recommended-action`, the compact
 active state's `## Next Action`, including wrapped continuation lines;
 otherwise it falls back to a generic refresh notice.
 
+Registry entries may override first-screen attention with optional public-safe
+fields: `waiting_on`, `attention_status`, `recommended_action`,
+`operator_question`, and `next_handoff_condition`. Status respects this before
+classifying the latest run, so a goal with a fresh `state_refreshed` record can
+still remain in `waiting_on=user_or_controller` when the active state says a
+human or target controller decision is the real next gate. This is intended for
+state-truth corrections, not for granting project-agent execution. Global
+registry sync preserves an existing attention override when a later source for
+the same goal omits these fields; set `clear_attention_override=true` in the
+syncing registry entry to clear a stale override intentionally.
+
 For registered planned high-complexity goals with a compatible
 `*_read_only_map_v0` adapter and no run yet, status keeps the queue item in
 `waiting_on=user_or_controller`, emits an `operator_question` for the Goal

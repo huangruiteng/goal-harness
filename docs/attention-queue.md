@@ -114,6 +114,13 @@ Status treats these as Codex-ready action:
 docs without running a project adapter. The next Codex action is to inspect the
 refreshed state and continue one bounded progress segment.
 
+A registry entry can explicitly override first-screen attention with
+`waiting_on`, `attention_status`, `recommended_action`, `operator_question`, and
+`next_handoff_condition`. This lets a controller keep a refreshed goal in the
+operator lane when the latest run is fresh but the real next step is still a
+human or target-controller decision. The override changes status and quota
+eligibility, but does not grant project-agent execution.
+
 `read_only_project_map` means a connected read-only project now has a standard
 map run from `goal-harness read-only-map`. The next Codex action should use the
 map's recommended action or upgrade to a project-specific adapter when needed.

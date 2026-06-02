@@ -12,6 +12,15 @@ from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_r
 from .registry import registry_goals
 
 
+ATTENTION_OVERRIDE_FIELDS = (
+    "waiting_on",
+    "attention_status",
+    "operator_question",
+    "recommended_action",
+    "next_handoff_condition",
+)
+
+
 def now_local() -> str:
     return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
 
@@ -45,11 +54,33 @@ def sanitize_goal_for_global(goal: dict[str, Any], *, source_registry: Path, syn
     return copied
 
 
+def preserve_attention_override(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = {key: value for key, value in incoming.items() if key != "clear_attention_override"}
+    if incoming.get("clear_attention_override"):
+        return merged
+
+    preserved = False
+    for field in ATTENTION_OVERRIDE_FIELDS:
+        if merged.get(field) or not existing.get(field):
+            continue
+        merged[field] = existing[field]
+        preserved = True
+    if preserved and existing.get("attention_override_synced_from"):
+        merged["attention_override_synced_from"] = existing.get("attention_override_synced_from")
+    return merged
+
+
 def merge_goal_entries(existing: list[Any], incoming: list[dict[str, Any]]) -> tuple[list[Any], list[str], list[str]]:
     merged: list[Any] = []
     seen_incoming = {str(goal.get("id")) for goal in incoming if goal.get("id")}
     actions: list[str] = []
     synced_ids: list[str] = []
+
+    existing_by_id = {
+        str(item.get("id")): item
+        for item in existing
+        if isinstance(item, dict) and item.get("id")
+    }
 
     for item in existing:
         if isinstance(item, dict) and str(item.get("id")) in seen_incoming:
@@ -60,7 +91,10 @@ def merge_goal_entries(existing: list[Any], incoming: list[dict[str, Any]]) -> t
         goal_id = str(goal.get("id") or "")
         if not goal_id:
             continue
-        action = "updated" if any(isinstance(item, dict) and str(item.get("id")) == goal_id for item in existing) else "added"
+        existing_goal = existing_by_id.get(goal_id)
+        action = "updated" if existing_goal else "added"
+        if existing_goal:
+            goal = preserve_attention_override(existing_goal, goal)
         merged.append(goal)
         actions.append(f"{goal_id}:{action}")
         synced_ids.append(goal_id)

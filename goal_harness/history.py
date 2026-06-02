@@ -12,6 +12,13 @@ from .registry import read_json, registry_goals
 STATUS_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
 }
+REGISTRY_ATTENTION_FIELDS = (
+    "waiting_on",
+    "attention_status",
+    "operator_question",
+    "recommended_action",
+    "next_handoff_condition",
+)
 
 
 def load_registry(path: Path) -> dict[str, Any]:
@@ -100,25 +107,28 @@ def collect_history(
         meta = goal_meta.get(current_goal_id) or {}
         adapter = meta.get("adapter") if isinstance(meta.get("adapter"), dict) else {}
         quota = goal_quota_with_spend_ledger(meta, runs) if registry_member else None
-        goals.append(
-            {
-                "id": current_goal_id,
-                "domain": meta.get("domain"),
-                "status": meta.get("status") if registry_member else "legacy-runtime",
-                "registry_member": registry_member,
-                "legacy_runtime_goal": not registry_member,
-                "adapter_kind": adapter.get("kind"),
-                "adapter_status": adapter.get("status"),
-                "authority_registry": goal_authority_registry_summary(meta) if registry_member else None,
-                "quota": quota,
-                "index_path": str(index_path),
-                "index_exists": index_path.exists(),
-                "raw_index_records": raw_count,
-                "unique_runs": len(runs),
-                "latest_status_run": latest_status_run(runs),
-                "latest_runs": runs[:limit],
-            }
-        )
+        goal_record = {
+            "id": current_goal_id,
+            "domain": meta.get("domain"),
+            "status": meta.get("status") if registry_member else "legacy-runtime",
+            "registry_member": registry_member,
+            "legacy_runtime_goal": not registry_member,
+            "adapter_kind": adapter.get("kind"),
+            "adapter_status": adapter.get("status"),
+            "authority_registry": goal_authority_registry_summary(meta) if registry_member else None,
+            "quota": quota,
+            "index_path": str(index_path),
+            "index_exists": index_path.exists(),
+            "raw_index_records": raw_count,
+            "unique_runs": len(runs),
+            "latest_status_run": latest_status_run(runs),
+            "latest_runs": runs[:limit],
+        }
+        if registry_member:
+            for field in REGISTRY_ATTENTION_FIELDS:
+                if meta.get(field):
+                    goal_record[field] = meta.get(field)
+        goals.append(goal_record)
 
     all_runs.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
     return {

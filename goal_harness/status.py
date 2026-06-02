@@ -38,6 +38,12 @@ USER_OR_CONTROLLER_CLASSIFICATIONS = {
     "operator_gate_deferred",
     "operator_gate_rejected",
 }
+REGISTRY_WAITING_ON_OVERRIDES = {
+    "user_or_controller",
+    "controller",
+    "codex",
+    "external_evidence",
+}
 WATCH_CLASSIFICATION_PREFIXES = ("await_", "monitor_")
 BLOCKING_CLASSIFICATIONS = {
     "blocked_by_safety",
@@ -599,6 +605,27 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
 
     classification = str(current_run.get("classification") or "unknown")
     action = str(current_run.get("recommended_action") or "inspect the latest run and choose one next action")
+    registry_waiting_on = str(goal.get("waiting_on") or "")
+    if registry_waiting_on in REGISTRY_WAITING_ON_OVERRIDES:
+        registry_attention_fields = dict(attention_fields)
+        if goal.get("operator_question"):
+            registry_attention_fields["operator_question"] = normalize_operator_question(
+                str(goal.get("operator_question") or ""),
+                goal_id=goal_id,
+                gate=str(goal.get("operator_gate") or DEFAULT_OPERATOR_GATE),
+            )
+        if goal.get("next_handoff_condition"):
+            registry_attention_fields["next_handoff_condition"] = str(goal.get("next_handoff_condition") or "")
+        return attention_item(
+            goal_id=goal_id,
+            status=str(goal.get("attention_status") or classification),
+            waiting_on=registry_waiting_on,
+            severity="watch" if registry_waiting_on == "external_evidence" else "action",
+            recommended_action=str(goal.get("recommended_action") or action),
+            source="registry",
+            **registry_attention_fields,
+            **lifecycle_fields,
+        )
     if classification in BLOCKING_CLASSIFICATIONS:
         return attention_item(
             goal_id=goal_id,

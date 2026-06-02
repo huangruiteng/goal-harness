@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T16:36:11+08:00
+updated_at: 2026-06-02T17:03:54+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,38 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. Premium-ui is now registered in the CS-Notes private wrapper
-  registry, so the next P0 state-truth question is whether its unresolved
-  owner/SOP decision should surface as operator-gated instead of eligible.
-  Compare that against dashboard attention-cost reduction and platform
-  heartbeat stability. Keep hard gates intact.
+  choosing work. The latest state-truth slice now keeps registered goals in
+  the operator lane when the registry declares an unresolved controller gate.
+  Compare: 1) dashboard first-screen placement for operator-gated cards; 2)
+  platform heartbeat prompt alignment; 3) real adapter proof. P0 human
+  decision-loop polish should win if the UI still makes the operator gate hard
+  to find or review.
 
 ## Recent Progress
 
+- 2026-06-02T17:03:54+08:00: Added registry-level attention overrides for
+  registered goals. Optional public-safe registry fields now flow through
+  history/status: `waiting_on`, `attention_status`, `recommended_action`,
+  `operator_question`, and `next_handoff_condition`. `goal-harness status`
+  respects `waiting_on` before latest-run classification, so a fresh
+  `state_refreshed` run can still remain in `waiting_on=user_or_controller`
+  when the real next gate is a human or target-controller decision; quota
+  then returns `state=operator_gate` and `should_run=false`. Global registry
+  sync now also preserves an existing attention override when another local
+  source for the same goal syncs later without one, preventing a project-local
+  registry from wiping the controller gate. Updated `goal_harness/status.py`,
+  `goal_harness/history.py`, `goal_harness/registry.py`,
+  `goal_harness/global_registry.py`, `examples/status-markdown-smoke.py`,
+  `examples/global-registry-sync-smoke.py`, `docs/status-data-contract.md`,
+  and `docs/attention-queue.md`. Private validation applied the override to
+  one connected read-only migration goal without copying private evidence into
+  this public state. Validation: status smoke, global-sync smoke, Python
+  compileall for `goal_harness`, the full smoke suite, private registry sync,
+  live `goal-harness status` / `quota should-run` assertions for the gated
+  goal, `goal-harness check --scan-root .`, and `git diff --check`. Critic:
+  agent-facing state truth is now corrected, but the dashboard still needs to
+  make operator-gated cards obvious enough for a human to review from the first
+  screen.
 - 2026-06-02T16:36:11+08:00: Fixed the CS-Notes private wrapper registry view
   for the premium-ui migration goal. The private registry now includes
   `premium-ui-ai-search-rec-migration` as a connected read-only controller with
