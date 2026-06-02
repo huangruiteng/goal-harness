@@ -97,6 +97,19 @@ def main() -> int:
         assert goal["next_handoff_condition"] == "owner/SOP decision recorded", goal
         assert goal["source_registry"] == str(project_registry.resolve()), goal
 
+        sync_project_registry_to_global(
+            registry_path=project_registry,
+            runtime_root_override=None,
+            dry_run=False,
+        )
+        goal = find_goal(global_registry_path(runtime))
+        assert "waiting_on" not in goal, goal
+        assert "attention_status" not in goal, goal
+        assert "recommended_action" not in goal, goal
+        assert "operator_question" not in goal, goal
+        assert "next_handoff_condition" not in goal, goal
+        assert goal["source_registry"] == str(project_registry.resolve()), goal
+
     print("global-registry-sync-smoke ok")
     return 0
 

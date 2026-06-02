@@ -343,9 +343,12 @@ classifying the latest run, so a goal with a fresh `state_refreshed` record can
 still remain in `waiting_on=user_or_controller` when the active state says a
 human or target controller decision is the real next gate. This is intended for
 state-truth corrections, not for granting project-agent execution. Global
-registry sync preserves an existing attention override when a later source for
-the same goal omits these fields; set `clear_attention_override=true` in the
-syncing registry entry to clear a stale override intentionally.
+registry sync preserves an existing attention override when a different later
+source for the same goal omits these fields, so a controller-authored gate is
+not accidentally lost during ordinary project sync. When the same source
+registry syncs again and omits these fields, that source is treated as
+authoritative and the stale override is cleared. A syncing registry entry can
+also set `clear_attention_override=true` to clear an override explicitly.
 
 Todo extraction is independent of attention overrides. A goal can stay in the
 operator lane because the registry says `waiting_on=user_or_controller`, while

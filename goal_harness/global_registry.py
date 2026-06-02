@@ -54,9 +54,22 @@ def sanitize_goal_for_global(goal: dict[str, Any], *, source_registry: Path, syn
     return copied
 
 
+def same_source_registry(existing: dict[str, Any], incoming: dict[str, Any]) -> bool:
+    existing_source = existing.get("source_registry")
+    incoming_source = incoming.get("source_registry")
+    if not existing_source or not incoming_source:
+        return False
+    try:
+        return Path(str(existing_source)).expanduser().resolve() == Path(str(incoming_source)).expanduser().resolve()
+    except OSError:
+        return str(existing_source) == str(incoming_source)
+
+
 def preserve_attention_override(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     merged = {key: value for key, value in incoming.items() if key != "clear_attention_override"}
     if incoming.get("clear_attention_override"):
+        return merged
+    if same_source_registry(existing, incoming):
         return merged
 
     preserved = False

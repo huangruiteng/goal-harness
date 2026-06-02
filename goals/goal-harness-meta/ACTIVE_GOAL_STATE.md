@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T21:18:31+08:00
+updated_at: 2026-06-02T21:24:10+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,15 +45,37 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should verify the dashboard first-screen behavior against the live
-  `/status.local.json` or current in-app view. If user todos, agent todos,
-  quota, next action, and stop condition are now cleanly read from
-  `project_asset`, stop adding UI and reduce duplicate packet/panel surfaces.
-  Keep `User Todo` counts separate from project-local production-write
-  blockers.
+- Next tick should verify the live dashboard/in-app view after the global
+  registry attention override fix. Confirm the platform-migration goal now
+  appears as Codex-ready/eligible from the global control plane, while its
+  remaining user todos and production-write gates stay separately labeled. If
+  this is clean, reduce duplicate packet/panel surfaces instead of adding UI.
 
 ## Recent Progress
 
+- 2026-06-02T21:24:10+08:00: Field bug from the platform-migration controller:
+  local status and latest run correctly showed `waiting_on=codex` after the
+  owner/SOP gate was approved for safe-local/offline work, but the global
+  registry still preserved stale `waiting_on=user_or_controller` and
+  `attention_status=owner_sop_review_pending`; as a result,
+  `quota should-run --registry ~/.codex/goal-harness/registry.global.json`
+  returned a stale operator gate. Root cause: global sync preserved attention
+  overrides whenever the later source omitted those fields, even when the later
+  source was the same source registry that had become authoritative again.
+  Fixed `sync-global` so cross-source overrides are preserved, but same-source
+  sync omission clears stale override fields. Updated the data contract and
+  smoke coverage. Applied the fixed sync to the live platform-migration global
+  registry. Changed files: `goal_harness/global_registry.py`,
+  `examples/global-registry-sync-smoke.py`, `docs/status-data-contract.md`, and
+  this active state. Validation: `python examples/global-registry-sync-smoke.py`,
+  `python examples/status-markdown-smoke.py`, `python examples/quota-plan-smoke.py`,
+  `python examples/quota-contract-smoke.py`, `python -m compileall -q
+  goal_harness`, `git diff --check`, live `sync-global` for
+  `premium-ui-ai-search-rec-migration`, and live global
+  `quota should-run` now returning `should_run=true`, `waiting_on=codex`,
+  `status=state_refreshed`, source `latest_run`. Critic: this fixes the state
+  truth bug; the next useful work is visual verification and UI wording, not
+  more prompt churn.
 - 2026-06-02T21:18:31+08:00: Steering audit candidates were: P0 dashboard
   project-asset consumption, P0 human-decision loop/copy surface cleanup, and
   P1 internal-introduction polish. Chose dashboard project-asset consumption
