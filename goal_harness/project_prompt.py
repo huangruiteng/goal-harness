@@ -19,7 +19,8 @@ def shell_arg(value: str) -> str:
 
 
 def render_cli_preflight() -> str:
-    return """install_script="$HOME/goal-harness/scripts/install-local.sh"
+    return """export PATH="$HOME/.local/bin:$PATH"
+install_script="$HOME/goal-harness/scripts/install-local.sh"
 if ! command -v goal-harness >/dev/null 2>&1; then
   if [ -x "$install_script" ]; then
     "$install_script"

@@ -47,6 +47,7 @@ goal-harness new-project-prompt \
    不在 PATH，运行本机安装脚本再继续：
 
    ```bash
+   export PATH="$HOME/.local/bin:$PATH"
    install_script="$HOME/goal-harness/scripts/install-local.sh"
    if ! command -v goal-harness >/dev/null 2>&1; then
      if [ -x "$install_script" ]; then

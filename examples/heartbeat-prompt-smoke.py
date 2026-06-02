@@ -55,7 +55,11 @@ def main() -> int:
     must_have = (
         "<ACTIVE_GOAL_STATE_PATH>",
         "<GOAL_ID>",
+        'export PATH="$HOME/.local/bin:$PATH"',
+        'install_script="$HOME/goal-harness/scripts/install-local.sh"',
+        "goal-harness doctor >/dev/null",
         "goal-harness --format json quota should-run --goal-id <GOAL_ID>",
+        "If that preflight still fails",
         "should_run=false",
         "state=operator_gate",
         "gate_prompt",
@@ -85,7 +89,11 @@ def main() -> int:
     for phrase in must_have:
         assert phrase in compact_doc, phrase
     for phrase in (
+        'export PATH="$HOME/.local/bin:$PATH"',
+        'install_script="$HOME/goal-harness/scripts/install-local.sh"',
+        "goal-harness doctor >/dev/null",
         "goal-harness --format json quota should-run --goal-id public-heartbeat-goal",
+        "If that preflight still fails",
         "should_run=false",
         "state=operator_gate",
         "gate_prompt",
@@ -110,7 +118,11 @@ def main() -> int:
     assert_ordered(
         doc,
         (
-            "Before spending delivery compute, run:",
+            "Before spending delivery compute, first make the Goal Harness CLI reachable",
+            'export PATH="$HOME/.local/bin:$PATH"',
+            "goal-harness doctor >/dev/null",
+            "goal-harness --format json quota should-run --goal-id <GOAL_ID>",
+            "If that preflight still fails",
             "If the result says should_run=false",
             "state=operator_gate",
             "gate_prompt",

@@ -55,6 +55,9 @@ HEARTBEAT_PROMPT_MUST_HAVE = (
 
 def assert_quota_guard(text: str) -> None:
     normalized = " ".join(text.split())
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in text, text
+    assert 'install_script="$HOME/goal-harness/scripts/install-local.sh"' in text, text
+    assert "goal-harness doctor >/dev/null" in text, text
     assert "goal-harness --format json quota should-run --goal-id" in text, text
     positions = []
     for phrase in MUST_HAVE:

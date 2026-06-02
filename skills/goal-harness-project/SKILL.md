@@ -26,6 +26,7 @@ automatically.
 From the target project shell:
 
 ```bash
+export PATH="$HOME/.local/bin:$PATH"
 goal-harness doctor
 ```
 

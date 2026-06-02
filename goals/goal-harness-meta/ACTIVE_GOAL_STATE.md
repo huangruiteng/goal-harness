@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T18:42:16+08:00
+updated_at: 2026-06-02T18:59:02+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,38 @@ private project context.
 
 ## Next Action
 
-- Fix the heartbeat/agent prompt PATH preflight so generated automations export
-  `$HOME/.local/bin` or otherwise use an installed CLI path before running
-  `goal-harness`. This outranks the next product feature because the current
-  heartbeat shell missed `goal-harness` on PATH even though the installed
-  wrapper exists.
+- Run the next tick's steering audit after confirming heartbeat preflight stays
+  healthy. Compare the Review Packet goal-id mismatch guard, one-click operator
+  decision recording, and the next project-agent execution loop gap; choose the
+  smallest P0 slice that improves cross-project handoff without adding user
+  attention cost.
 
 ## Recent Progress
 
+- 2026-06-02T18:59:02+08:00: User objected that the heartbeat PATH skip should
+  be self-resolved instead of surfaced as a visible skip message. Fixed the
+  root cause rather than relying on a one-off absolute path. The current
+  `goal-harness-hourly-tick` automation was already hot-patched to export
+  `$HOME/.local/bin`; this slice updated the public generators so future
+  heartbeat and new-project prompts do the same. `render_cli_preflight()` now
+  prepends `$HOME/.local/bin` before testing `command -v goal-harness`, so an
+  already installed wrapper is found even when the automation shell starts with
+  a minimal PATH. `heartbeat-prompt` now embeds the CLI preflight plus
+  `goal-harness doctor` before quota guard, and explicitly treats remaining
+  preflight failure as a no-work/no-spend quiet failure. Updated docs, smoke
+  tests, and repo/installed skill guidance. Changed files:
+  `goal_harness/project_prompt.py`, `goal_harness/heartbeat_prompt.py`,
+  `docs/heartbeat-automation-prompt.md`, `docs/new-project-codex-prompt.md`,
+  `examples/heartbeat-prompt-smoke.py`, `examples/project-prompt-smoke.py`,
+  and `skills/goal-harness-project/SKILL.md`. Validation: `python
+  examples/heartbeat-prompt-smoke.py`, `python examples/project-prompt-smoke.py`,
+  `python examples/run-smokes.py`, `python -m compileall -q goal_harness`,
+  `goal-harness check --scan-root .`, `git diff --check`, and a real preflight
+  command with `export PATH="$HOME/.local/bin:$PATH"; goal-harness --format json
+  quota should-run --goal-id goal-harness-meta` all passed. Critic: current and
+  future heartbeat prompts are now PATH-self-healing; no quota spend was
+  appended for the earlier failed preflight, correctly matching the accounting
+  rule.
 - 2026-06-02T18:42:16+08:00: Steering audit candidates: P0 state/safety for
   heartbeat PATH preflight, P0 project-agent execution loop via structured
   todo injection, and P1 one-click operator decision recording. Chose the todo

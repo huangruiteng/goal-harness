@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .project_prompt import render_quota_guard_command, render_quota_spend_command
+from .project_prompt import render_cli_preflight, render_quota_guard_command, render_quota_spend_command
 
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
@@ -22,9 +22,11 @@ def build_heartbeat_prompt(
     resolved_permission_rule = permission_rule or DEFAULT_PERMISSION_RULE
     quota_guard_command = render_quota_guard_command(goal_id)
     quota_spend_command = render_quota_spend_command(goal_id, source="heartbeat")
+    cli_preflight = render_cli_preflight()
     task_body = render_heartbeat_task_body(
         goal_id=goal_id,
         active_state=active_state_text,
+        cli_preflight=cli_preflight,
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
         material_queue_rule=resolved_material_rule,
@@ -36,6 +38,7 @@ def build_heartbeat_prompt(
         "active_state": active_state_text,
         "quota_guard_command": quota_guard_command,
         "quota_spend_command": quota_spend_command,
+        "cli_preflight": cli_preflight,
         "material_queue_rule": resolved_material_rule,
         "permission_rule": resolved_permission_rule,
         "task_body": task_body,
@@ -46,6 +49,7 @@ def render_heartbeat_task_body(
     *,
     goal_id: str,
     active_state: str,
+    cli_preflight: str,
     quota_guard_command: str,
     quota_spend_command: str,
     material_queue_rule: str,
@@ -53,11 +57,18 @@ def render_heartbeat_task_body(
 ) -> str:
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-Before spending delivery compute, run:
+Before spending delivery compute, first make the Goal Harness CLI reachable in
+this automation shell, then run the quota guard:
 
 ```bash
+{cli_preflight}
 {quota_guard_command}
 ```
+
+If that preflight still fails, do not do implementation work, adapter work,
+file edits, research, project exploration, or quota spend in this turn. Return
+a quiet heartbeat `DONT_NOTIFY` response with the exact preflight failure
+reason.
 
 If the result says `should_run=false`:
 
@@ -137,4 +148,5 @@ Copy this task body into a Codex App heartbeat automation.
 - active_state: `{payload.get("active_state")}`
 - quota_guard_command: `{payload.get("quota_guard_command")}`
 - quota_spend_command: `{payload.get("quota_spend_command")}`
+- cli_preflight: `{payload.get("cli_preflight")}`
 """

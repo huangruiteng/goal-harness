@@ -44,9 +44,26 @@ Replace the placeholders before installing the automation:
 ```text
 Advance the goal described in <ACTIVE_GOAL_STATE_PATH>.
 
-Before spending delivery compute, run:
+Before spending delivery compute, first make the Goal Harness CLI reachable in
+this automation shell, then run the quota guard:
 
+export PATH="$HOME/.local/bin:$PATH"
+install_script="$HOME/goal-harness/scripts/install-local.sh"
+if ! command -v goal-harness >/dev/null 2>&1; then
+  if [ -x "$install_script" ]; then
+    "$install_script"
+    export PATH="$HOME/.local/bin:$PATH"
+  else
+    echo "goal-harness is not on PATH; clone the Goal Harness repo and run scripts/install-local.sh" >&2
+    exit 1
+  fi
+fi
+goal-harness doctor >/dev/null
 goal-harness --format json quota should-run --goal-id <GOAL_ID>
+
+If that preflight still fails, do not do implementation work, adapter work,
+file edits, research, project exploration, or quota spend in this turn. Return
+a quiet heartbeat DONT_NOTIFY response with the exact preflight failure reason.
 
 If the result says should_run=false:
 
@@ -120,13 +137,15 @@ put the lifecycle in the automation task body:
 Create a heartbeat automation every <INTERVAL> for the current thread.
 
 Task:
-Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work, run
-`goal-harness --format json quota should-run --goal-id <GOAL_ID>`. If it returns
-`should_run=false`, ask about operator gates with NOTIFY using `gate_prompt`
-unless the same unresolved gate was already surfaced recently. If it returns
-`state=operator_gate` plus `safe_bypass_allowed=true`, avoid the gated command
-and do at most one independent read-only steering/analysis step after the gate
-has already been surfaced.
+Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work,
+export `$HOME/.local/bin` onto PATH and run `goal-harness doctor`; if the CLI is
+still unavailable, quietly report that preflight failure and do no work. Then
+run `goal-harness --format json quota should-run --goal-id <GOAL_ID>`. If it
+returns `should_run=false`, ask about operator gates with NOTIFY using
+`gate_prompt` unless the same unresolved gate was already surfaced recently. If
+it returns `state=operator_gate` plus `safe_bypass_allowed=true`, avoid the
+gated command and do at most one independent read-only steering/analysis step
+after the gate has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
 the priority stack, apply a continuation check for repeated topics, then do one
 bounded verifiable step, validate it, write back changed files / validation /
@@ -142,6 +161,8 @@ turn.
 For every automatic heartbeat turn, the agent-facing checklist is:
 
 1. Guard first: `quota should-run`.
+   If `goal-harness` is not initially on PATH, export `$HOME/.local/bin:$PATH`
+   and run the local installer fallback before declaring preflight failure.
 2. If `should_run=false` with `state=operator_gate`, ask the user/controller the
    current gate unless the same unresolved gate was already surfaced recently.
 3. If the gate was already surfaced and `safe_bypass_allowed=true`, either take
