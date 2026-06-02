@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T08:31:45+08:00
+updated_at: 2026-06-02T08:40:09+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,13 +27,30 @@ private project context.
 
 ## Next Action
 
-- Add one executable heartbeat-flow smoke for the full quota lifecycle:
-  `quota should-run` guard, bounded work marker, validation/state refresh,
-  exactly one `quota spend-slot --execute`, and a follow-up `should-run`
-  showing derived spend while registry policy remains unchanged.
+- Add a reusable public heartbeat automation prompt/template that includes the
+  executable lifecycle now protected by smoke: pre-turn `quota should-run`,
+  skip-without-compute, bounded work, validation/state refresh, exactly one
+  post-turn `quota spend-slot --execute`, and a compact final report.
 
 ## Recent Progress
 
+- 2026-06-02T08:40:09+08:00: Added
+  `examples/heartbeat-quota-flow-smoke.py`, an executable dependency-free smoke
+  for the full heartbeat quota lifecycle. The smoke creates a temporary
+  public-safe project, registry, runtime, and active state; runs CLI
+  `quota should-run` and verifies the goal is eligible at 0/2 slots; writes a
+  bounded heartbeat work marker; validates it with `goal-harness check`; appends
+  a state-only `refresh-state` run; asserts no spend event was written before
+  accounting; executes exactly one `quota spend-slot --source heartbeat
+  --execute`; verifies the runtime index has exactly one `quota_slot_spent`
+  event; runs a follow-up `quota should-run` and observes derived
+  `spent_slots=1/2` with `status=quota_slot_spent`; and checks the registry
+  stayed byte-for-byte unchanged. Validation: direct heartbeat quota flow smoke
+  passed; aggregate public smokes passed with 6 scripts; Python compile passed;
+  public contract check passed; `git diff --check` passed. Critic: the
+  lifecycle is now executable, but scheduled heartbeat setup still needs a
+  reusable prompt/template so other goals do not have to rediscover the guard
+  and post-turn spend order.
 - 2026-06-02T08:31:45+08:00: Standardized the post-turn spend accounting
   protocol in agent-facing prompts and public docs. The generated
   `new-project-prompt` now includes both the pre-turn `quota should-run` guard
