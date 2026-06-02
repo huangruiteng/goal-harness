@@ -75,6 +75,16 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
+        "`todo_write_hint`",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "`goal-harness todo add --role user` instead of hiding it in `Next Action`",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
         "ask the user or target controller the concrete gate question instead of silently skipping",
         label="quota doc",
     )

@@ -35,6 +35,12 @@ MUST_HAVE = (
     "才执行该命令。",
     "如果 `should_run=true` 但没有 `agent_command`",
     "只按 `recommended_action` 选择下一个安全只读动作。",
+    "如果你通过 read-only 分析、review doc、gate checklist 或 P0/P1 steering",
+    "用户/owner 待办",
+    "不要只写在 `Next Action`、外部 review 文档或聊天里。",
+    "goal-harness todo add --goal-id",
+    "--role user --text \"<public-safe user/owner action>\"",
+    "agent 自己的后续动作写成 `--role agent`",
 )
 SPEND_MUST_HAVE = (
     "validation 和必要的 `refresh-state` 完成后",

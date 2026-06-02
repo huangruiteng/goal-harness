@@ -562,6 +562,11 @@ def assert_operator_gate_should_run(status_payload: dict) -> None:
     assert payload["notify_user_on_gate"] is True, payload
     assert payload["operator_question"] == "是否同意 needs-operator 继续 gated delivery？", payload
     assert payload["user_todo_summary"]["open_count"] == 1, payload
+    assert payload["todo_write_hint"]["section"] == "User Todo / Owner Review Reading Queue", payload
+    assert "goal-harness todo add --goal-id needs-operator --role user" in payload["todo_write_hint"][
+        "user_todo_command_template"
+    ], payload
+    assert "Next Action" in payload["todo_write_hint"]["rule"], payload
     assert "请用户/控制器确认当前 gate" in payload["gate_prompt"], payload
     assert "Confirm the operator gate." in payload["gate_prompt"], payload
 

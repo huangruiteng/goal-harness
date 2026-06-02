@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T19:17:00+08:00
+updated_at: 2026-06-02T19:38:12+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,16 +27,53 @@ private project context.
 
 ## Next Action
 
-- Next tick should move to the P0 project-agent execution loop: improve the
-  approved-command handoff after an `operator_gate_approved` run, so the target
-  project agent gets one short, goal-id-guarded command/context and the user
-  does not have to relay a long packet. Keep the first slice read-only and
-  smoke-tested; do not touch real project repos. Losing candidate to remember:
-  one-click durable operator-gate recording in the dashboard can wait until the
-  handoff after approval is less manual.
+- Next tick should stay in the P0 project-agent execution loop, but shift from
+  writing more copy to adoption proof: verify, with a sanitized fixture or live
+  public-safe status output, that target agents see `todo_write_hint`, use
+  `goal-harness todo add --role user` for newly discovered owner/user work,
+  and only receive approved `agent_command` after an `operator_gate_approved`
+  run. Keep it read-only/smoke-tested; do not touch real project repos. Losing
+  candidate to remember: dashboard one-click durable operator-gate append is
+  still useful, but secondary to proving agents actually write user todos.
 
 ## Recent Progress
 
+- 2026-06-02T19:38:12+08:00: Steering audit candidates: P0 approved-command
+  handoff after durable operator gate approval, P0 user-todo writeback
+  friendliness for project agents, and P1 dashboard affordance polish. I began
+  with the approved-command handoff, then the user surfaced a sharper field
+  failure: a project agent had analyzed P0 owner/user work but hid it in
+  `Next Action` / review docs instead of adding dashboard-visible user todos.
+  Kept the slice within the same P0 project-agent execution loop and made the
+  contract agent-facing rather than UI-only. `review-packet` now detects
+  `operator_gate_approved` plus `agent_command` and emits a short
+  goal-id-guarded handoff that says the gate is already approved, only the
+  listed read-only/dry-run command may run, and write/run-history/production
+  escalation must stop. `quota should-run` now always returns a
+  `todo_write_hint` with exact `goal-harness todo add --role user|agent`
+  command templates, so agents who only read the guard JSON see how to write
+  newly discovered user/owner work into the canonical active-state section.
+  New-project and heartbeat prompts now explicitly forbid hiding user todos in
+  `Next Action`, review docs, or chat, and tell agents to use the todo CLI plus
+  `refresh-state` when dashboard needs the update. Changed files:
+  `goal_harness/review_packet.py`, `goal_harness/quota.py`,
+  `goal_harness/project_prompt.py`, `goal_harness/heartbeat_prompt.py`,
+  `docs/new-project-codex-prompt.md`,
+  `docs/heartbeat-automation-prompt.md`, `docs/quota-allocation.md`,
+  `examples/review-packet-cli-smoke.py`,
+  `examples/project-prompt-smoke.py`,
+  `examples/heartbeat-prompt-smoke.py`,
+  `examples/quota-plan-smoke.py`, `examples/quota-contract-smoke.py`, and
+  this active state. Validation: `python examples/project-prompt-smoke.py`,
+  `python examples/heartbeat-prompt-smoke.py`, `python
+  examples/quota-plan-smoke.py`, `python examples/quota-contract-smoke.py`,
+  `python examples/review-packet-cli-smoke.py`, `python examples/run-smokes.py`,
+  `python -m compileall -q goal_harness`, `goal-harness check --scan-root .`,
+  `git diff --check`, and live `goal-harness --format json quota should-run
+  --goal-id goal-harness-meta` showing `todo_write_hint`. Critic: this fixes
+  the contract that made agents miss user todos, but the next proof should
+  inspect a target-project run/automation prompt or sanitized fixture to ensure
+  adoption, not keep adding more textual guidance.
 - 2026-06-02T19:17:00+08:00: Steering audit candidates: P0 dashboard copy
   surface for durable gate recording, P0 project-agent approved-command
   handoff, and P1 dashboard polish. Chose the dashboard copy slice because the

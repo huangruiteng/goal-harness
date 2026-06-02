@@ -272,6 +272,24 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _todo_write_hint(goal_id: str) -> dict[str, str]:
+    return {
+        "rule": (
+            "If your analysis discovers a concrete user/owner action, write it to the active-state "
+            "User Todo section instead of hiding it in Next Action, review docs, or chat."
+        ),
+        "user_todo_command_template": (
+            f"goal-harness todo add --goal-id {goal_id} --role user "
+            "--text '<public-safe user/owner action>'"
+        ),
+        "agent_todo_command_template": (
+            f"goal-harness todo add --goal-id {goal_id} --role agent "
+            "--text '<public-safe agent action>'"
+        ),
+        "section": "User Todo / Owner Review Reading Queue",
+    }
+
+
 def _build_gate_prompt(item: dict[str, Any]) -> str | None:
     question = str(item.get("operator_question") or "").strip()
     recommended_action = str(item.get("recommended_action") or "").strip()
@@ -448,6 +466,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "source": item.get("source"),
             "recommended_action": item.get("recommended_action"),
             "plan_summary": plan.get("summary"),
+            "todo_write_hint": _todo_write_hint(safe_goal_id),
         }
         if item.get("operator_question"):
             payload["operator_question"] = item.get("operator_question")
@@ -906,6 +925,10 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"open={user_todo_summary.get('open_count')} "
             f"total={user_todo_summary.get('total_count')}"
         )
+    todo_write_hint = payload.get("todo_write_hint") if isinstance(payload.get("todo_write_hint"), dict) else {}
+    if todo_write_hint:
+        lines.append(f"- todo_write_hint: {todo_write_hint.get('rule')}")
+        lines.append(f"- user_todo_command_template: `{todo_write_hint.get('user_todo_command_template')}`")
     if payload.get("recommended_action"):
         lines.append(f"- recommended_action: {payload.get('recommended_action')}")
     if payload.get("agent_command"):

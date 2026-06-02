@@ -101,7 +101,13 @@ If the result says should_run=true:
 4. Do that step only. Keep public/private boundaries intact.
 5. Run the smallest useful validation.
 6. Write back changed files, validation, critic, and next action to the active
-   state.
+   state. If the step discovers a concrete user/owner action, do not hide it in
+   `Next Action`, a review doc, or chat. Add it to the active-state user todo
+   queue with:
+
+   goal-harness todo add --goal-id <GOAL_ID> --role user --text "<public-safe user/owner action>"
+
+   Use `--role agent` for project-agent follow-up work.
 7. If the dashboard or controller needs to see a state-only update, run:
 
    goal-harness refresh-state --goal-id <GOAL_ID>

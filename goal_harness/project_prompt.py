@@ -250,6 +250,16 @@ def render_prompt_text(
    如果 `should_run=true` 但没有 `agent_command`，只按 `recommended_action` 选择下一个安全只读动作。
    如果命令非零，fail closed，先修 `goal-harness doctor` / `goal-harness status`。
    这个 guard 不等于写权限、不绕过 operator gate、也不替代 human reward。
+   任何时候，如果你通过 read-only 分析、review doc、gate checklist 或 P0/P1 steering 发现新的
+   用户/owner 待办，不要只写在 `Next Action`、外部 review 文档或聊天里。立刻把它写进 active state
+   的 user todo 权威区：
+
+```bash
+goal-harness todo add --goal-id {goal_id} --role user --text "<public-safe user/owner action>"
+```
+
+   agent 自己的后续动作写成 `--role agent`。写入后如果 dashboard 需要看到最新状态，运行
+   `goal-harness refresh-state --goal-id {goal_id}`。
 6. 如果要给这个项目设置 recurring Codex App heartbeat，不要手抄 guard 和 spend 协议；先生成 task body，再把输出复制进 automation：
 
 ```bash

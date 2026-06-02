@@ -211,9 +211,38 @@ def target_goal_guard(goal_id: str) -> str:
     )
 
 
-def project_agent_section(kind: str, command: str, goal_id: str) -> str:
+def operator_gate_approved_handoff(item: dict[str, Any] | None, goal: dict[str, Any] | None) -> bool:
+    if not isinstance(item, dict) or not item.get("agent_command"):
+        return False
+    if str(item.get("status") or "") == "operator_gate_approved":
+        return True
+    run = latest_run(goal)
+    operator_gate = run.get("operator_gate") if isinstance(run, dict) else None
+    return (
+        isinstance(operator_gate, dict)
+        and operator_gate.get("decision") == "approve"
+        and bool(operator_gate.get("agent_command"))
+    )
+
+
+def project_agent_section(
+    kind: str,
+    command: str,
+    goal_id: str,
+    *,
+    approved_operator_gate: bool = False,
+) -> str:
     goal_guard = target_goal_guard(goal_id)
-    if kind == "reward":
+    if approved_operator_gate:
+        lines = [
+            goal_guard,
+            "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
+            "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
+            "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。",
+            "",
+            command_block(command),
+        ]
+    elif kind == "reward":
         lines = [
             goal_guard,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
@@ -264,11 +293,18 @@ def build_review_packet(
     question = str(item.get("operator_question") or prompt["question"]) if isinstance(item, dict) else prompt["question"]
     summary = str(item.get("recommended_action") or "当前状态源没有对应的 action card。") if isinstance(item, dict) else "当前状态源没有对应的 action card。"
     command = project_agent_command(status_payload, goal_id, kind, item)
+    approved_handoff = operator_gate_approved_handoff(item, goal)
     gate_commands = operator_gate_decision_commands(status_payload, goal_id) if kind == "controller" else {}
     gate_command = gate_commands.get("approve") if gate_commands else None
     decision = suggested_decision(kind, item, goal_id)
     reply = controller_reply(goal_id) if kind == "controller" else prompt["reply"]
-    agent_text = project_agent_section(kind, command, goal_id)
+    boundary = prompt["boundary"]
+    if approved_handoff:
+        question = "operator gate 已批准；是否把短交接发给目标项目 Agent？"
+        decision = "直接转发给项目 Agent；不追加写权限、主控接管或生产动作授权。"
+        reply = "转发下方【给项目 Agent】即可。"
+        boundary = "这只是执行已批准的只读/dry-run agent_command；如需写入或更高权限，项目 Agent 必须再次停下。"
+    agent_text = project_agent_section(kind, command, goal_id, approved_operator_gate=approved_handoff)
     type_label = {
         "reward": "Reward",
         "controller": "Controller",
@@ -287,7 +323,7 @@ def build_review_packet(
         f"问题：{question}",
         f"建议判断：{decision}",
         f"回复：{reply}",
-        f"边界：{prompt['boundary']}",
+        f"边界：{boundary}",
     ]
     if gate_command:
         lines.extend(
@@ -318,6 +354,8 @@ def build_review_packet(
         "question": question,
         "suggested_decision": decision,
         "project_agent_command": command,
+        "project_agent_handoff": agent_text,
+        "operator_gate_approved_handoff": approved_handoff,
         "operator_gate_dry_run_command": gate_command,
         "operator_gate_decision_commands": gate_commands,
         "packet": "\n".join(lines),

@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOAL_ID = "planned-main-control"
+APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -55,6 +56,44 @@ def write_planned_registry(root: Path) -> Path:
         encoding="utf-8",
     )
     return registry_path
+
+
+def append_operator_gate_approval_fixture(root: Path) -> None:
+    run_dir = root / "runtime" / "goals" / GOAL_ID / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    generated_at = "2026-01-01T00:01:00+00:00"
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-operator-gate.json"
+    markdown_path = run_dir / f"{compact_time}-operator-gate.md"
+    record = {
+        "generated_at": generated_at,
+        "goal_id": GOAL_ID,
+        "classification": "operator_gate_approved",
+        "recommended_action": "把已批准的 agent_command 发给目标项目 agent；这不是写权限授权",
+        "health_check": "fixture operator_gate decision=approve; agent_command 1/1",
+        "operator_gate": {
+            "recorded_at": generated_at,
+            "gate": "read_only_map_opt_in",
+            "decision": "approve",
+            "operator_question": f"是否同意 `{GOAL_ID}` 先执行 read-only map opt-in？",
+            "reason_summary": f"同意 {GOAL_ID} 先做 read-only map dry-run，不授权写入或生产动作",
+            "agent_command": APPROVED_COMMAND,
+        },
+    }
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture operator gate approval\n", encoding="utf-8")
+    with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    **record,
+                    "json_path": str(json_path),
+                    "markdown_path": str(markdown_path),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
 
 def run_cli(root: Path, registry_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -142,6 +181,56 @@ def main() -> int:
         assert payload["project_agent_command"], payload
         assert "转发条件" in payload["packet"], payload
         assert not run_dir.exists(), "json review-packet must not write runtime runs"
+
+        append_operator_gate_approval_fixture(root)
+        before_files = sorted(path.name for path in run_dir.iterdir())
+        approved_markdown_result = run_cli(
+            root,
+            registry_path,
+            "review-packet",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(root / "project"),
+        )
+        approved_packet = approved_markdown_result.stdout
+        assert "类型：Codex" in approved_packet, approved_packet
+        assert "问题：operator gate 已批准；是否把短交接发给目标项目 Agent？" in approved_packet, approved_packet
+        assert "建议判断：直接转发给项目 Agent；不追加写权限、主控接管或生产动作授权。" in approved_packet, approved_packet
+        assert "回复：转发下方【给项目 Agent】即可。" in approved_packet, approved_packet
+        assert "这只是执行已批准的只读/dry-run agent_command" in approved_packet, approved_packet
+        assert "【用户本地 Gate 记录草稿】" not in approved_packet, approved_packet
+        assert "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。" in approved_packet, approved_packet
+        assert "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。" in approved_packet, approved_packet
+        assert "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。" in approved_packet, approved_packet
+        assert APPROVED_COMMAND in approved_packet, approved_packet
+        assert_order(
+            approved_packet,
+            ["【人只需判断】", "operator gate 已批准", "【给项目 Agent】", "operator gate 已记录为 approve", APPROVED_COMMAND],
+        )
+
+        approved_json_result = run_cli(
+            root,
+            registry_path,
+            "--format",
+            "json",
+            "review-packet",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(root / "project"),
+        )
+        approved_payload = json.loads(approved_json_result.stdout)
+        assert approved_payload["ok"] is True, approved_payload
+        assert approved_payload["kind"] == "codex", approved_payload
+        assert approved_payload["operator_gate_approved_handoff"] is True, approved_payload
+        assert approved_payload["project_agent_command"] == APPROVED_COMMAND, approved_payload
+        assert approved_payload["project_agent_handoff"], approved_payload
+        assert "operator gate 已记录为 approve" in approved_payload["project_agent_handoff"], approved_payload
+        assert approved_payload["operator_gate_dry_run_command"] is None, approved_payload
+        assert approved_payload["operator_gate_decision_commands"] == {}, approved_payload
+        after_files = sorted(path.name for path in run_dir.iterdir())
+        assert after_files == before_files, "approved review-packet must not write runtime runs"
 
     print("review-packet-cli-smoke ok")
     return 0

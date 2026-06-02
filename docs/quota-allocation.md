@@ -229,6 +229,10 @@ or `user_todo_summary` when those fields are available. A heartbeat should use
 that prompt to ask the user or target controller the concrete gate question
 instead of silently skipping, unless the same unresolved gate was already asked
 in the recent visible thread.
+For every registered goal, `quota should-run` also includes a `todo_write_hint`
+so agent executors know to write newly discovered user/owner work with
+`goal-harness todo add --role user` instead of hiding it in `Next Action`,
+review docs, or chat.
 Unknown goals or status collection failures return non-zero so automations fail
 closed.
 
