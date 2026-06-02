@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T12:29:18+08:00
+updated_at: 2026-06-02T12:39:08+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,28 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. One stale main-control automation has been migrated to the
-  generated heartbeat lifecycle and now fail-closes on the operator gate.
-  Prefer comparing: whether to ask for/record the `agent-harness-main-control`
-  read-only-map opt-in, whether any remaining stale automations should be
-  migrated, or whether dashboard attention-cost reduction is now higher-value.
+  choosing work. The premature agent-harness main-control automation migration
+  has been reverted, and the platform-migration controller now has the
+  generated heartbeat lifecycle. Prefer comparing: platform migration heartbeat
+  behavior against its operator gate, whether to ask for/record the
+  `agent-harness-main-control` read-only-map opt-in, or dashboard
+  attention-cost reduction.
 
 ## Recent Progress
 
+- 2026-06-02T12:39:08+08:00: User corrected the previous automation migration:
+  `agent-harness-main-control` is still too complex to migrate, while the
+  platform migration controller should receive the generated Goal Harness
+  heartbeat first. Reverted the local agent-harness main-control automation to
+  its original short prompt and created a new platform migration heartbeat for
+  `premium-ui-ai-search-rec-migration` using the generated lifecycle: quota
+  should-run guard, quiet skip, steering audit, bounded work, validation,
+  refresh-state, and exactly one spend-slot after a completed turn. Validation:
+  local automation config now shows the agent-harness main-control prompt back
+  to the original short form; the new platform migration heartbeat points at
+  `premium-ui-ai-search-rec-migration` and its project active state. Critic:
+  keep agent-harness main-control on manual/operator-gated read-only opt-in
+  until its complexity is handled deliberately.
 - 2026-06-02T12:29:18+08:00: Migrated one stale local main-control automation
   from a short "advance TODO" style prompt to the generated Goal Harness
   heartbeat lifecycle. The updated automation now advances
