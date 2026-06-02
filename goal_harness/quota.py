@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -14,6 +18,28 @@ QUOTA_STATE_ORDER = (
     "throttled",
     "paused",
 )
+QUOTA_SLOT_SPENT_CLASSIFICATION = "quota_slot_spent"
+DEFAULT_SLOT_SPEND_SOURCE = "heartbeat"
+VALID_SLOT_SPEND_SOURCES = {"heartbeat", "controller", "adapter"}
+
+
+def _now_local() -> str:
+    return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
+
+
+def _run_file_stem(generated_at: str) -> str:
+    return re.sub(r"[^0-9A-Za-z-]+", "-", generated_at).strip("-")
+
+
+def _validate_goal_id_path_segment(goal_id: str) -> str:
+    value = goal_id.strip()
+    if not value:
+        raise ValueError("goal id is required")
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError("goal id must be a single path segment")
+    if Path(value).name != value:
+        raise ValueError("goal id must not include path traversal")
+    return value
 
 
 def _number(value: Any, *, default: float) -> float:
@@ -393,6 +419,119 @@ def build_quota_slot_preview(
     }
 
 
+def _compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    quota = decision.get("quota") if isinstance(decision.get("quota"), dict) else {}
+    return {
+        "should_run": bool(decision.get("should_run")),
+        "state": str(decision.get("state") or ""),
+        "compute": quota.get("compute"),
+        "window_hours": quota.get("window_hours"),
+        "spent_slots": quota.get("spent_slots"),
+        "allowed_slots": quota.get("allowed_slots"),
+    }
+
+
+def build_quota_slot_spend_event(
+    preview: dict[str, Any],
+    *,
+    source: str = DEFAULT_SLOT_SPEND_SOURCE,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    if not preview.get("ok"):
+        raise ValueError(preview.get("reason") or "quota slot spend requires an eligible preview")
+    safe_source = str(source or DEFAULT_SLOT_SPEND_SOURCE).strip()
+    if safe_source not in VALID_SLOT_SPEND_SOURCES:
+        raise ValueError(f"quota slot spend source must be one of: {', '.join(sorted(VALID_SLOT_SPEND_SOURCES))}")
+    before = preview.get("before") if isinstance(preview.get("before"), dict) else {}
+    after = preview.get("after") if isinstance(preview.get("after"), dict) else {}
+    slots = max(1, _int_number(preview.get("slots"), default=1))
+    before_compact = _compact_quota_decision(before)
+    after_compact = _compact_quota_decision(after)
+    if before_compact["should_run"] is not True or before_compact["state"] != "eligible":
+        raise ValueError("quota slot spend requires a fresh eligible quota should-run decision")
+    if _int_number(after_compact.get("spent_slots"), default=0) != _int_number(
+        before_compact.get("spent_slots"), default=0
+    ) + slots:
+        raise ValueError("after.spent_slots must equal before.spent_slots + slots")
+
+    return {
+        "generated_at": generated_at or _now_local(),
+        "goal_id": preview.get("goal_id"),
+        "classification": QUOTA_SLOT_SPENT_CLASSIFICATION,
+        "recommended_action": after.get("recommended_action") or "inspect next quota should-run decision",
+        "health_check": "quota should-run eligible; quota slot spend event public-safe",
+        "quota_event": {
+            "event_type": QUOTA_SLOT_SPENT_CLASSIFICATION,
+            "source": safe_source,
+            "slots": slots,
+            "reason_summary": f"{slots} automatic agent slot(s) completed under an eligible quota guard",
+            "before": before_compact,
+            "after": after_compact,
+        },
+    }
+
+
+def spend_quota_slot(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    slots: int = 1,
+    execute: bool = False,
+    source: str = DEFAULT_SLOT_SPEND_SOURCE,
+) -> dict[str, Any]:
+    safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    preview = build_quota_slot_preview(status_payload, goal_id=safe_goal_id, slots=slots)
+    if not preview.get("ok"):
+        return preview
+
+    generated_at = _now_local()
+    record = build_quota_slot_spend_event(preview, source=source, generated_at=generated_at)
+    raw_runtime_root = status_payload.get("runtime_root")
+    if not raw_runtime_root:
+        raise ValueError("status payload does not include runtime_root")
+    runtime_root = Path(str(raw_runtime_root)).expanduser()
+    runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
+    stem = _run_file_stem(generated_at)
+    json_path = runs_dir / f"{stem}.json"
+    markdown_path = runs_dir / f"{stem}.md"
+    index_path = runs_dir / "index.jsonl"
+    index_record = {
+        "generated_at": generated_at,
+        "goal_id": safe_goal_id,
+        "classification": QUOTA_SLOT_SPENT_CLASSIFICATION,
+        "recommended_action": record["recommended_action"],
+        "health_check": record["health_check"],
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+    }
+
+    payload = {
+        **preview,
+        "dry_run": not execute,
+        "appended": execute,
+        "registry_mutated": False,
+        "source": record["quota_event"]["source"],
+        "classification": QUOTA_SLOT_SPENT_CLASSIFICATION,
+        "generated_at": generated_at,
+        "quota_event": record["quota_event"],
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "index_path": str(index_path),
+        "reason": (
+            f"{'appended' if execute else 'dry-run preview'} quota slot spend event: "
+            f"{safe_goal_id} {record['quota_event']['before']['spent_slots']}->"
+            f"{record['quota_event']['after']['spent_slots']} slots"
+        ),
+    }
+    if execute:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        markdown_path.write_text(render_quota_slot_preview_markdown(payload) + "\n", encoding="utf-8")
+        with index_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+    return payload
+
+
 def render_quota_markdown(payload: dict[str, Any]) -> str:
     title = "Quota Plan" if payload.get("mode") == "plan" else "Quota Status"
     lines = [
@@ -493,11 +632,16 @@ def render_quota_slot_preview_markdown(payload: dict[str, Any]) -> str:
         f"- ok: `{payload.get('ok')}`",
         f"- dry_run: `{payload.get('dry_run')}`",
         f"- goal_id: `{payload.get('goal_id')}`",
+        f"- classification: `{payload.get('classification') or QUOTA_SLOT_SPENT_CLASSIFICATION}`",
         f"- slots: `{payload.get('slots')}`",
         f"- appended: `{payload.get('appended')}`",
         f"- registry_mutated: `{payload.get('registry_mutated')}`",
         f"- would_throttle: `{payload.get('would_throttle')}`",
     ]
+    if payload.get("json_path"):
+        lines.append(f"- json_path: `{payload.get('json_path')}`")
+    if payload.get("index_path"):
+        lines.append(f"- index_path: `{payload.get('index_path')}`")
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")
     if before:

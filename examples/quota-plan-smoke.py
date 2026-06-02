@@ -14,7 +14,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.quota import build_quota_plan, build_quota_should_run, build_quota_slot_preview, render_quota_markdown  # noqa: E402
+from goal_harness.quota import (  # noqa: E402
+    build_quota_plan,
+    build_quota_should_run,
+    build_quota_slot_preview,
+    render_quota_markdown,
+)
 
 
 def goal(
@@ -302,7 +307,6 @@ def run_cli_slot_preview(root: Path) -> tuple[dict, dict]:
             "near-limit-half",
             "--slots",
             "1",
-            "--dry-run",
             "--scan-path",
             str(project),
         ],
@@ -326,6 +330,39 @@ def run_cli_slot_preview(root: Path) -> tuple[dict, dict]:
         text=True,
     )
     return json.loads(preview_result.stdout), json.loads(should_run_result.stdout)
+
+
+def run_cli_slot_spend_execute(root: Path) -> dict:
+    registry_path, runtime, project = write_cli_fixture(root)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "goal_harness.cli",
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime),
+            "--format",
+            "json",
+            "quota",
+            "spend-slot",
+            "--goal-id",
+            "near-limit-half",
+            "--slots",
+            "1",
+            "--source",
+            "heartbeat",
+            "--execute",
+            "--scan-path",
+            str(project),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
 
 def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
@@ -410,6 +447,41 @@ def assert_dry_run_left_cli_fixture_unchanged(payload: dict) -> None:
     assert payload["quota"]["allowed_slots"] == 12, payload
 
 
+def assert_slot_spend_execute(payload: dict) -> None:
+    quota_event = payload["quota_event"]
+    before = quota_event["before"]
+    after = quota_event["after"]
+    json_path = Path(payload["json_path"])
+    index_path = Path(payload["index_path"])
+
+    assert payload["ok"] is True, payload
+    assert payload["dry_run"] is False, payload
+    assert payload["appended"] is True, payload
+    assert payload["registry_mutated"] is False, payload
+    assert payload["classification"] == "quota_slot_spent", payload
+    assert payload["source"] == "heartbeat", payload
+    assert json_path.exists(), payload
+    assert index_path.exists(), payload
+    assert quota_event["event_type"] == "quota_slot_spent", payload
+    assert quota_event["slots"] == 1, payload
+    assert before["should_run"] is True, payload
+    assert before["state"] == "eligible", payload
+    assert before["spent_slots"] == 11, payload
+    assert after["spent_slots"] == 12, payload
+    assert after["allowed_slots"] == 12, payload
+    assert after["state"] == "throttled", payload
+    assert after["should_run"] is False, payload
+
+    record = json.loads(json_path.read_text(encoding="utf-8"))
+    assert record["classification"] == "quota_slot_spent", record
+    assert record["quota_event"] == quota_event, record
+    forbidden = {"human_reward", "operator_gate", "write_control", "private_evidence", "agent_command"}
+    assert forbidden.isdisjoint(record), record
+    assert forbidden.isdisjoint(record["quota_event"]), record
+    index_lines = index_path.read_text(encoding="utf-8").splitlines()
+    assert any('"classification": "quota_slot_spent"' in line for line in index_lines), index_lines
+
+
 def main() -> int:
     status_payload = build_status_fixture()
     plan = build_quota_plan(status_payload, mode="plan")
@@ -426,6 +498,8 @@ def main() -> int:
         slot_preview, should_run_after_preview = run_cli_slot_preview(Path(tmp))
     assert_slot_preview(slot_preview)
     assert_dry_run_left_cli_fixture_unchanged(should_run_after_preview)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-quota-slot-execute-smoke-") as tmp:
+        assert_slot_spend_execute(run_cli_slot_spend_execute(Path(tmp)))
     print("quota-plan-smoke ok")
     return 0
 

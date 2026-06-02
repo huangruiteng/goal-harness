@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T08:03:30+08:00
+updated_at: 2026-06-02T08:12:26+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,14 +27,29 @@ private project context.
 
 ## Next Action
 
-- Implement the smallest append-only quota slot spend writer behind an explicit
-  execute flag. Default to dry-run, require a fresh eligible `quota should-run`
-  decision, append only the compact `quota_slot_spent` event, and keep reward,
-  operator gate, write-control, private evidence, and production identifiers
-  out of the event.
+- Teach status/quota planning to derive current `spent_slots` from compact
+  `quota_slot_spent` runtime events. Keep registry quota as the policy source,
+  event history as the spend source, and prove that an executed spend changes
+  the next `quota should-run` result without mutating registry.
 
 ## Recent Progress
 
+- 2026-06-02T08:12:26+08:00: Implemented the smallest append-only quota slot
+  spend writer. `goal-harness quota spend-slot --goal-id <goal-id> --slots 1`
+  now defaults to dry-run, while `--execute` appends a compact
+  `quota_slot_spent` runtime event after a fresh eligible `quota should-run`
+  decision. The writer records before/after quota state, source, slot count,
+  JSON/Markdown paths, and index entry; it leaves registry, reward overlays,
+  operator gates, write-control, private evidence, and production identifiers
+  untouched. Updated `docs/quota-allocation.md` to document the default dry-run
+  and explicit execute behavior, and extended `examples/quota-plan-smoke.py` to
+  verify both default dry-run and execute over a temporary public-safe
+  registry/runtime. Validation: direct quota-plan smoke passed; direct quota
+  contract smoke passed; aggregate public smokes passed with 5 scripts; Python
+  compile passed; public contract check passed; `git diff --check` passed.
+  Critic: the writer now creates durable spend events, but status/quota still
+  does not derive current spent slots from those events, so the next executable
+  gap is spend-ledger derivation rather than another write command.
 - 2026-06-02T08:03:30+08:00: Defined the public runtime event contract for a
   future real quota slot spend write path. `docs/quota-allocation.md` now names
   `classification=quota_slot_spent`, the nested `quota_event` fields, the

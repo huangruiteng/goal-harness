@@ -37,10 +37,10 @@ from .project_map import (
 from .quota import (
     build_quota_plan,
     build_quota_should_run,
-    build_quota_slot_preview,
     render_quota_markdown,
     render_quota_should_run_markdown,
     render_quota_slot_preview_markdown,
+    spend_quota_slot,
 )
 from .registry import inspect_registry, render_registry_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
@@ -332,11 +332,13 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         choices=["status", "plan", "should-run", "spend-slot"],
         default="status",
-        help="Use status for all groups, plan for next-turn groups, should-run for one goal, or spend-slot for a dry-run slot preview.",
+        help="Use status for all groups, plan for next-turn groups, should-run for one goal, or spend-slot for a slot accounting preview/write.",
     )
     quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run` and `quota spend-slot`.")
-    quota_parser.add_argument("--slots", type=int, default=1, help="Slots to preview for `quota spend-slot --dry-run`.")
-    quota_parser.add_argument("--dry-run", action="store_true", help="Required for `quota spend-slot`; no registry/runtime mutation.")
+    quota_parser.add_argument("--slots", type=int, default=1, help="Slots to account for `quota spend-slot`.")
+    quota_parser.add_argument("--source", choices=["heartbeat", "controller", "adapter"], default="heartbeat", help="Source label for `quota spend-slot`.")
+    quota_parser.add_argument("--dry-run", action="store_true", help="Keep `quota spend-slot` as preview-only. This is the default.")
+    quota_parser.add_argument("--execute", action="store_true", help="Append the compact quota_slot_spent runtime event for `quota spend-slot`.")
     quota_parser.add_argument(
         "--scan-root",
         default=default_public_scan_root(),
@@ -706,9 +708,15 @@ def main(argv: list[str] | None = None) -> int:
             elif args.quota_command == "spend-slot":
                 if not args.goal_id:
                     raise ValueError("`goal-harness quota spend-slot` requires --goal-id")
-                if not args.dry_run:
-                    raise ValueError("`goal-harness quota spend-slot` is preview-only; pass --dry-run")
-                payload = build_quota_slot_preview(status_payload, goal_id=args.goal_id, slots=args.slots)
+                if args.dry_run and args.execute:
+                    raise ValueError("`goal-harness quota spend-slot` accepts only one of --dry-run or --execute")
+                payload = spend_quota_slot(
+                    status_payload,
+                    goal_id=args.goal_id,
+                    slots=args.slots,
+                    execute=bool(args.execute),
+                    source=args.source,
+                )
             else:
                 payload = build_quota_plan(status_payload, mode=args.quota_command)
         except Exception as exc:

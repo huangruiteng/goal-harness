@@ -159,7 +159,8 @@ The first read-only or preview commands are:
 goal-harness quota status
 goal-harness quota plan
 goal-harness quota should-run --goal-id <goal-id>
-goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --dry-run
+goal-harness quota spend-slot --goal-id <goal-id> --slots 1
+goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --execute
 ```
 
 These commands reuse the status contract, including contract health, global
@@ -193,16 +194,16 @@ waiting, throttled, paused, or health-blocked return `ok=true` only when the
 status export itself is healthy, but still return `should_run=false`. Unknown
 goals or status collection failures return non-zero so automations fail closed.
 
-`quota spend-slot` is a preview-only accounting helper. It shows the before and
-after `should-run` decision for consuming slots and must be run with
-`--dry-run`; it does not mutate registry, runtime history, reward overlays, or
-operator gates. Use it to verify slot accounting before adding a real spend
-write path.
+`quota spend-slot` is an accounting helper. By default it is dry-run only: it
+shows the before and after `should-run` decision for consuming slots and writes
+nothing. With `--execute`, it appends one compact `quota_slot_spent` runtime
+event. It never mutates registry, reward overlays, operator gates, write
+control, private evidence, or production state.
 
 ## Slot Spend Event Contract
 
-A future real spend write path should append one compact runtime event after an
-automatic Codex turn actually consumes quota. The smallest public-safe event is
+A real spend write path appends one compact runtime event after an automatic
+Codex turn actually consumes quota. The smallest public-safe event is
 `classification=quota_slot_spent` with a nested `quota_event` object:
 
 ```json
@@ -252,7 +253,7 @@ This event is accounting, not permission. It records that compute was spent
 after the normal health, operator, evidence, and quota gates had already
 allowed the turn.
 
-Future write commands can stay behind explicit operator approval:
+Other write commands can stay behind explicit operator approval:
 
 ```bash
 goal-harness quota set --goal-id <goal-id> --compute 0.5
