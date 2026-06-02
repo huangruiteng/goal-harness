@@ -2016,6 +2016,8 @@ function UserActionSummary({
   const selectedKindCount = selectedKind === "all" ? items.length : kindCounts[selectedKind];
   const kindOptions = userActionKindOrder.filter((kind) => kindCounts[kind] > 0 || kind === selectedKind);
   const visibleItems = selectedKind === "all" ? items : items.filter((item) => item.kind === selectedKind);
+  const showAllForEmptyFilter = selectedKind !== "all" && selectedKindCount === 0 && items.length > 0;
+  const displayedItems = showAllForEmptyFilter ? items : visibleItems;
   const selectedKindLabel = selectedKind === "all" ? "All" : userActionKindConfig[selectedKind].label;
   const [actionCopyState, setActionCopyState] = useState<{ key: string; state: CopyState } | null>(null);
 
@@ -2082,13 +2084,18 @@ function UserActionSummary({
                 </Button>
               ))}
             </div>
-            {visibleItems.length === 0 ? (
+            {showAllForEmptyFilter ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+                No {selectedKindLabel.toLowerCase()} action is active; showing all active actions.
+              </div>
+            ) : null}
+            {displayedItems.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-zinc-800 dark:text-zinc-400">
                 No {selectedKindLabel.toLowerCase()} action is active for this status source.
               </div>
             ) : (
               <div className="grid gap-3 xl:grid-cols-2">
-                {visibleItems.map((item) => {
+                {displayedItems.map((item) => {
                   const actionKey = `${item.goalId}-${item.kind}-${item.title}`;
                   const copyState = actionCopyState?.key === actionKey ? actionCopyState.state : "idle";
                   const isGateAction = item.kind === "controller" || item.waitingOn === "user_or_controller" || item.waitingOn === "controller";

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T21:33:01+08:00
+updated_at: 2026-06-02T21:42:53+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,14 +45,30 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should reduce duplicate dashboard/operator surfaces now that the
-  live status path is clean. Prefer one bounded UI cleanup: make the
-  user-facing wording distinguish `User Todo` from production-write gates, or
-  collapse the duplicate yellow review card and lower white packet panel into
-  one action surface. Do not add another panel.
+- Next tick should remove the stale unmounted `ReviewLinkPanel` / lower review
+  packet component path after confirming no route renders it. Keep the single
+  visible packet affordance in `User Actions`, then run the dashboard build and
+  a browser smoke so duplicate packet surfaces cannot quietly return.
 
 ## Recent Progress
 
+- 2026-06-02T21:42:53+08:00: Steering audit candidates were: P0 state truth
+  verification, P0 human-decision UI surface cleanup, and P1 communication
+  polish. State truth had just been verified, so chose one bounded P0 UI cleanup
+  from the live dashboard: when the URL/filter is stuck on a now-empty action
+  kind such as `actionKind=controller` with zero controller actions, the
+  `User Actions` panel now shows a short empty-filter notice and falls back to
+  all active actions instead of hiding every actionable card and copy button.
+  This keeps Codex-ready goals and `Next user todo` cards reachable after a
+  gate is cleared. Changed files: `apps/dashboard/src/views/dashboard-page.tsx`
+  plus this active state; private `.local` state also updated. Validation:
+  `npm run build` in `apps/dashboard`, `goal-harness check --scan-root .`,
+  in-app browser reload on the live `actionKind=controller` URL showing the
+  fallback notice, visible Copy buttons, and the platform-migration
+  `Next user todo 2/13 open` card. Critic: the real empty-filter trap is fixed,
+  but the source still contains an unmounted old `ReviewLinkPanel` / lower
+  packet component; removing that stale code is the next smallest way to keep
+  the UI from regressing into duplicate packet surfaces.
 - 2026-06-02T21:33:01+08:00: Steering audit candidates were: P0 live
   dashboard verification after the global attention-override fix, P0 duplicate
   dashboard/panel cleanup, and P1 communication polish. Chose live dashboard
