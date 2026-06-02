@@ -51,6 +51,7 @@ import {
   parseRewardDryRunResponse,
   parseStatusPayload,
 } from "../data/status";
+import { buildActionPacket } from "../data/action-packet";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -1090,52 +1091,22 @@ function buildHumanFriendlyActionPacket({
   const reply = item.kind === "controller" ? controllerReplyLine(item.goalId) : prompt.reply;
   const command = item.safePathCommand ?? buildStatusCommand({ registry, runtimeRoot });
   const todoBlocksGate = Boolean(todo && item.operatorQuestion);
-  const userActionLines = todo
-    ? [
-      `用户待办：${compactPacketText(todo.text)}`,
-      ...(todoBlocksGate ? ["完成或明确暂缓用户待办后，再判断下面的 Gate。"] : []),
-    ]
-    : [
-      `用户待办：无。`,
-    ];
-  const gateLines = item.operatorQuestion
-    ? [
-      `Gate：${compactPacketText(item.operatorQuestion)}`,
-      `建议回复：${todoBlocksGate ? `先说明用户待办是否已完成；完成后再回复：${reply}` : reply}`,
-    ]
-    : [
-      `Gate：无用户 gate；${suggestedDecisionLine(item.kind, item, item.goalId)}`,
-    ];
-  const stateLine = [
-    compactPacketText(item.summary, 180),
-    quotaView ? `配额 ${quotaView.shortLine}` : null,
-    item.authorityCoverage ? `权威源 ${item.authorityCoverage.shortLine}` : null,
-  ].filter(Boolean).join("；");
-  return [
-    "【Goal Harness Action Packet】",
-    `目标：${item.goalId}`,
-    `动作：${item.title}`,
-    `状态：${stateLine}`,
-    "",
-    "【用户动作 / Gate】",
-    ...userActionLines,
-    ...gateLines,
-    `边界：${compactPacketText(prompt.boundary, 220)}`,
-    durableOperatorGateRecordRule(item.kind),
-    "",
-    "【同意后给项目 Agent】",
-    `只允许 safe path：${item.safePathLabel}`,
-    command ? `命令：${command.replace(/\s+/g, " ").trim()}` : null,
-    "要求：用中文回报 changed files、validation、next safe action；需要写入/生产/进一步授权时停下。",
-  ].filter(Boolean).join("\n");
-}
-
-function compactPacketText(value: string, maxLength = 260) {
-  const compact = value.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxLength) {
-    return compact;
-  }
-  return `${compact.slice(0, maxLength - 1)}…`;
+  return buildActionPacket({
+    goalId: item.goalId,
+    title: item.title,
+    summary: item.summary,
+    userTodoText: todo?.text,
+    todoBlocksGate,
+    operatorQuestion: item.operatorQuestion,
+    suggestedReply: reply,
+    gateFallbackDecision: suggestedDecisionLine(item.kind, item, item.goalId),
+    boundary: prompt.boundary,
+    durableRecordRule: durableOperatorGateRecordRule(item.kind),
+    safePathLabel: item.safePathLabel,
+    command,
+    quotaShortLine: quotaView?.shortLine,
+    authorityShortLine: item.authorityCoverage?.shortLine,
+  });
 }
 
 function readinessVariant(readiness: ControllerReadiness): "success" | "warning" | "info" {

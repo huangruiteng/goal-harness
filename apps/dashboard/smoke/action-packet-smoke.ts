@@ -1,0 +1,40 @@
+import { buildActionPacket } from "../src/data/action-packet.js";
+
+function assert(condition: boolean, message: string) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+const packet = buildActionPacket({
+  goalId: "premium-ui-ai-search-rec-migration",
+  title: "Review or authorize",
+  summary: "production still blocked; owner/SOP snapshot has 9 blockers, but only two user todos are open",
+  userTodoText: "Read the core Lark document section 8 first. Focus on 当前结论 and the Nacos diff 快速锚点 / Diff Anchors table.",
+  todoBlocksGate: true,
+  operatorQuestion: "是否同意 premium-ui 迁移在 owner/SOP review 后继续推进？",
+  suggestedReply: "同意继续 safe-local/offline 路径 / 暂不同意 + 一句话原因。",
+  gateFallbackDecision: "同意继续 safe-local/offline 路径；不授权写入或生产动作。",
+  boundary: "不要执行 Nacos 写入、Prem metadata upsert、workflow creation 或生产状态变化。",
+  durableRecordRule: "记录规则：先用 operator-gate dry-run 预览；确认写入时去掉 --dry-run。",
+  safePathLabel: "Read-only map dry-run",
+  command: "goal-harness read-only-map --goal-id premium-ui-ai-search-rec-migration --dry-run",
+  quotaShortLine: "Operator gate; 0/1440 slots",
+  authorityShortLine: "default entries 10/10; topic 10; risk medium",
+});
+
+assert(packet.includes("【Goal Harness Action Packet】"), "missing packet title");
+assert(packet.includes("【用户动作 / Gate】"), "missing user action section");
+assert(packet.includes("用户待办：Read the core Lark document section 8 first."), "missing first user todo");
+assert(packet.includes("完成或明确暂缓用户待办后，再判断下面的 Gate。"), "missing todo-before-gate cue");
+assert(packet.includes("Gate：是否同意 premium-ui 迁移"), "missing gate question");
+assert(packet.includes("【同意后给项目 Agent】"), "missing project-agent handoff section");
+assert(packet.includes("只允许 safe path：Read-only map dry-run"), "missing safe path");
+assert(packet.includes("不授权写入或生产动作") || packet.includes("不要执行 Nacos 写入"), "missing safety boundary");
+assert(packet.length > 450 && packet.length < 1200, `unexpected packet length: ${packet.length}`);
+assert(
+  packet.indexOf("【用户动作 / Gate】") < packet.indexOf("【同意后给项目 Agent】"),
+  "user action section must precede project-agent handoff",
+);
+
+console.log(`action-packet smoke ok (${packet.length} chars)`);

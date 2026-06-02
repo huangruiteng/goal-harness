@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T21:58:00+08:00
+updated_at: 2026-06-02T22:06:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,15 +45,33 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should add a small deterministic copy-packet smoke for the
-  dashboard action-packet builder, ideally by extracting the pure packet builder
-  enough to test one user-todo/Codex-ready fixture. Browser clipboard reads are
-  not reliable in the current in-app browser, so the regression guard should
-  assert the generated packet sections and rough length without depending on a
-  virtual clipboard.
+- Next tick should pivot from dashboard packet polish back to the P0
+  project-agent execution loop: add a small public contract or CLI smoke that
+  tells project agents how to surface `user_todos` and `agent_todos` instead of
+  hiding operator work in `Next Action` or review docs.
 
 ## Recent Progress
 
+- 2026-06-02T22:06:40+08:00: Steering audit candidates were: P0
+  project-agent todo contract, P0 deterministic action-packet regression guard,
+  and P1 communication polish. Continuation check: dashboard/UI work has taken
+  several recent delivery slices, but the previous payload fix explicitly left
+  one unguarded regression risk; chose this final bounded UI smoke before
+  pivoting back to the project-agent loop. Extracted the action-packet builder
+  to `apps/dashboard/src/data/action-packet.ts`, left the React page as a thin
+  adapter, and added `npm run smoke:action-packet` with a user-todo/gate
+  fixture that asserts the packet sections, ordering, safety boundary, and rough
+  length without using a browser clipboard. Changed files:
+  `apps/dashboard/package.json`, `apps/dashboard/src/data/action-packet.ts`,
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `apps/dashboard/smoke/action-packet-smoke.ts`, plus this active state;
+  private `.local` state also updated. Validation: `npm run
+  smoke:action-packet` in `apps/dashboard` reported `action-packet smoke ok
+  (855 chars)`, `npm run build` in `apps/dashboard`, `goal-harness check
+  --scan-root .`, and `git diff --check`. Critic: packet generation now has a
+  deterministic guard; further UI polish should wait for new user evidence.
+  Next work should help target project agents put user-facing todos into the
+  right Goal Harness fields.
 - 2026-06-02T21:58:00+08:00: Steering audit candidates were: P0 state-truth
   follow-up, P0 action packet payload quality, and P1 communication polish.
   Chose packet payload quality because the UI now has a single visible packet

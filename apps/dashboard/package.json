@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "dev": "vite --host 127.0.0.1",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "smoke:action-packet": "rm -rf /tmp/goal-harness-action-packet-smoke && tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --strict --outDir /tmp/goal-harness-action-packet-smoke smoke/action-packet-smoke.ts src/data/action-packet.ts && node /tmp/goal-harness-action-packet-smoke/smoke/action-packet-smoke.js"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.170.10",
