@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T09:04:50+08:00
+updated_at: 2026-06-02T09:10:47+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -27,12 +27,27 @@ private project context.
 
 ## Next Action
 
-- Add or extend an installer smoke that runs `scripts/install-local.sh` in a
-  temporary HOME and verifies the installed `goal-harness-project` skill
-  contains the `goal-harness heartbeat-prompt` guidance.
+- Add a small public smoke or contract note for operator-gate opt-in visibility:
+  a planned high-complexity goal should keep the human/controller decision in
+  the status/review surface before any project agent runs a real read-only map.
 
 ## Recent Progress
 
+- 2026-06-02T09:10:47+08:00: Added
+  `examples/install-local-smoke.py`, a temp-HOME installer smoke. The smoke
+  runs `scripts/install-local.sh` with isolated `HOME`, `CODEX_HOME`,
+  `GOAL_HARNESS_BIN_DIR`, and shell profile; verifies the installed wrapper
+  symlink resolves to `scripts/goal-harness`; checks the generated shell profile
+  contains the Goal Harness PATH block once; reads the installed
+  `goal-harness-project` skill and verifies `Set Up Recurring Heartbeats`,
+  `goal-harness heartbeat-prompt`, and `--source heartbeat --execute`; then
+  runs the installed CLI wrapper to generate a JSON `heartbeat-prompt` payload
+  and checks the guard/spend commands plus `DONT_NOTIFY` boundary. Validation:
+  direct install-local smoke passed; aggregate public smokes passed with 8
+  scripts; Python compile passed; public contract check passed; `git diff
+  --check` passed. Critic: heartbeat automation setup is now covered from docs
+  to generator to install path; the next P0 gap should move back to
+  human/controller gate visibility rather than more heartbeat polish.
 - 2026-06-02T09:04:50+08:00: Taught project agents and project-connection docs
   to discover `goal-harness heartbeat-prompt` without reading README first.
   Added a `Set Up Recurring Heartbeats` section to
