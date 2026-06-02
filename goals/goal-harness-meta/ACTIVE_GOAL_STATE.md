@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-02T22:06:40+08:00
+updated_at: 2026-06-02T22:13:39+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,13 +45,34 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Next tick should pivot from dashboard packet polish back to the P0
-  project-agent execution loop: add a small public contract or CLI smoke that
-  tells project agents how to surface `user_todos` and `agent_todos` instead of
-  hiding operator work in `Next Action` or review docs.
+- Next tick should wire the new project-agent todo contract into the generated
+  project surfaces only where useful, starting with a tiny check or link in the
+  new-project / heartbeat prompt path so target project agents can find the
+  canonical contract without reading the full README.
 
 ## Recent Progress
 
+- 2026-06-02T22:13:39+08:00: Steering audit candidates were: P0 state/plan
+  hygiene because the previous next action partly overlapped already-existing
+  todo CLI smokes, P0 project-agent execution loop contract, and P1 docs polish.
+  Continuation check: UI packet work is now guarded, so this slice pivoted back
+  to the agent-facing todo loop. Chose the contract doc because the mechanics
+  already existed but were scattered across the attention queue, generated
+  prompts, skill, and smokes; a short canonical doc reduces the chance that a
+  target project agent hides user work in `Next Action` again. Added
+  `docs/project-agent-todo-contract.md` and linked it from the README daily-use
+  section. The contract distinguishes `Next Action`, user todos, agent todos,
+  and production blockers/gates, and points to the existing todo/adoption
+  smokes. Changed files: `README.md`,
+  `docs/project-agent-todo-contract.md`, plus this active state; private
+  `.local` state also updated. Validation: `python3 examples/todo-cli-smoke.py`,
+  `python3 examples/project-agent-adoption-smoke.py`, `goal-harness check
+  --scan-root .`, and `git diff --check`. Critic: this centralizes the
+  contract but generated prompt surfaces do not yet point directly at the new
+  doc; the next slice should only wire that link where it helps agents, not
+  duplicate the whole contract text. Losing candidate to remember: a live
+  connected-goal adoption check is still useful after the public prompt surface
+  is coherent.
 - 2026-06-02T22:06:40+08:00: Steering audit candidates were: P0
   project-agent todo contract, P0 deterministic action-packet regression guard,
   and P1 communication polish. Continuation check: dashboard/UI work has taken

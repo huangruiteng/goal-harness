@@ -160,6 +160,17 @@ truncated refresh notice. Use
 `--recommended-action` when the state contains only private or overly detailed
 next-action text.
 
+Keep user and agent todos in explicit active-state sections instead of hiding
+them in `Next Action`, review documents, or chat:
+
+```bash
+goal-harness todo add --goal-id your-project-goal --role user --text "Review the owner checklist."
+goal-harness todo add --goal-id your-project-goal --role agent --text "Summarize the safe read-only evidence."
+```
+
+See [docs/project-agent-todo-contract.md](docs/project-agent-todo-contract.md)
+for the agent-facing todo contract and the public smokes that verify it.
+
 Append a generic read-only project map for a connected project:
 
 ```bash
