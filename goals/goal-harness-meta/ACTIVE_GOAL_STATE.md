@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T16:05:52+08:00
+updated_at: 2026-06-02T16:25:14+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,29 +28,36 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. `goal-harness-meta` is now intentionally full-quota via
-  `allowed_slots=1000000`, so it should not be throttled by the default 24-slot
-  window. Prefer comparing: fixing the CS-Notes wrapper registry's
+  choosing work. Quota semantics are now corrected: `compute=1.0` means the
+  full 24-hour duty cycle (`1440` default minute-slots), while `0.5` means
+  roughly 12 hours. Prefer comparing: fixing the CS-Notes wrapper registry's
   legacy-runtime view of premium-ui, dashboard attention-cost reduction, or
   one more platform heartbeat stability observation. Keep hard gates intact.
 
 ## Recent Progress
 
-- 2026-06-02T16:05:52+08:00: User clarified that the meta controller should be
-  full quota and effectively never compute-throttled. Root cause: in the
-  current quota model, `compute=1.0` means full duty cycle for the default
-  24-hour window, which derives 24 allowed automatic compute slots; it does
-  not mean infinite. The local source registry and shared global registry now
-  set `goal-harness-meta.quota.allowed_slots=1000000` while preserving
-  `compute=1.0`, so priority semantics remain full-duty and quota should no
-  longer throttle the meta controller. Updated `docs/quota-allocation.md` to
-  document this distinction and the explicit high `allowed_slots` override.
-  Validation: `goal-harness --format json quota should-run --goal-id
-  goal-harness-meta` returns `should_run=true`, `allowed_slots=1000000`,
-  `spent_slots=24`; `goal-harness status` reports global registry health
-  ok with no findings; `goal-harness check --scan-root .` passed. Critic:
-  compute quota is now unbounded for the meta controller, but health,
-  operator, evidence, write-control, and production gates still apply.
+- 2026-06-02T16:25:14+08:00: Corrected compute quota semantics after user
+  feedback. `compute=1.0` is now the full 24-hour duty cycle rather than a
+  24-event cap: the default slot budget is
+  `window_hours * 60 / slot_minutes * compute`, with `slot_minutes=1`.
+  Therefore `1.0` derives `1440` default minute-slots per 24h, `0.5` derives
+  `720`, and `0.3` derives `432`. Removed the temporary
+  `goal-harness-meta.quota.allowed_slots=1000000` override from the local
+  source registry and shared global registry so full quota is expressed by
+  plain `compute=1.0`. Changed files: `goal_harness/quota.py`,
+  `README.md`, `docs/quota-allocation.md`, `docs/status-data-contract.md`,
+  `docs/attention-queue.md`, `docs/codex-subagent-orchestration.md`,
+  `docs/heartbeat-automation-prompt.md`, `skills/goal-harness-project/SKILL.md`,
+  `examples/status.example.json`, `examples/quota-slot-spend-event.example.json`,
+  dashboard quota smoke fixtures, and this active state. Validation:
+  `python3 examples/quota-plan-smoke.py`, `python3
+  examples/quota-contract-smoke.py`, and `python3
+  examples/heartbeat-quota-flow-smoke.py` passed; live
+  `goal-harness --format json quota should-run --goal-id goal-harness-meta`
+  returns `should_run=true`, `allowed_slots=1440`, `spent_slots=25`.
+  Critic: slot accounting is still an approximation of compute time; the
+  default is now product-correct for minute-based heartbeats, while coarser
+  controllers should spend the number of scheduler minutes they reserve.
 - 2026-06-02T13:47:48+08:00: Ran the required steering audit after the
   platform migration heartbeat was re-activated. Candidates considered: P0
   state/safety observation of the actual platform migration heartbeat firing,

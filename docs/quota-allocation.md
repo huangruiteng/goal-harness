@@ -24,11 +24,13 @@ Compute quota answers one question:
 Examples:
 
 - `1.0`: full duty cycle. If the controller checks hourly, this goal is
-  eligible on every healthy check until its current window slot budget is
-  spent. With the default 24-hour window, `1.0` means 24 automatic compute
-  slots, not infinity.
-- `0.5`: half duty cycle, roughly 12 hours per day or half of scheduling slots.
-- `0.3`: 30% duty cycle, roughly 7.2 hours per day or 30% of scheduling slots.
+  eligible on every healthy check for the full 24-hour window. With the default
+  minute-granularity accounting, `1.0` means `24 * 60 = 1440` automatic compute
+  minute-slots.
+- `0.5`: half duty cycle, roughly 12 hours per day or half of scheduling
+  minute-slots.
+- `0.3`: 30% duty cycle, roughly 7.2 hours per day or 30% of scheduling
+  minute-slots.
 - `0`: compute-paused. The goal remains visible but should not receive
   automatic Codex turns.
 
@@ -48,11 +50,12 @@ The compact status shape can start with a small object:
   "quota": {
     "compute": 0.5,
     "window_hours": 24,
-    "allowed_slots": 12,
-    "spent_slots": 4,
+    "slot_minutes": 1,
+    "allowed_slots": 720,
+    "spent_slots": 240,
     "state": "eligible",
     "next_eligible_at": "2026-06-02T12:00:00+08:00",
-    "reason": "0.5 compute quota, 4/12 slots spent in the current window"
+    "reason": "0.5 compute quota, 240/720 minute-slots spent in the current window"
   }
 }
 ```
@@ -71,26 +74,18 @@ Registry entries may declare the same policy directly:
 If `quota.compute` is missing, status treats the goal as `1.0` by default so a
 newly connected project remains eligible unless a harder gate blocks it.
 
-If an operator wants a controller to be effectively unbounded by compute quota,
-keep `compute: 1.0` for prioritization and set an explicit high
-`allowed_slots`, for example:
+`slot_minutes` is optional and defaults to `1`. The default `allowed_slots` is
+computed as `window_hours * 60 / slot_minutes * compute`, so `compute=1.0` is
+already the full available 24-hour duty cycle. Operators should only set
+`allowed_slots` explicitly for exceptional overrides such as a temporary burst,
+a deliberately stricter experimental cap, or a non-minute scheduler. It should
+not be required to express normal full quota.
 
-```json
-{
-  "quota": {
-    "compute": 1.0,
-    "window_hours": 24,
-    "allowed_slots": 1000000
-  }
-}
-```
-
-This only removes compute throttling. Health checks, operator gates, evidence
-waits, write-control, and production permissions still apply.
-
-For the first implementation, `spent_slots` can count automatic Goal Harness
-ticks, adapter runs, heartbeat continuations, or controller-selected Codex
-turns. It does not need to count exact tokens or wall-clock seconds yet.
+For the first implementation, `spent_slots` counts compact automatic compute
+budget units. Under the default minute granularity, one slot means one minute of
+automatic compute budget. Minute-based heartbeat continuations can spend
+`--slots 1`; coarser controllers should spend the number of scheduler minutes
+they actually reserve. It does not need to count exact tokens yet.
 
 Status derives the current `spent_slots` from compact `quota_slot_spent`
 runtime events in the current `window_hours` window. The registry remains the
@@ -161,9 +156,9 @@ drill-down details.
 The dashboard should show compute quota as a compact control surface:
 
 - quota chips: `1.0`, `0.5`, `0.3`, `0`;
-- spent/allowed slots for the current window;
-- a "full / unbounded by quota" state when `allowed_slots` is intentionally
-  much larger than the normal window-derived default;
+- spent/allowed minute-slots for the current window;
+- a visible explicit-override marker only when `allowed_slots` is manually set
+  away from the window-derived default;
 - next eligible time when throttled;
 - simple operator actions: set quota, pause, resume, or grant a temporary
   burst;
@@ -258,16 +253,18 @@ Codex turn actually consumes quota. The smallest public-safe event is
       "state": "eligible",
       "compute": 0.5,
       "window_hours": 24,
-      "spent_slots": 11,
-      "allowed_slots": 12
+      "slot_minutes": 1,
+      "spent_slots": 719,
+      "allowed_slots": 720
     },
     "after": {
       "should_run": false,
       "state": "throttled",
       "compute": 0.5,
       "window_hours": 24,
-      "spent_slots": 12,
-      "allowed_slots": 12
+      "slot_minutes": 1,
+      "spent_slots": 720,
+      "allowed_slots": 720
     }
   }
 }

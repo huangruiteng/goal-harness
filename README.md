@@ -284,6 +284,10 @@ event after validation and any required state refresh:
 goal-harness quota spend-slot --goal-id <goal-id> --slots 1 --source heartbeat --execute
 ```
 
+Quota slots are minute-granularity by default. A minute-based heartbeat spends
+`--slots 1`; a coarser fixed-interval automation should spend the number of
+scheduler minutes consumed by the completed turn.
+
 Do not append spend for `should_run=false` skips, preflight failures, or pure
 dry-run previews. Do not run it more than once for the same completed turn.
 For a reusable Codex App heartbeat task body, use

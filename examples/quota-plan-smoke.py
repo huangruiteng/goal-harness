@@ -19,6 +19,7 @@ from goal_harness.quota import (  # noqa: E402
     build_quota_plan,
     build_quota_should_run,
     build_quota_slot_preview,
+    goal_quota_config,
     render_quota_markdown,
 )
 
@@ -30,7 +31,7 @@ def goal(
     spent_slots: int = 0,
     allowed_slots: int | None = None,
 ) -> dict:
-    allowed_slots = round(24 * compute) if allowed_slots is None else allowed_slots
+    allowed_slots = round(24 * 60 * compute) if allowed_slots is None else allowed_slots
     return {
         "id": goal_id,
         "status": "active",
@@ -41,6 +42,7 @@ def goal(
         "quota": {
             "compute": compute,
             "window_hours": 24,
+            "slot_minutes": 1,
             "allowed_slots": allowed_slots,
             "spent_slots": spent_slots,
         },
@@ -63,7 +65,7 @@ def attention(
     spent_slots: int = 0,
     allowed_slots: int | None = None,
 ) -> dict:
-    allowed_slots = round(24 * compute) if allowed_slots is None else allowed_slots
+    allowed_slots = round(24 * 60 * compute) if allowed_slots is None else allowed_slots
     if state == "operator_gate":
         reason = "human or target-controller gate must clear before spending compute"
     elif state == "throttled":
@@ -80,6 +82,7 @@ def attention(
         "quota": {
             "compute": compute,
             "window_hours": 24,
+            "slot_minutes": 1,
             "allowed_slots": allowed_slots,
             "spent_slots": spent_slots,
             "state": state,
@@ -159,6 +162,7 @@ def append_quota_slot_spend_fixture(
                 "state": "eligible",
                 "compute": compute,
                 "window_hours": 24,
+                "slot_minutes": 1,
                 "spent_slots": before_spent,
                 "allowed_slots": allowed_slots,
             },
@@ -167,6 +171,7 @@ def append_quota_slot_spend_fixture(
                 "state": after_state,
                 "compute": compute,
                 "window_hours": 24,
+                "slot_minutes": 1,
                 "spent_slots": after_spent,
                 "allowed_slots": allowed_slots,
             },
@@ -277,7 +282,7 @@ def write_cli_fixture(root: Path) -> tuple[Path, Path, Path]:
                 )
                 + "\n"
             )
-        effective_allowed_slots = round(24 * compute) if allowed_slots is None else allowed_slots
+        effective_allowed_slots = round(24 * 60 * compute) if allowed_slots is None else allowed_slots
         for slot_index in range(spent_slots):
             append_quota_slot_spend_fixture(
                 runs_dir,
@@ -485,6 +490,17 @@ def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
         assert markdown.index("`full-speed`") < markdown.index("`half-speed`") < markdown.index("`near-limit-half`") < markdown.index("`low-speed`"), markdown
 
 
+def assert_default_quota_is_duty_cycle() -> None:
+    full = goal_quota_config({"quota": {"compute": 1.0, "window_hours": 24}})
+    half = goal_quota_config({"quota": {"compute": 0.5, "window_hours": 24}})
+    low = goal_quota_config({"quota": {"compute": 0.3, "window_hours": 24}})
+
+    assert full["slot_minutes"] == 1, full
+    assert full["allowed_slots"] == 1440, full
+    assert half["allowed_slots"] == 720, half
+    assert low["allowed_slots"] == 432, low
+
+
 def assert_throttled_should_run(status_payload: dict) -> None:
     payload = build_quota_should_run(status_payload, goal_id="throttled-half")
     quota = payload["quota"]
@@ -591,6 +607,7 @@ def assert_slot_spend_execute(payload: dict, next_should_run: dict, registry_bef
 
 
 def main() -> int:
+    assert_default_quota_is_duty_cycle()
     status_payload = build_status_fixture()
     plan = build_quota_plan(status_payload, mode="plan")
     markdown = render_quota_markdown(plan)

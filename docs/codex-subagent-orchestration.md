@@ -195,7 +195,7 @@ show the controller run, child sub-agent runs, and compute quota state:
 
 ```text
 goal
-  quota: eligible, compute=0.5, 4/12 slots spent today
+  quota: eligible, compute=0.5, 240/720 minute-slots spent today
   controller run
     subagent: docs-map       completed
     subagent: validation-map completed

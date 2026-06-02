@@ -29,7 +29,8 @@ const approvedCommand = "goal-harness read-only-map --goal-id planned-main-contr
 const operatorGateQuota = {
   compute: 0.5,
   window_hours: 24,
-  allowed_slots: 12,
+  slot_minutes: 1,
+  allowed_slots: 720,
   spent_slots: 0,
   state: "operator_gate",
   reason: "planned goal needs operator opt-in before spending agent turns",

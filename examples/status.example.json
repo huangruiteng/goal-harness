@@ -81,7 +81,8 @@
         "quota": {
           "compute": 0.5,
           "window_hours": 24,
-          "allowed_slots": 12,
+          "slot_minutes": 1,
+          "allowed_slots": 720,
           "spent_slots": 0,
           "state": "operator_gate",
           "reason": "human or target-controller gate must clear before spending compute"
@@ -101,7 +102,8 @@
         "quota": {
           "compute": 1,
           "window_hours": 24,
-          "allowed_slots": 24,
+          "slot_minutes": 1,
+          "allowed_slots": 1440,
           "spent_slots": 0,
           "state": "eligible",
           "reason": "1 compute quota; eligible for the next automatic agent turn"
@@ -123,7 +125,8 @@
         "quota": {
           "compute": 0.3,
           "window_hours": 24,
-          "allowed_slots": 7,
+          "slot_minutes": 1,
+          "allowed_slots": 432,
           "spent_slots": 0,
           "state": "eligible",
           "reason": "0.3 compute quota; eligible for the next automatic agent turn"
@@ -226,7 +229,8 @@
         "quota": {
           "compute": 0.5,
           "window_hours": 24,
-          "allowed_slots": 12,
+          "slot_minutes": 1,
+          "allowed_slots": 720,
           "spent_slots": 0,
           "state": "operator_gate",
           "reason": "human or target-controller gate must clear before spending compute"
@@ -251,7 +255,8 @@
         "quota": {
           "compute": 1,
           "window_hours": 24,
-          "allowed_slots": 24,
+          "slot_minutes": 1,
+          "allowed_slots": 1440,
           "spent_slots": 0,
           "state": "eligible",
           "reason": "1 compute quota; eligible for the next automatic agent turn"
@@ -327,7 +332,8 @@
         "quota": {
           "compute": 0.3,
           "window_hours": 24,
-          "allowed_slots": 7,
+          "slot_minutes": 1,
+          "allowed_slots": 432,
           "spent_slots": 0,
           "state": "eligible",
           "reason": "0.3 compute quota; eligible for the next automatic agent turn"

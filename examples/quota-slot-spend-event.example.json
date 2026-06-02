@@ -12,16 +12,18 @@
       "state": "eligible",
       "compute": 0.5,
       "window_hours": 24,
-      "spent_slots": 11,
-      "allowed_slots": 12
+      "slot_minutes": 1,
+      "spent_slots": 719,
+      "allowed_slots": 720
     },
     "after": {
       "should_run": false,
       "state": "throttled",
       "compute": 0.5,
       "window_hours": 24,
-      "spent_slots": 12,
-      "allowed_slots": 12
+      "slot_minutes": 1,
+      "spent_slots": 720,
+      "allowed_slots": 720
     }
   }
 }

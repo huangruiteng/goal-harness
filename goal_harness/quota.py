@@ -10,6 +10,7 @@ from typing import Any
 
 DEFAULT_COMPUTE_QUOTA = 1.0
 DEFAULT_WINDOW_HOURS = 24
+DEFAULT_SLOT_MINUTES = 1
 QUOTA_STATE_ORDER = (
     "blocked_health",
     "operator_gate",
@@ -106,11 +107,14 @@ def goal_quota_config(goal: dict[str, Any] | None) -> dict[str, Any]:
         raw = {**raw, "compute": goal.get("compute_quota")}
     compute = _clamp_compute(_number(raw.get("compute"), default=DEFAULT_COMPUTE_QUOTA))
     window_hours = max(1, _int_number(raw.get("window_hours"), default=DEFAULT_WINDOW_HOURS))
+    slot_minutes = max(1, _int_number(raw.get("slot_minutes"), default=DEFAULT_SLOT_MINUTES))
     spent_slots = max(0, _int_number(raw.get("spent_slots"), default=0))
-    allowed_slots = max(0, _int_number(raw.get("allowed_slots"), default=round(window_hours * compute)))
+    default_allowed_slots = round((window_hours * 60 / slot_minutes) * compute)
+    allowed_slots = max(0, _int_number(raw.get("allowed_slots"), default=default_allowed_slots))
     payload: dict[str, Any] = {
         "compute": compute,
         "window_hours": window_hours,
+        "slot_minutes": slot_minutes,
         "allowed_slots": allowed_slots,
         "spent_slots": spent_slots,
     }
@@ -513,6 +517,7 @@ def _compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
         "state": str(decision.get("state") or ""),
         "compute": quota.get("compute"),
         "window_hours": quota.get("window_hours"),
+        "slot_minutes": quota.get("slot_minutes"),
         "spent_slots": quota.get("spent_slots"),
         "allowed_slots": quota.get("allowed_slots"),
     }
@@ -648,6 +653,7 @@ def render_quota_markdown(payload: dict[str, Any]) -> str:
             "- "
             f"`{next_turn.get('goal_id')}` "
             f"compute={quota.get('compute')} "
+            f"slot_minutes={quota.get('slot_minutes')} "
             f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')} "
             f"action={next_turn.get('recommended_action') or 'inspect latest run'}"
         )
@@ -690,6 +696,7 @@ def render_quota_markdown(payload: dict[str, Any]) -> str:
                 "- "
                 f"`{item.get('goal_id')}`: "
                 f"compute={quota.get('compute')} "
+                f"slot_minutes={quota.get('slot_minutes')} "
                 f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')} "
                 f"waiting_on={item.get('waiting_on')} "
                 f"status={item.get('status')} "
@@ -767,6 +774,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             "- quota: "
             f"compute={quota.get('compute')} "
+            f"slot_minutes={quota.get('slot_minutes')} "
             f"slots={quota.get('spent_slots')}/{quota.get('allowed_slots')}"
         )
     if payload.get("reason"):

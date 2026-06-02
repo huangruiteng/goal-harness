@@ -87,7 +87,10 @@ goal-harness heartbeat-prompt \
 Copy the generated task body into the Codex App heartbeat automation. It already
 contains the pre-turn `quota should-run` guard, quiet `should_run=false` skip,
 bounded work, validation/writeback, optional `refresh-state`, and exactly one
-post-turn `quota spend-slot --source heartbeat --execute` event.
+post-turn `quota spend-slot --source heartbeat --execute` event. Quota slots are
+minute-granularity by default: minute heartbeats spend `--slots 1`, while
+coarser fixed-interval automations should spend the scheduler minutes consumed
+by that completed turn.
 
 Keep the Codex App visible goal text short, for example
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short

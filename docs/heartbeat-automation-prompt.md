@@ -71,9 +71,12 @@ If the result says should_run=true:
    goal-harness refresh-state --goal-id <GOAL_ID>
 
 8. After validation and required state refresh are complete, append exactly one
-   spend event:
+   spend event. For a minute-based heartbeat, spend one slot:
 
    goal-harness quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
+
+   If the automation reserves a coarser fixed interval, set `--slots` to the
+   number of scheduler minutes consumed by that completed turn.
 
    Do not append spend for should_run=false skips, preflight failures, pure
    dry-run previews, or duplicate accounting attempts.
@@ -103,7 +106,8 @@ stack, apply a continuation check for repeated topics, then do one bounded
 verifiable step, validate it, write back changed files / validation / critic /
 next action, refresh state if needed, and append exactly one `goal-harness quota
 spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute` event
-after the completed turn.
+after the completed turn. Use `--slots 1` for minute-based heartbeats; for
+coarser intervals, spend the scheduler minutes consumed by that turn.
 ```
 
 ## Agent Checklist
