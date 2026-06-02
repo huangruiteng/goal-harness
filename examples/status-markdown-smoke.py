@@ -31,6 +31,8 @@ REGISTRY_OVERRIDE_STATUS = "owner_sop_review_pending"
 REGISTRY_OVERRIDE_ACTION = "请先完成 owner/SOP 判断；未决前不要让项目 agent 继续推进"
 REGISTRY_OVERRIDE_QUESTION = "是否同意 owner/SOP review 完成后继续推进？"
 REGISTRY_OVERRIDE_HANDOFF = "owner/SOP decision recorded"
+USER_TODO_TEXT = "Read source topic account-vs-group note before owner review."
+AGENT_TODO_TEXT = "Build the P0 two-layer config worksheet."
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -46,7 +48,12 @@ def write_planned_registry(root: Path) -> Path:
         "status: planned-high-complexity\n"
         "updated_at: 2026-01-01T00:00:00+00:00\n"
         "---\n\n"
-        "# Planned Main Control\n",
+        "# Planned Main Control\n\n"
+        "## User Todo / Owner Review Reading Queue\n\n"
+        f"- [ ] {USER_TODO_TEXT}\n"
+        "- [x] Open owner worksheet.\n\n"
+        "## Agent Todo\n\n"
+        f"- [ ] {AGENT_TODO_TEXT}\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -289,9 +296,16 @@ def assert_registry_attention_override(payload: dict, markdown: str) -> None:
     assert item["recommended_action"] == REGISTRY_OVERRIDE_ACTION, item
     assert item["operator_question"] == REGISTRY_OVERRIDE_QUESTION, item
     assert item["next_handoff_condition"] == REGISTRY_OVERRIDE_HANDOFF, item
+    assert item["user_todos"]["open_count"] == 1, item
+    assert item["user_todos"]["done_count"] == 1, item
+    assert item["user_todos"]["items"][0]["text"] == USER_TODO_TEXT, item
+    assert item["agent_todos"]["open_count"] == 1, item
+    assert item["agent_todos"]["items"][0]["text"] == AGENT_TODO_TEXT, item
     assert "agent_command" not in item, item
     assert REGISTRY_OVERRIDE_STATUS in markdown, markdown
     assert REGISTRY_OVERRIDE_ACTION in markdown, markdown
+    assert f"next_user_todo: {USER_TODO_TEXT}" in markdown, markdown
+    assert f"next_agent_todo: {AGENT_TODO_TEXT}" in markdown, markdown
     assert "state_refreshed" in json.dumps(payload["run_history"], ensure_ascii=False), payload
     assert_quota_should_run(
         payload,

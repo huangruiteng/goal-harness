@@ -74,6 +74,12 @@ Fields:
 - `quota`: optional compact compute-quota state. It should explain whether a
   goal is eligible, throttled, waiting, paused, or operator-gated before an
   automation spends another agent turn.
+- `user_todos`: optional active-state checkbox summary for the human/operator.
+  Dashboard consumers should surface the first unfinished item before generic
+  gate prose when present.
+- `agent_todos`: optional active-state checkbox summary for Codex/project
+  agents. This belongs in status/CLI and handoff context; it does not replace a
+  user/controller gate.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 
 ## Summary Counters
@@ -120,6 +126,24 @@ A registry entry can explicitly override first-screen attention with
 operator lane when the latest run is fresh but the real next step is still a
 human or target-controller decision. The override changes status and quota
 eligibility, but does not grant project-agent execution.
+
+For complex goals, avoid encoding a whole reading queue in one long
+`recommended_action`. Keep `recommended_action` as one routing sentence, then
+write explicit checkbox sections in the active state:
+
+```md
+## User Todo / Owner Review Reading Queue
+
+- [ ] Read the short review packet.
+- [ ] Record the owner decision in the worksheet.
+
+## Agent Todo
+
+- [ ] Build the next read-only worksheet after the user decision is recorded.
+```
+
+Status lifts those checkboxes into `user_todos` and `agent_todos`, so dashboard
+attention stays human-readable and agent-facing status remains actionable.
 
 `read_only_project_map` means a connected read-only project now has a standard
 map run from `goal-harness read-only-map`. The next Codex action should use the

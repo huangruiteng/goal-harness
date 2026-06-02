@@ -11,6 +11,20 @@ export const quotaSchema = z.object({
   reason: z.string().optional().nullable(),
 });
 
+export const todoItemSchema = z.object({
+  index: z.number(),
+  done: z.boolean(),
+  text: z.string(),
+});
+
+export const todoGroupSchema = z.object({
+  source_section: z.string().optional().nullable(),
+  total_count: z.number().optional().default(0),
+  open_count: z.number().optional().default(0),
+  done_count: z.number().optional().default(0),
+  items: z.array(todoItemSchema).optional().default([]),
+});
+
 export const queueItemSchema = z.object({
   goal_id: z.string(),
   status: z.string(),
@@ -26,6 +40,9 @@ export const queueItemSchema = z.object({
   missing_gates: z.array(z.string()).optional().default([]),
   next_handoff_condition: z.string().optional().nullable(),
   quota: quotaSchema.optional().nullable(),
+  user_todos: todoGroupSchema.optional().nullable(),
+  agent_todos: todoGroupSchema.optional().nullable(),
+  todo_state_file: z.string().optional().nullable(),
 });
 
 export const humanRewardSchema = z.object({
@@ -254,6 +271,8 @@ export type OperatorGate = z.infer<typeof operatorGateSchema>;
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
 export type AuthorityRegistry = z.infer<typeof authorityRegistrySchema>;
 export type ComputeQuota = z.infer<typeof quotaSchema>;
+export type TodoGroup = z.infer<typeof todoGroupSchema>;
+export type TodoItem = z.infer<typeof todoItemSchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;

@@ -44,6 +44,7 @@ import {
   RunGoal,
   RunRecord,
   StatusPayload,
+  TodoGroup,
   exampleStatusPayload,
   formatStatusError,
   parseRewardDryRunResponse,
@@ -698,6 +699,8 @@ type UserActionSummaryItem = {
   rewardHint: string;
   authorityCoverage?: AuthorityCoverage;
   quota?: ComputeQuota | null;
+  userTodos?: TodoGroup | null;
+  agentTodos?: TodoGroup | null;
   phase: string;
   waitingOn: string;
   draftLabel?: string;
@@ -712,6 +715,37 @@ const userActionKindConfig: Record<UserActionKind, { label: string; variant: Bad
   evidence: { label: "Evidence", variant: "info" },
   health: { label: "Health", variant: "danger" },
 };
+
+function firstOpenTodo(todos?: TodoGroup | null) {
+  return todos?.items.find((item) => !item.done);
+}
+
+function todoCountLabel(todos?: TodoGroup | null) {
+  if (!todos || todos.total_count === 0) {
+    return null;
+  }
+  return `${todos.open_count}/${todos.total_count} open`;
+}
+
+function UserTodoCallout({ todos }: { todos?: TodoGroup | null }) {
+  const todo = firstOpenTodo(todos);
+  const count = todoCountLabel(todos);
+  if (!todo) {
+    return null;
+  }
+  return (
+    <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+      <div className="flex flex-wrap items-center gap-2">
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
+        <Badge variant="success">Next user todo</Badge>
+        {count ? <Badge variant="neutral">{count}</Badge> : null}
+      </div>
+      <p className="mt-2 line-clamp-3 break-words text-sm font-medium leading-6 text-emerald-950 dark:text-emerald-100">
+        {todo.text}
+      </p>
+    </div>
+  );
+}
 
 type CopyState = "idle" | "copied" | "failed";
 
@@ -1752,6 +1786,8 @@ function buildUserActionSummaryItems({
         : `${draftDefaults.label} / needs run`,
       authorityCoverage,
       quota,
+      userTodos: row.queueItem?.user_todos ?? undefined,
+      agentTodos: row.queueItem?.agent_todos ?? undefined,
     };
 
     if (row.severity === "high") {
@@ -1924,13 +1960,22 @@ function UserActionSummary({
                   <Badge variant="warning">Needs decision</Badge>
                   <Badge variant="neutral">{operatorGateItems.length} gates</Badge>
                   <Badge variant="neutral">{primaryOperatorGate.goalId}</Badge>
+                  {todoCountLabel(primaryOperatorGate.userTodos) ? (
+                    <Badge variant="success">User todo {todoCountLabel(primaryOperatorGate.userTodos)}</Badge>
+                  ) : null}
                   <QuotaChip quota={primaryOperatorGate.quota} />
                 </div>
-                <p className="mt-2 break-words text-sm font-semibold leading-6 text-amber-950 dark:text-amber-100">
-                  {primaryOperatorGate.operatorQuestion ?? primaryOperatorGate.summary}
-                </p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
-                  {primaryOperatorGate.detail}
+                {firstOpenTodo(primaryOperatorGate.userTodos) ? (
+                  <UserTodoCallout todos={primaryOperatorGate.userTodos} />
+                ) : (
+                  <p className="mt-2 break-words text-sm font-semibold leading-6 text-amber-950 dark:text-amber-100">
+                    {primaryOperatorGate.operatorQuestion ?? primaryOperatorGate.summary}
+                  </p>
+                )}
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                  {firstOpenTodo(primaryOperatorGate.userTodos)
+                    ? primaryOperatorGate.operatorQuestion ?? primaryOperatorGate.detail
+                    : primaryOperatorGate.detail}
                 </p>
               </button>
             ) : null}
@@ -1986,6 +2031,7 @@ function UserActionSummary({
                     </div>
                     <div className="mt-3 break-words text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.title}</div>
                     <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">{item.goalId}</div>
+                    <UserTodoCallout todos={item.userTodos} />
                     {item.operatorQuestion ? (
                       <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 dark:border-amber-900/60 dark:bg-amber-950/30">
                         <div className="flex flex-wrap items-center gap-2">

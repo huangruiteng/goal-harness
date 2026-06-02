@@ -111,6 +111,8 @@ def collect_history(
             "id": current_goal_id,
             "domain": meta.get("domain"),
             "status": meta.get("status") if registry_member else "legacy-runtime",
+            "repo": meta.get("repo") if registry_member else None,
+            "state_file": meta.get("state_file") if registry_member else None,
             "registry_member": registry_member,
             "legacy_runtime_goal": not registry_member,
             "adapter_kind": adapter.get("kind"),

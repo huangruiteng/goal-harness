@@ -212,6 +212,26 @@ refresh run should publish the first public-safe item from `## Next Action` as
 the compact dashboard action, including wrapped continuation lines; keep raw
 evidence and private links in the state file, not in that action item.
 
+For complex projects, do not pack a whole user reading queue into
+`## Next Action`. Keep the first Next Action item as one routing sentence, then
+write explicit checkbox sections:
+
+```md
+## User Todo / Owner Review Reading Queue
+
+- [ ] Read the short review packet.
+- [ ] Record the owner decision in the worksheet.
+
+## Agent Todo
+
+- [ ] Build the next read-only worksheet after the user decision is recorded.
+```
+
+`goal-harness status` lifts those sections into `user_todos` and `agent_todos`.
+The dashboard uses `user_todos` for the first-screen human checklist; project
+agents should read `agent_todos` only after health, operator gates, evidence,
+and quota allow execution.
+
 ## Record Human Reward
 
 When the user gives a clear reward judgment for an exact run, first validate

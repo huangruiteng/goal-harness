@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep the public Goal Harness repo runnable, understandable, and safe to reuse"
-updated_at: 2026-06-02T17:11:07+08:00
+updated_at: 2026-06-02T17:28:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -28,14 +28,38 @@ private project context.
 ## Next Action
 
 - Run the next tick's steering audit across at least three lanes before
-  choosing work. Compare: 1) platform heartbeat prompt alignment for all
-  connected projects; 2) real adapter proof for a read-only project path; 3)
-  further dashboard review polish. Continue dashboard only if a browser pass or
-  user feedback shows the new operator decision banner still does not make the
-  active gate obvious enough.
+  choosing work. Compare: 1) adding a first-class `goal-harness todo add`
+  command so project agents can append `user_todos` / `agent_todos` without
+  hand-editing Markdown sections; 2) platform heartbeat prompt alignment for
+  all connected projects; 3) real adapter proof for a read-only project path.
+  Prefer the todo command if platform migration continues to need structured
+  human checklist updates from project agents.
 
 ## Recent Progress
 
+- 2026-06-02T17:28:00+08:00: Added structured active-state todo extraction to
+  status and dashboard. Registered goals now carry `repo` / `state_file` into
+  status collection, `goal-harness status` parses checkbox sections named
+  `## User Todo / Owner Review Reading Queue` and `## Agent Todo`, and
+  attention items can include `user_todos`, `agent_todos`, and
+  `todo_state_file`. The dashboard schema and `User Actions` panel now surface
+  the first unfinished user todo before generic gate prose. Updated
+  `goal_harness/history.py`, `goal_harness/status.py`,
+  `apps/dashboard/src/data/status.ts`,
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `examples/status-markdown-smoke.py`, `docs/status-data-contract.md`,
+  `docs/attention-queue.md`, and `skills/goal-harness-project/SKILL.md`.
+  Validation: `python examples/status-markdown-smoke.py`, `python
+  examples/run-smokes.py`, `goal-harness check --scan-root .`, and
+  `npm --prefix apps/dashboard run build` all passed; a real status refresh for
+  the platform migration goal produced `user_todos.open_count=9` and first todo
+  `Read the core Lark document section 8 first`; in-app browser was opened to
+  `goalId=premium-ui-ai-search-rec-migration&actionKind=controller` and
+  confirmed `Next user todo`, `9/9 open`, and the first todo are visible.
+  Critic: the checkbox-section convention is intentionally low-friction, but a
+  future `goal-harness todo add --role user|agent` command would be better for
+  project agents because it avoids requiring them to know section names or
+  Markdown formatting.
 - 2026-06-02T17:11:07+08:00: Added a first-screen operator decision banner to
   the dashboard `User Actions` panel. When any action item is waiting on
   `user_or_controller` or `controller`, the panel now shows a compact

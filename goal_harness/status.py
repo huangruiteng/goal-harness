@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 from typing import Any
 
 from .contract import check_contract
@@ -115,6 +116,98 @@ LIFECYCLE_PRIORITY = (
     "planned",
     "run_recorded",
 )
+TODO_TASK_PATTERN = re.compile(r"^\s*[-*]\s+\[([ xX-])\]\s+(.+?)\s*$")
+USER_TODO_HEADER_MARKERS = (
+    "user todo",
+    "owner review reading queue",
+    "owner reading queue",
+)
+AGENT_TODO_HEADER_MARKERS = (
+    "agent todo",
+    "codex todo",
+    "project agent todo",
+)
+MAX_STATUS_TODOS_PER_ROLE = 12
+
+
+def normalize_todo_text(text: str, *, limit: int = 500) -> str:
+    compact = " ".join(text.strip().split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
+def todo_role_for_heading(heading: str) -> str | None:
+    normalized = heading.strip().lower()
+    if any(marker in normalized for marker in USER_TODO_HEADER_MARKERS):
+        return "user"
+    if any(marker in normalized for marker in AGENT_TODO_HEADER_MARKERS):
+        return "agent"
+    return None
+
+
+def compact_todo_group(items: list[dict[str, Any]], *, source_section: str | None) -> dict[str, Any] | None:
+    if not items:
+        return None
+    open_items = [item for item in items if not item.get("done")]
+    done_items = [item for item in items if item.get("done")]
+    return {
+        "source_section": source_section,
+        "total_count": len(items),
+        "open_count": len(open_items),
+        "done_count": len(done_items),
+        "items": items[:MAX_STATUS_TODOS_PER_ROLE],
+    }
+
+
+def parse_active_state_todos(state_text: str) -> dict[str, Any]:
+    role: str | None = None
+    source_sections: dict[str, str | None] = {"user": None, "agent": None}
+    items: dict[str, list[dict[str, Any]]] = {"user": [], "agent": []}
+
+    for line in state_text.splitlines():
+        if line.startswith("## "):
+            heading = line.lstrip("#").strip()
+            role = todo_role_for_heading(heading)
+            if role and source_sections[role] is None:
+                source_sections[role] = heading
+            continue
+        if role is None:
+            continue
+        match = TODO_TASK_PATTERN.match(line)
+        if not match:
+            continue
+        marker, text = match.groups()
+        items[role].append(
+            {
+                "index": len(items[role]) + 1,
+                "done": marker.lower() == "x",
+                "text": normalize_todo_text(text),
+            }
+        )
+
+    result: dict[str, Any] = {}
+    user = compact_todo_group(items["user"], source_section=source_sections["user"])
+    agent = compact_todo_group(items["agent"], source_section=source_sections["agent"])
+    if user:
+        result["user_todos"] = user
+    if agent:
+        result["agent_todos"] = agent
+    return result
+
+
+def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
+    state_path = resolve_goal_local_path(goal.get("state_file"), goal, fallback_base=Path.cwd())
+    if state_path is None or not state_path.exists():
+        return {}
+    try:
+        state_text = state_path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    fields = parse_active_state_todos(state_text)
+    if fields:
+        fields["todo_state_file"] = str(state_path)
+    return fields
 
 
 def attention_item(
@@ -132,6 +225,9 @@ def attention_item(
     next_handoff_condition: str | None = None,
     lifecycle_phase: str | None = None,
     lifecycle_flags: list[str] | None = None,
+    user_todos: dict[str, Any] | None = None,
+    agent_todos: dict[str, Any] | None = None,
+    todo_state_file: str | None = None,
 ) -> dict[str, Any]:
     item = {
         "goal_id": goal_id,
@@ -155,6 +251,12 @@ def attention_item(
         item["lifecycle_phase"] = lifecycle_phase
     if lifecycle_flags:
         item["lifecycle_flags"] = lifecycle_flags
+    if user_todos:
+        item["user_todos"] = user_todos
+    if agent_todos:
+        item["agent_todos"] = agent_todos
+    if todo_state_file:
+        item["todo_state_file"] = todo_state_file
     return item
 
 
@@ -714,6 +816,7 @@ def build_attention_queue(
         item = goal_attention(goal)
         if item:
             if goal.get("registry_member"):
+                item.update(active_state_todo_fields(goal))
                 item["quota"] = quota_status(
                     goal,
                     waiting_on=str(item.get("waiting_on") or ""),
@@ -972,6 +1075,32 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         )
         if action:
             lines.append(f"  - action: {action}")
+        user_todos = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else {}
+        if user_todos:
+            lines.append(
+                "  - user_todos: "
+                f"open={user_todos.get('open_count')} "
+                f"done={user_todos.get('done_count')} "
+                f"total={user_todos.get('total_count')}"
+            )
+            for todo in user_todos.get("items") or []:
+                if not isinstance(todo, dict) or todo.get("done"):
+                    continue
+                lines.append(f"    - next_user_todo: {_markdown_scalar(todo.get('text') or '')}")
+                break
+        agent_todos = item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else {}
+        if agent_todos:
+            lines.append(
+                "  - agent_todos: "
+                f"open={agent_todos.get('open_count')} "
+                f"done={agent_todos.get('done_count')} "
+                f"total={agent_todos.get('total_count')}"
+            )
+            for todo in agent_todos.get("items") or []:
+                if not isinstance(todo, dict) or todo.get("done"):
+                    continue
+                lines.append(f"    - next_agent_todo: {_markdown_scalar(todo.get('text') or '')}")
+                break
         quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
         if quota:
             lines.append(

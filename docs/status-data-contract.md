@@ -264,6 +264,16 @@ Item fields:
   compute share (`1.0`, `0.5`, `0.3`, or `0`), eligibility, recent spend, and
   a public-safe reason without exposing private evidence. See
   [quota-allocation.md](quota-allocation.md).
+- `user_todos`: optional checkbox summary parsed from the active state's
+  `## User Todo ...` / `## Owner Review Reading Queue` section. Dashboard
+  consumers should render the first unfinished item as the human-facing next
+  step, while keeping `recommended_action` as routing context.
+- `agent_todos`: optional checkbox summary parsed from `## Agent Todo`,
+  `## Codex Todo`, or `## Project Agent Todo`. Agent-facing consumers may use
+  it to choose implementation work after gates and quota allow execution; it is
+  not a user approval signal.
+- `todo_state_file`: optional local path to the active state file that produced
+  `user_todos` / `agent_todos`.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 - `controller_stage`: optional compact controller-readiness classification from
   the latest run.
@@ -297,6 +307,13 @@ state-truth corrections, not for granting project-agent execution. Global
 registry sync preserves an existing attention override when a later source for
 the same goal omits these fields; set `clear_attention_override=true` in the
 syncing registry entry to clear a stale override intentionally.
+
+Todo extraction is independent of attention overrides. A goal can stay in the
+operator lane because the registry says `waiting_on=user_or_controller`, while
+the active state exposes a more concrete user checklist. This is the preferred
+shape for complex project review: keep `recommended_action` short enough to
+route the queue, and put ordered user work in checkbox sections the dashboard
+can summarize.
 
 For registered planned high-complexity goals with a compatible
 `*_read_only_map_v0` adapter and no run yet, status keeps the queue item in
