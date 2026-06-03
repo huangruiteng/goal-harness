@@ -157,10 +157,16 @@ def main(argv: list[str] | None = None) -> int:
         "--permission-rule",
         help="Optional trusted-session permission rule appended to the task body.",
     )
-    heartbeat_prompt_parser.add_argument(
+    heartbeat_style_group = heartbeat_prompt_parser.add_mutually_exclusive_group()
+    heartbeat_style_group.add_argument(
         "--compact",
         action="store_true",
         help="Generate a shorter automation body that points edge cases back to the expanded lifecycle contract.",
+    )
+    heartbeat_style_group.add_argument(
+        "--brief",
+        action="store_true",
+        help="Generate a minimal installed automation body that delegates details to the compact lifecycle contract.",
     )
 
     demo_parser = sub.add_parser(
@@ -546,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
             material_queue_rule=args.material_rule,
             permission_rule=args.permission_rule,
             compact=bool(args.compact),
+            brief=bool(args.brief),
         )
         print_payload(payload, args.format, render_heartbeat_prompt_markdown)
         return 0

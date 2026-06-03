@@ -39,6 +39,7 @@ def assert_ordered(text: str, phrases: tuple[str, ...]) -> None:
 def main() -> int:
     payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE)
     compact_payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE, compact=True)
+    brief_payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE, brief=True)
     assert payload["quota_guard_command"] == (
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" '
         "quota should-run --goal-id public-heartbeat-goal"
@@ -48,6 +49,7 @@ def main() -> int:
         "quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute"
     ), payload
     assert compact_payload["compact"] is True, compact_payload
+    assert compact_payload["brief"] is False, compact_payload
     assert compact_payload["quota_guard_command"] == payload["quota_guard_command"], compact_payload
     assert compact_payload["quota_spend_command"] == payload["quota_spend_command"], compact_payload
     assert len(str(compact_payload["task_body"])) < len(str(payload["task_body"])) * 0.45, (
@@ -75,6 +77,29 @@ def main() -> int:
         "Do not append spend for quiet skips",
     ):
         assert phrase in compact_task, phrase
+    assert brief_payload["brief"] is True, brief_payload
+    assert brief_payload["compact"] is False, brief_payload
+    assert brief_payload["quota_guard_command"] == payload["quota_guard_command"], brief_payload
+    assert brief_payload["quota_spend_command"] == payload["quota_spend_command"], brief_payload
+    assert len(str(brief_payload["task_body"])) < len(str(compact_payload["task_body"])) * 0.55, (
+        len(str(brief_payload["task_body"])),
+        len(str(compact_payload["task_body"])),
+    )
+    brief_task = normalized(str(brief_payload["task_body"]))
+    for phrase in (
+        "Brief installed Goal Harness heartbeat",
+        "goal-harness heartbeat-prompt --compact --goal-id public-heartbeat-goal --active-state /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
+        "Preflight and quota guard",
+        'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
+        "gate or open user todo",
+        "heartbeat_recommendation",
+        "steering audit with product-bottleneck lens",
+        "choose one bounded verifiable step",
+        "goal-harness todo add",
+        'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
+        "No spend for quiet skips",
+    ):
+        assert phrase in brief_task, phrase
 
     doc = DOC.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
@@ -275,9 +300,11 @@ def main() -> int:
     assert "do not hand-edit one-off automation prompt branches" in normalized(readme), readme
     assert "goal-harness heartbeat-prompt" in doc, doc
     assert "--compact" in doc, doc
+    assert "--brief" in doc, doc
     assert "Do not hand-edit per-project lifecycle branches" in doc, doc
     assert "goal-harness heartbeat-prompt" in integration_doc, integration_doc
     assert "goal-harness heartbeat-prompt --compact" in integration_doc, integration_doc
+    assert "goal-harness heartbeat-prompt --brief" in integration_doc, integration_doc
     assert "visible goal text can stay short" in integration_doc, integration_doc
     assert "shares the same quota, gate," in integration_doc, integration_doc
     assert "steering-audit, writeback, refresh, and spend lifecycle" in integration_doc, integration_doc
@@ -290,6 +317,7 @@ def main() -> int:
     assert "commit, push, and PR creation can proceed autonomously" in normalized(readme), readme
     assert "goal-harness heartbeat-prompt" in project_skill, project_skill
     assert "--compact" in project_skill, project_skill
+    assert "--brief" in project_skill, project_skill
     assert "Set Up Recurring Heartbeats" in project_skill, project_skill
     assert "visible goal text short" in project_skill, project_skill
     assert "--source heartbeat --execute" in project_skill, project_skill
@@ -324,6 +352,7 @@ def main() -> int:
     cli_payload = json.loads(cli_json.stdout)
     assert cli_payload["task_body"] == payload["task_body"], cli_payload
     assert cli_payload["compact"] is False, cli_payload
+    assert cli_payload["brief"] is False, cli_payload
 
     cli_compact_json = subprocess.run(
         [
@@ -347,6 +376,29 @@ def main() -> int:
     cli_compact_payload = json.loads(cli_compact_json.stdout)
     assert cli_compact_payload["task_body"] == compact_payload["task_body"], cli_compact_payload
     assert cli_compact_payload["compact"] is True, cli_compact_payload
+
+    cli_brief_json = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "goal_harness.cli",
+            "--format",
+            "json",
+            "heartbeat-prompt",
+            "--goal-id",
+            GOAL_ID,
+            "--active-state",
+            str(ACTIVE_STATE),
+            "--brief",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    cli_brief_payload = json.loads(cli_brief_json.stdout)
+    assert cli_brief_payload["task_body"] == brief_payload["task_body"], cli_brief_payload
+    assert cli_brief_payload["brief"] is True, cli_brief_payload
 
     cli_markdown = subprocess.run(
         [

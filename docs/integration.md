@@ -129,12 +129,23 @@ goal-harness heartbeat-prompt --compact \
   --active-state /path/to/project/.codex/goals/project-goal/ACTIVE_GOAL_STATE.md
 ```
 
+If an installed automation still needs to be smaller, use the brief body:
+
+```bash
+goal-harness heartbeat-prompt --brief \
+  --goal-id project-goal \
+  --active-state /path/to/project/.codex/goals/project-goal/ACTIVE_GOAL_STATE.md
+```
+
 Copy the generated task body into the heartbeat automation. The timer only
 wakes Codex; the task body asks Goal Harness whether the goal should spend
 delivery compute on that tick. The compact body is preferred for recurring
 heartbeats because it preserves the same quota, gate, blocker-push,
 recommendation, steering-audit, writeback, refresh, and spend lifecycle without
-copying the full audit prompt into every run context.
+copying the full audit prompt into every run context. The brief body is for
+installed automations that should carry only the preflight/guard, core
+invariants, and spend accounting while delegating detailed branches back to the
+generated contracts.
 
 The Codex App visible goal text can stay short, such as
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. It is only a label for

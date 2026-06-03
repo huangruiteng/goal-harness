@@ -133,9 +133,20 @@ goal-harness heartbeat-prompt --compact \
   --active-state <ACTIVE_GOAL_STATE_PATH>
 ```
 
+If the installed automation body still needs to be smaller, use the brief body:
+
+```bash
+goal-harness heartbeat-prompt --brief \
+  --goal-id <STABLE_GOAL_ID> \
+  --active-state <ACTIVE_GOAL_STATE_PATH>
+```
+
 Copy the generated task body into the Codex App heartbeat automation. The full
 body is the audit source and compatibility default; the compact body is the
-daily driver when context pressure matters. It still contains the pre-turn
+daily driver when context pressure matters. The brief body keeps only
+preflight/guard, core invariants, and spend accounting in the installed prompt
+while delegating detailed branches back to the generated compact/full
+contracts. It still contains the pre-turn
 `quota should-run` guard, operator-gate notification, blocker-push behavior,
 quiet non-gate `should_run=false` skip, bounded work, validation/writeback,
 optional `refresh-state`, and exactly one post-turn

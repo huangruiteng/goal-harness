@@ -17,6 +17,7 @@ def build_heartbeat_prompt(
     material_queue_rule: str | None = None,
     permission_rule: str | None = None,
     compact: bool = False,
+    brief: bool = False,
 ) -> dict[str, Any]:
     active_state_text = str(active_state.expanduser())
     resolved_material_rule = material_queue_rule or DEFAULT_MATERIAL_QUEUE_RULE
@@ -24,7 +25,12 @@ def build_heartbeat_prompt(
     quota_guard_command = render_quota_guard_command(goal_id)
     quota_spend_command = render_quota_spend_command(goal_id, source="heartbeat")
     cli_preflight = render_cli_preflight()
-    task_body_renderer = render_compact_heartbeat_task_body if compact else render_heartbeat_task_body
+    if brief:
+        task_body_renderer = render_brief_heartbeat_task_body
+    elif compact:
+        task_body_renderer = render_compact_heartbeat_task_body
+    else:
+        task_body_renderer = render_heartbeat_task_body
     task_body = task_body_renderer(
         goal_id=goal_id,
         active_state=active_state_text,
@@ -40,6 +46,7 @@ def build_heartbeat_prompt(
         "goal_id": goal_id,
         "active_state": active_state_text,
         "compact": compact,
+        "brief": brief,
         "expanded_prompt_command": expanded_prompt_command,
         "quota_guard_command": quota_guard_command,
         "quota_spend_command": quota_spend_command,
@@ -213,6 +220,58 @@ If the result says `should_run=true`:
 {permission_rule}"""
 
 
+def render_brief_heartbeat_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+) -> str:
+    compact_prompt_command = f"goal-harness heartbeat-prompt --compact --goal-id {goal_id} --active-state {active_state}"
+    expanded_prompt_command = f"goal-harness heartbeat-prompt --goal-id {goal_id} --active-state {active_state}"
+    return f"""Advance `{goal_id}` using `{active_state}`.
+
+Brief installed Goal Harness heartbeat. Keep details out; daily
+contract: `{compact_prompt_command}`; audit:
+`{expanded_prompt_command}`.
+
+Preflight and quota guard:
+
+```bash
+{cli_preflight}
+{quota_guard_command}
+```
+
+If preflight fails or guard says skip: no implementation, adapter work, file
+edits, research, exploration, or spend. If guard exposes gate or open user
+todo, send one concise Chinese `NOTIFY`; otherwise quiet
+`DONT_NOTIFY`.
+
+If allowed, follow the compact contract. Core invariants: read active state and
+status queue; blocker-push before delivery; obey `heartbeat_recommendation`;
+steering audit with product-bottleneck lens; choose one bounded verifiable step;
+stop on private/company-internal material, credentials, destructive git,
+production actions, or explicit review rules; validate/write back files,
+validation, critic, next action; add todos with `goal-harness todo add`; refresh
+state if needed.
+
+Spend exactly once only after completed delivery or safe-bypass work:
+
+```bash
+{quota_spend_command}
+```
+
+No spend for quiet skips, preflight failures, blocker-push asks, pure dry-runs,
+self-cancel, or duplicate accounting. Return compactly; `NOTIFY` only for a
+committed artifact, user gate, real blocker, or self-stop.
+
+{material_queue_rule}
+{permission_rule}"""
+
+
 def render_compact_heartbeat_task_body(
     *,
     goal_id: str,
@@ -297,7 +356,12 @@ real blocker, or self-stop; otherwise use `DONT_NOTIFY`.
 
 
 def render_heartbeat_prompt_markdown(payload: dict[str, Any]) -> str:
-    style = "compact " if payload.get("compact") else ""
+    if payload.get("brief"):
+        style = "brief "
+    elif payload.get("compact"):
+        style = "compact "
+    else:
+        style = ""
     return f"""# Heartbeat Automation Prompt
 
 Copy this {style}task body into a Codex App heartbeat automation.
@@ -311,6 +375,7 @@ Copy this {style}task body into a Codex App heartbeat automation.
 - goal_id: `{payload.get("goal_id")}`
 - active_state: `{payload.get("active_state")}`
 - compact: `{payload.get("compact")}`
+- brief: `{payload.get("brief")}`
 - expanded_prompt_command: `{payload.get("expanded_prompt_command")}`
 - quota_guard_command: `{payload.get("quota_guard_command")}`
 - quota_spend_command: `{payload.get("quota_spend_command")}`
