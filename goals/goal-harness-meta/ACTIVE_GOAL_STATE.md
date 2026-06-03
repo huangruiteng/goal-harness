@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T15:02:47+08:00
+updated_at: 2026-06-03T15:09:08+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,41 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- `quota should-run` now has a regression smoke proving that a current
+- Review Packet now has a regression smoke proving that a current approved
   `attention_queue` item can override stale `run_history.latest_runs` gate
-  evidence. The next heartbeat should audit another actual consumer for this
-  routing split, such as Review Packet or dashboard action selection, or move
-  to a real adapter-proof handoff that does not touch target project
-  repositories unless explicitly requested.
+  evidence when building an agent handoff. The next heartbeat should audit
+  dashboard action selection for the same routing split, or move to a real
+  adapter-proof handoff that does not touch target project repositories unless
+  explicitly requested.
 
 ## Recent Progress
 
+- 2026-06-03T15:09:08+08:00: Steering audit candidates were: P0 Review Packet
+  consumer audit for the current-routing-authority split, P0 dashboard
+  action-selection audit, P0 real adapter-proof handoff for a controller-ready
+  project line, and P2 no-progress guard tuning. Continuation check: this was
+  adjacent state-truth work after the quota guard smoke, but it moved to a
+  separate hot-path consumer that can directly package instructions for a
+  project agent. Continuing won because a stale Review Packet could re-ask an
+  old gate or omit the approved `agent_command` even when the current queue is
+  ready. No-progress self-stop check: not triggered because recent eligible
+  heartbeats produced committed artifacts or validation signals, and this turn
+  produced a bounded regression smoke. Bounded output: updated
+  `examples/review-packet-cli-smoke.py` with
+  `assert_attention_queue_drives_approved_handoff_over_stale_history`, a
+  fixture where `run_history.latest_runs` still looks
+  `operator_gate_deferred` while the current `attention_queue` item is
+  `operator_gate_approved` / `waiting_on=codex` and carries the approved
+  `agent_command`. Validation: `python3 examples/review-packet-cli-smoke.py`
+  passed; `python3 -m py_compile goal_harness/review_packet.py
+  examples/review-packet-cli-smoke.py` passed; `goal-harness --format json
+  check --scan-root .` passed with warnings=0 and a clean public boundary scan
+  over 82 files; `git diff --check` passed. Critic: this protects the
+  project-agent handoff surface without changing Review Packet logic, but
+  dashboard action selection still needs comparable regression coverage.
+  Losing candidate: real adapter-proof handoff remains high-value, but should
+  not jump ahead of the remaining state-truth consumer audit unless the queue
+  needs an immediate handoff.
 - 2026-06-03T15:02:47+08:00: Steering audit candidates were: P0 actual consumer
   audit for `quota should-run`, P0 Review Packet consumer audit, P0 dashboard
   action-selection audit, P0 real adapter-proof handoff for a controller-ready

@@ -11,6 +11,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from goal_harness.review_packet import build_review_packet  # noqa: E402
+
 GOAL_ID = "planned-main-control"
 APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
 
@@ -124,7 +129,76 @@ def assert_order(text: str, labels: list[str]) -> None:
     assert positions == sorted(positions), (labels, positions, text)
 
 
+def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
+    status_payload = {
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": GOAL_ID,
+                    "status": "operator_gate_approved",
+                    "waiting_on": "codex",
+                    "severity": "action",
+                    "recommended_action": "run the approved handoff now",
+                    "agent_command": APPROVED_COMMAND,
+                    "project_asset": {
+                        "owner": "codex",
+                        "gate": "none",
+                        "next_action": "run the approved handoff now",
+                        "stop_condition": "stop if the command needs write control",
+                        "agent_todos": {
+                            "next": "Run the approved queue-authority dry-run.",
+                        },
+                    },
+                    "source": "latest_run",
+                }
+            ]
+        },
+        "run_history": {
+            "goals": [
+                {
+                    "id": GOAL_ID,
+                    "status": "operator_gate_deferred",
+                    "registry_member": True,
+                    "latest_runs": [
+                        {
+                            "generated_at": "2026-01-01T00:00:00+00:00",
+                            "classification": "operator_gate_deferred",
+                            "recommended_action": "ask the stale operator gate again",
+                            "operator_gate": {
+                                "decision": "defer",
+                                "agent_command": "goal-harness stale-command --dry-run",
+                            },
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+    payload = build_review_packet(status_payload, goal_id=GOAL_ID)
+    packet = payload["packet"]
+
+    assert payload["ok"] is True, payload
+    assert payload["kind"] == "codex", payload
+    assert payload["status"] == "operator_gate_approved", payload
+    assert payload["waiting_on"] == "codex", payload
+    assert payload["operator_gate_approved_handoff"] is True, payload
+    assert payload["project_agent_command"] == APPROVED_COMMAND, payload
+    assert payload["operator_gate_dry_run_command"] is None, payload
+    assert payload["operator_gate_decision_commands"] == {}, payload
+    assert payload["agent_todo_text"] == "Run the approved queue-authority dry-run.", payload
+    assert "类型：Codex" in packet, packet
+    assert "operator gate 已批准" in packet, packet
+    assert "【用户本地 Gate 记录草稿】" not in packet, packet
+    assert "ask the stale operator gate again" not in packet, packet
+    assert "goal-harness stale-command" not in packet, packet
+    assert APPROVED_COMMAND in packet, packet
+
+
 def main() -> int:
+    assert_attention_queue_drives_approved_handoff_over_stale_history()
     with tempfile.TemporaryDirectory(prefix="goal-harness-review-packet-") as tmp:
         root = Path(tmp)
         registry_path = write_planned_registry(root)
