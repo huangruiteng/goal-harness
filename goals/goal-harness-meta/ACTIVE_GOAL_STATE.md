@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T06:34:43+08:00
+updated_at: 2026-06-04T06:38:05+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,22 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Define a private-safe boundary checklist for the platform-migration pilot
-  before touching private evidence. Keep the pre-existing dirty README
+- Apply the private-safe pilot checklist to the platform-migration pilot state
+  before reading private evidence. Keep the pre-existing dirty README
   untouched.
 
 ## Recent Progress
+
+- 2026-06-04T06:38:05+08:00: Added a public-safe private-pilot boundary
+  checklist to `docs/public-private-boundary.md`. The checklist defines the
+  fields a private project must settle before becoming a Goal Harness pilot:
+  goal identity, evidence classes, public projection, private retention, write
+  scope, gate order, validation surface, handoff rules, and publication stop.
+  This advances the platform-migration pilot without reading or publishing
+  private evidence. Validation: markdown diff-check and public/private
+  `goal-harness check` on the touched doc and state. Critic: the next useful
+  step is applying this checklist to private state; the public repo should not
+  guess platform-specific evidence.
 
 - 2026-06-04T06:34:43+08:00: Added an interface-budget smoke for active-state
   handoffs. `examples/active-state-interface-budget-smoke.py` checks the
