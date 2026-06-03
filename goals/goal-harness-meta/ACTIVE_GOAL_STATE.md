@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T06:38:05+08:00
+updated_at: 2026-06-04T06:55:30+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,24 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Apply the private-safe pilot checklist to the platform-migration pilot state
-  before reading private evidence. Keep the pre-existing dirty README
-  untouched.
+- Apply the sanitized no-evidence boundary scaffold to the platform-migration
+  project-local state; stop before private material, company repo drilldown, or
+  owner conclusion. Keep the pre-existing dirty README untouched.
 
 ## Recent Progress
+
+- 2026-06-04T06:55:30+08:00: Extended the existing
+  `examples/platform-migration-material-registry-smoke.py` fixture so a
+  platform-migration pilot active state must include a `Platform Migration
+  Pilot Boundary` no-evidence scaffold before material bodies, internal
+  repositories, or owner discussion are read. The regression asserts goal
+  identity, evidence classes, public projection, private retention, write
+  scope, stop condition, and public-boundary cleanliness. Validation:
+  `python3 examples/platform-migration-material-registry-smoke.py`,
+  `python3 -m py_compile examples/platform-migration-material-registry-smoke.py`,
+  touched-file `git diff --check`, and public/private `goal-harness check`.
+  Critic: this keeps the project-specific pilot out of the automation prompt;
+  the real private project state still needs a no-evidence application step.
 
 - 2026-06-04T06:38:05+08:00: Added a public-safe private-pilot boundary
   checklist to `docs/public-private-boundary.md`. The checklist defines the

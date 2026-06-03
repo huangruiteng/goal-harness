@@ -44,7 +44,20 @@ def write_platform_migration_fixture(root: Path) -> Path:
         "## Agent Todo\n\n"
         "- [ ] Run read-only map and report material freshness without internal links.\n\n"
         "## Next Action\n\n"
-        "- Refresh the public-safe material registry summary.\n",
+        "- Refresh the public-safe material registry summary.\n\n"
+        "## Platform Migration Pilot Boundary\n\n"
+        "Status: pre-evidence scaffold. Do not read material bodies, internal repositories, "
+        "or owner discussion text before this projection is validated.\n\n"
+        "- Goal identity: complex migration authority/material registry pilot.\n"
+        "- Evidence classes: current authority, owner review, source repository, "
+        "target repository, generated artifact, validation report, historical note.\n"
+        "- Public projection: role, freshness, missing gate, owner-review-required, "
+        "next public-safe action, validation surface, quota state, stop condition, todo counts.\n"
+        "- Private retention: source links, repository paths, raw command output, owner discussion, "
+        "generated diffs, business/team/person details.\n"
+        "- Write scope: local state and read-only projection only.\n"
+        "- Stop condition: private material, company repository drilldown, owner conclusion, "
+        "configuration generation, upload, or production action.\n",
         encoding="utf-8",
     )
 
@@ -162,6 +175,26 @@ def assert_public_safe(text: str) -> None:
         assert marker.lower() not in lowered, (marker, text)
 
 
+def assert_no_evidence_boundary_scaffold(state_text: str) -> None:
+    assert "## Platform Migration Pilot Boundary" in state_text, state_text
+    required = [
+        "pre-evidence scaffold",
+        "Goal identity",
+        "Evidence classes",
+        "Public projection",
+        "Private retention",
+        "Write scope",
+        "Stop condition",
+        "owner-review-required",
+        "read-only projection only",
+    ]
+    for marker in required:
+        assert marker in state_text, marker
+    assert "Do not read material bodies" in state_text, state_text
+    assert "company repository drilldown" in state_text, state_text
+    assert_public_safe(state_text)
+
+
 def assert_material_counts(
     registry: dict[str, object],
     *,
@@ -189,6 +222,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-platform-migration-") as tmp:
         root = Path(tmp)
         registry_path = write_platform_migration_fixture(root)
+        state_text = (registry_path.parent.parent / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md").read_text(
+            encoding="utf-8"
+        )
+        assert_no_evidence_boundary_scaffold(state_text)
 
         mapped = json.loads(
             run_cli(root, registry_path, "--format", "json", "read-only-map", "--goal-id", GOAL_ID).stdout
