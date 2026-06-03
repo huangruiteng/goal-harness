@@ -78,6 +78,30 @@ def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> No
         print(markdown_renderer(payload))
 
 
+def review_packet_handoff_only_payload(payload: dict[str, object]) -> dict[str, object]:
+    result: dict[str, object] = {
+        "ok": bool(payload.get("ok")),
+        "goal_id": payload.get("goal_id"),
+        "handoff_only": True,
+    }
+    if not payload.get("ok"):
+        result["error"] = payload.get("error")
+        return result
+    handoff_text = str(payload.get("project_agent_handoff") or "")
+    result.update(
+        {
+            "kind": payload.get("kind"),
+            "status": payload.get("status"),
+            "waiting_on": payload.get("waiting_on"),
+            "project_agent_command": payload.get("project_agent_command"),
+            "project_agent_handoff": handoff_text,
+            "handoff_text": handoff_text,
+            "operator_gate_approved_handoff": payload.get("operator_gate_approved_handoff"),
+        }
+    )
+    return result
+
+
 def user_supplied_registry(argv: list[str] | None) -> bool:
     values = sys.argv[1:] if argv is None else argv
     return any(value == "--registry" or value.startswith("--registry=") for value in values)
@@ -856,8 +880,7 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         if args.handoff_only:
-            payload["handoff_only"] = True
-            payload["handoff_text"] = str(payload.get("project_agent_handoff") or "")
+            payload = review_packet_handoff_only_payload(payload)
         if args.handoff_only and args.format != "json" and payload.get("ok"):
             print(str(payload.get("handoff_text") or ""))
         else:

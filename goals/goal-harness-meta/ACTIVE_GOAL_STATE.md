@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:31:33+08:00
+updated_at: 2026-06-04T07:41:42+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,29 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Audit `review-packet --handoff-only` for the same public-safe path boundary:
-  it should consume redacted `attention_queue` / `project_asset` and not
-  reintroduce local absolute paths from another layer.
+- Check whether any public consumer still depends on the old
+  `review-packet --handoff-only --format json` full-payload shape; keep the
+  minimized handoff payload boundary and update only narrow docs/examples if
+  needed.
 
 ## Recent Progress
+
+- 2026-06-04T07:41:42+08:00: Closed the review-packet handoff path boundary.
+  `goal_harness/review_packet.py` now redacts local absolute paths before they
+  enter `project_agent_command` or `project_agent_handoff`, covering generated
+  registry/runtime command paths and historical approved `agent_command` values.
+  `goal_harness/cli.py` now renders `--handoff-only --format json` as a
+  minimized handoff payload instead of returning the full operator packet, so
+  local gate preview fields are not reintroduced through JSON. The
+  review-packet CLI smoke now checks controller, approved, markdown, and JSON
+  handoff outputs for local path shapes and includes a fixture with an old
+  approved command carrying local paths. The status data contract documents the
+  minimized JSON and redacted command boundary. Validation: review-packet CLI
+  smoke, touched Python compile, touched-file `git diff --check`, 4-file
+  public/private `goal-harness check`, and live `goal-harness-meta`
+  handoff-only Markdown/JSON no-local-path checks. Critic: this changes the
+  handoff-only JSON shape intentionally; next check should ensure no public
+  consumer still expects the old full payload.
 
 - 2026-06-04T07:31:33+08:00: Added a generic no-local-path guard to
   `examples/user-todo-review-material-smoke.py`. The smoke now recursively

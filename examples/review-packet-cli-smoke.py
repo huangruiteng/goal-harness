@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +21,28 @@ from goal_harness.review_packet import build_review_packet  # noqa: E402
 
 GOAL_ID = "planned-main-control"
 APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
+APPROVED_COMMAND_TAIL = f"read-only-map --goal-id {GOAL_ID} --dry-run"
 FOCUS_WAIT_GOAL_ID = "focus-wait-owner-blocker"
+LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
+)
+
+
+def iter_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from iter_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_strings(item)
+
+
+def assert_no_local_paths(value: Any, label: str) -> None:
+    for text in iter_strings(value):
+        match = LOCAL_ABSOLUTE_PATH_PATTERN.search(text)
+        assert match is None, f"{label} leaked local path {match.group(0)!r}: {text}"
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -104,6 +128,13 @@ def write_planned_registry(root: Path) -> Path:
     return registry_path
 
 
+def approved_command_with_local_paths(root: Path) -> str:
+    return (
+        f"goal-harness --registry {root / 'project' / '.goal-harness' / 'registry.json'} "
+        f"--runtime-root {root / 'runtime'} read-only-map --goal-id {GOAL_ID} --dry-run"
+    )
+
+
 def append_operator_gate_approval_fixture(root: Path) -> None:
     run_dir = root / "runtime" / "goals" / GOAL_ID / "runs"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -123,7 +154,7 @@ def append_operator_gate_approval_fixture(root: Path) -> None:
             "decision": "approve",
             "operator_question": f"是否同意 `{GOAL_ID}` 先执行 read-only map opt-in？",
             "reason_summary": f"同意 {GOAL_ID} 先做 read-only map dry-run，不授权写入或生产动作",
-            "agent_command": APPROVED_COMMAND,
+            "agent_command": approved_command_with_local_paths(root),
         },
     }
     json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -395,11 +426,39 @@ def main() -> int:
         assert "--decision defer" in payload["operator_gate_decision_commands"]["defer"], payload
         assert "<public-safe-condition>" in payload["operator_gate_decision_commands"]["defer"], payload
         assert payload["project_agent_command"], payload
+        assert_no_local_paths(
+            {
+                "project_agent_command": payload["project_agent_command"],
+                "project_agent_handoff": payload["project_agent_handoff"],
+            },
+            "controller project-agent handoff",
+        )
         assert payload["user_todo_text"] == "Read owner review worksheet first.", payload
         assert payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", payload
         assert payload["authority_summary"] == "authority/material: topics=2, materials=4, repositories=2, owner_review_required=1, stale=1, current_authority=1, risk=low", payload
         assert "转发条件" in payload["packet"], payload
         assert not run_dir.exists(), "json review-packet must not write runtime runs"
+
+        controller_handoff_json_result = run_cli(
+            root,
+            registry_path,
+            "--format",
+            "json",
+            "review-packet",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(root / "project"),
+            "--handoff-only",
+        )
+        controller_handoff_payload = json.loads(controller_handoff_json_result.stdout)
+        assert controller_handoff_payload["ok"] is True, controller_handoff_payload
+        assert controller_handoff_payload["handoff_only"] is True, controller_handoff_payload
+        assert "packet" not in controller_handoff_payload, controller_handoff_payload
+        assert "operator_gate_dry_run_command" not in controller_handoff_payload, controller_handoff_payload
+        assert "operator_gate_decision_commands" not in controller_handoff_payload, controller_handoff_payload
+        assert controller_handoff_payload["handoff_text"] == controller_handoff_payload["project_agent_handoff"], controller_handoff_payload
+        assert_no_local_paths(controller_handoff_payload, "controller handoff-only json")
 
         append_operator_gate_approval_fixture(root)
         before_files = sorted(path.name for path in run_dir.iterdir())
@@ -426,10 +485,11 @@ def main() -> int:
         assert "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。" in approved_packet, approved_packet
         assert "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。" in approved_packet, approved_packet
         assert "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。" in approved_packet, approved_packet
-        assert APPROVED_COMMAND in approved_packet, approved_packet
+        assert APPROVED_COMMAND_TAIL in approved_packet, approved_packet
+        assert "<local-path>" in approved_packet, approved_packet
         assert_order(
             approved_packet,
-            ["【人只需判断】", "operator gate 已批准", "【给项目 Agent】", "Agent 待办", "operator gate 已记录为 approve", APPROVED_COMMAND],
+            ["【人只需判断】", "operator gate 已批准", "【给项目 Agent】", "Agent 待办", "operator gate 已记录为 approve", APPROVED_COMMAND_TAIL],
         )
 
         handoff_only_result = run_cli(
@@ -449,7 +509,9 @@ def main() -> int:
         assert "【用户本地 Gate 记录草稿】" not in handoff_only, handoff_only
         assert "operator gate 已记录为 approve" in handoff_only, handoff_only
         assert "不要从旧聊天或旧 packet 拼当前状态" in handoff_only, handoff_only
-        assert APPROVED_COMMAND in handoff_only, handoff_only
+        assert APPROVED_COMMAND_TAIL in handoff_only, handoff_only
+        assert "<local-path>" in handoff_only, handoff_only
+        assert_no_local_paths(handoff_only, "handoff-only markdown")
 
         approved_json_result = run_cli(
             root,
@@ -466,12 +528,20 @@ def main() -> int:
         assert approved_payload["ok"] is True, approved_payload
         assert approved_payload["kind"] == "codex", approved_payload
         assert approved_payload["operator_gate_approved_handoff"] is True, approved_payload
-        assert approved_payload["project_agent_command"] == APPROVED_COMMAND, approved_payload
+        assert APPROVED_COMMAND_TAIL in approved_payload["project_agent_command"], approved_payload
+        assert "<local-path>" in approved_payload["project_agent_command"], approved_payload
         assert approved_payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", approved_payload
         assert approved_payload["authority_summary"] == payload["authority_summary"], approved_payload
         assert approved_payload["project_agent_handoff"], approved_payload
         assert "operator gate 已记录为 approve" in approved_payload["project_agent_handoff"], approved_payload
         assert "不要从旧聊天或旧 packet 拼当前状态" in approved_payload["project_agent_handoff"], approved_payload
+        assert_no_local_paths(
+            {
+                "project_agent_command": approved_payload["project_agent_command"],
+                "project_agent_handoff": approved_payload["project_agent_handoff"],
+            },
+            "approved project-agent handoff",
+        )
         assert approved_payload["operator_gate_dry_run_command"] is None, approved_payload
         assert approved_payload["operator_gate_decision_commands"] == {}, approved_payload
 
@@ -492,6 +562,17 @@ def main() -> int:
         assert handoff_payload["handoff_only"] is True, handoff_payload
         assert handoff_payload["handoff_text"] == handoff_payload["project_agent_handoff"], handoff_payload
         assert handoff_payload["operator_gate_approved_handoff"] is True, handoff_payload
+        assert "packet" not in handoff_payload, handoff_payload
+        assert "operator_gate_dry_run_command" not in handoff_payload, handoff_payload
+        assert "operator_gate_decision_commands" not in handoff_payload, handoff_payload
+        assert_no_local_paths(
+            {
+                "handoff_text": handoff_payload["handoff_text"],
+                "project_agent_handoff": handoff_payload["project_agent_handoff"],
+                "project_agent_command": handoff_payload["project_agent_command"],
+            },
+            "handoff-only json",
+        )
 
         after_files = sorted(path.name for path in run_dir.iterdir())
         assert after_files == before_files, "approved review-packet must not write runtime runs"

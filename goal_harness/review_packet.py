@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import re
 import shlex
 from typing import Any
+
+
+LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
+)
+
+
+def redact_local_absolute_paths(value: str) -> str:
+    return LOCAL_ABSOLUTE_PATH_PATTERN.sub(lambda match: f"{match.group(1)}<local-path>", value)
 
 
 def compact_packet_text(value: str, limit: int = 180) -> str:
@@ -401,7 +411,7 @@ def build_review_packet(
     user_todo_text = todo_text_from_project_asset(item, "user_todos")
     agent_todo_text = todo_text_from_project_asset(item, "agent_todos")
     authority_summary = authority_material_summary(goal)
-    command = project_agent_command(status_payload, goal_id, kind, item)
+    command = redact_local_absolute_paths(project_agent_command(status_payload, goal_id, kind, item))
     approved_handoff = operator_gate_approved_handoff(item, goal)
     gate_commands = operator_gate_decision_commands(status_payload, goal_id) if kind == "controller" else {}
     gate_command = gate_commands.get("approve") if gate_commands else None
