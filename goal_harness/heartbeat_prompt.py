@@ -103,6 +103,12 @@ If the result says `should_run=false`:
 If the result says `should_run=true`:
 
 1. Read the active state, Priority Stack, recent progress, and critic.
+   When you inspect current Goal Harness routing, use the current status queue:
+   `attention_queue.items` and each item's `project_asset` are authoritative
+   for owner, gate, waiting party, and next action. Treat
+   `run_history.latest_runs` as evidence and drill-down only; it may be limited
+   by status command limits or filters, so do not decide whether a gate is
+   pending or approved from latest runs alone.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply

@@ -99,6 +99,12 @@ If the result says should_run=false:
 If the result says should_run=true:
 
 1. Read the active state, Priority Stack, recent progress, and critic.
+   When you inspect current Goal Harness routing, use the current status queue:
+   attention_queue.items and each item's project_asset are authoritative for
+   owner, gate, waiting party, and next action. Treat run_history.latest_runs
+   as evidence and drill-down only; it may be limited by status command limits
+   or filters, so do not decide whether a gate is pending or approved from
+   latest runs alone.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply
@@ -182,10 +188,12 @@ it returns `state=operator_gate` plus `safe_bypass_allowed=true`, avoid the
 gated command and do at most one independent read-only steering/analysis step
 after the gate has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
-the priority stack, apply a continuation check for repeated topics, run the
-no-progress self-stop check, then do one bounded verifiable step, validate it,
-write back changed files / validation / critic / next action, refresh state if
-needed, and append exactly one
+the priority stack, use `attention_queue.items` / `project_asset` as the current
+routing authority and treat `run_history.latest_runs` only as evidence,
+apply a continuation check for repeated topics, run the no-progress self-stop
+check, then do one bounded verifiable step, validate it, write back changed
+files / validation / critic / next action, refresh state if needed, and append
+exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
 event after the completed turn. Use `--slots 1` for minute-based
 heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
@@ -204,17 +212,19 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 3. If the gate was already surfaced and `safe_bypass_allowed=true`, either take
    one independent safe-bypass step or report the pending gate compactly.
 4. Run the steering audit before choosing the work.
-5. Cancel or pause the automation instead of spending if 5 consecutive eligible
+5. Use `attention_queue.items` / `project_asset` as current routing authority;
+   use `run_history.latest_runs` only as evidence or drill-down.
+6. Cancel or pause the automation instead of spending if 5 consecutive eligible
    turns are only repeated no-progress status loops.
-6. Treat routine public commit, push, and PR creation as autonomous after clean
+7. Treat routine public commit, push, and PR creation as autonomous after clean
    validation and a public/private boundary scan; stop for private/company
    material, credentials, destructive git, production actions, or repo rules
    that explicitly require review.
-7. Work small when `should_run=true`.
-8. Validate before reporting.
-9. Refresh state when the run is state-only.
-10. Spend exactly once after the completed turn.
-11. Report compactly.
+8. Work small when `should_run=true`.
+9. Validate before reporting.
+10. Refresh state when the run is state-only.
+11. Spend exactly once after the completed turn.
+12. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode

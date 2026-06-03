@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T14:54:45+08:00
+updated_at: 2026-06-03T14:59:00+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,40 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Status data contract now states that `attention_queue.items` and
-  `project_asset` are the current routing authority for owner/gate/waiting
-  party/next action, while `run_history.latest_runs` is only evidence and
-  drill-down. The next heartbeat should audit whether heartbeat/pre-tick
-  consumers follow this authority split, or move to a real adapter-proof handoff
-  that does not touch target project repositories unless explicitly requested.
+- Generated heartbeat prompts now carry the current-routing-authority rule:
+  `attention_queue.items` / `project_asset` are authoritative for owner, gate,
+  waiting party, and next action, while `run_history.latest_runs` is evidence
+  only. The next heartbeat should audit an actual consumer for this split or
+  move to a real adapter-proof handoff that does not touch target project
+  repositories unless explicitly requested.
 
 ## Recent Progress
 
+- 2026-06-03T14:59:00+08:00: Steering audit candidates were: P0 heartbeat
+  prompt consumer-hardening for the new routing-authority split, P0 actual
+  project-local pre-tick consumer audit, P0 real adapter-proof handoff for a
+  controller-ready project line, P1 dashboard duplicate-burden audit, and P2
+  no-progress guard tuning. Continuation check: this continued state-truth work
+  for one more slice because the previous patch only documented the contract;
+  generated automations still needed to carry the rule so future heartbeats do
+  not regress into `run_history.latest_runs` as the current gate source.
+  No-progress self-stop check: not triggered because recent eligible heartbeats
+  produced committed artifacts or validation signals, and this turn produced a
+  bounded generator/docs/test patch. Bounded output: updated
+  `goal_harness/heartbeat_prompt.py`, `docs/heartbeat-automation-prompt.md`,
+  and `examples/heartbeat-prompt-smoke.py` so generated heartbeat task bodies
+  tell agents to use `attention_queue.items` / `project_asset` as current
+  routing authority and treat `run_history.latest_runs` as evidence only.
+  Validation: `python3 examples/heartbeat-prompt-smoke.py` passed; `python3 -m
+  py_compile goal_harness/heartbeat_prompt.py
+  examples/heartbeat-prompt-smoke.py` passed; `goal-harness --format json
+  check --scan-root .` passed with warnings=0 and a clean public boundary scan
+  over 82 files; `git diff --check` passed. Critic: this is the right
+  follow-up to the contract patch because it changes future agent behavior, not
+  only documentation; residual risk is that existing already-created
+  automations or private pre-tick scripts may still need separate updates.
+  Losing candidate: actual consumer audit remains high-value and should not be
+  forgotten.
 - 2026-06-03T14:54:45+08:00: Steering audit candidates were: P0 state/safety
   contract gap after a project-local pre-tick consumer was found to rely on a
   limited latest-run slice; P0 real adapter-proof handoff for a controller-ready
