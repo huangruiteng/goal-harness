@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T11:54:05+08:00
+updated_at: 2026-06-03T12:01:10+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -53,16 +53,40 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Status markdown now prints `project_asset.next_action` as `asset_next_action`
-  alongside owner/gate/stop, so Markdown consumers do not need to reconstruct
-  the project asset from the generic action line. The user also asked whether
-  Goal Harness can proactively discover bottlenecks in core UX/capability and
-  adjust priorities. The next heartbeat should not continue small copy fixes;
-  it should run one explicit product bottleneck audit slice and, if a reusable
-  priority-rule gap is found, patch that single gap.
+- The reusable heartbeat lifecycle now includes a product bottleneck lens in
+  steering audits. The next heartbeat should use that lens on one concrete
+  UX/capability bottleneck, with user/agent todo visibility or dashboard
+  first-screen burden as the leading candidates, and patch only one mismatch.
 
 ## Recent Progress
 
+- 2026-06-03T12:01:10+08:00: Steering audit candidates were: P0 product
+  bottleneck/prioritization rule gap for autonomous goal ticks, P0 user/agent
+  todo visibility across status JSON/markdown/dashboard, P1 dashboard visual
+  polish, and P2 no-progress guard tuning. Continuation check: recent slices
+  fixed quota/defaults/approved handoff/status-markdown micro-contracts; after
+  the user asked whether Goal Harness can discover core UX/capability
+  bottlenecks and adjust priorities, another local copy fix would be the wrong
+  focus. No-progress self-stop check: not triggered because recent eligible
+  heartbeats produced committed artifacts and validation signals, and this turn
+  produced a reusable heartbeat-lifecycle contract patch. Bounded output:
+  updated `goal_harness/heartbeat_prompt.py`,
+  `docs/heartbeat-automation-prompt.md`,
+  `skills/goal-harness-project/SKILL.md`,
+  `docs/state-interaction-model.md`, and
+  `examples/heartbeat-prompt-smoke.py` so every generated heartbeat steering
+  audit must include a product bottleneck lens over user experience, agent
+  capability, evidence quality, adapter readiness, and priority-rule gaps, and
+  may promote one concrete bottleneck above the nearest local TODO. Validation:
+  `python3 examples/heartbeat-prompt-smoke.py` passed; `python3 -m py_compile
+  goal_harness/heartbeat_prompt.py examples/heartbeat-prompt-smoke.py` passed;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and
+  a clean public boundary scan over 82 files; `git diff --check` passed.
+  Critic: this makes bottleneck discovery part of the reusable lifecycle, but
+  it does not itself solve the next UX/capability bottleneck; the next slice
+  should apply the lens to one visible project-asset surface. Losing candidate:
+  dashboard visual polish remains useful but should be chosen only after the
+  lens confirms whether the first-screen burden is the top bottleneck.
 - 2026-06-03T11:54:05+08:00: Steering audit candidates were: P0 status-markdown
   project-asset ownership wording, P0 user/agent todo visibility across status
   JSON/markdown/dashboard, P1 dashboard visual polish, and P2 no-progress guard

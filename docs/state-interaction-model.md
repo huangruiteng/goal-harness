@@ -161,7 +161,11 @@ steering audit:
 4. separate compute quota from focus quota. Compute quota controls how many
    turns a goal may spend; focus quota controls whether one subtopic deserves
    the next turn at all;
-5. record the losing high-value candidate when it matters, so the next tick can
+5. include a product bottleneck lens: ask whether the core goal is currently
+   bottlenecked by user experience, agent capability, evidence quality, adapter
+   readiness, or priority-rule gaps, and promote one concrete bottleneck
+   candidate when it should outrank the nearest local TODO;
+6. record the losing high-value candidate when it matters, so the next tick can
    resume the broader milestone instead of rediscovering only the nearest
    local gap.
 

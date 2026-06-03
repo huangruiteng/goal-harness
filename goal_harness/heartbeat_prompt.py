@@ -108,7 +108,10 @@ If the result says `should_run=true`:
    useful; if the same topic has consumed several recent delivery slices, apply
    a continuation check and state why continuing still wins; keep compute quota
    separate from focus quota; record any losing high-value candidate that should
-   not be forgotten.
+   not be forgotten. Include a product bottleneck lens: ask whether the core
+   goal is currently bottlenecked by user experience, agent capability,
+   evidence quality, adapter readiness, or priority-rule gaps, and promote one
+   concrete bottleneck candidate when it should outrank the nearest local TODO.
 3. Run the no-progress self-stop check before choosing delivery work. Inspect
    recent active-state progress and run history for consecutive eligible
    heartbeat turns. Count a turn as no-progress only when it produced no

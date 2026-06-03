@@ -106,8 +106,12 @@ steering audit before choosing work: list at least three plausible next-action
 candidates across different P0/P1/P2 lanes when useful; if the same topic has
 consumed several recent delivery slices, apply a continuation check and state
 why continuing still wins; keep compute quota separate from focus quota; record
-any losing high-value candidate that should not be forgotten. Then choose
-exactly one bounded, verifiable step from that audit.
+any losing high-value candidate that should not be forgotten. Include a product
+bottleneck lens: ask whether the core goal is currently bottlenecked by user
+experience, agent capability, evidence quality, adapter readiness, or
+priority-rule gaps, and promote one concrete bottleneck candidate when it should
+outrank the nearest local TODO. Then choose exactly one bounded, verifiable step
+from that audit.
 
 ## Set Up Recurring Heartbeats
 
