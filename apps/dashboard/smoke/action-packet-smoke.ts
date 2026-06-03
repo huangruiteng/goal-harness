@@ -56,4 +56,27 @@ assert(!approvedHandoff.includes("【GH Packet】"), "handoff-only payload must 
 assert(!approvedHandoff.includes("【用户/Gate】"), "handoff-only payload must not include user gate wrapper");
 assert(!approvedHandoff.includes("建议："), "handoff-only payload must not include human suggestion text");
 
-console.log(`action-packet smoke ok (${packet.length} chars, handoff ${approvedHandoff.length} chars)`);
+const focusWaitPacket = buildActionPacket({
+  goalId: "focus-wait-owner-blocker",
+  title: "Focus wait owner blocker",
+  summary: "quiet until owner evidence, a clean baseline, or external eval changes",
+  userTodoText: "Provide new owner evidence, a clean baseline, or external eval before delivery resumes.",
+  agentTodoText: "只检查当前 state/status/history；保持 focus_wait 并用中文回报仍在等待什么。",
+  todoBlocksGate: false,
+  operatorQuestion: null,
+  suggestedReply: "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
+  gateFallbackDecision: "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
+  boundary: "这不是 delivery approval；项目 Agent 只做 status/history inspection，不执行交付路径、写入、reward append 或生产动作。",
+  safePathLabel: "Status/history inspection only",
+  command: "goal-harness --registry ./examples/registry.example.json --runtime-root ./tmp/runtime status --goal-id focus-wait-owner-blocker",
+});
+
+assert(focusWaitPacket.includes("目标：focus-wait-owner-blocker"), "missing focus-wait goal id");
+assert(focusWaitPacket.includes("待办：Provide new owner evidence"), "missing owner blocker unlock condition");
+assert(focusWaitPacket.includes("Gate：无；建议：继续保持 focus wait"), "missing focus-wait fallback decision");
+assert(focusWaitPacket.includes("Status/history inspection only"), "missing status/history-only safe path");
+assert(focusWaitPacket.includes("保持 focus_wait"), "missing agent focus-wait boundary");
+assert(!focusWaitPacket.includes("operator-gate"), "focus-wait packet must not draft an operator gate");
+assert(!focusWaitPacket.includes("read-only-map"), "focus-wait packet must not expose a delivery map command");
+
+console.log(`action-packet smoke ok (${packet.length} chars, handoff ${approvedHandoff.length} chars, focus ${focusWaitPacket.length} chars)`);

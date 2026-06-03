@@ -788,11 +788,13 @@ function todoCountLabel(todos?: TodoGroup | null) {
 
 function UserTodoCallout({
   blocksGate,
+  focusWait,
   goalId,
   source,
   todos,
 }: {
   blocksGate?: boolean;
+  focusWait?: boolean;
   goalId: string;
   source: DataSource;
   todos?: TodoGroup | null;
@@ -838,7 +840,7 @@ function UserTodoCallout({
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
       <div className="flex flex-wrap items-center gap-2">
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
-        <Badge variant="success">{blocksGate ? "先做用户待办" : "Next user todo"}</Badge>
+        <Badge variant="success">{blocksGate ? "先做用户待办" : focusWait ? "Owner blocker" : "Next user todo"}</Badge>
         {count ? <Badge variant="neutral">{count}</Badge> : null}
       </div>
       <p className="mt-2 line-clamp-3 break-words text-sm font-medium leading-6 text-emerald-950 dark:text-emerald-100">
@@ -847,6 +849,11 @@ function UserTodoCallout({
       {blocksGate ? (
         <p className="mt-1 text-xs font-medium leading-5 text-emerald-800 dark:text-emerald-200">
           完成或明确暂缓这个用户待办后，再审批下面的 gate。
+        </p>
+      ) : null}
+      {focusWait ? (
+        <p className="mt-1 text-xs font-medium leading-5 text-emerald-800 dark:text-emerald-200">
+          有新 owner evidence、clean baseline 或外部 eval 前保持 focus wait，不恢复 delivery。
         </p>
       ) : null}
       {materials.length > 0 ? (
@@ -1162,6 +1169,7 @@ function buildAuthorityCoverageFromProjectMap(projectMap: ProjectMap): Authority
 const quotaStateLabel: Record<string, string> = {
   blocked_health: "Health blocked",
   eligible: "Eligible",
+  focus_wait: "Focus wait",
   operator_gate: "Operator gate",
   paused: "Paused",
   throttled: "Throttled",
@@ -1171,6 +1179,7 @@ const quotaStateLabel: Record<string, string> = {
 const quotaStateReviewLabel: Record<string, string> = {
   blocked_health: "先修健康阻塞",
   eligible: "可自动推进",
+  focus_wait: "等待 owner evidence / clean baseline / external eval",
   operator_gate: "等待人或控制器决策",
   paused: "自动 compute 已暂停",
   throttled: "本窗口配额已用完",
@@ -1216,6 +1225,10 @@ function buildQuotaView(quota?: ComputeQuota | null): QuotaView | undefined {
   };
 }
 
+function isFocusWaitQuota(quota?: ComputeQuota | null) {
+  return (quota?.state ?? "") === "focus_wait";
+}
+
 function formatLatestValidation(validation?: ProjectAssetLatestValidation | null) {
   if (!validation) {
     return null;
@@ -1248,7 +1261,29 @@ function buildHumanFriendlyActionPacket({
   const todo = firstOpenTodo(item.userTodos);
   const agentTodo = firstOpenTodo(item.agentTodos);
   const approvedAgentCommand = item.kind === "codex" && Boolean(item.agentCommand);
-  const command = item.safePathCommand ?? item.agentCommand ?? buildStatusCommand({ registry, runtimeRoot });
+  const isFocusWait = isFocusWaitQuota(item.quota);
+  const command = isFocusWait
+    ? buildStatusCommand({ registry, runtimeRoot })
+    : item.safePathCommand ?? item.agentCommand ?? buildStatusCommand({ registry, runtimeRoot });
+  if (isFocusWait) {
+    return buildActionPacket({
+      goalId: item.goalId,
+      title: item.title,
+      summary: item.summary,
+      userTodoText: todo?.text,
+      agentTodoText: agentTodo?.text ?? "只检查当前 state/status/history；保持 focus_wait 并用中文回报仍在等待什么。",
+      todoBlocksGate: false,
+      operatorQuestion: null,
+      suggestedReply: "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
+      gateFallbackDecision: "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
+      boundary: "这不是 delivery approval；项目 Agent 只做 status/history inspection，不执行交付路径、写入、reward append 或生产动作。",
+      durableRecordRule: null,
+      safePathLabel: "Status/history inspection only",
+      command,
+      quotaShortLine: quotaView?.shortLine,
+      authorityShortLine: item.authorityCoverage?.shortLine,
+    });
+  }
   if (approvedAgentCommand && item.agentCommand) {
     return buildApprovedAgentHandoff({
       goalId: item.goalId,
@@ -1753,6 +1788,25 @@ function buildUserActionSummaryItems({
       }];
     }
 
+    if (decision.waitingOn === "codex" && quotaState === "focus_wait") {
+      const ownerTodo = firstOpenTodo(userTodos);
+      return [{
+        ...base,
+        kind: "evidence",
+        title: "Focus wait owner blocker",
+        badge: "Focus wait",
+        variant: "info",
+        summary: ownerTodo
+          ? `Waiting on owner blocker: ${ownerTodo.text}`
+          : "Waiting for owner evidence, a clean baseline, or external eval before delivery resumes.",
+        detail: stopCondition,
+        safePathLabel: "Status/history inspection only",
+        safePathCommand: buildStatusCommand({ registry, runtimeRoot }),
+        draftLabel: "focus wait",
+        priority: 3,
+      }];
+    }
+
     if (decision.waitingOn === "codex" && quotaState === "throttled") {
       return [];
     }
@@ -1911,6 +1965,8 @@ function UserActionSummary({
                     ? "Copied"
                     : item.kind === "codex" && item.agentCommand
                       ? "Copy Handoff"
+                      : isFocusWaitQuota(item.quota)
+                        ? "Copy Focus Packet"
                       : "Copy";
                   const agentTodo = firstOpenTodo(item.agentTodos);
                   return (
@@ -1965,6 +2021,7 @@ function UserActionSummary({
                     </div>
                     <UserTodoCallout
                       blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))}
+                      focusWait={isFocusWaitQuota(item.quota)}
                       goalId={item.goalId}
                       source={source}
                       todos={item.userTodos}

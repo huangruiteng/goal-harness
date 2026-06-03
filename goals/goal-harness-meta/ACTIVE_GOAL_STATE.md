@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:10:38+08:00
+updated_at: 2026-06-03T16:20:57+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -61,13 +61,42 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Review Packet now has a sanitized `focus_wait` owner-blocker fixture. Next,
-  carry the same focus-wait owner-blocker presentation into the dashboard
-  action packet / first-screen card so quiet projects show why they are quiet,
-  who can unblock them, what evidence is needed, and when delivery may resume.
+- `focus_wait + owner blocker` now appears in Review Packet and dashboard
+  first-screen action packets. Next, add a sanitized blocker-push fixture to
+  the generated heartbeat/status path so open owner blockers can become compact
+  `NOTIFY` asks when they can unlock a quiet project, rather than relying only
+  on hand-written automation instructions.
 
 ## Recent Progress
 
+- 2026-06-03T16:20:57+08:00: Steering audit candidates were: P0 dashboard
+  action packet / first-screen presentation for `focus_wait` owner blockers,
+  P0 generated heartbeat/status blocker-push prompts, P0 target-project dry-run
+  signals, and P1 browser-level fixture hardening. Continuation check: this was
+  the third focus-wait-related delivery slice, but continuing still won because
+  quota and Review Packet already carried the state while the dashboard
+  operator path still made quiet Codex-owned goals look generically actionable.
+  No-progress self-stop check: not triggered because recent heartbeats produced
+  committed artifacts, validation, and concrete user/agent surfaces. Bounded
+  output: dashboard quota labels now include `Focus wait`; first-screen action
+  cards render `focus_wait` as a `Focus wait owner blocker` card with an owner
+  blocker callout; the copy affordance says `Copy Focus Packet`; and the copied
+  packet is status/history-only, with no approved handoff, operator-gate draft,
+  or read-only map delivery path. Changed files:
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `apps/dashboard/smoke/action-packet-smoke.ts`,
+  `examples/review-packet-smoke.py`, and `docs/status-data-contract.md`.
+  Validation: `npm --prefix apps/dashboard run smoke:action-packet`,
+  `npm --prefix apps/dashboard run build`, `python3
+  examples/review-packet-smoke.py`, `python3 examples/review-packet-cli-smoke.py`,
+  `goal-harness --format json check --scan-root .`, `git diff --check`,
+  changed-diff sensitive-pattern scan, and an in-app browser check against a
+  sanitized loopback `focus-wait-owner-blocker` fixture all passed. Critic:
+  this closes the dashboard visibility gap, but blocker-push behavior is still
+  mostly encoded in the live automation prompt; the public generated heartbeat
+  path should learn the same compact NOTIFY policy. Losing candidate:
+  target-project dry-run signals remain high-value but must arrive from the
+  target project context.
 - 2026-06-03T16:10:38+08:00: Steering audit candidates were: P0 Review Packet
   focus-wait owner-blocker presentation, P1 dashboard card/action-packet
   presentation for the same state, P0 target project dry-run signals, and P1

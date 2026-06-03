@@ -435,6 +435,10 @@ which evidence is needed before delivery resumes. The project-agent section
 must not present a safe-local delivery path; it should only point to status or
 history inspection and tell the target agent to keep `focus_wait` until new
 owner evidence, a clean baseline, or external eval changes the state.
+Dashboard action packets and first-screen cards should follow the same rule:
+label the item as `Focus wait` / owner blocker, show the first open owner/user
+todo as the unlock condition, and make the copy affordance status/history-only
+rather than an approved handoff or read-only map delivery path.
 
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready
@@ -787,6 +791,10 @@ A first useful UI can be built from the export alone:
   that question as the primary operator prompt before `recommended_action`.
   `recommended_action` remains context; `agent_command` is displayed as the safe
   target-agent command only after the operator question has been answered.
+  When a Codex-owned queue item has `quota.state=focus_wait`, show it as a
+  focus-wait owner blocker even if `waiting_on=codex`: the card should say why
+  it is quiet, who or what can unblock it, which evidence is needed, and that
+  the copy packet is only for status/history inspection.
 - Queue gate hints: show `controller_stage`, `missing_gates`, and
   `next_handoff_condition` directly in queue rows so an operator can see why a
   watched goal is not ready yet without opening the full run payload.

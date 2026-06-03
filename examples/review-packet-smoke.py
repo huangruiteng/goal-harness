@@ -122,6 +122,32 @@ def build_sanitized_approved_command_packet() -> str:
     )
 
 
+def build_sanitized_focus_wait_packet() -> str:
+    goal_id = "focus-wait-owner-blocker"
+    status_command = (
+        "goal-harness --registry ./examples/registry.example.json "
+        "--runtime-root ./tmp/runtime status --goal-id focus-wait-owner-blocker"
+    )
+    return "\n".join(
+        [
+            "【GH Packet】",
+            f"目标：{goal_id}",
+            "状态：quiet until owner evidence, a clean baseline, or external eval changes",
+            "",
+            "【用户/Gate】",
+            "待办：Provide new owner evidence, a clean baseline, or external eval before delivery resumes.",
+            "Gate：无；建议：继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
+            "边界：这不是 delivery approval；项目 Agent 只做 status/history inspection，不执行交付路径、写入、reward append 或生产动作。",
+            "",
+            "【给项目 Agent】",
+            "待办：只检查当前 state/status/history；保持 focus_wait 并用中文回报仍在等待什么。",
+            "路径：Status/history inspection only",
+            f"命令：{status_command}",
+            "回报：files / validation / next；需授权则停。",
+        ]
+    )
+
+
 def main() -> int:
     source = DASHBOARD_PAGE.read_text(encoding="utf-8")
     action_packet_source = ACTION_PACKET.read_text(encoding="utf-8")
@@ -151,8 +177,12 @@ def main() -> int:
     packet_builder = source_between(source, "function buildHumanFriendlyActionPacket", "function readinessVariant")
     assert "return buildActionPacket({" in packet_builder
     assert "const approvedAgentCommand = item.kind === \"codex\" && Boolean(item.agentCommand);" in packet_builder
+    assert "const isFocusWait = isFocusWaitQuota(item.quota);" in packet_builder
     assert "const agentTodo = firstOpenTodo(item.agentTodos);" in packet_builder
     assert "agentTodoText: agentTodo?.text" in packet_builder
+    assert "Status/history inspection only" in packet_builder
+    assert "保持 focus_wait 并用中文回报仍在等待什么" in packet_builder
+    assert "不执行交付路径、写入、reward append 或生产动作" in packet_builder
     assert "直接转发给项目 Agent；不追加写权限、主控接管或生产动作授权。" in packet_builder
     assert "只执行已批准的只读/dry-run agent_command" in packet_builder
     assert "Approved agent command" in packet_builder
@@ -188,6 +218,8 @@ def main() -> int:
     assert "--dry-run" in read_only_builder
 
     quota_state_labels = source_between(source, "const quotaStateLabel", "function quotaVariant")
+    assert "Focus wait" in quota_state_labels
+    assert "等待 owner evidence / clean baseline / external eval" in quota_state_labels
     assert "Throttled" in quota_state_labels
     assert "本窗口配额已用完" in quota_state_labels
 
@@ -199,11 +231,15 @@ def main() -> int:
     assert "const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action;" in user_action_builder
     assert "const latestValidation = projectAsset?.latest_validation;" in user_action_builder
     assert "const quotaState = quota?.state ?? \"waiting\";" in user_action_builder
+    assert "decision.waitingOn === \"codex\" && quotaState === \"focus_wait\"" in user_action_builder
+    assert "Focus wait owner blocker" in user_action_builder
+    assert "Status/history inspection only" in user_action_builder
     assert "decision.waitingOn === \"codex\" && quotaState === \"throttled\"" in user_action_builder
     assert_order(
         user_action_builder,
         [
             "if (decision.waitingOn === \"external_evidence\")",
+            "decision.waitingOn === \"codex\" && quotaState === \"focus_wait\"",
             "decision.waitingOn === \"codex\" && quotaState === \"throttled\"",
             "if (decision.waitingOn === \"codex\")",
         ],
@@ -211,14 +247,18 @@ def main() -> int:
     user_action_summary = source_between(source, "function UserActionSummary", "function OperatorDecisionPanel")
     assert "buildHumanFriendlyActionPacket({ item, registry, runtimeRoot })" in user_action_summary
     assert "aria-label={`Copy action packet for ${item.goalId}`}" in user_action_summary
+    assert "Copy Focus Packet" in user_action_summary
     assert "const primaryOperatorGate" not in user_action_summary
     assert "Needs decision" not in user_action_summary
     assert "blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))}" in user_action_summary
+    assert "focusWait={isFocusWaitQuota(item.quota)}" in user_action_summary
     assert "formatLatestValidation(item.latestValidation)" in user_action_summary
     assert "const agentTodo = firstOpenTodo(item.agentTodos);" in user_action_summary
     assert "Agent todo" in user_action_summary
     assert "先做用户待办" in source
     assert "完成或明确暂缓这个用户待办后，再审批下面的 gate。" in source
+    assert "Owner blocker" in source
+    assert "有新 owner evidence、clean baseline 或外部 eval 前保持 focus wait" in source
 
     packet = build_sanitized_controller_packet()
     assert_order(
@@ -270,6 +310,22 @@ def main() -> int:
     assert "如果下一步需要写入、reward append、approval" not in approved_packet, approved_packet
     assert "不追加写权限、主控接管或生产动作授权" in approved_packet, approved_packet
     assert len(approved_packet.splitlines()) <= 18, approved_packet
+
+    focus_wait_packet = build_sanitized_focus_wait_packet()
+    assert_order(
+        focus_wait_packet,
+        [
+            "【用户/Gate】",
+            "待办：Provide new owner evidence",
+            "Gate：无；建议：继续保持 focus wait",
+            "【给项目 Agent】",
+            "Status/history inspection only",
+        ],
+    )
+    assert "保持 focus_wait" in focus_wait_packet, focus_wait_packet
+    assert "read-only-map" not in focus_wait_packet, focus_wait_packet
+    assert "operator-gate" not in focus_wait_packet, focus_wait_packet
+    assert len(focus_wait_packet.splitlines()) <= 18, focus_wait_packet
     print("review-packet-smoke ok")
     return 0
 
