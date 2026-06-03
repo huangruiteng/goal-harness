@@ -540,6 +540,11 @@ Goal shape:
     "default_entries_checked": 3,
     "default_entries_present": 3,
     "topic_authority_count": 8,
+    "project_material_count": 6,
+    "project_material_repository_count": 2,
+    "project_material_owner_review_required_count": 1,
+    "project_material_stale_count": 1,
+    "project_material_current_authority_count": 1,
     "deprecated_source_count": 0,
     "conflict_risk": "low"
   },
@@ -564,8 +569,11 @@ Goal shape:
 `authority_registry` on the goal comes from the registry and stays visible even
 when the latest run is an operator gate or reward overlay rather than a fresh
 project map. Dashboard consumers should translate it into one human-facing line
-such as "default entries 3/3, topic 8, risk low" before asking for operator
-decisions.
+such as "default entries 3/3, topic 8, materials 6, owner review 1, risk low"
+before asking for operator decisions. Material details stay project-local:
+public status exposes compact counts for material roles, repository links,
+owner-review gaps, stale sources, and current authorities instead of URLs,
+repository roots, product configs, or raw review notes.
 
 `quota` on the goal comes from the registry and defaults to `compute=1.0` when
 not declared. In v0.1, status derives only a compact product state from hard

@@ -29,6 +29,23 @@
           "goal": "docs/GOAL.md",
           "validation": "docs/VALIDATION.md"
         },
+        "project_materials": {
+          "migration_design": {
+            "role": "current_authority",
+            "source_kind": "external_doc",
+            "freshness": "owner_review_required"
+          },
+          "source_repo": {
+            "role": "source_surface",
+            "source_kind": "repository",
+            "freshness": "read_only_status_ok"
+          },
+          "target_repo": {
+            "role": "implementation_surface",
+            "source_kind": "repository",
+            "freshness": "read_only_status_ok"
+          }
+        },
         "deprecated_source_count": 0,
         "conflict_risk": "low"
       },

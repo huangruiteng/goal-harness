@@ -21,6 +21,9 @@ def write_planned_registry(root: Path) -> Path:
     registry_path = project / ".goal-harness" / "registry.json"
     (project / Path(state_file).parent).mkdir(parents=True, exist_ok=True)
     (project / "README.md").write_text("# Planned Project\n", encoding="utf-8")
+    (project / "docs" / "meta").mkdir(parents=True, exist_ok=True)
+    (project / "docs" / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (project / "docs" / "meta" / "DOC_REGISTRY.yaml").write_text("topics: {}\n", encoding="utf-8")
     (project / state_file).write_text(
         "---\n"
         "status: planned-high-complexity\n"
@@ -51,6 +54,41 @@ def write_planned_registry(root: Path) -> Path:
                         "repo": str(project),
                         "state_file": state_file,
                         "authority_sources": [{"kind": "doc", "role": "primary", "path": "README.md"}],
+                        "authority_registry": {
+                            "path": "docs/meta/DOC_REGISTRY.yaml",
+                            "read_status": "read",
+                            "default_entry_docs": [
+                                "docs/TODO.md",
+                                "docs/meta/DOC_REGISTRY.yaml",
+                            ],
+                            "topic_authority": {
+                                "current_priority": "docs/TODO.md",
+                            },
+                            "project_materials": {
+                                "migration_design": {
+                                    "role": "current_authority",
+                                    "source_kind": "external_doc",
+                                    "freshness": "owner_review_required",
+                                },
+                                "source_repo": {
+                                    "role": "source_surface",
+                                    "source_kind": "repository",
+                                    "freshness": "read_only_status_ok",
+                                },
+                                "target_repo": {
+                                    "role": "implementation_surface",
+                                    "source_kind": "repository",
+                                    "freshness": "read_only_status_ok",
+                                },
+                                "historical_note": {
+                                    "role": "historical_reference",
+                                    "source_kind": "external_doc",
+                                    "freshness": "stale",
+                                },
+                            },
+                            "deprecated_source_count": 0,
+                            "conflict_risk": "low",
+                        },
                         "adapter": {
                             "kind": "complex_project_read_only_map_v0",
                             "status": "planned",
@@ -120,6 +158,15 @@ def main() -> int:
         assert after["operator_gate"]["decision"] == "approve", after
         assert "planned_adapter_requires_controller_opt_in" not in after["residual_risks"], after
         assert "do not append real run history or grant write-control" in after["recommended_action"], after
+        project_map = after["project_map"]
+        assert project_map["authority_registry_default_entry_count"] == 2, project_map
+        assert project_map["authority_registry_default_entries_present"] == 2, project_map
+        assert project_map["topic_authority_count"] == 1, project_map
+        assert project_map["project_material_count"] == 4, project_map
+        assert project_map["project_material_repository_count"] == 2, project_map
+        assert project_map["project_material_owner_review_required_count"] == 1, project_map
+        assert project_map["project_material_stale_count"] == 1, project_map
+        assert project_map["project_material_current_authority_count"] == 1, project_map
 
         real_map = run_cli(root, registry_path, "read-only-map", "--goal-id", GOAL_ID, check=False)
         assert real_map.returncode != 0, real_map.stdout

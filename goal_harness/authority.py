@@ -13,6 +13,11 @@ AUTHORITY_REGISTRY_SUMMARY_FIELDS = (
     "default_entries_checked",
     "default_entries_present",
     "topic_authority_count",
+    "project_material_count",
+    "project_material_repository_count",
+    "project_material_owner_review_required_count",
+    "project_material_stale_count",
+    "project_material_current_authority_count",
     "deprecated_source_count",
     "conflict_risk",
 )
@@ -69,6 +74,44 @@ def authority_registry_topic_count(raw_topics: Any) -> int:
     return 0
 
 
+def authority_registry_project_material_stats(raw_materials: Any) -> dict[str, int]:
+    if isinstance(raw_materials, dict):
+        items = [item for item in raw_materials.values() if isinstance(item, dict)]
+    elif isinstance(raw_materials, list):
+        items = [item for item in raw_materials if isinstance(item, dict)]
+    else:
+        items = []
+
+    repository_kinds = {"repository", "repo", "git_repo", "source_repo", "target_repo"}
+    owner_review_freshness = {
+        "owner_review_required",
+        "owner_review_pending",
+        "owner_evidence_missing",
+        "missing_owner_evidence",
+    }
+    stale_freshness = {"stale", "outdated", "needs_refresh", "unknown"}
+    stats = {
+        "project_material_count": len(items),
+        "project_material_repository_count": 0,
+        "project_material_owner_review_required_count": 0,
+        "project_material_stale_count": 0,
+        "project_material_current_authority_count": 0,
+    }
+    for item in items:
+        source_kind = str(item.get("source_kind") or item.get("kind") or "").lower()
+        role = str(item.get("role") or "").lower()
+        freshness = str(item.get("freshness") or item.get("status") or "").lower()
+        if source_kind in repository_kinds or source_kind.endswith("_repository"):
+            stats["project_material_repository_count"] += 1
+        if freshness in owner_review_freshness or item.get("missing_owner_evidence") is True:
+            stats["project_material_owner_review_required_count"] += 1
+        if freshness in stale_freshness:
+            stats["project_material_stale_count"] += 1
+        if role == "current_authority" or role.endswith("_authority"):
+            stats["project_material_current_authority_count"] += 1
+    return stats
+
+
 def authority_registry_deprecated_count(raw: dict[str, Any]) -> int:
     for key in ("deprecated_source_count", "deprecated_sources_seen"):
         value = raw.get(key)
@@ -93,6 +136,11 @@ def compact_authority_registry(goal: dict[str, Any] | None, *, project: Path | N
             "default_entries_checked": 0,
             "default_entries_present": 0,
             "topic_authority_count": 0,
+            "project_material_count": 0,
+            "project_material_repository_count": 0,
+            "project_material_owner_review_required_count": 0,
+            "project_material_stale_count": 0,
+            "project_material_current_authority_count": 0,
             "deprecated_source_count": 0,
             "conflict_risk": "unknown",
             "default_entries": [],
@@ -132,6 +180,7 @@ def compact_authority_registry(goal: dict[str, Any] | None, *, project: Path | N
         "default_entries_checked": checked,
         "default_entries_present": present,
         "topic_authority_count": authority_registry_topic_count(raw.get("topic_authority")),
+        **authority_registry_project_material_stats(raw.get("project_materials")),
         "deprecated_source_count": authority_registry_deprecated_count(raw),
         "conflict_risk": str(raw.get("conflict_risk") or "unknown"),
         "default_entries": checked_entries,
@@ -157,6 +206,15 @@ def authority_registry_from_compact(raw: dict[str, Any]) -> dict[str, Any] | Non
         "default_entries_checked": int(raw.get("default_entries_checked") or 0),
         "default_entries_present": int(raw.get("default_entries_present") or 0),
         "topic_authority_count": int(raw.get("topic_authority_count") or 0),
+        "project_material_count": int(raw.get("project_material_count") or 0),
+        "project_material_repository_count": int(raw.get("project_material_repository_count") or 0),
+        "project_material_owner_review_required_count": int(
+            raw.get("project_material_owner_review_required_count") or 0
+        ),
+        "project_material_stale_count": int(raw.get("project_material_stale_count") or 0),
+        "project_material_current_authority_count": int(
+            raw.get("project_material_current_authority_count") or 0
+        ),
         "deprecated_source_count": int(raw.get("deprecated_source_count") or 0),
         "conflict_risk": str(raw.get("conflict_risk") or "unknown"),
     }

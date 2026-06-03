@@ -61,6 +61,11 @@ should report authority coverage before proposing sub-agent work:
     "default_entries_checked": 3,
     "default_entries_present": 3,
     "topic_authority_count": 24,
+    "project_material_count": 6,
+    "project_material_repository_count": 2,
+    "project_material_owner_review_required_count": 1,
+    "project_material_stale_count": 1,
+    "project_material_current_authority_count": 1,
     "deprecated_source_count": 2,
     "conflict_risk": "low"
   }
@@ -69,6 +74,10 @@ should report authority coverage before proposing sub-agent work:
 
 This prevents a complex project from being driven by whichever old design doc
 or diagnostic report the agent happened to read first.
+For multi-material migration work, the public compact map should expose counts
+for material roles, repository links, owner-review gaps, stale sources, and
+current authorities. Keep exact URLs, repository roots, product configs, and raw
+review text in the project-local registry or adapter payload.
 
 Each source should include:
 

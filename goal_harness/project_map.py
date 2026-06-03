@@ -301,6 +301,15 @@ def compact_project_map(record: dict[str, Any]) -> dict[str, Any]:
         "authority_registry_default_entry_count": authority_registry.get("default_entry_count"),
         "authority_registry_default_entries_present": authority_registry.get("default_entries_present"),
         "topic_authority_count": authority_registry.get("topic_authority_count"),
+        "project_material_count": authority_registry.get("project_material_count"),
+        "project_material_repository_count": authority_registry.get("project_material_repository_count"),
+        "project_material_owner_review_required_count": authority_registry.get(
+            "project_material_owner_review_required_count"
+        ),
+        "project_material_stale_count": authority_registry.get("project_material_stale_count"),
+        "project_material_current_authority_count": authority_registry.get(
+            "project_material_current_authority_count"
+        ),
         "authority_registry_conflict_risk": authority_registry.get("conflict_risk"),
         "guard_count": registry_goal.get("guard_count"),
         "sections_found": state_map.get("sections_found"),
@@ -387,6 +396,14 @@ def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
                     f"{project_map.get('authority_registry_default_entry_count')} "
                     f"topic_authority={project_map.get('topic_authority_count')} "
                     f"conflict_risk={project_map.get('authority_registry_conflict_risk')}`"
+                ),
+                (
+                    "- project_materials: "
+                    f"`total={project_map.get('project_material_count')} "
+                    f"repositories={project_map.get('project_material_repository_count')} "
+                    "owner_review_required="
+                    f"{project_map.get('project_material_owner_review_required_count')} "
+                    f"stale={project_map.get('project_material_stale_count')}`"
                 ),
                 f"- guards: `{project_map.get('guard_count')}`",
                 f"- state_sections: `{project_map.get('sections_found')}/{project_map.get('sections_checked')}`",
