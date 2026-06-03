@@ -189,6 +189,18 @@ type GoalDirectoryRow = {
   lifecycleFlags: string[];
 };
 
+type TodoFocusItem = {
+  goalId: string;
+  role: "user" | "agent";
+  text: string;
+  openCount: number;
+  totalCount: number;
+  severity: string;
+  waitingOn: string;
+  phase: string;
+  priority: number;
+};
+
 function laneFor(item: QueueItem) {
   return laneConfig.find((lane) => lane.waitingOn.includes(item.waiting_on));
 }
@@ -784,6 +796,194 @@ function todoCountLabel(todos?: TodoGroup | null) {
     return null;
   }
   return `${todos.open_count}/${todos.total_count} open`;
+}
+
+function todoFocusPriority({
+  role,
+  severity,
+  waitingOn,
+  phase,
+}: {
+  role: TodoFocusItem["role"];
+  severity: string;
+  waitingOn: string;
+  phase: string;
+}) {
+  const severityRank: Record<string, number> = {
+    high: 0,
+    action: 1,
+    watch: 2,
+    clear: 3,
+  };
+  const waitingRank: Record<string, number> = role === "user"
+    ? {
+        user_or_controller: 0,
+        controller: 1,
+        external_evidence: 2,
+        codex: 3,
+        clear: 4,
+      }
+    : {
+        codex: 0,
+        user_or_controller: 1,
+        controller: 2,
+        external_evidence: 3,
+        clear: 4,
+      };
+  const phaseRank = phase === "controller_gated" || phase === "operator_gated"
+    ? 0
+    : phase === "mapped" || phase === "refreshed"
+      ? 1
+      : 2;
+  return ((severityRank[severity] ?? 4) * 100) + ((waitingRank[waitingOn] ?? 5) * 10) + phaseRank;
+}
+
+function buildTodoFocusItems(rows: GoalDirectoryRow[]): TodoFocusItem[] {
+  const items: TodoFocusItem[] = [];
+
+  for (const row of rows) {
+    const projectAsset = row.queueItem?.project_asset;
+    const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos, row.queueItem?.user_todos, "project_asset.user_todos");
+    const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos, row.queueItem?.agent_todos, "project_asset.agent_todos");
+    for (const [role, todos] of [
+      ["user", userTodos],
+      ["agent", agentTodos],
+    ] as const) {
+      const todo = firstOpenTodo(todos);
+      if (!todo) {
+        continue;
+      }
+      items.push({
+        goalId: row.goal.id,
+        role,
+        text: todo.text,
+        openCount: todos?.open_count ?? 1,
+        totalCount: todos?.total_count ?? 1,
+        severity: row.severity,
+        waitingOn: row.waitingOn,
+        phase: row.lifecyclePhase,
+        priority: todoFocusPriority({
+          role,
+          severity: row.severity,
+          waitingOn: row.waitingOn,
+          phase: row.lifecyclePhase,
+        }),
+      });
+    }
+  }
+
+  return items.sort((a, b) => a.priority - b.priority || a.goalId.localeCompare(b.goalId));
+}
+
+function TodoFocusColumn({
+  icon: Icon,
+  items,
+  onSelectGoal,
+  selectedGoalId,
+  title,
+  variant,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  items: TodoFocusItem[];
+  onSelectGoal: (goalId: string) => void;
+  selectedGoalId: string;
+  title: string;
+  variant: BadgeVariant;
+}) {
+  return (
+    <section className="min-w-0 rounded-lg border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 dark:border-zinc-800">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-slate-600 dark:text-zinc-300" />
+          <h3 className="text-sm font-semibold text-slate-950 dark:text-zinc-50">{title}</h3>
+        </div>
+        <Badge variant={items.length > 0 ? variant : "success"}>{items.length}</Badge>
+      </div>
+      {items.length === 0 ? (
+        <div className="p-3 text-sm text-slate-500 dark:text-zinc-400">No open todo.</div>
+      ) : (
+        <div className="divide-y divide-slate-200 dark:divide-zinc-800">
+          {items.slice(0, 5).map((item) => (
+            <button
+              className={cn(
+                "grid w-full gap-2 px-3 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-zinc-900",
+                item.goalId === selectedGoalId && "bg-slate-100 dark:bg-zinc-900",
+              )}
+              key={`${item.role}-${item.goalId}-${item.text}`}
+              onClick={() => onSelectGoal(item.goalId)}
+              type="button"
+            >
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge variant="neutral">Goal</Badge>
+                <span className="break-all text-sm font-semibold text-slate-950 dark:text-zinc-50">{item.goalId}</span>
+              </div>
+              <p className="line-clamp-2 break-words text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.text}</p>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
+                <Badge variant={severityVariant[item.severity] ?? "neutral"}>{item.severity}</Badge>
+                <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
+                <Badge variant="info">{item.openCount}/{item.totalCount} open</Badge>
+                <PhaseBadges compact phase={item.phase} />
+              </div>
+            </button>
+          ))}
+          {items.length > 5 ? (
+            <div className="px-3 py-2 text-xs font-medium text-slate-500 dark:text-zinc-400">
+              +{items.length - 5} more
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TodoFocusPanel({
+  rows,
+  selectedGoalId,
+  onSelectGoal,
+}: {
+  rows: GoalDirectoryRow[];
+  selectedGoalId: string;
+  onSelectGoal: (goalId: string) => void;
+}) {
+  const items = useMemo(() => buildTodoFocusItems(rows), [rows]);
+  const userItems = items.filter((item) => item.role === "user");
+  const agentItems = items.filter((item) => item.role === "agent");
+
+  return (
+    <Card>
+      <CardHeader className="flex-wrap">
+        <CardTitle className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4" />
+          Todo Focus
+        </CardTitle>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={userItems.length > 0 ? "warning" : "success"}>{userItems.length} user</Badge>
+          <Badge variant={agentItems.length > 0 ? "info" : "success"}>{agentItems.length} agent</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <TodoFocusColumn
+            icon={Users}
+            items={userItems}
+            onSelectGoal={onSelectGoal}
+            selectedGoalId={selectedGoalId}
+            title="User Todo"
+            variant="warning"
+          />
+          <TodoFocusColumn
+            icon={Bot}
+            items={agentItems}
+            onSelectGoal={onSelectGoal}
+            selectedGoalId={selectedGoalId}
+            title="Agent Priority Todo"
+            variant="info"
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function UserTodoCallout({
@@ -3246,6 +3446,10 @@ export function DashboardPage() {
             </header>
 
             <div className="space-y-5 p-4 sm:p-6">
+              <section>
+                <TodoFocusPanel rows={goalRows} onSelectGoal={selectGoal} selectedGoalId={selectedReviewGoalId} />
+              </section>
+
               <section>
                 <UserActionSummary
                   selectedKind={search.actionKind}

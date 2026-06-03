@@ -96,6 +96,15 @@ waiting on evidence?", and "is a controller handoff safe yet?" Raw
 classifications, paths, and adapter terms should be secondary drill-down
 details.
 
+The first user-facing view should also make TODO ownership explicit. Before the
+operator reads a full action card or run history, the dashboard should surface
+the first open `user_todos` item and the highest-priority open `agent_todos`
+item per goal. This protects both sides of the loop: the user can see which
+human/owner action blocks progress, and the next agent can see the compact
+work item without re-reading stale thread context. Detailed action packets,
+review materials, run history, and raw adapter fields remain drill-down
+surfaces.
+
 ## State Stores
 
 | Store | Owner | Reader | Writer | Purpose |
@@ -119,7 +128,7 @@ For the v0.1 control-plane milestone, use this default priority stack:
 | Priority | Meaning | Typical surfaces |
 | --- | --- | --- |
 | P0 | Make the multi-project control loop reliable. | registry, global registry, active state, run history, authority coverage, public/private boundary, operator gate, human reward, project-agent packet, compute quota, real adapter proof |
-| P1 | Make the product easier to understand and use. | dashboard interaction, operator copy, share documents, launch copy, exploration lane design |
+| P1 | Make the product easier to understand and use. | todo-focus dashboard, dashboard interaction, operator copy, share documents, launch copy, exploration lane design |
 | P2 | Extend the platform after the loop works. | deeper scheduling, richer dreaming, refactor proposals, more adapters, benchmark expansion |
 
 Within P0, choose work in this order:

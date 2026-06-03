@@ -413,7 +413,7 @@ async function readBodyText({ requiredText = "User Actions", timeoutMs = 15_000 
   let lastError;
   while (Date.now() < deadline) {
     try {
-      body = String(evalRaw("() => document.querySelector('main section')?.innerText ?? document.body?.innerText ?? ''", { timeoutMs: 5_000 }));
+      body = String(evalRaw("() => document.querySelector('main')?.innerText ?? document.body?.innerText ?? ''", { timeoutMs: 5_000 }));
       if (!requiredText || body.includes(requiredText)) {
         return body;
       }
@@ -508,6 +508,9 @@ async function main() {
     navigateTo(`${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`);
     let body = await readBodyText({ requiredText: "Copy" });
     requireTexts(body, [
+      "Todo Focus",
+      "User Todo",
+      "Agent Priority Todo",
       "1 actions",
       "Project",
       goalId,
@@ -542,8 +545,9 @@ async function main() {
       "Suggested decision",
       "同意先做 read-only map dry-run；不授权写入或主控接管。",
     ], "Operator-gated goal leaked into confusing UI");
-    requireExactTextCount(body, "Review controller opt-in", 1, "All-actions controller action card count");
+    requireExactTextCount(body, "Review controller opt-in", 2, "All-actions controller action plus selected-detail count");
     requireExactTextCount(body, "Copy", 1, "All-actions review-packet copy count");
+    requireTextOrder(body, ["Todo Focus", "User Actions"], "Todo focus should lead user action cards");
     requireTextOrder(body, ["Project", goalId, "Review controller opt-in"], "All-actions project-first card identity");
     if (body.indexOf("Operator question") > body.indexOf("Agent command ready after approval")) {
       throw new Error("Operator question should appear before the after-approval agent command hint.");
@@ -552,6 +556,9 @@ async function main() {
     navigateTo(`${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=controller`);
     body = await readBodyText({ requiredText: "Copy" });
     requireTexts(body, [
+      "Todo Focus",
+      "User Todo",
+      "Agent Priority Todo",
       "1 actions",
       "Project",
       goalId,
@@ -577,8 +584,9 @@ async function main() {
       "Suggested decision",
       "同意先做 read-only map dry-run；不授权写入或主控接管。",
     ], "Focused controller view rendered confusing stale UI");
-    requireExactTextCount(body, "Review controller opt-in", 1, "Focused controller action card count");
+    requireExactTextCount(body, "Review controller opt-in", 2, "Focused controller action plus selected-detail count");
     requireExactTextCount(body, "Copy", 1, "Focused controller review-packet copy count");
+    requireTextOrder(body, ["Todo Focus", "User Actions"], "Focused todo focus should lead user action cards");
     requireTextOrder(body, ["Project", goalId, "Review controller opt-in"], "Focused controller project-first card identity");
 
     navigateTo(`${baseUrl}/?statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`);
@@ -604,7 +612,7 @@ async function main() {
       "Operator Review Packet",
       "Copy Review Packet",
     ], "Approved operator gate still looks user-gated");
-    requireExactTextCount(body, "Run approved agent command", 1, "Approved Codex-ready action card count");
+    requireExactTextCount(body, "Run approved agent command", 2, "Approved Codex-ready action plus selected-detail count");
     requireExactTextCount(body, "Copy", 1, "Approved review-packet copy count");
     requireExactTextCount(body, "Copy Handoff", 1, "Approved handoff copy count");
     requireTextOrder(body, ["Project", goalId, "Run approved agent command"], "Approved project-first card identity");
@@ -630,7 +638,7 @@ async function main() {
       "Operator Review Packet",
       "Copy Review Packet",
     ], "Current queue approved action was replaced by stale run-history gate");
-    requireExactTextCount(body, "Run approved agent command", 1, "Current queue approved card count over stale history");
+    requireExactTextCount(body, "Run approved agent command", 2, "Current queue approved action plus selected-detail count over stale history");
     requireExactTextCount(body, "Copy", 1, "Current queue approved packet copy count over stale history");
     requireExactTextCount(body, "Copy Handoff", 1, "Current queue approved handoff copy count over stale history");
     requireTextOrder(body, ["Project", goalId, "Run approved agent command"], "Current queue approved project-first card identity");

@@ -18,9 +18,14 @@ JSON, but the first screen is a human operator view: `User Review Map` translate
 registry/run/reward/controller signals into review states, while `Goal
 Directory` remains the multi-project switcher with public-safe domain,
 attention state, latest run, and run counts.
-`User Actions` is the first content region because the dashboard is for the
-human operator, not for raw status inspection. It lifts the selected-detail
-operator logic into the first screen:
+`Todo Focus` is the first content region because the dashboard must answer the
+two highest-signal operator questions before showing raw status: which user
+todo is blocking progress, and which high-priority agent todo can run next.
+It aggregates the first open user todo and agent todo per goal from the same
+status payload used by the queue, then keeps the selected goal one click away.
+`User Actions` follows that todo view because the dashboard is for the human
+operator, not for raw status inspection. It lifts the selected-detail operator
+logic into the first screen:
 reward gates, controller opt-ins, evidence watches, Codex handoffs, and health
 blocks are grouped as operator cards before the user opens a goal detail. Each
 card also exposes the matching safe local path and reward-draft hint, so the
