@@ -21,6 +21,7 @@ from goal_harness.quota import (  # noqa: E402
     build_quota_slot_preview,
     goal_quota_with_spend_ledger,
     goal_quota_config,
+    quota_status,
     render_quota_markdown,
     render_quota_slot_preview_markdown,
     render_quota_should_run_markdown,
@@ -73,6 +74,12 @@ def attention(
         reason = "operator gate blocks gated delivery; safe non-gated steering may continue"
     elif state == "throttled":
         reason = f"{compute:g} compute quota spent {spent_slots}/{allowed_slots} slots in this window"
+    elif state == "focus_wait":
+        reason = (
+            "focus wait: delivery lane has a continuation boundary or missing novelty; "
+            "wait for new evidence, owner input, external eval, or a clean baseline before "
+            "spending delivery compute"
+        )
     else:
         reason = f"{compute:g} compute quota; eligible for the next automatic agent turn"
     return {
@@ -131,6 +138,14 @@ def attention(
                     "safe_bypass_policy": "Do not execute agent_command; safe steering only.",
                 }
                 if state == "operator_gate"
+                else {}
+            ),
+            **(
+                {
+                    "blocked_action_scope": "delivery_focus",
+                    "focus_wait": True,
+                }
+                if state == "focus_wait"
                 else {}
             ),
         },
@@ -633,6 +648,49 @@ def assert_operator_gate_should_run(status_payload: dict) -> None:
     assert "agent_todo_command_template" in markdown, markdown
 
 
+def assert_focus_wait_should_run() -> None:
+    direct_quota = quota_status(
+        {"quota": {"compute": 1.0}},
+        waiting_on="codex",
+        severity="action",
+        lifecycle_flags=["continuation_boundary"],
+    )
+    assert direct_quota["state"] == "focus_wait", direct_quota
+    assert direct_quota["focus_wait"] is True, direct_quota
+    assert direct_quota["blocked_action_scope"] == "delivery_focus", direct_quota
+
+    focus_goal = goal("focus-wait", compute=1.0)
+    focus_item = attention("focus-wait", compute=1.0)
+    focus_item["lifecycle_phase"] = "focus_wait"
+    focus_item["lifecycle_flags"] = ["continuation_boundary"]
+
+    payload = {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 1,
+        "run_count": 1,
+        "attention_queue": {"items": [focus_item]},
+        "run_history": {"goals": [focus_goal]},
+    }
+    decision = build_quota_should_run(payload, goal_id="focus-wait")
+    markdown = render_quota_should_run_markdown(decision)
+
+    assert decision["ok"] is True, decision
+    assert decision["decision"] == "skip", decision
+    assert decision["should_run"] is False, decision
+    assert decision["state"] == "focus_wait", decision
+    assert decision["waiting_on"] == "codex", decision
+    assert decision["quota"]["focus_wait"] is True, decision
+    assert decision["quota"]["blocked_action_scope"] == "delivery_focus", decision
+    assert decision["safe_bypass_allowed"] is False, decision
+    assert decision["plan_summary"]["next_automatic_turn"] is None, decision
+    assert decision["lifecycle_phase"] == "focus_wait", decision
+    assert decision["lifecycle_flags"] == ["continuation_boundary"], decision
+    assert "agent_command" not in decision, decision
+    assert "- state: `focus_wait`" in markdown, markdown
+
+
 def assert_attention_queue_overrides_stale_run_history() -> None:
     stale_goal = goal("queue-authority", compute=1.0)
     stale_goal["status"] = "operator_gate_deferred"
@@ -806,6 +864,7 @@ def main() -> int:
     assert_plan_shape(plan, markdown)
     assert_throttled_should_run(status_payload)
     assert_operator_gate_should_run(status_payload)
+    assert_focus_wait_should_run()
     assert_attention_queue_overrides_stale_run_history()
     assert_safe_bypass_slot_preview(status_payload)
     assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))

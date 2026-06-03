@@ -106,7 +106,11 @@ Quota is applied after hard gates:
    production actions still require explicit human decisions.
 3. Evidence waits: a goal waiting on external metrics or target-controller
    response should not consume delivery compute just because quota remains.
-4. Compute quota: among goals that are otherwise eligible, quota decides
+4. Focus waits: a goal can still be Codex-owned while the current delivery lane
+   is saturated or waiting for novelty, owner evidence, external eval, or a
+   clean baseline. It should stay visible but should not spend delivery compute
+   only because compute quota remains.
+5. Compute quota: among goals that are otherwise eligible, quota decides
    whether this one should receive the next automatic turn.
 
 This keeps the model small. Quota does not become a second permission system.
@@ -121,8 +125,9 @@ The allocation rule is intentionally small:
 
 1. derive quota groups from the same status payload used by `goal-harness
    status`;
-2. keep `blocked_health`, `operator_gate`, `waiting`, `throttled`, and `paused`
-   goals in their own lanes, even when they have a high `quota.compute`;
+2. keep `blocked_health`, `operator_gate`, `focus_wait`, `waiting`,
+   `throttled`, and `paused` goals in their own lanes, even when they have a
+   high `quota.compute`;
 3. only goals with `state=eligible` enter the eligible lane;
 4. sort eligible goals by effective `quota.compute`, highest first;
 5. set `summary.next_automatic_turn` to the first eligible goal, or `none` when
@@ -132,17 +137,20 @@ Automations and controllers should treat `next_automatic_turn` as a scheduling
 hint, then ask `quota should-run --goal-id <goal-id>` immediately before
 spending compute. If the guard returns `should_run=false`, the executor should
 skip the blocked delivery work and follow the reported health, operator,
-evidence, pause, or throttle reason. When `state=operator_gate` also returns
-`safe_bypass_allowed=true`, the target heartbeat may do one bounded read-only
-steering or analysis step that does not depend on that gate, but it must not
-execute `agent_command`, adapter work, write-control, production actions, or the
-gated path.
+evidence, focus-wait, pause, or throttle reason. When `state=operator_gate` also
+returns `safe_bypass_allowed=true`, the target heartbeat may do one bounded
+read-only steering or analysis step that does not depend on that gate, but it
+must not execute `agent_command`, adapter work, write-control, production
+actions, or the gated path.
 
 ## Compute States
 
 Recommended compact states:
 
 - `eligible`: the goal can consume the next automatic agent turn.
+- `focus_wait`: the goal is Codex-addressable in principle, but the current
+  delivery focus is intentionally paused by a continuation boundary or missing
+  novelty, owner evidence, external eval, or clean baseline.
 - `throttled`: the goal is healthy but has spent its current compute quota.
 - `waiting`: the goal is waiting on external evidence or a target controller,
   so compute should not be spent yet.
@@ -172,6 +180,8 @@ The first screen should make it obvious why a project is quiet:
 
 - it is waiting on evidence;
 - it is gated by the operator;
+- it is in focus wait because the current lane needs novelty, evidence, or a
+  clean baseline before another delivery turn;
 - it is throttled by compute quota;
 - it is paused;
 - or it is eligible and should run next.
@@ -198,8 +208,8 @@ and quota state as the dashboard. Project-local state writes such as
 public-safe projection back to the global registry.
 
 `quota status` is the broad inventory for agents: it shows every registered
-goal under `blocked_health`, `operator_gate`, `eligible`, `waiting`,
-`throttled`, or `paused`.
+goal under `blocked_health`, `operator_gate`, `focus_wait`, `eligible`,
+`waiting`, `throttled`, or `paused`.
 
 `quota plan` is the next-turn view for automations: it hides empty groups in
 markdown output and highlights `next_automatic_turn` when a goal is eligible.
@@ -223,9 +233,9 @@ JSON or Markdown decision:
 }
 ```
 
-Only `state=eligible` returns `should_run=true`. Known goals that are gated,
-waiting, throttled, paused, or health-blocked return `ok=true` only when the
-status export itself is healthy, but still return `should_run=false`.
+Only `state=eligible` returns `should_run=true`. Known goals that are gated, in
+focus wait, waiting, throttled, paused, or health-blocked return `ok=true` only
+when the status export itself is healthy, but still return `should_run=false`.
 `safe_bypass_allowed=true` is not permission to clear the gate; it only says the
 agent can spend a bounded turn on independent read-only steering/analysis.
 For `state=operator_gate`, `quota should-run` should also surface

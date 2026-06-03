@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T15:49:44+08:00
+updated_at: 2026-06-03T16:01:19+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,40 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Observe the live `premium-ui-ai-search-rec-migration` controller loop and the
-  current Codex-managed project set, then decide Goal Harness takeover rhythm
-  and priorities from real operating friction. Keep this read-only: inspect
-  current Goal Harness status, owner/agent todos, review packets, and recent
-  validation signals; do not launch platform tasks, mutate production state, or
-  touch target repo files without explicit project authorization.
+- `focus_wait` is now represented in quota plan / should-run for
+  Codex-owned lines that hit a continuation boundary. Next, wire that state
+  into the dashboard or Review Packet presentation so focus-wait projects stay
+  visible as quiet/watch items instead of looking like either eligible work or
+  generic evidence waits.
 
 ## Recent Progress
 
+- 2026-06-03T16:01:19+08:00: Steering audit candidates were: P0
+  focus-eligibility state/safety because real multi-project observation showed
+  a Codex-owned line can remain compute-eligible after its current delivery
+  lane is saturated, P0 wait for target project dry-run signals, P1 dashboard
+  presentation for quiet/watch states, and P1 communication polish.
+  Continuation check: previous slices were handoff/onboarding/status cleanup;
+  continuing control-plane state still won because this was a different P0
+  gap in allocation safety, not another handoff-only polish pass. No-progress
+  self-stop check: not triggered because recent heartbeats produced commits,
+  validation, and concrete artifacts, and this slice produced a public
+  quota/status contract patch. Bounded output: added `focus_wait` to quota
+  ordering and should-run behavior, deriving it from
+  `lifecycle_phase=focus_wait` or `continuation_boundary` flags when
+  `waiting_on=codex`; status queue enrichment now passes lifecycle fields into
+  quota derivation, and stale eligible queue payloads are overridden when they
+  carry the focus-wait marker. Changed files: `goal_harness/quota.py`,
+  `goal_harness/status.py`, `examples/quota-plan-smoke.py`,
+  `docs/quota-allocation.md`, and `docs/status-data-contract.md`. Validation:
+  `python3 examples/quota-plan-smoke.py`, `python3 -m py_compile
+  goal_harness/quota.py goal_harness/status.py examples/quota-plan-smoke.py`,
+  `goal-harness --format json check --scan-root .`, `git diff --check`, and
+  changed-file sensitive-pattern scan passed. Critic: this cleanly separates
+  compute quota from delivery focus, but dashboard and Review Packet copy still
+  need to make `focus_wait` obvious to humans and project agents. Losing
+  candidate: target project dry-run signals remain high-value but still depend
+  on the target project context rather than this public control-plane slice.
 - 2026-06-03T15:49:44+08:00: Steering audit candidates were: P0 new-project
   agent prompt anti-overload because `new-project-prompt` was a fresh consumer
   that did not mention `review-packet --handoff-only`, P0 wait for target

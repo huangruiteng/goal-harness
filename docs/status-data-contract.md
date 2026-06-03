@@ -67,8 +67,9 @@ ledger.
 history for quota audit, but status and attention queues should use the latest
 non-accounting run as the current work state.
 In lane terms, `next_automatic_turn` may only name the first eligible goal;
-operator-gated, waiting, throttled, paused, and health-blocked goals must stay
-out of the eligible lane even when they have a high `quota.compute`.
+operator-gated, focus-waiting, waiting, throttled, paused, and health-blocked
+goals must stay out of the eligible lane even when they have a high
+`quota.compute`.
 
 ## Top-Level Shape
 
@@ -526,10 +527,10 @@ decisions.
 
 `quota` on the goal comes from the registry and defaults to `compute=1.0` when
 not declared. In v0.1, status derives only a compact product state from hard
-gates and attention ownership: `eligible`, `throttled`, `waiting`,
-`operator_gate`, `paused`, or `blocked_health`. It is not a permission signal
-and does not replace human reward, operator gates, write approval, or
-production-action authorization.
+gates and attention ownership: `eligible`, `focus_wait`, `throttled`,
+`waiting`, `operator_gate`, `paused`, or `blocked_health`. It is not a
+permission signal and does not replace human reward, operator gates, write
+approval, or production-action authorization.
 
 Run shape:
 
@@ -608,6 +609,11 @@ state interaction stages from adapter-specific classifications:
 both `adapter_inspected` and `reward_judged`, both `adapter_inspected` and
 `operator_approved`, or both `adapter_inspected` and `controller_gated`. UIs
 should show the primary phase first and use flags as secondary badges.
+When a Codex-owned goal carries `lifecycle_phase=focus_wait` or a
+`continuation_boundary` flag, quota should surface `state=focus_wait` instead
+of `eligible`. This keeps compute quota separate from delivery focus: the goal
+can remain healthy and visible while automatic turns wait for new evidence,
+owner input, external eval, or a clean baseline.
 
 For `controller_readiness`, the status export keeps only controller-stage
 booleans, missing gate names, operator-facing review text, next handoff
@@ -720,10 +726,11 @@ A first useful UI can be built from the export alone:
   auxiliary source controls, metrics, and raw drill-down, because the
   dashboard is a user decision surface rather than an agent CLI mirror.
 - Metrics: `ok`, `goal_count`, `run_count`, and contract summary.
-- Compute quota summary: goals eligible for the next agent turn, throttled
-  goals, waiting goals, paused goals, and operator-gated goals should be
-  visible on the first screen once quota fields are present. Automation cadence
-  should be treated as execution detail, not the only priority signal.
+- Compute quota summary: goals eligible for the next agent turn, focus-waiting
+  goals, throttled goals, waiting goals, paused goals, and operator-gated goals
+  should be visible on the first screen once quota fields are present.
+  Automation cadence should be treated as execution detail, not the only
+  priority signal.
 - User action summary: first-screen cards should derive from the same selected
   operator decision and reward-default logic, grouping reward gates, controller
   opt-ins, evidence watches, Codex handoffs, and blocking health items before

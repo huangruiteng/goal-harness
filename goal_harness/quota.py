@@ -14,6 +14,7 @@ DEFAULT_SLOT_MINUTES = 1
 QUOTA_STATE_ORDER = (
     "blocked_health",
     "operator_gate",
+    "focus_wait",
     "eligible",
     "waiting",
     "throttled",
@@ -22,6 +23,15 @@ QUOTA_STATE_ORDER = (
 QUOTA_SLOT_SPENT_CLASSIFICATION = "quota_slot_spent"
 DEFAULT_SLOT_SPEND_SOURCE = "heartbeat"
 VALID_SLOT_SPEND_SOURCES = {"heartbeat", "controller", "adapter"}
+FOCUS_WAIT_LIFECYCLE_MARKERS = {
+    "continuation_boundary",
+    "focus_wait",
+}
+FOCUS_WAIT_REASON = (
+    "focus wait: delivery lane has a continuation boundary or missing novelty; "
+    "wait for new evidence, owner input, external eval, or a clean baseline before "
+    "spending delivery compute"
+)
 
 
 def _now_local() -> str:
@@ -99,6 +109,55 @@ def _int_number(value: Any, *, default: int) -> int:
 
 def _clamp_compute(value: float) -> float:
     return round(min(1.0, max(0.0, value)), 2)
+
+
+def _text_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        values: list[str] = []
+        for item in value:
+            values.extend(_text_values(item))
+        return values
+    return [str(value)]
+
+
+def _has_focus_wait_marker(*values: Any) -> bool:
+    for value in values:
+        for text in _text_values(value):
+            marker = text.strip().lower()
+            if marker in FOCUS_WAIT_LIFECYCLE_MARKERS:
+                return True
+    return False
+
+
+def _focus_wait_quota(payload: dict[str, Any]) -> dict[str, Any]:
+    quota = dict(payload)
+    quota["state"] = "focus_wait"
+    quota["reason"] = FOCUS_WAIT_REASON
+    quota["blocked_action_scope"] = "delivery_focus"
+    quota["focus_wait"] = True
+    return quota
+
+
+def _quota_with_focus_wait_override(
+    quota: dict[str, Any],
+    *,
+    waiting_on: str | None = None,
+    lifecycle_phase: Any = None,
+    lifecycle_flags: Any = None,
+    status: Any = None,
+) -> dict[str, Any]:
+    if waiting_on != "codex":
+        return quota
+    if not _has_focus_wait_marker(lifecycle_phase, lifecycle_flags, status):
+        return quota
+    state = str(quota.get("state") or "eligible")
+    if state in {"blocked_health", "operator_gate", "waiting", "paused"}:
+        return quota
+    return _focus_wait_quota(quota)
 
 
 def goal_quota_config(goal: dict[str, Any] | None) -> dict[str, Any]:
@@ -189,6 +248,9 @@ def quota_status(
     *,
     waiting_on: str | None = None,
     severity: str | None = None,
+    lifecycle_phase: Any = None,
+    lifecycle_flags: Any = None,
+    status: Any = None,
 ) -> dict[str, Any]:
     payload = goal_quota_config(goal)
     compute = float(payload["compute"])
@@ -214,6 +276,11 @@ def quota_status(
     elif waiting_on == "external_evidence":
         state = "waiting"
         reason = "external evidence is still pending; do not spend delivery compute yet"
+    elif waiting_on == "codex" and _has_focus_wait_marker(lifecycle_phase, lifecycle_flags, status):
+        state = "focus_wait"
+        reason = FOCUS_WAIT_REASON
+        payload["blocked_action_scope"] = "delivery_focus"
+        payload["focus_wait"] = True
     elif waiting_on == "codex":
         if allowed_slots > 0 and spent_slots >= allowed_slots:
             state = "throttled"
@@ -358,14 +425,35 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
         goal_id = str(goal.get("id") or "")
         attention = queue_by_goal.get(goal_id, {})
         latest = _latest_run(goal)
+        waiting_on = attention.get("waiting_on") or "none"
+        lifecycle_phase = attention.get("lifecycle_phase") or goal.get("lifecycle_phase")
+        lifecycle_flags = attention.get("lifecycle_flags") or goal.get("lifecycle_flags")
+        status = attention.get("status") or goal.get("status")
         quota = attention.get("quota") if isinstance(attention.get("quota"), dict) else goal.get("quota")
-        quota = quota if isinstance(quota, dict) else quota_status(goal)
+        if isinstance(quota, dict):
+            quota = _quota_with_focus_wait_override(
+                quota,
+                waiting_on=str(waiting_on or ""),
+                lifecycle_phase=lifecycle_phase,
+                lifecycle_flags=lifecycle_flags,
+                status=status,
+            )
+        else:
+            quota = quota_status(
+                goal,
+                waiting_on=str(waiting_on or ""),
+                severity=str(attention.get("severity") or ""),
+                lifecycle_phase=lifecycle_phase,
+                lifecycle_flags=lifecycle_flags,
+                status=status,
+            )
         state = str(quota.get("state") or "waiting")
         item: dict[str, Any] = {
             "goal_id": goal_id,
-            "status": attention.get("status") or goal.get("status"),
-            "lifecycle_phase": attention.get("lifecycle_phase") or goal.get("lifecycle_phase"),
-            "waiting_on": attention.get("waiting_on") or "none",
+            "status": status,
+            "lifecycle_phase": lifecycle_phase,
+            "lifecycle_flags": lifecycle_flags,
+            "waiting_on": waiting_on,
             "severity": attention.get("severity") or "info",
             "source": attention.get("source") or "run_history",
             "recommended_action": attention.get("recommended_action") or latest.get("recommended_action"),
@@ -464,6 +552,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "safe_bypass_policy": quota.get("safe_bypass_policy"),
             "waiting_on": item.get("waiting_on"),
             "status": item.get("status"),
+            "lifecycle_phase": item.get("lifecycle_phase"),
+            "lifecycle_flags": item.get("lifecycle_flags"),
             "source": item.get("source"),
             "recommended_action": item.get("recommended_action"),
             "plan_summary": plan.get("summary"),
@@ -600,6 +690,9 @@ def build_quota_slot_preview(
         after_goal,
         waiting_on=str(before.get("waiting_on") or ""),
         severity=str(queue_item.get("severity") or ""),
+        lifecycle_phase=before.get("lifecycle_phase") or queue_item.get("lifecycle_phase"),
+        lifecycle_flags=before.get("lifecycle_flags") or queue_item.get("lifecycle_flags"),
+        status=before.get("status") or queue_item.get("status"),
     )
     _set_quota_for_goal(after_status, goal_id=safe_goal_id, quota=after_quota)
     after = build_quota_should_run(after_status, goal_id=safe_goal_id)

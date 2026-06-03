@@ -989,6 +989,9 @@ def build_attention_queue(
                     goal,
                     waiting_on=str(item.get("waiting_on") or ""),
                     severity=str(item.get("severity") or ""),
+                    lifecycle_phase=item.get("lifecycle_phase"),
+                    lifecycle_flags=item.get("lifecycle_flags"),
+                    status=item.get("status"),
                 )
                 enrich_project_asset(
                     item,
