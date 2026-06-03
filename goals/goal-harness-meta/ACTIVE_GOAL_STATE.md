@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T15:14:52+08:00
+updated_at: 2026-06-03T15:19:39+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,38 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Dashboard action selection now has a browser smoke proving that a current
-  approved `attention_queue` item can override stale `run_history.latest_runs`
-  gate evidence on the first-screen action card. The next heartbeat should move
-  to a real adapter-proof handoff that does not touch target project
-  repositories unless explicitly requested, or audit another concrete consumer
-  only if a fresh state-truth mismatch appears.
+- The current approved `agent-harness-main-control` Review Packet has been
+  validated and recorded as a private relay artifact without touching the
+  target project repository. The next heartbeat should either wait for the
+  target project agent to run the approved dry-run in its own context, or work
+  on another Goal Harness P0 slice that does not depend on that target repo
+  execution.
 
 ## Recent Progress
 
+- 2026-06-03T15:19:39+08:00: Steering audit candidates were: P0 real
+  adapter-proof handoff for the controller-ready project line, P0 audit another
+  concrete status consumer only if a fresh mismatch appears, P1 communication
+  artifact polish using the now-stable control loop, and P2 no-progress guard
+  tuning. Continuation check: recent slices already closed the current-authority
+  split across quota, Review Packet, and dashboard, so continuing consumer
+  audits lost. The chosen step moved to the highest-value P0 handoff while
+  preserving the explicit boundary not to touch the target project repository.
+  No-progress self-stop check: not triggered because recent eligible heartbeats
+  produced committed artifacts or validation signals, and this turn produced a
+  validated private relay artifact. Bounded output: generated the live
+  `agent-harness-main-control` Review Packet from the global Goal Harness
+  status and recorded the current `【给项目 Agent】` block as an approved relay
+  artifact in private state. Validation: `goal-harness --format json
+  review-packet --goal-id agent-harness-main-control` asserted
+  `kind=codex`, `waiting_on=codex`, `status=operator_gate_approved`,
+  `operator_gate_approved_handoff=true`, no local gate dry-run command, no
+  decision-command drafts, and the approved project-agent command. Critic: this
+  is a real handoff artifact rather than another fixture, but it deliberately
+  stops before executing in or reading the target project; the next useful
+  signal must come from that target-side dry-run or another independent P0
+  slice. Losing candidate: communication polish can wait because the control
+  loop still has a target-side execution gap.
 - 2026-06-03T15:14:52+08:00: Steering audit candidates were: P0 dashboard
   action-selection audit for the current-routing-authority split, P0 real
   adapter-proof handoff for a controller-ready project line, P1 communication
