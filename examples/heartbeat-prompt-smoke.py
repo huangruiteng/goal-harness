@@ -21,10 +21,28 @@ INTEGRATION_DOC = REPO_ROOT / "docs" / "integration.md"
 PROJECT_SKILL = REPO_ROOT / "skills" / "goal-harness-project" / "SKILL.md"
 GOAL_ID = "public-heartbeat-goal"
 ACTIVE_STATE = Path("/tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md")
+INTERFACE_BUDGET_CHARS = {
+    "full": 10_000,
+    "compact": 4_500,
+    "brief": 2_500,
+}
 
 
 def normalized(text: str) -> str:
     return " ".join(text.split())
+
+
+def prompt_budget_text(text: str) -> str:
+    return text.replace(GOAL_ID, "<GOAL_ID>").replace(str(ACTIVE_STATE), "<ACTIVE_GOAL_STATE_PATH>")
+
+
+def assert_prompt_budget(label: str, text: str) -> None:
+    budget_text = prompt_budget_text(text)
+    assert len(budget_text) <= INTERFACE_BUDGET_CHARS[label], (
+        label,
+        len(budget_text),
+        INTERFACE_BUDGET_CHARS[label],
+    )
 
 
 def assert_ordered(text: str, phrases: tuple[str, ...]) -> None:
@@ -40,6 +58,9 @@ def main() -> int:
     payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE)
     compact_payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE, compact=True)
     brief_payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE, brief=True)
+    assert_prompt_budget("full", str(payload["task_body"]))
+    assert_prompt_budget("compact", str(compact_payload["task_body"]))
+    assert_prompt_budget("brief", str(brief_payload["task_body"]))
     assert payload["quota_guard_command"] == (
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" '
         "quota should-run --goal-id public-heartbeat-goal"
