@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T06:24:13+08:00
+updated_at: 2026-06-04T06:29:15+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,20 +65,23 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- The temporary `agent-harness-side-bypass` rollout monitor is complete:
-  post-baseline records reached 16/15, the latest signal is
-  `side_bypass_universal_feedback_minimum_fit_sanity_positive_path_test`, and
-  no urgent drift was observed. This turn fixed a public Goal Harness handoff
-  bug where `refresh-state` derived `recommended_action` from only the first
-  eight `Next Action` lines, truncating long wrapped bullets before `quota
-  should-run` and status consumers saw them. The fix and regression were pushed
-  to `origin/main`; the pre-existing dirty README remains untouched. Return to
-  the normal Goal Harness P0 queue. The next non-monitor P0 slice should map
-  the private platform-migration pilot state only when its private-safe boundary
-  is explicit; otherwise pause additional public consumer regressions and look
-  for a concrete gap that reduces operator or project-agent context load.
+- Return to the normal Goal Harness P0 queue: map the private platform-migration
+  pilot only when its private-safe boundary is explicit; otherwise look for a
+  concrete operator or project-agent context-load gap. Keep the pre-existing
+  dirty README untouched.
 
 ## Recent Progress
+
+- 2026-06-04T06:29:15+08:00: Tightened the meta active-state handoff after the
+  truncation fix. The parser now preserves longer wrapped `recommended_action`
+  bullets, but the state itself was still using `Next Action` as a history
+  bundle, which kept guard/status surfaces noisy and made pre-tick samples look
+  clipped. Moved the side-bypass monitor and parser-fix detail back into the
+  ledger and reduced `Next Action` to a compact current action. Validation:
+  touched-state `git diff --check`, public/private `goal-harness check`, and a
+  follow-up `quota should-run` payload should show the shorter current action.
+  Critic: this is handoff hygiene, not a new feature; future detail should go
+  to progress/evidence surfaces, not the live action slot.
 
 - 2026-06-04T06:24:13+08:00: Fixed a public handoff-context gap in Goal
   Harness. `derive_recommended_action()` previously read only the first eight
