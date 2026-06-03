@@ -1,10 +1,22 @@
-# Commit Readiness Manifest - 2026-06-03
+# Commit Readiness Manifest - 2026-06-03 (Closed Historical Snapshot)
 
-This manifest groups the current public dirty tree into four reviewable clusters
-before publication. For public Goal Harness daily iteration, autonomous
-commit/push and PR creation are allowed when the public-sensitive scan is clean,
-validation passes, and the change does not include company-internal or private
-material.
+Status: closed historical snapshot. The public dirty tree described below was
+validated, committed, and pushed through later Goal Harness slices. Do not use
+this file as a current dirty-tree checklist.
+
+Current use:
+
+- Treat this file as archival evidence of how the 2026-06-03 public tree was
+  grouped before publication.
+- Re-check current readiness with `git status --short`, `git log -1 --oneline`,
+  `goal-harness --format json check --scan-root .`, and
+  `goals/goal-harness-meta/ACTIVE_GOAL_STATE.md` before acting on any cluster.
+- Preserve the publish-policy notes below as historical context, not as proof
+  that the present tree is ready to publish.
+
+For public Goal Harness daily iteration, autonomous commit/push and PR creation
+are allowed when the public-sensitive scan is clean, validation passes, and the
+change does not include company-internal or private material.
 
 ## Steering Audit
 

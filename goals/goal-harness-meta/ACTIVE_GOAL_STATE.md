@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T15:38:01+08:00
+updated_at: 2026-06-03T15:43:28+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,14 +58,42 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- The dashboard now uses handoff-only copy content for approved Codex actions
-  carrying `agent_command`, so the operator surface no longer hands target
-  agents a human gate wrapper after approval. The next heartbeat should either
-  wait for the target project agent dry-run signal, or choose another P0
-  anti-overload bottleneck that does not depend on target repository execution.
+- The stale commit-readiness manifest is now marked as a closed historical
+  snapshot, so future agents should treat it as archival evidence and re-check
+  current git/status truth before acting on any cluster. The next heartbeat
+  should either wait for the target project agent dry-run signal, or choose a
+  different P0 anti-overload bottleneck that does not depend on target
+  repository execution.
 
 ## Recent Progress
 
+- 2026-06-03T15:43:28+08:00: Steering audit candidates were: P0 stale-current
+  cleanup for a public commit-readiness manifest that still described a
+  "current public dirty tree" after the tree had already been published, P0
+  wait for the target project agent dry-run signal, P0 inspect another
+  status/dashboard consumer only if a fresh mismatch appears, and P1
+  communication polish. Continuation check: recent delivery slices consumed the
+  handoff-only topic, so continuing that topic lost unless a new consumer
+  exposed redundant handoff content; the stale manifest won as a different
+  dual anti-overload bottleneck because it preserved useful history while
+  preventing future agents from treating old readiness guidance as current
+  execution context. No-progress self-stop check: not triggered because recent
+  eligible heartbeats produced commits, validation, and concrete relay/UX
+  artifacts, and this slice produced a real public doc-state correction.
+  Bounded output: retitled `docs/commit-readiness-manifest-20260603.md` as a
+  closed historical snapshot and added current-use instructions requiring
+  `git status`, latest commit, Goal Harness check, and active state before
+  acting on historical clusters. Changed files:
+  `docs/commit-readiness-manifest-20260603.md`,
+  `goals/goal-harness-meta/ACTIVE_GOAL_STATE.md`; the corresponding private
+  state was updated outside the public repo. Validation: `git diff --check`,
+  `goal-harness --format json check --scan-root .`, and changed-file
+  sensitive-pattern scan passed. Critic: this removes a concrete stale-context
+  hazard with minimal churn; residual risk is that older public docs may still
+  contain historical language, so future cleanup should be evidence-triggered
+  rather than a broad documentation sweep. Losing candidate: target-side
+  dry-run remains high-value but must come from the target project agent
+  context.
 - 2026-06-03T15:38:01+08:00: Steering audit candidates were: P0 dashboard
   copy-path ergonomics for the newly added handoff-only rule, P0 wait for the
   target project agent dry-run signal, P0 inspect another consumer only if a
