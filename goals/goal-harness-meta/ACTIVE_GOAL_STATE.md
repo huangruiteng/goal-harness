@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:01:19+08:00
+updated_at: 2026-06-03T16:04:37+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -45,6 +45,9 @@ and agents receive the smallest sufficient execution context.
 - Keep human-facing and agent-facing surfaces distinct: user views optimize
   for decision novelty, while agent handoffs optimize for current authority,
   executable next steps, validation context, and explicit stop conditions.
+- Keep owner blockers as first-class project-asset state: a quiet project
+  should say whether it needs new evidence, an owner decision, a clean
+  baseline, or target-agent execution before delivery resumes.
 - Treat presentation/docs work as a secondary track: it may explain the system,
   but it should not drive core implementation ahead of the control-plane loop.
 
@@ -58,14 +61,24 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- `focus_wait` is now represented in quota plan / should-run for
-  Codex-owned lines that hit a continuation boundary. Next, wire that state
-  into the dashboard or Review Packet presentation so focus-wait projects stay
-  visible as quiet/watch items instead of looking like either eligible work or
-  generic evidence waits.
+- `focus_wait` is now represented in quota plan / should-run. Next, add a
+  sanitized presentation fixture that shows focus-wait plus owner-blocker
+  prompts in dashboard or Review Packet output: quiet projects should state
+  why they are quiet, who can unblock them, what evidence is needed, and when
+  delivery may resume.
 
 ## Recent Progress
 
+- 2026-06-03T16:04:37+08:00: User feedback promoted blocker-pushing to a core
+  control-plane goal: Goal Harness should not merely avoid noisy updates; it
+  should surface the smallest owner question when an owner blocker can unlock a
+  project line. Public-safe writeback: updated the active goal state so owner
+  blockers are first-class project-asset state, and changed Next Action toward
+  a sanitized dashboard / Review Packet fixture for focus-wait plus owner
+  blocker prompts. Validation: state-only update; no private project details
+  were added to the public repo. Critic: this records the priority but still
+  needs a public implementation slice that renders the blocker in the user and
+  agent surfaces.
 - 2026-06-03T16:01:19+08:00: Steering audit candidates were: P0
   focus-eligibility state/safety because real multi-project observation showed
   a Codex-owned line can remain compute-eligible after its current delivery
