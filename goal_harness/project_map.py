@@ -8,7 +8,7 @@ from .authority import compact_authority_registry
 from .feedback import validate_public_safe_text
 from .global_registry import sync_project_registry_to_global
 from .history import load_registry
-from .paths import resolve_runtime_root
+from .paths import rel_or_abs, resolve_runtime_root
 from .state_refresh import (
     derive_recommended_action,
     extract_section_lines,
@@ -77,7 +77,11 @@ def compact_authority_sources(goal: dict[str, Any] | None) -> list[dict[str, Any
     return sources
 
 
-def collect_project_inventory(project: Path | None) -> dict[str, Any]:
+def file_kind(path: Path) -> str:
+    return "dir" if path.is_dir() else "file" if path.is_file() else "missing"
+
+
+def collect_project_inventory(project: Path | None, *, goal_id: str | None = None, state_file: Path | None = None) -> dict[str, Any]:
     if project is None:
         return {
             "repo_exists": False,
@@ -92,13 +96,52 @@ def collect_project_inventory(project: Path | None) -> dict[str, Any]:
             {
                 "path": rel_path,
                 "exists": path.exists(),
-                "kind": "dir" if path.is_dir() else "file" if path.is_file() else "missing",
+                "kind": file_kind(path),
+                "role": "project_surface",
             }
         )
+    if goal_id:
+        goal_state_dir = project / ".codex" / "goals" / goal_id
+        checks.append(
+            {
+                "path": f".codex/goals/{goal_id}",
+                "exists": goal_state_dir.exists(),
+                "kind": file_kind(goal_state_dir),
+                "role": "goal_state_dir",
+                "goal_id": goal_id,
+            }
+        )
+    if state_file:
+        checks.append(
+            {
+                "path": rel_or_abs(state_file, project),
+                "exists": state_file.exists(),
+                "kind": file_kind(state_file),
+                "role": "active_state_file",
+                "goal_id": goal_id,
+            }
+        )
+    registry_check = next(
+        (item for item in checks if item.get("path") == ".goal-harness/registry.json"),
+        None,
+    )
+    goal_dir_check = next(
+        (item for item in checks if item.get("role") == "goal_state_dir"),
+        None,
+    )
+    active_state_check = next(
+        (item for item in checks if item.get("role") == "active_state_file"),
+        None,
+    )
     return {
         "repo_exists": project.exists(),
         "files_present": sum(1 for item in checks if item["exists"]),
         "files_checked": len(checks),
+        "project_registry_exists": bool(registry_check and registry_check.get("exists")),
+        "goal_state_dir_exists": bool(goal_dir_check and goal_dir_check.get("exists")) if goal_id else None,
+        "active_state_file_exists": bool(active_state_check and active_state_check.get("exists"))
+        if state_file
+        else None,
         "checks": checks,
     }
 
@@ -136,12 +179,14 @@ def build_project_map_record(
     if not authority_sources and isinstance(registry_goal.get("authority_source_count"), int):
         authority_source_count = int(registry_goal.get("authority_source_count") or 0)
     authority_registry = compact_authority_registry(registry_goal, project=project)
-    inventory = collect_project_inventory(project)
+    inventory = collect_project_inventory(project, goal_id=goal_id, state_file=state_file)
     state_sections = collect_state_sections(state_text)
     state_exists = state_file.exists()
     health_check = (
         f"repo {1 if inventory.get('repo_exists') else 0}/1; "
         f"state_file {1 if state_exists else 0}/1; "
+        f"project_registry {1 if inventory.get('project_registry_exists') else 0}/1; "
+        f"goal_state_dir {1 if inventory.get('goal_state_dir_exists') else 0}/1; "
         f"sections {state_sections['sections_found']}/{state_sections['sections_checked']}; "
         f"files {inventory['files_present']}/{inventory['files_checked']}; "
         f"authority_registry {1 if authority_registry.get('declared') else 0}/1"
@@ -216,7 +261,19 @@ def derive_residual_risks(record: dict[str, Any], *, opt_in_required: bool) -> l
 
     checks = inventory.get("checks") if isinstance(inventory.get("checks"), list) else []
     missing_paths = {str(item.get("path")) for item in checks if isinstance(item, dict) and not item.get("exists")}
-    if ".goal-harness/registry.json" in missing_paths or ".codex/goals" in missing_paths:
+    missing_roles = {str(item.get("role")) for item in checks if isinstance(item, dict) and not item.get("exists")}
+    goal_id = str(record.get("goal_id") or "")
+    if ".goal-harness/registry.json" in missing_paths:
+        risks.append("project_local_registry_not_detected")
+    if ".codex/goals" in missing_paths:
+        risks.append("project_goal_root_not_detected")
+    if "goal_state_dir" in missing_roles:
+        risks.append(f"project_goal_state_dir_not_detected:{goal_id}" if goal_id else "project_goal_state_dir_not_detected")
+    if (
+        ".goal-harness/registry.json" in missing_paths
+        or ".codex/goals" in missing_paths
+        or "goal_state_dir" in missing_roles
+    ):
         risks.append("project_local_goal_state_not_detected")
     if "README.md" in missing_paths and "docs" in missing_paths:
         risks.append("project_context_surface_sparse")
@@ -248,6 +305,9 @@ def compact_project_map(record: dict[str, Any]) -> dict[str, Any]:
         "guard_count": registry_goal.get("guard_count"),
         "sections_found": state_map.get("sections_found"),
         "sections_checked": state_map.get("sections_checked"),
+        "project_registry_exists": inventory.get("project_registry_exists"),
+        "goal_state_dir_exists": inventory.get("goal_state_dir_exists"),
+        "active_state_file_exists": inventory.get("active_state_file_exists"),
         "files_present": inventory.get("files_present"),
         "files_checked": inventory.get("files_checked"),
         "residual_risk_count": len(record.get("residual_risks") or []),
@@ -330,6 +390,12 @@ def render_read_only_project_map_markdown(payload: dict[str, Any]) -> str:
                 ),
                 f"- guards: `{project_map.get('guard_count')}`",
                 f"- state_sections: `{project_map.get('sections_found')}/{project_map.get('sections_checked')}`",
+                (
+                    "- project_goal_state: "
+                    f"`registry={project_map.get('project_registry_exists')} "
+                    f"goal_dir={project_map.get('goal_state_dir_exists')} "
+                    f"active_state={project_map.get('active_state_file_exists')}`"
+                ),
                 f"- project_inventory: `{project_map.get('files_present')}/{project_map.get('files_checked')}`",
                 f"- residual_risks: `{project_map.get('residual_risk_count')}`",
             ]

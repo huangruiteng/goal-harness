@@ -101,6 +101,23 @@ your-project/
   goals/<goal-id>/runs/
 ```
 
+One repository can host multiple independent goals. Run `connect` once per
+stable `goal_id`; Goal Harness keeps a single repo registry with separate
+entries and separate active states:
+
+```text
+your-project/
+  .goal-harness/registry.json
+  .codex/goals/main-control/ACTIVE_GOAL_STATE.md
+  .codex/goals/side-bypass/ACTIVE_GOAL_STATE.md
+```
+
+Do not point two goals at the same `state_file`. The registry health check
+allows multiple goals with the same `repo`, but reports an error when different
+goal ids share one active-state file. `read-only-map` also checks the current
+goal's own `.codex/goals/<goal-id>/` directory so a side lane cannot be treated
+as connected merely because the main lane has local state.
+
 When `--goal-doc` is provided, Goal Harness records it as a primary authority
 source in both the registry and the initial active goal state.
 
@@ -241,6 +258,10 @@ inventory, then writes a compact `read_only_project_map` run without mutating
 the project. The output includes a compact `residual_risks` list so project
 agents can report the same risk vocabulary instead of inferring it from raw
 inventory rows.
+For same-repo multi-goal projects, the map is goal-aware: it reports
+`project_registry_exists`, `goal_state_dir_exists`, and
+`active_state_file_exists`, and distinguishes a missing project registry from a
+missing state directory for the selected `goal_id`.
 
 For a high-complexity goal whose adapter is still `planned`, use
 `goal-harness read-only-map --goal-id ... --dry-run` as the opt-in preview.

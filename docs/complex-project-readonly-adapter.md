@@ -183,5 +183,10 @@ The preview also returns `residual_risks`, using stable labels such as
 `planned_adapter_requires_controller_opt_in` and
 `project_local_goal_state_not_detected`, so the target controller can review
 one shared risk vocabulary.
+For repositories with more than one goal, the preview checks the selected
+goal's own `.codex/goals/<goal-id>/` directory. If a side bypass has not yet
+been connected locally, the risk list includes
+`project_goal_state_dir_not_detected:<goal-id>` even if the main control goal in
+the same repository is already healthy.
 
 Skipping directly to editing creates avoidable coordination risk.

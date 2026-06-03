@@ -53,6 +53,47 @@ The default files are:
 .codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md
 ```
 
+## Multiple Goals In One Repository
+
+One repository may hold a main lane, a side bypass, and other independent goals
+at the same time. Connect each lane with a distinct stable `goal_id`:
+
+```bash
+cd /path/to/project
+goal-harness connect \
+  --goal-id main-control \
+  --objective "Run the main project control lane." \
+  --adapter-kind read_only_project_map_v0 \
+  --adapter-status connected-read-only
+
+goal-harness connect \
+  --goal-id side-bypass \
+  --objective "Run the low-conflict side bypass lane." \
+  --adapter-kind read_only_project_map_v0 \
+  --adapter-status connected-read-only
+```
+
+Both entries live in the same `.goal-harness/registry.json`, but each goal must
+own its own active state under `.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md`.
+Sharing the same `state_file` across two goal ids is treated as a registry
+health error because it lets one lane overwrite or summarize the other's state.
+
+Use `--goal-id` on every status-changing command:
+
+```bash
+goal-harness read-only-map --goal-id main-control
+goal-harness read-only-map --goal-id side-bypass --dry-run
+goal-harness quota should-run --goal-id side-bypass
+```
+
+`read-only-map` is goal-aware for same-repo setups. In addition to the generic
+project inventory, it reports whether the selected goal has a local project
+registry, a `.codex/goals/<goal-id>/` state directory, and the declared active
+state file. A missing side-lane state directory produces
+`project_goal_state_dir_not_detected:<goal-id>` plus the legacy
+`project_local_goal_state_not_detected` risk, while a healthy main lane in the
+same repo does not mask that problem.
+
 If `--goal-doc` is provided, the document path is recorded as a primary
 authority source. The receiving Codex should inspect that document first before
 choosing a next action.

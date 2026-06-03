@@ -468,6 +468,9 @@ agent to use that map. Compact run records may include a public-safe
   "guard_count": 3,
   "sections_found": 4,
   "sections_checked": 7,
+  "project_registry_exists": true,
+  "goal_state_dir_exists": true,
+  "active_state_file_exists": true,
   "files_present": 4,
   "files_checked": 9,
   "residual_risk_count": 1
@@ -481,6 +484,15 @@ declared, missing registry files, missing default entries, deprecated sources,
 or medium/high conflict risk are reported with stable `authority_registry_*`
 labels. Project agents should relay that list directly rather than inventing a
 free-form risk summary.
+
+For same-repo multi-goal projects, `project_registry_exists`,
+`goal_state_dir_exists`, and `active_state_file_exists` are goal-scoped health
+signals. A project can have both `main-control` and `side-bypass` in the same
+repo, but each selected `goal_id` should have its own
+`.codex/goals/<goal-id>/` directory. If that directory is missing, the map
+reports `project_goal_state_dir_not_detected:<goal-id>` and the legacy
+`project_local_goal_state_not_detected` risk even when another goal in the same
+repo is healthy.
 
 The CLI cleanup path is `goal-harness archive-runtime --goal-id <goal-id>`. It
 defaults to dry-run and requires `--execute` before moving the runtime directory

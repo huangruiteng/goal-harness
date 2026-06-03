@@ -53,8 +53,12 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     runtime_root = root / "runtime"
     project = root / "project"
     project.mkdir(parents=True)
-    state_file = project / "ACTIVE_GOAL_STATE.md"
-    state_file.write_text("---\nupdated_at: 2026-01-01T00:00:00+00:00\n---\n", encoding="utf-8")
+    reward_state_file = project / ".codex" / "goals" / "reward-overlay-goal" / "ACTIVE_GOAL_STATE.md"
+    duplicate_state_file = project / ".codex" / "goals" / "plain-duplicate-goal" / "ACTIVE_GOAL_STATE.md"
+    reward_state_file.parent.mkdir(parents=True)
+    duplicate_state_file.parent.mkdir(parents=True)
+    reward_state_file.write_text("---\nupdated_at: 2026-01-01T00:00:00+00:00\n---\n", encoding="utf-8")
+    duplicate_state_file.write_text("---\nupdated_at: 2026-01-01T00:00:00+00:00\n---\n", encoding="utf-8")
 
     write_run(runtime_root / "goals" / "reward-overlay-goal" / "runs", "reward-overlay-goal", duplicate_kind="reward_overlay")
     write_run(runtime_root / "goals" / "plain-duplicate-goal" / "runs", "plain-duplicate-goal", duplicate_kind="plain_duplicate")
@@ -68,7 +72,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                     {
                         "id": "reward-overlay-goal",
                         "repo": str(project),
-                        "state_file": "ACTIVE_GOAL_STATE.md",
+                        "state_file": ".codex/goals/reward-overlay-goal/ACTIVE_GOAL_STATE.md",
                         "domain": "smoke",
                         "status": "connected-read-only",
                         "adapter": {"kind": "smoke", "status": "connected-read-only"},
@@ -76,7 +80,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                     {
                         "id": "plain-duplicate-goal",
                         "repo": str(project),
-                        "state_file": "ACTIVE_GOAL_STATE.md",
+                        "state_file": ".codex/goals/plain-duplicate-goal/ACTIVE_GOAL_STATE.md",
                         "domain": "smoke",
                         "status": "connected-read-only",
                         "adapter": {"kind": "smoke", "status": "connected-read-only"},

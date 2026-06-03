@@ -219,6 +219,20 @@ goal-harness connect \
 `connect` should create or update the local registry/state and auto-sync the
 public-safe entry into `~/.codex/goal-harness/registry.global.json`.
 
+One repository can host multiple goals, such as a main controller and a
+low-conflict bypass lane. Run `connect` once per stable `goal_id`; keep one
+shared `.goal-harness/registry.json`, but use one active state per goal:
+
+```text
+.codex/goals/<main-goal-id>/ACTIVE_GOAL_STATE.md
+.codex/goals/<bypass-goal-id>/ACTIVE_GOAL_STATE.md
+```
+
+Do not reuse one `state_file` for two goal ids. `goal-harness registry` treats
+that as a health error, and `read-only-map` checks the selected goal's own
+`.codex/goals/<goal-id>/` directory so a healthy main lane does not hide a
+missing bypass state.
+
 If the goal state or registry contains private evidence, add `.goal-harness/`
 and `.codex/goals/` to that project's `.gitignore`.
 
