@@ -57,6 +57,12 @@ def render_heartbeat_task_body(
 ) -> str:
     return f"""Advance `{goal_id}` using `{active_state}`.
 
+This heartbeat body is the generic Goal Harness lifecycle. Do not add
+project-specific branching to the automation prompt. Put project-specific
+policy in the Goal Harness registry, active-state sections, adapter output, or
+narrow public/private boundary rules; if a new lifecycle rule is needed, update
+`goal-harness heartbeat-prompt` so all projects inherit it.
+
 Before spending delivery compute, first make the Goal Harness CLI reachable in
 this automation shell, then run the quota guard:
 
@@ -126,6 +132,15 @@ If the result says `should_run=true`:
    external-evidence wait, handle it before delivery as the same blocker-push
    opportunity: short `NOTIFY`, at most three items, no implementation work,
    and no quota spend for that blocker-push turn.
+   Also read `heartbeat_recommendation` from the quota payload before inventing
+   local automation behavior. If it says `recommended_mode=run_first_read_only_map`,
+   run exactly its `command` as a real read-only map, not another dry-run, then
+   validate/save the `read_only_project_map` result, sync or refresh state if
+   needed, append exactly one heartbeat spend, and `NOTIFY`. If it says
+   `recommended_mode=mapped_noop_if_unchanged` with `stop_if_unchanged=true`,
+   and you find no new user instruction, owner evidence, agent todo, stale
+   source, or safe handoff, return a quiet `DONT_NOTIFY` no-op: do not run
+   another dry-run, do not edit files, and do not append quota spend.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply

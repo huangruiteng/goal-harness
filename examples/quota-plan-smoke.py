@@ -767,6 +767,59 @@ def assert_attention_queue_overrides_stale_run_history() -> None:
     assert "gate_prompt" not in decision, decision
 
 
+def assert_heartbeat_recommendation_lifecycle() -> None:
+    first_map_goal = goal("first-map", compute=1.0)
+    mapped_goal = goal("mapped-quiet", compute=1.0)
+    first_map_item = attention("first-map", compute=1.0)
+    first_map_item.update(
+        {
+            "status": "connected_without_run",
+            "lifecycle_phase": "connected",
+            "lifecycle_flags": ["connected"],
+            "recommended_action": "run the first read-only adapter tick and save a compact run record",
+        }
+    )
+    mapped_item = attention("mapped-quiet", compute=1.0)
+    mapped_item.update(
+        {
+            "status": "read_only_project_map",
+            "lifecycle_phase": "mapped",
+            "lifecycle_flags": ["mapped"],
+            "recommended_action": "inspect the map and wait for new evidence",
+        }
+    )
+    payload = {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 2,
+        "run_count": 2,
+        "attention_queue": {"items": [first_map_item, mapped_item]},
+        "run_history": {"goals": [first_map_goal, mapped_goal]},
+    }
+
+    first_decision = build_quota_should_run(payload, goal_id="first-map")
+    first_rec = first_decision["heartbeat_recommendation"]
+
+    assert first_decision["should_run"] is True, first_decision
+    assert first_rec["recommended_mode"] == "run_first_read_only_map", first_rec
+    assert first_rec["command"] == "goal-harness read-only-map --goal-id first-map", first_rec
+    assert first_rec["notify"] == "NOTIFY", first_rec
+    assert "append exactly one heartbeat spend" in first_rec["spend_policy"], first_rec
+
+    mapped_decision = build_quota_should_run(payload, goal_id="mapped-quiet")
+    mapped_rec = mapped_decision["heartbeat_recommendation"]
+    mapped_markdown = render_quota_should_run_markdown(mapped_decision)
+
+    assert mapped_decision["should_run"] is True, mapped_decision
+    assert mapped_rec["recommended_mode"] == "mapped_noop_if_unchanged", mapped_rec
+    assert mapped_rec["stop_if_unchanged"] is True, mapped_rec
+    assert mapped_rec["notify"] == "DONT_NOTIFY", mapped_rec
+    assert "do not run another dry-run" in mapped_rec["spend_policy"], mapped_rec
+    assert "heartbeat_recommendation: mode=mapped_noop_if_unchanged notify=DONT_NOTIFY" in mapped_markdown
+    assert "heartbeat_stop_if_unchanged: `True`" in mapped_markdown, mapped_markdown
+
+
 def assert_safe_bypass_slot_preview(status_payload: dict) -> None:
     payload = build_quota_slot_preview(status_payload, goal_id="needs-operator", slots=1)
 
@@ -884,6 +937,7 @@ def main() -> int:
     assert_operator_gate_should_run(status_payload)
     assert_focus_wait_should_run()
     assert_attention_queue_overrides_stale_run_history()
+    assert_heartbeat_recommendation_lifecycle()
     assert_safe_bypass_slot_preview(status_payload)
     assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:

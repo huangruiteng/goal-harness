@@ -57,6 +57,10 @@ def main() -> int:
     must_have = (
         "<ACTIVE_GOAL_STATE_PATH>",
         "<GOAL_ID>",
+        "This heartbeat body is the generic Goal Harness lifecycle",
+        "Do not add project-specific branching to the automation prompt",
+        "Put project-specific policy in the Goal Harness registry, active-state sections, adapter output",
+        "update goal-harness heartbeat-prompt so all projects inherit it",
         'export PATH="$HOME/.local/bin:$PATH"',
         'install_script="$HOME/goal-harness/scripts/install-local.sh"',
         "goal-harness doctor >/dev/null",
@@ -91,6 +95,14 @@ def main() -> int:
         "do not decide whether a gate is pending or approved from latest runs alone",
         "If an open user/owner todo is the current blocker that can unlock a gate, focus_wait, or external-evidence wait",
         "no quota spend for that blocker-push turn",
+        "heartbeat_recommendation",
+        "recommended_mode=run_first_read_only_map",
+        "real read-only map, not another dry-run",
+        "read_only_project_map result",
+        "recommended_mode=mapped_noop_if_unchanged",
+        "stop_if_unchanged=true",
+        "no new user instruction, owner evidence, agent todo, stale source, or safe handoff",
+        "do not run another dry-run, do not edit files, and do not append quota spend",
         "Run a short steering audit before choosing work",
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
         "apply a continuation check",
@@ -127,6 +139,9 @@ def main() -> int:
     for phrase in (
         'export PATH="$HOME/.local/bin:$PATH"',
         'install_script="$HOME/goal-harness/scripts/install-local.sh"',
+        "This heartbeat body is the generic Goal Harness lifecycle",
+        "Do not add project-specific branching to the automation prompt",
+        "Put project-specific policy in the Goal Harness registry, active-state sections, adapter output",
         "goal-harness doctor >/dev/null",
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "If that preflight still fails",
@@ -158,6 +173,14 @@ def main() -> int:
         "do not decide whether a gate is pending or approved from latest runs alone",
         "current blocker that can unlock a gate, `focus_wait`, or external-evidence wait",
         "no quota spend for that blocker-push turn",
+        "heartbeat_recommendation",
+        "recommended_mode=run_first_read_only_map",
+        "real read-only map, not another dry-run",
+        "read_only_project_map` result",
+        "recommended_mode=mapped_noop_if_unchanged",
+        "stop_if_unchanged=true",
+        "no new user instruction, owner evidence, agent todo, stale source, or safe handoff",
+        "do not run another dry-run, do not edit files, and do not append quota spend",
         "Run a short steering audit before choosing work",
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
         "apply a continuation check",
@@ -201,6 +224,9 @@ def main() -> int:
             "attention_queue.items",
             "run_history.latest_runs",
             "same blocker-push opportunity",
+            "heartbeat_recommendation",
+            "recommended_mode=run_first_read_only_map",
+            "recommended_mode=mapped_noop_if_unchanged",
             "Run a short steering audit before choosing work",
             "Include a product bottleneck lens",
             "Run the no-progress self-stop check before choosing delivery work",
@@ -215,11 +241,16 @@ def main() -> int:
 
     assert "docs/heartbeat-automation-prompt.md" in readme, readme
     assert "goal-harness heartbeat-prompt" in readme, readme
+    assert "heartbeat_recommendation" in readme, readme
+    assert "do not hand-edit one-off automation prompt branches" in normalized(readme), readme
     assert "goal-harness heartbeat-prompt" in doc, doc
+    assert "Do not hand-edit per-project lifecycle branches" in doc, doc
     assert "goal-harness heartbeat-prompt" in integration_doc, integration_doc
     assert "visible goal text can stay short" in integration_doc, integration_doc
     assert "shares the same quota, gate," in integration_doc, integration_doc
     assert "steering-audit, writeback, refresh, and spend lifecycle" in integration_doc, integration_doc
+    assert "heartbeat_recommendation" in integration_doc, integration_doc
+    assert "Do not hand-edit one-off automation prompt branches" in normalized(integration_doc), integration_doc
     assert "public commit, push, and PR creation as autonomous" in normalized(integration_doc), integration_doc
     assert "Two Prompt Layers" in doc, doc
     assert "Visible goal text" in doc, doc
@@ -235,6 +266,9 @@ def main() -> int:
     assert "Do not reintroduce a user gate for public-safe publication itself" in project_skill, project_skill
     assert "notify_user_on_open_todo=true" in project_skill, project_skill
     assert "blocker-push `NOTIFY`" in project_skill, project_skill
+    assert "heartbeat_recommendation" in project_skill, project_skill
+    assert "mapped_noop_if_unchanged" in project_skill, project_skill
+    assert "reason to paste one-off control logic into the scheduler" in project_skill, project_skill
 
     cli_json = subprocess.run(
         [

@@ -385,6 +385,17 @@ todos when `user_todo_summary.open_count > 0`. It must not execute
 path. See
 `docs/quota-allocation.md` for the full allocation contract.
 
+`quota should-run` also returns `heartbeat_recommendation`, a machine-readable
+hint for generic heartbeat lifecycle decisions. For a newly connected read-only
+goal, `recommended_mode=run_first_read_only_map` means the heartbeat should run
+one real `read-only-map` and spend once after the map is saved and validated.
+For an already mapped goal, `recommended_mode=mapped_noop_if_unchanged` means
+the heartbeat should quietly no-op, without another dry-run or quota spend, when
+there is no new instruction, owner evidence, agent todo, stale source, or safe
+handoff. Keep project-specific differences in the registry, active-state file,
+adapter output, or boundary rules; do not hand-edit one-off automation prompt
+branches for a single project.
+
 Routine public repo publication is not an operator gate by itself. When the
 active state permits the step, validation passes, and the public/private
 boundary scan is clean, commit, push, and PR creation can proceed

@@ -32,6 +32,7 @@ FOCUS_WAIT_REASON = (
     "wait for new evidence, owner input, external eval, or a clean baseline before "
     "spending delivery compute"
 )
+READ_ONLY_MAP_ADAPTER_SUFFIX = "_read_only_map_v0"
 
 
 def _now_local() -> str:
@@ -427,6 +428,120 @@ def _open_todo_notify_reason(*, state: str, waiting_on: str) -> str:
     return "open user todo can resolve the current waiting lane"
 
 
+def _supports_read_only_project_map(adapter_kind: Any) -> bool:
+    kind = str(adapter_kind or "").strip()
+    return kind == "read_only_project_map_v0" or kind.endswith(READ_ONLY_MAP_ADAPTER_SUFFIX)
+
+
+def _open_todo_count(summary: dict[str, Any] | None) -> int:
+    if not isinstance(summary, dict):
+        return 0
+    try:
+        return max(0, int(summary.get("open_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _has_lifecycle_marker(*values: Any, marker: str) -> bool:
+    target = marker.strip().lower()
+    for value in values:
+        for text in _text_values(value):
+            if text.strip().lower() == target:
+                return True
+    return False
+
+
+def _heartbeat_recommendation(
+    item: dict[str, Any],
+    *,
+    goal_id: str,
+    state: str,
+    should_run: bool,
+    user_todo_summary: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    status = str(item.get("status") or "")
+    waiting_on = str(item.get("waiting_on") or "")
+    adapter_kind = str(item.get("adapter_kind") or "")
+    lifecycle_phase = item.get("lifecycle_phase")
+    lifecycle_flags = item.get("lifecycle_flags")
+    has_user_todos = _open_todo_count(user_todo_summary) > 0
+    has_agent_todos = _open_todo_count(agent_todo_summary) > 0
+
+    base: dict[str, Any] = {
+        "source": "quota.should-run",
+        "recommended_mode": "skip",
+        "notify": "DONT_NOTIFY",
+        "spend_policy": "do not append quota spend unless a completed bounded step produced substantive progress",
+    }
+
+    if state == "operator_gate":
+        return {
+            **base,
+            "recommended_mode": "ask_operator_gate",
+            "notify": "NOTIFY",
+            "spend_policy": "do not append quota spend while asking the operator gate",
+            "reason": "operator gate blocks the gated delivery path",
+        }
+    if state in {"focus_wait", "waiting"} and has_user_todos:
+        return {
+            **base,
+            "recommended_mode": "blocker_push_notify",
+            "notify": "NOTIFY",
+            "spend_policy": "do not append quota spend for the blocker-push turn",
+            "reason": _open_todo_notify_reason(state=state, waiting_on=waiting_on),
+        }
+    if not should_run:
+        return {
+            **base,
+            "recommended_mode": "quota_skip",
+            "reason": f"quota state is {state}; skip delivery compute",
+        }
+
+    if status == "connected_without_run" and _supports_read_only_project_map(adapter_kind):
+        return {
+            **base,
+            "recommended_mode": "run_first_read_only_map",
+            "command": f"goal-harness read-only-map --goal-id {goal_id}",
+            "notify": "NOTIFY",
+            "spend_policy": "append exactly one heartbeat spend after the read-only map run is saved and validated",
+            "reason": "connected read-only project has no saved compact run yet",
+        }
+
+    mapped = (
+        status == "read_only_project_map"
+        or _has_lifecycle_marker(lifecycle_phase, lifecycle_flags, marker="mapped")
+    )
+    if mapped and not any([has_user_todos, has_agent_todos, item.get("agent_command")]):
+        return {
+            **base,
+            "recommended_mode": "mapped_noop_if_unchanged",
+            "stop_if_unchanged": True,
+            "spend_policy": (
+                "do not run another dry-run or append quota spend when the latest read-only map is still current "
+                "and there is no new user instruction, owner evidence, agent todo, stale source, or safe handoff"
+            ),
+            "reason": "latest compact read-only map already exists; wait for new evidence or a concrete safe action",
+        }
+
+    if item.get("agent_command"):
+        return {
+            **base,
+            "recommended_mode": "run_agent_command",
+            "command": str(item.get("agent_command")),
+            "notify": "DONT_NOTIFY",
+            "spend_policy": "append exactly one heartbeat spend after the command completes and validation/writeback are saved",
+            "reason": "current status exposes an approved project-agent command",
+        }
+
+    return {
+        **base,
+        "recommended_mode": "steering_audit_then_one_step",
+        "spend_policy": "append exactly one heartbeat spend only after a bounded step is validated and written back",
+        "reason": "eligible Codex-ready goal requires the standard steering audit before delivery",
+    }
+
+
 def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
     queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
     queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
@@ -569,6 +684,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         reason = str(quota.get("reason") or "quota state is not eligible")
         if not plan.get("ok"):
             reason = "status or contract health is not ok; skip automatic compute"
+        user_todo_summary = _summarize_user_todos(item.get("user_todos"))
+        agent_todo_summary = _summarize_user_todos(item.get("agent_todos"))
         payload = {
             "ok": bool(plan.get("ok")),
             "mode": "should-run",
@@ -587,6 +704,14 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "lifecycle_flags": item.get("lifecycle_flags"),
             "source": item.get("source"),
             "recommended_action": item.get("recommended_action"),
+            "heartbeat_recommendation": _heartbeat_recommendation(
+                item,
+                goal_id=safe_goal_id,
+                state=state,
+                should_run=should_run,
+                user_todo_summary=user_todo_summary,
+                agent_todo_summary=agent_todo_summary,
+            ),
             "plan_summary": plan.get("summary"),
             "todo_write_hint": _todo_write_hint(safe_goal_id),
         }
@@ -594,7 +719,6 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["operator_question"] = item.get("operator_question")
         if item.get("missing_gates"):
             payload["missing_gates"] = item.get("missing_gates")
-        user_todo_summary = _summarize_user_todos(item.get("user_todos"))
         if user_todo_summary:
             payload["user_todo_summary"] = user_todo_summary
             if _should_notify_user_on_open_todo(
@@ -607,8 +731,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
                     state=state,
                     waiting_on=str(item.get("waiting_on") or ""),
                 )
-        if item.get("agent_todos"):
-            payload["agent_todo_summary"] = _summarize_user_todos(item.get("agent_todos"))
+        if agent_todo_summary:
+            payload["agent_todo_summary"] = agent_todo_summary
         gate_prompt = _build_gate_prompt(item) if state == "operator_gate" else None
         if gate_prompt:
             payload["gate_prompt"] = gate_prompt
@@ -1067,6 +1191,25 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")
+    heartbeat_recommendation = (
+        payload.get("heartbeat_recommendation")
+        if isinstance(payload.get("heartbeat_recommendation"), dict)
+        else {}
+    )
+    if heartbeat_recommendation:
+        lines.append(
+            "- heartbeat_recommendation: "
+            f"mode={heartbeat_recommendation.get('recommended_mode')} "
+            f"notify={heartbeat_recommendation.get('notify')}"
+        )
+        if heartbeat_recommendation.get("command"):
+            lines.append(f"- heartbeat_command: `{heartbeat_recommendation.get('command')}`")
+        if heartbeat_recommendation.get("stop_if_unchanged"):
+            lines.append("- heartbeat_stop_if_unchanged: `True`")
+        if heartbeat_recommendation.get("spend_policy"):
+            lines.append(f"- heartbeat_spend_policy: {heartbeat_recommendation.get('spend_policy')}")
+        if heartbeat_recommendation.get("reason"):
+            lines.append(f"- heartbeat_reason: {heartbeat_recommendation.get('reason')}")
     if payload.get("safe_bypass_allowed"):
         lines.append(f"- safe_bypass_allowed: `{payload.get('safe_bypass_allowed')}`")
     if payload.get("blocked_action_scope"):

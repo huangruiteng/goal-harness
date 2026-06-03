@@ -129,6 +129,14 @@ The Codex App visible goal text can stay short, such as
 the human and the executor. The recurring automation prompt should use the
 generated heartbeat body above, so every project shares the same quota, gate,
 steering-audit, writeback, refresh, and spend lifecycle.
+Project-specific behavior should live in the registry, active-state sections,
+adapter output, or narrow boundary rules. Do not hand-edit one-off automation
+prompt branches for a single project; when a lifecycle rule is broadly useful,
+add it to `goal-harness heartbeat-prompt` and its smoke contract.
+The quota guard's `heartbeat_recommendation` covers the common onboarding
+cases: `run_first_read_only_map` for a newly connected read-only goal, and
+`mapped_noop_if_unchanged` for an already mapped goal with no new instruction,
+owner evidence, agent todo, stale source, or safe handoff.
 That lifecycle treats routine public commit, push, and PR creation as
 autonomous after validation and a clean public/private boundary scan; private or
 company-internal material, credentials, destructive git, production actions, and

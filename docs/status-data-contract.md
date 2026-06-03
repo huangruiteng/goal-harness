@@ -59,6 +59,11 @@ that grouping for project heartbeats. These are read-only views, not a separate
 source of truth. Scripts should treat `summary.next_automatic_turn` in the
 quota-plan JSON as advisory and still respect the displayed health, operator,
 and evidence gates.
+The per-goal guard also emits `heartbeat_recommendation`, a compact executor
+hint for generic lifecycle cases such as first read-only map runs and quiet
+mapped no-ops. Project-specific policy should still come from the registry,
+active state, adapter output, or boundary rules rather than ad hoc scheduler
+prompt branches.
 For spend accounting, status derives `spent_slots` from compact
 `quota_slot_spent` runtime events in the current quota window. The registry
 remains the policy source for compute share and window size, not the spend
@@ -398,6 +403,12 @@ operator gate. This is intended for `focus_wait`, `waiting`, and
 Executors should list at most three open todos, include
 `open_todo_notify_reason`, skip implementation work, and skip quota spend for
 that blocker-push turn unless the same blocker was surfaced recently.
+When the payload includes `heartbeat_recommendation`, executors should follow
+that generic lifecycle hint before inventing local automation behavior:
+`run_first_read_only_map` runs and saves one real read-only map before spending
+once, while `mapped_noop_if_unchanged` returns a quiet no-op without another
+dry-run or quota spend if no new instruction, evidence, todo, stale source, or
+safe handoff exists.
 
 Review Packet source-of-truth rule:
 

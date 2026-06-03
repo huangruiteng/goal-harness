@@ -136,6 +136,21 @@ heartbeats spend `--slots 1`, while
 coarser fixed-interval automations should spend the scheduler minutes consumed
 by that completed turn.
 
+Keep project-specific behavior out of the automation prompt. Encode local
+differences in the project registry, `.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md`,
+adapter output, or narrow public/private boundary rules. If a lifecycle rule is
+useful across projects, update `goal-harness heartbeat-prompt` and its smoke
+contract rather than hand-editing one heartbeat automation.
+
+The quota guard returns `heartbeat_recommendation`. New connected read-only
+goals should follow `recommended_mode=run_first_read_only_map`: run one real
+`goal-harness read-only-map --goal-id <STABLE_GOAL_ID>`, validate the saved
+`read_only_project_map`, sync or refresh state if needed, and spend exactly once
+after completion. Already mapped goals should follow
+`recommended_mode=mapped_noop_if_unchanged`: if there is no new instruction,
+owner evidence, agent todo, stale source, or safe handoff, return a quiet no-op
+without another dry-run, file edit, or quota spend.
+
 The generated task body also carries a no-progress self-stop guard: if 5
 consecutive eligible heartbeat turns only repeat status checks without a
 substantive artifact, adapter or implementation progress, new gate/user
@@ -155,7 +170,9 @@ Keep the Codex App visible goal text short, for example
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short
 text as the automation body. Across projects, the automation body should be the
 same generated lifecycle prompt with only `goal_id`, `active_state`, and narrow
-project boundary rules changed.
+project boundary rules changed. When a project appears to need a custom
+automation branch, treat that as a Goal Harness product gap first, not as a
+reason to paste one-off control logic into the scheduler.
 
 ## Generate A Review Packet
 

@@ -22,6 +22,11 @@ Do not paste the full lifecycle protocol into the visible goal text, and do not
 use a short goal text such as "advance TODO" as the recurring automation body.
 The short text names the goal; the generated task body enforces quota, gates,
 steering audit, writeback, refresh, and spend accounting.
+Do not hand-edit per-project lifecycle branches into one automation prompt.
+Project-specific behavior belongs in the Goal Harness registry, active-state
+sections, adapter output, or narrow boundary rules. If a lifecycle rule is
+generally useful, add it to `goal-harness heartbeat-prompt` and its smoke
+contract so every project inherits it.
 
 You can generate the task body from the CLI:
 
@@ -43,6 +48,12 @@ Replace the placeholders before installing the automation:
 
 ```text
 Advance the goal described in <ACTIVE_GOAL_STATE_PATH>.
+
+This heartbeat body is the generic Goal Harness lifecycle. Do not add
+project-specific branching to the automation prompt. Put project-specific
+policy in the Goal Harness registry, active-state sections, adapter output, or
+narrow public/private boundary rules; if a new lifecycle rule is needed, update
+goal-harness heartbeat-prompt so all projects inherit it.
 
 Before spending delivery compute, first make the Goal Harness CLI reachable in
 this automation shell, then run the quota guard:
@@ -121,6 +132,15 @@ If the result says should_run=true:
    gate, focus_wait, or external-evidence wait, handle it before delivery as
    the same blocker-push opportunity: short NOTIFY, at most three items, no
    implementation work, and no quota spend for that blocker-push turn.
+   Also read heartbeat_recommendation from the quota payload before inventing
+   local automation behavior. If it says recommended_mode=run_first_read_only_map,
+   run exactly its command as a real read-only map, not another dry-run, then
+   validate/save the read_only_project_map result, sync or refresh state if
+   needed, append exactly one heartbeat spend, and NOTIFY. If it says
+   recommended_mode=mapped_noop_if_unchanged with stop_if_unchanged=true, and
+   you find no new user instruction, owner evidence, agent todo, stale source,
+   or safe handoff, return a quiet DONT_NOTIFY no-op: do not run another
+   dry-run, do not edit files, and do not append quota spend.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply
@@ -211,9 +231,14 @@ the priority stack, use `attention_queue.items` / `project_asset` as the current
 routing authority and treat `run_history.latest_runs` only as evidence,
 check whether any open `user_todo_summary` is a blocker-push opportunity for a
 gate / focus_wait / external-evidence wait, apply a continuation check for
-repeated topics, run the no-progress self-stop check, then do one bounded
-verifiable step, validate it, write back changed files / validation / critic /
-next action, refresh state if needed, and append
+repeated topics, then read `heartbeat_recommendation`: run
+`recommended_mode=run_first_read_only_map` as one real read-only map and spend
+once after validation; for `recommended_mode=mapped_noop_if_unchanged`, return a
+quiet no-op without another dry-run, file edit, or quota spend when no new
+instruction/evidence/todo/stale source/safe handoff exists. Then run the
+no-progress self-stop check, do one bounded verifiable step when a real step
+exists, validate it, write back changed files / validation / critic / next
+action, refresh state if needed, and append
 exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
 event after the completed turn. Use `--slots 1` for minute-based
@@ -238,17 +263,20 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 5. Run the steering audit before choosing the work.
 6. Use `attention_queue.items` / `project_asset` as current routing authority;
    use `run_history.latest_runs` only as evidence or drill-down.
-7. Cancel or pause the automation instead of spending if 5 consecutive eligible
+7. Follow `heartbeat_recommendation`: first connected read-only goals should run
+   one real `read-only-map`, while already mapped unchanged goals should return
+   a quiet no-op without another dry-run or quota spend.
+8. Cancel or pause the automation instead of spending if 5 consecutive eligible
    turns are only repeated no-progress status loops.
-8. Treat routine public commit, push, and PR creation as autonomous after clean
+9. Treat routine public commit, push, and PR creation as autonomous after clean
    validation and a public/private boundary scan; stop for private/company
    material, credentials, destructive git, production actions, or repo rules
    that explicitly require review.
-9. Work small when `should_run=true`.
-10. Validate before reporting.
-11. Refresh state when the run is state-only.
-12. Spend exactly once after the completed turn.
-13. Report compactly.
+10. Work small when `should_run=true`.
+11. Validate before reporting.
+12. Refresh state when the run is state-only.
+13. Spend exactly once after the completed turn.
+14. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode

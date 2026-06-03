@@ -144,6 +144,9 @@ level and the stale-state or operator-cost failure it prevents.
 `quota should-run` is a compute guard, not a strategy selector. It answers
 "may this goal spend another automatic turn now?" It does not answer "is this
 topic still the best use of attention?"
+Its `heartbeat_recommendation` can cover generic lifecycle mechanics such as
+the first saved read-only map or an unchanged mapped no-op, but it still does
+not replace the priority-stack steering audit for real delivery work.
 
 Before writing a new `Next Action`, an autonomous goal tick should run a small
 steering audit:

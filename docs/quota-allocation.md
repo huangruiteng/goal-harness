@@ -228,6 +228,12 @@ JSON or Markdown decision:
   "reason": "operator gate blocks gated delivery; safe non-gated steering may continue",
   "blocked_action_scope": "gated_delivery",
   "safe_bypass_allowed": true,
+  "heartbeat_recommendation": {
+    "source": "quota.should-run",
+    "recommended_mode": "ask_operator_gate",
+    "notify": "NOTIFY",
+    "spend_policy": "do not append quota spend while asking the operator gate"
+  },
   "operator_question": "是否同意 project-main-control 先做 read-only map dry-run？",
   "gate_prompt": "请用户/控制器确认当前 gate：..."
 }
@@ -263,6 +269,19 @@ For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,
 review docs, or chat.
+It also includes `heartbeat_recommendation`, which keeps generic heartbeat
+lifecycle decisions in Goal Harness instead of one-off automation prompts. The
+common modes are:
+
+- `run_first_read_only_map`: a connected read-only goal has no saved compact run
+  yet; run one real `goal-harness read-only-map --goal-id <goal-id>`, validate
+  and save the `read_only_project_map`, then append exactly one heartbeat spend.
+- `mapped_noop_if_unchanged`: the latest compact read-only map already exists;
+  if there is no new user instruction, owner evidence, agent todo, stale source,
+  or safe handoff, return a quiet no-op without another dry-run or quota spend.
+- `steering_audit_then_one_step`: the goal is eligible but needs the normal
+  steering audit before selecting one bounded step.
+
 Unknown goals or status collection failures return non-zero so automations fail
 closed.
 
