@@ -257,6 +257,15 @@ it remains in run history for audit and quota counting, but it should not
 become the current work classification in status, quota `should-run`, or the
 dashboard attention queue.
 
+The displayed before -> after transition is a same-status-payload projection
+for the slot being written. Later `quota status` and `quota should-run`
+commands recompute `spent_slots` from `quota_slot_spent` events still inside
+the rolling `window_hours`; if an older spend expires between the preview and
+the next check, the visible total can stay flat or drop even though the new
+event was appended. Treat the appended event path as the write receipt, and
+treat `spent_slots` as the current rolling-window total rather than a monotonic
+counter.
+
 Post-turn accounting protocol:
 
 - call `quota should-run` before spending delivery compute;

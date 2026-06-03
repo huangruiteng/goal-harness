@@ -19,8 +19,10 @@ from goal_harness.quota import (  # noqa: E402
     build_quota_plan,
     build_quota_should_run,
     build_quota_slot_preview,
+    goal_quota_with_spend_ledger,
     goal_quota_config,
     render_quota_markdown,
+    render_quota_slot_preview_markdown,
     render_quota_should_run_markdown,
 )
 
@@ -551,6 +553,43 @@ def assert_default_quota_is_duty_cycle() -> None:
     assert low["allowed_slots"] == 432, low
 
 
+def assert_rolling_window_ledger_expires_old_spends() -> None:
+    now = datetime.fromisoformat("2026-06-03T11:20:00+08:00")
+    goal_payload = {
+        "id": "rolling-window",
+        "quota": {
+            "compute": 1.0,
+            "window_hours": 24,
+        },
+    }
+    runs = [
+        {
+            "goal_id": "rolling-window",
+            "classification": "quota_slot_spent",
+            "generated_at": "2026-06-02T11:19:22+08:00",
+            "quota_event": {
+                "event_type": "quota_slot_spent",
+                "slots": 1,
+            },
+        },
+        {
+            "goal_id": "rolling-window",
+            "classification": "quota_slot_spent",
+            "generated_at": "2026-06-03T11:19:13+08:00",
+            "quota_event": {
+                "event_type": "quota_slot_spent",
+                "slots": 1,
+            },
+        },
+    ]
+
+    quota = goal_quota_with_spend_ledger(goal_payload, runs, now=now)
+
+    assert quota["spent_slots"] == 1, quota
+    assert quota["spend_event_count"] == 1, quota
+    assert quota["spend_source"] == "runtime_events", quota
+
+
 def assert_throttled_should_run(status_payload: dict) -> None:
     payload = build_quota_should_run(status_payload, goal_id="throttled-half")
     quota = payload["quota"]
@@ -625,6 +664,7 @@ def assert_throttled_cli_should_run(payload: dict) -> None:
 def assert_slot_preview(payload: dict) -> None:
     before = payload["before"]
     after = payload["after"]
+    markdown = render_quota_slot_preview_markdown(payload)
 
     assert payload["ok"] is True, payload
     assert payload["dry_run"] is True, payload
@@ -643,6 +683,9 @@ def assert_slot_preview(payload: dict) -> None:
     assert after["quota"]["spent_slots"] == 12, payload
     assert after["quota"]["allowed_slots"] == 12, payload
     assert after["plan_summary"]["next_automatic_turn"] == "full-speed", payload
+    assert "rolling_window_note" in payload, payload
+    assert "same-status-payload projection" in payload["rolling_window_note"], payload
+    assert "rolling_window_note" in markdown, markdown
 
 
 def assert_dry_run_left_cli_fixture_unchanged(payload: dict) -> None:
@@ -698,6 +741,7 @@ def assert_slot_spend_execute(payload: dict, next_should_run: dict, registry_bef
 
 def main() -> int:
     assert_default_quota_is_duty_cycle()
+    assert_rolling_window_ledger_expires_old_spends()
     status_payload = build_status_fixture()
     plan = build_quota_plan(status_payload, mode="plan")
     markdown = render_quota_markdown(plan)

@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T11:16:33+08:00
+updated_at: 2026-06-03T11:26:23+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -53,14 +53,35 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- The heartbeat lifecycle contract now encodes autonomous public repo
-  publication after validation and clean boundary scans. Future heartbeats
-  should move to a different bounded P0/P1 control-plane slice rather than keep
-  documenting publish policy; autonomous public commit/push/PR remains allowed
-  after validation and boundary scans.
+- Quota spend preview/status now documents the rolling-window semantics behind
+  same-turn before -> after projections. The next heartbeat should move to a
+  different P0 state-truth slice, such as checking dashboard/status consistency
+  for quota, user todo, and gate fields, and patch exactly one mismatch if found.
 
 ## Recent Progress
 
+- 2026-06-03T11:26:23+08:00: Steering audit candidates were: P0 quota
+  preview/status truth after the latest spend showed a same-window projection
+  while later status stayed flat, P0 state/status truth check only, P1
+  dashboard or quickstart polish, and P2 no-progress guard tuning. Continuation
+  check: recent slices focused on publication policy, so switching to quota
+  state truth was the higher-value P0 lane. No-progress self-stop check: not
+  triggered because recent eligible heartbeats produced commits, validation
+  evidence, and this turn produced a public quota contract artifact. Bounded
+  output: updated `goal_harness/quota.py` so `quota spend-slot` preview
+  markdown includes a rolling-window note, updated `docs/quota-allocation.md`
+  to explain that before -> after is a same-status-payload projection while
+  later status recomputes `spent_slots` from events inside `window_hours`, and
+  extended `examples/quota-plan-smoke.py` with a regression where an older
+  spend expires as a newer spend remains counted. Validation: `python3
+  examples/quota-plan-smoke.py` passed; `python3 -m py_compile
+  goal_harness/quota.py examples/quota-plan-smoke.py` passed; `goal-harness
+  --format json check --scan-root .` passed with warnings=0 and a clean public
+  boundary scan over 88 files; `git diff --check` passed. Critic: the ledger
+  algorithm was already correct, but the operator-facing preview needed an
+  explicit note to prevent misreading `spent_slots` as a monotonic counter.
+  Losing candidate: dashboard polish remains useful and should become the next
+  state-truth candidate rather than another quota-doc pass.
 - 2026-06-03T11:16:33+08:00: Steering audit candidates were: P0 sync the
   autonomous public publish policy into the reusable heartbeat lifecycle
   generator/docs/skill, P0 state/status truth check only, P1 dashboard or

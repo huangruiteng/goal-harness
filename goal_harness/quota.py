@@ -619,6 +619,11 @@ def build_quota_slot_preview(
             f"dry-run preview: spending {safe_slots} slot(s) would move "
             f"{safe_goal_id} from {before.get('state')} to {after.get('state')}"
         ),
+        "rolling_window_note": (
+            "before -> after is a same-status-payload projection. Later quota status "
+            "recomputes spent_slots from quota_slot_spent events still inside window_hours, "
+            "so the visible total can stay flat if an older spend expires."
+        ),
         "safe_bypass_spend": safe_bypass_spend,
     }
 
@@ -882,6 +887,8 @@ def render_quota_slot_preview_markdown(payload: dict[str, Any]) -> str:
         summary = after.get("plan_summary") if isinstance(after.get("plan_summary"), dict) else {}
         if summary:
             lines.append(f"- after_plan_next_automatic_turn: {summary.get('next_automatic_turn') or 'none'}")
+    if payload.get("rolling_window_note"):
+        lines.append(f"- rolling_window_note: {payload.get('rolling_window_note')}")
     return "\n".join(lines)
 
 
