@@ -30,8 +30,9 @@ assert(packet.includes("先处理/暂缓再判 gate"), "missing todo-before-gate
 assert(packet.includes("Gate：是否同意 premium-ui 迁移"), "missing gate question");
 assert(packet.includes("【给项目 Agent】"), "missing project-agent handoff section");
 assert(packet.includes("路径：Read-only map dry-run"), "missing safe path");
+assert(packet.includes("上下文：只信当前 state/status/history 与命令输出"), "missing agent context rule");
 assert(packet.includes("不授权写入或生产动作") || packet.includes("不要执行 Nacos 写入"), "missing safety boundary");
-assert(packet.length > 320 && packet.length < 650, `unexpected packet length: ${packet.length}`);
+assert(packet.length > 360 && packet.length < 740, `unexpected packet length: ${packet.length}`);
 assert(
   packet.indexOf("【用户/Gate】") < packet.indexOf("【给项目 Agent】"),
   "user action section must precede project-agent handoff",

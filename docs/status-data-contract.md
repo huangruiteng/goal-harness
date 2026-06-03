@@ -402,13 +402,18 @@ reward, write-control, or a real map run from the presence of a copied packet,
 review URL, selected `goal_id`, or `agent_command`.
 
 The project-agent section of a Review Packet should be short and operational:
-name the forwarding condition, the execution boundary, and the stop condition
-before showing any command. For controller opt-in, that means the section is
-only forwarded after an explicit human/controller agreement, the agent only
-runs the read-only or dry-run project path, and it must stop if it needs a real
-approval, write-control, run-history append, production action, or if the
-command fails. This keeps the packet easy for target agents to follow while
-preserving the dashboard as the human decision surface.
+name the current context source, the forwarding condition, the execution
+boundary, and the stop condition before showing any command. The context source
+rule keeps agent handoffs from bloating: the packet carries only the minimal
+current instruction; if the target agent needs more context, it reads the
+current active state, status, history, and command output instead of rebuilding
+truth from old chats or old packets. For controller opt-in, that means the
+section is only forwarded after an explicit human/controller agreement, the
+agent only runs the read-only or dry-run project path, and it must stop if it
+needs a real approval, write-control, run-history append, production action, or
+if the command fails. This keeps the packet easy for target agents to follow
+while preserving the dashboard as the human decision surface and the archival
+evidence trail as the cold path.
 
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready

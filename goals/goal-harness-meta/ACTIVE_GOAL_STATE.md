@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T12:13:42+08:00
+updated_at: 2026-06-03T12:22:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,44 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- The reusable heartbeat lifecycle now includes a product bottleneck lens in
-  steering audits. The next heartbeat should apply it to the dual
-  anti-overload goal: audit whether user/agent todo visibility, dashboard
-  first-screen burden, or project-agent handoff context is the top bottleneck,
-  then patch one surface so current truth stays compact without losing the
-  archival evidence trail.
+- Project-agent handoff packets now include an explicit context-source rule so
+  target agents do not rebuild current truth from stale chats or old packets.
+  The next heartbeat should apply the dual anti-overload lens to the dashboard
+  first screen: verify whether it already uses the compact `project_asset`
+  projection for user/agent todos, next action, stop condition, quota, and
+  validation before adding any new UI.
 
 ## Recent Progress
 
+- 2026-06-03T12:22:40+08:00: Steering audit candidates were: P0 project-agent
+  handoff context diet, P0 user/agent todo visibility across status and
+  dashboard, P0 dashboard first-screen burden, P1 dashboard polish, and P2
+  no-progress guard tuning. Continuation check: recent slices touched several
+  dashboard/status wording surfaces, but the user's newest product constraint
+  made agent context diet a distinct P0 surface, so this turn chose the
+  handoff packet instead of another visual-polish pass. No-progress self-stop
+  check: not triggered because recent eligible heartbeats produced committed
+  artifacts and validation signals, and this turn produced a bounded packet
+  contract patch. Bounded output: updated `goal_harness/review_packet.py` and
+  `apps/dashboard/src/data/action-packet.ts` so CLI Review Packets and
+  dashboard copied packets tell target project agents to treat the packet as
+  minimal current instruction and, when context is needed, read current active
+  state/status/history plus command output rather than old chats or old
+  packets; updated `docs/status-data-contract.md`,
+  `examples/review-packet-cli-smoke.py`,
+  `examples/project-agent-adoption-smoke.py`, and
+  `apps/dashboard/smoke/action-packet-smoke.ts` to lock that contract.
+  Validation: `python3 examples/review-packet-cli-smoke.py` passed; `python3
+  examples/project-agent-adoption-smoke.py` passed; `python3 -m py_compile
+  goal_harness/review_packet.py examples/review-packet-cli-smoke.py
+  examples/project-agent-adoption-smoke.py` passed; `npm --prefix
+  apps/dashboard run smoke:action-packet` passed; `goal-harness --format json
+  check --scan-root .` passed with warnings=0 and a clean public boundary scan
+  over 82 files; `git diff --check` passed. Critic: this improves agent
+  handoff context hygiene without adding more hot-path content, but it does not
+  yet verify whether the dashboard first screen is compact enough for humans.
+  Losing candidate: dashboard first-screen burden remains the next visible
+  dual anti-overload candidate.
 - 2026-06-03T12:13:42+08:00: Manual product clarification from the user
   upgraded the anti-overload goal from "avoid overwhelming the user" to two
   coupled requirements: protect human attention from redundant notifications

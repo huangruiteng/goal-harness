@@ -208,6 +208,7 @@ def main() -> int:
         assert packet["operator_gate_approved_handoff"] is True, packet
         assert packet["project_agent_command"] == APPROVED_COMMAND, packet
         assert "operator gate 已记录为 approve" in packet["project_agent_handoff"], packet
+        assert "不要从旧聊天或旧 packet 拼当前状态" in packet["project_agent_handoff"], packet
         assert "【用户本地 Gate 记录草稿】" not in packet["packet"], packet
 
     print("project-agent-adoption-smoke ok")

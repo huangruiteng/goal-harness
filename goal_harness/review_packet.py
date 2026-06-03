@@ -211,6 +211,13 @@ def target_goal_guard(goal_id: str) -> str:
     )
 
 
+def agent_context_rule() -> str:
+    return (
+        "上下文规则：本段只携带最小当前指令；如需核验上下文，只读目标 active "
+        "state/status/history 和本命令输出，不要从旧聊天或旧 packet 拼当前状态。"
+    )
+
+
 def operator_gate_approved_handoff(item: dict[str, Any] | None, goal: dict[str, Any] | None) -> bool:
     if not isinstance(item, dict) or not item.get("agent_command"):
         return False
@@ -233,9 +240,11 @@ def project_agent_section(
     approved_operator_gate: bool = False,
 ) -> str:
     goal_guard = target_goal_guard(goal_id)
+    context_rule = agent_context_rule()
     if approved_operator_gate:
         lines = [
             goal_guard,
+            context_rule,
             "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
             "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
             "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。",
@@ -245,6 +254,7 @@ def project_agent_section(
     elif kind == "reward":
         lines = [
             goal_guard,
+            context_rule,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
             "执行边界：不要替用户写 reward；active state 只做摘要，reward 的权威来源是 run-bound human_reward overlay。",
             "停止条件：如果 reward 还停留在 dry-run / 草稿 / 口头判断，停下等待用户记录；如果已经记录，只用下面 history 路径读取。",
@@ -254,6 +264,7 @@ def project_agent_section(
     elif kind == "controller":
         lines = [
             goal_guard,
+            context_rule,
             "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
             "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
             "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -263,6 +274,7 @@ def project_agent_section(
     else:
         lines = [
             goal_guard,
+            context_rule,
             "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
             "执行边界：读取本项目 status/history 后，只执行下面只读或 dry-run 路径。",
             "停止条件：需要真实写 reward、approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",

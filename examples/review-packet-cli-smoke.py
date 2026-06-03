@@ -148,6 +148,8 @@ def main() -> int:
         assert "operator-gate" in packet, packet
         assert "【给项目 Agent】" in packet, packet
         assert f"目标校验：本段只适用于 goal_id=`{GOAL_ID}`；如果与你当前 active goal 或 registry entry 不一致，停止并回报目标不匹配。" in packet, packet
+        assert "上下文规则：本段只携带最小当前指令" in packet, packet
+        assert "不要从旧聊天或旧 packet 拼当前状态" in packet, packet
         assert "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。" in packet, packet
         assert "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。" in packet, packet
         assert "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。" in packet, packet
@@ -200,6 +202,8 @@ def main() -> int:
         assert "回复：转发下方【给项目 Agent】即可。" in approved_packet, approved_packet
         assert "这只是执行已批准的只读/dry-run agent_command" in approved_packet, approved_packet
         assert "【用户本地 Gate 记录草稿】" not in approved_packet, approved_packet
+        assert "上下文规则：本段只携带最小当前指令" in approved_packet, approved_packet
+        assert "不要从旧聊天或旧 packet 拼当前状态" in approved_packet, approved_packet
         assert "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。" in approved_packet, approved_packet
         assert "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。" in approved_packet, approved_packet
         assert "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。" in approved_packet, approved_packet
@@ -227,6 +231,7 @@ def main() -> int:
         assert approved_payload["project_agent_command"] == APPROVED_COMMAND, approved_payload
         assert approved_payload["project_agent_handoff"], approved_payload
         assert "operator gate 已记录为 approve" in approved_payload["project_agent_handoff"], approved_payload
+        assert "不要从旧聊天或旧 packet 拼当前状态" in approved_payload["project_agent_handoff"], approved_payload
         assert approved_payload["operator_gate_dry_run_command"] is None, approved_payload
         assert approved_payload["operator_gate_decision_commands"] == {}, approved_payload
         after_files = sorted(path.name for path in run_dir.iterdir())

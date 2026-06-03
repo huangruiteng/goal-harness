@@ -49,6 +49,7 @@ export function buildActionPacket(input: ActionPacketInput) {
     "",
     "【给项目 Agent】",
     `路径：${input.safePathLabel}`,
+    "上下文：只信当前 state/status/history 与命令输出；勿用旧聊天/旧 packet 拼状态。",
     input.command ? `命令：${input.command.replace(/\s+/g, " ").trim()}` : null,
     "回报：files / validation / next；需授权则停。",
   ].filter(Boolean).join("\n");
