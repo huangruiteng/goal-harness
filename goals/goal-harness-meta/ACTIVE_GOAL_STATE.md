@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:34:56+08:00
+updated_at: 2026-06-03T16:41:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -61,14 +61,37 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- `notify_user_on_open_todo` now exists in `quota should-run` and the generated
-  heartbeat/new-project prompts. Next, either update the live heartbeat
-  automation to use the generated prompt branch or add a sanitized runtime
-  fixture proving a focus-wait open todo becomes a no-spend blocker-push
-  `NOTIFY`.
+- A sanitized runtime fixture now proves a focus-wait open todo reaches
+  `quota should-run` as `notify_user_on_open_todo=true` and maps to the
+  generated heartbeat no-spend blocker-push `NOTIFY` branch. Next, update the
+  live heartbeat automation to the generated prompt branch once its existing
+  schedule/thread fields can be preserved safely.
 
 ## Recent Progress
 
+- 2026-06-03T16:41:40+08:00: Steering audit candidates were: P0 update the
+  live heartbeat automation to use the generated blocker-push prompt, P0 add a
+  sanitized runtime fixture proving the new blocker-push path end to end, P0
+  wait for target project dry-run signals, and P1 dashboard/browser polish.
+  Continuation check: this was another blocker-push slice, but continuing
+  still won because it validated the exact runtime behavior introduced by the
+  previous commit rather than adding another presentation layer. No-progress
+  self-stop check: not triggered because recent heartbeats produced commits,
+  validation, and public artifacts; this turn added a new executable fixture.
+  Bounded output: added `examples/blocker-push-runtime-smoke.py`, which builds a
+  temporary sanitized registry/runtime/state, keeps a goal in `focus_wait` via
+  registry attention, exposes one open owner/user todo, and verifies the real
+  CLI path `status -> quota should-run -> heartbeat-prompt` produces
+  `notify_user_on_open_todo=true`, `state=focus_wait`, no `agent_command`, and
+  a generated no-spend blocker-push `NOTIFY` branch. Validation: `python3
+  examples/blocker-push-runtime-smoke.py`, `python3 -m py_compile
+  examples/blocker-push-runtime-smoke.py`, `goal-harness --format json check
+  --scan-root .`, `git diff --check`, and changed-diff sensitive-pattern scan
+  passed. Critic: this is safer than blindly editing the live automation
+  because the app automation view did not return a machine-readable full config
+  to preserve schedule/thread fields; the live automation update is still the
+  next operational step. Losing candidate: target-project dry-run signals
+  remain high-value but must arrive from the target project context.
 - 2026-06-03T16:34:56+08:00: Steering audit candidates were: P0 generated
   heartbeat/status blocker-push behavior for open owner/user todos, P0 wait for
   target project dry-run signals, P1 dashboard/browser polish, and P2 dreaming
