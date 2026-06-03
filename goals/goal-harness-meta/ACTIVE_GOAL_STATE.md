@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:04:37+08:00
+updated_at: 2026-06-03T16:10:38+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -61,14 +61,38 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- `focus_wait` is now represented in quota plan / should-run. Next, add a
-  sanitized presentation fixture that shows focus-wait plus owner-blocker
-  prompts in dashboard or Review Packet output: quiet projects should state
-  why they are quiet, who can unblock them, what evidence is needed, and when
-  delivery may resume.
+- Review Packet now has a sanitized `focus_wait` owner-blocker fixture. Next,
+  carry the same focus-wait owner-blocker presentation into the dashboard
+  action packet / first-screen card so quiet projects show why they are quiet,
+  who can unblock them, what evidence is needed, and when delivery may resume.
 
 ## Recent Progress
 
+- 2026-06-03T16:10:38+08:00: Steering audit candidates were: P0 Review Packet
+  focus-wait owner-blocker presentation, P1 dashboard card/action-packet
+  presentation for the same state, P0 target project dry-run signals, and P1
+  communication polish. Continuation check: this follows the previous
+  focus-wait and blocker-priority slices, but it is the first implementation
+  of owner-blocker presentation in a concrete user/agent surface rather than
+  another state-only update, so continuing still won. No-progress self-stop
+  check: not triggered because recent turns produced commits, validation, and
+  concrete contract artifacts, and this slice produced a Review Packet fixture.
+  Bounded output: added `focus_wait` Review Packet kind detection from quota
+  state, a human section that surfaces the first owner/user todo as an unlock
+  condition, and an agent handoff that only permits status/history inspection
+  while keeping `focus_wait` until new owner evidence, a clean baseline, or
+  external eval changes the state. Changed files:
+  `goal_harness/review_packet.py`, `examples/review-packet-cli-smoke.py`, and
+  `docs/status-data-contract.md`. Validation: `python3
+  examples/review-packet-cli-smoke.py`, `python3 examples/review-packet-smoke.py`,
+  `python3 -m py_compile goal_harness/review_packet.py
+  examples/review-packet-cli-smoke.py`, `npm --prefix apps/dashboard run
+  smoke:action-packet`, `goal-harness --format json check --scan-root .`, `git
+  diff --check`, and changed-diff sensitive-pattern scan passed. Critic: this
+  makes the owner blocker visible in CLI Review Packet and handoff-only paths,
+  but dashboard cards still need the same explicit focus-wait affordance.
+  Losing candidate: target project dry-run signals remain high-value but are
+  still outside this public control-plane repo.
 - 2026-06-03T16:04:37+08:00: User feedback promoted blocker-pushing to a core
   control-plane goal: Goal Harness should not merely avoid noisy updates; it
   should surface the smallest owner question when an owner blocker can unlock a

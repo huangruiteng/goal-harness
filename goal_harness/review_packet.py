@@ -165,6 +165,11 @@ def infer_action_kind(item: dict[str, Any] | None, goal: dict[str, Any] | None) 
     if waiting_on == "external_evidence":
         return "evidence"
     if waiting_on == "codex":
+        quota = item.get("quota") if isinstance(item, dict) and isinstance(item.get("quota"), dict) else {}
+        asset = item.get("project_asset") if isinstance(item, dict) and isinstance(item.get("project_asset"), dict) else {}
+        asset_quota = asset.get("quota") if isinstance(asset.get("quota"), dict) else {}
+        if quota.get("state") == "focus_wait" or asset_quota.get("state") == "focus_wait":
+            return "focus_wait"
         return "codex"
     return "status"
 
@@ -194,6 +199,12 @@ def human_prompt(kind: str) -> dict[str, str]:
             "reply": "继续等待 / 不继续等待 + 一句话原因。",
             "boundary": "观察状态不是 reward、approval 或 controller opt-in。",
         }
+    if kind == "focus_wait":
+        return {
+            "question": "是否继续保持 focus wait，直到 owner blocker 有新证据？",
+            "reply": "继续等待 / 提供新证据并恢复 delivery / 暂缓该线 + 一句话原因。",
+            "boundary": "focus wait 不是 delivery 授权；没有新 owner evidence、clean baseline 或外部 eval 时，项目 Agent 只读 status/history。",
+        }
     if kind == "health":
         return {
             "question": "是否先修健康阻塞，再讨论 reward/controller/codex handoff？",
@@ -220,6 +231,8 @@ def suggested_decision(kind: str, item: dict[str, Any] | None, goal_id: str | No
         return "同意让 Codex 沿 safe path 继续；如需写入再单独请求授权。"
     if kind == "evidence":
         return "继续等待外部证据；暂不升级成决策建议。"
+    if kind == "focus_wait":
+        return "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。"
     if kind == "health":
         return "先修健康阻塞；暂不处理 reward/controller/codex handoff。"
     return "继续 / 不继续 / 继续观察，并补一句原因。"
@@ -233,6 +246,8 @@ def project_agent_command(status_payload: dict[str, Any], goal_id: str, kind: st
     if kind == "controller":
         return build_read_only_map_command(status_payload, goal_id)
     if kind == "codex":
+        return build_history_command(status_payload, goal_id)
+    if kind == "focus_wait":
         return build_history_command(status_payload, goal_id)
     return build_status_command(status_payload)
 
@@ -309,6 +324,17 @@ def project_agent_section(
             "",
             command_block(command),
         ]
+    elif kind == "focus_wait":
+        lines = [
+            goal_guard,
+            context_rule,
+            todo_line,
+            "转发条件：仅当目标项目 Agent 需要当前等待边界时转发；这不是恢复 delivery 的授权。",
+            "执行边界：只读 status/history，确认当前 owner blocker、证据入口和 stop condition；不要继续实现、adapter work、写入或生产动作。",
+            "停止条件：没有新的 owner evidence、clean baseline 或外部 eval 时，保持 focus_wait 并用中文回报仍在等待什么。",
+            "",
+            command_block(command),
+        ]
     else:
         lines = [
             goal_guard,
@@ -359,6 +385,7 @@ def build_review_packet(
         decision = "直接转发给项目 Agent；不追加写权限、主控接管或生产动作授权。"
         reply = "转发下方【给项目 Agent】即可。"
         boundary = "这只是执行已批准的只读/dry-run agent_command；如需写入或更高权限，项目 Agent 必须再次停下。"
+    owner_blocker_text = user_todo_text if kind == "focus_wait" else None
     agent_text = project_agent_section(
         kind,
         command,
@@ -370,6 +397,7 @@ def build_review_packet(
         "reward": "Reward",
         "controller": "Controller",
         "codex": "Codex",
+        "focus_wait": "Focus Wait",
         "evidence": "Evidence",
         "health": "Health",
     }.get(kind, "Status")
@@ -381,6 +409,7 @@ def build_review_packet(
         f"摘要：{summary}",
         "",
         "【人只需判断】",
+        f"解锁条件：{owner_blocker_text}（有新证据或明确暂缓后再调整 focus）" if owner_blocker_text else None,
         f"待办：{user_todo_text}（先处理/暂缓再判 gate）" if user_todo_text and kind == "controller" else None,
         f"问题：{question}",
         f"建议判断：{decision}",
@@ -421,6 +450,7 @@ def build_review_packet(
         "operator_gate_dry_run_command": gate_command,
         "operator_gate_decision_commands": gate_commands,
         "user_todo_text": user_todo_text,
+        "owner_blocker_text": owner_blocker_text,
         "agent_todo_text": agent_todo_text,
         "packet": "\n".join(line for line in lines if line),
     }

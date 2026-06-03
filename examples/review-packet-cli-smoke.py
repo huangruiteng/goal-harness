@@ -18,6 +18,7 @@ from goal_harness.review_packet import build_review_packet  # noqa: E402
 
 GOAL_ID = "planned-main-control"
 APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
+FOCUS_WAIT_GOAL_ID = "focus-wait-owner-blocker"
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -197,8 +198,102 @@ def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
     assert APPROVED_COMMAND in packet, packet
 
 
+def assert_focus_wait_owner_blocker_packet() -> None:
+    blocker_text = "Provide new owner evidence, a clean baseline, or external eval before delivery resumes."
+    status_payload = {
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": FOCUS_WAIT_GOAL_ID,
+                    "status": "state_refreshed",
+                    "waiting_on": "codex",
+                    "severity": "action",
+                    "recommended_action": "Stay quiet until owner evidence changes.",
+                    "source": "fixture",
+                    "lifecycle_phase": "focus_wait",
+                    "lifecycle_flags": ["continuation_boundary"],
+                    "project_asset": {
+                        "owner": "codex",
+                        "gate": "focus_wait",
+                        "next_action": "Stay quiet until owner evidence changes.",
+                        "stop_condition": "resume only after owner evidence, clean baseline, or external eval changes",
+                        "user_todos": {
+                            "open": 1,
+                            "done": 0,
+                            "total": 1,
+                            "next": blocker_text,
+                        },
+                        "quota": {
+                            "compute": 1.0,
+                            "state": "focus_wait",
+                            "spent_slots": 0,
+                            "allowed_slots": 1440,
+                            "reason": "focus wait: delivery lane has a continuation boundary",
+                        },
+                    },
+                    "quota": {
+                        "compute": 1.0,
+                        "window_hours": 24,
+                        "slot_minutes": 1,
+                        "allowed_slots": 1440,
+                        "spent_slots": 0,
+                        "state": "focus_wait",
+                        "reason": "focus wait: delivery lane has a continuation boundary",
+                    },
+                }
+            ]
+        },
+        "run_history": {
+            "goals": [
+                {
+                    "id": FOCUS_WAIT_GOAL_ID,
+                    "status": "active-read-only",
+                    "registry_member": True,
+                    "latest_runs": [
+                        {
+                            "generated_at": "2026-01-01T00:02:00+00:00",
+                            "classification": "state_refreshed",
+                            "recommended_action": "Stay quiet until owner evidence changes.",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+    payload = build_review_packet(status_payload, goal_id=FOCUS_WAIT_GOAL_ID)
+    packet = payload["packet"]
+
+    assert payload["ok"] is True, payload
+    assert payload["kind"] == "focus_wait", payload
+    assert payload["status"] == "state_refreshed", payload
+    assert payload["waiting_on"] == "codex", payload
+    assert payload["owner_blocker_text"] == blocker_text, payload
+    assert payload["user_todo_text"] == blocker_text, payload
+    assert payload["operator_gate_dry_run_command"] is None, payload
+    assert payload["operator_gate_decision_commands"] == {}, payload
+    assert "类型：Focus Wait" in packet, packet
+    assert f"解锁条件：{blocker_text}（有新证据或明确暂缓后再调整 focus）" in packet, packet
+    assert "问题：是否继续保持 focus wait，直到 owner blocker 有新证据？" in packet, packet
+    assert "建议判断：继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。" in packet, packet
+    assert "focus wait 不是 delivery 授权" in packet, packet
+    assert "【用户本地 Gate 记录草稿】" not in packet, packet
+    assert "转发条件：仅当目标项目 Agent 需要当前等待边界时转发；这不是恢复 delivery 的授权。" in packet, packet
+    assert "不要继续实现、adapter work、写入或生产动作" in packet, packet
+    assert "保持 focus_wait 并用中文回报仍在等待什么" in packet, packet
+    assert "history \\" in packet, packet
+    assert "read-only-map" not in packet, packet
+    assert_order(
+        packet,
+        ["【人只需判断】", "解锁条件：", "问题：是否继续保持 focus wait", "【给项目 Agent】", "转发条件：仅当目标项目 Agent", "history \\"],
+    )
+
+
 def main() -> int:
     assert_attention_queue_drives_approved_handoff_over_stale_history()
+    assert_focus_wait_owner_blocker_packet()
     with tempfile.TemporaryDirectory(prefix="goal-harness-review-packet-") as tmp:
         root = Path(tmp)
         registry_path = write_planned_registry(root)

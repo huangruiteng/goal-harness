@@ -428,6 +428,14 @@ if the command fails. This keeps the packet easy for target agents to follow
 while preserving the dashboard as the human decision surface and the archival
 evidence trail as the cold path.
 
+For focus-wait packets, the Review Packet should surface the first open
+owner/user todo as the unlock condition, not as ordinary delivery work. The
+human section should explain why the project is quiet, who can unblock it, and
+which evidence is needed before delivery resumes. The project-agent section
+must not present a safe-local delivery path; it should only point to status or
+history inspection and tell the target agent to keep `focus_wait` until new
+owner evidence, a clean baseline, or external eval changes the state.
+
 `status=read_only_project_map` is emitted when the latest compact run came from
 `goal-harness read-only-map`. Dashboard consumers should show it as Codex-ready
 work with a map-specific badge or drill-down: the project is connected and has
