@@ -124,6 +124,11 @@ npm run dev
 
 Then load `/status.local.json` from the dashboard source control.
 
+`status.local.json` is intentionally git-ignored because live status exports can
+contain local registry/runtime paths and private project summaries. Keep it as a
+local inspection file only. For public demos, use the sanitized
+`examples/status.example.json` fixture instead of committing a live export.
+
 You can also import a JSON file directly in the browser, or load a local API
 URL that returns the same `goal-harness --format json status` shape.
 

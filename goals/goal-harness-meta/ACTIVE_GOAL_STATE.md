@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:46:35+08:00
+updated_at: 2026-06-04T07:53:08+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,27 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Run a non-handoff P0 state-safety audit for status, prompt, and dashboard
-  surfaces: check whether local path boundaries still rely on scattered regex
-  guards, and avoid adding a shared helper unless the duplication is causing a
-  concrete consumer risk.
+- Audit tracked dashboard fixtures/examples for local absolute path shapes. If
+  they are clean, stop path-boundary polish and move to the next project-asset
+  consumer gap.
 
 ## Recent Progress
+
+- 2026-06-04T07:53:08+08:00: Completed a non-handoff P0 state-safety slice for
+  dashboard local status exports. Confirmed live
+  `apps/dashboard/public/status.local.json` and `apps/dashboard/dist/...`
+  artifacts are already git-ignored, so the concrete gap was not tracked
+  leakage but missing local-only guidance. Updated `apps/dashboard/README.md`
+  to state that `status.local.json` is intentionally git-ignored, may contain
+  local registry/runtime paths and private project summaries, and should be
+  replaced by sanitized `examples/status.example.json` for public demos. Added
+  `examples/dashboard-local-status-gitignore-smoke.py` to assert local status
+  and dist artifacts stay ignored and the README keeps the public fixture
+  guidance. Validation: py-compile, dashboard local-status gitignore smoke,
+  touched-file `git diff --check`, and 2-file public/private
+  `goal-harness check`. Critic: no shared regex helper is needed here; the
+  consumer risk is local-export discipline. The next pass should scan tracked
+  dashboard fixtures/examples for path shapes, then leave this theme if clean.
 
 - 2026-06-04T07:46:35+08:00: Closed the old handoff-only JSON consumer audit.
   The public scan found two real stale contract entries: the CLI
