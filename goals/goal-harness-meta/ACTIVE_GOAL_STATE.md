@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:45:58+08:00
+updated_at: 2026-06-03T16:50:57+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -61,14 +61,42 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- The live `goal-harness-hourly-tick` heartbeat automation now uses the
-  generated heartbeat prompt branch with `notify_user_on_open_todo`, while
-  preserving its 4-minute schedule and current thread target. Next, observe the
-  next automatic tick for prompt-shape regressions; if stable, rotate focus
-  away from blocker-push plumbing toward target-project dry-run/handoff
-  readiness.
+- Live prompt-shape check passed: the next automatic heartbeat arrived with the
+  generated blocker-push prompt, global-registry quota guard, `goal-harness
+  doctor`, product bottleneck lens, no-progress self-stop, and public-safe
+  publication boundaries. Next, rotate away from blocker-push plumbing toward
+  target-project dry-run/handoff readiness: use Goal Harness status and review
+  packet surfaces only, avoid touching target repos, and surface the minimal
+  approved handoff or dry-run-result requirement when the target-project lane is
+  still waiting.
 
 ## Recent Progress
+
+- 2026-06-03T16:50:57+08:00: Steering audit candidates were: P0 observe the
+  first live tick after switching `goal-harness-hourly-tick` to the generated
+  blocker-push prompt, P0 rotate to target-project dry-run/handoff readiness,
+  P0 watch external-evidence project lines without delivery compute, and P1
+  dashboard polish. Product bottleneck lens: the immediate risk was no longer
+  user experience copy, but priority drift after a long blocker-push plumbing
+  sequence; one prompt-shape check should retire that topic. Continuation check:
+  this was the first automatic tick carrying the generated prompt, so a
+  state-only observation still won, but further blocker-push plumbing should
+  stop unless a regression appears. No-progress self-stop check: not triggered
+  because recent eligible turns produced commits, validation, runtime fixtures,
+  and the live automation update. Bounded output: verified the live automation
+  prompt contains `notify_user_on_open_todo`, `goal-harness doctor`,
+  `registry.global.json`, the blocker-push branch, product bottleneck lens,
+  preserved `RRULE:FREQ=MINUTELY;INTERVAL=4`, and the preserved thread target;
+  updated active state to mark the live prompt shape stable and rotate the next
+  action toward target-project dry-run/handoff readiness. Validation:
+  `goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" status --limit 10`
+  passed with contract ok, global registry current, and an attention queue led
+  by the target-project approved-handoff lane; `goal-harness --format json
+  check --scan-root .` passed with public boundary scan clean. Critic: this was
+  intentionally a state-only checkpoint, so it should not become another
+  delivery slice; the next useful work is handoff readiness or target-agent
+  dry-run observation. Losing candidate: dashboard polish remains useful but is
+  lower value than getting the approved handoff lane moving.
 
 - 2026-06-03T16:45:58+08:00: Steering audit candidates were: P0 update the
   live heartbeat automation to the generated blocker-push prompt now that the
