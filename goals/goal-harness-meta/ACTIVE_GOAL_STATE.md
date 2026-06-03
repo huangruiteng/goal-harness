@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T12:01:10+08:00
+updated_at: 2026-06-03T12:13:42+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -21,11 +21,13 @@ stop condition, user todo, agent todo, quota, review packet, and latest
 validation signal. Features that do not reduce human relay work, improve state
 truth, or make project agents easier to guide should be downgraded.
 
-The corresponding design principle is cognitive-load reduction: the human
-operator should not have to read every project-agent thread, relay every packet,
-or repeatedly restate context. Goal Harness should make the human only provide
-high-value inputs and decisions while the system carries state refresh,
-handoff, validation, and quota bookkeeping.
+The corresponding design principle is dual anti-overload: the human operator
+should not have to read every project-agent thread, relay every packet, or
+repeatedly restate context; project agents should not have to ingest stale,
+redundant, or low-actionability history before finding the current truth.
+Goal Harness should preserve the full valid evidence trail in archival layers
+while exposing compact current state, so humans provide high-value decisions
+and agents receive the smallest sufficient execution context.
 
 ## Current Scope
 
@@ -40,6 +42,9 @@ handoff, validation, and quota bookkeeping.
 - Keep status, dashboard, and packets centered on the small set of
   cognitive-load reducers: user todos, agent todos, gates, quota, review
   packets, and project status aggregation.
+- Keep human-facing and agent-facing surfaces distinct: user views optimize
+  for decision novelty, while agent handoffs optimize for current authority,
+  executable next steps, validation context, and explicit stop conditions.
 - Treat presentation/docs work as a secondary track: it may explain the system,
   but it should not drive core implementation ahead of the control-plane loop.
 
@@ -54,12 +59,26 @@ handoff, validation, and quota bookkeeping.
 ## Next Action
 
 - The reusable heartbeat lifecycle now includes a product bottleneck lens in
-  steering audits. The next heartbeat should use that lens on one concrete
-  UX/capability bottleneck, with user/agent todo visibility or dashboard
-  first-screen burden as the leading candidates, and patch only one mismatch.
+  steering audits. The next heartbeat should apply it to the dual
+  anti-overload goal: audit whether user/agent todo visibility, dashboard
+  first-screen burden, or project-agent handoff context is the top bottleneck,
+  then patch one surface so current truth stays compact without losing the
+  archival evidence trail.
 
 ## Recent Progress
 
+- 2026-06-03T12:13:42+08:00: Manual product clarification from the user
+  upgraded the anti-overload goal from "avoid overwhelming the user" to two
+  coupled requirements: protect human attention from redundant notifications
+  and protect project agents from stale/redundant context, while preserving all
+  valid information in archival evidence layers. State-only writeback updated
+  the Objective, Current Scope, and Next Action to make human attention diet and
+  agent context diet both P0 criteria. Validation: state patch only; public and
+  private `git diff --check` should be run before commit or refresh. Critic:
+  this records the product target, but the next delivery slice must still
+  inspect one concrete status/dashboard/handoff surface and fix the first real
+  mismatch. Losing candidate: generic dashboard polish remains lower priority
+  than context-layering for both humans and agents.
 - 2026-06-03T12:01:10+08:00: Steering audit candidates were: P0 product
   bottleneck/prioritization rule gap for autonomous goal ticks, P0 user/agent
   todo visibility across status JSON/markdown/dashboard, P1 dashboard visual
