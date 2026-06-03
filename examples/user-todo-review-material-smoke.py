@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -16,6 +17,9 @@ from typing import Any
 
 
 GOAL_ID = "user-todo-review-material-smoke"
+LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
+)
 
 
 def free_port() -> int:
@@ -84,6 +88,37 @@ def stop_server(server: subprocess.Popen[str]) -> None:
         server.wait(timeout=5)
 
 
+def iter_strings(value: Any, *, path: str = "$") -> list[tuple[str, str]]:
+    if isinstance(value, str):
+        return [(path, value)]
+    if isinstance(value, dict):
+        strings: list[tuple[str, str]] = []
+        for key, child in value.items():
+            strings.extend(iter_strings(child, path=f"{path}.{key}"))
+        return strings
+    if isinstance(value, list):
+        strings: list[tuple[str, str]] = []
+        for index, child in enumerate(value):
+            strings.extend(iter_strings(child, path=f"{path}[{index}]"))
+        return strings
+    return []
+
+
+def assert_no_local_paths(value: Any) -> None:
+    for path, text in iter_strings(value):
+        match = LOCAL_ABSOLUTE_PATH_PATTERN.search(text)
+        if match:
+            raise AssertionError({path: text, "match": match.group(0)})
+
+
+def assert_rejects_local_path(value: Any) -> None:
+    try:
+        assert_no_local_paths(value)
+    except AssertionError:
+        return
+    raise AssertionError(f"expected local path rejection: {value}")
+
+
 def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     runtime_root = root / "runtime"
     project = root / "project"
@@ -149,6 +184,8 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as raw_tmp:
         root = Path(raw_tmp)
+        assert_no_local_paths({"relative": ".codex/goals/example.md", "url": "https://example.test/docs/page"})
+        assert_rejects_local_path({"absolute": str(root / "project" / "docs" / "review.md")})
         registry, runtime_root, review_doc = write_fixture(root)
         payload = collect_status(
             registry_path=registry,
@@ -156,6 +193,7 @@ def main() -> None:
             scan_roots=[repo_root],
             limit=5,
         )
+        assert_no_local_paths(payload["attention_queue"])
         item = next(item for item in payload["attention_queue"]["items"] if item["goal_id"] == GOAL_ID)
         todo = item["user_todos"]["items"][0]
         material = todo["review_materials"][0]

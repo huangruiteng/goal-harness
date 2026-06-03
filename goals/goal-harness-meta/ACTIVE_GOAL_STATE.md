@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:22:48+08:00
+updated_at: 2026-06-04T07:31:33+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,23 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Add a lightweight no-local-path smoke for `attention_queue` so future queue
-  fields cannot reintroduce machine-specific absolute paths. Keep it as an
-  interface-budget guard, not a new feature.
+- Audit `review-packet --handoff-only` for the same public-safe path boundary:
+  it should consume redacted `attention_queue` / `project_asset` and not
+  reintroduce local absolute paths from another layer.
 
 ## Recent Progress
+
+- 2026-06-04T07:31:33+08:00: Added a generic no-local-path guard to
+  `examples/user-todo-review-material-smoke.py`. The smoke now recursively
+  scans all strings under `attention_queue`, rejects POSIX/Windows local
+  absolute path shapes, and includes allow/reject examples so relative
+  `.codex/goals/...` references and normal URLs are not false positives.
+  Validation: user-todo review-material smoke, status markdown smoke,
+  platform-migration material registry smoke, touched Python compile,
+  touched-file `git diff --check`, live `attention_queue` no-local-path check,
+  and public/private `goal-harness check`. Critic: the queue hot path is now
+  guarded by shape, not just field name; the next useful surface is the
+  review-packet handoff consumer.
 
 - 2026-06-04T07:22:48+08:00: Removed active-state file path metadata from
   public `attention_queue` items. `goal_harness/status.py` no longer injects
