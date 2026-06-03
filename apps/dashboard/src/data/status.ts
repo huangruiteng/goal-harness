@@ -11,10 +11,19 @@ export const quotaSchema = z.object({
   reason: z.string().optional().nullable(),
 });
 
+export const reviewMaterialSchema = z.object({
+  label: z.string().optional().nullable(),
+  path: z.string(),
+  anchor: z.string().optional().nullable(),
+  exists: z.boolean().optional().default(false),
+  resolved_path: z.string().optional().nullable(),
+});
+
 export const todoItemSchema = z.object({
   index: z.number(),
   done: z.boolean(),
   text: z.string(),
+  review_materials: z.array(reviewMaterialSchema).optional().default([]),
 });
 
 export const todoGroupSchema = z.object({
@@ -301,6 +310,7 @@ export type ProjectAsset = z.infer<typeof projectAssetSchema>;
 export type ProjectAssetTodoSummary = z.infer<typeof projectAssetTodoSummarySchema>;
 export type TodoGroup = z.infer<typeof todoGroupSchema>;
 export type TodoItem = z.infer<typeof todoItemSchema>;
+export type ReviewMaterial = z.infer<typeof reviewMaterialSchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
 export type RunGoal = z.infer<typeof runGoalSchema>;

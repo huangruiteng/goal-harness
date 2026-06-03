@@ -135,6 +135,36 @@ check is not the formatting; it is whether the next action, user todo, agent
 todo, gate state, and quota decision are visible enough that a later agent turn
 can continue without relying on chat memory.
 
+First-run success looks like this:
+
+- `ok: True` in the demo output.
+- `bootstrap` created or reused both the registry entry and active state file.
+- one user todo and one agent todo were added, or were already present on a
+  rerun.
+- `refresh-state` appended a compact run.
+- `status` can see the demo goal and reports a clear `waiting_on` value.
+- `quota should-run` returns `should_run=True` and `state=eligible`.
+
+Dashboard first-run success looks like this:
+
+- `goal-harness serve-status --port 8765` keeps running in the demo project and
+  `http://127.0.0.1:8765/status.json` returns JSON.
+- `npm run dev` in `~/goal-harness/apps/dashboard` prints a Vite URL without
+  build errors.
+- after choosing `Live`, the first screen shows the `demo-goal` project id
+  before the action text.
+- `User Actions` shows the demo user todo, and the selected-goal detail still
+  exposes the status context an agent would need.
+- the queue state is actionable: it says whether the next move is for the
+  user/controller, Codex, evidence, health, or quota.
+- if the dashboard is blank or stale, refresh the status server first, then run
+  `goal-harness --format json status` in the demo project before changing the
+  dashboard.
+
+If those checks pass, Goal Harness is installed well enough to connect a real
+project. If they do not, run `goal-harness doctor` before debugging the project
+itself.
+
 ## Daily Use
 
 Inspect the project registry:

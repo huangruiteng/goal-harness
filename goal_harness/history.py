@@ -27,13 +27,19 @@ def load_registry(path: Path) -> dict[str, Any]:
     return read_json(path)
 
 
-def discover_goal_ids(runtime_root: Path, registry: dict[str, Any], requested_goal: str | None) -> list[str]:
+def discover_goal_ids(
+    runtime_root: Path,
+    registry: dict[str, Any],
+    requested_goal: str | None,
+    *,
+    include_runtime_goals: bool = True,
+) -> list[str]:
     if requested_goal:
         return [requested_goal]
 
     ids = {str(goal.get("id")) for goal in registry_goals(registry)}
     goals_dir = runtime_root / "goals"
-    if goals_dir.exists():
+    if include_runtime_goals and goals_dir.exists():
         ids.update(path.name for path in goals_dir.iterdir() if path.is_dir())
     return sorted(ids)
 
@@ -89,13 +95,19 @@ def collect_history(
     runtime_root: Path,
     goal_id: str | None,
     limit: int,
+    include_runtime_goals: bool = True,
 ) -> dict[str, Any]:
     registry = load_registry(registry_path)
     goal_meta = {str(goal.get("id")): goal for goal in registry_goals(registry)}
     goals: list[dict[str, Any]] = []
     all_runs: list[dict[str, Any]] = []
 
-    for current_goal_id in discover_goal_ids(runtime_root, registry, goal_id):
+    for current_goal_id in discover_goal_ids(
+        runtime_root,
+        registry,
+        goal_id,
+        include_runtime_goals=include_runtime_goals,
+    ):
         index_path = runtime_root / "goals" / current_goal_id / "runs" / "index.jsonl"
         runs, raw_count = load_index(index_path)
         runs.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)

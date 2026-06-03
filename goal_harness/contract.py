@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,57 @@ DEFAULT_SKIP_DIRS = {
     "dist",
     "node_modules",
 }
+
+
+def _index_duplicate_summary(index_path: Path) -> dict[str, Any]:
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    if not index_path.exists():
+        return {
+            "duplicate_rows": 0,
+            "reward_overlay_rows": 0,
+            "unexpected_duplicate_rows": 0,
+        }
+
+    with index_path.open(encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("generated_at") or ""),
+                str(item.get("json_path") or ""),
+                str(item.get("markdown_path") or ""),
+            )
+            groups.setdefault(key, []).append(item)
+
+    reward_overlay_rows = 0
+    unexpected_duplicate_rows = 0
+    for records in groups.values():
+        if len(records) <= 1:
+            continue
+        duplicate_rows = len(records) - 1
+        normalized = []
+        reward_records = 0
+        for record in records:
+            if isinstance(record.get("human_reward"), dict):
+                reward_records += 1
+            normalized.append({key: value for key, value in record.items() if key != "human_reward"})
+        normalized_keys = {json.dumps(record, sort_keys=True, ensure_ascii=False) for record in normalized}
+        if reward_records and len(normalized_keys) == 1:
+            reward_overlay_rows += duplicate_rows
+        else:
+            unexpected_duplicate_rows += duplicate_rows
+
+    return {
+        "duplicate_rows": reward_overlay_rows + unexpected_duplicate_rows,
+        "reward_overlay_rows": reward_overlay_rows,
+        "unexpected_duplicate_rows": unexpected_duplicate_rows,
+    }
 
 
 def iter_scan_files(scan_root: Path) -> list[Path]:
@@ -129,7 +181,16 @@ def check_contract(
             checks.append(f"{item.get('id')}: legacy runtime goal has duplicate rows raw={raw} unique={unique}")
             continue
         if raw > unique:
-            warnings.append(f"{item.get('id')}: duplicate index rows raw={raw} unique={unique}")
+            duplicate_summary = _index_duplicate_summary(Path(str(item.get("index_path") or "")))
+            if duplicate_summary.get("unexpected_duplicate_rows"):
+                warnings.append(f"{item.get('id')}: duplicate index rows raw={raw} unique={unique}")
+            elif duplicate_summary.get("reward_overlay_rows"):
+                checks.append(
+                    f"{item.get('id')}: reward overlay rows raw={raw} unique={unique} "
+                    f"overlays={duplicate_summary.get('reward_overlay_rows')}"
+                )
+            else:
+                warnings.append(f"{item.get('id')}: duplicate index rows raw={raw} unique={unique}")
 
     boundary = scan_public_boundary(scan_roots)
     if boundary.get("ok"):

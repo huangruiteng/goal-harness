@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T01:24:55+08:00
+updated_at: 2026-06-03T11:06:50+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -43,16 +43,685 @@ handoff, validation, and quota bookkeeping.
 - Treat presentation/docs work as a secondary track: it may explain the system,
   but it should not drive core implementation ahead of the control-plane loop.
 
+## Agent Todo
+
+- [x] [P1-high] Collect 3-5 sanitized aha moments from connected Goal
+  Harness-managed project lines for the internal/share narrative. Each example
+  should show the previous operator relay burden, the owner/gate/next
+  action/reward/todo change after Goal Harness, and the safe evidence surface
+  that can be shown without private details.
+
 ## Next Action
 
-- Next tick should continue the P1 public first-try usability path by running a
-  fresh-user quickstart readthrough from README install -> `goal-harness demo`
-  -> dashboard live status, then fix exactly one remaining docs or command
-  mismatch. Return to P0 only if a real connected goal shows stale status,
-  hidden user todos, or an overlong gate packet again.
+- Public daily iteration no longer needs an explicit operator request before
+  commit, push, or PR creation. If the public-sensitive scan is clean,
+  validation passes, and no private or company-internal material is present,
+  publish the current Goal Harness changes to GitHub. After publication, move
+  to the next bounded P0/P1 control-plane slice instead of continuing packaging
+  hygiene.
 
 ## Recent Progress
 
+- 2026-06-03T11:06:50+08:00: Publication validation passed for the current
+  public Goal Harness dirty tree after the autonomous publish policy update.
+  Validation: `python3 examples/run-smokes.py` passed 18 smoke scripts;
+  `python3 examples/heartbeat-prompt-smoke.py`, `python3
+  examples/status-markdown-smoke.py`, `python3
+  examples/user-todo-review-material-smoke.py`, and `python3
+  examples/contract-reward-overlay-smoke.py` passed; `npm --prefix
+  apps/dashboard run build` passed with the existing Vite chunk-size warning;
+  `node examples/dashboard-reward-append-browser-smoke.mjs` passed;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan over 88 files; public and private `git diff
+  --check` passed; targeted sensitive-pattern scan over candidate files
+  produced no findings. Changed files: public source/docs/examples/state plus
+  the local-private CS-Notes state. Critic: the tree is safe to commit and push
+  to GitHub under the updated public daily iteration policy.
+- 2026-06-03T11:05:02+08:00: User clarified the publish boundary again:
+  public daily iteration can autonomously commit, push, and create PRs as long
+  as no sensitive or company-internal information is involved. The old rule
+  that commit/push/PR creation required explicit operator intent was too
+  conservative for the public Goal Harness repo. Bounded output: updated
+  `docs/commit-readiness-manifest-20260603.md`, this active state, and the
+  local-private CS-Notes active state to allow autonomous public publishing
+  after clean boundary scans and validation. Validation will be rerun before
+  publishing the current dirty tree. Critic: this reduces unnecessary user
+  gating while preserving the hard stop on private/company-internal material.
+- 2026-06-03T11:02:00+08:00: User corrected the previous packaging boundary:
+  asking whether to continue packaging as a User Todo was too conservative.
+  The correct gate is narrower: commit, push, and PR creation require explicit
+  operator intent, but ordinary heartbeat planning should not ask the operator
+  whether packaging should continue. Bounded output: removed the just-added
+  packaging User Todo and updated Next Action so future heartbeats move to a
+  different bounded P0/P1 control-plane slice unless the operator explicitly
+  asks for commit/PR packaging. Validation: follow-up `rg`, `goal-harness
+  check`, and diff checks confirm the User Todo is gone and the public boundary
+  remains clean. Critic: this fixes a coordination mistake; over-gating is its
+  own form of user burden.
+- 2026-06-03T11:00:50+08:00: Steering audit candidates were: P0 convert the
+  commit/PR packaging decision into a dashboard-visible User Todo, P0 run
+  another state/health recheck, P1 dashboard/demo polish, and P2 no-progress
+  guard hardening. Continuation check: commit-readiness has consumed recent
+  slices, so the right next move was to stop hiding the remaining operator
+  decision in Next Action rather than add more packaging detail. Compute quota
+  remained eligible; focus quota now shifts away from packaging until the user
+  answers. No-progress self-stop check: not triggered because recent eligible
+  heartbeats produced public artifacts, validation evidence, and this user-todo
+  writeback. Bounded output: used `goal-harness todo add` to add an open User
+  Todo asking whether to request commit/PR packaging for the validated dirty
+  tree, with instructions to use
+  `docs/commit-readiness-manifest-20260603.md` and re-run minimum validation if
+  the operator says yes. Validation: `goal-harness todo add --help` confirmed
+  the public todo command surface; `rg` confirmed the new User Todo and updated
+  timestamp in this state. Changed files: this active state and the
+  local-private CS-Notes active state. Critic: this makes the remaining human
+  decision first-class in status/dashboard, but no code or packaging was
+  changed. Losing candidate: dashboard polish remains parked because an open
+  packaging decision should not be buried under more UI expansion.
+- 2026-06-03T10:56:57+08:00: Steering audit candidates were: P0
+  public-sensitive diff review and staging plan, P0 state/health recheck only,
+  P1 dashboard/demo polish, and P2 no-progress guard hardening. Continuation
+  check: commit-readiness has consumed recent slices, but this was the
+  requested post-validation safety review and staging boundary, not another
+  status loop or feature expansion. Compute quota remained eligible; focus
+  quota favored release hygiene over new UI work. No-progress self-stop check:
+  not triggered because recent eligible heartbeats produced public artifacts,
+  validation evidence, and this manifest writeback. Bounded output: appended a
+  `Public-Sensitive Diff Review` section to
+  `docs/commit-readiness-manifest-20260603.md` covering 13 modified tracked
+  files, 5 untracked candidate files, a no-finding sensitive scan, and the
+  recommended staging order. Validation: `git status --short`, `git diff
+  --name-status`, `git ls-files --others --exclude-standard`, and `git diff
+  --stat` characterized the dirty tree; targeted `rg` sensitive scan found no
+  private path, internal URL, company-doc marker, sensitive assignment,
+  auth-header pattern, or cloud-key pattern in candidate files. Changed files: the
+  public manifest, this active state, and the local-private CS-Notes active
+  state. Critic: the tree is now safer to stage on request, but no commit/push
+  should happen without explicit operator intent and final validation must be
+  rerun after hunk staging. Losing candidate: dashboard polish remains parked
+  until commit boundaries are accepted or staged.
+- 2026-06-03T10:53:49+08:00: Steering audit candidates were: P0 run the
+  manifest minimum final validation, P0 public-sensitive diff review, P1
+  dashboard/demo polish, and P2 no-progress guard hardening. Continuation
+  check: commit-readiness has taken several slices, but this was the validation
+  half of the manifest checkpoint and directly reduced release risk without
+  expanding the dirty tree. No-progress self-stop check: not triggered because
+  recent eligible heartbeats produced public artifacts and this turn produced a
+  new validation writeback. Bounded output: updated
+  `docs/commit-readiness-manifest-20260603.md` with the final validation run
+  result. Validation: `python3 examples/run-smokes.py` passed 18 smoke scripts;
+  `python3 examples/heartbeat-prompt-smoke.py`,
+  `python3 examples/status-markdown-smoke.py`,
+  `python3 examples/user-todo-review-material-smoke.py`, and
+  `python3 examples/contract-reward-overlay-smoke.py` passed; `npm --prefix
+  apps/dashboard run build` passed with the existing Vite chunk-size warning;
+  `node examples/dashboard-reward-append-browser-smoke.mjs` passed;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan over 86 files; public `git diff --check` passed.
+  Changed files: the public manifest, this active state, and the local-private
+  CS-Notes active state. Critic: the dirty tree is now grouped and validated,
+  but no commit or push was attempted because the operator has not asked for
+  release packaging. Losing candidate: dashboard polish remains parked until
+  commit boundaries are accepted or staged.
+- 2026-06-03T10:49:00+08:00: Steering audit candidates were: P0 public dirty
+  tree commit-readiness manifest, P0 health/status recheck, and P1
+  dashboard/demo polish. Continuation check: checkpoint-only mode is gone, and
+  the previous Next Action explicitly asked to turn the public dirty tree into
+  reviewable commit boundaries; producing the manifest was real delivery, not a
+  repeated status check. No-progress self-stop check: the last 5 eligible
+  heartbeats included state/automation/prompt policy changes and a public
+  prompt-generator artifact, so this was not a 5-turn no-progress loop and the
+  automation was not cancelled. Bounded output: added public
+  `docs/commit-readiness-manifest-20260603.md`, grouping the dirty tree into
+  four clusters: first-run/heartbeat lifecycle contract,
+  runtime/status/contract truth, user-todo review-material reader, and dashboard
+  reward append flow. The manifest lists candidate files, remaining validation,
+  public/private boundary risks, files that must stay out of commits, and the
+  minimum final validation commands. Validation: `rg` confirmed the four
+  cluster sections, Do Not Commit, and Minimum Final Validation sections;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan over 84 files; `git diff --check` passed for both
+  the public repo and the private state repo. Changed files: the public
+  manifest, this active state, and the local-private CS-Notes active state.
+  Critic: the manifest reduces dirty-tree coordination load, but the full final
+  validation suite has not been rerun from the manifest yet. Losing candidate:
+  dashboard polish was deferred to avoid expanding the dirty tree before commit
+  boundaries are reviewable.
+- 2026-06-03T10:44:00+08:00: Steering audit candidates were: P0 move the
+  5-run no-progress self-stop guard into the public heartbeat prompt generator,
+  P0 public dirty tree commit-readiness manifest, and P1 dashboard/demo polish.
+  Continuation check: checkpoint-only mode was removed by the user, and the
+  previous turn only updated the local automation/state policy; publicizing the
+  guard in the generator lets other project heartbeats reuse it and directly
+  reduces unattended spinning, so it beat switching immediately to the commit
+  manifest. No-progress self-stop check: the last 5 eligible heartbeats were not
+  all no-progress loops because 10:38/10:40 changed automation/state policy and
+  this turn produced a public artifact, so the automation was not cancelled.
+  Bounded output: updated public `goal_harness/heartbeat_prompt.py` so generated
+  heartbeat task bodies run the no-progress self-stop check after steering
+  audit; synchronized `docs/heartbeat-automation-prompt.md`,
+  `skills/goal-harness-project/SKILL.md`, and
+  `examples/heartbeat-prompt-smoke.py`. Validation: `python3
+  examples/heartbeat-prompt-smoke.py` passed; `python3 -m py_compile
+  goal_harness/heartbeat_prompt.py examples/heartbeat-prompt-smoke.py` passed;
+  `python3 -m compileall -q goal_harness` passed; `goal-harness --format json
+  check --scan-root .` passed with warnings=0 and a clean public boundary scan
+  over 83 files; `git diff --check` passed for both the public repo and the
+  private state repo. Critic: this is the public
+  productization of the user's usability feedback; the next useful slice should
+  turn the current public dirty tree into a commit-readiness manifest so
+  ungrouped changes stop growing. Losing candidate: dashboard/demo polish is
+  allowed again, but release/commit hygiene currently reduces coordination load
+  more.
+- 2026-06-03T10:38:00+08:00: The user explicitly removed the hard constraint
+  that said not to continue quickstart/demo/dashboard functionality unless PR or
+  release packaging was requested, and proposed a 5-consecutive-no-progress
+  automation self-stop guard. Steering audit candidates were: P0 remove stale
+  stop constraint, P0 automation no-progress self-stop, and P1 resume concrete
+  product/packaging lane. Continuation check: the previous checkpoint-only mode
+  had started to confuse the operator, so keeping it would harm Goal Harness
+  usability. Bounded output: Next Action now tells future heartbeats to choose a
+  real bounded delivery slice from the Priority Stack; the next step is to
+  update the `goal-harness-hourly-tick` automation prompt with the 5-run
+  no-progress self-stop rule. Validation: this state patch will be followed by
+  automation update, `goal-harness check --scan-root .`, both-repo `git diff
+  --check`, and state refresh. Critic: this is a product-policy correction, not
+  a feature push; the self-stop guard should stop genuine spinning without
+  killing small but material state-safety fixes. Losing candidate:
+  manager-facing talk track remains parked until explicitly requested.
+- 2026-06-03T10:40:00+08:00: After `refresh-state`, the long Next Action was
+  truncated in the displayed recommended action, so this tick shortened the
+  current Next Action while preserving the three required facts: checkpoint-only
+  mode is removed, the next heartbeat should choose a real bounded P0/P1/P2
+  delivery slice, and the heartbeat prompt now carries the 5-run no-progress
+  self-stop guard.
+- 2026-06-03T10:35:00+08:00: Steering audit candidates were: P0
+  clarification checkpoint, P0 health-blocker diagnosis, P0 state hygiene
+  rollup, and P1 manager-facing talk track. Continuation check: recent
+  heartbeats had intentionally stayed on clean checkpoints, but the user's
+  "why not continue?" question showed that the stop/continue boundary needed to
+  be written back into state rather than left only in chat. Bounded output: no
+  public implementation changes; recorded the user-visible explanation and
+  updated Next Action to state the exact conditions for continuing. Validation:
+  global status returned `ok=true`, goal_count=6, run_count=537, attention
+  queue still has 4 items (`agent-harness-main-control`, `goal-harness-meta`,
+  `premium-ui-ai-search-rec-migration`, `tiger-team-maiduidui-regauc`),
+  contract errors=0/warnings=0, and global findings=0; the public-repo
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan over 83 files; `git diff --check` passed for both
+  the public repo and the private state repo. Changed files: this active state
+  and the local-private CS-Notes active state only. Critic: this was a needed
+  explanatory checkpoint, not a feature push; if the user explicitly says to
+  continue, first choose either PR/release packaging or a new concrete cut from
+  state. Losing candidate: manager-facing talk track remains parked until the
+  user explicitly switches back to share-draft work.
+- 2026-06-03T05:06-10:31+08:00: Steering audit candidates were: P0 brief
+  status check, P0 health-blocker diagnosis, P0 state hygiene rollup, and P1
+  manager-facing talk track. Continuation check: the last five heartbeats had
+  recorded the same clean status check, so another duplicate ledger row would
+  increase cognitive load without improving state truth. Because status stayed
+  clean, this tick compacted those repeated clean-check entries into one
+  checkpoint. Bounded output: no public implementation changes; state hygiene
+  only, with the next action kept on the same quiet status-check lane.
+  Validation: global status returned `ok=true`, goal_count=6, run_count=535,
+  attention queue still has 4 items (`agent-harness-main-control`,
+  `goal-harness-meta`, `premium-ui-ai-search-rec-migration`,
+  `tiger-team-maiduidui-regauc`), contract errors=0/warnings=0, and global
+  findings=0; the public-repo `goal-harness --format json check --scan-root .`
+  passed with warnings=0 and a clean public boundary scan over 83 files; `git
+  diff --check` passed for both the public repo and the private state repo. The
+  rechecks from 05:12 through 10:31 stayed clean, so no detailed ledger row was added.
+  Changed files: this active state and the local-private CS-Notes active state
+  only. Critic: future heartbeats should avoid expanding the ledger for clean
+  status checks; record detail only when health, gates, packaging state, or
+  validation materially changes, and keep public boundary scans scoped to the
+  public repo rather than private workspaces. Losing candidate: manager-facing talk track
+  remains parked until the user explicitly switches back to share-draft work.
+- 2026-06-03T04:42:00+08:00: Steering audit candidates were: P0 state
+  freshness check, P0 health-blocker diagnosis, and P1 manager-facing talk
+  track. Continuation check: release/quickstart polish was already closed, and
+  the previous next action explicitly said to do only a lightweight state
+  freshness check when there is no user packaging request; this beat adding
+  functionality. Bounded output: cleaned one stale shared-runtime demo residue.
+  `goal-harness status` showed an unregistered runtime goal `demo-goal` had
+  re-entered the global attention queue, causing `health_blockers=1`. Ran
+  `goal-harness archive-runtime --goal-id demo-goal` as the built-in dry-run and
+  confirmed it would only move the unregistered shared runtime directory, then
+  executed it to `~/.codex/goal-harness/archived-goals/demo-goal-20260602T204228Z`.
+  Changed files: no public implementation changes; moved the shared runtime
+  demo directory; updated this active state and the local-private CS-Notes
+  active state. Validation: global status attention queue now has 4 items and
+  `demo_present=false`; `quota should-run` reports `health_blockers=0`;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan; `git diff --check` passed. Critic: demo/browser
+  smokes can still leave runtime residue, so a future commit-readiness manifest
+  should list this as residual risk, but current health is clean. Losing
+  candidate: manager-facing talk track remains parked until the user explicitly
+  asks for share-draft work.
+- 2026-06-03T04:38:00+08:00: Steering audit candidates were: P0
+  publishability checkpoint, P0 status/contract consistency, and P1
+  manager-facing talk track. Continuation check: quickstart/release-readiness
+  had consumed several slices, but the previous state asked for exactly one
+  dirty-tree checkpoint before stopping; this was closure, not more feature
+  polish, and still beat switching to the share draft. Bounded output: no public
+  implementation changes. Grouped the public dirty tree into four clusters:
+  README first-run docs; state/status/contract truth covering local/global
+  runtime, reward-overlay index rows, and status smoke; user-todo review
+  material reader covering `goal_harness/materials.py`, status/server,
+  dashboard callout, and Python smoke; and dashboard reward append covering the
+  dry-run payload lock plus browser append smoke. The single most important
+  missing pre-commit validation was the dashboard cluster's production build and
+  reward append browser smoke; both were run and passed. Changed files: this
+  active state and the local-private CS-Notes active state only. Validation:
+  `npm --prefix apps/dashboard run build` passed with only the existing Vite
+  chunk-size warning; `node examples/dashboard-reward-append-browser-smoke.mjs`
+  passed; the previous slice already had `python3 examples/run-smokes.py`,
+  `goal-harness --format json check --scan-root .`, and `git diff --check`
+  passing. Critic: publishability checkpoint closes the last quickstart/release
+  validation gap; future automatic ticks should not add more release polish
+  unless the user asks for PR/release packaging. Losing candidate:
+  manager-facing talk track remains valuable, but needs an explicit user switch
+  back to share-draft work.
+- 2026-06-03T04:31:00+08:00: Steering audit candidates were: P0 public
+  release-readiness audit, P0 state/status contract consistency, and P1
+  manager-facing talk track. Continuation check: quickstart/demo polish had
+  consumed several slices, but the previous state explicitly requested a final
+  dirty-tree release audit before switching lanes; doing exactly that closed the
+  fresh-user usability lane and still beat share packaging. Bounded output: no
+  public implementation changes. Audited the current public dirty tree and the
+  README/examples/docs alignment. Found no concrete mismatch that would block a
+  willing first-time user from trying Goal Harness. `examples/run-smokes.py` is
+  the public dependency-free Python smoke runner and now includes the two new
+  Python smoke examples automatically; the browser `.mjs` smoke remains outside
+  that runner, which matches the README claims. The reward write API boundary is
+  documented by `docs/dashboard-reward-write-boundary.md`. Changed files: this
+  active state and the local-private CS-Notes active state only. Validation:
+  `python3 examples/run-smokes.py` passed all 18 Python smoke scripts;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan; `git diff --check` passed; targeted
+  README/docs/examples audit passed; no public/private boundary leak was found.
+  Critic: quickstart/release-readiness is good enough; continuing demo or
+  dashboard polish would be focus drift. Next useful automatic slice is a
+  publishability checkpoint for the dirty tree, not new features. Losing
+  candidate: manager-facing talk track remains valuable, but this heartbeat did
+  not include a user request to package the share draft.
+- 2026-06-03T04:30:00+08:00: Steering audit candidates were: P0 dashboard
+  first-screen project-identity verification, P0 release-readiness audit, and
+  P1 manager-facing talk track. Continuation check: quickstart polish had
+  consumed several slices, but the previous state named exactly one remaining
+  verification: confirm the dashboard puts project identity before action text.
+  Doing that final check was bounded and directly tied to the user's "project
+  is important" feedback, so it still beat switching lanes. Bounded output: no
+  public implementation changes. Started a temporary demo `serve-status` on
+  port 18765 and dashboard dev server on port 5176, loaded the demo Live URL
+  in the in-app browser, and verified the first screen. DOM validation found
+  `demo-goal` before the action text (`projectBeforeAction=true`), and the
+  screenshot visually showed the card as `Project` / `Selected`, bold
+  `demo-goal`, then `Let Codex continue`, with no overlap or truncation.
+  Temporary servers were stopped. Changed files: this active state and the
+  local-private CS-Notes active state only. Validation: browser DOM snapshot
+  and viewport screenshot inspection passed. Critic: the quickstart/demo lane
+  now has enough evidence; continuing it would be focus drift. Losing
+  candidate: manager-facing talk track remains valuable, but the user has not
+  asked to package the share draft in this heartbeat.
+- 2026-06-03T04:24:00+08:00: Steering audit candidates were: P0 fresh-user
+  README demo/dashboard readthrough, P0 public release/readiness polish, and
+  P1 manager-facing talk track. Continuation check: clean-health had just
+  closed, and the active next action explicitly named the README demo path; a
+  real first-run mismatch would directly hurt open-source usability, so the
+  quickstart readthrough still beat switching to share packaging. Bounded
+  output: fixed the local/global status mix in the public status layer.
+  `collect_history` now accepts `include_runtime_goals`; `collect_status`
+  enables runtime orphan discovery only for the global registry view, so a
+  project-local/demo registry no longer pulls unrelated shared runtime goals
+  into attention queue or quota health. Added a status smoke fixture proving
+  project-local status excludes an unregistered runtime orphan and keeps
+  `health_blockers=0`. Changed files in this slice: `goal_harness/history.py`,
+  `goal_harness/status.py`, `examples/status-markdown-smoke.py`, this active
+  state, and the local-private CS-Notes active state. Existing dirty dashboard,
+  materials, contract, README, and smoke files were not reverted. Validation:
+  `python3 examples/status-markdown-smoke.py` passed; `python3 -m compileall -q
+  goal_harness` passed; real `goal-harness demo` passed; demo
+  `goal-harness --registry "$registry" status --scan-root "$PWD"` now reports
+  `goals=1`, `runs=2`, and one `demo-goal` queue item; demo
+  `quota should-run` reports `health_blockers=0`; temporary `serve-status`
+  Live JSON assertion passed with only `demo-goal` in queue and run history;
+  `python3 examples/demo-cli-smoke.py` passed; `goal-harness --format json
+  check --scan-root .` passed with warnings=0; `git diff --check` passed;
+  global `goal-harness --format json status` still reports the global view
+  (`global_current=true`, `goal_count=7`, `queue_items=5`). Critic: this closes
+  the command/status mismatch, but the actual dashboard first screen has not
+  yet been visually checked against the cleaned Live JSON. Losing candidate:
+  manager-facing talk track remains ready but secondary until the user asks for
+  share-draft packaging.
+- 2026-06-03T04:12:00+08:00: Steering audit candidates were: P0 clean-health
+  status/dashboard validation, P0 fresh-user quickstart readthrough, and P1
+  manager-facing talk track. Continuation check: health/state hygiene had
+  consumed two recent slices, but after the contract warning fix the
+  user-visible status/dashboard layer still needed one clean-health check, so
+  this verification still beat switching back to share polish. Bounded output:
+  no public implementation changes; validated the clean-health user-facing
+  state. Validation: `goal-harness --format json status` asserted
+  `contract.summary.warnings=0`, `contract.warnings=[]`, and zero health
+  attention items; `npm --prefix apps/dashboard run build` passed with only the
+  existing Vite chunk-size warning; `node
+  examples/dashboard-throttled-browser-smoke.mjs` passed; `node
+  examples/dashboard-operator-gate-browser-smoke.mjs` passed. The first status
+  assertion attempt failed because the shell here-doc consumed stdin; rerunning
+  the same assertion with `python3 -c` passed. Changed files: this active state
+  and the local-private CS-Notes active state only; public implementation files
+  were not changed in this slice. Critic: clean-health is now closed enough;
+  the next slice should return to fresh-user quickstart usability unless the
+  user explicitly asks to package the share draft. Losing candidate:
+  manager-facing talk track has a six-image base but remains secondary to P0
+  usability.
+- 2026-06-03T04:08:00+08:00: Steering audit candidates were: P0 duplicate-index
+  warning cleanup, P0 status/dashboard clean-health smoke, and P1
+  manager-facing talk track. Continuation check: this was the previous next
+  action, and contract health remains P0 state truth/safety, so finishing it
+  beat switching back to share polish. Bounded output: identified the
+  `goal-harness-meta` duplicate row as an intentional run-bound `human_reward`
+  overlay on a prior `state_refreshed` run, not a corrupt duplicate index
+  entry. Updated public `goal_harness/contract.py` so duplicate groups that are
+  identical except for `human_reward` are recorded as `reward overlay rows`
+  checks rather than warnings, while ordinary duplicate rows still warn. Added
+  `examples/contract-reward-overlay-smoke.py` to prove both paths: reward
+  overlay does not warn; plain duplicate still warns. Changed files:
+  `goal_harness/contract.py`, the new smoke example, this active state, and the
+  local-private CS-Notes active state. Existing dirty dashboard/status/materials
+  files were not part of this slice. Validation: `python3
+  examples/contract-reward-overlay-smoke.py` passed; `python3
+  examples/reward-append-api-smoke.py` passed; `goal-harness --format json
+  check --scan-root .` passed with `warnings=0` and a reward-overlay check;
+  `python3 -m compileall -q goal_harness` passed; `git diff --check` passed;
+  targeted public-boundary scan passed. Critic: contract health is now clean,
+  but the first-screen status/dashboard view has not yet been explicitly
+  checked for the clean-health user experience. Losing candidate:
+  manager-facing talk track can wait until the user asks to package the share
+  draft.
+- 2026-06-03T04:01:00+08:00: Steering audit candidates were: P0 split the
+  `health_blockers=1` source from the duplicate-index warning, P0 duplicate
+  index cleanup, and P1 manager-facing talk track. Continuation check: this was
+  the previous next action and state truth/safety beats more quickstart docs or
+  share polish. Bounded output: diagnosed the health mismatch and archived the
+  disposable demo runtime left by the demo smoke. `status` showed the real
+  health blocker was an unregistered runtime-only `demo-goal`, not the
+  duplicate-index warning. The goal had one run and was not in the global
+  registry. Ran `goal-harness archive-runtime --goal-id demo-goal` dry-run to
+  confirm it would only move the shared runtime demo directory, then executed it
+  to `~/.codex/goal-harness/archived-goals/demo-goal-20260602T200106Z`.
+  Changed files: no public code changed; shared runtime demo directory was
+  archived; this active state and the local-private CS-Notes active state were
+  updated. Validation: `goal-harness status` attention queue no longer includes
+  `demo-goal`; `quota should-run` plan summary reports `health_blockers=0`;
+  `goal-harness check --scan-root .` still passes and only reports the
+  `goal-harness-meta` duplicate-index warning; archive path exists and the
+  source runtime directory is gone. Critic: the status health blocker is gone,
+  but the duplicate-index warning still makes contract health look untidy; next
+  slice should isolate and fix or explicitly classify that warning. Losing
+  candidate: manager-facing talk track can wait until the user asks to package
+  the share draft.
+- 2026-06-03T03:58:00+08:00: Steering audit candidates were: P0 dashboard
+  first-run quickstart checklist, P0 state/health hygiene for the
+  `health_blockers=1` / duplicate-index warning, and P1 manager-facing talk
+  track. Continuation check: the share/evidence lane is closed, and the
+  previous CLI first-run checklist still did not make the dashboard `Live`
+  first screen obvious; finishing this P0 quickstart docs gap beat more share
+  polish. Bounded output: added a `Dashboard first-run success` checklist under
+  README `Try It In 10 Minutes`, covering the demo status server, Vite URL,
+  `Live` source, `demo-goal` project id visibility, `User Actions`, actionable
+  queue state, and the blank/stale dashboard troubleshooting order. Changed
+  files for this slice: public `README.md`, this active state, and the
+  local-private CS-Notes active state. Existing dirty dashboard/status/materials
+  files were not part of this slice. Validation: `python3
+  examples/demo-cli-smoke.py` passed; `git diff --check` passed;
+  `goal-harness check --scan-root .` passed with only the known duplicate-index
+  warning; README/state targeted boundary scan passed; checklist heading and
+  keyword search passed. Critic: this improves first-run docs, but the next
+  higher-value P0 step is to explain or clear the `health_blockers=1` /
+  duplicate-index warning so status health is trustworthy. Losing candidate:
+  manager-facing talk track can wait until the user asks to package the share
+  draft.
+- 2026-06-03T03:53:00+08:00: Steering audit candidates were: P0 fresh-user
+  quickstart usability, P1 assemble the six screenshots into a manager-facing
+  talk track, and P0 state/boundary hygiene. Continuation check: the
+  share/evidence lane had consumed several recent slices and the six-slot
+  evidence set is now closed, so switching back to P0 open-source usability
+  beat more share polish. Bounded output: added a first-run success checklist
+  under README `Try It In 10 Minutes`, explaining the signals a new user should
+  see after `goal-harness demo`: `ok: True`, registry/state bootstrap,
+  user/agent todos, refresh-state append, status `waiting_on`, and quota
+  eligibility. It also points failed first runs to `goal-harness doctor` before
+  project debugging. Changed files for this slice: public `README.md`, this
+  active state, and the local-private CS-Notes active state. Existing dirty
+  dashboard/status/materials files were not part of this slice. Validation:
+  `python3 examples/demo-cli-smoke.py` passed; `git diff --check` passed;
+  `goal-harness check --scan-root .` passed with only the known duplicate-index
+  warning; README targeted boundary scan passed. Critic: this improves the CLI
+  demo first-run path but does not yet make the dashboard Live first run
+  equally obvious. Losing candidate: manager-facing talk track can wait until
+  the user asks to package the share draft.
+- 2026-06-03T03:48:00+08:00: Steering audit candidates were: P1 create the
+  remaining two manager-share synthetic evidence panels (read-only-map gate and
+  quota/steering), P0 fresh-user quickstart usability, and P1 assemble the
+  current four screenshots into the manager-facing talk track. Continuation
+  check: the share/evidence lane has consumed several recent slices, but the
+  previous critic named exactly two remaining evidence slots; completing them
+  closed the six-slot evidence set and created a natural stopping point.
+  Bounded output: extended the local-private synthetic evidence HTML with
+  read-only-map gate and quota/steering panels, rendered a refreshed full
+  screenshot, cropped two clean images, and updated the local-private leader
+  draft, intro draft, and redaction plan so the evidence set now contains six
+  screenshots. The quota panel uses a stable `slots tracked` label instead of a
+  real slot count. Public implementation files did not change. Validation: six
+  PNG dimensions checked; the new crops were visually inspected; Markdown image
+  paths exist; targeted text and PNG string boundary scans passed; `git diff
+  --check` and `goal-harness check --scan-root .` passed with only the known
+  duplicate-index warning. Critic: manager-share evidence capture is now
+  complete enough; the next slice should either assemble a tighter talk track
+  or return to P0 fresh-user quickstart. Losing candidate: fresh-user
+  quickstart should be re-raised next.
+- 2026-06-03T03:40:00+08:00: Steering audit candidates were: P1 create the
+  next two manager-share synthetic evidence panels (`await_eval` and
+  run-bound reward), P0 fresh-user quickstart usability, and P1 assemble the
+  current screenshots into the leader draft. Continuation check: this remained
+  in the leader/share lane, but the previous state explicitly named
+  `await_eval` and reward as the remaining evidence gaps; completing that
+  bounded evidence set reduced the user's share-prep coordination load more
+  directly than switching lanes. Bounded output: extended the local-private
+  synthetic HTML with two new panels, rendered a refreshed full screenshot, and
+  cropped clean `await_eval` and run-bound reward images. Updated the
+  local-private leader draft, intro draft, and redaction plan so the evidence
+  set now contains four screenshots. Public implementation files did not
+  change. Validation: four PNG dimensions checked; new crops visually
+  inspected; targeted text and PNG string boundary scans passed with no local
+  paths, private repo/URL markers, token-shaped material, or project-specific
+  sensitive terms. Critic: four manager-share screenshots now exist, but the
+  read-only-map gate and quota/steering slots are still checklist items.
+  Losing candidate: fresh-user quickstart remains important for open-source
+  adoption, but finishing the evidence set was the current bounded artifact.
+- 2026-06-03T03:24:00+08:00: Steering audit candidates were: P1 visually
+  inspect and crop the existing synthetic evidence HTML, P1 create the next
+  evidence slots (`await_eval` and reward), and P0 fresh-user quickstart
+  usability. Continuation check: this remained in the leader/share lane, but it
+  completed the previous turn's explicitly bounded artifact step and avoided
+  adding more scope before visual validation. Used Chrome headless to render the
+  local-private synthetic HTML, visually inspected the full screenshot, then
+  cropped two clean panels: multi-project operator view and user todo +
+  review-material. Updated the local-private intro draft and redaction plan with
+  the generated image paths. Public implementation files did not change.
+  Validation: visual inspection found no private content or layout breakage;
+  cropped images are readable; image dimensions and PNG string boundary scan
+  passed; text boundary scan passed after generalizing one internal product
+  term; `git diff --check` and `goal-harness check --scan-root .` passed with
+  only the known duplicate-index warning. Critic: two high-impact
+  screenshots now exist, but evidence-waiting and reward slots are still text
+  plan only. Losing candidate: fresh-user quickstart remains useful, but
+  manager-share evidence capture was the current bounded artifact.
+- 2026-06-03T03:19:00+08:00: Steering audit candidates were: P1 create
+  sanitized demo evidence for the two highest-impact manager-share slots, P0
+  fresh-user quickstart usability, and P1 continue broader evidence slots
+  (`await_eval` and reward). Continuation check: this is another leader/share
+  slice, but the previous turn explicitly stopped raw screenshots and named the
+  safe demo/synthetic step; completing that boundary-preserving step still won
+  over switching lanes. Bounded output: created a local-private synthetic HTML
+  evidence artifact with two screenshot-ready panels: multi-project operator
+  view and user todo + review-material. Updated the local-private intro draft
+  and redaction plan to point to the artifact. Public implementation files did
+  not change. Validation: synthetic evidence structure check passed; targeted
+  boundary scan found no local paths, private repo markers, internal URLs,
+  token-shaped material, or project-specific sensitive terms in the HTML.
+  Critic: the evidence is now safe and screenshot-ready, but not visually
+  inspected or cropped yet. Losing candidate: fresh-user quickstart remains
+  important for open-source adoption, but manager-share evidence readiness is
+  the active local-private deliverable.
+- 2026-06-03T03:13:00+08:00: Steering audit candidates were: P1 capture
+  local-private evidence assets for the manager-facing draft, P0 fresh-user
+  quickstart usability, and P1 public/demo evidence generation. Chose the
+  evidence asset step because the previous slice produced the 3-minute manager
+  narrative, but the screenshot/evidence surface was still only a checklist.
+  Continuation check: this remains in the leader/share lane for a third slice,
+  but it still wins because the work has a clear stop condition and directly
+  reduces user preparation load before any Lark/public sync. Inspection of live
+  status showed raw screenshots would expose local paths, private goal ids,
+  concrete Markdown filenames, and project-specific next-action text, so the
+  stop condition fired. Bounded output: created a local-private redaction plan
+  with six evidence slots, required redactions, safe alternatives, capture
+  rules, validation checklist, and next safe demo-evidence step. Public
+  implementation files did not change. Validation: redaction-plan structure is
+  present and targeted boundary scan found no obvious concrete private
+  paths/internal URLs/token-shaped material. Critic: no screenshots were
+  captured, by design; next step should use demo/synthetic evidence for the
+  operator-view and user-todo/review-material slots. Losing candidate:
+  fresh-user quickstart remains important for open-source adoption, but this
+  slice protected the manager-share evidence boundary first.
+- 2026-06-03T03:09:00+08:00: Steering audit candidates were: P1 convert the
+  collected aha moments into a manager-facing 3-minute version, P0 fresh-user
+  quickstart usability, and P1 local screenshot/evidence capture. Chose the
+  3-minute version because the prior slice produced story material but not a
+  short manager-ready narrative, and this remained the smallest bounded step
+  serving the user's latest leader-share priority. Updated the local-private
+  internal intro draft with a new manager-facing section: first minute problem,
+  second minute control-plane answer, third minute current evidence and next
+  milestone, plus a six-item screenshot/evidence checklist and redaction rules.
+  Public implementation files did not change. Validation: draft heading numbers
+  are sequential, the new 3-minute/evidence sections exist, and a targeted scan
+  found no obvious concrete private paths/internal URLs/token-shaped material in
+  the local-private draft. Critic: the story and short narrative are now usable,
+  but the screenshot/evidence assets are still a checklist rather than captured
+  artifacts. Losing candidate: fresh-user quickstart remains important for
+  open-source adoption, but it is lower priority than completing the
+  manager-share evidence surface.
+- 2026-06-03T03:05:00+08:00: Steering audit candidates were: P1 collect
+  sanitized project aha moments for the leader/share narrative, P0 fresh-user
+  quickstart usability, and P0/P1 dashboard evidence polish. Chose the P1
+  collection slice because the prior live material-reader validation closed the
+  immediate P0 gap, and the open agent todo explicitly asked for vivid examples
+  from managed project lines. Updated the local-private internal intro draft
+  with five sanitized aha moments: user-todo review materials, evidence-waiting
+  experiment state, read-only map before complex controller handoff, run-bound
+  human reward, and quota versus steering/focus. Public implementation files did
+  not change. Validation: heading numbering for the local-private draft is
+  sequential, the draft has no obvious concrete private paths/internal URLs from
+  the targeted scan, `git diff --check` passes, and `goal-harness check
+  --scan-root .` passes with only the known duplicate-index warning. Critic: the examples are now story-shaped,
+  but they still need a shorter manager-facing version and a screenshot/evidence
+  checklist before the draft is presentation-ready. Losing candidate: fresh-user
+  quickstart remains valuable for open-source adoption, but the user's latest
+  explicit priority is the leader/share draft.
+- 2026-06-03T03:01:00+08:00: Steering audit candidates were: P0 live
+  connected-goal validation for the new user-todo review-material surface, P1
+  sanitized aha-moment collection for the leader/share narrative, and P1
+  fresh-user quickstart usability. Continuation check: the previous slice added
+  review-material extraction and dashboard rendering, but only synthetic
+  coverage existed, so one live connected-goal validation was still the best
+  bounded P0 step. Validation result: global `status` projected one open user
+  todo with one Markdown review material on a connected private project; a
+  temporary loopback `serve-status` instance returned non-empty Markdown content
+  through `GET /review-material?goal_id=...&path=...`; an absolute-path read was
+  rejected with HTTP 400. No implementation files changed this slice; only goal
+  state was updated and the server was stopped. Critic: the local reader path is
+  now live-validated, but the next useful product/narrative step is no longer
+  more reader polish; resume collecting sanitized aha moments. Losing
+  candidate: fresh-user quickstart remains useful, but it is lower priority
+  than turning real multi-project control-plane wins into shareable examples.
+- 2026-06-03T02:55:00+08:00: User identified a control-plane gap: user todos
+  can say that the operator should read key Markdown material, but Goal Harness
+  did not make those materials readable from the user todo surface. Bounded
+  fix: added `goal_harness/materials.py` to extract backticked/linked Markdown
+  references from active-state todo text, resolve them only inside the goal
+  repo/state/runtime roots, and cap local reads. Status now adds
+  `review_materials` to todo items and renders `review_material` hints in
+  status Markdown. `serve-status` now exposes a loopback-only
+  `GET /review-material?goal_id=...&path=...` endpoint for local Markdown
+  reading. The dashboard schema and User Actions card now preserve
+  `review_materials`, show Review material chips under the next user todo, and
+  inline-read the Markdown from a live loopback status URL. Added
+  `examples/user-todo-review-material-smoke.py`, proving status projection,
+  local Markdown read, absolute path rejection, and relative `../` path
+  rejection. Validation: `python3 examples/user-todo-review-material-smoke.py`,
+  `npm --prefix apps/dashboard run build`, `node
+  examples/dashboard-operator-gate-browser-smoke.mjs`, `python3
+  examples/reward-append-api-smoke.py`, `node
+  examples/dashboard-reward-append-browser-smoke.mjs`, `python3 -m compileall
+  -q goal_harness`, `git diff --check`, and `PATH="$HOME/.local/bin:$PATH"
+  goal-harness check --scan-root .` pass. Known warnings remain: Vite
+  chunk-size warning and duplicate index rows in the global runtime. Changed
+  files: dashboard status schema/view, `goal_harness/materials.py`,
+  `goal_harness/status.py`, `goal_harness/status_server.py`, the new material
+  smoke, this active state, and the private CS-Notes state. Critic: the feature
+  is covered synthetically and by dashboard build/browser smoke, but it still
+  needs a live connected-goal validation to catch the exact Markdown reference
+  shape used in real project user todos. Losing candidate: the aha-moment
+  leader/share collection remains high priority and should resume after the
+  live material-reader check.
+- 2026-06-03T02:41:00+08:00: Steering audit candidates were: P0 dashboard
+  reward browser proof, P1 leader/share aha-moment case collection, and P1
+  fresh-user quickstart readthrough. Continuation check: reward submission had
+  just gained API proof but no browser click proof, so finishing the P0
+  human-decision-loop proof still won; the user's new request was captured as a
+  high-priority agent todo and promoted to the next action. Bounded fix: added
+  `examples/dashboard-reward-append-browser-smoke.mjs`, which starts a temporary
+  registry/runtime, serves status with `--enable-reward-write-api`, opens the
+  dashboard, clicks Reward dry-run and append, then polls status until the
+  selected run exposes `human_reward` and `reward_judged`. The smoke exposed a
+  real UI/API mismatch: preview ids included dry-run `recorded_at`, but the
+  append request recomputed a new timestamp and failed as stale. Fixed the
+  dashboard Reward panel to lock the dry-run request body, including
+  `recorded_at`, and reuse that exact payload on append. Validation:
+  `node examples/dashboard-reward-append-browser-smoke.mjs`,
+  `python3 examples/reward-append-api-smoke.py`,
+  `npm --prefix apps/dashboard run build`, `git diff --check`, and
+  `PATH="$HOME/.local/bin:$PATH" goal-harness check --scan-root .` pass; build
+  still has the known Vite chunk-size warning, and contract check still has the
+  known duplicate index rows warning. Changed files:
+  `apps/dashboard/src/views/dashboard-page.tsx`,
+  `examples/dashboard-reward-append-browser-smoke.mjs`, this active state, and
+  the private CS-Notes state. Critic: the browser-level reward loop is now
+  proven, but the internal/share narrative still lacks vivid project examples;
+  next slice should collect sanitized aha moments instead of adding more UI.
+  Losing candidate: the fresh-user quickstart readthrough remains useful, but
+  the user's latest priority is richer leader/share examples.
+- 2026-06-03T02:08:00+08:00: Steering audit candidates were: P0
+  human-decision loop proof, P1 front-end reward submit usability, and P0
+  status/agent reward visibility. Chose the proof slice because the user
+  suggested mocking human reward on this goal, and the smallest valuable step
+  was to prove the existing writer/status stack before adding more UI. A
+  mock run-bound reward was appended to `goal-harness-meta` run
+  `2026-06-03T01:26:33+08:00` with
+  `decision=mock_frontend_reward_capture`, then history/status confirmed
+  `human_reward` and `lifecycle_phase=reward_judged`. Existing code inspection
+  showed `serve-status --enable-reward-write-api` and the dashboard reward
+  panel already support dry-run -> append. Validation:
+  `python3 examples/reward-append-api-smoke.py`,
+  `npm --prefix apps/dashboard run build`, `git diff --check`, and
+  `goal-harness check --scan-root .` pass. Changed files: this active state;
+  runtime index gained one explicit mock `human_reward` overlay. Critic: API
+  and build coverage are strong, but there is still no browser-level e2e smoke
+  that clicks through the dashboard Reward panel and verifies the refreshed
+  status; that should be the next bounded proof. Losing candidate: the
+  fresh-user quickstart readthrough remains useful, but reward submission is a
+  higher-value P0 human-decision-loop proof after the user's feedback.
 - 2026-06-03T01:24:55+08:00: Steering audit candidates were: P0
   state/status truth, P1 dashboard docs/operator-copy wording, P1 quickstart
   smoke, and P2 broader dashboard polish. Chose the dashboard docs wording
@@ -590,7 +1259,7 @@ handoff, validation, and quota bookkeeping.
   `owner_sop_review_pending`, `waiting_on=user_or_controller`, and carries
   `user_todos` from `User Todo / Owner Review Reading Queue` with 12 total,
   8 done, and 4 open items. The first open items include owner review worksheet
-  recording, ZJXMT P0 column semantics/routing, latest-code invert validation
+  recording, P0 column semantics/routing, latest-code invert validation
   tracking, and item-embedding field/prompt drift. The quota guard also exposes
   `todo_write_hint` with the exact `goal-harness todo add --role user` command
   template, plus a `gate_prompt` that lists the first open user todos before
@@ -1315,7 +1984,7 @@ handoff, validation, and quota bookkeeping.
   `examples/project-prompt-smoke.py` so the skill, integration doc, static
   prompt, generated CLI prompt, and heartbeat prompt contract all mention the
   generator. Ran `scripts/install-local.sh` on the current machine and verified
-  the installed `/Users/bytedance/.codex/skills/goal-harness-project/SKILL.md`
+  the installed local `goal-harness-project` skill
   includes `Set Up Recurring Heartbeats`, `goal-harness heartbeat-prompt`, and
   `--source heartbeat --execute`. Validation: direct heartbeat prompt smoke
   passed; direct project prompt smoke passed; aggregate public smokes passed

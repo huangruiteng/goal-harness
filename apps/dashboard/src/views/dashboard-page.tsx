@@ -7,6 +7,7 @@ import {
   Clock3,
   FileCheck2,
   FileJson2,
+  FileText,
   Gauge,
   GitBranch,
   History,
@@ -40,6 +41,7 @@ import {
   HumanReward,
   OperatorGate,
   ProjectMap,
+  ReviewMaterial,
   RewardDryRunResponse,
   RunGoal,
   RunRecord,
@@ -154,6 +156,26 @@ const inputClassName =
   "h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500";
 
 type RewardValue = (typeof rewardOptions)[number];
+
+type RewardRequestBody = {
+  goal_id: string;
+  run_generated_at: string;
+  decision: string;
+  reward: RewardValue;
+  reason_summary: string;
+  follow_up?: string;
+  recorded_at?: string;
+};
+
+type ReviewMaterialContent = {
+  ok: boolean;
+  goal_id?: string;
+  path?: string;
+  resolved_path?: string;
+  bytes?: number;
+  content?: string;
+  error?: string;
+};
 
 type GoalDirectoryRow = {
   goal: RunGoal;
@@ -327,6 +349,25 @@ function buildRewardApiUrls(source: DataSource) {
       : { dryRunUrl: null, appendUrl: null };
   } catch {
     return { dryRunUrl: null, appendUrl: null };
+  }
+}
+
+function buildReviewMaterialUrl(source: DataSource, goalId: string, material: ReviewMaterial) {
+  if (source.kind !== "url" || !/^https?:\/\//i.test(source.label) || !material.path) {
+    return null;
+  }
+  try {
+    const url = new URL(source.label);
+    const isLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
+    if (!isLoopback) {
+      return null;
+    }
+    const materialUrl = new URL("/review-material", url.origin);
+    materialUrl.searchParams.set("goal_id", goalId);
+    materialUrl.searchParams.set("path", material.path);
+    return materialUrl.toString();
+  } catch {
+    return null;
   }
 }
 
@@ -719,13 +760,19 @@ function todosFromProjectAssetSummary(
     return fallback ?? null;
   }
   const next = summary.next?.trim();
+  const fallbackFirstOpen = firstOpenTodo(fallback);
   return {
     source_section: fallback?.source_section ?? sourceSection,
     total_count: summary.total ?? fallback?.total_count ?? 0,
     open_count: summary.open ?? fallback?.open_count ?? 0,
     done_count: summary.done ?? fallback?.done_count ?? 0,
     items: next
-      ? [{ index: 1, done: false, text: next }]
+      ? [{
+          index: fallbackFirstOpen?.index ?? 1,
+          done: false,
+          text: next,
+          review_materials: fallbackFirstOpen?.review_materials ?? [],
+        }]
       : (fallback?.items ?? []),
   };
 }
@@ -737,12 +784,54 @@ function todoCountLabel(todos?: TodoGroup | null) {
   return `${todos.open_count}/${todos.total_count} open`;
 }
 
-function UserTodoCallout({ blocksGate, todos }: { blocksGate?: boolean; todos?: TodoGroup | null }) {
+function UserTodoCallout({
+  blocksGate,
+  goalId,
+  source,
+  todos,
+}: {
+  blocksGate?: boolean;
+  goalId: string;
+  source: DataSource;
+  todos?: TodoGroup | null;
+}) {
   const todo = firstOpenTodo(todos);
   const count = todoCountLabel(todos);
+  const materials = todo?.review_materials ?? [];
+  const [activeMaterial, setActiveMaterial] = useState<ReviewMaterial | null>(null);
+  const [materialContent, setMaterialContent] = useState<ReviewMaterialContent | null>(null);
+  const [materialError, setMaterialError] = useState<string | null>(null);
+  const [isReadingMaterial, setIsReadingMaterial] = useState(false);
   if (!todo) {
     return null;
   }
+
+  async function readMaterial(material: ReviewMaterial) {
+    const url = buildReviewMaterialUrl(source, goalId, material);
+    if (!url) {
+      setMaterialError("Review material reader is only available for loopback live status URLs.");
+      setActiveMaterial(material);
+      setMaterialContent(null);
+      return;
+    }
+    setIsReadingMaterial(true);
+    setActiveMaterial(material);
+    setMaterialError(null);
+    setMaterialContent(null);
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      const payload = await response.json() as ReviewMaterialContent;
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setMaterialContent(payload);
+    } catch (error) {
+      setMaterialError(formatStatusError(error));
+    } finally {
+      setIsReadingMaterial(false);
+    }
+  }
+
   return (
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
       <div className="flex flex-wrap items-center gap-2">
@@ -757,6 +846,61 @@ function UserTodoCallout({ blocksGate, todos }: { blocksGate?: boolean; todos?: 
         <p className="mt-1 text-xs font-medium leading-5 text-emerald-800 dark:text-emerald-200">
           完成或明确暂缓这个用户待办后，再审批下面的 gate。
         </p>
+      ) : null}
+      {materials.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Badge variant="info">Review material</Badge>
+          {materials.map((material) => {
+            const label = material.label || material.path;
+            const canRead = Boolean(material.exists && buildReviewMaterialUrl(source, goalId, material));
+            return (
+              <Button
+                disabled={!material.exists || isReadingMaterial}
+                key={`${material.path}-${material.anchor ?? ""}`}
+                onClick={() => void readMaterial(material)}
+                size="sm"
+                variant={canRead ? "secondary" : "ghost"}
+              >
+                <FileText className="h-4 w-4" />
+                {label}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
+      {activeMaterial || materialError || materialContent ? (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-white/70 p-2 dark:border-emerald-900 dark:bg-zinc-950/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="break-all text-xs font-semibold text-emerald-950 dark:text-emerald-100">
+                {activeMaterial?.label || activeMaterial?.path || "Review material"}
+              </div>
+              {materialContent?.bytes ? (
+                <div className="text-[11px] text-emerald-800 dark:text-emerald-200">{materialContent.bytes} bytes</div>
+              ) : null}
+            </div>
+            <Button
+              onClick={() => {
+                setActiveMaterial(null);
+                setMaterialContent(null);
+                setMaterialError(null);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              Close
+            </Button>
+          </div>
+          {isReadingMaterial ? (
+            <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200">Loading review material...</p>
+          ) : null}
+          {materialError ? <Badge variant="danger">{materialError.slice(0, 120)}</Badge> : null}
+          {materialContent?.content ? (
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border border-emerald-100 bg-white p-3 text-xs leading-5 text-slate-800 dark:border-emerald-900 dark:bg-zinc-950 dark:text-zinc-100">
+              {materialContent.content}
+            </pre>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -1608,6 +1752,7 @@ function UserActionSummary({
   onSelectKind,
   registry,
   runtimeRoot,
+  source,
 }: {
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
@@ -1616,6 +1761,7 @@ function UserActionSummary({
   onSelectKind: (kind: UserActionFilter) => void;
   registry: string;
   runtimeRoot: string;
+  source: DataSource;
 }) {
   const items = buildUserActionSummaryItems({ rows, registry, runtimeRoot });
   const kindCounts = items.reduce<Record<UserActionKind, number>>((counts, item) => {
@@ -1764,7 +1910,12 @@ function UserActionSummary({
                       <QuotaChip quota={item.quota} />
                       {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
                     </div>
-                    <UserTodoCallout blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))} todos={item.userTodos} />
+                    <UserTodoCallout
+                      blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))}
+                      goalId={item.goalId}
+                      source={source}
+                      todos={item.userTodos}
+                    />
                     {item.operatorQuestion ? (
                       <div className="mt-3">
                         <div className="flex flex-wrap items-center gap-2">
@@ -2242,6 +2393,7 @@ function RewardCommandDraft({
   const [reasonSummary, setReasonSummary] = useState(draftDefaults.reasonSummary);
   const [followUp, setFollowUp] = useState(draftDefaults.followUp);
   const [dryRunResult, setDryRunResult] = useState<RewardDryRunResponse | null>(null);
+  const [dryRunRequestBody, setDryRunRequestBody] = useState<RewardRequestBody | null>(null);
   const [appendResult, setAppendResult] = useState<RewardDryRunResponse | null>(null);
   const [dryRunError, setDryRunError] = useState<string | null>(null);
   const [isDryRunning, setIsDryRunning] = useState(false);
@@ -2262,6 +2414,7 @@ function RewardCommandDraft({
   const canDryRun = Boolean(command && dryRunUrl && decision.trim() && reasonSummary.trim());
   const canAppend = Boolean(
     appendUrl
+    && dryRunRequestBody
     && dryRunResult?.ok
     && dryRunResult.preview_id
     && !dryRunResult.appended
@@ -2274,6 +2427,7 @@ function RewardCommandDraft({
     setReasonSummary(draftDefaults.reasonSummary);
     setFollowUp(draftDefaults.followUp);
     setDryRunResult(null);
+    setDryRunRequestBody(null);
     setAppendResult(null);
     setDryRunError(null);
     setAppendError(null);
@@ -2286,7 +2440,7 @@ function RewardCommandDraft({
     latestRun?.generated_at,
   ]);
 
-  function rewardRequestBody() {
+  function rewardRequestBody(): RewardRequestBody | null {
     if (!goal || !latestRun) {
       return null;
     }
@@ -2307,18 +2461,25 @@ function RewardCommandDraft({
     setIsDryRunning(true);
     setDryRunError(null);
     setDryRunResult(null);
+    setDryRunRequestBody(null);
     setAppendResult(null);
     setAppendError(null);
     try {
+      const requestBody = rewardRequestBody();
+      if (!requestBody) {
+        return;
+      }
       const response = await fetch(dryRunUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(rewardRequestBody()),
+        body: JSON.stringify(requestBody),
       });
       const payload = parseRewardDryRunResponse(await response.json());
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
+      const recordedAt = payload.human_reward?.recorded_at;
+      setDryRunRequestBody(recordedAt ? { ...requestBody, recorded_at: recordedAt } : requestBody);
       setDryRunResult(payload);
     } catch (error) {
       setDryRunError(formatStatusError(error));
@@ -2328,7 +2489,7 @@ function RewardCommandDraft({
   }
 
   async function appendRewardOverlay() {
-    const requestBody = rewardRequestBody();
+    const requestBody = dryRunRequestBody;
     if (!appendUrl || !requestBody || !dryRunResult?.preview_id) {
       return;
     }
@@ -2379,6 +2540,7 @@ function RewardCommandDraft({
                 setReasonSummary(draftDefaults.reasonSummary);
                 setFollowUp(draftDefaults.followUp);
                 setDryRunResult(null);
+                setDryRunRequestBody(null);
                 setAppendResult(null);
                 setDryRunError(null);
                 setAppendError(null);
@@ -2974,6 +3136,7 @@ export function DashboardPage() {
                   runtimeRoot={payload.runtime_root}
                   onSelectGoal={selectGoal}
                   selectedGoalId={selectedReviewGoalId}
+                  source={source}
                 />
               </section>
 

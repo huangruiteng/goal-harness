@@ -5,9 +5,12 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .feedback import append_human_reward, compact_reward
+from .history import load_registry
+from .materials import read_review_material
+from .paths import resolve_runtime_root
 from .status import collect_status
 
 
@@ -16,6 +19,7 @@ DEFAULT_STATUS_PORT = 8765
 DEFAULT_STATUS_PATH = "/status.json"
 DEFAULT_REWARD_DRY_RUN_PATH = "/reward/dry-run"
 DEFAULT_REWARD_APPEND_PATH = "/reward/append"
+DEFAULT_REVIEW_MATERIAL_PATH = "/review-material"
 
 REWARD_REQUEST_FIELDS = {
     "goal_id",
@@ -246,10 +250,56 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
 
         self._send_json(self._compact_reward_response(payload, dry_run=False, appended=True))
 
+    def _handle_review_material(self, query: dict[str, list[str]]) -> None:
+        if not is_loopback_host(str(self.server.server_address[0])):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "review material reads require a loopback status server",
+                },
+                status=403,
+            )
+            return
+        goal_id = (query.get("goal_id") or [""])[0].strip()
+        raw_path = (query.get("path") or [""])[0].strip()
+        if not goal_id or not raw_path:
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "goal_id and path are required",
+                },
+                status=400,
+            )
+            return
+        try:
+            registry = load_registry(self.server.registry_path)
+            payload = read_review_material(
+                registry=registry,
+                runtime_root=resolve_runtime_root(registry, self.server.runtime_root_override),
+                goal_id=goal_id,
+                raw_path=raw_path,
+            )
+        except Exception as exc:  # noqa: BLE001 - local UI should see the exact read failure.
+            self._send_json(
+                {
+                    "ok": False,
+                    "goal_id": goal_id,
+                    "path": raw_path,
+                    "error": str(exc),
+                },
+                status=400,
+            )
+            return
+        self._send_json(payload)
+
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/healthz":
             self._send_json({"ok": True})
+            return
+        if path == DEFAULT_REVIEW_MATERIAL_PATH:
+            self._handle_review_material(parse_qs(parsed_url.query))
             return
         if path in {"", "/"}:
             self._send_json(
@@ -258,6 +308,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                     "status_url": self.server.status_path,
                     "reward_dry_run_url": self.server.reward_dry_run_path,
                     "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
+                    "review_material_url": DEFAULT_REVIEW_MATERIAL_PATH,
                     "reward_write_enabled": self.server.reward_write_enabled,
                     "health_url": "/healthz",
                 }

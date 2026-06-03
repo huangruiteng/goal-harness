@@ -126,6 +126,13 @@ heartbeats spend `--slots 1`, while
 coarser fixed-interval automations should spend the scheduler minutes consumed
 by that completed turn.
 
+The generated task body also carries a no-progress self-stop guard: if 5
+consecutive eligible heartbeat turns only repeat status checks without a
+substantive artifact, adapter or implementation progress, new gate/user
+decision, or new validation signal, the agent should cancel or pause the
+heartbeat automation, explain the no-progress loop with `NOTIFY`, and skip
+quota spend for that self-cancel turn.
+
 Keep the Codex App visible goal text short, for example
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short
 text as the automation body. Across projects, the automation body should be the

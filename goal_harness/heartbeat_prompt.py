@@ -109,10 +109,20 @@ If the result says `should_run=true`:
    a continuation check and state why continuing still wins; keep compute quota
    separate from focus quota; record any losing high-value candidate that should
    not be forgotten.
-3. Choose exactly one bounded, verifiable step from that audit.
-4. Do that step only. Keep public/private boundaries intact.
-5. Run the smallest useful validation.
-6. Write back changed files, validation, critic, and next action to the active
+3. Run the no-progress self-stop check before choosing delivery work. Inspect
+   recent active-state progress and run history for consecutive eligible
+   heartbeat turns. Count a turn as no-progress only when it produced no
+   substantive artifact, no adapter or implementation progress, no new gate or
+   user decision, no new validation signal, and only repeated
+   status/brief-check/compact-checkpoint state edits. If 5 consecutive eligible
+   heartbeats are no-progress loops, delete or pause this heartbeat automation
+   through the Codex App automation management path, do not append a quota spend
+   for that self-cancel turn, and return `NOTIFY` explaining that the automation
+   was cancelled because it was spinning without progress.
+4. Choose exactly one bounded, verifiable step from that audit.
+5. Do that step only. Keep public/private boundaries intact.
+6. Run the smallest useful validation.
+7. Write back changed files, validation, critic, and next action to the active
    state. If the step discovers a concrete user/owner action, do not hide it in
    `Next Action`, a review doc, or chat. Add it to the active-state user todo
    queue with:
@@ -124,13 +134,13 @@ If the result says `should_run=true`:
    Use `--role agent` for project-agent follow-up work.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the Goal Harness checkout.
-7. If the dashboard or controller needs to see a state-only update, run:
+8. If the dashboard or controller needs to see a state-only update, run:
 
    ```bash
    goal-harness refresh-state --goal-id {goal_id}
    ```
 
-8. After validation and required state refresh are complete, append exactly one
+9. After validation and required state refresh are complete, append exactly one
    spend event:
 
    ```bash
@@ -143,9 +153,9 @@ If the result says `should_run=true`:
    a bounded safe-bypass step, append this same spend event once after
    validation/writeback.
 
-9. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
-   user visibility, such as a committed artifact, a user gate, or a real
-   blocker. Otherwise use `DONT_NOTIFY`.
+10. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
+    user visibility, such as a committed artifact, a user gate, a real blocker,
+    or the automation self-stop. Otherwise use `DONT_NOTIFY`.
 
 {material_queue_rule}
 {permission_rule}"""

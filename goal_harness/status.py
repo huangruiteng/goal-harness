@@ -8,6 +8,7 @@ from typing import Any
 
 from .contract import check_contract
 from .history import collect_history, load_registry
+from .materials import extract_review_materials
 from .operator_gate import DEFAULT_OPERATOR_GATE, default_operator_question, normalize_operator_question
 from .paths import global_registry_path, resolve_runtime_root
 from .quota import quota_status
@@ -160,7 +161,7 @@ def compact_todo_group(items: list[dict[str, Any]], *, source_section: str | Non
     }
 
 
-def parse_active_state_todos(state_text: str) -> dict[str, Any]:
+def parse_active_state_todos(state_text: str, *, goal: dict[str, Any] | None = None, state_path: Path | None = None) -> dict[str, Any]:
     role: str | None = None
     source_sections: dict[str, str | None] = {"user": None, "agent": None}
     items: dict[str, list[dict[str, Any]]] = {"user": [], "agent": []}
@@ -178,13 +179,16 @@ def parse_active_state_todos(state_text: str) -> dict[str, Any]:
         if not match:
             continue
         marker, text = match.groups()
-        items[role].append(
-            {
-                "index": len(items[role]) + 1,
-                "done": marker.lower() == "x",
-                "text": normalize_todo_text(text),
-            }
-        )
+        todo: dict[str, Any] = {
+            "index": len(items[role]) + 1,
+            "done": marker.lower() == "x",
+            "text": normalize_todo_text(text),
+        }
+        if goal is not None:
+            materials = extract_review_materials(text, goal=goal, state_path=state_path)
+            if materials:
+                todo["review_materials"] = materials
+        items[role].append(todo)
 
     result: dict[str, Any] = {}
     user = compact_todo_group(items["user"], source_section=source_sections["user"])
@@ -357,7 +361,7 @@ def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
         state_text = state_path.read_text(encoding="utf-8")
     except OSError:
         return {}
-    fields = parse_active_state_todos(state_text)
+    fields = parse_active_state_todos(state_text, goal=goal, state_path=state_path)
     if fields:
         fields["todo_state_file"] = str(state_path)
     return fields
@@ -1142,11 +1146,13 @@ def collect_status(
         runtime_root=runtime_root,
         current_registry=registry,
     )
+    include_runtime_goals = bool(global_registry.get("current_registry_is_global"))
     history = collect_history(
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=None,
         limit=limit,
+        include_runtime_goals=include_runtime_goals,
     )
     contract = check_contract(
         registry_path=registry_path,
@@ -1305,6 +1311,14 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 if not isinstance(todo, dict) or todo.get("done"):
                     continue
                 lines.append(f"    - next_user_todo: {_markdown_scalar(todo.get('text') or '')}")
+                for material in todo.get("review_materials") or []:
+                    if not isinstance(material, dict):
+                        continue
+                    lines.append(
+                        "      - review_material: "
+                        f"{_markdown_scalar(material.get('label') or material.get('path') or '')} "
+                        f"exists={material.get('exists')}"
+                    )
                 break
         agent_todos = item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else {}
         if agent_todos:

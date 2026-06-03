@@ -202,6 +202,40 @@ def append_state_refreshed_fixture(root: Path, *, generated_at: str) -> None:
         )
 
 
+def append_orphan_runtime_fixture(root: Path, *, goal_id: str, generated_at: str) -> None:
+    run_dir = root / "runtime" / "goals" / goal_id / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-operator-gate-approved.json"
+    markdown_path = run_dir / f"{compact_time}-operator-gate-approved.md"
+    record = {
+        "generated_at": generated_at,
+        "goal_id": goal_id,
+        "classification": "operator_gate_approved",
+        "recommended_action": "orphan runtime fixture should only appear in global views",
+        "health_check": "fixture orphan runtime goal",
+        "operator_gate": {
+            "recorded_at": generated_at,
+            "gate": "read_only_map_opt_in",
+            "decision": "approve",
+        },
+    }
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture orphan runtime goal\n", encoding="utf-8")
+    with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    **record,
+                    "json_path": str(json_path),
+                    "markdown_path": str(markdown_path),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+
 def set_registry_attention_override(registry_path: Path) -> None:
     payload = json.loads(registry_path.read_text(encoding="utf-8"))
     payload["goals"][0].update(
@@ -305,6 +339,20 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
     assert quota_payload["status"] == "planned-high-complexity", quota_payload
 
 
+def assert_project_local_status_excludes_runtime_orphans(registry_path: Path) -> None:
+    root = registry_path.parents[2]
+    orphan_goal_id = "unregistered-orphan-goal"
+    append_orphan_runtime_fixture(root, goal_id=orphan_goal_id, generated_at="2026-01-01T00:05:00+00:00")
+    payload, markdown = collect_fixture_status(root, registry_path)
+    goal_ids = {item["id"] for item in payload["run_history"]["goals"]}
+    queue_goal_ids = {item["goal_id"] for item in payload["attention_queue"]["items"]}
+    assert goal_ids == {"planned-main-control"}, payload
+    assert queue_goal_ids == {"planned-main-control"}, payload
+    assert orphan_goal_id not in markdown, markdown
+    quota_payload = build_quota_should_run(payload, goal_id="planned-main-control")
+    assert quota_payload["plan_summary"]["health_blockers"] == 0, quota_payload
+
+
 def assert_registry_attention_override(payload: dict, markdown: str) -> None:
     items = payload["attention_queue"]["items"]
     assert len(items) == 1, items
@@ -349,6 +397,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
         registry_path = write_planned_registry(root)
+        assert_project_local_status_excludes_runtime_orphans(registry_path)
         payload, markdown = collect_fixture_status(root, registry_path)
         append_operator_gate_fixture(
             root,

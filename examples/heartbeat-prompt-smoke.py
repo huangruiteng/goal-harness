@@ -80,6 +80,10 @@ def main() -> int:
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
         "apply a continuation check",
         "keep compute quota separate from focus quota",
+        "Run the no-progress self-stop check before choosing delivery work",
+        "5 consecutive eligible heartbeats are no-progress loops",
+        "do not append a quota spend for that self-cancel turn",
+        "automation was cancelled because it was spinning without progress",
         "Choose exactly one bounded, verifiable step from that audit",
         "Run the smallest useful validation",
         "Write back changed files, validation, critic, and next action",
@@ -121,6 +125,10 @@ def main() -> int:
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
         "apply a continuation check",
         "keep compute quota separate from focus quota",
+        "Run the no-progress self-stop check before choosing delivery work",
+        "5 consecutive eligible heartbeats are no-progress loops",
+        "do not append a quota spend for that self-cancel turn",
+        "automation was cancelled because it was spinning without progress",
         "Choose exactly one bounded, verifiable step from that audit",
         "If the step discovers a concrete user/owner action",
         "goal-harness todo add --goal-id public-heartbeat-goal --role user --text \"<public-safe user/owner action>\"",
@@ -145,6 +153,7 @@ def main() -> int:
             "safe_bypass_allowed=true",
             "If the result says should_run=true",
             "Run a short steering audit before choosing work",
+            "Run the no-progress self-stop check before choosing delivery work",
             "Choose exactly one bounded, verifiable step from that audit",
             "Run the smallest useful validation",
             "goal-harness refresh-state --goal-id <GOAL_ID>",
@@ -167,6 +176,8 @@ def main() -> int:
     assert "Set Up Recurring Heartbeats" in project_skill, project_skill
     assert "visible goal text short" in project_skill, project_skill
     assert "--source heartbeat --execute" in project_skill, project_skill
+    assert "no-progress self-stop guard" in project_skill, project_skill
+    assert "consecutive eligible heartbeat turns" in project_skill, project_skill
 
     cli_json = subprocess.run(
         [

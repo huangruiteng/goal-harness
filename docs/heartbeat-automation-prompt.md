@@ -105,10 +105,20 @@ If the result says should_run=true:
    a continuation check and state why continuing still wins; keep compute quota
    separate from focus quota; record any losing high-value candidate that should
    not be forgotten.
-3. Choose exactly one bounded, verifiable step from that audit.
-4. Do that step only. Keep public/private boundaries intact.
-5. Run the smallest useful validation.
-6. Write back changed files, validation, critic, and next action to the active
+3. Run the no-progress self-stop check before choosing delivery work. Inspect
+   recent active-state progress and run history for consecutive eligible
+   heartbeat turns. Count a turn as no-progress only when it produced no
+   substantive artifact, no adapter or implementation progress, no new gate or
+   user decision, no new validation signal, and only repeated
+   status/brief-check/compact-checkpoint state edits. If 5 consecutive eligible
+   heartbeats are no-progress loops, delete or pause this heartbeat automation
+   through the Codex App automation management path, do not append a quota spend
+   for that self-cancel turn, and return NOTIFY explaining that the automation
+   was cancelled because it was spinning without progress.
+4. Choose exactly one bounded, verifiable step from that audit.
+5. Do that step only. Keep public/private boundaries intact.
+6. Run the smallest useful validation.
+7. Write back changed files, validation, critic, and next action to the active
    state. If the step discovers a concrete user/owner action, do not hide it in
    `Next Action`, a review doc, or chat. Add it to the active-state user todo
    queue with:
@@ -118,11 +128,11 @@ If the result says should_run=true:
    Use `--role agent` for project-agent follow-up work.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the Goal Harness checkout.
-7. If the dashboard or controller needs to see a state-only update, run:
+8. If the dashboard or controller needs to see a state-only update, run:
 
    goal-harness refresh-state --goal-id <GOAL_ID>
 
-8. After validation and required state refresh are complete, append exactly one
+9. After validation and required state refresh are complete, append exactly one
    spend event. For a minute-based heartbeat, spend one slot:
 
    goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
@@ -136,9 +146,9 @@ If the result says should_run=true:
    bounded safe-bypass step, append this same spend event once after
    validation/writeback.
 
-9. Return a compact final report. Use heartbeat NOTIFY only for meaningful user
-   visibility, such as a committed artifact, a user gate, or a real blocker.
-   Otherwise use DONT_NOTIFY.
+10. Return a compact final report. Use heartbeat NOTIFY only for meaningful
+    user visibility, such as a committed artifact, a user gate, a real blocker,
+    or the automation self-stop. Otherwise use DONT_NOTIFY.
 
 <MATERIAL_QUEUE_RULE>
 Do not ask for permissions when the current Codex session is already trusted.
@@ -163,9 +173,10 @@ it returns `state=operator_gate` plus `safe_bypass_allowed=true`, avoid the
 gated command and do at most one independent read-only steering/analysis step
 after the gate has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
-the priority stack, apply a continuation check for repeated topics, then do one
-bounded verifiable step, validate it, write back changed files / validation /
-critic / next action, refresh state if needed, and append exactly one
+the priority stack, apply a continuation check for repeated topics, run the
+no-progress self-stop check, then do one bounded verifiable step, validate it,
+write back changed files / validation / critic / next action, refresh state if
+needed, and append exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
 event after the completed turn. Use `--slots 1` for minute-based
 heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
@@ -184,11 +195,13 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 3. If the gate was already surfaced and `safe_bypass_allowed=true`, either take
    one independent safe-bypass step or report the pending gate compactly.
 4. Run the steering audit before choosing the work.
-5. Work small when `should_run=true`.
-6. Validate before reporting.
-7. Refresh state when the run is state-only.
-8. Spend exactly once after the completed turn.
-9. Report compactly.
+5. Cancel or pause the automation instead of spending if 5 consecutive eligible
+   turns are only repeated no-progress status loops.
+6. Work small when `should_run=true`.
+7. Validate before reporting.
+8. Refresh state when the run is state-only.
+9. Spend exactly once after the completed turn.
+10. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode
