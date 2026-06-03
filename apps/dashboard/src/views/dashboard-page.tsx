@@ -1248,12 +1248,16 @@ function authorityCoverageVariant({
   declared,
   conflictRisk,
   deprecatedCount,
+  materialOwnerReviewCount,
+  materialStaleCount,
   present,
   total,
 }: {
   declared: boolean;
   conflictRisk?: string | null;
   deprecatedCount: number;
+  materialOwnerReviewCount?: number;
+  materialStaleCount?: number;
   present: number;
   total: number;
 }): BadgeVariant {
@@ -1261,7 +1265,13 @@ function authorityCoverageVariant({
     return "neutral";
   }
   const risk = normalizeConflictRisk(conflictRisk);
-  if (risk === "high" || deprecatedCount > 0 || (total > 0 && present < total)) {
+  if (
+    risk === "high" ||
+    deprecatedCount > 0 ||
+    (materialOwnerReviewCount ?? 0) > 0 ||
+    (materialStaleCount ?? 0) > 0 ||
+    (total > 0 && present < total)
+  ) {
     return "warning";
   }
   if (risk === "medium") {
@@ -1276,6 +1286,11 @@ function buildAuthorityCoverageFromCounts({
   present,
   total,
   topics,
+  materialTotal,
+  materialRepositories,
+  materialOwnerReviewRequired,
+  materialStale,
+  materialCurrentAuthority,
   deprecatedCount,
   conflictRisk,
 }: {
@@ -1284,38 +1299,59 @@ function buildAuthorityCoverageFromCounts({
   present?: number | null;
   total?: number | null;
   topics?: number | null;
+  materialTotal?: number | null;
+  materialRepositories?: number | null;
+  materialOwnerReviewRequired?: number | null;
+  materialStale?: number | null;
+  materialCurrentAuthority?: number | null;
   deprecatedCount?: number | null;
   conflictRisk?: string | null;
 }): AuthorityCoverage | undefined {
   const isDeclared = Boolean(declared);
-  if (!isDeclared && !total && !topics) {
+  if (!isDeclared && !total && !topics && !materialTotal) {
     return undefined;
   }
   const presentCount = present ?? 0;
   const totalCount = total ?? 0;
   const topicCount = topics ?? 0;
+  const materialCount = materialTotal ?? 0;
+  const materialRepoCount = materialRepositories ?? 0;
+  const materialOwnerReviewCount = materialOwnerReviewRequired ?? 0;
+  const materialStaleCount = materialStale ?? 0;
+  const materialCurrentAuthorityCount = materialCurrentAuthority ?? 0;
   const deprecated = deprecatedCount ?? 0;
   const risk = normalizeConflictRisk(conflictRisk);
   const pathText = pathExists == null ? "path unchecked" : pathExists ? "path ok" : "path missing";
   const entryText = totalCount > 0 ? `default entries ${presentCount}/${totalCount}` : "default entries not declared";
   const riskText = risk === "unknown" ? "risk unknown" : `risk ${risk}`;
+  const materialText =
+    materialCount > 0
+      ? `materials ${materialCount}; repos ${materialRepoCount}; owner review ${materialOwnerReviewCount}; stale ${materialStaleCount}; current ${materialCurrentAuthorityCount}`
+      : "";
   const badge = !isDeclared
     ? "No registry"
-    : risk === "high" || risk === "medium" || deprecated > 0 || (totalCount > 0 && presentCount < totalCount)
+    : risk === "high" ||
+        risk === "medium" ||
+        deprecated > 0 ||
+        materialOwnerReviewCount > 0 ||
+        materialStaleCount > 0 ||
+        (totalCount > 0 && presentCount < totalCount)
       ? "Needs review"
       : "Covered";
   return {
     badge,
     reviewLine: isDeclared
-      ? `权威源：已声明；${pathText}；${entryText}；topic ${topicCount}；${riskText}${deprecated ? `；deprecated ${deprecated}` : ""}。`
+      ? `权威源：已声明；${pathText}；${entryText}；topic ${topicCount}；${riskText}${materialText ? `；${materialText}` : ""}${deprecated ? `；deprecated ${deprecated}` : ""}。`
       : "权威源：未声明 authority registry；只能看到普通 authority sources。",
     shortLine: isDeclared
-      ? `${entryText}; topic ${topicCount}; ${riskText}`
+      ? `${entryText}; topic ${topicCount}; ${materialText ? `${materialText}; ` : ""}${riskText}`
       : "authority registry not declared",
     variant: authorityCoverageVariant({
       declared: isDeclared,
       conflictRisk: risk,
       deprecatedCount: deprecated,
+      materialOwnerReviewCount,
+      materialStaleCount,
       present: presentCount,
       total: totalCount,
     }),
@@ -1337,6 +1373,11 @@ function buildAuthorityCoverage({
       present: projectMap.authority_registry_default_entries_present,
       total: projectMap.authority_registry_default_entry_count,
       topics: projectMap.topic_authority_count,
+      materialTotal: projectMap.project_material_count,
+      materialRepositories: projectMap.project_material_repository_count,
+      materialOwnerReviewRequired: projectMap.project_material_owner_review_required_count,
+      materialStale: projectMap.project_material_stale_count,
+      materialCurrentAuthority: projectMap.project_material_current_authority_count,
       conflictRisk: projectMap.authority_registry_conflict_risk,
     });
   }
@@ -1350,6 +1391,11 @@ function buildAuthorityCoverage({
     present: registry.default_entries_present,
     total: registry.default_entry_count,
     topics: registry.topic_authority_count,
+    materialTotal: registry.project_material_count,
+    materialRepositories: registry.project_material_repository_count,
+    materialOwnerReviewRequired: registry.project_material_owner_review_required_count,
+    materialStale: registry.project_material_stale_count,
+    materialCurrentAuthority: registry.project_material_current_authority_count,
     deprecatedCount: registry.deprecated_source_count,
     conflictRisk: registry.conflict_risk,
   });
@@ -1362,6 +1408,11 @@ function buildAuthorityCoverageFromProjectMap(projectMap: ProjectMap): Authority
     present: projectMap.authority_registry_default_entries_present,
     total: projectMap.authority_registry_default_entry_count,
     topics: projectMap.topic_authority_count,
+    materialTotal: projectMap.project_material_count,
+    materialRepositories: projectMap.project_material_repository_count,
+    materialOwnerReviewRequired: projectMap.project_material_owner_review_required_count,
+    materialStale: projectMap.project_material_stale_count,
+    materialCurrentAuthority: projectMap.project_material_current_authority_count,
     conflictRisk: projectMap.authority_registry_conflict_risk,
   });
 }

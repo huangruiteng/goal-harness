@@ -162,6 +162,11 @@
           "default_entries_checked": 3,
           "default_entries_present": 3,
           "topic_authority_count": 8,
+          "project_material_count": 6,
+          "project_material_repository_count": 2,
+          "project_material_owner_review_required_count": 1,
+          "project_material_stale_count": 1,
+          "project_material_current_authority_count": 1,
           "deprecated_source_count": 0,
           "conflict_risk": "low"
         },
