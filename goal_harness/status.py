@@ -165,6 +165,36 @@ def compact_todo_group(items: list[dict[str, Any]], *, source_section: str | Non
     }
 
 
+def redacted_status_todo_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(fields)
+    for key in ("user_todos", "agent_todos"):
+        group = redacted.get(key)
+        if not isinstance(group, dict):
+            continue
+        group_copy = dict(group)
+        items: list[Any] = []
+        for item in group_copy.get("items") or []:
+            if not isinstance(item, dict):
+                items.append(item)
+                continue
+            item_copy = dict(item)
+            materials = item_copy.get("review_materials")
+            if isinstance(materials, list):
+                redacted_materials = []
+                for material in materials:
+                    if not isinstance(material, dict):
+                        redacted_materials.append(material)
+                        continue
+                    material_copy = dict(material)
+                    material_copy.pop("resolved_path", None)
+                    redacted_materials.append(material_copy)
+                item_copy["review_materials"] = redacted_materials
+            items.append(item_copy)
+        group_copy["items"] = items
+        redacted[key] = group_copy
+    return redacted
+
+
 def parse_active_state_todos(state_text: str, *, goal: dict[str, Any] | None = None, state_path: Path | None = None) -> dict[str, Any]:
     role: str | None = None
     source_sections: dict[str, str | None] = {"user": None, "agent": None}
@@ -367,6 +397,7 @@ def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
         return {}
     fields = parse_active_state_todos(state_text, goal=goal, state_path=state_path)
     if fields:
+        fields = redacted_status_todo_fields(fields)
         fields["todo_state_file"] = str(state_path)
     return fields
 

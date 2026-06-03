@@ -162,8 +162,11 @@ def main() -> None:
         assert material["label"] == "review.md", material
         assert material["path"] == "docs/review.md", material
         assert material["exists"] is True, material
+        assert "resolved_path" not in material, material
+        assert "resolved_path" not in json.dumps(item, ensure_ascii=False), item
         markdown = render_status_markdown(payload)
         assert "review_material: review.md exists=True" in markdown, markdown
+        assert "resolved_path" not in markdown, markdown
 
         port = free_port()
         server = start_server(repo_root, registry, runtime_root, port)
@@ -172,6 +175,7 @@ def main() -> None:
             status, body = request_json(review_material_url(base_url, path="docs/review.md"))
             assert status == 200, body
             assert body["content"] == review_doc.read_text(encoding="utf-8"), body
+            assert body["resolved_path"].endswith("docs/review.md"), body
 
             status, body = request_json(review_material_url(base_url, path=str(root / "outside.md")))
             assert status == 400, body

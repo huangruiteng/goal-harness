@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T06:55:30+08:00
+updated_at: 2026-06-04T07:18:18+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,24 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Apply the sanitized no-evidence boundary scaffold to the platform-migration
-  project-local state; stop before private material, company repo drilldown, or
-  owner conclusion. Keep the pre-existing dirty README untouched.
+- Audit the remaining status queue path metadata boundary, especially whether
+  `todo_state_file` belongs in the public-safe queue item or only in a debug
+  layer. Keep it as an interface-budget guard, not a new feature.
 
 ## Recent Progress
+
+- 2026-06-04T07:18:18+08:00: Added a lightweight status todo projection
+  redaction. `goal_harness/status.py` now removes review material
+  `resolved_path` from public `attention_queue` todo items while preserving
+  `label`, `path`, `exists`, and endpoint readability. The regression in
+  `examples/user-todo-review-material-smoke.py` asserts that status payloads
+  and markdown omit `resolved_path`, while the review-material endpoint still
+  resolves and returns content. Validation: user-todo review-material smoke,
+  status markdown smoke, platform-migration material registry smoke, touched
+  Python compile, touched-file `git diff --check`, live global status
+  `resolved_path` projection check, and public/private `goal-harness check`.
+  Critic: this is intentionally a narrow interface guard; broader local path
+  metadata such as `todo_state_file` needs a separate boundary decision.
 
 - 2026-06-04T06:55:30+08:00: Extended the existing
   `examples/platform-migration-material-registry-smoke.py` fixture so a
