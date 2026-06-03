@@ -116,7 +116,13 @@ If the result says should_run=true:
    for that self-cancel turn, and return NOTIFY explaining that the automation
    was cancelled because it was spinning without progress.
 4. Choose exactly one bounded, verifiable step from that audit.
-5. Do that step only. Keep public/private boundaries intact.
+5. Do that step only. Keep public/private boundaries intact. Public-safe repo
+   publication is not an operator gate by itself: for routine public project
+   work, commit, push, and PR creation may proceed autonomously after validation
+   and a clean public/private boundary scan. Stop and surface a user/controller
+   gate only for private or company-internal material, credentials, destructive
+   git operations, production actions, or repository rules that explicitly
+   require review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
    state. If the step discovers a concrete user/owner action, do not hide it in
@@ -197,11 +203,15 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 4. Run the steering audit before choosing the work.
 5. Cancel or pause the automation instead of spending if 5 consecutive eligible
    turns are only repeated no-progress status loops.
-6. Work small when `should_run=true`.
-7. Validate before reporting.
-8. Refresh state when the run is state-only.
-9. Spend exactly once after the completed turn.
-10. Report compactly.
+6. Treat routine public commit, push, and PR creation as autonomous after clean
+   validation and a public/private boundary scan; stop for private/company
+   material, credentials, destructive git, production actions, or repo rules
+   that explicitly require review.
+7. Work small when `should_run=true`.
+8. Validate before reporting.
+9. Refresh state when the run is state-only.
+10. Spend exactly once after the completed turn.
+11. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode

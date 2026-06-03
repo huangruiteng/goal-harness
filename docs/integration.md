@@ -88,6 +88,10 @@ The Codex App visible goal text can stay short, such as
 the human and the executor. The recurring automation prompt should use the
 generated heartbeat body above, so every project shares the same quota, gate,
 steering-audit, writeback, refresh, and spend lifecycle.
+That lifecycle treats routine public commit, push, and PR creation as
+autonomous after validation and a clean public/private boundary scan; private or
+company-internal material, credentials, destructive git, production actions, and
+repo rules that explicitly require review still stop on a gate.
 
 In most real projects these files should be private. If they contain current
 work state or local evidence, add them to `.gitignore`:

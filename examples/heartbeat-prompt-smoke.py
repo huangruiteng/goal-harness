@@ -85,6 +85,10 @@ def main() -> int:
         "do not append a quota spend for that self-cancel turn",
         "automation was cancelled because it was spinning without progress",
         "Choose exactly one bounded, verifiable step from that audit",
+        "Public-safe repo publication is not an operator gate by itself",
+        "commit, push, and PR creation may proceed autonomously after validation",
+        "clean public/private boundary scan",
+        "private or company-internal material, credentials, destructive git operations, production actions",
         "Run the smallest useful validation",
         "Write back changed files, validation, critic, and next action",
         "If the step discovers a concrete user/owner action",
@@ -130,6 +134,9 @@ def main() -> int:
         "do not append a quota spend for that self-cancel turn",
         "automation was cancelled because it was spinning without progress",
         "Choose exactly one bounded, verifiable step from that audit",
+        "Public-safe repo publication is not an operator gate by itself",
+        "commit, push, and PR creation may proceed autonomously after validation",
+        "clean public/private boundary scan",
         "If the step discovers a concrete user/owner action",
         "goal-harness todo add --goal-id public-heartbeat-goal --role user --text \"<public-safe user/owner action>\"",
         "docs/project-agent-todo-contract.md",
@@ -155,6 +162,7 @@ def main() -> int:
             "Run a short steering audit before choosing work",
             "Run the no-progress self-stop check before choosing delivery work",
             "Choose exactly one bounded, verifiable step from that audit",
+            "Public-safe repo publication is not an operator gate by itself",
             "Run the smallest useful validation",
             "goal-harness refresh-state --goal-id <GOAL_ID>",
             'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
@@ -169,15 +177,19 @@ def main() -> int:
     assert "visible goal text can stay short" in integration_doc, integration_doc
     assert "shares the same quota, gate," in integration_doc, integration_doc
     assert "steering-audit, writeback, refresh, and spend lifecycle" in integration_doc, integration_doc
+    assert "public commit, push, and PR creation as autonomous" in normalized(integration_doc), integration_doc
     assert "Two Prompt Layers" in doc, doc
     assert "Visible goal text" in doc, doc
     assert "Heartbeat automation task body" in doc, doc
+    assert "commit, push, and PR creation can proceed autonomously" in normalized(readme), readme
     assert "goal-harness heartbeat-prompt" in project_skill, project_skill
     assert "Set Up Recurring Heartbeats" in project_skill, project_skill
     assert "visible goal text short" in project_skill, project_skill
     assert "--source heartbeat --execute" in project_skill, project_skill
     assert "no-progress self-stop guard" in project_skill, project_skill
     assert "consecutive eligible heartbeat turns" in project_skill, project_skill
+    assert "Routine public repo publication is a boundary decision" in project_skill, project_skill
+    assert "Do not reintroduce a user gate for public-safe publication itself" in project_skill, project_skill
 
     cli_json = subprocess.run(
         [

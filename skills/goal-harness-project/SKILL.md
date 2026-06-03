@@ -86,6 +86,12 @@ Action.
 This guard is only a compute-allocation check. It does not grant write
 permission, bypass operator gates, or replace run-bound human reward. Operator
 gates block the gated delivery path, not unrelated safe steering work.
+Routine public repo publication is a boundary decision, not a standing operator
+gate: when the active state permits the step, validation passes, and the
+public/private boundary scan is clean, commit, push, and PR creation can proceed
+autonomously. Stop for private or company-internal material, credentials,
+destructive git operations, production actions, or repository rules that
+explicitly require review.
 Use the shared global registry for this guard so the project agent reads the
 same operator gates, user todos, agent todos, and quota state as the dashboard. This does
 not mean all project work is global: `todo add`, `refresh-state`, adapter runs,
@@ -132,6 +138,9 @@ substantive artifact, adapter or implementation progress, new gate/user
 decision, or new validation signal, the agent should cancel or pause the
 heartbeat automation, explain the no-progress loop with `NOTIFY`, and skip
 quota spend for that self-cancel turn.
+The same generated task body also makes routine public commit, push, and PR
+creation autonomous after validation plus a clean public/private boundary scan.
+Do not reintroduce a user gate for public-safe publication itself.
 
 Keep the Codex App visible goal text short, for example
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short

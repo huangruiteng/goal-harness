@@ -358,6 +358,13 @@ todos when `user_todo_summary.open_count > 0`. It must not execute
 path. See
 `docs/quota-allocation.md` for the full allocation contract.
 
+Routine public repo publication is not an operator gate by itself. When the
+active state permits the step, validation passes, and the public/private
+boundary scan is clean, commit, push, and PR creation can proceed
+autonomously. Stop for private or company-internal material, credentials,
+destructive git operations, production actions, or repository rules that
+explicitly require review.
+
 After an automatic turn actually spends delivery compute, append one spend
 event after validation and any required state refresh:
 

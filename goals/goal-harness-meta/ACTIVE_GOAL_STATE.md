@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T11:08:34+08:00
+updated_at: 2026-06-03T11:16:33+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -53,14 +53,38 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- The validated public dirty tree was published to GitHub as `628aae4 Improve
-  heartbeat lifecycle and dashboard actions`. Future heartbeats should move to
-  the next bounded P0/P1 control-plane slice instead of continuing packaging
-  hygiene; autonomous public commit/push remains allowed after clean validation
-  and boundary scans.
+- The heartbeat lifecycle contract now encodes autonomous public repo
+  publication after validation and clean boundary scans. Future heartbeats
+  should move to a different bounded P0/P1 control-plane slice rather than keep
+  documenting publish policy; autonomous public commit/push/PR remains allowed
+  after validation and boundary scans.
 
 ## Recent Progress
 
+- 2026-06-03T11:16:33+08:00: Steering audit candidates were: P0 sync the
+  autonomous public publish policy into the reusable heartbeat lifecycle
+  generator/docs/skill, P0 state/status truth check only, P1 dashboard or
+  quickstart polish, and P2 advanced no-progress guard tuning. Continuation
+  check: recent slices included packaging hygiene, but this turn fixed a policy
+  regression after the user clarified public commit/push/PR should not be a
+  standing gate; it was not another packaging detail pass. No-progress self-stop
+  check: not triggered because recent eligible heartbeats produced commits,
+  validation evidence, and this reusable contract artifact. Bounded output:
+  updated `goal_harness/heartbeat_prompt.py`,
+  `docs/heartbeat-automation-prompt.md`,
+  `skills/goal-harness-project/SKILL.md`, `README.md`, `docs/integration.md`,
+  and `examples/heartbeat-prompt-smoke.py` so public-safe commit, push, and PR
+  creation can proceed autonomously after validation and a clean public/private
+  boundary scan, while private/company material, credentials, destructive git,
+  production actions, and explicit repo rules still stop on a gate. Validation:
+  `python3 examples/heartbeat-prompt-smoke.py` passed; `python3 -m py_compile
+  goal_harness/heartbeat_prompt.py examples/heartbeat-prompt-smoke.py` passed;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and a
+  clean public boundary scan over 88 files; `git diff --check` passed. Critic:
+  the lifecycle should now stop asking the user about public-safe publication,
+  but the next heartbeat should move to another P0/P1 control-plane slice to
+  avoid over-documenting the same policy. Losing candidate: dashboard polish
+  remains useful but lower priority than correcting the reusable publish gate.
 - 2026-06-03T11:08:34+08:00: Published the validated public dirty tree to
   GitHub on `main` as `628aae4 Improve heartbeat lifecycle and dashboard
   actions`. Validation before publication covered 18 smoke scripts, heartbeat

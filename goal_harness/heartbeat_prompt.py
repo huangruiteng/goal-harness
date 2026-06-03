@@ -120,7 +120,13 @@ If the result says `should_run=true`:
    for that self-cancel turn, and return `NOTIFY` explaining that the automation
    was cancelled because it was spinning without progress.
 4. Choose exactly one bounded, verifiable step from that audit.
-5. Do that step only. Keep public/private boundaries intact.
+5. Do that step only. Keep public/private boundaries intact. Public-safe repo
+   publication is not an operator gate by itself: for routine public project
+   work, commit, push, and PR creation may proceed autonomously after validation
+   and a clean public/private boundary scan. Stop and surface a user/controller
+   gate only for private or company-internal material, credentials, destructive
+   git operations, production actions, or repository rules that explicitly
+   require review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
    state. If the step discovers a concrete user/owner action, do not hide it in
