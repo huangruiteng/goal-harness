@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T06:15:13+08:00
+updated_at: 2026-06-04T06:24:13+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -68,16 +68,33 @@ and agents receive the smallest sufficient execution context.
 - The temporary `agent-harness-side-bypass` rollout monitor is complete:
   post-baseline records reached 16/15, the latest signal is
   `side_bypass_universal_feedback_minimum_fit_sanity_positive_path_test`, and
-  no urgent drift was observed. The public Goal Harness checkpoint for the
-  validated consumer / quota / prompt contract changes has been committed and
-  pushed to `origin/main`, while the pre-existing dirty README remains
-  untouched. Return to the normal Goal Harness P0 queue. The next non-monitor
-  P0 slice should map the private platform-migration pilot state only when its
-  private-safe boundary is explicit; otherwise pause additional public consumer
-  regressions and look for a concrete gap that reduces operator or
-  project-agent context load.
+  no urgent drift was observed. This turn fixed a public Goal Harness handoff
+  bug where `refresh-state` derived `recommended_action` from only the first
+  eight `Next Action` lines, truncating long wrapped bullets before `quota
+  should-run` and status consumers saw them. The fix and regression were pushed
+  to `origin/main`; the pre-existing dirty README remains untouched. Return to
+  the normal Goal Harness P0 queue. The next non-monitor P0 slice should map
+  the private platform-migration pilot state only when its private-safe boundary
+  is explicit; otherwise pause additional public consumer regressions and look
+  for a concrete gap that reduces operator or project-agent context load.
 
 ## Recent Progress
+
+- 2026-06-04T06:24:13+08:00: Fixed a public handoff-context gap in Goal
+  Harness. `derive_recommended_action()` previously read only the first eight
+  non-empty `Next Action` lines, so a long but still single wrapped bullet could
+  be clipped mid-sentence in `refresh-state`, `quota should-run`, and status
+  consumers. Raised the recommended-action section window to 16 lines and added
+  a regression in `examples/heartbeat-quota-flow-smoke.py` with a wrapped
+  bullet over eight lines, asserting both the refresh payload and follow-up
+  quota payload preserve the tail sentence. Validation:
+  `python3 examples/heartbeat-quota-flow-smoke.py`, `python3 -m py_compile
+  goal_harness/state_refresh.py examples/heartbeat-quota-flow-smoke.py`,
+  touched-file `git diff --check`, and a 2-file public/private
+  `goal-harness check` all passed. The commit excludes the pre-existing dirty
+  README. Critic: this fixes accidental truncation but does not change the
+  product rule that `Next Action` should stay short; longer context belongs in
+  ledger/evidence surfaces.
 
 - 2026-06-04T06:15:13+08:00: Ran the post-monitor steering audit. Candidates:
   map the private platform-migration pilot state, add another public consumer

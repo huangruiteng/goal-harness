@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOAL_ID = "heartbeat-flow-main-control"
+LONG_NEXT_ACTION_TAIL = "without truncating the final private-safe boundary sentence."
 
 
 def run_cli(root: Path, *args: str, registry_path: Path, runtime: Path) -> dict:
@@ -55,7 +56,13 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "## Objective\n\n"
         "Exercise heartbeat quota accounting.\n\n"
         "## Next Action\n\n"
-        "- Run one bounded heartbeat marker and account exactly one spend slot.\n\n"
+        "- Run one bounded heartbeat marker, preserve the wrapped next-action\n"
+        "  continuation across more than eight public-safe lines, keep the current\n"
+        "  owner gate context intact, keep the validation context intact, keep the\n"
+        "  quota accounting context intact, keep the project-agent handoff context\n"
+        "  intact, keep the public/private boundary context intact, keep the\n"
+        "  status-queue routing context intact, keep the review packet context\n"
+        "  intact, and finish " + LONG_NEXT_ACTION_TAIL + "\n\n"
         "## Progress Ledger\n\n"
         "- Initialized fixture.\n",
         encoding="utf-8",
@@ -154,6 +161,7 @@ def main() -> int:
         )
         assert refresh["ok"] is True, refresh
         assert refresh["appended"] is True, refresh
+        assert LONG_NEXT_ACTION_TAIL in refresh["recommended_action"], refresh
         assert count_spend_events(runtime) == 0
 
         spend = run_cli(
@@ -196,6 +204,7 @@ def main() -> int:
         assert follow_up["status"] == "state_refreshed", follow_up
         assert follow_up["quota"]["spent_slots"] == 1, follow_up
         assert follow_up["quota"]["allowed_slots"] == 2, follow_up
+        assert LONG_NEXT_ACTION_TAIL in follow_up["recommended_action"], follow_up
         assert registry_path.read_text(encoding="utf-8") == registry_before
 
     print("heartbeat-quota-flow-smoke ok")

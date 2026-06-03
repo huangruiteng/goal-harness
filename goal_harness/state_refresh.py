@@ -17,6 +17,7 @@ from .runtime import validate_goal_id_path_segment
 
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
 DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the next bounded progress segment"
+RECOMMENDED_ACTION_SECTION_LINE_LIMIT = 16
 BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 
 
@@ -103,7 +104,7 @@ def section_list_items(lines: list[str]) -> list[str]:
 
 
 def derive_recommended_action(state_text: str) -> str:
-    lines = extract_section_lines(state_text, "Next Action", limit=8)
+    lines = extract_section_lines(state_text, "Next Action", limit=RECOMMENDED_ACTION_SECTION_LINE_LIMIT)
     for index, line in enumerate(lines):
         action = first_action_item(lines, index)
         if not action:
