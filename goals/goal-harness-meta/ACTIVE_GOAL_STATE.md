@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T14:44:04+08:00
+updated_at: 2026-06-03T14:54:45+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,37 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Status Markdown `project_asset` now carries the first open user and agent todo
-  in the hot path, matching the JSON/dashboard project-asset contract without
-  forcing agents to scan detailed todo sections. The next heartbeat should
-  leave packet/todo parity unless a new concrete mismatch appears; prefer a P0
-  state/safety audit or a focused dashboard detail-vs-first-screen duplicate
-  burden audit.
+- Status data contract now states that `attention_queue.items` and
+  `project_asset` are the current routing authority for owner/gate/waiting
+  party/next action, while `run_history.latest_runs` is only evidence and
+  drill-down. The next heartbeat should audit whether heartbeat/pre-tick
+  consumers follow this authority split, or move to a real adapter-proof handoff
+  that does not touch target project repositories unless explicitly requested.
 
 ## Recent Progress
 
+- 2026-06-03T14:54:45+08:00: Steering audit candidates were: P0 state/safety
+  contract gap after a project-local pre-tick consumer was found to rely on a
+  limited latest-run slice; P0 real adapter-proof handoff for a controller-ready
+  project line; P0 dashboard duplicate-burden audit; P1 dashboard polish; and
+  P2 no-progress guard tuning. Continuation check: recent slices consumed
+  packet/todo parity focus, so continuing that topic lost unless a fresh
+  mismatch appeared. The chosen step fixed the generic state-truth contract
+  instead: consumers must route from current `attention_queue.items` /
+  `project_asset`, not from truncated `run_history.latest_runs`. No-progress
+  self-stop check: not triggered because recent eligible heartbeats produced
+  committed artifacts or validation signals, and this turn produced a public
+  contract patch. Bounded output: updated `docs/status-data-contract.md` with
+  the current-routing-authority rule. Validation: initial `goal-harness check`
+  failed only because an isolated shell lacked the preflight PATH; rerun with
+  `export PATH="$HOME/.local/bin:$PATH"` passed with warnings=0 and a clean
+  public boundary scan over 82 files; `git diff --check` passed; `rg` confirmed
+  the new contract text. Critic: this is a small but important anti-overload
+  fix because it protects agents from stale evidence while preserving the
+  historical evidence surface; residual risk is that some existing consumers
+  may still need an audit for this split. Losing candidate: the dashboard
+  duplicate-burden audit remains useful, but should wait behind state-truth
+  consumers.
 - 2026-06-03T14:44:04+08:00: Steering audit candidates were: P0 duplicate
   dashboard packet/panel surface audit, P0 status Markdown versus project-asset
   packet parity, P0 state/safety public-boundary check, P1 dashboard polish, and

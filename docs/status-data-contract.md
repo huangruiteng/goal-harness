@@ -296,6 +296,12 @@ Item fields:
   unfinished user and agent todo here when available, so hot-path readers do not
   need to scan the detailed todo sections. The richer top-level `user_todos`,
   `agent_todos`, and `quota` fields remain available for detailed views.
+- Current routing authority: consumers should choose the current owner, gate,
+  waiting party, and next action from `attention_queue.items` and its
+  `project_asset`. `run_history.latest_runs` is an evidence and drill-down
+  surface; it may be limited by status command limits or filters, so consumers
+  must not use it as the sole source for deciding whether a gate is still
+  pending or already approved.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
 - `agent_command`: optional command or instruction for the target project agent
