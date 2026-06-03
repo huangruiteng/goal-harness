@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T11:06:50+08:00
+updated_at: 2026-06-03T11:08:34+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -53,15 +53,23 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Public daily iteration no longer needs an explicit operator request before
-  commit, push, or PR creation. If the public-sensitive scan is clean,
-  validation passes, and no private or company-internal material is present,
-  publish the current Goal Harness changes to GitHub. After publication, move
-  to the next bounded P0/P1 control-plane slice instead of continuing packaging
-  hygiene.
+- The validated public dirty tree was published to GitHub as `628aae4 Improve
+  heartbeat lifecycle and dashboard actions`. Future heartbeats should move to
+  the next bounded P0/P1 control-plane slice instead of continuing packaging
+  hygiene; autonomous public commit/push remains allowed after clean validation
+  and boundary scans.
 
 ## Recent Progress
 
+- 2026-06-03T11:08:34+08:00: Published the validated public dirty tree to
+  GitHub on `main` as `628aae4 Improve heartbeat lifecycle and dashboard
+  actions`. Validation before publication covered 18 smoke scripts, heartbeat
+  prompt/status/user-todo/contract smoke tests, dashboard build, dashboard
+  reward append browser smoke, public boundary check, targeted sensitive scan,
+  and diff checks. Bounded output: public commit and push completed; this
+  state-only writeback moves Next Action away from packaging hygiene. Critic:
+  publication is complete, so the next heartbeat should pick a new bounded P0/P1
+  control-plane improvement rather than revalidating the same tree.
 - 2026-06-03T11:06:50+08:00: Publication validation passed for the current
   public Goal Harness dirty tree after the autonomous publish policy update.
   Validation: `python3 examples/run-smokes.py` passed 18 smoke scripts;
