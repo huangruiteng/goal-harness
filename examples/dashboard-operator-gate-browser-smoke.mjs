@@ -12,8 +12,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/dashboard");
 const fixtureName = "status.operator-gate.browser-smoke.json";
 const approvedFixtureName = "status.operator-gate-approved.browser-smoke.json";
+const staleHistoryApprovedFixtureName = "status.operator-gate-approved-stale-history.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const approvedFixturePath = resolve(dashboardDir, "public", approvedFixtureName);
+const staleHistoryApprovedFixturePath = resolve(dashboardDir, "public", staleHistoryApprovedFixtureName);
 const playwrightCliOutputDir = resolve(repoRoot, ".playwright-cli");
 const port = Number(process.env.GOAL_HARNESS_DASHBOARD_OPERATOR_GATE_SMOKE_PORT ?? "5192");
 const session = `ghog${process.pid}`;
@@ -254,6 +256,66 @@ const approvedStatusFixture = {
   },
 };
 
+const staleHistoryApprovedStatusFixture = {
+  ...approvedStatusFixture,
+  run_history: {
+    ...approvedStatusFixture.run_history,
+    goals: [
+      {
+        ...statusFixture.run_history.goals[0],
+        status: "operator_gate_deferred",
+        lifecycle_phase: "planned",
+        lifecycle_flags: ["planned"],
+        index_exists: true,
+        raw_index_records: 1,
+        unique_runs: 1,
+        latest_runs: [
+          {
+            generated_at: "2026-01-01T00:00:00+00:00",
+            goal_id: goalId,
+            classification: "operator_gate_deferred",
+            lifecycle_phase: "planned",
+            lifecycle_flags: ["planned"],
+            recommended_action: "ask the stale operator gate again",
+            health_check: "stale latest run should not drive dashboard action selection",
+            json_exists: true,
+            markdown_exists: true,
+            operator_gate: {
+              recorded_at: "2026-01-01T00:00:00+00:00",
+              gate: "read_only_map_opt_in",
+              decision: "defer",
+              operator_question: operatorQuestion,
+              reason_summary: "stale defer should not replace the current queue item",
+              agent_command: "goal-harness stale-command --dry-run",
+            },
+          },
+        ],
+      },
+    ],
+    recent_runs: [
+      {
+        generated_at: "2026-01-01T00:00:00+00:00",
+        goal_id: goalId,
+        classification: "operator_gate_deferred",
+        lifecycle_phase: "planned",
+        lifecycle_flags: ["planned"],
+        recommended_action: "ask the stale operator gate again",
+        health_check: "stale latest run should not drive dashboard action selection",
+        json_exists: true,
+        markdown_exists: true,
+        operator_gate: {
+          recorded_at: "2026-01-01T00:00:00+00:00",
+          gate: "read_only_map_opt_in",
+          decision: "defer",
+          operator_question: operatorQuestion,
+          reason_summary: "stale defer should not replace the current queue item",
+          agent_command: "goal-harness stale-command --dry-run",
+        },
+      },
+    ],
+  },
+};
+
 function runPw(args, { allowFailure = false, timeoutMs = 30_000 } = {}) {
   const result = spawnSync("bash", [pwcli, ...args], {
     cwd: repoRoot,
@@ -424,6 +486,7 @@ async function main() {
 
   await writeFile(fixturePath, JSON.stringify(statusFixture, null, 2) + "\n", "utf-8");
   await writeFile(approvedFixturePath, JSON.stringify(approvedStatusFixture, null, 2) + "\n", "utf-8");
+  await writeFile(staleHistoryApprovedFixturePath, JSON.stringify(staleHistoryApprovedStatusFixture, null, 2) + "\n", "utf-8");
 
   const server = spawn("npm", ["run", "dev", "--", "--port", String(port), "--strictPort"], {
     cwd: dashboardDir,
@@ -536,11 +599,37 @@ async function main() {
     requireExactTextCount(body, "Run approved agent command", 1, "Approved Codex-ready action card count");
     requireExactTextCount(body, "Copy", 1, "Approved review-packet copy count");
     requireTextOrder(body, ["Project", goalId, "Run approved agent command"], "Approved project-first card identity");
+
+    navigateTo(`${baseUrl}/?statusUrl=/${staleHistoryApprovedFixtureName}&goalId=${goalId}&actionKind=all`);
+    body = await readBodyText({ requiredText: "Copy" });
+    requireTexts(body, [
+      "1 actions",
+      "Project",
+      goalId,
+      "Codex",
+      "Run approved agent command",
+      "Approved handoff",
+      "Approved agent command",
+      "approved command",
+      "Copy",
+    ], "current queue over stale history dashboard");
+    forbidTexts(body, [
+      "Review controller opt-in",
+      "Needs approval",
+      "Agent command ready after approval",
+      "Operator gate dry-run draft",
+      "Operator Review Packet",
+      "Copy Review Packet",
+    ], "Current queue approved action was replaced by stale run-history gate");
+    requireExactTextCount(body, "Run approved agent command", 1, "Current queue approved card count over stale history");
+    requireExactTextCount(body, "Copy", 1, "Current queue approved packet copy count over stale history");
+    requireTextOrder(body, ["Project", goalId, "Run approved agent command"], "Current queue approved project-first card identity");
     console.log("dashboard-operator-gate-browser-smoke ok");
   } finally {
     server.kill("SIGTERM");
     await rm(fixturePath, { force: true });
     await rm(approvedFixturePath, { force: true });
+    await rm(staleHistoryApprovedFixturePath, { force: true });
     runPw(["close"], { allowFailure: true, timeoutMs: 5_000 });
     runPw(["kill-all"], { allowFailure: true, timeoutMs: 5_000 });
     forceKillBrowserSession();

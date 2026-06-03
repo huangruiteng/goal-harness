@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T15:09:08+08:00
+updated_at: 2026-06-03T15:14:52+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,39 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Review Packet now has a regression smoke proving that a current approved
-  `attention_queue` item can override stale `run_history.latest_runs` gate
-  evidence when building an agent handoff. The next heartbeat should audit
-  dashboard action selection for the same routing split, or move to a real
-  adapter-proof handoff that does not touch target project repositories unless
-  explicitly requested.
+- Dashboard action selection now has a browser smoke proving that a current
+  approved `attention_queue` item can override stale `run_history.latest_runs`
+  gate evidence on the first-screen action card. The next heartbeat should move
+  to a real adapter-proof handoff that does not touch target project
+  repositories unless explicitly requested, or audit another concrete consumer
+  only if a fresh state-truth mismatch appears.
 
 ## Recent Progress
 
+- 2026-06-03T15:14:52+08:00: Steering audit candidates were: P0 dashboard
+  action-selection audit for the current-routing-authority split, P0 real
+  adapter-proof handoff for a controller-ready project line, P1 communication
+  artifact polish using the now-stable control loop, and P2 no-progress guard
+  tuning. Continuation check: this was another state-truth slice, but it covered
+  the last first-screen hot-path consumer after quota and Review Packet. It won
+  because the dashboard is the operator's primary action surface; if it were
+  driven by stale `run_history.latest_runs`, the user could still see an old
+  approval gate instead of the current approved handoff. No-progress self-stop
+  check: not triggered because recent eligible heartbeats produced committed
+  artifacts or validation signals, and this turn produced a browser-level
+  regression smoke. Bounded output: updated
+  `examples/dashboard-operator-gate-browser-smoke.mjs` with a fixture where the
+  current `attention_queue` item is `operator_gate_approved` /
+  `waiting_on=codex` with an approved `agent_command`, while
+  `run_history.latest_runs` deliberately remains `operator_gate_deferred`.
+  Validation: `node examples/dashboard-operator-gate-browser-smoke.mjs` passed;
+  `npm --prefix apps/dashboard run build` passed with the existing large-chunk
+  warning; `goal-harness --format json check --scan-root .` passed with
+  warnings=0 and a clean public boundary scan over 82 files; `git diff --check`
+  passed. Critic: this closes the three main hot-path current-authority
+  consumers without changing dashboard logic, but it is still fixture-based and
+  should not expand into more UI tests unless a new mismatch appears. Losing
+  candidate: real adapter-proof handoff is now the strongest next candidate.
 - 2026-06-03T15:09:08+08:00: Steering audit candidates were: P0 Review Packet
   consumer audit for the current-routing-authority split, P0 dashboard
   action-selection audit, P0 real adapter-proof handoff for a controller-ready
