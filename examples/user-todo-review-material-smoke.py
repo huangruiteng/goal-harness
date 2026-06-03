@@ -164,9 +164,11 @@ def main() -> None:
         assert material["exists"] is True, material
         assert "resolved_path" not in material, material
         assert "resolved_path" not in json.dumps(item, ensure_ascii=False), item
+        assert "todo_state_file" not in item, item
         markdown = render_status_markdown(payload)
         assert "review_material: review.md exists=True" in markdown, markdown
         assert "resolved_path" not in markdown, markdown
+        assert "todo_state_file" not in markdown, markdown
 
         port = free_port()
         server = start_server(repo_root, registry, runtime_root, port)

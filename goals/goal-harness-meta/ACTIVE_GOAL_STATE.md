@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:18:18+08:00
+updated_at: 2026-06-04T07:22:48+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,24 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Audit the remaining status queue path metadata boundary, especially whether
-  `todo_state_file` belongs in the public-safe queue item or only in a debug
-  layer. Keep it as an interface-budget guard, not a new feature.
+- Add a lightweight no-local-path smoke for `attention_queue` so future queue
+  fields cannot reintroduce machine-specific absolute paths. Keep it as an
+  interface-budget guard, not a new feature.
 
 ## Recent Progress
+
+- 2026-06-04T07:22:48+08:00: Removed active-state file path metadata from
+  public `attention_queue` items. `goal_harness/status.py` no longer injects
+  `todo_state_file`, and `docs/status-data-contract.md` now states that local
+  active-state paths are debug/source metadata rather than public-safe queue
+  fields. The review-material smoke now asserts queue items and markdown omit
+  both `todo_state_file` and `resolved_path` while preserving material endpoint
+  readability. Validation: user-todo review-material smoke, status markdown
+  smoke, platform-migration material registry smoke, touched Python compile,
+  touched-file `git diff --check`, live global queue path-metadata redaction
+  check, and public/private `goal-harness check`. Critic: this closes the
+  known path fields; a general no-local-path smoke would better prevent future
+  field-name variants.
 
 - 2026-06-04T07:18:18+08:00: Added a lightweight status todo projection
   redaction. `goal_harness/status.py` now removes review material

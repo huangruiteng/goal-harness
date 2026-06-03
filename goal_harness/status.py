@@ -398,7 +398,6 @@ def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
     fields = parse_active_state_todos(state_text, goal=goal, state_path=state_path)
     if fields:
         fields = redacted_status_todo_fields(fields)
-        fields["todo_state_file"] = str(state_path)
     return fields
 
 

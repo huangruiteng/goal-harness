@@ -342,8 +342,10 @@ Item fields:
   `## Codex Todo`, or `## Project Agent Todo`. Agent-facing consumers may use
   it to choose implementation work after gates and quota allow execution; it is
   not a user approval signal.
-- `todo_state_file`: optional local path to the active state file that produced
-  `user_todos` / `agent_todos`.
+- Local active-state file paths are intentionally omitted from queue items.
+  They are useful debug/source metadata, but the public-safe status queue should
+  identify work by `goal_id`, project asset state, and compact todos instead of
+  exposing machine-specific paths.
 - `source`: `contract`, `registry`, `run_history`, or `latest_run`.
 - `controller_stage`: optional compact controller-readiness classification from
   the latest run.
