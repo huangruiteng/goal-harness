@@ -286,7 +286,9 @@ common modes are:
   if there is no new user instruction, owner evidence, agent todo, stale source,
   or safe handoff, return a quiet no-op without another dry-run or quota spend.
 - `steering_audit_then_one_step`: the goal is eligible but needs the normal
-  steering audit before selecting one bounded step.
+  steering audit before selecting one bounded progress segment. A coherent
+  implementation/test/state batch is valid when scope and validation are clear;
+  the contract is bounded, not tiny.
 
 Unknown goals or status collection failures return non-zero so automations fail
 closed.
@@ -312,9 +314,11 @@ counter.
 Post-turn accounting protocol:
 
 - call `quota should-run` before spending delivery compute;
-- do the bounded automatic turn, validation, and required state refresh;
+- do the bounded automatic turn, validation, and state writeback;
 - append exactly one `quota spend-slot --execute` event for that completed
-  turn;
+  turn before any state-only refresh that might close the active delivery lane;
+- refresh state after spend when the dashboard or controller needs the updated
+  state projection;
 - do not append spend for quiet `should_run=false` skips, preflight failures,
   pure dry-run previews, or duplicate accounting attempts;
 - if `should_run=false` but `safe_bypass_allowed=true` and the agent actually

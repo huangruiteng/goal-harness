@@ -163,7 +163,8 @@ goal-harness new-project-prompt \
    ```
 8. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的
    adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh
-   run：
+   run；若本轮实际消耗了 automatic delivery compute，则把这个 refresh 放到
+   quota spend 之后，避免 state refresh 先关闭 active delivery lane：
 
    ```bash
    goal-harness refresh-state --goal-id <STABLE_GOAL_ID>
@@ -176,8 +177,9 @@ goal-harness new-project-prompt \
    - `goal-harness status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `goal-harness check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
 10. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、
-   实现推进或验证推进），在 validation 和必要的 `refresh-state` 完成后，只
-   append 一次 quota spend：
+   实现推进或验证推进），在 validation / writeback 完成后、任何可能关闭 active delivery
+   lane 的 state-only `refresh-state` 之前，只 append 一次 quota spend；需要 dashboard
+   或 controller 看到新状态时，再在 spend 后 refresh：
 
    ```bash
    goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute

@@ -509,7 +509,7 @@ def _heartbeat_recommendation(
         "source": "quota.should-run",
         "recommended_mode": "skip",
         "notify": "DONT_NOTIFY",
-        "spend_policy": "do not append quota spend unless a completed bounded step produced substantive progress",
+        "spend_policy": "do not append quota spend unless a completed bounded progress segment produced substantive progress",
     }
 
     if state == "operator_gate":
@@ -574,7 +574,7 @@ def _heartbeat_recommendation(
     return {
         **base,
         "recommended_mode": "steering_audit_then_one_step",
-        "spend_policy": "append exactly one heartbeat spend only after a bounded step is validated and written back",
+        "spend_policy": "append exactly one heartbeat spend only after a bounded progress segment is validated and written back",
         "reason": "eligible Codex-ready goal requires the standard steering audit before delivery",
     }
 

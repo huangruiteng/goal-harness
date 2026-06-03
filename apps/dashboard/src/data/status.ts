@@ -239,6 +239,39 @@ export const globalRegistryHealthSchema = z.object({
   checks: z.array(z.string()).optional().default([]),
 });
 
+export const usageTotalsSchema = z.object({
+  runs_24h: z.number().optional().default(0),
+  runs_7d: z.number().optional().default(0),
+  quota_spend_slots_24h: z.number().optional().default(0),
+  quota_spend_slots_7d: z.number().optional().default(0),
+  automation_run_count_24h: z.number().optional().default(0),
+  automation_run_count_7d: z.number().optional().default(0),
+});
+
+export const usageGoalSchema = usageTotalsSchema.extend({
+  goal_id: z.string(),
+  project_share_24h: z.number().optional().default(0),
+});
+
+const defaultUsageTotals = {
+  runs_24h: 0,
+  runs_7d: 0,
+  quota_spend_slots_24h: 0,
+  quota_spend_slots_7d: 0,
+  automation_run_count_24h: 0,
+  automation_run_count_7d: 0,
+};
+
+export const usageSummarySchema = z.object({
+  available: z.boolean().optional().default(true),
+  source: z.string().optional().default("run_history"),
+  generated_at: z.string().optional().nullable(),
+  sample_run_count: z.number().optional().default(0),
+  proxy_note: z.string().optional().nullable(),
+  totals: usageTotalsSchema.optional().default(defaultUsageTotals),
+  goals: z.array(usageGoalSchema).optional().default([]),
+}).optional().nullable();
+
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
   registry: z.string(),
@@ -291,6 +324,7 @@ export const statusPayloadSchema = z.object({
     goals: [],
     recent_runs: [],
   }),
+  usage_summary: usageSummarySchema.default(null),
 });
 
 export const rewardDryRunResponseSchema = z.object({
@@ -333,6 +367,7 @@ export type TodoItem = z.infer<typeof todoItemSchema>;
 export type ReviewMaterial = z.infer<typeof reviewMaterialSchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;
+export type UsageSummary = NonNullable<z.infer<typeof usageSummarySchema>>;
 export type RunGoal = z.infer<typeof runGoalSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 export type RewardDryRunResponse = z.infer<typeof rewardDryRunResponseSchema>;

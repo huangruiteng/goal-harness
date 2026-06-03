@@ -49,6 +49,7 @@ import {
   ProjectAssetLatestValidation,
   ProjectAssetTodoSummary,
   TodoGroup,
+  UsageSummary,
   exampleStatusPayload,
   formatStatusError,
   parseRewardDryRunResponse,
@@ -3528,6 +3529,8 @@ export function DashboardPage() {
                 <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
               </section>
 
+              <UsageStatsPanel usage={payload.usage_summary} />
+
               <GoalDirectory rows={goalRows} onSelectGoal={selectGoal} selectedGoalId={selectedGoalId} />
 
               <GlobalRegistryHealthPanel health={payload.global_registry} />
@@ -3707,6 +3710,91 @@ export function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function formatUsageCount(value?: number | null) {
+  return String(value ?? 0);
+}
+
+function formatUsageShare(value?: number | null) {
+  return `${Math.round((value ?? 0) * 100)}%`;
+}
+
+function UsageMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-h-20 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="text-xs font-medium uppercase text-slate-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-2 break-words text-2xl font-semibold text-slate-950 dark:text-zinc-50">{value}</div>
+    </div>
+  );
+}
+
+function UsageStatsPanel({ usage }: { usage?: UsageSummary | null }) {
+  if (!usage?.available) {
+    return null;
+  }
+  const totals = usage.totals;
+  const topGoals = usage.goals.slice(0, 5);
+  return (
+    <Card>
+      <CardHeader className="flex-wrap">
+        <CardTitle className="flex items-center gap-2">
+          <Gauge className="h-4 w-4" />
+          Usage Snapshot
+        </CardTitle>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="info">{usage.source}</Badge>
+          <Badge variant="neutral">{usage.sample_run_count} samples</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <UsageMetric label="24h turns" value={formatUsageCount(totals.runs_24h)} />
+          <UsageMetric label="7d turns" value={formatUsageCount(totals.runs_7d)} />
+          <UsageMetric
+            label="Quota slots"
+            value={`${formatUsageCount(totals.quota_spend_slots_24h)} / ${formatUsageCount(totals.quota_spend_slots_7d)}`}
+          />
+          <UsageMetric
+            label="Automation"
+            value={`${formatUsageCount(totals.automation_run_count_24h)} / ${formatUsageCount(totals.automation_run_count_7d)}`}
+          />
+        </div>
+        {topGoals.length ? (
+          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800">
+            <div className="grid grid-cols-[minmax(0,1fr)_80px_80px_80px] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+              <div>Goal</div>
+              <div className="text-right">24h</div>
+              <div className="text-right">7d</div>
+              <div className="text-right">Share</div>
+            </div>
+            <div className="divide-y divide-slate-200 dark:divide-zinc-800">
+              {topGoals.map((goal) => (
+                <div
+                  className="grid grid-cols-[minmax(0,1fr)_80px_80px_80px] gap-2 px-3 py-2 text-sm"
+                  key={goal.goal_id}
+                >
+                  <div className="min-w-0 break-all font-medium text-slate-900 dark:text-zinc-100">{goal.goal_id}</div>
+                  <div className="text-right text-slate-600 dark:text-zinc-300">{goal.runs_24h}</div>
+                  <div className="text-right text-slate-600 dark:text-zinc-300">{goal.runs_7d}</div>
+                  <div className="text-right text-slate-600 dark:text-zinc-300">{formatUsageShare(goal.project_share_24h)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {usage.proxy_note ? (
+          <div className="mt-3 text-xs text-slate-500 dark:text-zinc-400">{usage.proxy_note}</div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 

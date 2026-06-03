@@ -54,17 +54,64 @@ def recent_runs(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [run for run in runs if isinstance(run, dict)]
 
 
+def goals_by_id(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    history = payload.get("run_history")
+    if not isinstance(history, dict):
+        return {}
+    goals = history.get("goals")
+    if not isinstance(goals, list):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for goal in goals:
+        if not isinstance(goal, dict):
+            continue
+        goal_id = str(goal.get("id") or "")
+        if goal_id:
+            result[goal_id] = goal
+    return result
+
+
 def severity_class(item: dict[str, Any]) -> str:
     severity = str(item.get("severity") or "action")
     return severity if severity in {"high", "action", "watch"} else "action"
 
 
-def render_item(item: dict[str, Any]) -> str:
+def authority_summary(goal: dict[str, Any] | None) -> str | None:
+    registry = goal.get("authority_registry") if isinstance(goal, dict) else None
+    if not isinstance(registry, dict) or not registry.get("declared"):
+        return None
+    materials = int(registry.get("project_material_count") or 0)
+    topics = int(registry.get("topic_authority_count") or 0)
+    if materials <= 0 and topics <= 0:
+        return None
+    entries_present = int(registry.get("default_entries_present") or 0)
+    entries_total = int(registry.get("default_entry_count") or 0)
+    return (
+        f"entries {entries_present}/{entries_total}; topics {topics}; "
+        f"materials {materials}; repos {int(registry.get('project_material_repository_count') or 0)}; "
+        f"owner review {int(registry.get('project_material_owner_review_required_count') or 0)}; "
+        f"stale {int(registry.get('project_material_stale_count') or 0)}; "
+        f"risk {registry.get('conflict_risk') or 'unknown'}"
+    )
+
+
+def render_item(item: dict[str, Any], *, goals: dict[str, dict[str, Any]] | None = None) -> str:
     status = esc(item.get("status"))
     phase = esc(item.get("lifecycle_phase"))
     waiting = esc(item.get("waiting_on"))
     source = esc(item.get("source"))
     action = esc(item.get("recommended_action"))
+    goal = goals.get(str(item.get("goal_id") or "")) if goals else None
+    authority = authority_summary(goal)
+    authority_block = ""
+    if authority:
+        authority_block = f"""
+          <div class="gate-summary">
+            <strong>Authority</strong>
+            <span>{esc(authority)}</span>
+            <p>Public-safe counts only; no source links or raw material text.</p>
+          </div>
+        """
     missing = item.get("missing_gates") if isinstance(item.get("missing_gates"), list) else []
     missing_text = ", ".join(esc(gate) for gate in missing if gate)
     gate_block = ""
@@ -89,6 +136,7 @@ def render_item(item: dict[str, Any]) -> str:
             <dt>Source</dt><dd>{source}</dd>
           </dl>
           <p>{action}</p>
+          {authority_block}
           {gate_block}
         </article>
     """
@@ -141,9 +189,15 @@ def render_run(run: dict[str, Any]) -> str:
     """
 
 
-def render_lane(title: str, waiting_values: set[str], items: list[dict[str, Any]]) -> str:
+def render_lane(
+    title: str,
+    waiting_values: set[str],
+    items: list[dict[str, Any]],
+    *,
+    goals: dict[str, dict[str, Any]] | None = None,
+) -> str:
     lane_items = [item for item in items if str(item.get("waiting_on")) in waiting_values]
-    body = "\n".join(render_item(item) for item in lane_items)
+    body = "\n".join(render_item(item, goals=goals) for item in lane_items)
     if not body:
         body = '<p class="empty">No goals in this lane.</p>'
     return f"""
@@ -162,7 +216,8 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     summary = contract.get("summary") if isinstance(contract.get("summary"), dict) else {}
     queue = payload.get("attention_queue") if isinstance(payload.get("attention_queue"), dict) else {}
     items = queue_items(payload)
-    lanes = "\n".join(render_lane(title, values, items) for _, title, values in LANES)
+    goals = goals_by_id(payload)
+    lanes = "\n".join(render_lane(title, values, items, goals=goals) for _, title, values in LANES)
     runs = recent_runs(payload)
     run_details = "\n".join(render_run(run) for run in runs[:5])
     if not run_details:

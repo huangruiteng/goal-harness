@@ -53,6 +53,42 @@ def write_planned_registry(root: Path) -> Path:
                         "status": "planned-high-complexity",
                         "repo": str(project),
                         "state_file": state_file,
+                        "authority_registry": {
+                            "path": "docs/meta/DOC_REGISTRY.yaml",
+                            "read_status": "read",
+                            "default_entry_docs": [
+                                "README.md",
+                                "docs/GOAL.md",
+                            ],
+                            "topic_authority": {
+                                "goal": "docs/GOAL.md",
+                                "validation": "docs/VALIDATION.md",
+                            },
+                            "project_materials": {
+                                "migration_design": {
+                                    "role": "current_authority",
+                                    "source_kind": "external_doc",
+                                    "freshness": "owner_review_required",
+                                },
+                                "source_repo": {
+                                    "role": "source_surface",
+                                    "source_kind": "repository",
+                                    "freshness": "read_only_status_ok",
+                                },
+                                "target_repo": {
+                                    "role": "implementation_surface",
+                                    "source_kind": "repository",
+                                    "freshness": "read_only_status_ok",
+                                },
+                                "historical_note": {
+                                    "role": "historical_reference",
+                                    "source_kind": "external_doc",
+                                    "freshness": "stale",
+                                },
+                            },
+                            "deprecated_source_count": 0,
+                            "conflict_risk": "low",
+                        },
                         "adapter": {
                             "kind": "complex_project_read_only_map_v0",
                             "status": "planned",
@@ -312,6 +348,7 @@ def main() -> int:
         packet = markdown_result.stdout
         assert "【Goal Harness Review Packet】" in packet, packet
         assert "类型：Controller" in packet, packet
+        assert "材料：authority/material: topics=2, materials=4, repositories=2, owner_review_required=1, stale=1, current_authority=1, risk=low（仅脱敏计数；不含内部链接、路径或正文。）" in packet, packet
         assert "待办：Read owner review worksheet first.（先处理/暂缓再判 gate）" in packet, packet
         assert f"建议判断：先确认待办；完成后：同意 {GOAL_ID} 先做 read-only map dry-run；不授权写入或生产动作。" in packet, packet
         assert f"回复：同意 {GOAL_ID} 先做 read-only map dry-run / 暂不同意 + 一句话原因。" in packet, packet
@@ -325,13 +362,15 @@ def main() -> int:
         assert "上下文规则：本段只携带最小当前指令" in packet, packet
         assert "不要从旧聊天或旧 packet 拼当前状态" in packet, packet
         assert "Agent 待办：Run the read-only map dry-run after owner todo resolution." in packet, packet
+        assert "材料上下文：authority/material: topics=2, materials=4, repositories=2, owner_review_required=1, stale=1, current_authority=1, risk=low" in packet, packet
+        assert "不要要求内部链接或原文" in packet, packet
         assert "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。" in packet, packet
         assert "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。" in packet, packet
         assert "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。" in packet, packet
         assert "read-only-map" in packet, packet
         assert_order(
             packet,
-            ["【人只需判断】", "待办：Read owner review worksheet first.", "【用户本地 Gate 记录草稿】", "operator-gate", "【给项目 Agent】", "目标校验", "Agent 待办", "read-only-map"],
+            ["材料：authority/material", "【人只需判断】", "待办：Read owner review worksheet first.", "【用户本地 Gate 记录草稿】", "operator-gate", "【给项目 Agent】", "目标校验", "Agent 待办", "材料上下文", "read-only-map"],
         )
         assert not run_dir.exists(), "review-packet must not write runtime runs"
 
@@ -358,6 +397,7 @@ def main() -> int:
         assert payload["project_agent_command"], payload
         assert payload["user_todo_text"] == "Read owner review worksheet first.", payload
         assert payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", payload
+        assert payload["authority_summary"] == "authority/material: topics=2, materials=4, repositories=2, owner_review_required=1, stale=1, current_authority=1, risk=low", payload
         assert "转发条件" in payload["packet"], payload
         assert not run_dir.exists(), "json review-packet must not write runtime runs"
 
@@ -382,6 +422,7 @@ def main() -> int:
         assert "上下文规则：本段只携带最小当前指令" in approved_packet, approved_packet
         assert "不要从旧聊天或旧 packet 拼当前状态" in approved_packet, approved_packet
         assert "Agent 待办：Run the read-only map dry-run after owner todo resolution." in approved_packet, approved_packet
+        assert "材料上下文：authority/material: topics=2, materials=4, repositories=2, owner_review_required=1, stale=1, current_authority=1, risk=low" in approved_packet, approved_packet
         assert "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。" in approved_packet, approved_packet
         assert "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。" in approved_packet, approved_packet
         assert "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。" in approved_packet, approved_packet
@@ -427,6 +468,7 @@ def main() -> int:
         assert approved_payload["operator_gate_approved_handoff"] is True, approved_payload
         assert approved_payload["project_agent_command"] == APPROVED_COMMAND, approved_payload
         assert approved_payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", approved_payload
+        assert approved_payload["authority_summary"] == payload["authority_summary"], approved_payload
         assert approved_payload["project_agent_handoff"], approved_payload
         assert "operator gate 已记录为 approve" in approved_payload["project_agent_handoff"], approved_payload
         assert "不要从旧聊天或旧 packet 拼当前状态" in approved_payload["project_agent_handoff"], approved_payload

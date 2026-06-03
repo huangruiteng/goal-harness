@@ -47,10 +47,12 @@ MUST_HAVE = (
     "docs/project-agent-todo-contract.md",
 )
 SPEND_MUST_HAVE = (
-    "validation 和必要的 `refresh-state` 完成后",
+    "validation / writeback 完成后",
+    "state-only `refresh-state` 之前",
     "只 append 一次 quota spend",
     'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id',
     "--source adapter --execute",
+    "再在 spend 后 refresh",
     "不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账",
     "实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账",
     "不要重复执行。",

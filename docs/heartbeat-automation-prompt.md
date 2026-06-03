@@ -200,8 +200,11 @@ If the result says should_run=true:
    through the Codex App automation management path, do not append a quota spend
    for that self-cancel turn, and return NOTIFY explaining that the automation
    was cancelled because it was spinning without progress.
-4. Choose exactly one bounded, verifiable step from that audit.
-5. Do that step only. Stay inside goal_boundary when present and keep
+4. Choose one bounded, verifiable progress segment from that audit. It may be a
+   coherent batch across related implementation, test, doc, and state-writeback
+   files when the write scope is clear and validation is explicit; it should not
+   be forced into a tiny single-file step.
+5. Do that segment only. Stay inside goal_boundary when present and keep
    public/private boundaries intact. Public-safe repo publication is not an
    operator gate by itself: for routine public project work, commit, push, and PR
    creation may proceed autonomously after validation and a clean public/private
@@ -279,11 +282,12 @@ repeated topics, then read `heartbeat_recommendation`: run
 once after validation; for `recommended_mode=mapped_noop_if_unchanged`, return a
 quiet no-op without another dry-run, file edit, or quota spend when no new
 instruction/evidence/todo/stale source/safe handoff exists. Then run the
-no-progress self-stop check, do one bounded verifiable step when a real step
-exists, validate it, write back changed files / validation / critic / next
-action, append exactly one
+no-progress self-stop check, do one bounded verifiable progress segment when a
+real step exists, validate it, write back changed files / validation / critic /
+next action, append exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
-event after the completed turn, then refresh state if needed. Use `--slots 1` for minute-based
+event after the completed turn and before any state-only refresh that might
+close the active delivery lane. Then refresh state if needed. Use `--slots 1` for minute-based
 heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
 turn.
 ```
@@ -314,10 +318,11 @@ For every automatic heartbeat turn, the agent-facing checklist is:
    validation and a public/private boundary scan; stop for private/company
    material, credentials, destructive git, production actions, or repo rules
    that explicitly require review.
-10. Work small when `should_run=true`.
+10. Work bounded when `should_run=true`; a coherent implementation/test/state
+    batch is fine when scope and validation are clear.
 11. Validate before reporting.
-12. Refresh state when the run is state-only.
-13. Spend exactly once after the completed turn.
+12. Spend exactly once after validation/writeback and before a state-only refresh.
+13. Refresh state when needed after spend.
 14. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work

@@ -173,8 +173,11 @@ If the result says `should_run=true`:
    through the Codex App automation management path, do not append a quota spend
    for that self-cancel turn, and return `NOTIFY` explaining that the automation
    was cancelled because it was spinning without progress.
-4. Choose exactly one bounded, verifiable step from that audit.
-5. Do that step only. Stay inside `goal_boundary` when present and keep
+4. Choose one bounded, verifiable progress segment from that audit. It may be a
+   coherent batch across related implementation, test, doc, and state-writeback
+   files when the write scope is clear and validation is explicit; it should not
+   be forced into a tiny single-file step.
+5. Do that segment only. Stay inside `goal_boundary` when present and keep
    public/private boundaries intact. Public-safe repo publication is not an
    operator gate by itself: for routine public project work, commit, push, and
    PR creation may proceed autonomously after validation and a clean
@@ -237,8 +240,8 @@ def render_brief_heartbeat_task_body(
     expanded_prompt_command = f"goal-harness heartbeat-prompt --goal-id {goal_id} --active-state {active_state}"
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-Brief installed Goal Harness heartbeat. Keep details out; daily
-contract: `{compact_prompt_command}`; audit:
+Brief installed Goal Harness heartbeat. Daily
+body: `{compact_prompt_command}`; audit:
 `{expanded_prompt_command}`.
 
 Preflight and quota guard:
@@ -256,7 +259,8 @@ todo, send one concise Chinese `NOTIFY`; otherwise quiet
 If allowed, follow compact contract: read active state/status queue;
 blocker-push before delivery; obey `heartbeat_recommendation` and
 `goal_boundary`;
-steering audit with product-bottleneck lens; choose one bounded verifiable step;
+steering audit with product-bottleneck lens; choose one bounded verifiable
+progress segment; coherent batches are allowed when scope/validation are clear;
 stop on private/company-internal material, credentials, destructive git,
 production actions, or explicit review rules; validate/write back files,
 validation, critic, next action; add todos with `goal-harness todo add`; refresh
@@ -335,8 +339,9 @@ If `should_run=true`:
    only repeat status/brief checks with no artifact, implementation/adapter
    progress, gate/user decision, or validation signal, pause/delete automation,
    `NOTIFY`, no spend.
-6. Choose one bounded, verifiable step. Public-safe commit, push, and
-   PR creation may proceed after validation and clean scan. Stop for
+6. Choose one bounded, verifiable progress segment. It may be a coherent batch
+   when scope and validation are clear. Public-safe commit, push, and PR
+   creation may proceed after validation and clean scan. Stop for
    private/company-internal material, credentials, destructive git, production
    actions, or explicit repo review rules.
 7. Validate; write files/validation/critic/next action to active state;

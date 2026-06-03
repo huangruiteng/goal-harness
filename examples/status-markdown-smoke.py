@@ -33,6 +33,9 @@ REGISTRY_OVERRIDE_QUESTION = "是否同意 owner/SOP review 完成后继续推�
 REGISTRY_OVERRIDE_HANDOFF = "owner/SOP decision recorded"
 USER_TODO_TEXT = "Read source topic account-vs-group note before owner review."
 AGENT_TODO_TEXT = "Build the P0 two-layer config worksheet."
+DELIVERY_GOAL_ID = "delivery-side-bypass"
+DELIVERY_ACTION = "Continue the ranker path with the next clean readiness implementation/test batch."
+DELIVERY_AGENT_TODO = "Add the readiness smoke plus the matching implementation guard when both paths are clean."
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -84,6 +87,94 @@ def write_planned_registry(root: Path) -> Path:
         encoding="utf-8",
     )
     return registry_path
+
+
+def write_connected_delivery_registry(root: Path) -> Path:
+    project = root / "project"
+    runtime = root / "runtime"
+    state_file = f".codex/goals/{DELIVERY_GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    registry_path = project / ".goal-harness" / "registry.json"
+
+    (project / Path(state_file).parent).mkdir(parents=True, exist_ok=True)
+    (project / state_file).write_text(
+        "---\n"
+        "status: active\n"
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Connected Delivery\n\n"
+        "## Agent Todo\n\n"
+        f"- [ ] {DELIVERY_AGENT_TODO}\n",
+        encoding="utf-8",
+    )
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": DELIVERY_GOAL_ID,
+                        "domain": "connected-delivery-fixture",
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": state_file,
+                        "adapter": {
+                            "kind": "fixture_connected_delivery_v0",
+                            "status": "connected-delivery",
+                        },
+                        "quota": {
+                            "compute": 0.33,
+                            "window_hours": 24,
+                        },
+                        "coordination": {
+                            "write_scope": ["src/**", "tests/**"],
+                            "requires_parent_approval": ["publish", "production-action"],
+                        },
+                        "guards": [
+                            "low-conflict delivery within declared write_scope",
+                        ],
+                        "next_probe": f"goal-harness quota should-run --goal-id {DELIVERY_GOAL_ID}",
+                        "authority_sources": [],
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return registry_path
+
+
+def append_connected_delivery_fixture(root: Path, *, generated_at: str) -> None:
+    run_dir = root / "runtime" / "goals" / DELIVERY_GOAL_ID / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-connected-delivery.json"
+    markdown_path = run_dir / f"{compact_time}-connected-delivery.md"
+    record = {
+        "generated_at": generated_at,
+        "goal_id": DELIVERY_GOAL_ID,
+        "classification": "delivery_ranker_readiness_batch",
+        "recommended_action": DELIVERY_ACTION,
+        "health_check": "fixture connected delivery run with custom classification",
+    }
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture connected delivery run\n", encoding="utf-8")
+    with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    **record,
+                    "json_path": str(json_path),
+                    "markdown_path": str(markdown_path),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
 
 def append_operator_gate_fixture(
@@ -399,6 +490,33 @@ def assert_registry_attention_override(payload: dict, markdown: str) -> None:
     )
 
 
+def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown: str) -> None:
+    items = payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    item = items[0]
+    assert item["goal_id"] == DELIVERY_GOAL_ID, item
+    assert item["status"] == "delivery_ranker_readiness_batch", item
+    assert item["waiting_on"] == "codex", item
+    assert item["source"] == "latest_run", item
+    assert item["recommended_action"] == DELIVERY_ACTION, item
+    assert item["project_asset"]["owner"] == "codex", item
+    assert item["project_asset"]["next_action"] == DELIVERY_ACTION, item
+    assert item["project_asset"]["agent_todos"]["open"] == 1, item
+    assert item["agent_todos"]["open_count"] == 1, item
+    assert item["agent_todos"]["items"][0]["text"] == DELIVERY_AGENT_TODO, item
+    assert "delivery_ranker_readiness_batch" in markdown, markdown
+    assert f"asset_agent_todo: {DELIVERY_AGENT_TODO}" in markdown, markdown
+
+    quota_payload = build_quota_should_run(payload, goal_id=DELIVERY_GOAL_ID)
+    assert quota_payload["should_run"] is True, quota_payload
+    assert quota_payload["state"] == "eligible", quota_payload
+    assert quota_payload["waiting_on"] == "codex", quota_payload
+    assert quota_payload["agent_todo_summary"]["open_count"] == 1, quota_payload
+    assert quota_payload["goal_boundary"]["adapter"]["status"] == "connected-delivery", quota_payload
+    assert quota_payload["goal_boundary"]["write_scope"] == ["src/**", "tests/**"], quota_payload
+    assert quota_payload["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", quota_payload
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
@@ -434,6 +552,11 @@ def main() -> int:
         append_state_refreshed_fixture(root, generated_at="2026-01-01T00:04:00+00:00")
         set_registry_attention_override(registry_path)
         override_payload, override_markdown = collect_fixture_status(root, registry_path)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-status-connected-delivery-smoke-") as tmp:
+        root = Path(tmp)
+        delivery_registry_path = write_connected_delivery_registry(root)
+        append_connected_delivery_fixture(root, generated_at="2026-01-01T00:05:00+00:00")
+        delivery_payload, delivery_markdown = collect_fixture_status(root, delivery_registry_path)
 
     assert_planned_preview_is_not_runnable(payload, markdown)
     approved_items = approved_payload["attention_queue"]["items"]
@@ -491,6 +614,7 @@ def main() -> int:
         waiting_on="user_or_controller",
     )
     assert_registry_attention_override(override_payload, override_markdown)
+    assert_connected_delivery_custom_run_stays_runnable(delivery_payload, delivery_markdown)
     print("status-markdown-smoke ok")
     return 0
 

@@ -135,12 +135,29 @@ goals must stay out of the eligible lane even when they have a high
     "run_count": 2,
     "goals": [],
     "recent_runs": []
+  },
+  "usage_summary": {
+    "available": true,
+    "source": "run_history",
+    "sample_run_count": 2,
+    "proxy_note": "run-history proxy; excludes token counts and raw thread logs",
+    "totals": {
+      "runs_24h": 2,
+      "runs_7d": 2,
+      "quota_spend_slots_24h": 1,
+      "quota_spend_slots_7d": 1,
+      "automation_run_count_24h": 1,
+      "automation_run_count_7d": 1
+    },
+    "goals": []
   }
 }
 ```
 
 Consumers should treat unknown fields as additive. Required fields for a
 first-screen UI are `ok`, `contract`, and `attention_queue`.
+`usage_summary` is optional and should be treated as a compact run-history
+proxy, not as billing or token telemetry.
 
 ## Global Registry Health
 
@@ -574,6 +591,10 @@ before asking for operator decisions. Material details stay project-local:
 public status exposes compact counts for material roles, repository links,
 owner-review gaps, stale sources, and current authorities instead of URLs,
 repository roots, product configs, or raw review notes.
+The Markdown status renderer should expose the same compact context as an
+`authority_material` line on attention-queue items, so agent-facing handoffs
+see freshness and owner-review pressure without needing internal material
+links or source text.
 
 `quota` on the goal comes from the registry and defaults to `compute=1.0` when
 not declared. In v0.1, status derives only a compact product state from hard
@@ -768,6 +789,30 @@ changed selected run, or changed raw index count forces the operator to preview
 again. The compact browser response does not expose index paths, state file
 paths, or raw private evidence.
 
+## Usage Summary
+
+`usage_summary` is an optional dashboard-friendly proxy derived from the same
+compact run history. It is not billing telemetry and intentionally excludes
+token counts, raw thread logs, local project paths, private artifact contents,
+or anything that would require reading a Codex session transcript.
+
+The summary currently reports:
+
+- `runs_24h` / `runs_7d`: observed compact run records in the current status
+  sample.
+- `quota_spend_slots_24h` / `quota_spend_slots_7d`: slots from
+  `quota_slot_spent` events in that sample.
+- `automation_run_count_24h` / `automation_run_count_7d`: quota spend events
+  whose compact `quota_event.source` is `heartbeat`, `automation`, or `cron`.
+  If the compact run index does not retain a source, `quota_slot_spent` is
+  counted as an automation/spend proxy rather than dropped.
+- `project_share_24h`: per-goal share of observed 24h runs, rounded to three
+  decimals.
+
+Because `status --limit` can bound the recent run sample, consumers should
+display `sample_run_count` and treat these values as operational signals for
+finding busy project lines, not as precise historical accounting.
+
 ## Display Model
 
 A first useful UI can be built from the export alone:
@@ -776,6 +821,9 @@ A first useful UI can be built from the export alone:
   auxiliary source controls, metrics, and raw drill-down, because the
   dashboard is a user decision surface rather than an agent CLI mirror.
 - Metrics: `ok`, `goal_count`, `run_count`, and contract summary.
+- Usage snapshot: optional `usage_summary` proxy metrics for observed 24h/7d
+  runs, quota spend slots, automation run count, and busiest goals by current
+  sample share.
 - Compute quota summary: goals eligible for the next agent turn, focus-waiting
   goals, throttled goals, waiting goals, paused goals, and operator-gated goals
   should be visible on the first screen once quota fields are present.

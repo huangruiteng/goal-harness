@@ -58,11 +58,16 @@ export function buildActionPacket(input: ActionPacketInput) {
   const stateLine = [
     compactPacketText(input.summary, 110),
   ].filter(Boolean).join("；");
+  const compactContextLines = [
+    input.quotaShortLine ? `Quota：${compactPacketText(input.quotaShortLine, 80)}` : null,
+    input.authorityShortLine ? `Authority：${compactPacketText(input.authorityShortLine, 110)}` : null,
+  ];
 
   return [
     "【GH Packet】",
     `目标：${input.goalId}`,
     `状态：${stateLine}`,
+    ...compactContextLines,
     "",
     "【用户/Gate】",
     ...userActionLines,

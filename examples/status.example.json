@@ -4,6 +4,43 @@
   "runtime_root": "./runtime",
   "goal_count": 4,
   "run_count": 3,
+  "usage_summary": {
+    "available": true,
+    "source": "run_history",
+    "generated_at": "2026-06-01T00:10:00+00:00",
+    "sample_run_count": 3,
+    "proxy_note": "run-history proxy; excludes token counts and raw thread logs",
+    "totals": {
+      "runs_24h": 3,
+      "runs_7d": 3,
+      "quota_spend_slots_24h": 0,
+      "quota_spend_slots_7d": 0,
+      "automation_run_count_24h": 0,
+      "automation_run_count_7d": 0
+    },
+    "goals": [
+      {
+        "goal_id": "complex-project-main-control",
+        "runs_24h": 2,
+        "runs_7d": 2,
+        "quota_spend_slots_24h": 0,
+        "quota_spend_slots_7d": 0,
+        "automation_run_count_24h": 0,
+        "automation_run_count_7d": 0,
+        "project_share_24h": 0.667
+      },
+      {
+        "goal_id": "experiment-controller-goal",
+        "runs_24h": 1,
+        "runs_7d": 1,
+        "quota_spend_slots_24h": 0,
+        "quota_spend_slots_7d": 0,
+        "automation_run_count_24h": 0,
+        "automation_run_count_7d": 0,
+        "project_share_24h": 0.333
+      }
+    ]
+  },
   "contract": {
     "ok": true,
     "summary": {

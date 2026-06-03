@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T02:14:33+08:00
+updated_at: 2026-06-04T06:15:13+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,20 +58,305 @@ and agents receive the smallest sufficient execution context.
   should show the previous operator relay burden, the owner/gate/next
   action/reward/todo change after Goal Harness, and the safe evidence surface
   that can be shown without private details.
-- [ ] [P1] Add dashboard aggregate and per-project usage stats: daily/weekly turns, threads, token/compute proxy, quota spend, automation run count, and project share; surface resource-heavy projects without flooding the first screen.
+- [x] [P1] Add the first dashboard aggregate and per-project usage stats slice
+  as a run-history / quota-spend proxy, and add regression coverage that keeps
+  raw sessions, thread counts, and token logs out until a public-safe source is
+  explicitly introduced.
 
 ## Next Action
 
-- Live prompt-shape check passed: the next automatic heartbeat arrived with the
-  generated blocker-push prompt, global-registry quota guard, `goal-harness
-  doctor`, product bottleneck lens, no-progress self-stop, and public-safe
-  publication boundaries. Next, rotate away from blocker-push plumbing toward
-  target-project dry-run/handoff readiness: use Goal Harness status and review
-  packet surfaces only, avoid touching target repos, and surface the minimal
-  approved handoff or dry-run-result requirement when the target-project lane is
-  still waiting.
+- The temporary `agent-harness-side-bypass` rollout monitor is complete:
+  post-baseline records reached 16/15, the latest signal is
+  `side_bypass_universal_feedback_minimum_fit_sanity_positive_path_test`, and
+  no urgent drift was observed. The public Goal Harness checkpoint for the
+  validated consumer / quota / prompt contract changes has been committed and
+  pushed to `origin/main`, while the pre-existing dirty README remains
+  untouched. Return to the normal Goal Harness P0 queue. The next non-monitor
+  P0 slice should map the private platform-migration pilot state only when its
+  private-safe boundary is explicit; otherwise pause additional public consumer
+  regressions and look for a concrete gap that reduces operator or
+  project-agent context load.
 
 ## Recent Progress
+
+- 2026-06-04T06:15:13+08:00: Ran the post-monitor steering audit. Candidates:
+  map the private platform-migration pilot state, add another public consumer
+  regression, or checkpoint the validated public Goal Harness changes. The
+  checkpoint won because the private pilot still needs an explicit private-safe
+  boundary, consumer surfaces already cover the main entries, and leaving 22
+  validated public files dirty would increase future agent context and repeated
+  validation cost. Scope intentionally excludes the pre-existing dirty
+  `README.md`. Included changes cover dashboard action/todo/usage displays,
+  status/review-packet authority/material counts, heartbeat/project prompt
+  contract updates, quota wording, usage-summary and platform-migration
+  material-registry smokes, and this state file. Validation: usage-summary
+  smoke, platform-migration material-registry smoke, status Markdown smoke,
+  review-packet CLI smoke, project-prompt smoke, dashboard
+  `smoke:action-packet`, `python3 -m py_compile` on touched Python files,
+  touched-file `git diff --check`, new-smoke intent-to-add `git diff --check`,
+  and 22-file public/private `goal-harness check` all passed. Known
+  non-blocker: the full heartbeat-prompt smoke still fails on README assertions
+  because README has an unrelated uncommitted rewrite; this turn did not stage
+  README. Critic: this is a public checkpoint, not permission to keep expanding
+  interfaces without a concrete gap.
+
+- 2026-06-04T06:08:21+08:00: Completed the temporary
+  `agent-harness-side-bypass` rollout monitor. Post-baseline runtime index
+  records reached 16/15, with 11 non-spend records. The latest classification is
+  `side_bypass_universal_feedback_minimum_fit_sanity_positive_path_test`; direct
+  side guard is eligible, spend is 7/475, and one agent todo remains open for
+  clean model-input / feature-table validation. The rollout now shows the
+  intended behavior: after early handoff and dirty-worktree preflight, it moved
+  into real ranker / feedback-reranker delivery through official-train feedback
+  rows, official-train readiness positive/negative paths, minimum fit-sanity
+  blocked-input gating, and minimum fit-sanity positive-path readiness. Target
+  dirty state remains large but stable: 88 dirty entries and 14 protected-dirty
+  entries, still centered on pre-existing AGENTS/TODO/doc-registry/managed-Lark
+  mirror/OpenViking state rather than new side-bypass drift. No quota runaway,
+  hidden user gate, spend without artifact/validation, protected-scope edits,
+  no-progress loop, or main-control conflict was observed. This turn updates
+  the heartbeat automation to remove the temporary monitor clause and refreshes
+  state; no meta quota spend is appended for monitoring-only completion.
+
+- 2026-06-04T05:56:23+08:00: Side-bypass monitor stayed healthy and advanced
+  to about 13/15 post-baseline signals using baseline run_count=4. The latest
+  side-bypass classification is
+  `side_bypass_universal_feedback_minimum_fit_sanity_blocked_input_test`; direct
+  guard is eligible, spend is 6/475, and one agent todo remains open for the
+  real-ready positive-path fit-sanity test if the checker stays clean. Target
+  state records a real feedback-reranker test in
+  `tests/test_universal_feedback_minimum_fit_sanity_bundle_readiness.py`, with
+  targeted pytest plus `git diff --check` validation. Target dirty state remains
+  large but stable: 88 dirty entries, 13 protected-dirty entries, with no new
+  urgent drift attributable to side-bypass. Steering audit candidates were the
+  private platform-migration pilot, another public consumer regression, and
+  monitor-only continuation. Monitor-only is required until 15 but should not
+  spend; public consumers already cover read-only-map, JSON status, Markdown
+  status, review-packet, React dashboard, and static dashboard, so further
+  consumer expansion risks interface bloat without a concrete gap. The private
+  pilot remains the next P0 lane only after a private-safe boundary is explicit.
+  This turn only tightened state and next-action boundaries, so no meta quota
+  spend was appended.
+
+- 2026-06-04T05:49:30+08:00: Added the next public consumer regression for
+  platform-migration authority/material context: `goal-harness status`
+  Markdown now emits an `authority_material` line for attention-queue items,
+  using only compact public-safe counts from `run_history.goals[].authority_registry`.
+  The platform-migration smoke now verifies read-only-map, JSON status, Markdown
+  status, review-packet, and static HTML all expose the same sanitized material
+  pressure without links, local paths, or raw source text. Documented the
+  Markdown contract in `docs/status-data-contract.md`. Side-bypass monitor
+  stayed healthy at 11/15 post-baseline records: latest remains
+  `side_bypass_tau2_feedback_readiness_negative_path_test`, direct guard is
+  eligible, spend is 5/475, and protected dirty files remain pre-existing.
+  Validation: `python3 examples/platform-migration-material-registry-smoke.py`,
+  `python3 -m py_compile goal_harness/status.py
+  examples/platform-migration-material-registry-smoke.py`,
+  `python3 examples/status-markdown-smoke.py`,
+  `python3 examples/project-map-smoke.py`,
+  `python3 examples/review-packet-cli-smoke.py`, touched-file `git diff
+  --check`, and targeted `goal-harness --format json check` on the changed code
+  and smoke files passed. Critic: public consumers now cover JSON status,
+  Markdown status, review packet, React/static dashboard paths; continuing to
+  add consumer surfaces would be diminishing returns unless a concrete gap is
+  found. Next non-monitor P0 step should map the private platform-migration
+  pilot state or pause that lane until a private-safe boundary is available.
+
+- 2026-06-04T05:44:30+08:00: Side-bypass monitor observed a new healthy
+  delivery signal. Post-baseline side-bypass records reached 11/15; latest is
+  `side_bypass_tau2_feedback_readiness_negative_path_test`, and direct
+  side-bypass guard still returns eligible with one open agent todo and spend
+  5/475. The target side-bypass state records a real negative-path readiness
+  test in `tests/test_tau2_official_train_feedback_readiness.py`, validating
+  that test-split leakage and missing fixed-first-user coverage block the next
+  official-train feedback stage; validation passed with targeted pytest over
+  the readiness and rows tests (`3 passed`) plus `git diff --check`. No new
+  protected-scope drift was observed; protected dirty files remain the same
+  pre-existing target-repo state. Meta delivery continued on the public
+  platform-migration consumer regression from the previous slice: static
+  dashboard fallback now renders compact authority/material counts for
+  attention-queue rows, and
+  `examples/platform-migration-material-registry-smoke.py` verifies
+  read-only-map, status, review-packet, and static HTML all expose only
+  public-safe counts. Validation:
+  `python3 examples/platform-migration-material-registry-smoke.py`,
+  `python3 -m py_compile examples/platform-migration-material-registry-smoke.py
+  examples/render-status-dashboard.py`, `python3 examples/project-map-smoke.py`,
+  `python3 examples/review-packet-cli-smoke.py`, touched-file `git diff
+  --check`, and targeted `goal-harness --format json check` passed. Critic:
+  side-bypass is progressing as intended but still below the 15-signal monitor
+  target; the public fixture is useful, but the next non-monitor P0 step should
+  either map the private platform-migration pilot state or stop adding consumer
+  surfaces unless a concrete gap appears.
+
+- 2026-06-04T05:43:30+08:00: Extended the sanitized platform-migration
+  material-registry fixture into a public consumer regression. The static
+  `examples/render-status-dashboard.py` fallback now renders compact
+  authority/material coverage for attention-queue items by joining them with
+  `run_history.goals[].authority_registry`; the fixture asserts the generated
+  HTML shows only public-safe counts such as materials, repo roles, owner-review
+  gap, stale source, and risk, without source links, local paths, or raw
+  material text. Side-bypass monitor stayed stable: latest remains the ranker
+  readiness test, direct guard is eligible, spend is 4/475, and no new
+  protected-scope drift was observed. Validation:
+  `python3 examples/platform-migration-material-registry-smoke.py`,
+  `python3 -m py_compile examples/platform-migration-material-registry-smoke.py
+  examples/render-status-dashboard.py`, `python3 examples/project-map-smoke.py`,
+  `python3 examples/review-packet-cli-smoke.py`, touched-file `git diff
+  --check`, and targeted `goal-harness --format json check` on both touched
+  example files all passed. Critic: React dashboard and static dashboard now
+  both surface material coverage, but the fixture is still public synthetic;
+  the next private pilot step should map a real platform-migration state without
+  copying internal links or owner discussion into public artifacts.
+
+- 2026-06-04T05:38:30+08:00: Added a dedicated sanitized platform-migration
+  material-registry fixture in `examples/platform-migration-material-registry-smoke.py`.
+  The smoke builds a temporary complex-migration goal with canonical docs,
+  repository-role materials, an owner-review gap, a stale source, and validation
+  evidence; it then verifies the same public-safe authority/material counts
+  flow through `read-only-map`, `status`, and `review-packet` without exposing
+  internal links, local paths, or source text. Side-bypass monitor remained
+  stable during this slice: latest side-bypass run is still the ranker readiness
+  test, direct guard remains eligible, spent slots stay 4/475, and no new
+  protected-scope drift was observed. Validation:
+  `python3 examples/platform-migration-material-registry-smoke.py`,
+  `python3 -m py_compile examples/platform-migration-material-registry-smoke.py`,
+  `python3 examples/project-map-smoke.py`,
+  `python3 examples/review-packet-cli-smoke.py`, touched-file `git diff
+  --check`, and targeted `goal-harness --format json check` on the new smoke
+  plus this state file all passed. Critic: this is still a public sanitized
+  fixture, not a private platform-migration live map; the next P0 step should
+  apply the same contract to the private pilot state or add the next public
+  consumer regression, while continuing the side-bypass 15-signal monitor.
+
+- 2026-06-04T05:26:41+08:00: Monitored the post-fix side-bypass rollout and
+  confirmed the next signal moved in the expected direction. Post-baseline
+  recent count is 10, below the 15-signal monitor target. The latest run is
+  `side_bypass_tau2_official_train_feedback_readiness_test`; direct
+  `quota should-run` for `agent-harness-side-bypass` returns
+  `should_run=true`, `state=eligible`, `waiting_on=codex`, connected-delivery
+  `goal_boundary`, and one open agent todo for the next negative-path ranker
+  readiness test. The target repo now has real ranker test artifacts
+  `tests/test_tau2_official_train_feedback_readiness.py` and
+  `tests/test_tau2_official_train_feedback_rows.py`; the side-bypass state
+  records targeted pytest plus `git diff --check` validation. Quota spend
+  moved from 3 to 4 and was recorded before the later state refresh, matching
+  the repaired spend-before-refresh ordering. Residual risk: the target repo
+  still has substantial unrelated/protected dirty files, so side-bypass must
+  stay on clean ranker / cross-domain validation surfaces. This turn was
+  monitoring plus state writeback only, so no meta quota spend was appended.
+
+- 2026-06-04T05:24:41+08:00: Diagnosed why the latest side-bypass delivery was
+  smaller than expected. The target agent did produce a real ranker test, but
+  Goal Harness routed the custom connected-delivery classification out of the
+  Codex-ready lane, so `quota should-run` fell back to `waiting / no active
+  Codex-ready work` and hid the open Agent Todo from the payload. The heartbeat
+  contract also still over-emphasized "one bounded step" and some docs retained
+  the stale refresh-before-spend ordering. Fixed public Goal Harness by treating
+  `adapter.status=connected-delivery` custom non-neutral runs as Codex-ready
+  unless a gate/watch/blocker says otherwise; `quota should-run` now exposes
+  `agent_todo_summary` and `goal_boundary` for the side-bypass goal. Updated
+  heartbeat/new-project/quota contracts to say one bounded progress segment may
+  be a coherent implementation/test/doc/state batch when scope and validation
+  are clear, and spend must happen after validation/writeback before a
+  state-only refresh that might close the lane. Added a connected-delivery
+  status smoke. Validation: `python3 -m py_compile ...`, `python3
+  examples/status-markdown-smoke.py`, `python3 examples/project-prompt-smoke.py`,
+  `python3 examples/quota-plan-smoke.py`, `python3 examples/usage-summary-smoke.py`,
+  focused heartbeat-prompt generator assertions, `goal-harness --format json
+  check` on the touched public files, `git diff --check` on the touched files,
+  and a real side-bypass guard assertion passed
+  (`should_run=true`, `state=eligible`, `waiting_on=codex`, open agent todo=1).
+  Residual risk: full `examples/heartbeat-prompt-smoke.py` and
+  `examples/quota-contract-smoke.py` still hit README assertions because
+  `README.md` has an unrelated pre-existing rewrite in the worktree; this turn
+  intentionally did not touch README.
+
+- 2026-06-04T05:09:47+08:00: Side-bypass monitor showed the user's new
+  instruction landed: latest run became
+  `side_bypass_tau2_official_train_feedback_rows_test`, with recommended action
+  to continue ranker / feedback-reranker delivery on clean official-train
+  feedback readiness targets. Quota stayed waiting with spent 3/475 and no new
+  protected-scope drift attributable to side-bypass. Steering audit candidates
+  were P0 platform-migration authority/material registry trial, P1 usage stats
+  extension, and P2 dashboard refinement; P0 won because the product bottleneck
+  is evidence quality and agent handoff context for multi-material migration
+  projects. Bounded output: CLI Review Packet now derives an
+  `authority_summary` from the goal's compact `authority_registry` counts and
+  renders the sanitized material context in both the human review packet and
+  project-agent handoff. It exposes only counts and risk
+  (`topics`, `materials`, `repositories`, `owner_review_required`, `stale`,
+  `current_authority`, `risk`) and explicitly tells the target agent not to
+  request internal links or raw documents. Updated
+  `examples/review-packet-cli-smoke.py` with a platform-migration-like
+  sanitized registry fixture and assertions for controller and approved-handoff
+  packet paths. Validation: `python3 examples/review-packet-cli-smoke.py`,
+  `python3 -m py_compile goal_harness/review_packet.py
+  examples/review-packet-cli-smoke.py`, `python3 examples/usage-summary-smoke.py`,
+  `npm --prefix apps/dashboard run smoke:action-packet`, `git diff --check`,
+  and `goal-harness --format json check --scan-root .` all passed. Critic:
+  this improves handoff context but still relies on fixture-level counts; the
+  next useful step is a more integrated sanitized platform-migration fixture
+  across status/dashboard/review-packet, or applying the same contract in the
+  private platform-migration active state without leaking internal material.
+
+- 2026-06-04T05:04:06+08:00: Side-bypass monitor remained stable: 7
+  post-baseline run signals, latest still `side_bypass_manual_steering_next_action`,
+  quota waiting with spent 3/475, and no new protected-scope drift attributable
+  to side-bypass. Steering audit candidates were P0 platform-migration
+  authority/material registry trial, P1 usage stats extension, and P2 dashboard
+  refinement. Continuation check: usage stats had consumed the previous
+  delivery slice, so this turn was limited to regression coverage rather than
+  expanding the feature. Bounded output: added
+  `examples/usage-summary-smoke.py`, a dependency-free temporary registry/run
+  fixture that asserts `usage_summary` reports observed 24h/7d runs, quota
+  spend slots, automation/spend proxy events, per-goal project share, sample
+  count, and does not expose token/thread/raw-session keys. Validation:
+  `python3 examples/usage-summary-smoke.py`, `python3 -m py_compile
+  examples/usage-summary-smoke.py goal_harness/status.py`, `python3 -m
+  json.tool examples/status.example.json`, `npm --prefix apps/dashboard run
+  build`, `npm --prefix apps/dashboard run smoke:action-packet`, `git diff
+  --check`, and `goal-harness --format json check --scan-root .` all passed.
+  Critic: this completes the safe first usage slice and prevents accidental
+  raw telemetry creep; the next useful work should return to the P0
+  authority/material registry trial for platform migration.
+
+- 2026-06-04T04:59:44+08:00: Steering audit candidates were: P0 platform
+  migration authority/material registry trial, P1 dashboard usage stats, and
+  P0 side-bypass rollout monitoring. Product bottleneck lens: dashboard
+  observability was missing a compact way to see which project lines are
+  consuming run/heartbeat attention, while raw tokens and thread logs are not
+  public-safe. Bounded output: added a `usage_summary` status payload derived
+  only from compact run history, including observed 24h/7d runs, quota spend
+  slots, automation/spend proxy count, per-goal project share, and sample
+  count; added dashboard schema and a `Usage Snapshot` panel after the metric
+  cards so Todo Focus stays first; updated the bundled sanitized status
+  fixture and `docs/status-data-contract.md` to state that this is a proxy, not
+  billing or token telemetry. Side-bypass monitor tuple stayed stable
+  (`agent-harness-side-bypass` waiting, spent 3/475, protected dirty already
+  present), so it did not block meta delivery. Validation: `python3 -m
+  py_compile goal_harness/status.py`, `python3 -m json.tool
+  examples/status.example.json`, `goal-harness --format json status --limit
+  200` with `usage_summary` assertions, `npm --prefix apps/dashboard run
+  build`, `npm --prefix apps/dashboard run smoke:action-packet`, `git diff
+  --check`, and `goal-harness --format json check --scan-root .` all passed.
+  Critic: the slice intentionally does not count real threads or tokens; the
+  next decision is whether a safe thread-count proxy can be exposed without
+  reading raw session logs. Losing candidate to keep: platform migration should
+  remain the P0 trial for authority/material registry after this visibility
+  slice.
+
+- 2026-06-04T04:44:55+08:00: Fixed a compact action-packet context gap. The
+  dashboard already passed `quotaShortLine` and `authorityShortLine` into the
+  packet formatter, but the formatter did not render them, forcing humans and
+  project agents to look elsewhere for quota and authority/material context.
+  `buildActionPacket` now renders those compact lines, and
+  `apps/dashboard/smoke/action-packet-smoke.ts` asserts material owner-review
+  and stale-count context plus an explicit 930-character interface budget.
+  Validation: `npm --prefix apps/dashboard run smoke:action-packet` passed with
+  packet length 893, handoff 519, focus packet 719. Critic: this closes the
+  dashboard action-packet path; CLI `review-packet` still needs the same compact
+  material summary if it is used independently of the dashboard packet.
 
 - 2026-06-03T16:50:57+08:00: Steering audit candidates were: P0 observe the
   first live tick after switching `goal-harness-hourly-tick` to the generated

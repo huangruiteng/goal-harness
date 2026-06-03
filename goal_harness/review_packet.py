@@ -141,6 +141,28 @@ def todo_text_from_project_asset(item: dict[str, Any] | None, key: str) -> str |
     return first_open_todo_text(item.get(key))
 
 
+def authority_material_summary(goal: dict[str, Any] | None) -> str | None:
+    if not isinstance(goal, dict):
+        return None
+    registry = goal.get("authority_registry")
+    if not isinstance(registry, dict) or not registry.get("declared"):
+        return None
+    material_total = int(registry.get("project_material_count") or 0)
+    topic_count = int(registry.get("topic_authority_count") or 0)
+    if material_total <= 0 and topic_count <= 0:
+        return None
+    parts = [
+        f"topics={topic_count}",
+        f"materials={material_total}",
+        f"repositories={int(registry.get('project_material_repository_count') or 0)}",
+        f"owner_review_required={int(registry.get('project_material_owner_review_required_count') or 0)}",
+        f"stale={int(registry.get('project_material_stale_count') or 0)}",
+        f"current_authority={int(registry.get('project_material_current_authority_count') or 0)}",
+        f"risk={registry.get('conflict_risk') or 'unknown'}",
+    ]
+    return "authority/material: " + ", ".join(parts)
+
+
 def latest_run(goal: dict[str, Any] | None) -> dict[str, Any] | None:
     runs = goal.get("latest_runs") if isinstance(goal, dict) else None
     if isinstance(runs, list) and runs and isinstance(runs[0], dict):
@@ -286,16 +308,19 @@ def project_agent_section(
     goal_id: str,
     *,
     agent_todo_text: str | None = None,
+    authority_summary: str | None = None,
     approved_operator_gate: bool = False,
 ) -> str:
     goal_guard = target_goal_guard(goal_id)
     context_rule = agent_context_rule()
     todo_line = f"Agent 待办：{agent_todo_text}" if agent_todo_text else None
+    authority_line = f"材料上下文：{authority_summary}；只用这些脱敏计数判断 freshness / owner gap，不要要求内部链接或原文。" if authority_summary else None
     if approved_operator_gate:
         lines = [
             goal_guard,
             context_rule,
             todo_line,
+            authority_line,
             "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
             "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
             "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。",
@@ -307,6 +332,7 @@ def project_agent_section(
             goal_guard,
             context_rule,
             todo_line,
+            authority_line,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
             "执行边界：不要替用户写 reward；active state 只做摘要，reward 的权威来源是 run-bound human_reward overlay。",
             "停止条件：如果 reward 还停留在 dry-run / 草稿 / 口头判断，停下等待用户记录；如果已经记录，只用下面 history 路径读取。",
@@ -318,6 +344,7 @@ def project_agent_section(
             goal_guard,
             context_rule,
             todo_line,
+            authority_line,
             "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
             "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
             "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -329,6 +356,7 @@ def project_agent_section(
             goal_guard,
             context_rule,
             todo_line,
+            authority_line,
             "转发条件：仅当目标项目 Agent 需要当前等待边界时转发；这不是恢复 delivery 的授权。",
             "执行边界：只读 status/history，确认当前 owner blocker、证据入口和 stop condition；不要继续实现、adapter work、写入或生产动作。",
             "停止条件：没有新的 owner evidence、clean baseline 或外部 eval 时，保持 focus_wait 并用中文回报仍在等待什么。",
@@ -340,6 +368,7 @@ def project_agent_section(
             goal_guard,
             context_rule,
             todo_line,
+            authority_line,
             "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
             "执行边界：读取本项目 status/history 后，只执行下面只读或 dry-run 路径。",
             "停止条件：需要真实写 reward、approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -371,6 +400,7 @@ def build_review_packet(
     summary = str(item.get("recommended_action") or "当前状态源没有对应的 action card。") if isinstance(item, dict) else "当前状态源没有对应的 action card。"
     user_todo_text = todo_text_from_project_asset(item, "user_todos")
     agent_todo_text = todo_text_from_project_asset(item, "agent_todos")
+    authority_summary = authority_material_summary(goal)
     command = project_agent_command(status_payload, goal_id, kind, item)
     approved_handoff = operator_gate_approved_handoff(item, goal)
     gate_commands = operator_gate_decision_commands(status_payload, goal_id) if kind == "controller" else {}
@@ -391,6 +421,7 @@ def build_review_packet(
         command,
         goal_id,
         agent_todo_text=agent_todo_text,
+        authority_summary=authority_summary,
         approved_operator_gate=approved_handoff,
     )
     type_label = {
@@ -407,6 +438,7 @@ def build_review_packet(
         f"类型：{type_label}",
         f"链接：{review_url or 'CLI generated packet; no dashboard URL provided.'}",
         f"摘要：{summary}",
+        f"材料：{authority_summary}（仅脱敏计数；不含内部链接、路径或正文。）" if authority_summary else None,
         "",
         "【人只需判断】",
         f"解锁条件：{owner_blocker_text}（有新证据或明确暂缓后再调整 focus）" if owner_blocker_text else None,
@@ -452,6 +484,7 @@ def build_review_packet(
         "user_todo_text": user_todo_text,
         "owner_blocker_text": owner_blocker_text,
         "agent_todo_text": agent_todo_text,
+        "authority_summary": authority_summary,
         "packet": "\n".join(line for line in lines if line),
     }
 

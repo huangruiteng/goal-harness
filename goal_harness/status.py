@@ -55,6 +55,9 @@ CONNECTED_ADAPTER_STATUSES = {
     "connected-read-only",
     "pre-tick-runnable",
 }
+CONNECTED_DELIVERY_ADAPTER_STATUSES = {
+    "connected-delivery",
+}
 PLANNED_CONTROLLER_OPT_IN_RECOMMENDED_ACTION = (
     "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run"
 )
@@ -73,6 +76,7 @@ RUN_COMPACT_FIELDS = (
     "json_exists",
     "markdown_exists",
 )
+USAGE_PROXY_NOTE = "run-history proxy; excludes token counts and raw thread logs"
 HUMAN_REWARD_COMPACT_FIELDS = (
     "recorded_at",
     "decision",
@@ -928,6 +932,17 @@ def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
             **attention_fields,
             **lifecycle_fields,
         )
+    if adapter_status in CONNECTED_DELIVERY_ADAPTER_STATUSES:
+        return attention_item(
+            goal_id=goal_id,
+            status=classification,
+            waiting_on="codex",
+            severity="action",
+            recommended_action=action,
+            source="latest_run",
+            **attention_fields,
+            **lifecycle_fields,
+        )
     if classification.startswith(WATCH_CLASSIFICATION_PREFIXES):
         return attention_item(
             goal_id=goal_id,
@@ -1050,6 +1065,40 @@ def _markdown_scalar(value: Any) -> str:
     return str(value).replace("\n", " ").replace("|", "\\|").strip()
 
 
+def _goals_by_id(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    run_history = payload.get("run_history") if isinstance(payload.get("run_history"), dict) else {}
+    goals = run_history.get("goals") if isinstance(run_history.get("goals"), list) else []
+    result: dict[str, dict[str, Any]] = {}
+    for goal in goals:
+        if not isinstance(goal, dict):
+            continue
+        goal_id = str(goal.get("id") or "")
+        if goal_id:
+            result[goal_id] = goal
+    return result
+
+
+def _authority_registry_markdown_summary(goal: dict[str, Any] | None) -> str | None:
+    registry = goal.get("authority_registry") if isinstance(goal, dict) else None
+    if not isinstance(registry, dict) or not registry.get("declared"):
+        return None
+    materials = int(registry.get("project_material_count") or 0)
+    topics = int(registry.get("topic_authority_count") or 0)
+    if materials <= 0 and topics <= 0:
+        return None
+    return (
+        f"entries={int(registry.get('default_entries_present') or 0)}/"
+        f"{int(registry.get('default_entry_count') or 0)} "
+        f"topics={topics} "
+        f"materials={materials} "
+        f"repositories={int(registry.get('project_material_repository_count') or 0)} "
+        f"owner_review_required={int(registry.get('project_material_owner_review_required_count') or 0)} "
+        f"stale={int(registry.get('project_material_stale_count') or 0)} "
+        f"current_authority={int(registry.get('project_material_current_authority_count') or 0)} "
+        f"risk={_markdown_scalar(registry.get('conflict_risk') or 'unknown')}"
+    )
+
+
 def _append_human_reward_markdown(lines: list[str], goal_id: Any, reward: dict[str, Any]) -> None:
     headline_parts = []
     for field in ("recorded_at", "decision", "reward"):
@@ -1138,6 +1187,109 @@ def build_run_history(history: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def quota_spend_slots(run: dict[str, Any]) -> int:
+    if str(run.get("classification") or "") != "quota_slot_spent":
+        return 0
+    quota_event = run.get("quota_event") if isinstance(run.get("quota_event"), dict) else {}
+    raw_slots = quota_event.get("slots", 1)
+    try:
+        return max(0, int(raw_slots))
+    except (TypeError, ValueError):
+        return 1
+
+
+def is_automation_run(run: dict[str, Any]) -> bool:
+    quota_event = run.get("quota_event") if isinstance(run.get("quota_event"), dict) else {}
+    source = str(quota_event.get("source") or run.get("source") or "").lower()
+    if source in {"heartbeat", "automation", "cron"}:
+        return True
+    if "heartbeat" in source or "automation" in source:
+        return True
+    return str(run.get("classification") or "") == "quota_slot_spent"
+
+
+def blank_usage_goal(goal_id: str) -> dict[str, Any]:
+    return {
+        "goal_id": goal_id,
+        "runs_24h": 0,
+        "runs_7d": 0,
+        "quota_spend_slots_24h": 0,
+        "quota_spend_slots_7d": 0,
+        "automation_run_count_24h": 0,
+        "automation_run_count_7d": 0,
+        "project_share_24h": 0.0,
+    }
+
+
+def build_usage_summary(history: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_7d = now - timedelta(days=7)
+    totals = {
+        "runs_24h": 0,
+        "runs_7d": 0,
+        "quota_spend_slots_24h": 0,
+        "quota_spend_slots_7d": 0,
+        "automation_run_count_24h": 0,
+        "automation_run_count_7d": 0,
+    }
+    goals: dict[str, dict[str, Any]] = {}
+    sample_count = 0
+
+    for run in history.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        sample_count += 1
+        generated_at = parse_timestamp(run.get("generated_at"))
+        if generated_at is None:
+            continue
+        goal_id = str(run.get("goal_id") or "unknown-goal")
+        goal = goals.setdefault(goal_id, blank_usage_goal(goal_id))
+        slots = quota_spend_slots(run)
+        automation_event = is_automation_run(run)
+
+        if generated_at >= cutoff_7d:
+            totals["runs_7d"] += 1
+            goal["runs_7d"] += 1
+            totals["quota_spend_slots_7d"] += slots
+            goal["quota_spend_slots_7d"] += slots
+            if automation_event:
+                totals["automation_run_count_7d"] += 1
+                goal["automation_run_count_7d"] += 1
+        if generated_at >= cutoff_24h:
+            totals["runs_24h"] += 1
+            goal["runs_24h"] += 1
+            totals["quota_spend_slots_24h"] += slots
+            goal["quota_spend_slots_24h"] += slots
+            if automation_event:
+                totals["automation_run_count_24h"] += 1
+                goal["automation_run_count_24h"] += 1
+
+    if totals["runs_24h"]:
+        for goal in goals.values():
+            goal["project_share_24h"] = round(goal["runs_24h"] / totals["runs_24h"], 3)
+
+    goal_rows = sorted(
+        goals.values(),
+        key=lambda item: (
+            item["runs_24h"],
+            item["quota_spend_slots_24h"],
+            item["runs_7d"],
+            item["goal_id"],
+        ),
+        reverse=True,
+    )
+    return {
+        "available": True,
+        "source": "run_history",
+        "generated_at": now.isoformat(),
+        "sample_run_count": sample_count,
+        "proxy_note": USAGE_PROXY_NOTE,
+        "totals": totals,
+        "goals": goal_rows,
+    }
+
+
 def collect_status(
     *,
     registry_path: Path,
@@ -1168,6 +1320,7 @@ def collect_status(
     )
     queue = build_attention_queue(contract=contract, history=history, global_registry=global_registry)
     run_history = build_run_history(history)
+    usage_summary = build_usage_summary(history)
     return {
         "ok": bool(contract.get("ok")) and bool(global_registry.get("ok", True)),
         "registry": str(registry_path),
@@ -1184,6 +1337,7 @@ def collect_status(
         "global_registry": global_registry,
         "attention_queue": queue,
         "run_history": run_history,
+        "usage_summary": usage_summary,
     }
 
 
@@ -1240,6 +1394,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         ]
     )
     items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    goals = _goals_by_id(payload)
     if not items:
         lines.append("- none")
     for item in items:
@@ -1257,6 +1412,9 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         )
         if action:
             lines.append(f"  - action: {action}")
+        authority_summary = _authority_registry_markdown_summary(goals.get(str(item.get("goal_id") or "")))
+        if authority_summary:
+            lines.append(f"  - authority_material: {authority_summary}")
         project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
         if project_asset:
             lines.append(
