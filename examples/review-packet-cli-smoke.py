@@ -359,6 +359,17 @@ def assert_focus_wait_owner_blocker_packet() -> None:
 
 
 def main() -> int:
+    help_result = subprocess.run(
+        [sys.executable, "-m", "goal_harness.cli", "review-packet", "--help"],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    compact_help = " ".join(help_result.stdout.split())
+    assert "JSON output returns a minimized handoff payload" in compact_help, help_result.stdout
+    assert "JSON output keeps the full payload" not in compact_help, help_result.stdout
+
     assert_attention_queue_drives_approved_handoff_over_stale_history()
     assert_focus_wait_owner_blocker_packet()
     with tempfile.TemporaryDirectory(prefix="goal-harness-review-packet-") as tmp:

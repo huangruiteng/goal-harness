@@ -242,7 +242,8 @@ This command is read-only. It packages the current status into the same Review
 Packet shape as the dashboard; it does not append human reward, append an
 operator gate, refresh state, grant write-control, or authorize production
 actions. `--handoff-only` only strips the human decision wrapper from markdown
-output; JSON output still keeps the full payload and adds `handoff_text`.
+output; JSON output returns a minimized handoff payload with `handoff_text`
+instead of the full operator packet.
 
 Read the packet in order:
 

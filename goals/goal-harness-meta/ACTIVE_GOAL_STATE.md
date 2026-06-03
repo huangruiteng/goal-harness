@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:41:42+08:00
+updated_at: 2026-06-04T07:46:35+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,28 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check whether any public consumer still depends on the old
-  `review-packet --handoff-only --format json` full-payload shape; keep the
-  minimized handoff payload boundary and update only narrow docs/examples if
-  needed.
+- Run a non-handoff P0 state-safety audit for status, prompt, and dashboard
+  surfaces: check whether local path boundaries still rely on scattered regex
+  guards, and avoid adding a shared helper unless the duplication is causing a
+  concrete consumer risk.
 
 ## Recent Progress
+
+- 2026-06-04T07:46:35+08:00: Closed the old handoff-only JSON consumer audit.
+  The public scan found two real stale contract entries: the CLI
+  `--handoff-only` help text and the installable `goal-harness-project` skill
+  still described JSON as keeping the full payload. Updated both to the
+  minimized handoff payload contract. Added regression coverage in
+  `examples/review-packet-cli-smoke.py` for the CLI help text and in
+  `examples/install-local-smoke.py` for the installed skill text, including
+  negative assertions for the old full-payload wording. Re-ran
+  `scripts/install-local.sh` so the local installed skill now matches the
+  public source. Validation: review-packet CLI smoke, install-local smoke,
+  touched Python compile, touched-file `git diff --check`, 4-file
+  public/private `goal-harness check`, and stale full-payload wording scan.
+  Critic: handoff-only contract drift is now covered across CLI/docs/skill;
+  further work should move to another P0 state-safety surface instead of
+  polishing the same interface.
 
 - 2026-06-04T07:41:42+08:00: Closed the review-packet handoff path boundary.
   `goal_harness/review_packet.py` now redacts local absolute paths before they

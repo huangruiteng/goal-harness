@@ -67,8 +67,10 @@ def main() -> int:
             "goal-harness --format json review-packet --goal-id",
             "target project agent must not run this draft",
             "This command is read-only",
+            "JSON output returns a minimized handoff payload with `handoff_text` instead of the full operator packet",
         ):
             assert phrase in compact_skill_text, phrase
+        assert "JSON output still keeps the full payload" not in compact_skill_text, compact_skill_text
 
         cli_env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
         cli = subprocess.run(

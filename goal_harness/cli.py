@@ -428,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     review_packet_parser.add_argument(
         "--handoff-only",
         action="store_true",
-        help="Print only the target project-agent handoff in markdown output; JSON output keeps the full payload and adds handoff_text.",
+        help="Print only the target project-agent handoff in markdown output; JSON output returns a minimized handoff payload.",
     )
     review_packet_parser.add_argument("--limit", type=int, default=5)
 
