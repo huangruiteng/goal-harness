@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T11:47:50+08:00
+updated_at: 2026-06-03T11:54:05+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -53,14 +53,39 @@ handoff, validation, and quota bookkeeping.
 
 ## Next Action
 
-- Approved-command handoff wording now matches across the dashboard action
-  card, copied dashboard action packet, and CLI Review Packet boundary. The
-  next heartbeat should leave this approved-handoff topic and move to another
-  P0 state-truth slice, preferably checking user/agent todo visibility or
-  status-markdown ownership wording, and patch only one mismatch if found.
+- Status markdown now prints `project_asset.next_action` as `asset_next_action`
+  alongside owner/gate/stop, so Markdown consumers do not need to reconstruct
+  the project asset from the generic action line. The user also asked whether
+  Goal Harness can proactively discover bottlenecks in core UX/capability and
+  adjust priorities. The next heartbeat should not continue small copy fixes;
+  it should run one explicit product bottleneck audit slice and, if a reusable
+  priority-rule gap is found, patch that single gap.
 
 ## Recent Progress
 
+- 2026-06-03T11:54:05+08:00: Steering audit candidates were: P0 status-markdown
+  project-asset ownership wording, P0 user/agent todo visibility across status
+  JSON/markdown/dashboard, P1 dashboard visual polish, and P2 no-progress guard
+  tuning. Continuation check: the last two slices consumed approved-handoff
+  focus, so this turn left that topic and chose status-markdown project-asset
+  truth. No-progress self-stop check: not triggered because recent eligible
+  heartbeats produced committed artifacts and validation signals, and this turn
+  produced a bounded status-markdown contract fix. Bounded output: updated
+  `goal_harness/status.py` so attention queue markdown emits
+  `asset_next_action` from `project_asset.next_action`, keeping owner/gate/stop
+  and next action together for Markdown consumers; updated
+  `examples/status-markdown-smoke.py` to assert planned operator-gate and
+  registry-override fixtures expose that line. Validation: `python3
+  examples/status-markdown-smoke.py` passed; `python3 -m py_compile
+  goal_harness/status.py examples/status-markdown-smoke.py` passed;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and
+  a clean public boundary scan over 82 files; `git diff --check` passed.
+  Critic: this is a small Markdown state-truth fix, not a broader product
+  bottleneck audit; after the user's latest feedback, the next slice should
+  explicitly test whether Goal Harness can discover UX/capability bottlenecks
+  instead of only following local next-action mismatches. Losing candidate:
+  dashboard visual polish remains lower priority than a reusable bottleneck
+  discovery/prioritization rule.
 - 2026-06-03T11:47:50+08:00: Steering audit candidates were: P0 compare CLI
   Review Packet approved-command copy with the dashboard copied action packet,
   P0 state-only status recheck, P1 dashboard visual polish, and P2 no-progress

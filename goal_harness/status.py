@@ -1259,6 +1259,9 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 f"gate={_markdown_scalar(project_asset.get('gate') or '')} "
                 f"stop={_markdown_scalar(project_asset.get('stop_condition') or '')}"
             )
+            asset_next_action = _markdown_scalar(project_asset.get("next_action") or "")
+            if asset_next_action:
+                lines.append(f"    - asset_next_action: {asset_next_action}")
             asset_user_todos = (
                 project_asset.get("user_todos")
                 if isinstance(project_asset.get("user_todos"), dict)
