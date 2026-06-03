@@ -71,9 +71,10 @@ def render_heartbeat_task_body(
 
 This heartbeat body is the generic Goal Harness lifecycle. Do not add
 project-specific branching to the automation prompt. Put project-specific
-policy in the Goal Harness registry, active-state sections, adapter output, or
-narrow public/private boundary rules; if a new lifecycle rule is needed, update
-`goal-harness heartbeat-prompt` so all projects inherit it.
+policy in the Goal Harness registry, active-state sections, adapter output,
+`quota should-run.goal_boundary`, or narrow public/private boundary rules; if a
+new lifecycle rule is needed, update `goal-harness heartbeat-prompt` so all
+projects inherit it.
 
 Before spending delivery compute, first make the Goal Harness CLI reachable in
 this automation shell, then run the quota guard:
@@ -138,8 +139,8 @@ If the result says `should_run=true`:
    for owner, gate, waiting party, and next action. Treat
    `run_history.latest_runs` as evidence and drill-down only; it may be limited
    by status command limits or filters, so do not decide whether a gate is
-   pending or approved from latest runs alone. Also inspect any
-   `user_todo_summary` from the guard/status payload. If an open user/owner
+   pending or approved from latest runs alone. Also inspect `goal_boundary` and
+   any `user_todo_summary` from the guard/status payload. If an open user/owner
    todo is the current blocker that can unlock a gate, `focus_wait`, or
    external-evidence wait, handle it before delivery as the same blocker-push
    opportunity: short `NOTIFY`, at most three items, no implementation work,
@@ -173,13 +174,14 @@ If the result says `should_run=true`:
    for that self-cancel turn, and return `NOTIFY` explaining that the automation
    was cancelled because it was spinning without progress.
 4. Choose exactly one bounded, verifiable step from that audit.
-5. Do that step only. Keep public/private boundaries intact. Public-safe repo
-   publication is not an operator gate by itself: for routine public project
-   work, commit, push, and PR creation may proceed autonomously after validation
-   and a clean public/private boundary scan. Stop and surface a user/controller
-   gate only for private or company-internal material, credentials, destructive
-   git operations, production actions, or repository rules that explicitly
-   require review.
+5. Do that step only. Stay inside `goal_boundary` when present and keep
+   public/private boundaries intact. Public-safe repo publication is not an
+   operator gate by itself: for routine public project work, commit, push, and
+   PR creation may proceed autonomously after validation and a clean
+   public/private boundary scan. Stop and surface a user/controller gate only
+   for private or company-internal material, credentials, destructive git
+   operations, production actions, or repository rules that explicitly require
+   review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
    state. If the step discovers a concrete user/owner action, do not hide it in
@@ -252,7 +254,8 @@ todo, send one concise Chinese `NOTIFY`; otherwise quiet
 `DONT_NOTIFY`.
 
 If allowed, follow compact contract: read active state/status queue;
-blocker-push before delivery; obey `heartbeat_recommendation`;
+blocker-push before delivery; obey `heartbeat_recommendation` and
+`goal_boundary`;
 steering audit with product-bottleneck lens; choose one bounded verifiable step;
 stop on private/company-internal material, credentials, destructive git,
 production actions, or explicit review rules; validate/write back files,
@@ -288,7 +291,7 @@ def render_compact_heartbeat_task_body(
 
 This compact Goal Harness heartbeat body keeps project-specific branches out of
 the automation prompt. Put local policy in registry, active state, adapter, or
-boundary rules. Expanded lifecycle contract:
+`goal_boundary`. Expanded lifecycle contract:
 `{expanded_prompt_command}`; inspect it for ambiguous edge branches.
 
 Before delivery, make CLI reachable; run quota guard:
@@ -313,7 +316,7 @@ If `should_run=false`:
 - Otherwise quiet `DONT_NOTIFY` with the skip reason; no work or spend.
 
 If `should_run=true`:
-1. Read active state, Priority Stack, progress, critic,
+1. Read active state, Priority Stack, progress, critic, `goal_boundary`,
    `attention_queue.items` / `project_asset`, and guard `user_todo_summary`.
    Treat `run_history.latest_runs` as drill-down only.
 2. Before delivery, surface open user/owner todo that can unlock a gate,

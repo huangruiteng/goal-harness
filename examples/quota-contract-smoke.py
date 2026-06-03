@@ -80,6 +80,16 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
+        "Connected delivery goals also include `goal_boundary`",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "automation prompts should say to obey `goal_boundary` instead of repeating long protected file or action lists",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
         "`goal-harness todo add --role user` instead of hiding it in `Next Action`",
         label="quota doc",
     )

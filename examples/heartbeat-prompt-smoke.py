@@ -26,6 +26,15 @@ INTERFACE_BUDGET_CHARS = {
     "compact": 4_500,
     "brief": 2_500,
 }
+PROJECT_SPECIFIC_PROMPT_LEAKS = (
+    "agent-harness-side-bypass",
+    "agent-harness-main-control",
+    "OpenViking",
+    "managed Lark mirrors",
+    "docs/TODO.md",
+    "premium-ui",
+    "tiger-team",
+)
 
 
 def normalized(text: str) -> str:
@@ -45,6 +54,11 @@ def assert_prompt_budget(label: str, text: str) -> None:
     )
 
 
+def assert_no_project_specific_prompt_leaks(label: str, text: str) -> None:
+    for phrase in PROJECT_SPECIFIC_PROMPT_LEAKS:
+        assert phrase not in text, (label, phrase)
+
+
 def assert_ordered(text: str, phrases: tuple[str, ...]) -> None:
     compact = normalized(text)
     positions = []
@@ -61,6 +75,9 @@ def main() -> int:
     assert_prompt_budget("full", str(payload["task_body"]))
     assert_prompt_budget("compact", str(compact_payload["task_body"]))
     assert_prompt_budget("brief", str(brief_payload["task_body"]))
+    assert_no_project_specific_prompt_leaks("full", str(payload["task_body"]))
+    assert_no_project_specific_prompt_leaks("compact", str(compact_payload["task_body"]))
+    assert_no_project_specific_prompt_leaks("brief", str(brief_payload["task_body"]))
     assert payload["quota_guard_command"] == (
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" '
         "quota should-run --goal-id public-heartbeat-goal"
@@ -87,6 +104,7 @@ def main() -> int:
         "notify_user_on_open_todo=true",
         "safe_bypass_allowed=true",
         "heartbeat_recommendation",
+        "goal_boundary",
         "run_first_read_only_map",
         "mapped_noop_if_unchanged",
         "steering audit",
@@ -114,6 +132,7 @@ def main() -> int:
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "gate or open user todo",
         "heartbeat_recommendation",
+        "goal_boundary",
         "steering audit with product-bottleneck lens",
         "choose one bounded verifiable step",
         "goal-harness todo add",
@@ -135,6 +154,7 @@ def main() -> int:
         "This heartbeat body is the generic Goal Harness lifecycle",
         "Do not add project-specific branching to the automation prompt",
         "Put project-specific policy in the Goal Harness registry, active-state sections, adapter output",
+        "quota should-run.goal_boundary",
         "update goal-harness heartbeat-prompt so all projects inherit it",
         'export PATH="$HOME/.local/bin:$PATH"',
         'install_script="$HOME/goal-harness/scripts/install-local.sh"',
@@ -168,6 +188,7 @@ def main() -> int:
         "project_asset are authoritative",
         "run_history.latest_runs as evidence and drill-down only",
         "do not decide whether a gate is pending or approved from latest runs alone",
+        "goal_boundary",
         "If an open user/owner todo is the current blocker that can unlock a gate, focus_wait, or external-evidence wait",
         "no quota spend for that blocker-push turn",
         "heartbeat_recommendation",
@@ -190,6 +211,7 @@ def main() -> int:
         "do not append a quota spend for that self-cancel turn",
         "automation was cancelled because it was spinning without progress",
         "Choose exactly one bounded, verifiable step from that audit",
+        "Stay inside goal_boundary when present",
         "Public-safe repo publication is not an operator gate by itself",
         "commit, push, and PR creation may proceed autonomously after validation",
         "clean public/private boundary scan",
@@ -217,6 +239,7 @@ def main() -> int:
         "This heartbeat body is the generic Goal Harness lifecycle",
         "Do not add project-specific branching to the automation prompt",
         "Put project-specific policy in the Goal Harness registry, active-state sections, adapter output",
+        "quota should-run.goal_boundary",
         "goal-harness doctor >/dev/null",
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "If that preflight still fails",
@@ -246,6 +269,7 @@ def main() -> int:
         "project_asset` are authoritative",
         "run_history.latest_runs` as evidence and drill-down only",
         "do not decide whether a gate is pending or approved from latest runs alone",
+        "goal_boundary",
         "current blocker that can unlock a gate, `focus_wait`, or external-evidence wait",
         "no quota spend for that blocker-push turn",
         "heartbeat_recommendation",
@@ -268,6 +292,7 @@ def main() -> int:
         "do not append a quota spend for that self-cancel turn",
         "automation was cancelled because it was spinning without progress",
         "Choose exactly one bounded, verifiable step from that audit",
+        "Stay inside `goal_boundary` when present",
         "Public-safe repo publication is not an operator gate by itself",
         "commit, push, and PR creation may proceed autonomously after validation",
         "clean public/private boundary scan",
@@ -298,6 +323,7 @@ def main() -> int:
             "When you inspect current Goal Harness routing",
             "attention_queue.items",
             "run_history.latest_runs",
+            "Also inspect goal_boundary",
             "same blocker-push opportunity",
             "heartbeat_recommendation",
             "recommended_mode=run_first_read_only_map",
@@ -339,6 +365,8 @@ def main() -> int:
     assert "goal-harness heartbeat-prompt" in project_skill, project_skill
     assert "--compact" in project_skill, project_skill
     assert "--brief" in project_skill, project_skill
+    assert "goal_boundary" in project_skill, project_skill
+    assert "smoke" in project_skill and "contract" in project_skill, project_skill
     assert "Set Up Recurring Heartbeats" in project_skill, project_skill
     assert "visible goal text short" in project_skill, project_skill
     assert "--source heartbeat --execute" in project_skill, project_skill

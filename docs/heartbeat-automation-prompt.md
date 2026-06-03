@@ -90,8 +90,9 @@ Advance the goal described in <ACTIVE_GOAL_STATE_PATH>.
 This heartbeat body is the generic Goal Harness lifecycle. Do not add
 project-specific branching to the automation prompt. Put project-specific
 policy in the Goal Harness registry, active-state sections, adapter output, or
-narrow public/private boundary rules; if a new lifecycle rule is needed, update
-goal-harness heartbeat-prompt so all projects inherit it.
+quota should-run.goal_boundary, or narrow public/private boundary rules; if a
+new lifecycle rule is needed, update goal-harness heartbeat-prompt so all
+projects inherit it.
 
 Before spending delivery compute, first make the Goal Harness CLI reachable in
 this automation shell, then run the quota guard:
@@ -165,16 +166,17 @@ If the result says should_run=true:
    owner, gate, waiting party, and next action. Treat run_history.latest_runs
    as evidence and drill-down only; it may be limited by status command limits
    or filters, so do not decide whether a gate is pending or approved from
-   latest runs alone. Also inspect any user_todo_summary from the guard/status
-   payload. If an open user/owner todo is the current blocker that can unlock a
+   latest runs alone. Also inspect goal_boundary and any user_todo_summary from
+   the guard/status payload. If an open user/owner todo is the current blocker
+   that can unlock a
    gate, focus_wait, or external-evidence wait, handle it before delivery as
    the same blocker-push opportunity: short NOTIFY, at most three items, no
    implementation work, and no quota spend for that blocker-push turn.
    Also read heartbeat_recommendation from the quota payload before inventing
    local automation behavior. If it says recommended_mode=run_first_read_only_map,
    run exactly its command as a real read-only map, not another dry-run, then
-   validate/save the read_only_project_map result, sync or refresh state if
-   needed, append exactly one heartbeat spend, and NOTIFY. If it says
+   validate/save the read_only_project_map result, append exactly one heartbeat
+   spend, sync or refresh state if needed, and NOTIFY. If it says
    recommended_mode=mapped_noop_if_unchanged with stop_if_unchanged=true, and
    you find no new user instruction, owner evidence, agent todo, stale source,
    or safe handoff, return a quiet DONT_NOTIFY no-op: do not run another
@@ -199,13 +201,13 @@ If the result says should_run=true:
    for that self-cancel turn, and return NOTIFY explaining that the automation
    was cancelled because it was spinning without progress.
 4. Choose exactly one bounded, verifiable step from that audit.
-5. Do that step only. Keep public/private boundaries intact. Public-safe repo
-   publication is not an operator gate by itself: for routine public project
-   work, commit, push, and PR creation may proceed autonomously after validation
-   and a clean public/private boundary scan. Stop and surface a user/controller
-   gate only for private or company-internal material, credentials, destructive
-   git operations, production actions, or repository rules that explicitly
-   require review.
+5. Do that step only. Stay inside goal_boundary when present and keep
+   public/private boundaries intact. Public-safe repo publication is not an
+   operator gate by itself: for routine public project work, commit, push, and PR
+   creation may proceed autonomously after validation and a clean public/private
+   boundary scan. Stop and surface a user/controller gate only for private or
+   company-internal material, credentials, destructive git operations,
+   production actions, or repository rules that explicitly require review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
    state. If the step discovers a concrete user/owner action, do not hide it in
@@ -269,8 +271,9 @@ after the gate has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
 the priority stack, use `attention_queue.items` / `project_asset` as the current
 routing authority and treat `run_history.latest_runs` only as evidence,
-check whether any open `user_todo_summary` is a blocker-push opportunity for a
-gate / focus_wait / external-evidence wait, apply a continuation check for
+read `goal_boundary`, check whether any open `user_todo_summary` is a
+blocker-push opportunity for a gate / focus_wait / external-evidence wait,
+apply a continuation check for
 repeated topics, then read `heartbeat_recommendation`: run
 `recommended_mode=run_first_read_only_map` as one real read-only map and spend
 once after validation; for `recommended_mode=mapped_noop_if_unchanged`, return a

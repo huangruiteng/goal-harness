@@ -175,6 +175,13 @@ For delivery-specific boundaries, prefer the registry fields surfaced in
 `quota should-run.goal_boundary`; the automation prompt only needs to say to
 obey that payload and stop when useful work falls outside it.
 
+When a Goal Harness client/prompt contract changes, update the matching smoke
+coverage in the same patch. Interface-budget and regression constraints belong
+in lightweight smoke scripts such as `examples/heartbeat-prompt-smoke.py`,
+`examples/quota-plan-smoke.py`, or `examples/quota-contract-smoke.py`; heavier
+Codex CLI plus Goal Harness end-to-end checks should stay explicit or
+low-frequency instead of becoming the default heartbeat path.
+
 The quota guard returns `heartbeat_recommendation`. New connected read-only
 goals should follow `recommended_mode=run_first_read_only_map`: run one real
 `goal-harness read-only-map --goal-id <STABLE_GOAL_ID>`, validate the saved
