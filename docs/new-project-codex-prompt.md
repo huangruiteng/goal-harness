@@ -114,7 +114,10 @@ goal-harness new-project-prompt \
    `safe_bypass_allowed=true`，该 gate 只阻塞被 gate 覆盖的 delivery path；可以从
    active state / Priority Stack 里选择一个不依赖该 gate 的 bounded 只读分析、steering、
    文档或 P0/P1 工作。若实际完成 safe-bypass 工作，仍需验证、写回进展，并 append 一次
-   quota spend。如果返回 `should_run=false` 且不是 operator gate，本轮不要做实现或 adapter
+   quota spend。如果 payload 返回 `notify_user_on_open_todo=true`，把开放 user todo 当作
+   blocker-push，而不是静默 skip：用中文最多列 3 个开放项和期望回复格式，并且本轮不做
+   delivery、不 append quota spend，除非同一个 blocker 最近已经问过。如果返回
+   `should_run=false` 且不是 operator gate / blocker-push，本轮不要做实现或 adapter
    工作，只记录 public-safe reason；不要执行任何 `agent_command`，即使 status 或 review
    packet 里提到过命令。只有当返回 `should_run=true` 且 payload 里包含 `agent_command` 时，
    才执行该命令。如果 `should_run=true` 但没有 `agent_command`，

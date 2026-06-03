@@ -84,6 +84,18 @@ If the result says `should_run=false`:
   never summarize this case as "no new user action". Do not execute
   `agent_command`, adapter work, write-control, production actions, or the
   gated path while asking.
+- If the payload says `notify_user_on_open_todo=true`, treat the existing open
+  `user_todo_summary` as a blocker-push opportunity, not as a silent skip. This
+  is especially important for `state=focus_wait`, `state=waiting`, and
+  `waiting_on=external_evidence`, where a short user/owner answer can unlock a
+  quiet project. If the same blocker ask has not already been surfaced in the
+  recent visible thread, return heartbeat `NOTIFY` with one concise Chinese ask
+  listing at most three `first_open_items`, the `open_todo_notify_reason`, and
+  the expected reply format: `done`, `defer/not now`, or a new evidence
+  link/date/conclusion. Do not do implementation work, adapter work, file
+  edits, research, project exploration, or quota spend for that blocker-push
+  turn. If the same blocker was already surfaced recently, return a quiet
+  `DONT_NOTIFY` skip reason and do not append quota spend.
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   read the active state and do exactly one bounded safe-bypass step from the
@@ -108,7 +120,12 @@ If the result says `should_run=true`:
    for owner, gate, waiting party, and next action. Treat
    `run_history.latest_runs` as evidence and drill-down only; it may be limited
    by status command limits or filters, so do not decide whether a gate is
-   pending or approved from latest runs alone.
+   pending or approved from latest runs alone. Also inspect any
+   `user_todo_summary` from the guard/status payload. If an open user/owner
+   todo is the current blocker that can unlock a gate, `focus_wait`, or
+   external-evidence wait, handle it before delivery as the same blocker-push
+   opportunity: short `NOTIFY`, at most three items, no implementation work,
+   and no quota spend for that blocker-push turn.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply

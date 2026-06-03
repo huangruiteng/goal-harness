@@ -55,9 +55,12 @@ goal-harness refresh-state --goal-id <goal-id>
    automatic delivery compute.
 2. If the guard or review packet exposes open user todos, surface them to the
    user instead of reporting "no new user action".
-3. Do not execute `agent_command`, adapter work, write-control, or production
+3. If the guard sets `notify_user_on_open_todo=true`, treat the open todos as a
+   blocker-push notification: ask at most three items, skip delivery work, and
+   skip quota spend unless the same blocker was already surfaced recently.
+4. Do not execute `agent_command`, adapter work, write-control, or production
    actions while the relevant gate is still unresolved.
-4. After the user todo is completed or explicitly deferred, the project agent
+5. After the user todo is completed or explicitly deferred, the project agent
    may continue only through the safe path allowed by the current guard or
    review packet.
 

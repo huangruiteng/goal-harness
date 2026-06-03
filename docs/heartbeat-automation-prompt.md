@@ -79,6 +79,18 @@ If the result says should_run=false:
   actions; never summarize this case as "no new user action". Do not execute
   agent_command, adapter work, write-control, production actions, or the gated
   path while asking.
+- If the payload says notify_user_on_open_todo=true, treat the existing open
+  user_todo_summary as a blocker-push opportunity, not as a silent skip. This
+  is especially important for state=focus_wait, state=waiting, and
+  waiting_on=external_evidence, where a short user/owner answer can unlock a
+  quiet project. If the same blocker ask has not already been surfaced in the
+  recent visible thread, return heartbeat NOTIFY with one concise Chinese ask
+  listing at most three first_open_items, the open_todo_notify_reason, and the
+  expected reply format: done, defer/not now, or a new evidence
+  link/date/conclusion. Do not do implementation work, adapter work, file
+  edits, research, project exploration, or quota spend for that blocker-push
+  turn. If the same blocker was already surfaced recently, return a quiet
+  DONT_NOTIFY skip reason and do not append quota spend.
 - If the payload also says safe_bypass_allowed=true and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   still read the active state and do exactly one bounded safe-bypass step from
@@ -104,7 +116,11 @@ If the result says should_run=true:
    owner, gate, waiting party, and next action. Treat run_history.latest_runs
    as evidence and drill-down only; it may be limited by status command limits
    or filters, so do not decide whether a gate is pending or approved from
-   latest runs alone.
+   latest runs alone. Also inspect any user_todo_summary from the guard/status
+   payload. If an open user/owner todo is the current blocker that can unlock a
+   gate, focus_wait, or external-evidence wait, handle it before delivery as
+   the same blocker-push opportunity: short NOTIFY, at most three items, no
+   implementation work, and no quota spend for that blocker-push turn.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply
@@ -184,15 +200,20 @@ still unavailable, quietly report that preflight failure and do no work. Then
 run `goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <GOAL_ID>`. If it
 returns `should_run=false`, ask about operator gates with NOTIFY using
 `gate_prompt` unless the same unresolved gate was already surfaced recently. If
+the payload says `notify_user_on_open_todo=true`, ask up to three open
+`user_todo_summary` items as a blocker-push NOTIFY and do not spend quota for
+that blocker-push turn. If
 it returns `state=operator_gate` plus `safe_bypass_allowed=true`, avoid the
 gated command and do at most one independent read-only steering/analysis step
 after the gate has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
 the priority stack, use `attention_queue.items` / `project_asset` as the current
 routing authority and treat `run_history.latest_runs` only as evidence,
-apply a continuation check for repeated topics, run the no-progress self-stop
-check, then do one bounded verifiable step, validate it, write back changed
-files / validation / critic / next action, refresh state if needed, and append
+check whether any open `user_todo_summary` is a blocker-push opportunity for a
+gate / focus_wait / external-evidence wait, apply a continuation check for
+repeated topics, run the no-progress self-stop check, then do one bounded
+verifiable step, validate it, write back changed files / validation / critic /
+next action, refresh state if needed, and append
 exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
 event after the completed turn. Use `--slots 1` for minute-based
@@ -209,22 +230,25 @@ For every automatic heartbeat turn, the agent-facing checklist is:
    and run the local installer fallback before declaring preflight failure.
 2. If `should_run=false` with `state=operator_gate`, ask the user/controller the
    current gate unless the same unresolved gate was already surfaced recently.
-3. If the gate was already surfaced and `safe_bypass_allowed=true`, either take
+3. If `notify_user_on_open_todo=true`, ask up to three open user todos as a
+   blocker-push notification unless the same blocker was surfaced recently; do
+   not spend quota for that blocker-push turn.
+4. If the gate was already surfaced and `safe_bypass_allowed=true`, either take
    one independent safe-bypass step or report the pending gate compactly.
-4. Run the steering audit before choosing the work.
-5. Use `attention_queue.items` / `project_asset` as current routing authority;
+5. Run the steering audit before choosing the work.
+6. Use `attention_queue.items` / `project_asset` as current routing authority;
    use `run_history.latest_runs` only as evidence or drill-down.
-6. Cancel or pause the automation instead of spending if 5 consecutive eligible
+7. Cancel or pause the automation instead of spending if 5 consecutive eligible
    turns are only repeated no-progress status loops.
-7. Treat routine public commit, push, and PR creation as autonomous after clean
+8. Treat routine public commit, push, and PR creation as autonomous after clean
    validation and a public/private boundary scan; stop for private/company
    material, credentials, destructive git, production actions, or repo rules
    that explicitly require review.
-8. Work small when `should_run=true`.
-9. Validate before reporting.
-10. Refresh state when the run is state-only.
-11. Spend exactly once after the completed turn.
-12. Report compactly.
+9. Work small when `should_run=true`.
+10. Validate before reporting.
+11. Refresh state when the run is state-only.
+12. Spend exactly once after the completed turn.
+13. Report compactly.
 
 This prompt is intentionally a template rather than a scheduler. It should work
 with per-project heartbeats, a shared controller loop, or future Codex goal-mode

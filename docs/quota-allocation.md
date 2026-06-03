@@ -251,6 +251,14 @@ report must still list the existing open user todos instead of saying that
 there is no user action. If `agent_todo_summary.open_count > 0`, the agent
 should use that summary as its next safe follow-up checklist instead of mining
 chat history or an overlong `Next Action`.
+For `state=focus_wait`, `state=waiting`, or
+`waiting_on=external_evidence`, an open user todo can be the smallest unlock
+for a quiet project. In that case, `quota should-run` should set
+`notify_user_on_open_todo=true` and include `open_todo_notify_reason`. The
+target heartbeat should return a compact `NOTIFY` listing at most three open
+user todos and the expected reply (`done`, `defer/not now`, or new evidence
+link/date/conclusion), while skipping delivery work and quota spend for that
+blocker-push turn unless the same blocker was already surfaced recently.
 For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,

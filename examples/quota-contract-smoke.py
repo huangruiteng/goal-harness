@@ -40,7 +40,7 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
-        "keep `blocked_health`, `operator_gate`, `waiting`, `throttled`, and `paused` goals in their own lanes",
+        "keep `blocked_health`, `operator_gate`, `focus_wait`, `waiting`, `throttled`, and `paused` goals in their own lanes",
         label="quota doc",
     )
     assert_contains(
@@ -96,6 +96,21 @@ def main() -> int:
     assert_contains(
         quota_doc,
         "This also applies after a bounded safe-bypass step",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "`notify_user_on_open_todo=true`",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "target heartbeat should return a compact `NOTIFY` listing at most three open user todos",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "skipping delivery work and quota spend for that blocker-push turn",
         label="quota doc",
     )
     assert_contains(
@@ -156,7 +171,7 @@ def main() -> int:
     )
     assert_contains(
         readme,
-        "operator-gated, waiting, throttled, paused, and health-blocked goals stay out of the eligible lane",
+        "operator-gated, focus-waiting, waiting, throttled, paused, and health-blocked goals stay out of the eligible lane",
         label="README",
     )
     assert_contains(
@@ -172,6 +187,16 @@ def main() -> int:
     assert_contains(
         readme,
         "its report still has to list existing open user todos",
+        label="README",
+    )
+    assert_contains(
+        readme,
+        "`notify_user_on_open_todo=true`",
+        label="README",
+    )
+    assert_contains(
+        readme,
+        "skip delivery work and quota spend for that blocker-push turn",
         label="README",
     )
     assert_contains(
@@ -226,12 +251,27 @@ def main() -> int:
     )
     assert_contains(
         status_contract,
-        "operator-gated, waiting, throttled, paused, and health-blocked goals must stay out of the eligible lane",
+        "operator-gated, focus-waiting, waiting, throttled, paused, and health-blocked goals must stay out of the eligible lane",
         label="status contract",
     )
     assert_contains(
         status_contract,
         "ask that concrete gate in the visible thread with `NOTIFY`",
+        label="status contract",
+    )
+    assert_contains(
+        status_contract,
+        "`notify_user_on_open_todo=true`",
+        label="status contract",
+    )
+    assert_contains(
+        status_contract,
+        "`open_todo_notify_reason`",
+        label="status contract",
+    )
+    assert_contains(
+        status_contract,
+        "skip quota spend for that blocker-push turn",
         label="status contract",
     )
     assert_contains(

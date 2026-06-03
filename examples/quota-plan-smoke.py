@@ -663,6 +663,19 @@ def assert_focus_wait_should_run() -> None:
     focus_item = attention("focus-wait", compute=1.0)
     focus_item["lifecycle_phase"] = "focus_wait"
     focus_item["lifecycle_flags"] = ["continuation_boundary"]
+    focus_item["user_todos"] = {
+        "source_section": "User Todo",
+        "total_count": 1,
+        "open_count": 1,
+        "done_count": 0,
+        "items": [
+            {
+                "index": 1,
+                "done": False,
+                "text": "Provide new owner evidence, a clean baseline, or external eval before delivery resumes.",
+            }
+        ],
+    }
 
     payload = {
         "ok": True,
@@ -684,11 +697,16 @@ def assert_focus_wait_should_run() -> None:
     assert decision["quota"]["focus_wait"] is True, decision
     assert decision["quota"]["blocked_action_scope"] == "delivery_focus", decision
     assert decision["safe_bypass_allowed"] is False, decision
+    assert decision["user_todo_summary"]["open_count"] == 1, decision
+    assert decision["notify_user_on_open_todo"] is True, decision
+    assert "focus_wait" in decision["open_todo_notify_reason"], decision
     assert decision["plan_summary"]["next_automatic_turn"] is None, decision
     assert decision["lifecycle_phase"] == "focus_wait", decision
     assert decision["lifecycle_flags"] == ["continuation_boundary"], decision
     assert "agent_command" not in decision, decision
     assert "- state: `focus_wait`" in markdown, markdown
+    assert "- notify_user_on_open_todo: `True`" in markdown, markdown
+    assert "- user_todo_next[1]: Provide new owner evidence" in markdown, markdown
 
 
 def assert_attention_queue_overrides_stale_run_history() -> None:

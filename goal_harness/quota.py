@@ -396,6 +396,37 @@ def _build_gate_prompt(item: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
+def _should_notify_user_on_open_todo(
+    *,
+    state: str,
+    waiting_on: str,
+    user_todo_summary: dict[str, Any] | None,
+) -> bool:
+    if state == "operator_gate":
+        return False
+    if not isinstance(user_todo_summary, dict):
+        return False
+    try:
+        open_count = int(user_todo_summary.get("open_count") or 0)
+    except (TypeError, ValueError):
+        open_count = 0
+    if open_count <= 0:
+        return False
+    if state in {"focus_wait", "waiting"}:
+        return True
+    return waiting_on in {"user_or_controller", "controller", "external_evidence"}
+
+
+def _open_todo_notify_reason(*, state: str, waiting_on: str) -> str:
+    if state == "focus_wait":
+        return "open user todo can unblock focus_wait after owner evidence, external eval, or a clean baseline changes"
+    if waiting_on == "external_evidence":
+        return "open user todo can provide or defer the external-evidence checkpoint"
+    if waiting_on in {"user_or_controller", "controller"}:
+        return "open user todo can resolve the user/controller blocker"
+    return "open user todo can resolve the current waiting lane"
+
+
 def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
     queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
     queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
@@ -563,8 +594,19 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["operator_question"] = item.get("operator_question")
         if item.get("missing_gates"):
             payload["missing_gates"] = item.get("missing_gates")
-        if item.get("user_todos"):
-            payload["user_todo_summary"] = _summarize_user_todos(item.get("user_todos"))
+        user_todo_summary = _summarize_user_todos(item.get("user_todos"))
+        if user_todo_summary:
+            payload["user_todo_summary"] = user_todo_summary
+            if _should_notify_user_on_open_todo(
+                state=state,
+                waiting_on=str(item.get("waiting_on") or ""),
+                user_todo_summary=user_todo_summary,
+            ):
+                payload["notify_user_on_open_todo"] = True
+                payload["open_todo_notify_reason"] = _open_todo_notify_reason(
+                    state=state,
+                    waiting_on=str(item.get("waiting_on") or ""),
+                )
         if item.get("agent_todos"):
             payload["agent_todo_summary"] = _summarize_user_todos(item.get("agent_todos"))
         gate_prompt = _build_gate_prompt(item) if state == "operator_gate" else None
@@ -1035,6 +1077,10 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- operator_question: {payload.get('operator_question')}")
     if payload.get("notify_user_on_gate"):
         lines.append(f"- notify_user_on_gate: `{payload.get('notify_user_on_gate')}`")
+    if payload.get("notify_user_on_open_todo"):
+        lines.append(f"- notify_user_on_open_todo: `{payload.get('notify_user_on_open_todo')}`")
+    if payload.get("open_todo_notify_reason"):
+        lines.append(f"- open_todo_notify_reason: {payload.get('open_todo_notify_reason')}")
     if payload.get("gate_prompt"):
         lines.extend(["", "## Gate Prompt", str(payload.get("gate_prompt"))])
     user_todo_summary = (

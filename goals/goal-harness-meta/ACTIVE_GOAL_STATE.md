@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:20:57+08:00
+updated_at: 2026-06-03T16:34:56+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -61,14 +61,52 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- `focus_wait + owner blocker` now appears in Review Packet and dashboard
-  first-screen action packets. Next, add a sanitized blocker-push fixture to
-  the generated heartbeat/status path so open owner blockers can become compact
-  `NOTIFY` asks when they can unlock a quiet project, rather than relying only
-  on hand-written automation instructions.
+- `notify_user_on_open_todo` now exists in `quota should-run` and the generated
+  heartbeat/new-project prompts. Next, either update the live heartbeat
+  automation to use the generated prompt branch or add a sanitized runtime
+  fixture proving a focus-wait open todo becomes a no-spend blocker-push
+  `NOTIFY`.
 
 ## Recent Progress
 
+- 2026-06-03T16:34:56+08:00: Steering audit candidates were: P0 generated
+  heartbeat/status blocker-push behavior for open owner/user todos, P0 wait for
+  target project dry-run signals, P1 dashboard/browser polish, and P2 dreaming
+  proposal work. Continuation check: this was another focus-wait / blocker
+  slice, but continuing still won because the previous slices made the blocker
+  visible while the generated automation path still lacked a data-backed signal
+  telling heartbeat agents to notify instead of silently skipping or spending
+  delivery compute. No-progress self-stop check: not triggered because recent
+  heartbeats produced committed artifacts, validation signals, and concrete
+  public control-plane surfaces. Bounded output: `quota should-run` now emits
+  `notify_user_on_open_todo=true` plus `open_todo_notify_reason` for
+  non-operator-gate waiting lanes such as `focus_wait`, generic waiting, and
+  external-evidence waits when open user todos can unlock progress; the
+  generated heartbeat prompt now turns that payload into a compact no-spend
+  blocker-push `NOTIFY`; and the new-project prompt, skill, README, quota,
+  status, and todo contracts document the same behavior. Changed files:
+  `goal_harness/quota.py`, `goal_harness/heartbeat_prompt.py`,
+  `goal_harness/project_prompt.py`, `examples/heartbeat-prompt-smoke.py`,
+  `examples/quota-plan-smoke.py`, `examples/quota-contract-smoke.py`,
+  `examples/project-prompt-smoke.py`, `README.md`,
+  `docs/heartbeat-automation-prompt.md`, `docs/quota-allocation.md`,
+  `docs/status-data-contract.md`, `docs/project-agent-todo-contract.md`,
+  `docs/new-project-codex-prompt.md`, and
+  `skills/goal-harness-project/SKILL.md`. Validation: `python3
+  examples/heartbeat-prompt-smoke.py`, `python3 examples/quota-plan-smoke.py`,
+  `python3 examples/quota-contract-smoke.py`, `python3
+  examples/project-prompt-smoke.py`, `python3 examples/status-markdown-smoke.py`,
+  `python3 -m py_compile goal_harness/quota.py
+  goal_harness/heartbeat_prompt.py goal_harness/project_prompt.py
+  examples/heartbeat-prompt-smoke.py examples/quota-plan-smoke.py
+  examples/quota-contract-smoke.py examples/project-prompt-smoke.py`,
+  `goal-harness --format json check --scan-root .`, `git diff --check`, and a
+  changed-diff sensitive-pattern scan passed. Critic: this closes the public
+  generator/data-contract gap, but the live heartbeat automation may still need
+  to be refreshed or fixture-checked so future ticks inherit the generated
+  blocker-push branch rather than only this thread's current prompt. Losing
+  candidate: target-project dry-run signals remain high-value but must arrive
+  from the target project context.
 - 2026-06-03T16:20:57+08:00: Steering audit candidates were: P0 dashboard
   action packet / first-screen presentation for `focus_wait` owner blockers,
   P0 generated heartbeat/status blocker-push prompts, P0 target-project dry-run

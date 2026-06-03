@@ -70,6 +70,14 @@ def main() -> int:
         "user_todo_summary.open_count > 0",
         "never summarize this case as \"no new user action\"",
         "NOTIFY",
+        "notify_user_on_open_todo=true",
+        "blocker-push opportunity",
+        "state=focus_wait",
+        "waiting_on=external_evidence",
+        "listing at most three first_open_items",
+        "open_todo_notify_reason",
+        "done, defer/not now, or a new evidence link/date/conclusion",
+        "quota spend for that blocker-push turn",
         "safe_bypass_allowed=true",
         "gate blocks only the gated delivery path",
         "one bounded safe-bypass step",
@@ -81,6 +89,8 @@ def main() -> int:
         "project_asset are authoritative",
         "run_history.latest_runs as evidence and drill-down only",
         "do not decide whether a gate is pending or approved from latest runs alone",
+        "If an open user/owner todo is the current blocker that can unlock a gate, focus_wait, or external-evidence wait",
+        "no quota spend for that blocker-push turn",
         "Run a short steering audit before choosing work",
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
         "apply a continuation check",
@@ -128,6 +138,14 @@ def main() -> int:
         "user_todo_summary.open_count > 0",
         "never summarize this case as \"no new user action\"",
         "NOTIFY",
+        "notify_user_on_open_todo=true",
+        "blocker-push opportunity",
+        "state=focus_wait",
+        "waiting_on=external_evidence",
+        "listing at most three `first_open_items`",
+        "open_todo_notify_reason",
+        "new evidence link/date/conclusion",
+        "quota spend for that blocker-push turn",
         "safe_bypass_allowed=true",
         "gate blocks only the gated delivery path",
         "one bounded safe-bypass step",
@@ -138,6 +156,8 @@ def main() -> int:
         "project_asset` are authoritative",
         "run_history.latest_runs` as evidence and drill-down only",
         "do not decide whether a gate is pending or approved from latest runs alone",
+        "current blocker that can unlock a gate, `focus_wait`, or external-evidence wait",
+        "no quota spend for that blocker-push turn",
         "Run a short steering audit before choosing work",
         "list at least three plausible next-action candidates across different P0/P1/P2 lanes",
         "apply a continuation check",
@@ -173,11 +193,14 @@ def main() -> int:
             "If the result says should_run=false",
             "state=operator_gate",
             "gate_prompt",
+            "notify_user_on_open_todo=true",
+            "blocker-push opportunity",
             "safe_bypass_allowed=true",
             "If the result says should_run=true",
             "When you inspect current Goal Harness routing",
             "attention_queue.items",
             "run_history.latest_runs",
+            "same blocker-push opportunity",
             "Run a short steering audit before choosing work",
             "Include a product bottleneck lens",
             "Run the no-progress self-stop check before choosing delivery work",
@@ -210,6 +233,8 @@ def main() -> int:
     assert "consecutive eligible heartbeat turns" in project_skill, project_skill
     assert "Routine public repo publication is a boundary decision" in project_skill, project_skill
     assert "Do not reintroduce a user gate for public-safe publication itself" in project_skill, project_skill
+    assert "notify_user_on_open_todo=true" in project_skill, project_skill
+    assert "blocker-push `NOTIFY`" in project_skill, project_skill
 
     cli_json = subprocess.run(
         [

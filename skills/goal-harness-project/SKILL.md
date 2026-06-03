@@ -145,6 +145,11 @@ quota spend for that self-cancel turn.
 The same generated task body also makes routine public commit, push, and PR
 creation autonomous after validation plus a clean public/private boundary scan.
 Do not reintroduce a user gate for public-safe publication itself.
+It also respects `notify_user_on_open_todo=true`: open user todos in
+focus-wait, waiting, or external-evidence lanes should become a compact
+blocker-push `NOTIFY` with at most three items, while skipping delivery work
+and quota spend for that blocker-push turn unless the same blocker was already
+surfaced recently.
 
 Keep the Codex App visible goal text short, for example
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short

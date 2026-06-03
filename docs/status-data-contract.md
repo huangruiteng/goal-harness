@@ -391,6 +391,13 @@ actions. When the payload also includes `gate_prompt`, `operator_question`,
 concrete gate in the visible thread with `NOTIFY` unless the same unresolved
 gate was already asked recently; the guard should not collapse a user decision
 into a silent skip.
+When the payload includes `notify_user_on_open_todo=true`, the open
+`user_todo_summary` is the current blocker-push surface even if there is no
+operator gate. This is intended for `focus_wait`, `waiting`, and
+`external_evidence` lanes where a short user/owner answer can unlock progress.
+Executors should list at most three open todos, include
+`open_todo_notify_reason`, skip implementation work, and skip quota spend for
+that blocker-push turn unless the same blocker was surfaced recently.
 
 Review Packet source-of-truth rule:
 
