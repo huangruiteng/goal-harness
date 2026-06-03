@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T12:39:40+08:00
+updated_at: 2026-06-03T14:44:04+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,41 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- CLI `goal-harness review-packet` now mirrors the dashboard GH packet's
-  user/agent todo visibility and context-source boundary: user todo appears in
-  the human decision section, and the first open agent todo appears in the
-  project-agent handoff. The next heartbeat should audit duplicate
-  packet/panel surfaces, or status markdown versus packet parity, and only
-  patch a concrete anti-overload mismatch.
+- Status Markdown `project_asset` now carries the first open user and agent todo
+  in the hot path, matching the JSON/dashboard project-asset contract without
+  forcing agents to scan detailed todo sections. The next heartbeat should
+  leave packet/todo parity unless a new concrete mismatch appears; prefer a P0
+  state/safety audit or a focused dashboard detail-vs-first-screen duplicate
+  burden audit.
 
 ## Recent Progress
 
+- 2026-06-03T14:44:04+08:00: Steering audit candidates were: P0 duplicate
+  dashboard packet/panel surface audit, P0 status Markdown versus project-asset
+  packet parity, P0 state/safety public-boundary check, P1 dashboard polish, and
+  P2 no-progress guard tuning. Continuation check: recent slices consumed
+  packet/card anti-overload focus, so continuing only won after the duplicate
+  dashboard check found the old `Operator Review Packet`/`Copy Review Packet`
+  surface already forbidden by browser smoke and the status Markdown audit found
+  a concrete hot-path mismatch: `project_asset` exposed todo counts but not the
+  first open user/agent todo text. No-progress self-stop check: not triggered
+  because recent eligible heartbeats produced committed artifacts and validation
+  signals, and this turn produced a bounded status Markdown parity patch.
+  Bounded output: updated `goal_harness/status.py` so Markdown project-asset
+  blocks render `asset_user_todo` and `asset_agent_todo` from compact
+  `project_asset.*_todos.next`; updated `examples/status-markdown-smoke.py` and
+  `docs/status-data-contract.md` to lock and document that hot-path readers get
+  the current todo without scanning detailed sections. Validation: `python3
+  examples/status-markdown-smoke.py` passed; `python3 -m py_compile
+  goal_harness/status.py examples/status-markdown-smoke.py` passed;
+  `goal-harness --format json check --scan-root .` passed with warnings=0 and
+  a clean public boundary scan over 82 files; `git diff --check` passed.
+  Critic: this is a precise anti-overload fix and keeps archival todo detail in
+  the colder top-level fields, but this topic has now had enough adjacent
+  slices; the next turn should shift away unless it finds a fresh concrete
+  mismatch. Losing candidate: a true dashboard detail-vs-first-screen duplicate
+  burden audit remains useful, but should be chosen only with a visible
+  duplication finding.
 - 2026-06-03T12:39:40+08:00: Steering audit candidates were: P0 CLI Review
   Packet parity with the dashboard GH packet for user/agent todo visibility and
   context-source boundaries, P0 duplicate packet/panel surface audit, P0

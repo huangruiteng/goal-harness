@@ -324,6 +324,8 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
     assert "project_asset: owner=user_or_controller gate=operator_question" in markdown, markdown
     assert f"asset_next_action: {NEW_PLANNED_ACTION}" in markdown, markdown
     assert "asset_todos: user_open=1 agent_open=1" in markdown, markdown
+    assert f"asset_user_todo: {USER_TODO_TEXT}" in markdown, markdown
+    assert f"asset_agent_todo: {AGENT_TODO_TEXT}" in markdown, markdown
     assert "asset_quota: compute=1.0 state=operator_gate" in markdown, markdown
 
     gate_index = markdown.index("operator_gate_dry_run")
@@ -383,6 +385,8 @@ def assert_registry_attention_override(payload: dict, markdown: str) -> None:
     assert REGISTRY_OVERRIDE_ACTION in markdown, markdown
     assert "project_asset: owner=user_or_controller gate=operator_question" in markdown, markdown
     assert f"asset_next_action: {REGISTRY_OVERRIDE_ACTION}" in markdown, markdown
+    assert f"asset_user_todo: {USER_TODO_TEXT}" in markdown, markdown
+    assert f"asset_agent_todo: {AGENT_TODO_TEXT}" in markdown, markdown
     assert "latest_validation: classification=state_refreshed" in markdown, markdown
     assert f"next_user_todo: {USER_TODO_TEXT}" in markdown, markdown
     assert f"next_agent_todo: {AGENT_TODO_TEXT}" in markdown, markdown

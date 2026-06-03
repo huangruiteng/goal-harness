@@ -1279,6 +1279,10 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 if asset_agent_todos:
                     todo_parts.append(f"agent_open={asset_agent_todos.get('open')}")
                 lines.append(f"    - asset_todos: {' '.join(todo_parts)}")
+                if asset_user_todos.get("next"):
+                    lines.append(f"      - asset_user_todo: {_markdown_scalar(asset_user_todos.get('next') or '')}")
+                if asset_agent_todos.get("next"):
+                    lines.append(f"      - asset_agent_todo: {_markdown_scalar(asset_agent_todos.get('next') or '')}")
             asset_quota = (
                 project_asset.get("quota")
                 if isinstance(project_asset.get("quota"), dict)

@@ -292,7 +292,9 @@ Item fields:
   `latest_validation` summaries. This is the first-screen project asset surface
   for agents and dashboards; it lets consumers avoid reconstructing owner,
   gate, next action, stop condition, todo counts, compute state, and latest
-  validation from scattered fields. The richer top-level `user_todos`,
+  validation from scattered fields. Markdown renderers should include the first
+  unfinished user and agent todo here when available, so hot-path readers do not
+  need to scan the detailed todo sections. The richer top-level `user_todos`,
   `agent_todos`, and `quota` fields remain available for detailed views.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
