@@ -21,6 +21,11 @@ A useful authority registry names:
 - default entry documents for a new controller tick;
 - topic ownership: which file is canonical for current priorities, system
   design, validation, external sync, or historical evidence;
+- project material and repository links: which external docs, repo roots,
+  dashboards, issue trackers, or review surfaces are relevant to the goal;
+- source role and freshness: whether a source is the current authority, a
+  supporting reference, a historical note, a local mirror, or an owner-gated
+  evidence source;
 - document status: active, draft, diagnostic, external mirror, superseded,
   deprecated, archived;
 - conflict rules: what wins when a TODO, design doc, mirror, and old run report
@@ -43,6 +48,18 @@ Goal Harness should treat this as a first-class complex-project mechanism:
       "current_priority": "docs/TODO.md",
       "runtime_architecture": "docs/SYSTEM_DESIGN.md",
       "external_sync": "docs/external_materials/MANIFEST.md"
+    },
+    "project_materials": {
+      "migration_design": {
+        "role": "current_authority",
+        "source_kind": "external_doc",
+        "freshness": "owner_review_required"
+      },
+      "target_repo": {
+        "role": "implementation_surface",
+        "source_kind": "repository",
+        "freshness": "read_only_status_ok"
+      }
     }
   }
 }
@@ -52,6 +69,16 @@ For `read-only-map`, the adapter should not just list files. It should report
 whether an authority registry exists, which default entries were inspected,
 which topics have canonical owners, and whether any active source conflicts
 with a deprecated or archived source.
+
+The same pattern applies outside documentation-heavy agent repositories. A
+platform migration or product integration goal often has several material
+classes at once: design docs, owner review notes, target and source
+repositories, migration checklists, dashboards, and validation records. Goal
+Harness should compact those into a public-safe material registry: expose roles,
+freshness, missing owner evidence, and next action, while keeping private URLs,
+repository paths, product configs, and raw review text in project-local payloads.
+This lets a new project agent know which sources are current without flooding
+its context with every old link.
 
 ## 2. Current-Belief TODO
 
@@ -231,8 +258,10 @@ Goal Harness should actively prevent these patterns:
 
 These field patterns imply four concrete Goal Harness surfaces:
 
-1. **Authority registry support**: `connect` and `read-only-map` should accept
-   or discover a project authority registry and publish compact coverage.
+1. **Authority/material registry support**: `connect` and `read-only-map`
+   should accept or discover a project authority registry, including external
+   material and repository-link roles, then publish compact public-safe
+   coverage.
 2. **Experiment board support**: experiment adapters should name primary metric,
    decision window, guardrails, active-task section, and route-history section.
 3. **Validation surface map**: status and dashboard should show why a goal is
