@@ -80,6 +80,15 @@ repository paths, product configs, and raw review text in project-local payloads
 This lets a new project agent know which sources are current without flooding
 its context with every old link.
 
+The near-term public pilot should use a sanitized complex-migration fixture.
+The fixture should model the material roles and freshness states that matter
+without naming private projects: current design authority, source repository,
+target repository, owner review surface, migration checklist, validation
+dashboard, and deprecated historical notes. Status, dashboard, and review
+packets should expose only the role, freshness, missing owner evidence, and next
+action; private URLs, repo roots, product configs, and raw review notes stay in
+project-local payloads.
+
 ## 2. Current-Belief TODO
 
 For long-running projects, a TODO file is most valuable when it answers three
@@ -261,7 +270,9 @@ These field patterns imply four concrete Goal Harness surfaces:
 1. **Authority/material registry support**: `connect` and `read-only-map`
    should accept or discover a project authority registry, including external
    material and repository-link roles, then publish compact public-safe
-   coverage.
+   coverage. The first fixture should be a sanitized complex-migration material
+   registry so implementation is grounded in a real multi-material control
+   problem without leaking project specifics.
 2. **Experiment board support**: experiment adapters should name primary metric,
    decision window, guardrails, active-task section, and route-history section.
 3. **Validation surface map**: status and dashboard should show why a goal is
