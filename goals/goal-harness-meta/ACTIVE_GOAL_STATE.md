@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T16:50:57+08:00
+updated_at: 2026-06-04T02:14:33+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,6 +58,7 @@ and agents receive the smallest sufficient execution context.
   should show the previous operator relay burden, the owner/gate/next
   action/reward/todo change after Goal Harness, and the safe evidence surface
   that can be shown without private details.
+- [ ] [P1] Add dashboard aggregate and per-project usage stats: daily/weekly turns, threads, token/compute proxy, quota spend, automation run count, and project share; surface resource-heavy projects without flooding the first screen.
 
 ## Next Action
 

@@ -217,12 +217,9 @@ If the result says should_run=true:
    Use `--role agent` for project-agent follow-up work.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the Goal Harness checkout.
-8. If the dashboard or controller needs to see a state-only update, run:
-
-   goal-harness refresh-state --goal-id <GOAL_ID>
-
-9. After validation and required state refresh are complete, append exactly one
-   spend event. For a minute-based heartbeat, spend one slot:
+8. After validation and writeback complete, append exactly one spend event
+   before any state-only refresh that might close the active delivery lane.
+   For a minute-based heartbeat, spend one slot:
 
    goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute
 
@@ -234,6 +231,11 @@ If the result says should_run=true:
    should_run=false but safe_bypass_allowed=true and you actually completed a
    bounded safe-bypass step, append this same spend event once after
    validation/writeback.
+
+9. If the dashboard or controller needs to see a state-only update after spend,
+   run:
+
+   goal-harness refresh-state --goal-id <GOAL_ID>
 
 10. Return a compact final report. Use heartbeat NOTIFY only for meaningful
     user visibility, such as a committed artifact, a user gate, a real blocker,
@@ -276,10 +278,9 @@ quiet no-op without another dry-run, file edit, or quota spend when no new
 instruction/evidence/todo/stale source/safe handoff exists. Then run the
 no-progress self-stop check, do one bounded verifiable step when a real step
 exists, validate it, write back changed files / validation / critic / next
-action, refresh state if needed, and append
-exactly one
+action, append exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
-event after the completed turn. Use `--slots 1` for minute-based
+event after the completed turn, then refresh state if needed. Use `--slots 1` for minute-based
 heartbeats; for coarser intervals, spend the scheduler minutes consumed by that
 turn.
 ```

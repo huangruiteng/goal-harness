@@ -201,8 +201,8 @@ def main() -> int:
         "goal-harness todo add --goal-id <GOAL_ID> --role user --text \"<public-safe user/owner action>\"",
         "Use `--role agent` for project-agent follow-up work",
         "docs/project-agent-todo-contract.md",
-        "goal-harness refresh-state --goal-id <GOAL_ID>",
         'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
+        "goal-harness refresh-state --goal-id <GOAL_ID>",
         "append exactly one",
         "Do not append spend for quiet should_run=false skips, preflight failures, pure dry-run previews, or duplicate accounting attempts",
         "safe_bypass_allowed=true and you actually completed a bounded safe-bypass step",
@@ -274,8 +274,8 @@ def main() -> int:
         "If the step discovers a concrete user/owner action",
         "goal-harness todo add --goal-id public-heartbeat-goal --role user --text \"<public-safe user/owner action>\"",
         "docs/project-agent-todo-contract.md",
-        "goal-harness refresh-state --goal-id public-heartbeat-goal",
         'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
+        "goal-harness refresh-state --goal-id public-heartbeat-goal",
         "Do not append spend for quiet `should_run=false` skips",
     ):
         assert phrase in compact_generated, phrase
@@ -308,8 +308,8 @@ def main() -> int:
             "Choose exactly one bounded, verifiable step from that audit",
             "Public-safe repo publication is not an operator gate by itself",
             "Run the smallest useful validation",
-            "goal-harness refresh-state --goal-id <GOAL_ID>",
             'goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute',
+            "goal-harness refresh-state --goal-id <GOAL_ID>",
             "Return a compact final report",
         ),
     )

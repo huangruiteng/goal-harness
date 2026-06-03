@@ -147,8 +147,8 @@ If the result says `should_run=true`:
    Also read `heartbeat_recommendation` from the quota payload before inventing
    local automation behavior. If it says `recommended_mode=run_first_read_only_map`,
    run exactly its `command` as a real read-only map, not another dry-run, then
-   validate/save the `read_only_project_map` result, sync or refresh state if
-   needed, append exactly one heartbeat spend, and `NOTIFY`. If it says
+   validate/save the `read_only_project_map` result, append exactly one
+   heartbeat spend, sync or refresh state if needed, and `NOTIFY`. If it says
    `recommended_mode=mapped_noop_if_unchanged` with `stop_if_unchanged=true`,
    and you find no new user instruction, owner evidence, agent todo, stale
    source, or safe handoff, return a quiet `DONT_NOTIFY` no-op: do not run
@@ -193,14 +193,8 @@ If the result says `should_run=true`:
    Use `--role agent` for project-agent follow-up work.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the Goal Harness checkout.
-8. If the dashboard or controller needs to see a state-only update, run:
-
-   ```bash
-   goal-harness refresh-state --goal-id {goal_id}
-   ```
-
-9. After validation and required state refresh are complete, append exactly one
-   spend event:
+8. After validation and writeback complete, append exactly one spend event
+   before any state-only refresh that might close the active delivery lane:
 
    ```bash
    {quota_spend_command}
@@ -211,6 +205,13 @@ If the result says `should_run=true`:
    `should_run=false` but `safe_bypass_allowed=true` and you actually completed
    a bounded safe-bypass step, append this same spend event once after
    validation/writeback.
+
+9. If the dashboard or controller needs to see a state-only update after spend,
+   run:
+
+   ```bash
+   goal-harness refresh-state --goal-id {goal_id}
+   ```
 
 10. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
     user visibility, such as a committed artifact, a user gate, a real blocker,
@@ -250,13 +251,13 @@ edits, research, exploration, or spend. If guard exposes gate or open user
 todo, send one concise Chinese `NOTIFY`; otherwise quiet
 `DONT_NOTIFY`.
 
-If allowed, follow the compact contract. Core invariants: read active state and
-status queue; blocker-push before delivery; obey `heartbeat_recommendation`;
+If allowed, follow compact contract: read active state/status queue;
+blocker-push before delivery; obey `heartbeat_recommendation`;
 steering audit with product-bottleneck lens; choose one bounded verifiable step;
 stop on private/company-internal material, credentials, destructive git,
 production actions, or explicit review rules; validate/write back files,
 validation, critic, next action; add todos with `goal-harness todo add`; refresh
-state if needed.
+after spend if needed.
 
 Spend exactly once only after completed delivery or safe-bypass work:
 
@@ -308,7 +309,7 @@ If `should_run=false`:
   delivery or spend.
 - `safe_bypass_allowed=true` after the same gate was already surfaced: do at
   most one bounded gate-independent safe-bypass step; validate, write back,
-  refresh if needed, and spend once only if real work completed.
+  spend once only if real work completed, then refresh if needed.
 - Otherwise quiet `DONT_NOTIFY` with the skip reason; no work or spend.
 
 If `should_run=true`:
@@ -320,7 +321,7 @@ If `should_run=true`:
    spend.
 3. Follow `heartbeat_recommendation` before inventing behavior:
    `run_first_read_only_map` means run exact real-map command, then
-   validate/save/refresh/spend/`NOTIFY`; `mapped_noop_if_unchanged` plus
+   validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if there is no new instruction,
    owner evidence, agent todo, stale source, or safe handoff.
 4. Run a steering audit before choosing work: compare at least three P0/P1/P2
@@ -338,12 +339,14 @@ If `should_run=true`:
 7. Validate; write files/validation/critic/next action to active state;
    use `goal-harness todo add --goal-id {goal_id} --role user|agent` for
    blockers/follow-ups, not prose.
-8. Refresh state if dashboard/controller needs it.
-9. After completed delivery or safe-bypass work, append exactly one spend event:
+8. After completed delivery or safe-bypass work, spend once before state
+   refresh:
 
 ```bash
 {quota_spend_command}
 ```
+
+9. Refresh state after spend if needed.
 
 Do not append spend for quiet skips, preflight failures, blocker-push asks,
 pure dry-runs, self-cancel turns, or duplicate accounting attempts.

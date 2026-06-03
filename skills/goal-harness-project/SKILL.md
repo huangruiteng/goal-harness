@@ -113,6 +113,13 @@ priority-rule gaps, and promote one concrete bottleneck candidate when it should
 outrank the nearest local TODO. Then choose exactly one bounded, verifiable step
 from that audit.
 
+For connected delivery goals, also read `goal_boundary` from the
+`quota should-run` payload before choosing a step. It carries the registry's
+adapter status, allowed write scope, parent-approval scopes, guards, and stop
+condition. Treat it as the project-specific boundary contract so automation
+prompts can stay short instead of repeating long per-project protected-scope
+lists.
+
 ## Set Up Recurring Heartbeats
 
 When a user or controller wants a recurring Codex App heartbeat for a connected
@@ -149,8 +156,8 @@ while delegating detailed branches back to the generated compact/full
 contracts. It still contains the pre-turn
 `quota should-run` guard, operator-gate notification, blocker-push behavior,
 quiet non-gate `should_run=false` skip, bounded work, validation/writeback,
-optional `refresh-state`, and exactly one post-turn
-`quota spend-slot --source heartbeat --execute` event. It points rare edge
+exactly one post-turn `quota spend-slot --source heartbeat --execute` event,
+and optional `refresh-state` after spend. It points rare edge
 branches back to the expanded lifecycle contract instead of copying every detail
 into each heartbeat context. The generated guard and spend commands explicitly
 use the shared global registry so project heartbeats read the same operator
@@ -164,12 +171,15 @@ differences in the project registry, `.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.m
 adapter output, or narrow public/private boundary rules. If a lifecycle rule is
 useful across projects, update `goal-harness heartbeat-prompt` and its smoke
 contract rather than hand-editing one heartbeat automation.
+For delivery-specific boundaries, prefer the registry fields surfaced in
+`quota should-run.goal_boundary`; the automation prompt only needs to say to
+obey that payload and stop when useful work falls outside it.
 
 The quota guard returns `heartbeat_recommendation`. New connected read-only
 goals should follow `recommended_mode=run_first_read_only_map`: run one real
 `goal-harness read-only-map --goal-id <STABLE_GOAL_ID>`, validate the saved
-`read_only_project_map`, sync or refresh state if needed, and spend exactly once
-after completion. Already mapped goals should follow
+`read_only_project_map`, spend exactly once after validation, then sync or
+refresh state if needed. Already mapped goals should follow
 `recommended_mode=mapped_noop_if_unchanged`: if there is no new instruction,
 owner evidence, agent todo, stale source, or safe handoff, return a quiet no-op
 without another dry-run, file edit, or quota spend.

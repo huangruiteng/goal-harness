@@ -358,6 +358,43 @@ def _todo_write_hint(goal_id: str) -> dict[str, str]:
     }
 
 
+def _goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    boundary: dict[str, Any] = {}
+    adapter_kind = goal.get("adapter_kind")
+    adapter_status = goal.get("adapter_status")
+    if adapter_kind or adapter_status:
+        boundary["adapter"] = {
+            "kind": adapter_kind,
+            "status": adapter_status,
+        }
+    coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
+    write_scope = coordination.get("write_scope") if isinstance(coordination.get("write_scope"), list) else []
+    requires_approval = (
+        coordination.get("requires_parent_approval")
+        if isinstance(coordination.get("requires_parent_approval"), list)
+        else []
+    )
+    if write_scope:
+        boundary["write_scope"] = [str(value) for value in write_scope if str(value).strip()]
+    if requires_approval:
+        boundary["requires_parent_approval"] = [
+            str(value) for value in requires_approval if str(value).strip()
+        ]
+    guards = goal.get("guards") if isinstance(goal.get("guards"), list) else []
+    if guards:
+        boundary["guards"] = [str(value) for value in guards if str(value).strip()]
+    if goal.get("next_probe"):
+        boundary["next_probe"] = str(goal.get("next_probe"))
+    if item and item.get("project_asset"):
+        project_asset = item.get("project_asset")
+        if isinstance(project_asset, dict) and project_asset.get("stop_condition"):
+            boundary["stop_condition"] = project_asset.get("stop_condition")
+    if boundary:
+        boundary["rule"] = "Follow this boundary before choosing delivery work; stop if useful work requires an unapproved scope."
+        return boundary
+    return None
+
+
 def _build_gate_prompt(item: dict[str, Any]) -> str | None:
     question = str(item.get("operator_question") or "").strip()
     recommended_action = str(item.get("recommended_action") or "").strip()
@@ -605,6 +642,9 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "recommended_action": attention.get("recommended_action") or latest.get("recommended_action"),
             "adapter_kind": goal.get("adapter_kind"),
             "adapter_status": goal.get("adapter_status"),
+            "coordination": goal.get("coordination") if isinstance(goal.get("coordination"), dict) else None,
+            "guards": goal.get("guards") if isinstance(goal.get("guards"), list) else [],
+            "next_probe": goal.get("next_probe"),
             "latest_run_generated_at": latest.get("generated_at"),
             "quota": quota,
         }
@@ -712,6 +752,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
                 user_todo_summary=user_todo_summary,
                 agent_todo_summary=agent_todo_summary,
             ),
+            "goal_boundary": _goal_boundary(item),
             "plan_summary": plan.get("summary"),
             "todo_write_hint": _todo_write_hint(safe_goal_id),
         }
@@ -1216,6 +1257,29 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- blocked_action_scope: `{payload.get('blocked_action_scope')}`")
     if payload.get("safe_bypass_policy"):
         lines.append(f"- safe_bypass_policy: {payload.get('safe_bypass_policy')}")
+    goal_boundary = payload.get("goal_boundary") if isinstance(payload.get("goal_boundary"), dict) else {}
+    if goal_boundary:
+        adapter = goal_boundary.get("adapter") if isinstance(goal_boundary.get("adapter"), dict) else {}
+        if adapter:
+            lines.append(
+                "- goal_boundary_adapter: "
+                f"{adapter.get('kind') or ''}:{adapter.get('status') or ''}"
+            )
+        write_scope = goal_boundary.get("write_scope") if isinstance(goal_boundary.get("write_scope"), list) else []
+        if write_scope:
+            lines.append(f"- goal_boundary_write_scope: {', '.join(str(value) for value in write_scope)}")
+        approvals = (
+            goal_boundary.get("requires_parent_approval")
+            if isinstance(goal_boundary.get("requires_parent_approval"), list)
+            else []
+        )
+        if approvals:
+            lines.append(f"- goal_boundary_requires_approval: {', '.join(str(value) for value in approvals)}")
+        guards = goal_boundary.get("guards") if isinstance(goal_boundary.get("guards"), list) else []
+        for guard in guards[:5]:
+            lines.append(f"- goal_boundary_guard: {guard}")
+        if goal_boundary.get("stop_condition"):
+            lines.append(f"- goal_boundary_stop_condition: {goal_boundary.get('stop_condition')}")
     if payload.get("operator_question"):
         lines.append(f"- operator_question: {payload.get('operator_question')}")
     if payload.get("notify_user_on_gate"):

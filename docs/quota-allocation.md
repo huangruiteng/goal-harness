@@ -269,6 +269,12 @@ For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,
 review docs, or chat.
+Connected delivery goals also include `goal_boundary` when the registry has
+boundary data. That field carries the adapter status, allowed write scope,
+parent-approval scopes, registry guards, next probe, and stop condition. It is
+the preferred place for project-specific delivery boundaries; automation
+prompts should say to obey `goal_boundary` instead of repeating long protected
+file or action lists.
 It also includes `heartbeat_recommendation`, which keeps generic heartbeat
 lifecycle decisions in Goal Harness instead of one-off automation prompts. The
 common modes are:

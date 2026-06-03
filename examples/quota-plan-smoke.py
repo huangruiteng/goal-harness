@@ -820,6 +820,57 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert "heartbeat_stop_if_unchanged: `True`" in mapped_markdown, mapped_markdown
 
 
+def assert_goal_boundary_in_should_run() -> None:
+    delivery_goal = goal("delivery-side-bypass", compute=0.33)
+    delivery_goal.update(
+        {
+            "adapter_kind": "agent_harness_side_bypass_delivery_v0",
+            "adapter_status": "connected-delivery",
+            "coordination": {
+                "write_scope": ["docs/design/**", "src/agent_harness/**", "tests/**"],
+                "requires_parent_approval": [
+                    "write-outside-side-bypass-scope",
+                    "production-action",
+                    "managed-mirror-sync",
+                ],
+            },
+            "guards": [
+                "low-conflict delivery within side-bypass write_scope only",
+                "do not touch protected main-control files",
+            ],
+            "next_probe": "goal-harness quota should-run --goal-id delivery-side-bypass",
+        }
+    )
+    delivery_item = attention("delivery-side-bypass", compute=0.33)
+    delivery_item.update(
+        {
+            "status": "state_refreshed",
+            "recommended_action": "choose one public-safe delivery step",
+        }
+    )
+    payload = {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 1,
+        "run_count": 1,
+        "attention_queue": {"items": [delivery_item]},
+        "run_history": {"goals": [delivery_goal]},
+    }
+    decision = build_quota_should_run(payload, goal_id="delivery-side-bypass")
+    boundary = decision["goal_boundary"]
+    markdown = render_quota_should_run_markdown(decision)
+
+    assert decision["should_run"] is True, decision
+    assert boundary["adapter"]["status"] == "connected-delivery", boundary
+    assert boundary["write_scope"] == ["docs/design/**", "src/agent_harness/**", "tests/**"], boundary
+    assert "production-action" in boundary["requires_parent_approval"], boundary
+    assert "low-conflict delivery" in boundary["guards"][0], boundary
+    assert "goal_boundary_adapter: agent_harness_side_bypass_delivery_v0:connected-delivery" in markdown, markdown
+    assert "goal_boundary_write_scope: docs/design/**, src/agent_harness/**, tests/**" in markdown, markdown
+    assert "goal_boundary_requires_approval:" in markdown, markdown
+
+
 def assert_safe_bypass_slot_preview(status_payload: dict) -> None:
     payload = build_quota_slot_preview(status_payload, goal_id="needs-operator", slots=1)
 
@@ -938,6 +989,7 @@ def main() -> int:
     assert_focus_wait_should_run()
     assert_attention_queue_overrides_stale_run_history()
     assert_heartbeat_recommendation_lifecycle()
+    assert_goal_boundary_in_should_run()
     assert_safe_bypass_slot_preview(status_payload)
     assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:
