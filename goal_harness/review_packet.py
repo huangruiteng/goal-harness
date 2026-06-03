@@ -4,6 +4,13 @@ import shlex
 from typing import Any
 
 
+def compact_packet_text(value: str, limit: int = 180) -> str:
+    compact = " ".join(str(value).split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
 def command_block(command: str | None) -> str:
     if not command:
         return "（当前没有可执行命令；先读取 status/history。）"
@@ -106,6 +113,32 @@ def find_queue_item(status_payload: dict[str, Any], goal_id: str) -> dict[str, A
         if isinstance(item, dict) and item.get("goal_id") == goal_id:
             return item
     return None
+
+
+def first_open_todo_text(todos: Any) -> str | None:
+    if not isinstance(todos, dict):
+        return None
+    items = todos.get("items")
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if not isinstance(item, dict) or item.get("done"):
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            return compact_packet_text(text)
+    return None
+
+
+def todo_text_from_project_asset(item: dict[str, Any] | None, key: str) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+    summary = project_asset.get(key) if isinstance(project_asset.get(key), dict) else {}
+    next_text = str(summary.get("next") or "").strip()
+    if next_text:
+        return compact_packet_text(next_text)
+    return first_open_todo_text(item.get(key))
 
 
 def latest_run(goal: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -237,14 +270,17 @@ def project_agent_section(
     command: str,
     goal_id: str,
     *,
+    agent_todo_text: str | None = None,
     approved_operator_gate: bool = False,
 ) -> str:
     goal_guard = target_goal_guard(goal_id)
     context_rule = agent_context_rule()
+    todo_line = f"Agent 待办：{agent_todo_text}" if agent_todo_text else None
     if approved_operator_gate:
         lines = [
             goal_guard,
             context_rule,
+            todo_line,
             "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
             "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
             "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。",
@@ -255,6 +291,7 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            todo_line,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
             "执行边界：不要替用户写 reward；active state 只做摘要，reward 的权威来源是 run-bound human_reward overlay。",
             "停止条件：如果 reward 还停留在 dry-run / 草稿 / 口头判断，停下等待用户记录；如果已经记录，只用下面 history 路径读取。",
@@ -265,6 +302,7 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            todo_line,
             "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
             "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
             "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -275,13 +313,14 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            todo_line,
             "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
             "执行边界：读取本项目 status/history 后，只执行下面只读或 dry-run 路径。",
             "停止条件：需要真实写 reward、approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
             "",
             command_block(command),
         ]
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if line)
 
 
 def build_review_packet(
@@ -304,11 +343,15 @@ def build_review_packet(
     prompt = human_prompt(kind)
     question = str(item.get("operator_question") or prompt["question"]) if isinstance(item, dict) else prompt["question"]
     summary = str(item.get("recommended_action") or "当前状态源没有对应的 action card。") if isinstance(item, dict) else "当前状态源没有对应的 action card。"
+    user_todo_text = todo_text_from_project_asset(item, "user_todos")
+    agent_todo_text = todo_text_from_project_asset(item, "agent_todos")
     command = project_agent_command(status_payload, goal_id, kind, item)
     approved_handoff = operator_gate_approved_handoff(item, goal)
     gate_commands = operator_gate_decision_commands(status_payload, goal_id) if kind == "controller" else {}
     gate_command = gate_commands.get("approve") if gate_commands else None
     decision = suggested_decision(kind, item, goal_id)
+    if user_todo_text and kind == "controller":
+        decision = f"先确认待办；完成后：{decision}"
     reply = controller_reply(goal_id) if kind == "controller" else prompt["reply"]
     boundary = prompt["boundary"]
     if approved_handoff:
@@ -316,7 +359,13 @@ def build_review_packet(
         decision = "直接转发给项目 Agent；不追加写权限、主控接管或生产动作授权。"
         reply = "转发下方【给项目 Agent】即可。"
         boundary = "这只是执行已批准的只读/dry-run agent_command；如需写入或更高权限，项目 Agent 必须再次停下。"
-    agent_text = project_agent_section(kind, command, goal_id, approved_operator_gate=approved_handoff)
+    agent_text = project_agent_section(
+        kind,
+        command,
+        goal_id,
+        agent_todo_text=agent_todo_text,
+        approved_operator_gate=approved_handoff,
+    )
     type_label = {
         "reward": "Reward",
         "controller": "Controller",
@@ -332,6 +381,7 @@ def build_review_packet(
         f"摘要：{summary}",
         "",
         "【人只需判断】",
+        f"待办：{user_todo_text}（先处理/暂缓再判 gate）" if user_todo_text and kind == "controller" else None,
         f"问题：{question}",
         f"建议判断：{decision}",
         f"回复：{reply}",
@@ -370,7 +420,9 @@ def build_review_packet(
         "operator_gate_approved_handoff": approved_handoff,
         "operator_gate_dry_run_command": gate_command,
         "operator_gate_decision_commands": gate_commands,
-        "packet": "\n".join(lines),
+        "user_todo_text": user_todo_text,
+        "agent_todo_text": agent_todo_text,
+        "packet": "\n".join(line for line in lines if line),
     }
 
 

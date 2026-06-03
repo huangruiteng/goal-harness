@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-03T12:34:04+08:00
+updated_at: 2026-06-03T12:39:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -58,15 +58,44 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Dashboard first-screen action cards and copied GH packets now expose the
-  first open `agent_todos` item as compact `Agent todo` / project-agent `待办`
-  context, while user todos remain the human/gate callout. The next heartbeat
-  should audit CLI `goal-harness review-packet` parity against the dashboard GH
-  packet for user/agent todo visibility and context-source boundaries, or audit
-  duplicate packet/panel surfaces; only patch a concrete mismatch.
+- CLI `goal-harness review-packet` now mirrors the dashboard GH packet's
+  user/agent todo visibility and context-source boundary: user todo appears in
+  the human decision section, and the first open agent todo appears in the
+  project-agent handoff. The next heartbeat should audit duplicate
+  packet/panel surfaces, or status markdown versus packet parity, and only
+  patch a concrete anti-overload mismatch.
 
 ## Recent Progress
 
+- 2026-06-03T12:39:40+08:00: Steering audit candidates were: P0 CLI Review
+  Packet parity with the dashboard GH packet for user/agent todo visibility and
+  context-source boundaries, P0 duplicate packet/panel surface audit, P0
+  status markdown versus packet parity, P1 dashboard polish, and P2
+  no-progress guard tuning. Continuation check: this is the third consecutive
+  packet/card anti-overload slice, but it covered a separate formatter:
+  dashboard copied packets had just gained compact agent todo context while CLI
+  `goal-harness review-packet` still generated an independent packet without
+  user/agent todos. Continuing won because target agents can receive the CLI
+  packet directly, so leaving it stale would preserve the context-overload gap.
+  No-progress self-stop check: not triggered because recent eligible heartbeats
+  produced committed artifacts and validation signals, and this turn produced a
+  bounded CLI formatter parity patch. Bounded output: updated
+  `goal_harness/review_packet.py` so it pulls compact user/agent todo text from
+  `project_asset.*_todos.next` with fallback to full todo groups, adds user todo
+  to the human decision section, adds `Agent 待办` to the project-agent handoff,
+  and exposes `user_todo_text` / `agent_todo_text` in JSON output; updated
+  `examples/review-packet-cli-smoke.py` to lock both controller and approved
+  handoff packets while preserving the read-only/no-runtime-write boundary.
+  Validation: `python3 examples/review-packet-cli-smoke.py` passed; `python3 -m
+  py_compile goal_harness/review_packet.py
+  examples/review-packet-cli-smoke.py` passed; `python3
+  examples/project-agent-adoption-smoke.py` passed; `python3
+  examples/review-packet-smoke.py` passed; `goal-harness --format json check
+  --scan-root .` passed with warnings=0 and a clean public boundary scan over
+  82 files; `git diff --check` passed. Critic: this closes the CLI/dashboard
+  packet parity gap without expanding packet length with archival context, but
+  duplicate packet/panel affordances may still be noisier than needed. Losing
+  candidate: duplicate packet/panel surface audit should not be forgotten.
 - 2026-06-03T12:34:04+08:00: Steering audit candidates were: P0 user/agent
   todo visibility across status JSON, dashboard cards, and copied packets; P0
   CLI Review Packet parity with the dashboard GH packet; P1 dashboard polish;

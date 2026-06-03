@@ -26,7 +26,11 @@ def write_planned_registry(root: Path) -> Path:
         "status: planned-high-complexity\n"
         "updated_at: 2026-01-01T00:00:00+00:00\n"
         "---\n\n"
-        "# Planned Main Control\n",
+        "# Planned Main Control\n\n"
+        "## User Todo\n\n"
+        "- [ ] Read owner review worksheet first.\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] Run the read-only map dry-run after owner todo resolution.\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,7 +143,8 @@ def main() -> int:
         packet = markdown_result.stdout
         assert "【Goal Harness Review Packet】" in packet, packet
         assert "类型：Controller" in packet, packet
-        assert f"建议判断：同意 {GOAL_ID} 先做 read-only map dry-run；不授权写入或生产动作。" in packet, packet
+        assert "待办：Read owner review worksheet first.（先处理/暂缓再判 gate）" in packet, packet
+        assert f"建议判断：先确认待办；完成后：同意 {GOAL_ID} 先做 read-only map dry-run；不授权写入或生产动作。" in packet, packet
         assert f"回复：同意 {GOAL_ID} 先做 read-only map dry-run / 暂不同意 + 一句话原因。" in packet, packet
         assert f"--reason-summary '同意 {GOAL_ID} 先做 read-only map dry-run，不授权写入或生产动作'" in packet, packet
         assert "【用户本地 Gate 记录草稿】" in packet, packet
@@ -150,13 +155,14 @@ def main() -> int:
         assert f"目标校验：本段只适用于 goal_id=`{GOAL_ID}`；如果与你当前 active goal 或 registry entry 不一致，停止并回报目标不匹配。" in packet, packet
         assert "上下文规则：本段只携带最小当前指令" in packet, packet
         assert "不要从旧聊天或旧 packet 拼当前状态" in packet, packet
+        assert "Agent 待办：Run the read-only map dry-run after owner todo resolution." in packet, packet
         assert "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。" in packet, packet
         assert "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。" in packet, packet
         assert "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。" in packet, packet
         assert "read-only-map" in packet, packet
         assert_order(
             packet,
-            ["【人只需判断】", "【用户本地 Gate 记录草稿】", "operator-gate", "【给项目 Agent】", "目标校验", "read-only-map"],
+            ["【人只需判断】", "待办：Read owner review worksheet first.", "【用户本地 Gate 记录草稿】", "operator-gate", "【给项目 Agent】", "目标校验", "Agent 待办", "read-only-map"],
         )
         assert not run_dir.exists(), "review-packet must not write runtime runs"
 
@@ -181,6 +187,8 @@ def main() -> int:
         assert "--decision defer" in payload["operator_gate_decision_commands"]["defer"], payload
         assert "<public-safe-condition>" in payload["operator_gate_decision_commands"]["defer"], payload
         assert payload["project_agent_command"], payload
+        assert payload["user_todo_text"] == "Read owner review worksheet first.", payload
+        assert payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", payload
         assert "转发条件" in payload["packet"], payload
         assert not run_dir.exists(), "json review-packet must not write runtime runs"
 
@@ -204,13 +212,14 @@ def main() -> int:
         assert "【用户本地 Gate 记录草稿】" not in approved_packet, approved_packet
         assert "上下文规则：本段只携带最小当前指令" in approved_packet, approved_packet
         assert "不要从旧聊天或旧 packet 拼当前状态" in approved_packet, approved_packet
+        assert "Agent 待办：Run the read-only map dry-run after owner todo resolution." in approved_packet, approved_packet
         assert "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。" in approved_packet, approved_packet
         assert "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。" in approved_packet, approved_packet
         assert "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。" in approved_packet, approved_packet
         assert APPROVED_COMMAND in approved_packet, approved_packet
         assert_order(
             approved_packet,
-            ["【人只需判断】", "operator gate 已批准", "【给项目 Agent】", "operator gate 已记录为 approve", APPROVED_COMMAND],
+            ["【人只需判断】", "operator gate 已批准", "【给项目 Agent】", "Agent 待办", "operator gate 已记录为 approve", APPROVED_COMMAND],
         )
 
         approved_json_result = run_cli(
@@ -229,6 +238,7 @@ def main() -> int:
         assert approved_payload["kind"] == "codex", approved_payload
         assert approved_payload["operator_gate_approved_handoff"] is True, approved_payload
         assert approved_payload["project_agent_command"] == APPROVED_COMMAND, approved_payload
+        assert approved_payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", approved_payload
         assert approved_payload["project_agent_handoff"], approved_payload
         assert "operator gate 已记录为 approve" in approved_payload["project_agent_handoff"], approved_payload
         assert "不要从旧聊天或旧 packet 拼当前状态" in approved_payload["project_agent_handoff"], approved_payload
