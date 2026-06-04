@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:58:01+08:00
+updated_at: 2026-06-04T09:06:56+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,30 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue the P0 real adapter proof by adding a project_asset-backed
-  no-evidence fixture for `quota should-run`, confirming the automatic compute
-  guard uses project_asset quota, todos, next, and stop instead of inferring
-  owner or gate from raw queue status.
+- Move to P0 real adapter adoption: choose one real non-fixture project state
+  for a public-safe handoff/readiness proof, confirming project_asset authority
+  flows through `should-run -> handoff packet -> target-agent stop condition`.
+  If private evidence is needed, read it only from local/private state and
+  commit only sanitized contract coverage.
 
 ## Recent Progress
+
+- 2026-06-04T09:06:56+08:00: Completed the `quota should-run`
+  project_asset-backed no-evidence guard proof. `goal_harness/quota.py` now
+  prefers attention-item `project_asset.quota`, `project_asset.next_action`,
+  compact user/agent todos, and `project_asset.stop_condition` on the quota
+  plan / should-run hot path. `spend-slot` preview/accounting also updates
+  `project_asset.quota`, so the after-state does not reread stale asset slots
+  and falsely report that spent slots failed to advance. `render_quota_should_run_markdown`
+  now exposes `project_asset_source`. `examples/quota-plan-smoke.py` adds a
+  platform-migration no-evidence fixture with intentionally stale raw queue
+  quota/todos/next, asserting that should-run still gets eligible quota 0/1440,
+  the correct Next/Stop, user todo, agent todo, and a
+  `steering_audit_then_one_step` heartbeat recommendation from project_asset.
+  Validation: quota plan smoke and touched Python `py_compile`. Critic: this
+  closes the automatic compute guard at fixture level, but it is still not a
+  real non-fixture project handoff; the next step should leave the repeated
+  platform-migration fixture loop and move to real adapter adoption/readiness.
 
 - 2026-06-04T08:58:01+08:00: Added the React User Actions / copied action packet
   platform-migration no-evidence fixture. `apps/dashboard/smoke/action-packet-smoke.ts`

@@ -340,6 +340,24 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if isinstance(value.get("items"), list):
+        return _summarize_user_todos(value)
+
+    next_text = str(value.get("next") or "").strip()
+    first_open_items = [{"index": 1, "text": next_text}] if next_text else []
+    open_count = value.get("open", value.get("open_count", len(first_open_items)))
+    return {
+        "source_section": "project_asset",
+        "total_count": value.get("total", value.get("total_count")),
+        "open_count": open_count,
+        "done_count": value.get("done", value.get("done_count")),
+        "first_open_items": first_open_items,
+    }
+
+
 def _todo_write_hint(goal_id: str) -> dict[str, str]:
     return {
         "rule": (
@@ -385,8 +403,9 @@ def _goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> 
         boundary["guards"] = [str(value) for value in guards if str(value).strip()]
     if goal.get("next_probe"):
         boundary["next_probe"] = str(goal.get("next_probe"))
-    if item and item.get("project_asset"):
-        project_asset = item.get("project_asset")
+    project_asset_source = item if item is not None else goal
+    if isinstance(project_asset_source, dict) and project_asset_source.get("project_asset"):
+        project_asset = project_asset_source.get("project_asset")
         if isinstance(project_asset, dict) and project_asset.get("stop_condition"):
             boundary["stop_condition"] = project_asset.get("stop_condition")
     if boundary:
@@ -607,13 +626,27 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             continue
         goal_id = str(goal.get("id") or "")
         attention = queue_by_goal.get(goal_id, {})
+        project_asset = (
+            attention.get("project_asset")
+            if isinstance(attention.get("project_asset"), dict)
+            else {}
+        )
+        project_asset_quota = (
+            project_asset.get("quota")
+            if isinstance(project_asset.get("quota"), dict)
+            else {}
+        )
         latest = _latest_run(goal)
         waiting_on = attention.get("waiting_on") or "none"
         lifecycle_phase = attention.get("lifecycle_phase") or goal.get("lifecycle_phase")
         lifecycle_flags = attention.get("lifecycle_flags") or goal.get("lifecycle_flags")
         status = attention.get("status") or goal.get("status")
-        quota = attention.get("quota") if isinstance(attention.get("quota"), dict) else goal.get("quota")
-        if isinstance(quota, dict):
+        raw_quota = attention.get("quota") if isinstance(attention.get("quota"), dict) else goal.get("quota")
+        if project_asset_quota:
+            raw_quota_base = raw_quota if isinstance(raw_quota, dict) else {}
+            quota = {**raw_quota_base, **project_asset_quota}
+        elif isinstance(raw_quota, dict):
+            quota = raw_quota
             quota = _quota_with_focus_wait_override(
                 quota,
                 waiting_on=str(waiting_on or ""),
@@ -639,7 +672,9 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "waiting_on": waiting_on,
             "severity": attention.get("severity") or "info",
             "source": attention.get("source") or "run_history",
-            "recommended_action": attention.get("recommended_action") or latest.get("recommended_action"),
+            "recommended_action": project_asset.get("next_action")
+            or attention.get("recommended_action")
+            or latest.get("recommended_action"),
             "adapter_kind": goal.get("adapter_kind"),
             "adapter_status": goal.get("adapter_status"),
             "coordination": goal.get("coordination") if isinstance(goal.get("coordination"), dict) else None,
@@ -648,6 +683,11 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "latest_run_generated_at": latest.get("generated_at"),
             "quota": quota,
         }
+        if project_asset:
+            item["project_asset"] = project_asset
+            item["project_asset_source"] = "project_asset"
+        else:
+            item["project_asset_source"] = "legacy_raw_fallback"
         for optional_field in (
             "operator_question",
             "agent_command",
@@ -724,8 +764,13 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         reason = str(quota.get("reason") or "quota state is not eligible")
         if not plan.get("ok"):
             reason = "status or contract health is not ok; skip automatic compute"
-        user_todo_summary = _summarize_user_todos(item.get("user_todos"))
-        agent_todo_summary = _summarize_user_todos(item.get("agent_todos"))
+        project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+        user_todo_summary = _summarize_project_asset_todos(
+            project_asset.get("user_todos") if project_asset else None
+        ) or _summarize_user_todos(item.get("user_todos"))
+        agent_todo_summary = _summarize_project_asset_todos(
+            project_asset.get("agent_todos") if project_asset else None
+        ) or _summarize_user_todos(item.get("agent_todos"))
         payload = {
             "ok": bool(plan.get("ok")),
             "mode": "should-run",
@@ -743,6 +788,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "lifecycle_phase": item.get("lifecycle_phase"),
             "lifecycle_flags": item.get("lifecycle_flags"),
             "source": item.get("source"),
+            "project_asset_source": item.get("project_asset_source"),
             "recommended_action": item.get("recommended_action"),
             "heartbeat_recommendation": _heartbeat_recommendation(
                 item,
@@ -841,6 +887,9 @@ def _set_quota_for_goal(status_payload: dict[str, Any], *, goal_id: str, quota: 
     for item in queue_items:
         if isinstance(item, dict) and str(item.get("goal_id") or "") == goal_id:
             item["quota"] = dict(quota)
+            project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+            if project_asset:
+                project_asset["quota"] = dict(quota)
 
 
 def build_quota_slot_preview(
@@ -1205,6 +1254,8 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         f"- waiting_on: `{payload.get('waiting_on')}`",
         f"- status: `{payload.get('status')}`",
     ]
+    if payload.get("project_asset_source"):
+        lines.append(f"- project_asset_source: {payload.get('project_asset_source')}")
 
     def append_todo_summary(label: str, summary: dict[str, Any]) -> None:
         lines.append(

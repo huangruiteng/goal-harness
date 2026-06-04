@@ -767,6 +767,92 @@ def assert_attention_queue_overrides_stale_run_history() -> None:
     assert "gate_prompt" not in decision, decision
 
 
+def assert_project_asset_backed_no_evidence_should_run() -> None:
+    goal_id = "platform-migration-material-registry"
+    expected_next = "Refresh the public-safe material registry summary."
+    expected_stop = "stop if the next action needs reward, gate approval, write control, or production access"
+    expected_user_todo = "Confirm whether owner review is fresh enough to resume delivery."
+    expected_agent_todo = "Run read-only map and report material freshness without internal links."
+    raw_next = "raw queue says ask for an old gate"
+    raw_user_todo = "Raw fallback user todo should not become owner authority."
+    raw_agent_todo = "Raw fallback agent todo should not become routing authority."
+
+    project_goal = goal(goal_id, compute=0.25, spent_slots=120, allowed_slots=120)
+    project_item = attention(goal_id, compute=0.25, state="throttled", spent_slots=120, allowed_slots=120)
+    project_item.update(
+        {
+            "status": "state_refreshed",
+            "waiting_on": "codex",
+            "recommended_action": raw_next,
+            "user_todos": {
+                "source_section": "Raw User Todo",
+                "total_count": 1,
+                "open_count": 1,
+                "done_count": 0,
+                "items": [{"index": 1, "done": False, "text": raw_user_todo}],
+            },
+            "agent_todos": {
+                "source_section": "Raw Agent Todo",
+                "total_count": 1,
+                "open_count": 1,
+                "done_count": 0,
+                "items": [{"index": 1, "done": False, "text": raw_agent_todo}],
+            },
+            "project_asset": {
+                "owner": "codex",
+                "gate": "none",
+                "next_action": expected_next,
+                "stop_condition": expected_stop,
+                "user_todos": {"open": 1, "done": 0, "total": 1, "next": expected_user_todo},
+                "agent_todos": {"open": 1, "done": 0, "total": 1, "next": expected_agent_todo},
+                "quota": {
+                    "compute": 1.0,
+                    "state": "eligible",
+                    "spent_slots": 0,
+                    "allowed_slots": 1440,
+                    "reason": "project_asset quota is current no-evidence routing authority",
+                },
+            },
+        }
+    )
+    payload = {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 1,
+        "run_count": 1,
+        "attention_queue": {"items": [project_item]},
+        "run_history": {"goals": [project_goal]},
+    }
+    decision = build_quota_should_run(payload, goal_id=goal_id)
+    markdown = render_quota_should_run_markdown(decision)
+
+    assert decision["ok"] is True, decision
+    assert decision["decision"] == "run", decision
+    assert decision["should_run"] is True, decision
+    assert decision["state"] == "eligible", decision
+    assert decision["project_asset_source"] == "project_asset", decision
+    assert decision["recommended_action"] == expected_next, decision
+    assert decision["quota"]["compute"] == 1.0, decision
+    assert decision["quota"]["state"] == "eligible", decision
+    assert decision["quota"]["spent_slots"] == 0, decision
+    assert decision["quota"]["allowed_slots"] == 1440, decision
+    assert decision["user_todo_summary"]["open_count"] == 1, decision
+    assert decision["user_todo_summary"]["first_open_items"][0]["text"] == expected_user_todo, decision
+    assert decision["agent_todo_summary"]["open_count"] == 1, decision
+    assert decision["agent_todo_summary"]["first_open_items"][0]["text"] == expected_agent_todo, decision
+    assert decision["goal_boundary"]["stop_condition"] == expected_stop, decision
+    assert decision["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", decision
+    assert "project_asset_source: project_asset" in markdown, markdown
+    assert "quota: compute=1.0 slot_minutes=1 slots=0/1440" in markdown, markdown
+    assert f"goal_boundary_stop_condition: {expected_stop}" in markdown, markdown
+    assert f"user_todo_next[1]: {expected_user_todo}" in markdown, markdown
+    assert f"agent_todo_next[1]: {expected_agent_todo}" in markdown, markdown
+    assert raw_next not in markdown, markdown
+    assert raw_user_todo not in markdown, markdown
+    assert raw_agent_todo not in markdown, markdown
+
+
 def assert_heartbeat_recommendation_lifecycle() -> None:
     first_map_goal = goal("first-map", compute=1.0)
     mapped_goal = goal("mapped-quiet", compute=1.0)
@@ -988,6 +1074,7 @@ def main() -> int:
     assert_operator_gate_should_run(status_payload)
     assert_focus_wait_should_run()
     assert_attention_queue_overrides_stale_run_history()
+    assert_project_asset_backed_no_evidence_should_run()
     assert_heartbeat_recommendation_lifecycle()
     assert_goal_boundary_in_should_run()
     assert_safe_bypass_slot_preview(status_payload)
