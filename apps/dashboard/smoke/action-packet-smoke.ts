@@ -1,4 +1,6 @@
 import { buildActionPacket, buildApprovedAgentHandoff } from "../src/data/action-packet.js";
+// @ts-expect-error The smoke compiler intentionally runs without @types/node.
+import { readFileSync } from "node:fs";
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -117,5 +119,56 @@ assert(focusWaitPacket.includes("Status/history inspection only"), "missing stat
 assert(focusWaitPacket.includes("保持 focus_wait"), "missing agent focus-wait boundary");
 assert(!focusWaitPacket.includes("operator-gate"), "focus-wait packet must not draft an operator gate");
 assert(!focusWaitPacket.includes("read-only-map"), "focus-wait packet must not expose a delivery map command");
+
+const platformMigrationNoEvidencePacket = buildActionPacket({
+  goalId: "platform-migration-material-registry",
+  title: "Let Codex continue",
+  summary: "Refreshed public-safe no-evidence projection gives Codex a usable next action.",
+  userTodoText: "Confirm whether owner review is fresh enough to resume delivery.",
+  agentTodoText: "Run read-only map and report material freshness without internal links.",
+  todoBlocksGate: false,
+  operatorQuestion: null,
+  suggestedReply: "继续 no-evidence projection；不授权读取私有证据、写入或生产动作。",
+  gateFallbackDecision: "继续 no-evidence projection；不授权读取私有证据、写入或生产动作。",
+  boundary: "Use only sanitized status/history/material counts; do not read private evidence, internal links, raw paths, or production state.",
+  durableRecordRule: null,
+  safePathLabel: "No-evidence status/packet sanity",
+  command: "goal-harness status --goal-id platform-migration-material-registry --limit 20",
+  quotaShortLine: "Eligible; 0/1440 slots",
+  authorityShortLine: "entries 0/3; topics 3; materials 6; repos 2; owner review 1; stale 1; risk medium",
+  projectOwner: "codex",
+  projectGate: "none",
+  projectNextAction: "Refresh the public-safe material registry summary.",
+  projectStopCondition: "stop if the next action needs reward, gate approval, write control, or production access",
+  projectAssetSource: "project_asset",
+});
+
+assert(platformMigrationNoEvidencePacket.includes("目标：platform-migration-material-registry"), "missing platform migration target");
+assert(platformMigrationNoEvidencePacket.includes("Project Asset：Owner=codex；Gate=none"), "missing platform project asset owner/gate");
+assert(platformMigrationNoEvidencePacket.includes("Next：Refresh the public-safe material registry summary."), "missing platform next action");
+assert(platformMigrationNoEvidencePacket.includes("Stop：stop if the next action needs reward"), "missing platform stop condition");
+assert(platformMigrationNoEvidencePacket.includes("Quota：Eligible; 0/1440 slots"), "missing platform quota context");
+assert(platformMigrationNoEvidencePacket.includes("Authority：entries 0/3; topics 3; materials 6; repos 2; owner review 1; stale 1; risk medium"), "missing platform material context");
+assert(platformMigrationNoEvidencePacket.includes("待办：Confirm whether owner review is fresh enough to resume delivery."), "missing platform user todo");
+assert(platformMigrationNoEvidencePacket.includes("待办：Run read-only map and report material freshness without internal links."), "missing platform agent todo");
+assert(platformMigrationNoEvidencePacket.includes("Gate：无；建议：继续 no-evidence projection"), "missing no-evidence non-gate cue");
+assert(platformMigrationNoEvidencePacket.includes("No-evidence status/packet sanity"), "missing platform safe path");
+assert(!platformMigrationNoEvidencePacket.includes("legacy/raw fallback"), "project-asset-backed platform packet must not fall back to raw status");
+assert(!platformMigrationNoEvidencePacket.includes("不授权写入或生产动作") || platformMigrationNoEvidencePacket.includes("Gate：无"), "platform safety text must remain non-gated");
+
+const dashboardPageSource = readFileSync("src/views/dashboard-page.tsx", "utf8");
+const firstScreenRequiredSource = [
+  "const quota = projectAsset?.quota ?? row.queueItem?.quota ?? row.goal.quota",
+  "const nextAction = projectAsset?.next_action ?? decision.action",
+  "const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action",
+  "const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos",
+  "const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos",
+  "<Badge variant=\"neutral\">Project asset</Badge>",
+  "Owner/Gate/Stop are not project_asset-backed; below uses raw status fallback.",
+  "<span className=\"font-medium\">{buildQuotaView(item.quota)?.shortLine}</span>",
+];
+for (const snippet of firstScreenRequiredSource) {
+  assert(dashboardPageSource.includes(snippet), `React User Actions source drifted: ${snippet}`);
+}
 
 console.log(`action-packet smoke ok (${packet.length} chars, handoff ${approvedHandoff.length} chars, legacy ${legacyFallbackPacket.length} chars, focus ${focusWaitPacket.length} chars)`);

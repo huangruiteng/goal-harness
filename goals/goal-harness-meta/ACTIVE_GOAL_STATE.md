@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:53:40+08:00
+updated_at: 2026-06-04T08:58:01+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,29 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue the P0 real adapter proof by adding a platform-migration
-  no-evidence fixture for the React User Actions / copied action packet path,
-  so the first-screen card and static dashboard do not diverge on
-  project_asset, quota, todos, next, or stop consumption.
+- Continue the P0 real adapter proof by adding a project_asset-backed
+  no-evidence fixture for `quota should-run`, confirming the automatic compute
+  guard uses project_asset quota, todos, next, and stop instead of inferring
+  owner or gate from raw queue status.
 
 ## Recent Progress
+
+- 2026-06-04T08:58:01+08:00: Added the React User Actions / copied action packet
+  platform-migration no-evidence fixture. `apps/dashboard/smoke/action-packet-smoke.ts`
+  now covers a `platform-migration-material-registry` copied packet and asserts
+  project-asset-backed Owner=codex/Gate=none, Next/Stop, eligible quota,
+  authority/material counts, user todo, agent todo, and a no-evidence non-gate
+  cue all reach the packet without falling back to legacy/raw status. The same
+  smoke statically checks that the React User Actions card still consumes
+  `projectAsset?.quota`, `projectAsset?.next_action`,
+  `projectAsset?.stop_condition`, user todo summaries, and agent todo summaries
+  while retaining Project asset / Quota / fallback first-screen text.
+  Validation: dashboard action-packet smoke, dashboard `npm run build`,
+  touched-file `git diff --check`, and 2-file public/private
+  `goal-harness check`. Critic: this is a copied-packet and source-contract
+  regression rather than a browser screenshot; static dashboard and React
+  copied-packet paths are now aligned, so the next more useful guard is
+  `quota should-run` project_asset-backed no-evidence behavior.
 
 - 2026-06-04T08:53:40+08:00: Fixed the static dashboard action-card projection
   for the platform-migration no-evidence path. `examples/render-status-dashboard.py`
