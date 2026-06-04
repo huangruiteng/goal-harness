@@ -151,7 +151,12 @@ def write_connected_delivery_registry(root: Path) -> Path:
     return registry_path
 
 
-def append_connected_delivery_fixture(root: Path, *, generated_at: str) -> None:
+def append_connected_delivery_fixture(
+    root: Path,
+    *,
+    generated_at: str,
+    classification: str = "delivery_ranker_readiness_batch",
+) -> None:
     run_dir = root / "runtime" / "goals" / DELIVERY_GOAL_ID / "runs"
     run_dir.mkdir(parents=True, exist_ok=True)
     compact_time = generated_at.replace("-", "").replace(":", "")
@@ -160,7 +165,7 @@ def append_connected_delivery_fixture(root: Path, *, generated_at: str) -> None:
     record = {
         "generated_at": generated_at,
         "goal_id": DELIVERY_GOAL_ID,
-        "classification": "delivery_ranker_readiness_batch",
+        "classification": classification,
         "recommended_action": DELIVERY_ACTION,
         "health_check": "fixture connected delivery run with custom classification",
     }
@@ -605,6 +610,33 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert quota_payload["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", quota_payload
 
 
+def assert_connected_delivery_no_baseline_small_streak(payload: dict, markdown: str) -> None:
+    items = payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    item = items[0]
+    assert item["goal_id"] == DELIVERY_GOAL_ID, item
+    readiness = item["handoff_readiness"]
+    assert readiness["handoff_status"] == "post_handoff_run_seen", readiness
+    assert readiness["post_handoff_run_seen"] is True, readiness
+    assert "handoff_ready_at" not in readiness, readiness
+    assert [run["delivery_batch_scale"] for run in readiness["post_handoff_recent_runs"]] == [
+        "test_only",
+        "test_only",
+    ], readiness
+    assert readiness["post_handoff_small_scale_streak"] == 2, readiness
+    assert "post_handoff_recent_scales: test_only,test_only small_streak=2" in markdown, markdown
+
+    quota_payload = build_quota_should_run(payload, goal_id=DELIVERY_GOAL_ID)
+    quota_readiness = quota_payload["handoff_readiness"]
+    assert [run["delivery_batch_scale"] for run in quota_readiness["post_handoff_recent_runs"]] == [
+        "test_only",
+        "test_only",
+    ], quota_payload
+    assert quota_readiness["post_handoff_small_scale_streak"] == 2, quota_payload
+    quota_markdown = render_quota_should_run_markdown(quota_payload)
+    assert "post_handoff_recent_scales: test_only,test_only small_streak=2" in quota_markdown, quota_markdown
+
+
 def assert_handoff_waiting_for_post_run(item: dict, markdown: str) -> None:
     readiness = item["handoff_readiness"]
     assert readiness["ready"] is True, readiness
@@ -739,6 +771,20 @@ def main() -> int:
         delivery_registry_path = write_connected_delivery_registry(root)
         append_connected_delivery_fixture(root, generated_at="2026-01-01T00:05:00+00:00")
         delivery_payload, delivery_markdown = collect_fixture_status(root, delivery_registry_path)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-status-connected-delivery-small-streak-") as tmp:
+        root = Path(tmp)
+        delivery_registry_path = write_connected_delivery_registry(root)
+        append_connected_delivery_fixture(
+            root,
+            generated_at="2026-01-01T00:05:00+00:00",
+            classification="delivery_owner_drop_shape_test",
+        )
+        append_connected_delivery_fixture(
+            root,
+            generated_at="2026-01-01T00:06:00+00:00",
+            classification="delivery_active_blocker_snapshot_test",
+        )
+        small_streak_payload, small_streak_markdown = collect_fixture_status(root, delivery_registry_path)
 
     assert_planned_preview_is_not_runnable(payload, markdown)
     approved_items = approved_payload["attention_queue"]["items"]
@@ -805,6 +851,7 @@ def main() -> int:
     )
     assert_registry_attention_override(override_payload, override_markdown)
     assert_connected_delivery_custom_run_stays_runnable(delivery_payload, delivery_markdown)
+    assert_connected_delivery_no_baseline_small_streak(small_streak_payload, small_streak_markdown)
     print("status-markdown-smoke ok")
     return 0
 

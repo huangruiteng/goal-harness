@@ -458,18 +458,26 @@ def project_asset_handoff_state(
     post_handoff_run: dict[str, Any] | None = None
     recent_post_handoff_runs: list[dict[str, Any]] = []
     if handoff_at is None and ready:
+        recent_post_handoff_runs = [
+            run
+            for run, _generated_at in parsed_runs
+            if is_custom_post_handoff_work_run(run)
+        ]
+        if recent_post_handoff_runs:
+            post_handoff_run = recent_post_handoff_runs[0]
         latest_validation = (
             project_asset.get("latest_validation")
             if isinstance(project_asset.get("latest_validation"), dict)
             else {}
         )
-        if latest_validation:
+        if latest_validation and post_handoff_run is None:
             latest_validation_run = {
                 "generated_at": latest_validation.get("generated_at"),
                 "classification": latest_validation.get("classification"),
             }
             if is_custom_post_handoff_work_run(latest_validation_run):
                 post_handoff_run = latest_validation_run
+                recent_post_handoff_runs = [latest_validation_run]
             else:
                 handoff_at = parse_timestamp(latest_validation.get("generated_at"))
                 handoff_run = latest_validation_run

@@ -155,7 +155,8 @@ If the result says `should_run=true`:
    and you find no new user instruction, owner evidence, agent todo, stale
    source, or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or
    spend.
-   Check `delivery_batch_scale` before tightening project-agent handoffs.
+	   Check `delivery_batch_scale` / `handoff_delivery_contract`; for
+	   repeated-small, obey contract.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply
@@ -258,16 +259,14 @@ edits, research, exploration, or spend. If guard exposes gate or open user
 todo, send one concise Chinese `NOTIFY`; otherwise quiet
 `DONT_NOTIFY`.
 
-If allowed, follow compact contract: read active state/status queue and
-project_asset source labels;
-blocker-push before delivery; obey `heartbeat_recommendation` and
-`goal_boundary`; check `delivery_batch_scale`;
-steering audit with product-bottleneck lens; choose one bounded verifiable
-progress segment; coherent batches are allowed when scope/validation are clear;
-stop on private/company-internal material, credentials, destructive git,
-production actions, or explicit review rules; validate/write back files,
-validation, critic, next action; add todos with `goal-harness todo add`; refresh
-after spend if needed.
+If allowed, follow compact contract: read state/status queue/project_asset;
+blocker-push first; obey `heartbeat_recommendation`, `goal_boundary`, and
+`delivery_batch_scale` / `handoff_delivery_contract`; steering audit with
+product-bottleneck lens; choose one bounded verifiable progress segment, batch
+ok when scope/validation are clear; stop on private material, credentials,
+destructive git, production actions, or explicit review rules; validate/write
+back files, validation, critic, next action; add todos with `goal-harness todo
+add`; refresh after spend if needed.
 
 Spend exactly once only after completed delivery or safe-bypass work:
 
@@ -335,7 +334,8 @@ If `should_run=true`:
    validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if there is no new instruction,
    owner evidence, agent todo, stale source, or safe handoff.
-   Check `delivery_batch_scale` before tightening project-agent handoffs.
+	   Check `delivery_batch_scale` / `handoff_delivery_contract`; for
+	   repeated-small, obey contract.
 4. Run a steering audit before choosing work: compare at least three P0/P1/P2
    candidates when useful, apply continuation checks, keep compute quota
    separate from focus quota, include product-bottleneck lens, record any

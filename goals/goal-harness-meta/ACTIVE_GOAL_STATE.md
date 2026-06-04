@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T10:48:45+08:00
+updated_at: 2026-06-04T11:46:34+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,14 +65,38 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue the P0 project-agent handoff loop by using `delivery_batch_scale`
-  plus `post_handoff_small_scale_streak` across `status`, `quota should-run`,
-  review packets, and the dashboard as heartbeat guard input. Keep observing
-  when a real target run is multi-surface or implementation-shaped; tighten the
-  project-agent handoff packet only when the recent scale streak shows repeated
-  test-only, single-surface, or ambiguous follow-through.
+- Continue the P0 project-agent handoff loop by observing whether target agents
+  follow `handoff_delivery_contract` after repeated small-scale follow-through.
+  The next healthy target run should be `multi_surface` or
+  implementation-shaped, with a real artifact, targeted validation, and state
+  writeback. If another run stays test-only/single-surface without a blocker
+  report, treat it as a real execution-quality blocker rather than adding more
+  UI or prompt text.
 
 ## Recent Progress
+
+- 2026-06-04T11:46:34+08:00: Turned repeated-small follow-through from an ad hoc
+  packet flag into a reusable project-agent delivery contract. `status.py` now
+  counts repeated small post-handoff runs even when there is no explicit handoff
+  baseline, fixing the connected no-baseline case where several custom target
+  runs previously collapsed to `small_streak=1`. `review_packet.py` now keeps
+  `handoff_followthrough_summary` as pure observation and emits a structured
+  `handoff_delivery_contract` when `post_handoff_small_scale_streak >= 2`:
+  the target agent is asked for one coherent multi-surface or
+  implementation-shaped batch with a real artifact, targeted validation, and
+  state writeback, or a blocker report without spend. `heartbeat_prompt.py`,
+  `docs/status-data-contract.md`, `docs/heartbeat-automation-prompt.md`, and
+  smoke fixtures now treat that contract as the shared interface instead of
+  duplicating handoff wording. Live side-bypass sanity now reports
+  `recent=[test_only,test_only,test_only]`, `small_streak=3`, and
+  `review-packet --handoff-only` includes both `交付观测` and `交付合同`.
+  Validation: Python compile checks; status Markdown, review-packet,
+  heartbeat-prompt, and platform material-registry smokes; dashboard action
+  packet smoke; dashboard production build; public contract check; touched-file
+  diff check; live quota/review-packet sanity. Critic: this should help the
+  target agent execute a fuller next batch without a private-target hack; if the
+  next target run remains small without a blocker report, the bottleneck is
+  target execution quality rather than missing Goal Harness observability.
 
 - 2026-06-04T10:48:45+08:00: Added repeated-small-delivery observability for
   project-agent handoffs. `goal_harness/status.py` now emits compact

@@ -80,6 +80,8 @@ def assert_status_data_contract_documents_handoff_budget() -> None:
     compact_contract = " ".join(contract.split())
     assert "within 16 lines and 1800 characters" in compact_contract, contract
     assert "include at most one command block" in compact_contract, contract
+    assert "optional delivery contract" in compact_contract, contract
+    assert "mode=expand_after_repeated_small_delivery" in compact_contract, contract
     assert "handoff-only output must not carry the full Review Packet" in compact_contract, contract
     assert "raw `run_history`, or `latest_runs` cold-path evidence" in compact_contract, contract
 
@@ -325,6 +327,28 @@ def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
     assert "ask the stale operator gate again" not in packet, packet
     assert "goal-harness stale-command" not in packet, packet
     assert APPROVED_COMMAND in packet, packet
+
+    readiness = status_payload["attention_queue"]["items"][0]["handoff_readiness"]
+    readiness["post_handoff_latest_run"]["delivery_batch_scale"] = "test_only"
+    readiness["post_handoff_small_scale_streak"] = 2
+    small_payload = build_review_packet(status_payload, goal_id=GOAL_ID)
+    small_packet = small_payload["packet"]
+    assert (
+        small_payload["handoff_followthrough_summary"]
+        == "post_handoff_run=owner_handoff_consumer_test, scale=test_only, small_streak=2, at=2026-01-01T00:02:00+00:00"
+    ), small_payload
+    assert small_payload["handoff_delivery_contract"]["mode"] == "expand_after_repeated_small_delivery", small_payload
+    assert small_payload["handoff_delivery_contract"]["minimum_scale"] == "multi_surface_or_implementation", small_payload
+    assert small_payload["handoff_delivery_contract"]["must_include"] == [
+        "coherent_artifact",
+        "targeted_validation",
+        "state_writeback",
+    ], small_payload
+    assert "交付观测：post_handoff_run=owner_handoff_consumer_test, scale=test_only" in small_packet, small_packet
+    assert "交付合同：下一轮选 1 个连贯推进段" in small_packet, small_packet
+    assert "至少达到 multi_surface/implementation" in small_packet, small_packet
+    assert "targeted validation、state writeback" in small_packet, small_packet
+    assert "不 spend" in small_packet, small_packet
 
 
 def assert_focus_wait_owner_blocker_packet() -> None:

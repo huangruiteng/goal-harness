@@ -186,6 +186,54 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     )
 
 
+def handoff_delivery_contract(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
+    streak = readiness.get("post_handoff_small_scale_streak")
+    if not isinstance(streak, int) or streak < 2:
+        return None
+    recent_runs = readiness.get("post_handoff_recent_runs")
+    recent_scales = [
+        str(run.get("delivery_batch_scale") or "unknown").strip() or "unknown"
+        for run in recent_runs or []
+        if isinstance(run, dict)
+    ][:3]
+    summary = compact_packet_text(
+        "expand_after_repeated_small_delivery; "
+        "minimum_scale=multi_surface_or_implementation; "
+        "include=coherent_artifact+targeted_validation+state_writeback; "
+        "if_blocked=report_blocker_without_spend",
+        limit=220,
+    )
+    instruction = compact_packet_text(
+        "下一轮选 1 个连贯推进段，至少达到 multi_surface/implementation；"
+        "必须包含真实 artifact、targeted validation、state writeback；"
+        "若只能继续 test-only/single-surface，先回报 blocker，不 spend。",
+        limit=260,
+    )
+    return {
+        "mode": "expand_after_repeated_small_delivery",
+        "minimum_scale": "multi_surface_or_implementation",
+        "must_include": ["coherent_artifact", "targeted_validation", "state_writeback"],
+        "if_blocked": "report_blocker_without_spend",
+        "post_handoff_small_scale_streak": streak,
+        "recent_scales": recent_scales,
+        "summary": summary,
+        "instruction": instruction,
+    }
+
+
+def handoff_delivery_contract_summary(contract: dict[str, Any] | None) -> str | None:
+    if not isinstance(contract, dict):
+        return None
+    instruction = str(contract.get("instruction") or "").strip()
+    if instruction:
+        return instruction
+    summary = str(contract.get("summary") or "").strip()
+    return summary or None
+
+
 def authority_material_summary(goal: dict[str, Any] | None) -> str | None:
     if not isinstance(goal, dict):
         return None
@@ -356,6 +404,7 @@ def project_agent_section(
     authority_summary: str | None = None,
     project_asset_source_text: str | None = None,
     handoff_followthrough_text: str | None = None,
+    handoff_delivery_contract_text: str | None = None,
     approved_operator_gate: bool = False,
 ) -> str:
     goal_guard = target_goal_guard(goal_id)
@@ -364,6 +413,7 @@ def project_agent_section(
     authority_line = f"材料上下文：{authority_summary}；只用这些脱敏计数判断 freshness / owner gap，不要要求内部链接或原文。" if authority_summary else None
     source_line = f"项目资产来源：{project_asset_source_text}" if project_asset_source_text else None
     followthrough_line = f"交付观测：{handoff_followthrough_text}" if handoff_followthrough_text else None
+    delivery_contract_line = f"交付合同：{handoff_delivery_contract_text}" if handoff_delivery_contract_text else None
     if approved_operator_gate:
         lines = [
             goal_guard,
@@ -372,6 +422,7 @@ def project_agent_section(
             todo_line,
             authority_line,
             followthrough_line,
+            delivery_contract_line,
             "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
             "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
             "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。",
@@ -386,6 +437,7 @@ def project_agent_section(
             todo_line,
             authority_line,
             followthrough_line,
+            delivery_contract_line,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
             "执行边界：不要替用户写 reward；active state 只做摘要，reward 的权威来源是 run-bound human_reward overlay。",
             "停止条件：如果 reward 还停留在 dry-run / 草稿 / 口头判断，停下等待用户记录；如果已经记录，只用下面 history 路径读取。",
@@ -400,6 +452,7 @@ def project_agent_section(
             todo_line,
             authority_line,
             followthrough_line,
+            delivery_contract_line,
             "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
             "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
             "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -414,6 +467,7 @@ def project_agent_section(
             todo_line,
             authority_line,
             followthrough_line,
+            delivery_contract_line,
             "转发条件：仅当目标项目 Agent 需要当前等待边界时转发；这不是恢复 delivery 的授权。",
             "执行边界：只读 status/history，确认当前 owner blocker、证据入口和 stop condition；不要继续实现、adapter work、写入或生产动作。",
             "停止条件：没有新的 owner evidence、clean baseline 或外部 eval 时，保持 focus_wait 并用中文回报仍在等待什么。",
@@ -428,6 +482,7 @@ def project_agent_section(
             todo_line,
             authority_line,
             followthrough_line,
+            delivery_contract_line,
             "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
             "执行边界：读取本项目 status/history 后，只执行下面只读或 dry-run 路径。",
             "停止条件：需要真实写 reward、approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -463,6 +518,8 @@ def build_review_packet(
     asset_source_line = project_asset_source_line(asset_source)
     authority_summary = authority_material_summary(goal)
     followthrough_summary = handoff_followthrough_summary(item)
+    delivery_contract = handoff_delivery_contract(item)
+    delivery_contract_text = handoff_delivery_contract_summary(delivery_contract)
     command = redact_local_absolute_paths(project_agent_command(status_payload, goal_id, kind, item))
     approved_handoff = operator_gate_approved_handoff(item, goal)
     gate_commands = operator_gate_decision_commands(status_payload, goal_id) if kind == "controller" else {}
@@ -486,6 +543,7 @@ def build_review_packet(
         authority_summary=authority_summary,
         project_asset_source_text=asset_source_line,
         handoff_followthrough_text=followthrough_summary,
+        handoff_delivery_contract_text=delivery_contract_text,
         approved_operator_gate=approved_handoff,
     )
     type_label = {
@@ -551,6 +609,7 @@ def build_review_packet(
         "agent_todo_text": agent_todo_text,
         "authority_summary": authority_summary,
         "handoff_followthrough_summary": followthrough_summary,
+        "handoff_delivery_contract": delivery_contract,
         "project_asset_source": asset_source,
         "packet": "\n".join(line for line in lines if line),
     }

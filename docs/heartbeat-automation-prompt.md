@@ -181,7 +181,8 @@ If the result says should_run=true:
    recommended_mode=mapped_noop_if_unchanged with stop_if_unchanged=true, and
    you find no new user instruction, owner evidence, agent todo, stale source,
    or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or spend.
-   Check `delivery_batch_scale` before tightening project-agent handoffs.
+   Check `delivery_batch_scale` / `handoff_delivery_contract`; for
+   repeated-small, obey contract.
 2. Run a short steering audit before choosing work: list at least three
    plausible next-action candidates across different P0/P1/P2 lanes when
    useful; if the same topic has consumed several recent delivery slices, apply
@@ -284,7 +285,8 @@ repeated topics, then read `heartbeat_recommendation`: run
 once after validation; for `recommended_mode=mapped_noop_if_unchanged`, return a
 quiet no-op without another dry-run, file edit, or quota spend when no new
 instruction/evidence/todo/stale source/safe handoff exists. Check
-`delivery_batch_scale` before tightening project-agent handoffs. Then run the
+`delivery_batch_scale` / `handoff_delivery_contract`; for repeated-small, obey
+contract. Then run the
 no-progress self-stop check, do one bounded verifiable progress segment when a
 real step exists, validate it, write back changed files / validation / critic /
 next action, append exactly one
@@ -316,7 +318,8 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 7. Follow `heartbeat_recommendation`: first connected read-only goals should run
    one real `read-only-map`, while already mapped unchanged goals should return
    a quiet no-op without another dry-run or quota spend.
-8. Check `delivery_batch_scale` before tightening project-agent handoffs.
+8. Check `delivery_batch_scale` / `handoff_delivery_contract`; for
+   repeated-small, obey contract.
 9. Cancel or pause the automation instead of spending if 5 consecutive eligible
    turns are only repeated no-progress status loops.
 10. Treat routine public commit, push, and PR creation as autonomous after clean

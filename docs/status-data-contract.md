@@ -359,8 +359,9 @@ Item fields:
   or still unknown. `post_handoff_recent_runs` is a compact newest-first slice
   of recent post-handoff work runs, and `post_handoff_small_scale_streak`
   counts the leading `test_only` / `single_surface` / `unknown` scale streak so
-  heartbeat jobs can tighten handoff wording only after repeated small-scale
-  follow-through. `quota_slot_spent` events do not count as post-handoff work.
+  heartbeat jobs and review packets can request a larger validated delivery
+  batch only after repeated small-scale follow-through. `quota_slot_spent`
+  events do not count as post-handoff work.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
 - `agent_command`: optional command or instruction for the target project agent
@@ -484,8 +485,14 @@ Review Packet source-of-truth rule:
 - project-agent handoff text is an interface-budgeted hot-path artifact: it
   should stay within 16 lines and 1800 characters, include at most one command
   block, and carry only the target goal guard, minimal-context rule, source
-  label, optional compact post-handoff delivery scale, forwarding/execution
-  boundary, command, and stop condition;
+  label, optional compact post-handoff delivery scale, optional delivery
+  contract, forwarding/execution boundary, command, and stop condition;
+- `handoff_delivery_contract` is optional structured guidance derived from the
+  current `handoff_readiness`, not a target-specific hack. When repeated
+  small-scale follow-through is detected, packets may set
+  `mode=expand_after_repeated_small_delivery` and ask the target agent to run one
+  coherent `multi_surface` / `implementation` batch with artifact, targeted
+  validation, and state writeback, or report a blocker without spending quota;
 - handoff-only output must not carry the full Review Packet, human decision
   section, local operator-gate preview, operator decision payload fields, raw
   `run_history`, or `latest_runs` cold-path evidence;
