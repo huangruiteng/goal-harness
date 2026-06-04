@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:58:28+08:00
+updated_at: 2026-06-04T08:07:44+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,10 +65,28 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check whether the dashboard/action-packet first screen and copied packet use
-  project-asset fields as the authority source instead of raw status fields.
+- Check whether status/dashboard fallback semantics are too strong when
+  `project_asset` is missing; first-screen surfaces should label legacy/raw
+  fallback instead of implying owner, gate, and stop condition are already
+  trustworthy.
 
 ## Recent Progress
+
+- 2026-06-04T08:07:44+08:00: Completed the dashboard/action-packet
+  project-asset consumer slice. `buildActionPacket` now places Project Asset
+  Owner/Gate/Next/Stop immediately after the state line and before quota or
+  authority context, so copied packets no longer rely only on raw status
+  fields. Approved agent handoffs now carry project-asset next and stop
+  condition. The dashboard `User Actions` card propagates owner, gate, next
+  action, and stop condition from `queueItem.project_asset` and renders a
+  first-screen Project asset block with Owner/Gate badges plus Next/Stop
+  summaries. `apps/dashboard/smoke/action-packet-smoke.ts` now asserts
+  project-asset owner/gate/next/stop and approved-handoff next/stop content.
+  Validation: dashboard `smoke:action-packet`, 3-file + state
+  `goal-harness check`, and touched-file `git diff --check`. Critic: this
+  strengthens authoritative consumption when `project_asset` exists; the next
+  useful gap is explicit legacy/raw fallback labeling when project_asset is
+  absent.
 
 - 2026-06-04T07:58:28+08:00: Closed the dashboard path-boundary theme with a
   tracked-fixture regression. Added

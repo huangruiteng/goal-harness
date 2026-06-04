@@ -747,6 +747,10 @@ type UserActionSummaryItem = {
   userTodos?: TodoGroup | null;
   agentTodos?: TodoGroup | null;
   latestValidation?: ProjectAssetLatestValidation | null;
+  projectOwner?: string | null;
+  projectGate?: string | null;
+  projectNextAction?: string | null;
+  projectStopCondition?: string | null;
   phase: string;
   waitingOn: string;
   draftLabel?: string;
@@ -1534,6 +1538,10 @@ function buildHumanFriendlyActionPacket({
       command,
       quotaShortLine: quotaView?.shortLine,
       authorityShortLine: item.authorityCoverage?.shortLine,
+      projectOwner: item.projectOwner,
+      projectGate: item.projectGate,
+      projectNextAction: item.projectNextAction,
+      projectStopCondition: item.projectStopCondition,
     });
   }
   if (approvedAgentCommand && item.agentCommand) {
@@ -1541,6 +1549,8 @@ function buildHumanFriendlyActionPacket({
       goalId: item.goalId,
       command: item.agentCommand,
       agentTodoText: agentTodo?.text,
+      projectNextAction: item.projectNextAction,
+      projectStopCondition: item.projectStopCondition,
     });
   }
   const reply = item.kind === "controller"
@@ -1569,6 +1579,10 @@ function buildHumanFriendlyActionPacket({
     command,
     quotaShortLine: quotaView?.shortLine,
     authorityShortLine: item.authorityCoverage?.shortLine,
+    projectOwner: item.projectOwner,
+    projectGate: item.projectGate,
+    projectNextAction: item.projectNextAction,
+    projectStopCondition: item.projectStopCondition,
   });
 }
 
@@ -1983,6 +1997,10 @@ function buildUserActionSummaryItems({
       userTodos,
       agentTodos,
       latestValidation,
+      projectOwner: projectAsset?.owner,
+      projectGate: projectAsset?.gate,
+      projectNextAction: nextAction,
+      projectStopCondition: stopCondition,
     };
 
     if (row.severity === "high") {
@@ -2271,6 +2289,25 @@ function UserActionSummary({
                       <QuotaChip quota={item.quota} />
                       {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
                     </div>
+                    {(item.projectOwner || item.projectGate || item.projectNextAction || item.projectStopCondition) ? (
+                      <div className="mt-3 border-t border-slate-200 pt-3 text-xs leading-5 text-slate-600 dark:border-zinc-800 dark:text-zinc-300">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="neutral">Project asset</Badge>
+                          {item.projectOwner ? <Badge variant="info">Owner {item.projectOwner}</Badge> : null}
+                          {item.projectGate ? <Badge variant="warning">Gate {item.projectGate}</Badge> : null}
+                        </div>
+                        {item.projectNextAction ? (
+                          <p className="mt-2 line-clamp-2 break-words">
+                            <span className="font-medium">Next:</span> {item.projectNextAction}
+                          </p>
+                        ) : null}
+                        {item.projectStopCondition ? (
+                          <p className="mt-1 line-clamp-2 break-words">
+                            <span className="font-medium">Stop:</span> {item.projectStopCondition}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <UserTodoCallout
                       blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))}
                       focusWait={isFocusWaitQuota(item.quota)}

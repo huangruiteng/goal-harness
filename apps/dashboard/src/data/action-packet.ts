@@ -14,12 +14,18 @@ export type ActionPacketInput = {
   command?: string | null;
   quotaShortLine?: string | null;
   authorityShortLine?: string | null;
+  projectOwner?: string | null;
+  projectGate?: string | null;
+  projectNextAction?: string | null;
+  projectStopCondition?: string | null;
 };
 
 export type ApprovedAgentHandoffInput = {
   goalId: string;
   command: string;
   agentTodoText?: string | null;
+  projectNextAction?: string | null;
+  projectStopCondition?: string | null;
 };
 
 export function buildApprovedAgentHandoff(input: ApprovedAgentHandoffInput) {
@@ -27,6 +33,8 @@ export function buildApprovedAgentHandoff(input: ApprovedAgentHandoffInput) {
   return [
     `目标校验：本段只适用于 goal_id=\`${input.goalId}\`；如果与你当前 active goal 或 registry entry 不一致，停止并回报目标不匹配。`,
     "上下文规则：本段只携带最小当前指令；不要从旧聊天或旧 packet 拼当前状态。需要更多上下文时，先读当前 active state、status、history 和命令输出。",
+    input.projectNextAction ? `Project Asset Next：${compactPacketText(input.projectNextAction, 180)}` : null,
+    input.projectStopCondition ? `Project Asset Stop：${compactPacketText(input.projectStopCondition, 180)}` : null,
     input.agentTodoText ? `Agent 待办：${compactPacketText(input.agentTodoText, 220)}` : null,
     "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
     "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
@@ -62,11 +70,19 @@ export function buildActionPacket(input: ActionPacketInput) {
     input.quotaShortLine ? `Quota：${compactPacketText(input.quotaShortLine, 80)}` : null,
     input.authorityShortLine ? `Authority：${compactPacketText(input.authorityShortLine, 110)}` : null,
   ];
+  const projectAssetLines = [
+    input.projectOwner || input.projectGate
+      ? `Project Asset：Owner=${compactPacketText(input.projectOwner ?? "unknown", 70)}；Gate=${compactPacketText(input.projectGate ?? "unknown", 70)}`
+      : null,
+    input.projectNextAction ? `Next：${compactPacketText(input.projectNextAction, 160)}` : null,
+    input.projectStopCondition ? `Stop：${compactPacketText(input.projectStopCondition, 160)}` : null,
+  ];
 
   return [
     "【GH Packet】",
     `目标：${input.goalId}`,
     `状态：${stateLine}`,
+    ...projectAssetLines,
     ...compactContextLines,
     "",
     "【用户/Gate】",
