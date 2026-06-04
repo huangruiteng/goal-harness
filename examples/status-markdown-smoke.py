@@ -8,6 +8,7 @@ temporary planned read-only-map goal.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -650,6 +651,27 @@ def assert_post_handoff_run_seen(payload: dict, markdown: str) -> None:
     ) in quota_markdown, quota_markdown
 
 
+def assert_static_dashboard_post_handoff_scale(payload: dict, root: Path) -> None:
+    status_path = root / "status.json"
+    html_path = root / "status.html"
+    status_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    subprocess.run(
+        [
+            sys.executable,
+            "examples/render-status-dashboard.py",
+            str(status_path),
+            str(html_path),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    html = html_path.read_text(encoding="utf-8")
+    assert "Post-handoff run" in html, html
+    assert "scale=single_surface" in html, html
+
+
 def main() -> int:
     assert_missing_project_asset_markdown_fallback()
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
@@ -668,6 +690,7 @@ def main() -> int:
         post_spend_payload, post_spend_markdown = collect_fixture_status(root, registry_path)
         append_post_handoff_run_fixture(root, generated_at="2026-01-01T00:01:45+00:00")
         post_handoff_payload, post_handoff_markdown = collect_fixture_status(root, registry_path)
+        assert_static_dashboard_post_handoff_scale(post_handoff_payload, root)
         append_operator_gate_fixture(
             root,
             decision="reject",

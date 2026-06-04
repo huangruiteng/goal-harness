@@ -160,9 +160,15 @@ def project_asset_block(item: dict[str, Any]) -> str:
         )
         latest_run_line = ""
         if latest_run:
+            scale_text = (
+                f" scale={esc(latest_run.get('delivery_batch_scale'))}"
+                if latest_run.get("delivery_batch_scale")
+                else ""
+            )
             latest_run_line = (
                 f"<p><b>Post-handoff run</b> "
-                f"{esc(latest_run.get('classification'))} at {esc(latest_run.get('generated_at'))}</p>"
+                f"{esc(latest_run.get('classification'))} at {esc(latest_run.get('generated_at'))}"
+                f"{scale_text}</p>"
             )
         readiness_block = f"""
             <div class="handoff-readiness {'ready' if readiness.get('ready') else 'blocked'}">

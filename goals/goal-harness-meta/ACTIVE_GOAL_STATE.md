@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T10:34:25+08:00
+updated_at: 2026-06-04T10:38:56+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,13 +65,25 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue the P0 project-agent handoff loop by using `quota should-run`
-  `handoff_readiness.post_handoff_latest_run.delivery_batch_scale` as heartbeat
-  guard input. Keep observing when a real target run is multi-surface or
-  implementation-shaped; tighten the project-agent handoff packet only when
-  follow-through remains test-only, single-surface, or ambiguous.
+- Continue the P0 project-agent handoff loop by using `delivery_batch_scale`
+  across `status`, `quota should-run`, review packets, and the dashboard as
+  heartbeat guard input. Keep observing when a real target run is
+  multi-surface or implementation-shaped; tighten the project-agent handoff
+  packet only when follow-through remains test-only, single-surface, or
+  ambiguous.
 
 ## Recent Progress
+
+- 2026-06-04T10:38:56+08:00: Closed the static dashboard delivery-scale
+  visibility gap. `examples/render-status-dashboard.py` now appends
+  `scale=...` to the `Post-handoff run` line when compact handoff readiness
+  already carries `post_handoff_latest_run.delivery_batch_scale`;
+  `examples/status-markdown-smoke.py` now renders the static fallback from the
+  post-handoff fixture and asserts `scale=single_surface`. Validation: Python
+  compile checks, status Markdown smoke, platform material-registry smoke,
+  public contract check, and touched-file diff check. Critic: this completes
+  the observability surface rather than changing packet strictness; continue
+  using repeated small-scale evidence before tightening handoff wording.
 
 - 2026-06-04T10:34:25+08:00: Exposed post-handoff delivery scale in the
   project-agent review packet hot path. `goal_harness/review_packet.py` now
