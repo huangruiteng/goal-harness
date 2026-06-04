@@ -167,10 +167,13 @@ const firstScreenRequiredSource = [
   "const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action",
   "const handoffReadiness = row.queueItem?.handoff_readiness",
   "buildHandoffReadinessView(item.handoffReadiness)",
+  "function HandoffReadinessPanel({ readiness }",
+  "<HandoffReadinessPanel readiness={queueItem.handoff_readiness} />",
   "const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos",
   "const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos",
   "<Badge variant=\"neutral\">Project asset</Badge>",
   "Handoff readiness:",
+  "Failed checks:",
   "Owner/Gate/Stop are not project_asset-backed; below uses raw status fallback.",
   "<span className=\"font-medium\">{buildQuotaView(item.quota)?.shortLine}</span>",
 ];

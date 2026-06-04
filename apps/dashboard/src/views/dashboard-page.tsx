@@ -839,6 +839,36 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
   };
 }
 
+function HandoffReadinessPanel({ readiness }: { readiness?: ProjectAssetHandoffReadiness | null }) {
+  const view = buildHandoffReadinessView(readiness);
+  if (!view) {
+    return null;
+  }
+  return (
+    <div
+      className={cn(
+        "mt-3 rounded-lg border p-3 text-xs leading-5",
+        view.ready
+          ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"
+          : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={view.variant}>{view.ready ? "Handoff ready" : "Handoff blocked"}</Badge>
+        <span className="break-words font-medium">{view.shortLine}</span>
+      </div>
+      <p className="mt-2 break-words">
+        <span className="font-medium">Failed checks:</span> {view.failedLabel}
+      </p>
+      {view.probe ? (
+        <p className="mt-1 break-words">
+          <span className="font-medium">Probe:</span> {view.probe}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function todoFocusPriority({
   role,
   severity,
@@ -3228,6 +3258,7 @@ function RunHistoryPanel({
                 </div>
               ) : null}
               <QueueGateSummary item={queueItem} />
+              <HandoffReadinessPanel readiness={queueItem.handoff_readiness} />
             </div>
           ) : null}
 

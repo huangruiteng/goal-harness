@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T09:36:32+08:00
+updated_at: 2026-06-04T09:42:59+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,27 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue P0 dashboard adoption by wiring `handoff_readiness` into the selected
-  project / queue detail drill-down and adding browser-level smoke coverage when
-  a browser runtime is available, so readiness is not only visible in User
-  Actions cards and copied packets.
+- Continue P0 dashboard adoption by adding browser-level smoke / DOM coverage
+  for the selected project / queue detail `handoff_readiness` panel when a
+  browser runtime is available, while keeping focus on the real project-agent
+  handoff loop rather than adding more UI-only fields.
 
 ## Recent Progress
+
+- 2026-06-04T09:42:59+08:00: Wired `handoff_readiness` into the React dashboard
+  selected project / queue detail path. `apps/dashboard/src/views/dashboard-page.tsx`
+  now has a reusable `HandoffReadinessPanel` that uses the existing readiness
+  view helper and renders `Handoff ready/blocked`, the compact readiness line,
+  failed checks, and the next probe inside the selected queue action detail.
+  `apps/dashboard/smoke/action-packet-smoke.ts` now includes source-drift checks
+  for the detail panel and `queueItem.handoff_readiness` wiring. Validation:
+  dashboard action-packet smoke, dashboard TypeScript `tsc --noEmit`, dashboard
+  Vite build, touched-file `git diff --check`, and public goal-harness contract
+  check. Browser-level DOM smoke remains pending because no browser runtime was
+  used in this run. Critic: readiness now covers status/static dashboard, React
+  User Actions, copied packets, and selected detail; the remaining useful gap is
+  page-level browser verification plus observing a real project-agent handoff
+  after execution.
 
 - 2026-06-04T09:36:32+08:00: Wired `handoff_readiness` into the React dashboard
   User Actions path. `apps/dashboard/src/data/status.ts` now parses
