@@ -163,10 +163,11 @@ If the result says should_run=true:
 1. Read the active state, Priority Stack, recent progress, and critic.
    When you inspect current Goal Harness routing, use the current status queue:
    attention_queue.items and each item's project_asset are authoritative for
-   owner, gate, waiting party, and next action. Treat run_history.latest_runs
-   as evidence and drill-down only; it may be limited by status command limits
-   or filters, so do not decide whether a gate is pending or approved from
-   latest runs alone. Also inspect goal_boundary and any user_todo_summary from
+   owner, gate, waiting party, and next action. If project_asset is absent or
+   legacy/raw fallback, raw queue fields are not owner/gate/stop authority.
+   Treat run_history.latest_runs as evidence and drill-down only; it may be
+   limited by status command limits or filters, so do not decide whether a gate
+   is pending or approved from latest runs alone. Also inspect goal_boundary and any user_todo_summary from
    the guard/status payload. If an open user/owner todo is the current blocker
    that can unlock a
    gate, focus_wait, or external-evidence wait, handle it before delivery as
@@ -273,7 +274,8 @@ gated command and do at most one independent read-only steering/analysis step
 after the gate has already been surfaced.
 If it returns `should_run=true`, first compare candidate next actions across
 the priority stack, use `attention_queue.items` / `project_asset` as the current
-routing authority and treat `run_history.latest_runs` only as evidence,
+routing authority; if project_asset is absent or legacy/raw fallback, raw queue
+fields are not owner/gate/stop authority. Treat `run_history.latest_runs` only as evidence,
 read `goal_boundary`, check whether any open `user_todo_summary` is a
 blocker-push opportunity for a gate / focus_wait / external-evidence wait,
 apply a continuation check for
@@ -308,7 +310,8 @@ For every automatic heartbeat turn, the agent-facing checklist is:
    one independent safe-bypass step or report the pending gate compactly.
 5. Run the steering audit before choosing the work.
 6. Use `attention_queue.items` / `project_asset` as current routing authority;
-   use `run_history.latest_runs` only as evidence or drill-down.
+   if project_asset is absent or legacy/raw fallback, raw queue fields are not
+   owner/gate/stop authority. Use `run_history.latest_runs` only as evidence or drill-down.
 7. Follow `heartbeat_recommendation`: first connected read-only goals should run
    one real `read-only-map`, while already mapped unchanged goals should return
    a quiet no-op without another dry-run or quota spend.

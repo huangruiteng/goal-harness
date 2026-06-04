@@ -105,6 +105,7 @@ def main() -> int:
         "safe_bypass_allowed=true",
         "heartbeat_recommendation",
         "goal_boundary",
+        "Legacy/raw fallback is not owner/gate/stop authority",
         "run_first_read_only_map",
         "mapped_noop_if_unchanged",
         "steering audit",
@@ -133,6 +134,7 @@ def main() -> int:
         "gate or open user todo",
         "heartbeat_recommendation",
         "goal_boundary",
+        "project_asset source labels",
         "steering audit with product-bottleneck lens",
         "choose one bounded verifiable progress segment",
         "goal-harness todo add",
@@ -186,6 +188,7 @@ def main() -> int:
         "When you inspect current Goal Harness routing",
         "attention_queue.items",
         "project_asset are authoritative",
+        "raw queue fields are not owner/gate/stop authority",
         "run_history.latest_runs as evidence and drill-down only",
         "do not decide whether a gate is pending or approved from latest runs alone",
         "goal_boundary",
@@ -269,6 +272,7 @@ def main() -> int:
         "When you inspect current Goal Harness routing",
         "attention_queue.items",
         "project_asset` are authoritative",
+        "raw queue fields are not owner/gate/stop authority",
         "run_history.latest_runs` as evidence and drill-down only",
         "do not decide whether a gate is pending or approved from latest runs alone",
         "goal_boundary",
@@ -381,6 +385,8 @@ def main() -> int:
     assert "blocker-push `NOTIFY`" in project_skill, project_skill
     assert "heartbeat_recommendation" in project_skill, project_skill
     assert "mapped_noop_if_unchanged" in project_skill, project_skill
+    assert "legacy/raw fallback" in project_skill, project_skill
+    assert "do not infer" in project_skill, project_skill
     assert "reason to paste one-off control logic into the scheduler" in project_skill, project_skill
 
     cli_json = subprocess.run(

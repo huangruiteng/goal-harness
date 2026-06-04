@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:24:32+08:00
+updated_at: 2026-06-04T08:29:24+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,29 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check whether heartbeat/project prompt contracts also require non-dashboard
-  consumers to declare the project_asset/source boundary; if they already do,
-  move to the next P0 project-agent handoff compactness gap.
+- Check whether project-agent handoff and handoff-only outputs can still carry
+  too much context; prefer a lightweight interface-budget or compactness smoke
+  so handoffs are not flooded by old chat, long packets, or cold-path evidence.
 
 ## Recent Progress
+
+- 2026-06-04T08:29:24+08:00: Closed the heartbeat/project prompt
+  source-boundary contract gap. Full, compact, and brief heartbeat prompts now
+  tell agents to respect `project_asset` source labels: when `project_asset` is
+  absent or legacy/raw fallback, raw queue fields are not owner/gate/stop
+  authority. The new-project prompt, heartbeat automation doc, new-project
+  prompt doc, and installable `goal-harness-project` skill now carry the same
+  rule. Re-ran `scripts/install-local.sh` so the local installed skill matches
+  the public source. Regression coverage: `examples/heartbeat-prompt-smoke.py`
+  checks full/compact/brief prompts plus the skill text, and
+  `examples/project-prompt-smoke.py` checks the new-project handoff clause.
+  Validation: heartbeat smoke with HEAD README injected to avoid the
+  pre-existing dirty README, project-prompt smoke, install-local smoke, touched
+  Python `py_compile`, touched-file `git diff --check`, 7-file public/private
+  `goal-harness check`, and installed skill phrase scan. Critic: the
+  source-boundary theme now covers dashboard, status Markdown, review-packet,
+  heartbeat/project prompts, and the installed skill; further work should move
+  to project-agent handoff compactness instead of continuing the same thread.
 
 - 2026-06-04T08:24:32+08:00: Completed the non-dashboard project_asset/source
   boundary slice. Status Markdown now emits `project_asset_source` for every

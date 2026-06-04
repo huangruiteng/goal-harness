@@ -71,6 +71,8 @@ HANDOFF_MUST_HAVE = (
     "`run_history.latest_runs`",
     "拼当前状态",
     "当前权威状态来自 `attention_queue.items` / `project_asset`",
+    "如果缺少 `project_asset` 或标记为 `legacy/raw fallback`",
+    "不要把 raw queue 字段当作 owner/gate/stop authority",
     "goal-harness review-packet --goal-id",
     "--handoff-only",
     "只把输出的 handoff 交给目标项目 agent",

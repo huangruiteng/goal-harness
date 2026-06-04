@@ -136,7 +136,8 @@ If the result says `should_run=true`:
 1. Read the active state, Priority Stack, recent progress, and critic.
    When you inspect current Goal Harness routing, use the current status queue:
    `attention_queue.items` and each item's `project_asset` are authoritative
-   for owner, gate, waiting party, and next action. Treat
+   for owner, gate, waiting party, and next action. If `project_asset` is absent
+   or legacy/raw fallback, raw queue fields are not owner/gate/stop authority. Treat
    `run_history.latest_runs` as evidence and drill-down only; it may be limited
    by status command limits or filters, so do not decide whether a gate is
    pending or approved from latest runs alone. Also inspect `goal_boundary` and
@@ -256,7 +257,8 @@ edits, research, exploration, or spend. If guard exposes gate or open user
 todo, send one concise Chinese `NOTIFY`; otherwise quiet
 `DONT_NOTIFY`.
 
-If allowed, follow compact contract: read active state/status queue;
+If allowed, follow compact contract: read active state/status queue and
+project_asset source labels;
 blocker-push before delivery; obey `heartbeat_recommendation` and
 `goal_boundary`;
 steering audit with product-bottleneck lens; choose one bounded verifiable
@@ -322,7 +324,8 @@ If `should_run=false`:
 If `should_run=true`:
 1. Read active state, Priority Stack, progress, critic, `goal_boundary`,
    `attention_queue.items` / `project_asset`, and guard `user_todo_summary`.
-   Treat `run_history.latest_runs` as drill-down only.
+   Legacy/raw fallback is not owner/gate/stop authority. Treat
+   `run_history.latest_runs` as drill-down only.
 2. Before delivery, surface open user/owner todo that can unlock a gate,
    `focus_wait`, or external-evidence wait: short Chinese `NOTIFY`, no work or
    spend.

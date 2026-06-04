@@ -274,7 +274,8 @@ goal-harness todo add --goal-id {goal_id} --role user --text "<public-safe user/
    完整契约见 Goal Harness 仓库里的 `docs/project-agent-todo-contract.md`。
 6. 如果需要把当前 packet 或已批准命令交给项目 agent，优先生成最小 handoff，不要从旧聊天、
    旧 review packet 或 `run_history.latest_runs` 拼当前状态。当前权威状态来自
-   `attention_queue.items` / `project_asset`：
+   `attention_queue.items` / `project_asset`；如果缺少 `project_asset` 或标记为
+   `legacy/raw fallback`，不要把 raw queue 字段当作 owner/gate/stop authority：
 
 ```bash
 goal-harness review-packet --goal-id {goal_id} --handoff-only

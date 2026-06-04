@@ -119,6 +119,10 @@ adapter status, allowed write scope, parent-approval scopes, guards, and stop
 condition. Treat it as the project-specific boundary contract so automation
 prompts can stay short instead of repeating long per-project protected-scope
 lists.
+When reading status or quota routing, use `attention_queue.items` and
+`project_asset` as current authority only when the item is project-asset-backed.
+If `project_asset` is absent or the source is legacy/raw fallback, do not infer
+owner, gate, or stop-condition authority from raw queue fields.
 
 ## Set Up Recurring Heartbeats
 
@@ -243,7 +247,9 @@ Packet shape as the dashboard; it does not append human reward, append an
 operator gate, refresh state, grant write-control, or authorize production
 actions. `--handoff-only` only strips the human decision wrapper from markdown
 output; JSON output returns a minimized handoff payload with `handoff_text`
-instead of the full operator packet.
+instead of the full operator packet. If the selected queue item is legacy/raw
+fallback rather than project-asset-backed, do not treat raw queue fields as
+owner, gate, or stop-condition authority.
 
 Read the packet in order:
 
