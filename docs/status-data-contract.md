@@ -445,6 +445,13 @@ Review Packet source-of-truth rule:
 - project-agent handoff commands redact local absolute registry/runtime paths
   before they enter `project_agent_command`, `project_agent_handoff`, or
   `handoff_text`;
+- project-agent handoff text is an interface-budgeted hot-path artifact: it
+  should stay within 16 lines and 1800 characters, include at most one command
+  block, and carry only the target goal guard, minimal-context rule, source
+  label, forwarding/execution boundary, command, and stop condition;
+- handoff-only output must not carry the full Review Packet, human decision
+  section, local operator-gate preview, operator decision payload fields, raw
+  `run_history`, or `latest_runs` cold-path evidence;
 - the local `operator_gate_dry_run` preview belongs to the user or controller,
   not the target project agent;
 - the project-agent command is only the after-approval dry-run execution path.

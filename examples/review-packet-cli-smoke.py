@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from goal_harness.review_packet import build_review_packet  # noqa: E402
 
+STATUS_DATA_CONTRACT_PATH = REPO_ROOT / "docs" / "status-data-contract.md"
 GOAL_ID = "planned-main-control"
 APPROVED_COMMAND = f"goal-harness read-only-map --goal-id {GOAL_ID} --dry-run"
 APPROVED_COMMAND_TAIL = f"read-only-map --goal-id {GOAL_ID} --dry-run"
@@ -72,6 +73,15 @@ def assert_project_agent_handoff_compact(text: str, label: str, *, goal_id: str)
     assert text.count("```") <= 2, (label, text)
     for marker in PROJECT_AGENT_HANDOFF_FORBIDDEN_MARKERS:
         assert marker not in text, (label, marker, text)
+
+
+def assert_status_data_contract_documents_handoff_budget() -> None:
+    contract = STATUS_DATA_CONTRACT_PATH.read_text(encoding="utf-8")
+    compact_contract = " ".join(contract.split())
+    assert "within 16 lines and 1800 characters" in compact_contract, contract
+    assert "include at most one command block" in compact_contract, contract
+    assert "handoff-only output must not carry the full Review Packet" in compact_contract, contract
+    assert "raw `run_history`, or `latest_runs` cold-path evidence" in compact_contract, contract
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -459,6 +469,7 @@ def main() -> int:
     assert "JSON output returns a minimized handoff payload" in compact_help, help_result.stdout
     assert "JSON output keeps the full payload" not in compact_help, help_result.stdout
 
+    assert_status_data_contract_documents_handoff_budget()
     assert_attention_queue_drives_approved_handoff_over_stale_history()
     assert_focus_wait_owner_blocker_packet()
     assert_missing_project_asset_review_packet_fallback()

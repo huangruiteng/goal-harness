@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:34:53+08:00
+updated_at: 2026-06-04T08:40:04+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,28 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check whether the status data contract or docs should state the handoff
-  compactness budget; if the smoke coverage is enough, move to the P0 real
-  adapter proof around platform-migration no-evidence projection.
+- Move to the P0 real adapter proof: run a public-safe sanity check for the
+  platform-migration no-evidence projection across status, packet, and handoff
+  surfaces, confirming that owner, gate, next, stop, todos, and quota remain
+  expressible without reading private evidence.
 
 ## Recent Progress
+
+- 2026-06-04T08:40:04+08:00: Documented the handoff compactness budget in the
+  public status data contract. `docs/status-data-contract.md` now states that
+  project-agent handoff text is an interface-budgeted hot-path artifact: it
+  should stay within 16 lines / 1800 characters, include at most one command
+  block, and carry only the target goal guard, minimal-context rule, source
+  label, forwarding/execution boundary, command, and stop condition.
+  Handoff-only output must not carry the full Review Packet, human decision
+  section, local operator-gate preview, operator decision payload fields, raw
+  `run_history`, or `latest_runs` cold-path evidence. The review-packet CLI
+  smoke now checks that the contract keeps those budget clauses, so the docs
+  and interface regression cannot drift silently. Validation: review-packet CLI
+  smoke, touched Python `py_compile`, touched-file `git diff --check`, and
+  2-file public/private `goal-harness check`. Critic: code and docs now both
+  cover the handoff compactness theme; further work should move to real
+  adapter proof rather than polishing this same contract.
 
 - 2026-06-04T08:34:53+08:00: Added a compactness/interface-budget regression
   for project-agent handoffs. `examples/review-packet-cli-smoke.py` now guards
