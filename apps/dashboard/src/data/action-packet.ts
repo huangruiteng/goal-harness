@@ -1,3 +1,5 @@
+export type ProjectAssetSource = "project_asset" | "legacy_raw_fallback";
+
 export type ActionPacketInput = {
   goalId: string;
   title: string;
@@ -18,6 +20,7 @@ export type ActionPacketInput = {
   projectGate?: string | null;
   projectNextAction?: string | null;
   projectStopCondition?: string | null;
+  projectAssetSource?: ProjectAssetSource | null;
 };
 
 export type ApprovedAgentHandoffInput = {
@@ -26,15 +29,20 @@ export type ApprovedAgentHandoffInput = {
   agentTodoText?: string | null;
   projectNextAction?: string | null;
   projectStopCondition?: string | null;
+  projectAssetSource?: ProjectAssetSource | null;
 };
 
 export function buildApprovedAgentHandoff(input: ApprovedAgentHandoffInput) {
   const command = input.command.replace(/\s+/g, " ").trim();
+  const isFallback = input.projectAssetSource === "legacy_raw_fallback";
+  const nextLabel = isFallback ? "Fallback Next" : "Project Asset Next";
+  const stopLabel = isFallback ? "Fallback Stop" : "Project Asset Stop";
   return [
     `目标校验：本段只适用于 goal_id=\`${input.goalId}\`；如果与你当前 active goal 或 registry entry 不一致，停止并回报目标不匹配。`,
     "上下文规则：本段只携带最小当前指令；不要从旧聊天或旧 packet 拼当前状态。需要更多上下文时，先读当前 active state、status、history 和命令输出。",
-    input.projectNextAction ? `Project Asset Next：${compactPacketText(input.projectNextAction, 180)}` : null,
-    input.projectStopCondition ? `Project Asset Stop：${compactPacketText(input.projectStopCondition, 180)}` : null,
+    isFallback ? "Project Asset Source：legacy/raw fallback；未收到 project_asset，Next/Stop 来自 raw status 降级判断。" : null,
+    input.projectNextAction ? `${nextLabel}：${compactPacketText(input.projectNextAction, 180)}` : null,
+    input.projectStopCondition ? `${stopLabel}：${compactPacketText(input.projectStopCondition, 180)}` : null,
     input.agentTodoText ? `Agent 待办：${compactPacketText(input.agentTodoText, 220)}` : null,
     "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
     "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
@@ -47,6 +55,7 @@ export function buildApprovedAgentHandoff(input: ApprovedAgentHandoffInput) {
 }
 
 export function buildActionPacket(input: ActionPacketInput) {
+  const isFallback = input.projectAssetSource === "legacy_raw_fallback";
   const needsTodoFirst = Boolean(input.userTodoText && input.todoBlocksGate);
   const userActionLines = input.userTodoText
     ? [
@@ -71,11 +80,13 @@ export function buildActionPacket(input: ActionPacketInput) {
     input.authorityShortLine ? `Authority：${compactPacketText(input.authorityShortLine, 110)}` : null,
   ];
   const projectAssetLines = [
-    input.projectOwner || input.projectGate
+    isFallback
+      ? "Project Asset：legacy/raw fallback；未收到 project_asset，Owner/Gate/Stop 未确认。"
+      : input.projectOwner || input.projectGate
       ? `Project Asset：Owner=${compactPacketText(input.projectOwner ?? "unknown", 70)}；Gate=${compactPacketText(input.projectGate ?? "unknown", 70)}`
       : null,
-    input.projectNextAction ? `Next：${compactPacketText(input.projectNextAction, 160)}` : null,
-    input.projectStopCondition ? `Stop：${compactPacketText(input.projectStopCondition, 160)}` : null,
+    input.projectNextAction ? `${isFallback ? "Fallback Next" : "Next"}：${compactPacketText(input.projectNextAction, 160)}` : null,
+    input.projectStopCondition ? `${isFallback ? "Fallback Stop" : "Stop"}：${compactPacketText(input.projectStopCondition, 160)}` : null,
   ];
 
   return [

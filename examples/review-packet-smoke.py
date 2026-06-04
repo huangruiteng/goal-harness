@@ -180,6 +180,7 @@ def main() -> int:
     assert "const isFocusWait = isFocusWaitQuota(item.quota);" in packet_builder
     assert "const agentTodo = firstOpenTodo(item.agentTodos);" in packet_builder
     assert "agentTodoText: agentTodo?.text" in packet_builder
+    assert "projectAssetSource: item.projectAssetSource" in packet_builder
     assert "Status/history inspection only" in packet_builder
     assert "保持 focus_wait 并用中文回报仍在等待什么" in packet_builder
     assert "不执行交付路径、写入、reward append 或生产动作" in packet_builder
@@ -225,11 +226,13 @@ def main() -> int:
 
     user_action_builder = source_between(source, "function buildUserActionSummaryItems", "function UserActionSummary")
     assert "const projectAsset = row.queueItem?.project_asset;" in user_action_builder
+    assert 'const projectAssetSource: ProjectAssetSource = projectAsset ? "project_asset" : "legacy_raw_fallback";' in user_action_builder
     assert "const quota = projectAsset?.quota ?? row.queueItem?.quota ?? row.goal.quota;" in user_action_builder
     assert "todosFromProjectAssetSummary(projectAsset?.user_todos" in user_action_builder
     assert "const nextAction = projectAsset?.next_action ?? decision.action;" in user_action_builder
     assert "const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action;" in user_action_builder
     assert "const latestValidation = projectAsset?.latest_validation;" in user_action_builder
+    assert "projectAssetSource," in user_action_builder
     assert "const quotaState = quota?.state ?? \"waiting\";" in user_action_builder
     assert "decision.waitingOn === \"codex\" && quotaState === \"focus_wait\"" in user_action_builder
     assert "Focus wait owner blocker" in user_action_builder
@@ -244,6 +247,11 @@ def main() -> int:
             "if (decision.waitingOn === \"codex\")",
         ],
     )
+    user_action_surface = source_between(source, "function UserActionSummary", "function buildOperatorActionBridge")
+    assert "Legacy/raw fallback" in user_action_surface
+    assert "Owner/Gate/Stop are not project_asset-backed" in user_action_surface
+    assert "Fallback next:" in user_action_surface
+    assert "Fallback stop:" in user_action_surface
     user_action_summary = source_between(source, "function UserActionSummary", "function OperatorDecisionPanel")
     assert "buildHumanFriendlyActionPacket({ item, registry, runtimeRoot })" in user_action_summary
     assert "aria-label={`Copy action packet for ${item.goalId}`}" in user_action_summary

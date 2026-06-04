@@ -55,7 +55,7 @@ import {
   parseRewardDryRunResponse,
   parseStatusPayload,
 } from "../data/status";
-import { buildActionPacket, buildApprovedAgentHandoff } from "../data/action-packet";
+import { buildActionPacket, buildApprovedAgentHandoff, ProjectAssetSource } from "../data/action-packet";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -751,6 +751,7 @@ type UserActionSummaryItem = {
   projectGate?: string | null;
   projectNextAction?: string | null;
   projectStopCondition?: string | null;
+  projectAssetSource: ProjectAssetSource;
   phase: string;
   waitingOn: string;
   draftLabel?: string;
@@ -1542,6 +1543,7 @@ function buildHumanFriendlyActionPacket({
       projectGate: item.projectGate,
       projectNextAction: item.projectNextAction,
       projectStopCondition: item.projectStopCondition,
+      projectAssetSource: item.projectAssetSource,
     });
   }
   if (approvedAgentCommand && item.agentCommand) {
@@ -1551,6 +1553,7 @@ function buildHumanFriendlyActionPacket({
       agentTodoText: agentTodo?.text,
       projectNextAction: item.projectNextAction,
       projectStopCondition: item.projectStopCondition,
+      projectAssetSource: item.projectAssetSource,
     });
   }
   const reply = item.kind === "controller"
@@ -1583,6 +1586,7 @@ function buildHumanFriendlyActionPacket({
     projectGate: item.projectGate,
     projectNextAction: item.projectNextAction,
     projectStopCondition: item.projectStopCondition,
+    projectAssetSource: item.projectAssetSource,
   });
 }
 
@@ -1974,6 +1978,7 @@ function buildUserActionSummaryItems({
       ?? latestRun?.controller_readiness?.next_handoff_condition
       ?? "";
     const projectAsset = row.queueItem?.project_asset;
+    const projectAssetSource: ProjectAssetSource = projectAsset ? "project_asset" : "legacy_raw_fallback";
     const quota = projectAsset?.quota ?? row.queueItem?.quota ?? row.goal.quota;
     const quotaState = quota?.state ?? "waiting";
     const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos, row.queueItem?.user_todos, "project_asset.user_todos");
@@ -2001,6 +2006,7 @@ function buildUserActionSummaryItems({
       projectGate: projectAsset?.gate,
       projectNextAction: nextAction,
       projectStopCondition: stopCondition,
+      projectAssetSource,
     };
 
     if (row.severity === "high") {
@@ -2289,21 +2295,30 @@ function UserActionSummary({
                       <QuotaChip quota={item.quota} />
                       {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
                     </div>
-                    {(item.projectOwner || item.projectGate || item.projectNextAction || item.projectStopCondition) ? (
+                    {(item.projectAssetSource === "legacy_raw_fallback" || item.projectOwner || item.projectGate || item.projectNextAction || item.projectStopCondition) ? (
                       <div className="mt-3 border-t border-slate-200 pt-3 text-xs leading-5 text-slate-600 dark:border-zinc-800 dark:text-zinc-300">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="neutral">Project asset</Badge>
-                          {item.projectOwner ? <Badge variant="info">Owner {item.projectOwner}</Badge> : null}
-                          {item.projectGate ? <Badge variant="warning">Gate {item.projectGate}</Badge> : null}
+                          {item.projectAssetSource === "legacy_raw_fallback" ? (
+                            <Badge variant="warning">Legacy/raw fallback</Badge>
+                          ) : (
+                            <Badge variant="neutral">Project asset</Badge>
+                          )}
+                          {item.projectAssetSource !== "legacy_raw_fallback" && item.projectOwner ? <Badge variant="info">Owner {item.projectOwner}</Badge> : null}
+                          {item.projectAssetSource !== "legacy_raw_fallback" && item.projectGate ? <Badge variant="warning">Gate {item.projectGate}</Badge> : null}
                         </div>
+                        {item.projectAssetSource === "legacy_raw_fallback" ? (
+                          <p className="mt-2 break-words font-medium text-amber-700 dark:text-amber-200">
+                            Owner/Gate/Stop are not project_asset-backed; below uses raw status fallback.
+                          </p>
+                        ) : null}
                         {item.projectNextAction ? (
                           <p className="mt-2 line-clamp-2 break-words">
-                            <span className="font-medium">Next:</span> {item.projectNextAction}
+                            <span className="font-medium">{item.projectAssetSource === "legacy_raw_fallback" ? "Fallback next:" : "Next:"}</span> {item.projectNextAction}
                           </p>
                         ) : null}
                         {item.projectStopCondition ? (
                           <p className="mt-1 line-clamp-2 break-words">
-                            <span className="font-medium">Stop:</span> {item.projectStopCondition}
+                            <span className="font-medium">{item.projectAssetSource === "legacy_raw_fallback" ? "Fallback stop:" : "Stop:"}</span> {item.projectStopCondition}
                           </p>
                         ) : null}
                       </div>

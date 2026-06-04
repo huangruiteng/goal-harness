@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:07:44+08:00
+updated_at: 2026-06-04T08:15:11+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,29 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check whether status/dashboard fallback semantics are too strong when
-  `project_asset` is missing; first-screen surfaces should label legacy/raw
-  fallback instead of implying owner, gate, and stop condition are already
-  trustworthy.
+- Check non-dashboard consumers such as status Markdown and review-packet CLI
+  for the same project_asset/source boundary, so raw queue actions do not keep
+  looking like trustworthy project assets outside the dashboard.
 
 ## Recent Progress
+
+- 2026-06-04T08:15:11+08:00: Added explicit legacy/raw fallback labeling for
+  dashboard and action-packet consumers when `project_asset` is missing. A new
+  `ProjectAssetSource` field flows through `buildUserActionSummaryItems`,
+  copied action packets, approved handoffs, and the `User Actions` card.
+  `buildActionPacket` and approved handoff now emit `legacy/raw fallback` plus
+  `Fallback Next/Stop` labels instead of presenting raw queue fields as
+  project-asset authority. The dashboard first-screen card now shows a warning
+  fallback badge and a not-project-asset-backed cue; project-asset-backed items
+  still show Project asset with Owner/Gate badges. Regression coverage:
+  `apps/dashboard/smoke/action-packet-smoke.ts` checks fallback packet text and
+  `examples/review-packet-smoke.py` checks source propagation plus first-screen
+  fallback labels. Validation: dashboard `smoke:action-packet`,
+  `examples/review-packet-smoke.py`, dashboard `npm run build`,
+  `py_compile`, touched-file `git diff --check`, and 5-file public/private
+  `goal-harness check`. Critic: TSX build and static source assertions cover
+  this slice; no separate browser screenshot was taken. The next residual risk
+  is non-dashboard consumers still missing the same source boundary.
 
 - 2026-06-04T08:07:44+08:00: Completed the dashboard/action-packet
   project-asset consumer slice. `buildActionPacket` now places Project Asset

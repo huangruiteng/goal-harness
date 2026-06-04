@@ -26,6 +26,7 @@ const packet = buildActionPacket({
   projectGate: "owner_sop_review",
   projectNextAction: "Project asset says the owner/SOP review is the current authority.",
   projectStopCondition: "Stop before write-control or production mutation.",
+  projectAssetSource: "project_asset",
 });
 
 assert(packet.includes("【GH Packet】"), "missing packet title");
@@ -55,6 +56,7 @@ const approvedHandoff = buildApprovedAgentHandoff({
   agentTodoText: "Run the read-only map dry-run after owner todo resolution.",
   projectNextAction: "Approved project asset next action.",
   projectStopCondition: "Stop if execution needs write authority.",
+  projectAssetSource: "project_asset",
 });
 
 assert(approvedHandoff.includes("目标校验：本段只适用于 goal_id=`planned-main-control`"), "missing target guard");
@@ -68,6 +70,30 @@ assert(approvedHandoff.includes("goal-harness read-only-map --goal-id planned-ma
 assert(!approvedHandoff.includes("【GH Packet】"), "handoff-only payload must not include packet wrapper");
 assert(!approvedHandoff.includes("【用户/Gate】"), "handoff-only payload must not include user gate wrapper");
 assert(!approvedHandoff.includes("建议："), "handoff-only payload must not include human suggestion text");
+
+const legacyFallbackPacket = buildActionPacket({
+  goalId: "legacy-status-only",
+  title: "Legacy status",
+  summary: "raw status says continue but no project_asset is present",
+  userTodoText: null,
+  agentTodoText: "Inspect status only; do not treat raw fields as owner-approved state.",
+  todoBlocksGate: false,
+  operatorQuestion: null,
+  suggestedReply: "保持 status inspection；补 project_asset 后再恢复 delivery。",
+  gateFallbackDecision: "保持 status inspection；补 project_asset 后再恢复 delivery。",
+  boundary: "This is a legacy/raw fallback; do not infer owner, gate, or stop condition authority.",
+  safePathLabel: "Legacy status inspection",
+  command: "goal-harness status --goal-id legacy-status-only",
+  projectNextAction: "Continue from raw status field.",
+  projectStopCondition: "Stop before any delivery claim.",
+  projectAssetSource: "legacy_raw_fallback",
+});
+
+assert(legacyFallbackPacket.includes("Project Asset：legacy/raw fallback"), "missing legacy/raw fallback source");
+assert(legacyFallbackPacket.includes("Owner/Gate/Stop 未确认"), "missing fallback untrusted-owner cue");
+assert(legacyFallbackPacket.includes("Fallback Next：Continue from raw status field."), "missing fallback next label");
+assert(legacyFallbackPacket.includes("Fallback Stop：Stop before any delivery claim."), "missing fallback stop label");
+assert(!legacyFallbackPacket.includes("Project Asset：Owner="), "fallback packet must not claim owner/gate authority");
 
 const focusWaitPacket = buildActionPacket({
   goalId: "focus-wait-owner-blocker",
@@ -92,4 +118,4 @@ assert(focusWaitPacket.includes("保持 focus_wait"), "missing agent focus-wait 
 assert(!focusWaitPacket.includes("operator-gate"), "focus-wait packet must not draft an operator gate");
 assert(!focusWaitPacket.includes("read-only-map"), "focus-wait packet must not expose a delivery map command");
 
-console.log(`action-packet smoke ok (${packet.length} chars, handoff ${approvedHandoff.length} chars, focus ${focusWaitPacket.length} chars)`);
+console.log(`action-packet smoke ok (${packet.length} chars, handoff ${approvedHandoff.length} chars, legacy ${legacyFallbackPacket.length} chars, focus ${focusWaitPacket.length} chars)`);
