@@ -95,6 +95,65 @@ def authority_summary(goal: dict[str, Any] | None) -> str | None:
     )
 
 
+def quota_summary(quota: dict[str, Any] | None) -> str | None:
+    if not isinstance(quota, dict):
+        return None
+    compute = quota.get("compute")
+    state = quota.get("state") or "waiting"
+    spent = quota.get("spent_slots")
+    allowed = quota.get("allowed_slots")
+    slots = f"; slots {spent}/{allowed}" if spent is not None and allowed is not None else ""
+    return f"compute {compute}; {state}{slots}"
+
+
+def todo_summary(asset: dict[str, Any], role: str) -> str | None:
+    todos = asset.get(f"{role}_todos")
+    if not isinstance(todos, dict):
+        return None
+    open_count = todos.get("open")
+    total_count = todos.get("total")
+    next_todo = todos.get("next")
+    label = "User todo" if role == "user" else "Agent todo"
+    count = f"{open_count}/{total_count} open" if open_count is not None and total_count is not None else "open"
+    if next_todo:
+        return f"{label}: {count}; next {next_todo}"
+    return f"{label}: {count}"
+
+
+def project_asset_block(item: dict[str, Any]) -> str:
+    asset = item.get("project_asset")
+    if not isinstance(asset, dict):
+        return """
+          <div class="project-asset fallback">
+            <strong>Project Asset</strong>
+            <span>legacy/raw fallback</span>
+            <p>Owner, gate, next, and stop are not project_asset-backed.</p>
+          </div>
+        """
+    owner = asset.get("owner") or "unknown"
+    gate = asset.get("gate") or "unknown"
+    next_action = asset.get("next_action")
+    stop_condition = asset.get("stop_condition")
+    latest_validation = asset.get("latest_validation") if isinstance(asset.get("latest_validation"), dict) else {}
+    validation = latest_validation.get("classification") if isinstance(latest_validation, dict) else None
+    quota = quota_summary(asset.get("quota") if isinstance(asset.get("quota"), dict) else item.get("quota"))
+    rows = [
+        f"<p><b>Next</b> {esc(next_action)}</p>" if next_action else "",
+        f"<p><b>Stop</b> {esc(stop_condition)}</p>" if stop_condition else "",
+        f"<p><b>{esc(todo_summary(asset, 'user'))}</b></p>" if todo_summary(asset, "user") else "",
+        f"<p><b>{esc(todo_summary(asset, 'agent'))}</b></p>" if todo_summary(asset, "agent") else "",
+        f"<p><b>Quota</b> {esc(quota)}</p>" if quota else "",
+        f"<p><b>Validation</b> {esc(validation)}</p>" if validation else "",
+    ]
+    return f"""
+          <div class="project-asset">
+            <strong>Project Asset</strong>
+            <span>owner {esc(owner)}; gate {esc(gate)}</span>
+            {''.join(rows)}
+          </div>
+        """
+
+
 def render_item(item: dict[str, Any], *, goals: dict[str, dict[str, Any]] | None = None) -> str:
     status = esc(item.get("status"))
     phase = esc(item.get("lifecycle_phase"))
@@ -136,6 +195,7 @@ def render_item(item: dict[str, Any], *, goals: dict[str, dict[str, Any]] | None
             <dt>Source</dt><dd>{source}</dd>
           </dl>
           <p>{action}</p>
+          {project_asset_block(item)}
           {authority_block}
           {gate_block}
         </article>
@@ -383,6 +443,22 @@ def render_dashboard(payload: dict[str, Any]) -> str:
     }}
     .gate-summary strong, .gate-summary span {{ display: block; overflow-wrap: anywhere; }}
     .gate-summary p {{ margin-top: 6px; color: #9a3412; }}
+    .project-asset {{
+      margin-top: 10px;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      background: #eff6ff;
+      padding: 10px;
+      color: #1e3a8a;
+      font-size: 12px;
+    }}
+    .project-asset.fallback {{
+      border-color: #fde68a;
+      background: #fffbeb;
+      color: #78350f;
+    }}
+    .project-asset strong, .project-asset span {{ display: block; overflow-wrap: anywhere; }}
+    .project-asset p {{ margin-top: 6px; color: inherit; }}
     .run-section {{
       margin-top: 18px;
     }}

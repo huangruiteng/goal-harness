@@ -381,6 +381,14 @@ def main() -> int:
         assert "Authority" in html, html
         assert "materials 6; repos 2; owner review 1; stale 1; risk medium" in html, html
         assert "Public-safe counts only; no source links or raw material text." in html, html
+        assert "Project Asset" in html, html
+        assert "owner codex; gate none" in html, html
+        assert f"<b>Next</b> {EXPECTED_NEXT_ACTION}" in html, html
+        assert f"<b>Stop</b> {EXPECTED_STOP_CONDITION}" in html, html
+        assert f"User todo: 1/1 open; next {EXPECTED_USER_TODO}" in html, html
+        assert f"Agent todo: 1/1 open; next {EXPECTED_AGENT_TODO}" in html, html
+        assert "<b>Quota</b> compute 1.0; eligible; slots 0/1440" in html, html
+        assert "<b>Validation</b> read_only_project_map" in html, html
         assert_public_safe(html)
 
     print("platform-migration-material-registry-smoke ok")

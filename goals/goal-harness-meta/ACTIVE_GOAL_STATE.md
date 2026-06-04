@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:47:51+08:00
+updated_at: 2026-06-04T08:53:40+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,12 +65,28 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue the P0 real adapter proof by checking the platform-migration
-  no-evidence projection across quota and dashboard action-card surfaces, so
-  generic lifecycle guards and first-screen user actions do not mis-block,
-  over-authorize, or leak when private evidence is intentionally absent.
+- Continue the P0 real adapter proof by adding a platform-migration
+  no-evidence fixture for the React User Actions / copied action packet path,
+  so the first-screen card and static dashboard do not diverge on
+  project_asset, quota, todos, next, or stop consumption.
 
 ## Recent Progress
+
+- 2026-06-04T08:53:40+08:00: Fixed the static dashboard action-card projection
+  for the platform-migration no-evidence path. `examples/render-status-dashboard.py`
+  now renders project-asset-backed owner/gate, next, stop, user todo, agent
+  todo, quota, and latest validation on each status card. When `project_asset`
+  is absent, the card explicitly says `legacy/raw fallback` so raw status is
+  not presented as owner/gate/stop authority. The platform-migration smoke now
+  verifies that the sanitized HTML output includes owner=codex, gate=none,
+  Next/Stop, 1/1 open user and agent todos, eligible quota 0/1440, and
+  `read_only_project_map` validation while staying public-safe. Validation:
+  platform-migration material registry smoke, touched Python `py_compile`,
+  touched-file `git diff --check`, and 3-file public/private
+  `goal-harness check`. Critic: this fixes the static render helper, not a
+  browser-level React first-screen smoke; the next useful slice is a React
+  User Actions / copied-packet no-evidence fixture to keep both dashboard
+  entrypoints semantically aligned.
 
 - 2026-06-04T08:47:51+08:00: Added the public-safe platform-migration
   no-evidence projection proof. `examples/platform-migration-material-registry-smoke.py`
