@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T07:53:08+08:00
+updated_at: 2026-06-04T07:58:28+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,26 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Audit tracked dashboard fixtures/examples for local absolute path shapes. If
-  they are clean, stop path-boundary polish and move to the next project-asset
-  consumer gap.
+- Check whether the dashboard/action-packet first screen and copied packet use
+  project-asset fields as the authority source instead of raw status fields.
 
 ## Recent Progress
+
+- 2026-06-04T07:58:28+08:00: Closed the dashboard path-boundary theme with a
+  tracked-fixture regression. Added
+  `examples/dashboard-tracked-fixtures-smoke.py`, which scans only git-tracked
+  dashboard app files, dashboard browser smokes, `examples/status.example.json`,
+  and the dashboard render helper. It rejects user-home absolute path shapes,
+  internal URL markers, and bearer/token-like material while allowing relative
+  fixture paths and `/tmp` smoke scratch paths. The smoke currently covers 23
+  tracked dashboard files. Re-ran the adjacent
+  `dashboard-local-status-gitignore-smoke` so tracked fixtures and ignored
+  local exports are both guarded. Validation: py-compile, dashboard
+  tracked-fixtures smoke, dashboard local-status gitignore smoke, and
+  touched-file `git diff --check`. Critic: path leakage is now guarded at both
+  tracked and ignored-local boundaries; further regex polish is low-value. Move
+  to the project-asset consumer gap: dashboard and copy-packet surfaces should
+  consume owner/gate/next action/stop condition/todo/quota as the authority.
 
 - 2026-06-04T07:53:08+08:00: Completed a non-handoff P0 state-safety slice for
   dashboard local status exports. Confirmed live
