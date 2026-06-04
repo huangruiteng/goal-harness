@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:29:24+08:00
+updated_at: 2026-06-04T08:34:53+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,25 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check whether project-agent handoff and handoff-only outputs can still carry
-  too much context; prefer a lightweight interface-budget or compactness smoke
-  so handoffs are not flooded by old chat, long packets, or cold-path evidence.
+- Check whether the status data contract or docs should state the handoff
+  compactness budget; if the smoke coverage is enough, move to the P0 real
+  adapter proof around platform-migration no-evidence projection.
 
 ## Recent Progress
+
+- 2026-06-04T08:34:53+08:00: Added a compactness/interface-budget regression
+  for project-agent handoffs. `examples/review-packet-cli-smoke.py` now guards
+  `project_agent_handoff` and `handoff_text` with a 16-line / 1800-character
+  budget, requires the target goal guard, minimal-context rule, anti-old-chat
+  warning, project-asset source, and stop condition, and rejects full review
+  packet sections, local gate drafts, operator decision payload fields, and
+  `run_history` / `latest_runs` cold-path evidence. The assertions cover
+  controller, approved codex, focus-wait, legacy/raw fallback, handoff-only
+  Markdown, and handoff-only JSON surfaces. Validation: review-packet CLI
+  smoke and touched Python `py_compile`. Critic: this is a contract regression
+  around interface size and shape, not a rewrite of the current handoff prose;
+  decide whether docs need to publish the budget before moving to real adapter
+  proof.
 
 - 2026-06-04T08:29:24+08:00: Closed the heartbeat/project prompt
   source-boundary contract gap. Full, compact, and brief heartbeat prompts now

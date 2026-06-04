@@ -26,6 +26,20 @@ FOCUS_WAIT_GOAL_ID = "focus-wait-owner-blocker"
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
 )
+MAX_PROJECT_AGENT_HANDOFF_LINES = 16
+MAX_PROJECT_AGENT_HANDOFF_CHARS = 1800
+PROJECT_AGENT_HANDOFF_FORBIDDEN_MARKERS = (
+    "【Goal Harness Review Packet】",
+    "【人只需判断】",
+    "【用户本地 Gate 记录草稿】",
+    "问题：",
+    "建议判断：",
+    "回复：",
+    "operator_gate_dry_run_command",
+    "operator_gate_decision_commands",
+    "latest_runs",
+    "run_history",
+)
 
 
 def iter_strings(value: Any) -> Iterator[str]:
@@ -43,6 +57,21 @@ def assert_no_local_paths(value: Any, label: str) -> None:
     for text in iter_strings(value):
         match = LOCAL_ABSOLUTE_PATH_PATTERN.search(text)
         assert match is None, f"{label} leaked local path {match.group(0)!r}: {text}"
+
+
+def assert_project_agent_handoff_compact(text: str, label: str, *, goal_id: str) -> None:
+    lines = text.splitlines()
+    assert len(lines) <= MAX_PROJECT_AGENT_HANDOFF_LINES, (label, len(lines), text)
+    assert len(text) <= MAX_PROJECT_AGENT_HANDOFF_CHARS, (label, len(text), text)
+    assert text.startswith(f"目标校验：本段只适用于 goal_id=`{goal_id}`"), (label, text)
+    assert "上下文规则：本段只携带最小当前指令" in text, (label, text)
+    assert "不要从旧聊天或旧 packet 拼当前状态" in text, (label, text)
+    assert "项目资产来源：" in text, (label, text)
+    assert "停止条件：" in text, (label, text)
+    assert text.count("```bash") <= 1, (label, text)
+    assert text.count("```") <= 2, (label, text)
+    for marker in PROJECT_AGENT_HANDOFF_FORBIDDEN_MARKERS:
+        assert marker not in text, (label, marker, text)
 
 
 def write_planned_registry(root: Path) -> Path:
@@ -258,6 +287,11 @@ def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
     assert payload["operator_gate_decision_commands"] == {}, payload
     assert payload["agent_todo_text"] == "Run the approved queue-authority dry-run.", payload
     assert payload["project_asset_source"] == "project_asset", payload
+    assert_project_agent_handoff_compact(
+        payload["project_agent_handoff"],
+        "approved attention queue project-agent handoff",
+        goal_id=GOAL_ID,
+    )
     assert "类型：Codex" in packet, packet
     assert "来源：project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）" in packet, packet
     assert "项目资产来源：project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）" in packet, packet
@@ -343,6 +377,11 @@ def assert_focus_wait_owner_blocker_packet() -> None:
     assert payload["project_asset_source"] == "project_asset", payload
     assert payload["owner_blocker_text"] == blocker_text, payload
     assert payload["user_todo_text"] == blocker_text, payload
+    assert_project_agent_handoff_compact(
+        payload["project_agent_handoff"],
+        "focus-wait project-agent handoff",
+        goal_id=FOCUS_WAIT_GOAL_ID,
+    )
     assert payload["operator_gate_dry_run_command"] is None, payload
     assert payload["operator_gate_decision_commands"] == {}, payload
     assert "类型：Focus Wait" in packet, packet
@@ -396,6 +435,11 @@ def assert_missing_project_asset_review_packet_fallback() -> None:
 
     assert payload["ok"] is True, payload
     assert payload["project_asset_source"] == "legacy_raw_fallback", payload
+    assert_project_agent_handoff_compact(
+        payload["project_agent_handoff"],
+        "legacy fallback project-agent handoff",
+        goal_id="legacy-status-only",
+    )
     assert "来源：legacy/raw fallback" in packet, packet
     assert "不能当 owner/gate/stop authority" in packet, packet
     assert "项目资产来源：legacy/raw fallback" in payload["project_agent_handoff"], payload
@@ -490,6 +534,11 @@ def main() -> int:
             },
             "controller project-agent handoff",
         )
+        assert_project_agent_handoff_compact(
+            payload["project_agent_handoff"],
+            "controller project-agent handoff",
+            goal_id=GOAL_ID,
+        )
         assert payload["user_todo_text"] == "Read owner review worksheet first.", payload
         assert payload["agent_todo_text"] == "Run the read-only map dry-run after owner todo resolution.", payload
         assert payload["authority_summary"] == "authority/material: topics=2, materials=4, repositories=2, owner_review_required=1, stale=1, current_authority=1, risk=low", payload
@@ -516,6 +565,11 @@ def main() -> int:
         assert "operator_gate_decision_commands" not in controller_handoff_payload, controller_handoff_payload
         assert controller_handoff_payload["handoff_text"] == controller_handoff_payload["project_agent_handoff"], controller_handoff_payload
         assert_no_local_paths(controller_handoff_payload, "controller handoff-only json")
+        assert_project_agent_handoff_compact(
+            controller_handoff_payload["handoff_text"],
+            "controller handoff-only json",
+            goal_id=GOAL_ID,
+        )
 
         append_operator_gate_approval_fixture(root)
         before_files = sorted(path.name for path in run_dir.iterdir())
@@ -569,6 +623,11 @@ def main() -> int:
         assert APPROVED_COMMAND_TAIL in handoff_only, handoff_only
         assert "<local-path>" in handoff_only, handoff_only
         assert_no_local_paths(handoff_only, "handoff-only markdown")
+        assert_project_agent_handoff_compact(
+            handoff_only,
+            "handoff-only markdown",
+            goal_id=GOAL_ID,
+        )
 
         approved_json_result = run_cli(
             root,
@@ -598,6 +657,11 @@ def main() -> int:
                 "project_agent_handoff": approved_payload["project_agent_handoff"],
             },
             "approved project-agent handoff",
+        )
+        assert_project_agent_handoff_compact(
+            approved_payload["project_agent_handoff"],
+            "approved project-agent handoff",
+            goal_id=GOAL_ID,
         )
         assert approved_payload["operator_gate_dry_run_command"] is None, approved_payload
         assert approved_payload["operator_gate_decision_commands"] == {}, approved_payload
@@ -629,6 +693,11 @@ def main() -> int:
                 "project_agent_command": handoff_payload["project_agent_command"],
             },
             "handoff-only json",
+        )
+        assert_project_agent_handoff_compact(
+            handoff_payload["handoff_text"],
+            "handoff-only json",
+            goal_id=GOAL_ID,
         )
 
         after_files = sorted(path.name for path in run_dir.iterdir())
