@@ -256,6 +256,20 @@ def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
                         "gate": "none",
                         "next_action": "run the approved handoff now",
                         "stop_condition": "stop if the command needs write control",
+                        "execution_profile": {
+                            "cadence": "bounded_progress_segment",
+                            "minimum_scale": "implementation",
+                            "must_include": [
+                                "implementation_artifact",
+                                "targeted_validation",
+                                "state_writeback",
+                            ],
+                            "spend_rule": "spend_only_after_artifact_validation_writeback",
+                            "degradation_policy": {
+                                "small_scale_streak_threshold": 3,
+                                "on_degradation": "require_blocker_or_expand_next_batch",
+                            },
+                        },
                         "agent_todos": {
                             "next": "Run the approved queue-authority dry-run.",
                         },
@@ -331,22 +345,26 @@ def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
     readiness = status_payload["attention_queue"]["items"][0]["handoff_readiness"]
     readiness["post_handoff_latest_run"]["delivery_batch_scale"] = "test_only"
     readiness["post_handoff_small_scale_streak"] = 2
+    below_threshold_payload = build_review_packet(status_payload, goal_id=GOAL_ID)
+    assert below_threshold_payload["handoff_delivery_contract"] is None, below_threshold_payload
+    readiness["post_handoff_small_scale_streak"] = 3
     small_payload = build_review_packet(status_payload, goal_id=GOAL_ID)
     small_packet = small_payload["packet"]
     assert (
         small_payload["handoff_followthrough_summary"]
-        == "post_handoff_run=owner_handoff_consumer_test, scale=test_only, small_streak=2, at=2026-01-01T00:02:00+00:00"
+        == "post_handoff_run=owner_handoff_consumer_test, scale=test_only, small_streak=3, at=2026-01-01T00:02:00+00:00"
     ), small_payload
     assert small_payload["handoff_delivery_contract"]["mode"] == "expand_after_repeated_small_delivery", small_payload
-    assert small_payload["handoff_delivery_contract"]["minimum_scale"] == "multi_surface_or_implementation", small_payload
+    assert small_payload["handoff_delivery_contract"]["minimum_scale"] == "implementation", small_payload
     assert small_payload["handoff_delivery_contract"]["must_include"] == [
-        "coherent_artifact",
+        "implementation_artifact",
         "targeted_validation",
         "state_writeback",
     ], small_payload
+    assert small_payload["handoff_delivery_contract"]["small_scale_streak_threshold"] == 3, small_payload
     assert "交付观测：post_handoff_run=owner_handoff_consumer_test, scale=test_only" in small_packet, small_packet
     assert "交付合同：下一轮选 1 个连贯推进段" in small_packet, small_packet
-    assert "至少达到 multi_surface/implementation" in small_packet, small_packet
+    assert "至少达到 implementation" in small_packet, small_packet
     assert "targeted validation、state writeback" in small_packet, small_packet
     assert "不 spend" in small_packet, small_packet
 

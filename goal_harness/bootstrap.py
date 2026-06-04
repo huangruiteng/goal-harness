@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .execution_profile import (
+    build_execution_profile,
+    compact_execution_profile,
+    execution_profile_summary,
+)
 from .global_registry import sync_project_registry_to_global
 from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs
 
@@ -55,8 +60,17 @@ def render_authority_sources(project: Path, goal_doc: Path | None) -> str:
     return f"- Primary goal document: `{rel_or_abs(goal_doc, project)}`"
 
 
-def render_state_markdown(*, project: Path, goal_id: str, objective: str, updated_at: str, goal_doc: Path | None) -> str:
+def render_state_markdown(
+    *,
+    project: Path,
+    goal_id: str,
+    objective: str,
+    updated_at: str,
+    goal_doc: Path | None,
+    execution_profile: dict[str, Any] | None,
+) -> str:
     safe_objective = objective.replace('"', '\\"')
+    profile_summary = execution_profile_summary(execution_profile)
     return f"""---
 status: active
 owner_mode: goal
@@ -83,6 +97,11 @@ adapter_id: {goal_id}
 - Run a bounded progress segment when useful; it does not have to be one tiny step.
 - Keep private evidence, credentials, local paths, and raw logs out of public commits.
 - End each tick with changed files, validation, residual risk, and the next action.
+
+## Execution Profile
+
+- `{profile_summary}`
+- Repeated small-scale follow-through should expand the next delivery batch or report a blocker before spending quota.
 
 ## Non-Goals
 
@@ -125,6 +144,7 @@ def build_goal_entry(
     allowed_domains: list[str],
     write_scope: list[str],
     claim_ttl_minutes: int,
+    execution_profile: dict[str, Any] | None,
 ) -> dict[str, Any]:
     authority_sources = []
     if goal_doc:
@@ -162,6 +182,7 @@ def build_goal_entry(
                 "production-action",
             ],
         },
+        "execution_profile": compact_execution_profile(execution_profile),
         "next_probe": next_probe
         or f"goal-harness --registry .goal-harness/registry.json check --scan-root {project}",
         "guards": [
@@ -216,6 +237,9 @@ def bootstrap_project(
     allowed_domains: list[str] | None,
     write_scope: list[str] | None,
     claim_ttl_minutes: int,
+    execution_minimum_scale: str | None = None,
+    execution_must_include: list[str] | None = None,
+    execution_small_streak_threshold: int | None = None,
     force: bool,
     dry_run: bool,
     sync_global: bool,
@@ -232,6 +256,11 @@ def bootstrap_project(
     goal_doc = resolve_project_path(project, goal_doc)
     runtime_root = runtime_root.expanduser() if runtime_root else DEFAULT_RUNTIME_ROOT
     updated_at = now_iso()
+    execution_profile = build_execution_profile(
+        minimum_scale=execution_minimum_scale,
+        must_include=execution_must_include,
+        small_scale_streak_threshold=execution_small_streak_threshold,
+    )
 
     registry = read_json_if_exists(registry_path)
     registry.setdefault("schema_version", "0.1")
@@ -256,6 +285,7 @@ def bootstrap_project(
         allowed_domains=allowed_domains or [],
         write_scope=write_scope or [],
         claim_ttl_minutes=claim_ttl_minutes,
+        execution_profile=execution_profile,
     )
     registry, registry_goal_action = merge_goal(registry, goal_entry, force=force)
 
@@ -295,6 +325,7 @@ def bootstrap_project(
                     objective=objective,
                     updated_at=updated_at,
                     goal_doc=goal_doc,
+                    execution_profile=execution_profile,
                 ),
                 encoding="utf-8",
             )
@@ -318,6 +349,7 @@ def bootstrap_project(
         "runtime_root": str(runtime_root),
         "registry_goal_action": registry_goal_action,
         "state_action": state_action,
+        "execution_profile": execution_profile,
         "global_sync": global_sync
         or {
             "enabled": sync_global,
@@ -338,6 +370,12 @@ def bootstrap_project(
 
 
 def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
+    execution_profile = (
+        payload.get("execution_profile")
+        if isinstance(payload.get("execution_profile"), dict)
+        else None
+    )
+    execution_profile_text = execution_profile_summary(execution_profile)
     lines = [
         "# Goal Harness Bootstrap",
         "",
@@ -352,6 +390,7 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
         f"- runtime_root: `{payload.get('runtime_root')}`",
         f"- registry_goal_action: `{payload.get('registry_goal_action')}`",
         f"- state_action: `{payload.get('state_action')}`",
+        f"- execution_profile: `{execution_profile_text}`",
         f"- global_sync: `{(payload.get('global_sync') or {}).get('wrote')}`",
         "",
         "## Actions",

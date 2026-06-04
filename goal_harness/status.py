@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from .contract import check_contract
+from .execution_profile import compact_execution_profile, execution_profile_summary
 from .history import collect_history, load_registry
 from .materials import extract_review_materials
 from .operator_gate import DEFAULT_OPERATOR_GATE, default_operator_question, normalize_operator_question
@@ -580,6 +581,7 @@ def enrich_project_asset(
     quota: dict[str, Any] | None = None,
     latest_validation: dict[str, Any] | None = None,
     latest_runs: list[dict[str, Any]] | None = None,
+    execution_profile: dict[str, Any] | None = None,
 ) -> None:
     project_asset = item.get("project_asset")
     if not isinstance(project_asset, dict):
@@ -593,6 +595,8 @@ def enrich_project_asset(
     quota_summary = project_asset_quota_summary(quota)
     if quota_summary:
         project_asset["quota"] = quota_summary
+    if execution_profile is not None:
+        project_asset["execution_profile"] = compact_execution_profile(execution_profile)
     if latest_validation:
         project_asset["latest_validation"] = latest_validation
     readiness = project_asset_handoff_readiness(item, latest_runs=latest_runs)
@@ -1272,6 +1276,11 @@ def build_attention_queue(
                 item,
                 latest_validation=project_asset_latest_validation(latest_run(goal)),
                 latest_runs=goal_latest_runs,
+                execution_profile=(
+                    goal.get("execution_profile")
+                    if isinstance(goal.get("execution_profile"), dict)
+                    else None
+                ),
             )
             if goal.get("registry_member"):
                 item.update(active_state_todo_fields(goal))
@@ -1710,6 +1719,16 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             asset_next_action = _markdown_scalar(project_asset.get("next_action") or "")
             if asset_next_action:
                 lines.append(f"    - asset_next_action: {asset_next_action}")
+            asset_execution_profile = (
+                project_asset.get("execution_profile")
+                if isinstance(project_asset.get("execution_profile"), dict)
+                else None
+            )
+            if asset_execution_profile:
+                lines.append(
+                    "    - execution_profile: "
+                    f"{_markdown_scalar(execution_profile_summary(asset_execution_profile))}"
+                )
             asset_user_todos = (
                 project_asset.get("user_todos")
                 if isinstance(project_asset.get("user_todos"), dict)

@@ -21,6 +21,10 @@ GOAL_ID = "new-project-main-control"
 PROJECT = Path("/tmp/public-example-project")
 GOAL_DOC = Path("/tmp/public-example-project/GOAL.md")
 MUST_HAVE = (
+    "registry 里的 `execution_profile`",
+    "默认 cadence 是 `bounded_progress_segment`",
+    "必须扩展到 `minimum_scale`",
+    "包含 `must_include`",
     "如果返回 `state=operator_gate`",
     "把它当成人/控制器交互，而不是安静 skip",
     "`gate_prompt`、`operator_question`、`recommended_action`",

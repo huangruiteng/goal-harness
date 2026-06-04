@@ -4,6 +4,8 @@ import re
 import shlex
 from typing import Any
 
+from .execution_profile import compact_execution_profile, execution_profile_threshold
+
 
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
@@ -186,12 +188,32 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     )
 
 
+def _contract_minimum_text(value: str) -> str:
+    return value.replace("_or_", "/")
+
+
+def _contract_must_include_text(values: list[str]) -> str:
+    display = {
+        "coherent_artifact": "artifact",
+        "targeted_validation": "targeted validation",
+        "state_writeback": "state writeback",
+    }
+    return "、".join(display.get(value, value.replace("_", " ")) for value in values)
+
+
 def handoff_delivery_contract(item: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
+    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+    profile = compact_execution_profile(
+        project_asset.get("execution_profile")
+        if isinstance(project_asset.get("execution_profile"), dict)
+        else None
+    )
+    threshold = execution_profile_threshold(profile)
     readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
     streak = readiness.get("post_handoff_small_scale_streak")
-    if not isinstance(streak, int) or streak < 2:
+    if not isinstance(streak, int) or streak < threshold:
         return None
     recent_runs = readiness.get("post_handoff_recent_runs")
     recent_scales = [
@@ -199,26 +221,38 @@ def handoff_delivery_contract(item: dict[str, Any] | None) -> dict[str, Any] | N
         for run in recent_runs or []
         if isinstance(run, dict)
     ][:3]
+    minimum_scale = str(profile.get("minimum_scale") or "multi_surface_or_implementation")
+    must_include = [
+        str(value)
+        for value in (profile.get("must_include") if isinstance(profile.get("must_include"), list) else [])
+        if str(value).strip()
+    ] or ["coherent_artifact", "targeted_validation", "state_writeback"]
+    spend_rule = str(profile.get("spend_rule") or "spend_only_after_artifact_validation_writeback")
     summary = compact_packet_text(
         "expand_after_repeated_small_delivery; "
-        "minimum_scale=multi_surface_or_implementation; "
-        "include=coherent_artifact+targeted_validation+state_writeback; "
+        f"minimum_scale={minimum_scale}; "
+        f"include={'+'.join(must_include)}; "
+        f"spend_rule={spend_rule}; "
+        f"threshold={threshold}; "
         "if_blocked=report_blocker_without_spend",
         limit=220,
     )
     instruction = compact_packet_text(
-        "下一轮选 1 个连贯推进段，至少达到 multi_surface/implementation；"
-        "必须包含真实 artifact、targeted validation、state writeback；"
+        f"下一轮选 1 个连贯推进段，至少达到 {_contract_minimum_text(minimum_scale)}；"
+        f"必须包含真实 {_contract_must_include_text(must_include)}；"
         "若只能继续 test-only/single-surface，先回报 blocker，不 spend。",
         limit=260,
     )
     return {
         "mode": "expand_after_repeated_small_delivery",
-        "minimum_scale": "multi_surface_or_implementation",
-        "must_include": ["coherent_artifact", "targeted_validation", "state_writeback"],
+        "minimum_scale": minimum_scale,
+        "must_include": must_include,
+        "spend_rule": spend_rule,
+        "small_scale_streak_threshold": threshold,
         "if_blocked": "report_blocker_without_spend",
         "post_handoff_small_scale_streak": streak,
         "recent_scales": recent_scales,
+        "execution_profile": profile,
         "summary": summary,
         "instruction": instruction,
     }

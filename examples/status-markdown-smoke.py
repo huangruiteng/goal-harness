@@ -135,6 +135,20 @@ def write_connected_delivery_registry(root: Path) -> Path:
                             "write_scope": ["src/**", "tests/**"],
                             "requires_parent_approval": ["publish", "production-action"],
                         },
+                        "execution_profile": {
+                            "cadence": "bounded_progress_segment",
+                            "minimum_scale": "implementation",
+                            "must_include": [
+                                "implementation_artifact",
+                                "targeted_validation",
+                                "state_writeback",
+                            ],
+                            "spend_rule": "spend_only_after_artifact_validation_writeback",
+                            "degradation_policy": {
+                                "small_scale_streak_threshold": 3,
+                                "on_degradation": "require_blocker_or_expand_next_batch",
+                            },
+                        },
                         "guards": [
                             "low-conflict delivery within declared write_scope",
                         ],
@@ -573,6 +587,8 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert item["recommended_action"] == DELIVERY_ACTION, item
     assert item["project_asset"]["owner"] == "codex", item
     assert item["project_asset"]["next_action"] == DELIVERY_ACTION, item
+    assert item["project_asset"]["execution_profile"]["minimum_scale"] == "implementation", item
+    assert item["project_asset"]["execution_profile"]["degradation_policy"]["small_scale_streak_threshold"] == 3, item
     assert item["project_asset"]["agent_todos"]["open"] == 1, item
     assert item["agent_todos"]["open_count"] == 1, item
     assert item["agent_todos"]["items"][0]["text"] == DELIVERY_AGENT_TODO, item
@@ -589,6 +605,7 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert "post_handoff_run: classification=delivery_ranker_readiness_batch" in markdown, markdown
     assert "scale=multi_surface" in markdown, markdown
     assert "post_handoff_recent_scales: multi_surface small_streak=0" in markdown, markdown
+    assert "execution_profile: cadence=bounded_progress_segment minimum=implementation" in markdown, markdown
     assert f"asset_agent_todo: {DELIVERY_AGENT_TODO}" in markdown, markdown
 
     quota_payload = build_quota_should_run(payload, goal_id=DELIVERY_GOAL_ID)
@@ -598,6 +615,8 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert quota_payload["agent_todo_summary"]["open_count"] == 1, quota_payload
     assert quota_payload["goal_boundary"]["adapter"]["status"] == "connected-delivery", quota_payload
     assert quota_payload["goal_boundary"]["write_scope"] == ["src/**", "tests/**"], quota_payload
+    assert quota_payload["execution_profile"]["minimum_scale"] == "implementation", quota_payload
+    assert quota_payload["goal_boundary"]["execution_profile"]["minimum_scale"] == "implementation", quota_payload
     assert (
         quota_payload["handoff_readiness"]["post_handoff_latest_run"]["delivery_batch_scale"]
         == "multi_surface"
@@ -608,6 +627,8 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     ), quota_payload
     assert quota_payload["handoff_readiness"]["post_handoff_small_scale_streak"] == 0, quota_payload
     assert quota_payload["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", quota_payload
+    quota_markdown = render_quota_should_run_markdown(quota_payload)
+    assert "execution_profile: cadence=bounded_progress_segment minimum=implementation" in quota_markdown, quota_markdown
 
 
 def assert_connected_delivery_no_baseline_small_streak(payload: dict, markdown: str) -> None:
@@ -615,6 +636,8 @@ def assert_connected_delivery_no_baseline_small_streak(payload: dict, markdown: 
     assert len(items) == 1, items
     item = items[0]
     assert item["goal_id"] == DELIVERY_GOAL_ID, item
+    assert item["project_asset"]["execution_profile"]["minimum_scale"] == "implementation", item
+    assert item["project_asset"]["execution_profile"]["degradation_policy"]["small_scale_streak_threshold"] == 3, item
     readiness = item["handoff_readiness"]
     assert readiness["handoff_status"] == "post_handoff_run_seen", readiness
     assert readiness["post_handoff_run_seen"] is True, readiness
@@ -635,6 +658,7 @@ def assert_connected_delivery_no_baseline_small_streak(payload: dict, markdown: 
     assert quota_readiness["post_handoff_small_scale_streak"] == 2, quota_payload
     quota_markdown = render_quota_should_run_markdown(quota_payload)
     assert "post_handoff_recent_scales: test_only,test_only small_streak=2" in quota_markdown, quota_markdown
+    assert "execution_profile: cadence=bounded_progress_segment minimum=implementation" in quota_markdown, quota_markdown
 
 
 def assert_handoff_waiting_for_post_run(item: dict, markdown: str) -> None:

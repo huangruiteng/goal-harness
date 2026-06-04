@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .authority import goal_authority_registry_summary
+from .execution_profile import compact_execution_profile
 from .quota import goal_quota_with_spend_ledger
 from .registry import read_json, registry_goals
 
@@ -130,6 +131,7 @@ def collect_history(
             "adapter_kind": adapter.get("kind"),
             "adapter_status": adapter.get("status"),
             "coordination": meta.get("coordination") if isinstance(meta.get("coordination"), dict) else None,
+            "execution_profile": compact_execution_profile(meta.get("execution_profile")) if registry_member else None,
             "guards": meta.get("guards") if isinstance(meta.get("guards"), list) else [],
             "next_probe": meta.get("next_probe") if registry_member else None,
             "authority_registry": goal_authority_registry_summary(meta) if registry_member else None,

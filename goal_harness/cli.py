@@ -22,6 +22,7 @@ from .demo import (
     run_demo,
 )
 from .doctor import collect_doctor, render_doctor_markdown
+from .execution_profile import DEFAULT_EXECUTION_PROFILE
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
 from .heartbeat_prompt import build_heartbeat_prompt, render_heartbeat_prompt_markdown
@@ -139,6 +140,23 @@ def main(argv: list[str] | None = None) -> int:
     bootstrap_parser.add_argument("--allowed-domain", action="append", default=[], help="Allowed child work domain. Repeatable.")
     bootstrap_parser.add_argument("--write-scope", action="append", default=[], help="Allowed write scope such as docs/**. Repeatable.")
     bootstrap_parser.add_argument("--claim-ttl-minutes", type=int, default=30)
+    bootstrap_parser.add_argument(
+        "--execution-minimum-scale",
+        default=str(DEFAULT_EXECUTION_PROFILE["minimum_scale"]),
+        help="Minimum delivery scale after repeated small follow-through.",
+    )
+    bootstrap_parser.add_argument(
+        "--execution-must-include",
+        action="append",
+        default=[],
+        help="Required delivery component. Repeatable; defaults to artifact, validation, and state writeback.",
+    )
+    bootstrap_parser.add_argument(
+        "--execution-small-streak-threshold",
+        type=int,
+        default=int(DEFAULT_EXECUTION_PROFILE["degradation_policy"]["small_scale_streak_threshold"]),
+        help="Repeated small-scale streak that triggers the delivery contract.",
+    )
     bootstrap_parser.add_argument("--force", action="store_true", help="Replace existing goal entry or state file.")
     bootstrap_parser.add_argument("--dry-run", action="store_true", help="Show planned writes without changing files.")
     bootstrap_parser.add_argument(
@@ -539,6 +557,9 @@ def main(argv: list[str] | None = None) -> int:
                 allowed_domains=args.allowed_domain,
                 write_scope=args.write_scope,
                 claim_ttl_minutes=args.claim_ttl_minutes,
+                execution_minimum_scale=args.execution_minimum_scale,
+                execution_must_include=args.execution_must_include or None,
+                execution_small_streak_threshold=args.execution_small_streak_threshold,
                 force=args.force,
                 dry_run=args.dry_run,
                 sync_global=not bool(args.no_global_sync),

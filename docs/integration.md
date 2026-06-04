@@ -53,6 +53,37 @@ The default files are:
 .codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md
 ```
 
+The generated registry entry also includes an `execution_profile`. This is the
+source-level delivery contract for the project, not a one-off heartbeat hint:
+
+```json
+{
+  "execution_profile": {
+    "cadence": "bounded_progress_segment",
+    "minimum_scale": "multi_surface_or_implementation",
+    "must_include": [
+      "coherent_artifact",
+      "targeted_validation",
+      "state_writeback"
+    ],
+    "spend_rule": "spend_only_after_artifact_validation_writeback",
+    "degradation_policy": {
+      "small_scale_streak_threshold": 2,
+      "on_degradation": "require_blocker_or_expand_next_batch"
+    }
+  }
+}
+```
+
+`goal-harness status`, `quota should-run`, and `review-packet --handoff-only`
+all read this same profile through `project_asset`. When recent follow-through
+keeps shrinking into test-only, single-surface, or unknown-scale runs, the
+handoff delivery contract is generated from the profile: the next agent must
+expand to the declared minimum scale with a real artifact, targeted validation,
+and state writeback, or report a blocker before spending quota. Override the
+profile only when a project has a deliberate different floor; do not patch
+automation prompts to compensate for a weak connection contract.
+
 ## Multiple Goals In One Repository
 
 One repository may hold a main lane, a side bypass, and other independent goals

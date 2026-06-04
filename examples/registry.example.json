@@ -73,6 +73,20 @@
           "production-action"
         ]
       },
+      "execution_profile": {
+        "cadence": "bounded_progress_segment",
+        "minimum_scale": "multi_surface_or_implementation",
+        "must_include": [
+          "coherent_artifact",
+          "targeted_validation",
+          "state_writeback"
+        ],
+        "spend_rule": "spend_only_after_artifact_validation_writeback",
+        "degradation_policy": {
+          "small_scale_streak_threshold": 2,
+          "on_degradation": "require_blocker_or_expand_next_batch"
+        }
+      },
       "next_probe": "python3 scripts/project-pre-tick.py --format json --save-run",
       "guards": [
         "read-only by default",

@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .execution_profile import execution_profile_summary
+
 
 DEFAULT_COMPUTE_QUOTA = 1.0
 DEFAULT_WINDOW_HOURS = 24
@@ -468,8 +470,11 @@ def _goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> 
     project_asset_source = item if item is not None else goal
     if isinstance(project_asset_source, dict) and project_asset_source.get("project_asset"):
         project_asset = project_asset_source.get("project_asset")
-        if isinstance(project_asset, dict) and project_asset.get("stop_condition"):
-            boundary["stop_condition"] = project_asset.get("stop_condition")
+        if isinstance(project_asset, dict):
+            if project_asset.get("stop_condition"):
+                boundary["stop_condition"] = project_asset.get("stop_condition")
+            if isinstance(project_asset.get("execution_profile"), dict):
+                boundary["execution_profile"] = project_asset["execution_profile"]
     if boundary:
         boundary["rule"] = "Follow this boundary before choosing delivery work; stop if useful work requires an unapproved scope."
         return boundary
@@ -858,6 +863,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "source": item.get("source"),
             "project_asset_source": item.get("project_asset_source"),
             "recommended_action": item.get("recommended_action"),
+            "execution_profile": project_asset.get("execution_profile") if project_asset else None,
             "handoff_readiness": item.get("handoff_readiness"),
             "heartbeat_recommendation": _heartbeat_recommendation(
                 item,
@@ -1325,6 +1331,13 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
     ]
     if payload.get("project_asset_source"):
         lines.append(f"- project_asset_source: {payload.get('project_asset_source')}")
+    execution_profile = (
+        payload.get("execution_profile")
+        if isinstance(payload.get("execution_profile"), dict)
+        else {}
+    )
+    if execution_profile:
+        lines.append(f"- execution_profile: {execution_profile_summary(execution_profile)}")
 
     def append_todo_summary(label: str, summary: dict[str, Any]) -> None:
         lines.append(

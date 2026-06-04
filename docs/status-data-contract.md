@@ -334,13 +334,16 @@ Item fields:
 - `project_asset`: a compact control-plane projection derived from the same
   item. It must carry `owner`, `gate`, `next_action`, and `stop_condition`, and
   may include compact `user_todos`, `agent_todos`, `quota`, and
-  `latest_validation` summaries. This is the first-screen project asset surface
-  for agents and dashboards; it lets consumers avoid reconstructing owner,
-  gate, next action, stop condition, todo counts, compute state, and latest
-  validation from scattered fields. Markdown renderers should include the first
-  unfinished user and agent todo here when available, so hot-path readers do not
-  need to scan the detailed todo sections. The richer top-level `user_todos`,
-  `agent_todos`, and `quota` fields remain available for detailed views.
+  `latest_validation` summaries. Registry-backed project assets also include
+  `execution_profile`, the project-level delivery floor created by
+  `goal-harness connect`. This is the first-screen project asset surface for
+  agents and dashboards; it lets consumers avoid reconstructing owner, gate,
+  next action, stop condition, todo counts, compute state, latest validation,
+  and delivery-floor policy from scattered fields. Markdown renderers should
+  include the first unfinished user and agent todo here when available, so
+  hot-path readers do not need to scan the detailed todo sections. The richer
+  top-level `user_todos`, `agent_todos`, and `quota` fields remain available
+  for detailed views.
 - Current routing authority: consumers should choose the current owner, gate,
   waiting party, and next action from `attention_queue.items` and its
   `project_asset`. `run_history.latest_runs` is an evidence and drill-down
@@ -488,11 +491,12 @@ Review Packet source-of-truth rule:
   label, optional compact post-handoff delivery scale, optional delivery
   contract, forwarding/execution boundary, command, and stop condition;
 - `handoff_delivery_contract` is optional structured guidance derived from the
-  current `handoff_readiness`, not a target-specific hack. When repeated
-  small-scale follow-through is detected, packets may set
-  `mode=expand_after_repeated_small_delivery` and ask the target agent to run one
-  coherent `multi_surface` / `implementation` batch with artifact, targeted
-  validation, and state writeback, or report a blocker without spending quota;
+  current `handoff_readiness` plus `project_asset.execution_profile`, not a
+  target-specific hack. When repeated small-scale follow-through reaches the
+  profile's `degradation_policy.small_scale_streak_threshold`, packets may set
+  `mode=expand_after_repeated_small_delivery` and ask the target agent to run
+  one coherent batch at the profile's `minimum_scale` with the declared
+  `must_include` surfaces, or report a blocker without spending quota;
 - handoff-only output must not carry the full Review Packet, human decision
   section, local operator-gate preview, operator decision payload fields, raw
   `run_history`, or `latest_runs` cold-path evidence;
