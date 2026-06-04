@@ -365,6 +365,41 @@ def assert_operator_gate_waits_for_user(payload: dict, markdown: str, *, status:
     assert "operator_gate_dry_run" not in markdown, markdown
 
 
+def assert_missing_project_asset_markdown_fallback() -> None:
+    markdown = render_status_markdown({
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 1,
+        "run_count": 0,
+        "contract": {"ok": True, "summary": {"errors": 0, "warnings": 0, "checks": 0}},
+        "global_registry": {"available": False, "summary": {}},
+        "attention_queue": {
+            "item_count": 1,
+            "needs_user_or_controller": 0,
+            "needs_controller": 0,
+            "needs_codex": 1,
+            "watching_external_evidence": 0,
+            "items": [
+                {
+                    "goal_id": "legacy-status-only",
+                    "status": "state_refreshed",
+                    "lifecycle_phase": "refreshed",
+                    "waiting_on": "codex",
+                    "severity": "action",
+                    "source": "latest_run",
+                    "recommended_action": "raw queue action should be labeled as fallback",
+                }
+            ],
+        },
+        "run_history": {"goals": []},
+    })
+
+    assert "project_asset_source: legacy/raw fallback" in markdown, markdown
+    assert "owner/gate/stop are not project_asset-backed" in markdown, markdown
+    assert "project_asset: owner=" not in markdown, markdown
+
+
 def assert_quota_should_run(payload: dict, *, expected: bool, state: str, waiting_on: str) -> dict:
     quota_payload = build_quota_should_run(payload, goal_id="planned-main-control")
     quota_markdown = render_quota_should_run_markdown(quota_payload)
@@ -518,6 +553,7 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
 
 
 def main() -> int:
+    assert_missing_project_asset_markdown_fallback()
     with tempfile.TemporaryDirectory(prefix="goal-harness-status-smoke-") as tmp:
         root = Path(tmp)
         registry_path = write_planned_registry(root)

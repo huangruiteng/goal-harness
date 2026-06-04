@@ -257,7 +257,10 @@ def assert_attention_queue_drives_approved_handoff_over_stale_history() -> None:
     assert payload["operator_gate_dry_run_command"] is None, payload
     assert payload["operator_gate_decision_commands"] == {}, payload
     assert payload["agent_todo_text"] == "Run the approved queue-authority dry-run.", payload
+    assert payload["project_asset_source"] == "project_asset", payload
     assert "类型：Codex" in packet, packet
+    assert "来源：project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）" in packet, packet
+    assert "项目资产来源：project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）" in packet, packet
     assert "operator gate 已批准" in packet, packet
     assert "【用户本地 Gate 记录草稿】" not in packet, packet
     assert "ask the stale operator gate again" not in packet, packet
@@ -337,6 +340,7 @@ def assert_focus_wait_owner_blocker_packet() -> None:
     assert payload["kind"] == "focus_wait", payload
     assert payload["status"] == "state_refreshed", payload
     assert payload["waiting_on"] == "codex", payload
+    assert payload["project_asset_source"] == "project_asset", payload
     assert payload["owner_blocker_text"] == blocker_text, payload
     assert payload["user_todo_text"] == blocker_text, payload
     assert payload["operator_gate_dry_run_command"] is None, payload
@@ -358,6 +362,47 @@ def assert_focus_wait_owner_blocker_packet() -> None:
     )
 
 
+def assert_missing_project_asset_review_packet_fallback() -> None:
+    status_payload = {
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": "legacy-status-only",
+                    "status": "state_refreshed",
+                    "waiting_on": "codex",
+                    "severity": "action",
+                    "recommended_action": "Continue only through raw status fallback.",
+                    "agent_command": "goal-harness status --goal-id legacy-status-only",
+                    "source": "latest_run",
+                }
+            ]
+        },
+        "run_history": {
+            "goals": [
+                {
+                    "id": "legacy-status-only",
+                    "status": "active-read-only",
+                    "registry_member": True,
+                    "latest_runs": [],
+                }
+            ]
+        },
+    }
+
+    payload = build_review_packet(status_payload, goal_id="legacy-status-only")
+    packet = payload["packet"]
+
+    assert payload["ok"] is True, payload
+    assert payload["project_asset_source"] == "legacy_raw_fallback", payload
+    assert "来源：legacy/raw fallback" in packet, packet
+    assert "不能当 owner/gate/stop authority" in packet, packet
+    assert "项目资产来源：legacy/raw fallback" in payload["project_agent_handoff"], payload
+    assert "owner/gate/stop authority" in payload["project_agent_handoff"], payload
+    assert "项目资产来源：project_asset" not in packet, packet
+
+
 def main() -> int:
     help_result = subprocess.run(
         [sys.executable, "-m", "goal_harness.cli", "review-packet", "--help"],
@@ -372,6 +417,7 @@ def main() -> int:
 
     assert_attention_queue_drives_approved_handoff_over_stale_history()
     assert_focus_wait_owner_blocker_packet()
+    assert_missing_project_asset_review_packet_fallback()
     with tempfile.TemporaryDirectory(prefix="goal-harness-review-packet-") as tmp:
         root = Path(tmp)
         registry_path = write_planned_registry(root)

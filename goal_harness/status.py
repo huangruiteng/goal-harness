@@ -1446,6 +1446,14 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         if authority_summary:
             lines.append(f"  - authority_material: {authority_summary}")
         project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+        lines.append(
+            "  - project_asset_source: "
+            + (
+                "project_asset"
+                if project_asset
+                else "legacy/raw fallback; owner/gate/stop are not project_asset-backed"
+            )
+        )
         if project_asset:
             lines.append(
                 "  - project_asset: "

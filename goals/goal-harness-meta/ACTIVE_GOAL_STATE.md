@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T08:15:11+08:00
+updated_at: 2026-06-04T08:24:32+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,27 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Check non-dashboard consumers such as status Markdown and review-packet CLI
-  for the same project_asset/source boundary, so raw queue actions do not keep
-  looking like trustworthy project assets outside the dashboard.
+- Check whether heartbeat/project prompt contracts also require non-dashboard
+  consumers to declare the project_asset/source boundary; if they already do,
+  move to the next P0 project-agent handoff compactness gap.
 
 ## Recent Progress
+
+- 2026-06-04T08:24:32+08:00: Completed the non-dashboard project_asset/source
+  boundary slice. Status Markdown now emits `project_asset_source` for every
+  action item: `project_asset` when the authoritative asset exists, and
+  `legacy/raw fallback; owner/gate/stop are not project_asset-backed` when it
+  does not. The review-packet CLI now carries the same boundary in packet text,
+  project-agent handoff text, and JSON payloads. Missing project assets are
+  labeled as raw queue/status fallback and explicitly not owner/gate/stop
+  authority. Regression coverage: `examples/status-markdown-smoke.py` checks
+  the Markdown fallback, and `examples/review-packet-cli-smoke.py` checks
+  project-asset-backed packets, focus-wait packets, and missing-project-asset
+  fallback packets. Validation: status Markdown smoke, review-packet CLI
+  smoke, touched Python `py_compile`, and touched-file `git diff --check`.
+  Critic: this fixes the CLI/Markdown/handoff consumer boundary, not the
+  underlying data producer; future prompt contracts still need to require
+  consumers to respect the source label.
 
 - 2026-06-04T08:15:11+08:00: Added explicit legacy/raw fallback labeling for
   dashboard and action-packet consumers when `project_asset` is missing. A new

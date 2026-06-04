@@ -151,6 +151,18 @@ def todo_text_from_project_asset(item: dict[str, Any] | None, key: str) -> str |
     return first_open_todo_text(item.get(key))
 
 
+def project_asset_source(item: dict[str, Any] | None) -> str:
+    if isinstance(item, dict) and isinstance(item.get("project_asset"), dict):
+        return "project_asset"
+    return "legacy_raw_fallback"
+
+
+def project_asset_source_line(source: str) -> str:
+    if source == "project_asset":
+        return "project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）"
+    return "legacy/raw fallback（未收到 project_asset；summary/action/todos 来自 raw queue/status 降级判断，不能当 owner/gate/stop authority）"
+
+
 def authority_material_summary(goal: dict[str, Any] | None) -> str | None:
     if not isinstance(goal, dict):
         return None
@@ -319,16 +331,19 @@ def project_agent_section(
     *,
     agent_todo_text: str | None = None,
     authority_summary: str | None = None,
+    project_asset_source_text: str | None = None,
     approved_operator_gate: bool = False,
 ) -> str:
     goal_guard = target_goal_guard(goal_id)
     context_rule = agent_context_rule()
     todo_line = f"Agent 待办：{agent_todo_text}" if agent_todo_text else None
     authority_line = f"材料上下文：{authority_summary}；只用这些脱敏计数判断 freshness / owner gap，不要要求内部链接或原文。" if authority_summary else None
+    source_line = f"项目资产来源：{project_asset_source_text}" if project_asset_source_text else None
     if approved_operator_gate:
         lines = [
             goal_guard,
             context_rule,
+            source_line,
             todo_line,
             authority_line,
             "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
@@ -341,6 +356,7 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            source_line,
             todo_line,
             authority_line,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
@@ -353,6 +369,7 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            source_line,
             todo_line,
             authority_line,
             "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
@@ -365,6 +382,7 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            source_line,
             todo_line,
             authority_line,
             "转发条件：仅当目标项目 Agent 需要当前等待边界时转发；这不是恢复 delivery 的授权。",
@@ -377,6 +395,7 @@ def project_agent_section(
         lines = [
             goal_guard,
             context_rule,
+            source_line,
             todo_line,
             authority_line,
             "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
@@ -410,6 +429,8 @@ def build_review_packet(
     summary = str(item.get("recommended_action") or "当前状态源没有对应的 action card。") if isinstance(item, dict) else "当前状态源没有对应的 action card。"
     user_todo_text = todo_text_from_project_asset(item, "user_todos")
     agent_todo_text = todo_text_from_project_asset(item, "agent_todos")
+    asset_source = project_asset_source(item)
+    asset_source_line = project_asset_source_line(asset_source)
     authority_summary = authority_material_summary(goal)
     command = redact_local_absolute_paths(project_agent_command(status_payload, goal_id, kind, item))
     approved_handoff = operator_gate_approved_handoff(item, goal)
@@ -432,6 +453,7 @@ def build_review_packet(
         goal_id,
         agent_todo_text=agent_todo_text,
         authority_summary=authority_summary,
+        project_asset_source_text=asset_source_line,
         approved_operator_gate=approved_handoff,
     )
     type_label = {
@@ -448,6 +470,7 @@ def build_review_packet(
         f"类型：{type_label}",
         f"链接：{review_url or 'CLI generated packet; no dashboard URL provided.'}",
         f"摘要：{summary}",
+        f"来源：{asset_source_line}",
         f"材料：{authority_summary}（仅脱敏计数；不含内部链接、路径或正文。）" if authority_summary else None,
         "",
         "【人只需判断】",
@@ -495,6 +518,7 @@ def build_review_packet(
         "owner_blocker_text": owner_blocker_text,
         "agent_todo_text": agent_todo_text,
         "authority_summary": authority_summary,
+        "project_asset_source": asset_source,
         "packet": "\n".join(line for line in lines if line),
     }
 
