@@ -56,6 +56,14 @@ export const projectAssetLatestValidationSchema = z.object({
   summary: z.string().optional().nullable(),
 });
 
+export const postHandoffRunSchema = z.object({
+  generated_at: z.string().optional().nullable(),
+  classification: z.string().optional().nullable(),
+  health_check: z.string().optional().nullable(),
+  json_exists: z.boolean().optional().nullable(),
+  markdown_exists: z.boolean().optional().nullable(),
+});
+
 export const handoffReadinessChecksSchema = z.object({
   project_asset_backed: z.boolean().optional(),
   same_source_should_run: z.boolean().optional(),
@@ -71,6 +79,11 @@ export const projectAssetHandoffReadinessSchema = z.object({
   source: z.string().optional().nullable(),
   quota_state: z.string().optional().nullable(),
   checks: handoffReadinessChecksSchema.optional().default({}),
+  handoff_status: z.string().optional().nullable(),
+  handoff_ready_at: z.string().optional().nullable(),
+  handoff_ready_classification: z.string().optional().nullable(),
+  post_handoff_run_seen: z.boolean().optional().default(false),
+  post_handoff_latest_run: postHandoffRunSchema.optional().nullable(),
   next_probe: z.string().optional().nullable(),
 });
 

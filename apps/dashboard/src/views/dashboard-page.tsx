@@ -809,6 +809,8 @@ function todoCountLabel(todos?: TodoGroup | null) {
 type HandoffReadinessView = {
   ready: boolean;
   shortLine: string;
+  stateLine: string;
+  latestRunLine?: string | null;
   failedLabel: string;
   probe?: string | null;
   variant: BadgeVariant;
@@ -824,6 +826,9 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
     .map(([key]) => humanizeIdentifier(key));
   const failedLabel = failed.length ? failed.join(", ") : "none";
   const ready = Boolean(readiness.ready);
+  const postRunSeen = Boolean(readiness.post_handoff_run_seen);
+  const handoffStatus = readiness.handoff_status ?? (ready ? "ready_waiting_for_run" : "not_ready");
+  const latestRun = readiness.post_handoff_latest_run;
   return {
     ready,
     shortLine: [
@@ -833,9 +838,22 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
       `quota=${readiness.quota_state ?? "unknown"}`,
       `failed=${failedLabel}`,
     ].join("; "),
+    stateLine: [
+      `status=${handoffStatus}`,
+      `post_handoff_run_seen=${postRunSeen}`,
+      readiness.handoff_ready_at ? `ready_at=${readiness.handoff_ready_at}` : null,
+    ].filter(Boolean).join("; "),
+    latestRunLine: latestRun
+      ? [
+        latestRun.classification ?? "unknown",
+        latestRun.generated_at ? `at=${latestRun.generated_at}` : null,
+        latestRun.json_exists !== undefined ? `json=${Boolean(latestRun.json_exists)}` : null,
+        latestRun.markdown_exists !== undefined ? `markdown=${Boolean(latestRun.markdown_exists)}` : null,
+      ].filter(Boolean).join("; ")
+      : null,
     failedLabel,
     probe: readiness.next_probe,
-    variant: ready ? "success" : "warning",
+    variant: postRunSeen ? "info" : ready ? "success" : "warning",
   };
 }
 
@@ -870,6 +888,14 @@ function HandoffReadinessPanel({
       <p className="mt-2 break-words">
         <span className="font-medium">Failed checks:</span> {view.failedLabel}
       </p>
+      <p className="mt-1 break-words">
+        <span className="font-medium">Handoff state:</span> {view.stateLine}
+      </p>
+      {view.latestRunLine ? (
+        <p className="mt-1 break-words">
+          <span className="font-medium">Post-handoff run:</span> {view.latestRunLine}
+        </p>
+      ) : null}
       {view.probe ? (
         <p className="mt-1 break-words">
           <span className="font-medium">Probe:</span> {view.probe}
@@ -2412,6 +2438,14 @@ function UserActionSummary({
                             <p className="break-words">
                               <span className="font-medium">Handoff readiness:</span> {handoffReadiness.shortLine}
                             </p>
+                            <p className="mt-1 break-words">
+                              <span className="font-medium">Handoff state:</span> {handoffReadiness.stateLine}
+                            </p>
+                            {handoffReadiness.latestRunLine ? (
+                              <p className="mt-1 break-words">
+                                <span className="font-medium">Post-handoff run:</span> {handoffReadiness.latestRunLine}
+                              </p>
+                            ) : null}
                             {handoffReadiness.probe ? (
                               <p className="mt-1 break-words">
                                 <span className="font-medium">Probe:</span> {handoffReadiness.probe}

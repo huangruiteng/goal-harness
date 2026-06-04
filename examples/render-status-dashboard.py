@@ -148,11 +148,29 @@ def project_asset_block(item: dict[str, Any]) -> str:
             f"{state}; codex_ready {readiness.get('codex_ready')}; "
             f"source {readiness.get('source')}; quota {readiness.get('quota_state')}"
         )
+        handoff_state = (
+            f"status {readiness.get('handoff_status')}; "
+            f"post_handoff_run_seen {readiness.get('post_handoff_run_seen')}; "
+            f"ready_at {readiness.get('handoff_ready_at')}"
+        )
+        latest_run = (
+            readiness.get("post_handoff_latest_run")
+            if isinstance(readiness.get("post_handoff_latest_run"), dict)
+            else {}
+        )
+        latest_run_line = ""
+        if latest_run:
+            latest_run_line = (
+                f"<p><b>Post-handoff run</b> "
+                f"{esc(latest_run.get('classification'))} at {esc(latest_run.get('generated_at'))}</p>"
+            )
         readiness_block = f"""
             <div class="handoff-readiness {'ready' if readiness.get('ready') else 'blocked'}">
               <strong>Handoff readiness</strong>
               <span>{esc(readiness_summary)}</span>
               <p><b>Failed checks</b> {esc(failed_text)}</p>
+              <p><b>Handoff state</b> {esc(handoff_state)}</p>
+              {latest_run_line}
               <p><b>Probe</b> {esc(readiness.get("next_probe"))}</p>
             </div>
         """

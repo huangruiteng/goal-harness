@@ -25,6 +25,8 @@ OLD_PLANNED_ACTION = "先审阅 Goal Harness operator gate；同意后再发送�
 NEW_PLANNED_ACTION = "先在 Goal Harness 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run"
 APPROVED_ACTION = "把已批准的 agent_command 发给目标项目 agent；这不是写权限授权"
 APPROVED_COMMAND = "goal-harness read-only-map --goal-id planned-main-control --dry-run"
+POST_HANDOFF_ACTION = "post-handoff fixture run is visible; choose the next bounded delivery step"
+POST_HANDOFF_CLASSIFICATION = "read_only_project_map"
 REJECTED_ACTION = "保持 goal 在 gate 状态，修改 handoff 后再请求 operator 判断"
 DEFERRED_ACTION = "保持 goal 在 gate 状态，先补齐要求的证据后再请求判断"
 REGISTRY_OVERRIDE_STATUS = "owner_sop_review_pending"
@@ -250,6 +252,35 @@ def append_quota_slot_spend_fixture(root: Path, *, generated_at: str) -> None:
     }
     json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     markdown_path.write_text("# Fixture quota slot spend\n", encoding="utf-8")
+    with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    **record,
+                    "json_path": str(json_path),
+                    "markdown_path": str(markdown_path),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+
+def append_post_handoff_run_fixture(root: Path, *, generated_at: str) -> None:
+    run_dir = root / "runtime" / "goals" / "planned-main-control" / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    compact_time = generated_at.replace("-", "").replace(":", "")
+    json_path = run_dir / f"{compact_time}-post-handoff-run.json"
+    markdown_path = run_dir / f"{compact_time}-post-handoff-run.md"
+    record = {
+        "generated_at": generated_at,
+        "goal_id": "planned-main-control",
+        "classification": POST_HANDOFF_CLASSIFICATION,
+        "recommended_action": POST_HANDOFF_ACTION,
+        "health_check": "fixture target agent run after approved handoff",
+    }
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture post-handoff run\n", encoding="utf-8")
     with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
         f.write(
             json.dumps(
@@ -539,7 +570,14 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert item["project_asset"]["agent_todos"]["open"] == 1, item
     assert item["agent_todos"]["open_count"] == 1, item
     assert item["agent_todos"]["items"][0]["text"] == DELIVERY_AGENT_TODO, item
+    readiness = item["handoff_readiness"]
+    assert readiness["handoff_status"] == "post_handoff_run_seen", readiness
+    assert readiness["post_handoff_run_seen"] is True, readiness
+    assert "handoff_ready_at" not in readiness, readiness
+    assert readiness["post_handoff_latest_run"]["classification"] == "delivery_ranker_readiness_batch", readiness
     assert "delivery_ranker_readiness_batch" in markdown, markdown
+    assert "handoff_state: status=post_handoff_run_seen post_handoff_run_seen=True ready_at=" in markdown, markdown
+    assert "post_handoff_run: classification=delivery_ranker_readiness_batch" in markdown, markdown
     assert f"asset_agent_todo: {DELIVERY_AGENT_TODO}" in markdown, markdown
 
     quota_payload = build_quota_should_run(payload, goal_id=DELIVERY_GOAL_ID)
@@ -550,6 +588,47 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert quota_payload["goal_boundary"]["adapter"]["status"] == "connected-delivery", quota_payload
     assert quota_payload["goal_boundary"]["write_scope"] == ["src/**", "tests/**"], quota_payload
     assert quota_payload["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", quota_payload
+
+
+def assert_handoff_waiting_for_post_run(item: dict, markdown: str) -> None:
+    readiness = item["handoff_readiness"]
+    assert readiness["ready"] is True, readiness
+    assert readiness["handoff_status"] == "ready_waiting_for_run", readiness
+    assert readiness["post_handoff_run_seen"] is False, readiness
+    assert readiness["handoff_ready_at"] == "2026-01-01T00:01:00+00:00", readiness
+    assert readiness["handoff_ready_classification"] == "operator_gate_approved", readiness
+    assert "post_handoff_latest_run" not in readiness, readiness
+    assert (
+        "handoff_state: status=ready_waiting_for_run "
+        "post_handoff_run_seen=False ready_at=2026-01-01T00:01:00+00:00"
+    ) in markdown, markdown
+    assert "post_handoff_run:" not in markdown.split("## Run History")[0], markdown
+
+
+def assert_post_handoff_run_seen(payload: dict, markdown: str) -> None:
+    items = payload["attention_queue"]["items"]
+    assert len(items) == 1, items
+    item = items[0]
+    assert item["goal_id"] == "planned-main-control", item
+    assert item["status"] == POST_HANDOFF_CLASSIFICATION, item
+    assert item["waiting_on"] == "codex", item
+    assert item["recommended_action"] == POST_HANDOFF_ACTION, item
+    readiness = item["handoff_readiness"]
+    assert readiness["ready"] is True, readiness
+    assert readiness["handoff_status"] == "post_handoff_run_seen", readiness
+    assert readiness["post_handoff_run_seen"] is True, readiness
+    assert readiness["handoff_ready_at"] == "2026-01-01T00:01:00+00:00", readiness
+    assert readiness["handoff_ready_classification"] == "operator_gate_approved", readiness
+    assert readiness["post_handoff_latest_run"]["classification"] == POST_HANDOFF_CLASSIFICATION, readiness
+    assert readiness["post_handoff_latest_run"]["generated_at"] == "2026-01-01T00:01:45+00:00", readiness
+    assert (
+        "handoff_state: status=post_handoff_run_seen "
+        "post_handoff_run_seen=True ready_at=2026-01-01T00:01:00+00:00"
+    ) in markdown, markdown
+    assert (
+        "post_handoff_run: classification=read_only_project_map "
+        "at=2026-01-01T00:01:45+00:00"
+    ) in markdown, markdown
 
 
 def main() -> int:
@@ -568,6 +647,8 @@ def main() -> int:
         approved_payload, approved_markdown = collect_fixture_status(root, registry_path)
         append_quota_slot_spend_fixture(root, generated_at="2026-01-01T00:01:30+00:00")
         post_spend_payload, post_spend_markdown = collect_fixture_status(root, registry_path)
+        append_post_handoff_run_fixture(root, generated_at="2026-01-01T00:01:45+00:00")
+        post_handoff_payload, post_handoff_markdown = collect_fixture_status(root, registry_path)
         append_operator_gate_fixture(
             root,
             decision="reject",
@@ -612,6 +693,7 @@ def main() -> int:
     assert "operator_gate_dry_run" not in approved_markdown, approved_markdown
     assert "latest_validation: classification=operator_gate_approved" in approved_markdown, approved_markdown
     assert f"agent_command: `{APPROVED_COMMAND}`" in approved_markdown, approved_markdown
+    assert_handoff_waiting_for_post_run(approved_item, approved_markdown)
     assert_quota_should_run(
         approved_payload,
         expected=True,
@@ -625,6 +707,8 @@ def main() -> int:
     assert post_spend_item["recommended_action"] == APPROVED_ACTION, post_spend_item
     assert "quota_slot_spent" in json.dumps(post_spend_payload["run_history"], ensure_ascii=False), post_spend_payload
     assert "quota_slot_spent" not in post_spend_markdown.split("## Run History")[0], post_spend_markdown
+    assert_handoff_waiting_for_post_run(post_spend_item, post_spend_markdown)
+    assert_post_handoff_run_seen(post_handoff_payload, post_handoff_markdown)
     assert_operator_gate_waits_for_user(
         rejected_payload,
         rejected_markdown,

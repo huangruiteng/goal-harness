@@ -249,6 +249,8 @@ def assert_no_evidence_handoff_readiness(readiness: dict[str, object]) -> None:
     assert readiness["codex_ready"] is True, readiness
     assert readiness["source"] == "project_asset", readiness
     assert readiness["quota_state"] == "eligible", readiness
+    assert readiness["handoff_status"] == "ready_waiting_for_run", readiness
+    assert readiness["post_handoff_run_seen"] is False, readiness
     assert readiness["next_probe"] == f"goal-harness review-packet --goal-id {GOAL_ID} --handoff-only", readiness
     checks = readiness["checks"]
     assert checks["project_asset_backed"] is True, readiness
@@ -275,6 +277,7 @@ def assert_status_markdown_no_evidence_projection(status_markdown: str) -> None:
             "pass=project_asset_backed,same_source_should_run,codex_ready,handoff_has_next_action,"
             "handoff_has_stop_condition,handoff_sanitized_surface fail=-"
         ),
+        "handoff_state: status=ready_waiting_for_run post_handoff_run_seen=False",
         f"handoff_probe: `goal-harness review-packet --goal-id {GOAL_ID} --handoff-only`",
         "authority_material: entries=0/3 topics=3 materials=6 repositories=2",
         "owner_review_required=1 stale=1 current_authority=1 risk=medium",
@@ -416,6 +419,7 @@ def main() -> int:
         assert "Handoff readiness" in html, html
         assert "ready; codex_ready True; source project_asset; quota eligible" in html, html
         assert "<b>Failed checks</b> none" in html, html
+        assert "<b>Handoff state</b> status ready_waiting_for_run; post_handoff_run_seen False" in html, html
         assert f"<b>Probe</b> goal-harness review-packet --goal-id {GOAL_ID} --handoff-only" in html, html
         assert_public_safe(html)
 

@@ -31,6 +31,10 @@ CODEX_READY_CLASSIFICATIONS = {
 STATUS_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
 }
+HANDOFF_READY_CLASSIFICATIONS = {
+    "operator_gate_approved",
+    "controller_opted_in_waiting_for_run",
+}
 USER_OR_CONTROLLER_CLASSIFICATIONS = {
     "needs_human_reward",
     "needs_controller_opt_in",
@@ -345,7 +349,115 @@ def project_asset_summary_is_public_safe(project_asset: dict[str, Any]) -> bool:
     return not LOCAL_PATH_SURFACE_PATTERN.search(text) and not SECRET_LIKE_SURFACE_PATTERN.search(text)
 
 
-def project_asset_handoff_readiness(item: dict[str, Any]) -> dict[str, Any] | None:
+def is_handoff_ready_run(run: dict[str, Any]) -> bool:
+    classification = str(run.get("classification") or "")
+    if classification in HANDOFF_READY_CLASSIFICATIONS:
+        return True
+    operator_gate = compact_operator_gate(run.get("operator_gate"))
+    return bool(
+        operator_gate
+        and operator_gate.get("decision") == "approve"
+        and operator_gate.get("agent_command")
+    )
+
+
+def is_custom_post_handoff_work_run(run: dict[str, Any]) -> bool:
+    classification = str(run.get("classification") or "")
+    if not classification:
+        return False
+    if is_status_neutral_run(run) or is_handoff_ready_run(run):
+        return False
+    if classification in CODEX_READY_CLASSIFICATIONS:
+        return False
+    if classification in USER_OR_CONTROLLER_CLASSIFICATIONS or classification in BLOCKING_CLASSIFICATIONS:
+        return False
+    if classification.startswith(WATCH_CLASSIFICATION_PREFIXES):
+        return False
+    return True
+
+
+def compact_post_handoff_run(run: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for field in ("generated_at", "classification", "health_check", "json_exists", "markdown_exists"):
+        if field in run:
+            compact[field] = run[field]
+    return compact
+
+
+def project_asset_handoff_state(
+    *,
+    ready: bool,
+    project_asset: dict[str, Any],
+    latest_runs: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    runs = [run for run in latest_runs or [] if isinstance(run, dict)]
+    parsed_runs = [
+        (run, parse_timestamp(run.get("generated_at")))
+        for run in runs
+    ]
+    parsed_runs = [(run, generated_at) for run, generated_at in parsed_runs if generated_at]
+    parsed_runs.sort(key=lambda item: item[1], reverse=True)
+
+    handoff_run: dict[str, Any] | None = None
+    handoff_at: datetime | None = None
+    for run, generated_at in parsed_runs:
+        if is_handoff_ready_run(run):
+            handoff_run = run
+            handoff_at = generated_at
+            break
+
+    post_handoff_run: dict[str, Any] | None = None
+    if handoff_at is None and ready:
+        latest_validation = (
+            project_asset.get("latest_validation")
+            if isinstance(project_asset.get("latest_validation"), dict)
+            else {}
+        )
+        if latest_validation:
+            latest_validation_run = {
+                "generated_at": latest_validation.get("generated_at"),
+                "classification": latest_validation.get("classification"),
+            }
+            if is_custom_post_handoff_work_run(latest_validation_run):
+                post_handoff_run = latest_validation_run
+            else:
+                handoff_at = parse_timestamp(latest_validation.get("generated_at"))
+                handoff_run = latest_validation_run
+
+    if handoff_at is not None and post_handoff_run is None:
+        for run, generated_at in parsed_runs:
+            if generated_at <= handoff_at:
+                continue
+            if is_status_neutral_run(run) or is_handoff_ready_run(run):
+                continue
+            post_handoff_run = run
+            break
+
+    if post_handoff_run:
+        handoff_status = "post_handoff_run_seen"
+    elif ready:
+        handoff_status = "ready_waiting_for_run"
+    else:
+        handoff_status = "not_ready"
+
+    state: dict[str, Any] = {
+        "handoff_status": handoff_status,
+        "post_handoff_run_seen": bool(post_handoff_run),
+    }
+    if handoff_run and handoff_run.get("generated_at"):
+        state["handoff_ready_at"] = handoff_run.get("generated_at")
+    if handoff_run and handoff_run.get("classification"):
+        state["handoff_ready_classification"] = handoff_run.get("classification")
+    if post_handoff_run:
+        state["post_handoff_latest_run"] = compact_post_handoff_run(post_handoff_run)
+    return state
+
+
+def project_asset_handoff_readiness(
+    item: dict[str, Any],
+    *,
+    latest_runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     project_asset = item.get("project_asset")
     if not isinstance(project_asset, dict):
         return None
@@ -376,6 +488,13 @@ def project_asset_handoff_readiness(item: dict[str, Any]) -> dict[str, Any] | No
         "quota_state": quota_state or "unknown",
         "checks": checks,
     }
+    readiness.update(
+        project_asset_handoff_state(
+            ready=bool(readiness["ready"]),
+            project_asset=project_asset,
+            latest_runs=latest_runs,
+        )
+    )
     if goal_id:
         readiness["next_probe"] = f"goal-harness review-packet --goal-id {goal_id} --handoff-only"
     return readiness
@@ -388,6 +507,7 @@ def enrich_project_asset(
     agent_todos: dict[str, Any] | None = None,
     quota: dict[str, Any] | None = None,
     latest_validation: dict[str, Any] | None = None,
+    latest_runs: list[dict[str, Any]] | None = None,
 ) -> None:
     project_asset = item.get("project_asset")
     if not isinstance(project_asset, dict):
@@ -403,7 +523,7 @@ def enrich_project_asset(
         project_asset["quota"] = quota_summary
     if latest_validation:
         project_asset["latest_validation"] = latest_validation
-    readiness = project_asset_handoff_readiness(item)
+    readiness = project_asset_handoff_readiness(item, latest_runs=latest_runs)
     if readiness:
         item["handoff_readiness"] = readiness
 
@@ -1075,7 +1195,12 @@ def build_attention_queue(
             continue
         item = goal_attention(goal)
         if item:
-            enrich_project_asset(item, latest_validation=project_asset_latest_validation(latest_run(goal)))
+            goal_latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
+            enrich_project_asset(
+                item,
+                latest_validation=project_asset_latest_validation(latest_run(goal)),
+                latest_runs=goal_latest_runs,
+            )
             if goal.get("registry_member"):
                 item.update(active_state_todo_fields(goal))
                 item["quota"] = quota_status(
@@ -1091,6 +1216,7 @@ def build_attention_queue(
                     user_todos=item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None,
                     agent_todos=item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None,
                     quota=item.get("quota") if isinstance(item.get("quota"), dict) else None,
+                    latest_runs=goal_latest_runs,
                 )
             items.append(item)
 
@@ -1581,6 +1707,23 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                         "      - handoff_checks: "
                         f"pass={','.join(passed) if passed else '-'} "
                         f"fail={','.join(failed) if failed else '-'}"
+                    )
+                lines.append(
+                    "      - handoff_state: "
+                    f"status={_markdown_scalar(handoff_readiness.get('handoff_status') or '')} "
+                    f"post_handoff_run_seen={handoff_readiness.get('post_handoff_run_seen')} "
+                    f"ready_at={_markdown_scalar(handoff_readiness.get('handoff_ready_at') or '')}"
+                )
+                latest_handoff_run = (
+                    handoff_readiness.get("post_handoff_latest_run")
+                    if isinstance(handoff_readiness.get("post_handoff_latest_run"), dict)
+                    else {}
+                )
+                if latest_handoff_run:
+                    lines.append(
+                        "      - post_handoff_run: "
+                        f"classification={_markdown_scalar(latest_handoff_run.get('classification') or '')} "
+                        f"at={_markdown_scalar(latest_handoff_run.get('generated_at') or '')}"
                     )
                 if handoff_readiness.get("next_probe"):
                     handoff_probe = _markdown_scalar(handoff_readiness.get("next_probe") or "")

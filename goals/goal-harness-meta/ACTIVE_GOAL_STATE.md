@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T09:50:30+08:00
+updated_at: 2026-06-04T10:04:35+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -65,11 +65,28 @@ and agents receive the smallest sufficient execution context.
 
 ## Next Action
 
-- Continue the P0 project-agent handoff loop by distinguishing `handoff ready`
-  from `post-handoff run seen / still waiting` in status or dashboard surfaces,
-  instead of adding more UI-only fields.
+- Continue the P0 project-agent handoff loop by using the new handoff status to
+  observe real project-agent follow-through, then tighten the next handoff packet
+  only if status still cannot explain whether a target run was seen.
 
 ## Recent Progress
+
+- 2026-06-04T10:04:35+08:00: Added post-handoff follow-through status for
+  project-agent handoffs. `goal_harness/status.py` now extends
+  `handoff_readiness` with `handoff_status`, `post_handoff_run_seen`,
+  `handoff_ready_at`, and `post_handoff_latest_run`, so status can distinguish a
+  ready/approved handoff that has only accounting spend from one that has a
+  later non-neutral delivery/work run. When no explicit approval baseline is
+  visible, only custom delivery/work classifications count as seen; ordinary
+  `read_only_project_map` and `state_refreshed` remain waiting signals. The
+  dashboard schema, React handoff panels, static dashboard, Markdown renderer,
+  and status data contract now consume or document the fields. Validation:
+  Python compile checks, status Markdown smoke, platform material-registry
+  smoke, dashboard action-packet smoke, dashboard production build, public
+  contract check, touched-file diff check, and a live status JSON sanity check.
+  Critic: this fixes a control-plane blind spot rather than expanding UI-only
+  chrome; the next useful step is to observe whether project agents use this
+  signal to produce larger, validated delivery batches.
 
 - 2026-06-04T09:50:30+08:00: Completed browser-level DOM verification for the
   React dashboard selected-detail `handoff_readiness` panel and added a stable

@@ -277,6 +277,23 @@ Item shape:
       "summary": "read-only map available; write-control not approved"
     }
   },
+  "handoff_readiness": {
+    "ready": false,
+    "codex_ready": false,
+    "source": "project_asset",
+    "quota_state": "operator_gate",
+    "handoff_status": "not_ready",
+    "post_handoff_run_seen": false,
+    "checks": {
+      "project_asset_backed": true,
+      "same_source_should_run": true,
+      "codex_ready": false,
+      "handoff_has_next_action": true,
+      "handoff_has_stop_condition": true,
+      "handoff_sanitized_surface": true
+    },
+    "next_probe": "goal-harness review-packet --goal-id complex-project-main-control --handoff-only"
+  },
   "operator_question": "是否同意 `complex-project-main-control` 先执行 read-only map opt-in？",
   "agent_command": "goal-harness read-only-map --goal-id complex-project-main-control --dry-run",
   "quota": {
@@ -325,6 +342,14 @@ Item fields:
   surface; it may be limited by status command limits or filters, so consumers
   must not use it as the sole source for deciding whether a gate is still
   pending or already approved.
+- `handoff_readiness`: optional project-asset consistency and follow-through
+  summary. `ready=true` means the current queue item is Codex-runnable under the
+  same source, quota, next-action, stop-condition, and public-safety checks.
+  `handoff_status=ready_waiting_for_run` means a handoff is ready or approved
+  but no later non-accounting run has appeared in the compact history window.
+  `handoff_status=post_handoff_run_seen` means a later non-neutral run exists;
+  `post_handoff_latest_run` identifies that latest seen run by timestamp and
+  classification. `quota_slot_spent` events do not count as post-handoff work.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
 - `agent_command`: optional command or instruction for the target project agent
