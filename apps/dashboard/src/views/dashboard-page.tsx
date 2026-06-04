@@ -811,6 +811,7 @@ type HandoffReadinessView = {
   shortLine: string;
   stateLine: string;
   latestRunLine?: string | null;
+  recentRunLine?: string | null;
   failedLabel: string;
   probe?: string | null;
   variant: BadgeVariant;
@@ -829,6 +830,9 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
   const postRunSeen = Boolean(readiness.post_handoff_run_seen);
   const handoffStatus = readiness.handoff_status ?? (ready ? "ready_waiting_for_run" : "not_ready");
   const latestRun = readiness.post_handoff_latest_run;
+  const recentScales = (readiness.post_handoff_recent_runs ?? [])
+    .map((run) => run.delivery_batch_scale)
+    .filter((scale): scale is string => Boolean(scale));
   return {
     ready,
     shortLine: [
@@ -851,6 +855,12 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
         latestRun.json_exists !== undefined ? `json=${Boolean(latestRun.json_exists)}` : null,
         latestRun.markdown_exists !== undefined ? `markdown=${Boolean(latestRun.markdown_exists)}` : null,
       ].filter(Boolean).join("; ")
+      : null,
+    recentRunLine: recentScales.length
+      ? [
+        recentScales.join(","),
+        `small_streak=${readiness.post_handoff_small_scale_streak ?? 0}`,
+      ].join("; ")
       : null,
     failedLabel,
     probe: readiness.next_probe,
@@ -895,6 +905,11 @@ function HandoffReadinessPanel({
       {view.latestRunLine ? (
         <p className="mt-1 break-words">
           <span className="font-medium">Post-handoff run:</span> {view.latestRunLine}
+        </p>
+      ) : null}
+      {view.recentRunLine ? (
+        <p className="mt-1 break-words">
+          <span className="font-medium">Recent scales:</span> {view.recentRunLine}
         </p>
       ) : null}
       {view.probe ? (

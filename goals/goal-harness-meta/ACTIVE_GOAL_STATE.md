@@ -2,7 +2,7 @@
 status: active-read-only
 owner_mode: goal
 objective: "Keep Goal Harness focused on reducing operator coordination load across multi-project agent work"
-updated_at: 2026-06-04T10:38:56+08:00
+updated_at: 2026-06-04T10:48:45+08:00
 ---
 
 # Goal Harness Meta Goal
@@ -66,13 +66,29 @@ and agents receive the smallest sufficient execution context.
 ## Next Action
 
 - Continue the P0 project-agent handoff loop by using `delivery_batch_scale`
-  across `status`, `quota should-run`, review packets, and the dashboard as
-  heartbeat guard input. Keep observing when a real target run is
-  multi-surface or implementation-shaped; tighten the project-agent handoff
-  packet only when follow-through remains test-only, single-surface, or
-  ambiguous.
+  plus `post_handoff_small_scale_streak` across `status`, `quota should-run`,
+  review packets, and the dashboard as heartbeat guard input. Keep observing
+  when a real target run is multi-surface or implementation-shaped; tighten the
+  project-agent handoff packet only when the recent scale streak shows repeated
+  test-only, single-surface, or ambiguous follow-through.
 
 ## Recent Progress
+
+- 2026-06-04T10:48:45+08:00: Added repeated-small-delivery observability for
+  project-agent handoffs. `goal_harness/status.py` now emits compact
+  newest-first `post_handoff_recent_runs` and
+  `post_handoff_small_scale_streak` so heartbeat guards can distinguish one
+  small step from repeated small-scale follow-through without parsing raw run
+  history. `goal_harness/quota.py`, status/quota Markdown, review-packet
+  follow-through text, React dashboard schema/detail, static dashboard, and the
+  status data contract now preserve or render the streak. Validation: Python
+  compile checks, status Markdown smoke, review-packet CLI smoke, platform
+  material-registry smoke, dashboard action-packet smoke, dashboard production
+  build, public contract check, live side-bypass quota sanity
+  (`recent=[implementation]`, `small_streak=0`), and touched-file diff check.
+  Critic: this makes the "tighten only after repeated small steps" policy
+  machine-readable; it still intentionally avoids tightening packet wording
+  while the live delivery lane is implementation-shaped.
 
 - 2026-06-04T10:38:56+08:00: Closed the static dashboard delivery-scale
   visibility gap. `examples/render-status-dashboard.py` now appends

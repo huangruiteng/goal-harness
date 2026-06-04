@@ -177,8 +177,13 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     classification = str(latest_run.get("classification") or "unknown").strip() or "unknown"
     scale = str(latest_run.get("delivery_batch_scale") or "unknown").strip() or "unknown"
     generated_at = str(latest_run.get("generated_at") or "").strip()
+    streak = readiness.get("post_handoff_small_scale_streak")
+    streak_text = f", small_streak={streak}" if isinstance(streak, int) else ""
     suffix = f", at={generated_at}" if generated_at else ""
-    return compact_packet_text(f"post_handoff_run={classification}, scale={scale}{suffix}", limit=220)
+    return compact_packet_text(
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}",
+        limit=220,
+    )
 
 
 def authority_material_summary(goal: dict[str, Any] | None) -> str | None:

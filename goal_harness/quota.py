@@ -42,6 +42,7 @@ HANDOFF_READINESS_COMPACT_FIELDS = (
     "post_handoff_run_seen",
     "handoff_ready_at",
     "handoff_ready_classification",
+    "post_handoff_small_scale_streak",
     "next_probe",
 )
 POST_HANDOFF_RUN_COMPACT_FIELDS = (
@@ -416,6 +417,24 @@ def _compact_handoff_readiness(value: Any) -> dict[str, Any] | None:
             for field in POST_HANDOFF_RUN_COMPACT_FIELDS
             if field in latest_run
         }
+    recent_runs = (
+        value.get("post_handoff_recent_runs")
+        if isinstance(value.get("post_handoff_recent_runs"), list)
+        else []
+    )
+    compact_recent_runs: list[dict[str, Any]] = []
+    for run in recent_runs:
+        if not isinstance(run, dict):
+            continue
+        compact_run = {
+            field: run[field]
+            for field in POST_HANDOFF_RUN_COMPACT_FIELDS
+            if field in run
+        }
+        if compact_run:
+            compact_recent_runs.append(compact_run)
+    if compact_recent_runs:
+        compact["post_handoff_recent_runs"] = compact_recent_runs[:3]
     return compact or None
 
 
@@ -1363,6 +1382,22 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"classification={latest_handoff_run.get('classification')} "
                 f"at={latest_handoff_run.get('generated_at')} "
                 f"scale={latest_handoff_run.get('delivery_batch_scale') or ''}"
+            )
+        recent_handoff_runs = (
+            handoff_readiness.get("post_handoff_recent_runs")
+            if isinstance(handoff_readiness.get("post_handoff_recent_runs"), list)
+            else []
+        )
+        recent_scales = [
+            str(run.get("delivery_batch_scale") or "")
+            for run in recent_handoff_runs
+            if isinstance(run, dict)
+        ]
+        if recent_scales:
+            lines.append(
+                "- post_handoff_recent_scales: "
+                f"{','.join(recent_scales)} "
+                f"small_streak={handoff_readiness.get('post_handoff_small_scale_streak', 0)}"
             )
     heartbeat_recommendation = (
         payload.get("heartbeat_recommendation")

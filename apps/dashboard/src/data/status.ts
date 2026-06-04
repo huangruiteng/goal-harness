@@ -85,6 +85,8 @@ export const projectAssetHandoffReadinessSchema = z.object({
   handoff_ready_classification: z.string().optional().nullable(),
   post_handoff_run_seen: z.boolean().optional().default(false),
   post_handoff_latest_run: postHandoffRunSchema.optional().nullable(),
+  post_handoff_recent_runs: z.array(postHandoffRunSchema).optional().default([]),
+  post_handoff_small_scale_streak: z.number().int().nonnegative().optional().default(0),
   next_probe: z.string().optional().nullable(),
 });
 

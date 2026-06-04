@@ -356,7 +356,11 @@ Item fields:
   `post_handoff_latest_run` identifies that latest seen run by timestamp and
   classification, and `delivery_batch_scale` labels whether the observed
   delivery is test-only, single-surface, multi-surface, implementation-shaped,
-  or still unknown. `quota_slot_spent` events do not count as post-handoff work.
+  or still unknown. `post_handoff_recent_runs` is a compact newest-first slice
+  of recent post-handoff work runs, and `post_handoff_small_scale_streak`
+  counts the leading `test_only` / `single_surface` / `unknown` scale streak so
+  heartbeat jobs can tighten handoff wording only after repeated small-scale
+  follow-through. `quota_slot_spent` events do not count as post-handoff work.
 - `operator_question`: optional human-facing gate to show in the Goal Harness
   operator view. This is the canonical place for user/controller judgment.
 - `agent_command`: optional command or instruction for the target project agent

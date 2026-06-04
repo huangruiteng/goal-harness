@@ -74,6 +74,11 @@ DELIVERY_BATCH_SCALE_IMPLEMENTATION_CLASSIFICATION_HINTS = (
     "implementation",
     "runner",
 )
+SMALL_DELIVERY_BATCH_SCALES = {
+    "single_surface",
+    "test_only",
+    "unknown",
+}
 CONNECTED_ADAPTER_STATUSES = {
     "connected",
     "connected-read-only",
@@ -419,6 +424,15 @@ def compact_post_handoff_run(run: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def small_delivery_batch_scale_streak(runs: list[dict[str, Any]]) -> int:
+    streak = 0
+    for run in runs:
+        if delivery_batch_scale_for_run(run) not in SMALL_DELIVERY_BATCH_SCALES:
+            break
+        streak += 1
+    return streak
+
+
 def project_asset_handoff_state(
     *,
     ready: bool,
@@ -442,6 +456,7 @@ def project_asset_handoff_state(
             break
 
     post_handoff_run: dict[str, Any] | None = None
+    recent_post_handoff_runs: list[dict[str, Any]] = []
     if handoff_at is None and ready:
         latest_validation = (
             project_asset.get("latest_validation")
@@ -465,8 +480,14 @@ def project_asset_handoff_state(
                 continue
             if is_status_neutral_run(run) or is_handoff_ready_run(run):
                 continue
-            post_handoff_run = run
-            break
+            recent_post_handoff_runs.append(run)
+        if recent_post_handoff_runs:
+            post_handoff_run = recent_post_handoff_runs[0]
+
+    if post_handoff_run and not recent_post_handoff_runs:
+        recent_post_handoff_runs = [post_handoff_run]
+    if len(recent_post_handoff_runs) > 3:
+        recent_post_handoff_runs = recent_post_handoff_runs[:3]
 
     if post_handoff_run:
         handoff_status = "post_handoff_run_seen"
@@ -485,6 +506,14 @@ def project_asset_handoff_state(
         state["handoff_ready_classification"] = handoff_run.get("classification")
     if post_handoff_run:
         state["post_handoff_latest_run"] = compact_post_handoff_run(post_handoff_run)
+    if recent_post_handoff_runs:
+        state["post_handoff_recent_runs"] = [
+            compact_post_handoff_run(run)
+            for run in recent_post_handoff_runs
+        ]
+        state["post_handoff_small_scale_streak"] = small_delivery_batch_scale_streak(
+            recent_post_handoff_runs
+        )
     return state
 
 
@@ -1760,6 +1789,22 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                         f"classification={_markdown_scalar(latest_handoff_run.get('classification') or '')} "
                         f"at={_markdown_scalar(latest_handoff_run.get('generated_at') or '')} "
                         f"scale={_markdown_scalar(latest_handoff_run.get('delivery_batch_scale') or '')}"
+                    )
+                recent_handoff_runs = (
+                    handoff_readiness.get("post_handoff_recent_runs")
+                    if isinstance(handoff_readiness.get("post_handoff_recent_runs"), list)
+                    else []
+                )
+                recent_scales = [
+                    _markdown_scalar(str(run.get("delivery_batch_scale") or ""))
+                    for run in recent_handoff_runs
+                    if isinstance(run, dict)
+                ]
+                if recent_scales:
+                    lines.append(
+                        "      - post_handoff_recent_scales: "
+                        f"{','.join(recent_scales)} "
+                        f"small_streak={handoff_readiness.get('post_handoff_small_scale_streak', 0)}"
                     )
                 if handoff_readiness.get("next_probe"):
                     handoff_probe = _markdown_scalar(handoff_readiness.get("next_probe") or "")

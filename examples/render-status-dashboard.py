@@ -170,6 +170,22 @@ def project_asset_block(item: dict[str, Any]) -> str:
                 f"{esc(latest_run.get('classification'))} at {esc(latest_run.get('generated_at'))}"
                 f"{scale_text}</p>"
             )
+        recent_runs = (
+            readiness.get("post_handoff_recent_runs")
+            if isinstance(readiness.get("post_handoff_recent_runs"), list)
+            else []
+        )
+        recent_scales = [
+            esc(str(run.get("delivery_batch_scale") or ""))
+            for run in recent_runs
+            if isinstance(run, dict) and run.get("delivery_batch_scale")
+        ]
+        recent_scale_line = ""
+        if recent_scales:
+            recent_scale_line = (
+                f"<p><b>Recent scales</b> {', '.join(recent_scales)}; "
+                f"small_streak {esc(readiness.get('post_handoff_small_scale_streak'))}</p>"
+            )
         readiness_block = f"""
             <div class="handoff-readiness {'ready' if readiness.get('ready') else 'blocked'}">
               <strong>Handoff readiness</strong>
@@ -177,6 +193,7 @@ def project_asset_block(item: dict[str, Any]) -> str:
               <p><b>Failed checks</b> {esc(failed_text)}</p>
               <p><b>Handoff state</b> {esc(handoff_state)}</p>
               {latest_run_line}
+              {recent_scale_line}
               <p><b>Probe</b> {esc(readiness.get("next_probe"))}</p>
             </div>
         """

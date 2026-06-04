@@ -378,7 +378,7 @@ def collect_fixture_status(root: Path, registry_path: Path) -> tuple[dict, str]:
         registry_path=registry_path,
         runtime_root_override=str(root / "runtime"),
         scan_roots=[root / "project"],
-        limit=3,
+        limit=5,
     )
     return payload, render_status_markdown(payload)
 
@@ -577,10 +577,13 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
     assert "handoff_ready_at" not in readiness, readiness
     assert readiness["post_handoff_latest_run"]["classification"] == "delivery_ranker_readiness_batch", readiness
     assert readiness["post_handoff_latest_run"]["delivery_batch_scale"] == "multi_surface", readiness
+    assert readiness["post_handoff_recent_runs"][0]["delivery_batch_scale"] == "multi_surface", readiness
+    assert readiness["post_handoff_small_scale_streak"] == 0, readiness
     assert "delivery_ranker_readiness_batch" in markdown, markdown
     assert "handoff_state: status=post_handoff_run_seen post_handoff_run_seen=True ready_at=" in markdown, markdown
     assert "post_handoff_run: classification=delivery_ranker_readiness_batch" in markdown, markdown
     assert "scale=multi_surface" in markdown, markdown
+    assert "post_handoff_recent_scales: multi_surface small_streak=0" in markdown, markdown
     assert f"asset_agent_todo: {DELIVERY_AGENT_TODO}" in markdown, markdown
 
     quota_payload = build_quota_should_run(payload, goal_id=DELIVERY_GOAL_ID)
@@ -594,6 +597,11 @@ def assert_connected_delivery_custom_run_stays_runnable(payload: dict, markdown:
         quota_payload["handoff_readiness"]["post_handoff_latest_run"]["delivery_batch_scale"]
         == "multi_surface"
     ), quota_payload
+    assert (
+        quota_payload["handoff_readiness"]["post_handoff_recent_runs"][0]["delivery_batch_scale"]
+        == "multi_surface"
+    ), quota_payload
+    assert quota_payload["handoff_readiness"]["post_handoff_small_scale_streak"] == 0, quota_payload
     assert quota_payload["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", quota_payload
 
 
@@ -629,6 +637,11 @@ def assert_post_handoff_run_seen(payload: dict, markdown: str) -> None:
     assert readiness["post_handoff_latest_run"]["classification"] == POST_HANDOFF_CLASSIFICATION, readiness
     assert readiness["post_handoff_latest_run"]["generated_at"] == "2026-01-01T00:01:45+00:00", readiness
     assert readiness["post_handoff_latest_run"]["delivery_batch_scale"] == "single_surface", readiness
+    assert [run["delivery_batch_scale"] for run in readiness["post_handoff_recent_runs"]] == [
+        "single_surface",
+        "single_surface",
+    ], readiness
+    assert readiness["post_handoff_small_scale_streak"] == 2, readiness
     assert (
         "handoff_state: status=post_handoff_run_seen "
         "post_handoff_run_seen=True ready_at=2026-01-01T00:01:00+00:00"
@@ -637,6 +650,7 @@ def assert_post_handoff_run_seen(payload: dict, markdown: str) -> None:
         "post_handoff_run: classification=read_only_project_map "
         "at=2026-01-01T00:01:45+00:00 scale=single_surface"
     ) in markdown, markdown
+    assert "post_handoff_recent_scales: single_surface,single_surface small_streak=2" in markdown, markdown
     quota_payload = build_quota_should_run(payload, goal_id="planned-main-control")
     quota_markdown = render_quota_should_run_markdown(quota_payload)
     quota_readiness = quota_payload["handoff_readiness"]
@@ -644,11 +658,17 @@ def assert_post_handoff_run_seen(payload: dict, markdown: str) -> None:
     assert quota_readiness["post_handoff_run_seen"] is True, quota_payload
     assert quota_readiness["post_handoff_latest_run"]["classification"] == POST_HANDOFF_CLASSIFICATION, quota_payload
     assert quota_readiness["post_handoff_latest_run"]["delivery_batch_scale"] == "single_surface", quota_payload
+    assert [run["delivery_batch_scale"] for run in quota_readiness["post_handoff_recent_runs"]] == [
+        "single_surface",
+        "single_surface",
+    ], quota_payload
+    assert quota_readiness["post_handoff_small_scale_streak"] == 2, quota_payload
     assert "handoff_state: status=post_handoff_run_seen post_handoff_run_seen=True" in quota_markdown, quota_markdown
     assert (
         "post_handoff_run: classification=read_only_project_map "
         "at=2026-01-01T00:01:45+00:00 scale=single_surface"
     ) in quota_markdown, quota_markdown
+    assert "post_handoff_recent_scales: single_surface,single_surface small_streak=2" in quota_markdown, quota_markdown
 
 
 def assert_static_dashboard_post_handoff_scale(payload: dict, root: Path) -> None:
@@ -670,6 +690,8 @@ def assert_static_dashboard_post_handoff_scale(payload: dict, root: Path) -> Non
     html = html_path.read_text(encoding="utf-8")
     assert "Post-handoff run" in html, html
     assert "scale=single_surface" in html, html
+    assert "Recent scales" in html, html
+    assert "single_surface, single_surface; small_streak 2" in html, html
 
 
 def main() -> int:
@@ -688,6 +710,7 @@ def main() -> int:
         approved_payload, approved_markdown = collect_fixture_status(root, registry_path)
         append_quota_slot_spend_fixture(root, generated_at="2026-01-01T00:01:30+00:00")
         post_spend_payload, post_spend_markdown = collect_fixture_status(root, registry_path)
+        append_post_handoff_run_fixture(root, generated_at="2026-01-01T00:01:40+00:00")
         append_post_handoff_run_fixture(root, generated_at="2026-01-01T00:01:45+00:00")
         post_handoff_payload, post_handoff_markdown = collect_fixture_status(root, registry_path)
         assert_static_dashboard_post_handoff_scale(post_handoff_payload, root)
