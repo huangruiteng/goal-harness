@@ -459,6 +459,22 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json(payload)
 
+    def _local_dashboard_api_payload(self) -> dict[str, Any]:
+        return {
+            "source": "serve-status",
+            "status_url": self.server.status_path,
+            "health_url": "/healthz",
+            "review_material_url": DEFAULT_REVIEW_MATERIAL_PATH,
+            "reward_dry_run_url": self.server.reward_dry_run_path,
+            "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
+            "reward_write_enabled": self.server.reward_write_enabled,
+            "configure_goal_dry_run_url": self.server.configure_goal_dry_run_path,
+            "configure_goal_apply_url": self.server.configure_goal_apply_path
+            if self.server.control_plane_write_enabled
+            else None,
+            "control_plane_write_enabled": self.server.control_plane_write_enabled,
+        }
+
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
@@ -472,17 +488,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "ok": True,
-                    "status_url": self.server.status_path,
-                    "reward_dry_run_url": self.server.reward_dry_run_path,
-                    "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
-                    "configure_goal_dry_run_url": self.server.configure_goal_dry_run_path,
-                    "configure_goal_apply_url": self.server.configure_goal_apply_path
-                    if self.server.control_plane_write_enabled
-                    else None,
-                    "review_material_url": DEFAULT_REVIEW_MATERIAL_PATH,
-                    "reward_write_enabled": self.server.reward_write_enabled,
-                    "control_plane_write_enabled": self.server.control_plane_write_enabled,
-                    "health_url": "/healthz",
+                    **self._local_dashboard_api_payload(),
                 }
             )
             return
@@ -504,6 +510,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 scan_roots=self.server.scan_roots,
                 limit=self.server.limit,
             )
+            payload["local_dashboard_api"] = self._local_dashboard_api_payload()
         except Exception as exc:  # noqa: BLE001 - the HTTP layer should preserve diagnostics.
             self._send_json(
                 {

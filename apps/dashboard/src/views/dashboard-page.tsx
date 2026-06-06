@@ -441,9 +441,31 @@ function buildRewardApiUrls(source: DataSource) {
   }
 }
 
-function buildControlPlaneApiUrls(source: DataSource) {
+function localApiUrl(source: DataSource, path: string | null | undefined) {
+  if (!path || source.kind !== "url" || !/^https?:\/\//i.test(source.label)) {
+    return null;
+  }
+  try {
+    const sourceUrl = new URL(source.label);
+    const targetUrl = new URL(path, sourceUrl.origin);
+    const isLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(targetUrl.hostname);
+    return isLoopback ? targetUrl.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildControlPlaneApiUrls(source: DataSource, payload?: StatusPayload) {
+  const localApi = payload?.local_dashboard_api;
+  if (localApi) {
+    return {
+      dryRunUrl: localApiUrl(source, localApi.configure_goal_dry_run_url),
+      applyUrl: localApiUrl(source, localApi.configure_goal_apply_url),
+      writeEnabled: Boolean(localApi.control_plane_write_enabled),
+    };
+  }
   if (source.kind !== "url" || !/^https?:\/\//i.test(source.label)) {
-    return { dryRunUrl: null, applyUrl: null };
+    return { dryRunUrl: null, applyUrl: null, writeEnabled: null };
   }
   try {
     const url = new URL(source.label);
@@ -452,10 +474,11 @@ function buildControlPlaneApiUrls(source: DataSource) {
       ? {
           dryRunUrl: `${url.origin}/control-plane/configure-goal/dry-run`,
           applyUrl: `${url.origin}/control-plane/configure-goal/apply`,
+          writeEnabled: null,
         }
-      : { dryRunUrl: null, applyUrl: null };
+      : { dryRunUrl: null, applyUrl: null, writeEnabled: null };
   } catch {
-    return { dryRunUrl: null, applyUrl: null };
+    return { dryRunUrl: null, applyUrl: null, writeEnabled: null };
   }
 }
 
@@ -1961,6 +1984,7 @@ function ControlPlaneSettingsPanel({
   onStatusRefresh,
   queueItem,
   registry,
+  writeEnabled,
 }: {
   applyUrl: string | null;
   dryRunUrl: string | null;
@@ -1968,6 +1992,7 @@ function ControlPlaneSettingsPanel({
   onStatusRefresh: () => Promise<void>;
   queueItem?: QueueItem;
   registry: string;
+  writeEnabled: boolean | null;
 }) {
   const quota = queueItem?.quota ?? queueItem?.project_asset?.quota ?? goal?.quota;
   const quotaView = buildQuotaView(quota);
@@ -2017,6 +2042,8 @@ function ControlPlaneSettingsPanel({
   const canCopy = Boolean(goalId && dirty);
   const canDryRun = Boolean(dryRunUrl && dirty && requestBody);
   const canApply = Boolean(applyUrl && dryRunBody && dryRunResult?.ok && dryRunResult.preview_id && !applyResult?.written);
+  const writeApiLabel = writeEnabled === true ? "write API on" : writeEnabled === false ? "write API off" : "write API unknown";
+  const writeApiVariant: BadgeVariant = writeEnabled === true ? "success" : writeEnabled === false ? "warning" : "neutral";
 
   useEffect(() => {
     setDraft(currentDraft);
@@ -2113,6 +2140,7 @@ function ControlPlaneSettingsPanel({
           <Badge variant={orchestrationVariant}>{mode}</Badge>
           <Badge variant={dirty ? "warning" : "success"}>{dirty ? "dirty" : "clean"}</Badge>
           <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "local API" : "copy only"}</Badge>
+          <Badge variant={writeApiVariant}>{writeApiLabel}</Badge>
           {applyResult?.written ? <Badge variant="success">applied</Badge> : null}
         </div>
       </div>
@@ -4965,6 +4993,7 @@ function RewardCommandDraft({
 function RunHistoryPanel({
   controlPlaneApplyUrl,
   controlPlaneDryRunUrl,
+  controlPlaneWriteEnabled,
   goal,
   onStatusRefresh,
   queueItem,
@@ -4975,6 +5004,7 @@ function RunHistoryPanel({
 }: {
   controlPlaneApplyUrl: string | null;
   controlPlaneDryRunUrl: string | null;
+  controlPlaneWriteEnabled: boolean | null;
   goal?: RunGoal;
   onStatusRefresh: () => Promise<void>;
   queueItem?: QueueItem;
@@ -5039,6 +5069,7 @@ function RunHistoryPanel({
             onStatusRefresh={onStatusRefresh}
             queueItem={queueItem}
             registry={registry}
+            writeEnabled={controlPlaneWriteEnabled}
           />
 
           <div className="grid gap-2 sm:grid-cols-4">
@@ -5296,7 +5327,7 @@ export function DashboardPage() {
     [runHistory.goals, queue.items],
   );
   const rewardApiUrls = useMemo(() => buildRewardApiUrls(source), [source]);
-  const controlPlaneApiUrls = useMemo(() => buildControlPlaneApiUrls(source), [source]);
+  const controlPlaneApiUrls = useMemo(() => buildControlPlaneApiUrls(source, payload), [payload, source]);
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -5699,6 +5730,7 @@ export function DashboardPage() {
                   <RunHistoryPanel
                     controlPlaneApplyUrl={controlPlaneApiUrls.applyUrl}
                     controlPlaneDryRunUrl={controlPlaneApiUrls.dryRunUrl}
+                    controlPlaneWriteEnabled={controlPlaneApiUrls.writeEnabled}
                     goal={selectedGoal}
                     onStatusRefresh={async () => {
                       if (source.kind === "url") {

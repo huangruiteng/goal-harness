@@ -253,6 +253,19 @@ below the dashboard's expected version, run
 `~/goal-harness/scripts/macos-dashboard-launchagent.sh restart` so the dashboard
 does not read an older status contract from a stale daemon.
 
+The LaunchAgent status feed is read-only for control-plane registry writes by
+default. If an operator intentionally wants the dashboard Apply button to write
+per-goal control-plane settings, install or restart the LaunchAgent with the
+explicit opt-in flag:
+
+```bash
+~/goal-harness/scripts/macos-dashboard-launchagent.sh --enable-control-plane-write-api restart
+```
+
+The `status` command reports `control_plane_write_api: enabled|disabled`, and
+the dashboard reads the same `local_dashboard_api` capability from
+`/status.json`.
+
 For a one-command public demo-readiness check from the checkout:
 
 ```bash

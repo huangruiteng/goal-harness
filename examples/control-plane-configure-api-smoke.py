@@ -162,6 +162,12 @@ def main() -> None:
         disabled_server = start_server(repo_root, registry, runtime_root, disabled_port, write_enabled=False)
         try:
             base_url = f"http://127.0.0.1:{disabled_port}"
+            status, status_payload = request_json("GET", f"{base_url}/status.json")
+            assert status == 200, status_payload
+            disabled_api = status_payload["local_dashboard_api"]
+            assert disabled_api["control_plane_write_enabled"] is False, disabled_api
+            assert disabled_api["configure_goal_dry_run_url"] == "/control-plane/configure-goal/dry-run", disabled_api
+            assert disabled_api["configure_goal_apply_url"] is None, disabled_api
             status, dry = request_json("POST", f"{base_url}/control-plane/configure-goal/dry-run", configure_payload())
             assert status == 200, dry
             assert dry["changed"] is True, dry
@@ -209,6 +215,11 @@ def main() -> None:
         server = start_server(repo_root, registry, runtime_root, port, write_enabled=True)
         try:
             base_url = f"http://127.0.0.1:{port}"
+            status, status_payload = request_json("GET", f"{base_url}/status.json")
+            assert status == 200, status_payload
+            enabled_api = status_payload["local_dashboard_api"]
+            assert enabled_api["control_plane_write_enabled"] is True, enabled_api
+            assert enabled_api["configure_goal_apply_url"] == "/control-plane/configure-goal/apply", enabled_api
             status, dry = request_json("POST", f"{base_url}/control-plane/configure-goal/dry-run", configure_payload())
             assert status == 200, dry
             assert dry["preview_id"], dry
