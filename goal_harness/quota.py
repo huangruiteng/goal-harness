@@ -1467,6 +1467,15 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         )
         if backlog_warning:
             payload["backlog_hygiene_warning"] = backlog_warning
+        archive_warning = (
+            item.get("completed_todo_archive_warning")
+            if isinstance(item.get("completed_todo_archive_warning"), dict)
+            else project_asset.get("completed_todo_archive_warning")
+            if isinstance(project_asset.get("completed_todo_archive_warning"), dict)
+            else None
+        )
+        if archive_warning:
+            payload["completed_todo_archive_warning"] = archive_warning
         interface_budget_cadence = (
             project_asset.get("interface_budget_cadence")
             if isinstance(project_asset.get("interface_budget_cadence"), dict)
@@ -1993,6 +2002,23 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if backlog_hygiene_warning.get("recommended_action"):
             lines.append(f"- backlog_hygiene_action: {backlog_hygiene_warning.get('recommended_action')}")
+    completed_todo_archive_warning = (
+        payload.get("completed_todo_archive_warning")
+        if isinstance(payload.get("completed_todo_archive_warning"), dict)
+        else {}
+    )
+    if completed_todo_archive_warning:
+        lines.append(
+            "- completed_todo_archive_warning: "
+            f"requires_archive={completed_todo_archive_warning.get('requires_archive')} "
+            f"active_done={completed_todo_archive_warning.get('active_done_count')} "
+            f"max_active_done={completed_todo_archive_warning.get('max_active_done_count')} "
+            f"archive_section={completed_todo_archive_warning.get('archive_section')}"
+        )
+        if completed_todo_archive_warning.get("recommended_action"):
+            lines.append(
+                f"- completed_todo_archive_action: {completed_todo_archive_warning.get('recommended_action')}"
+            )
     interface_budget_cadence = (
         payload.get("interface_budget_cadence")
         if isinstance(payload.get("interface_budget_cadence"), dict)

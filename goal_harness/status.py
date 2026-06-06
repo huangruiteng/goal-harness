@@ -261,6 +261,7 @@ AGENT_TODO_HEADER_MARKERS = (
     "project agent todo",
 )
 MAX_STATUS_TODOS_PER_ROLE = 12
+MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE = MAX_STATUS_TODOS_PER_ROLE
 MAX_PROJECT_ASSET_TODO_ITEMS = 3
 MAX_DEPENDENCY_BLOCKERS = 4
 MAX_AUTONOMOUS_BACKLOG_CANDIDATES = 6
@@ -272,6 +273,14 @@ BACKLOG_HYGIENE_SECTION_HEADINGS = ("Next Action", "Operating Lessons")
 BACKLOG_HYGIENE_BULLET_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$")
 BACKLOG_HYGIENE_HINT_PATTERN = re.compile(
     r"(?i)(?:\[p[0-4]\]|todo|backlog|follow[- ]?up|queue|audit|regression|smoke|cadence|mirror|monitor|sub-?agent|待办|回归|审计|修复|检查|推进)"
+)
+TODO_ARCHIVE_HEADER_MARKERS = (
+    "todo archive",
+    "work archive",
+    "completed archive",
+    "completed work",
+    "完成归档",
+    "待办归档",
 )
 
 
@@ -321,6 +330,8 @@ def parse_state_frontmatter(state_text: str) -> dict[str, str]:
 
 def todo_role_for_heading(heading: str) -> str | None:
     normalized = heading.strip().lower()
+    if any(marker in normalized for marker in TODO_ARCHIVE_HEADER_MARKERS):
+        return None
     if any(marker in normalized for marker in USER_TODO_HEADER_MARKERS):
         return "user"
     if any(marker in normalized for marker in AGENT_TODO_HEADER_MARKERS):
@@ -477,6 +488,33 @@ def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | No
         "recommended_action": (
             "mirror durable follow-up work into Agent Todo before heartbeat scheduling relies on "
             "Next Action or Operating Lessons"
+        ),
+    }
+
+
+def completed_todo_archive_warning(agent_todos: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(agent_todos, dict):
+        return None
+    try:
+        done_count = int(agent_todos.get("done_count") or 0)
+    except (TypeError, ValueError):
+        done_count = 0
+    if done_count <= MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE:
+        return None
+    try:
+        open_count = int(agent_todos.get("open_count") or 0)
+    except (TypeError, ValueError):
+        open_count = 0
+    return {
+        "kind": "completed_agent_todo_archive_required",
+        "requires_archive": True,
+        "archive_section": "Completed Work Archive",
+        "active_done_count": done_count,
+        "active_open_count": open_count,
+        "max_active_done_count": MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
+        "recommended_action": (
+            "move older completed Agent Todo entries into a dedicated Completed Work Archive "
+            "until the active Agent Todo section keeps only current open work and a small recent-done tail"
         ),
     }
 
@@ -1287,6 +1325,11 @@ def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
     )
     if warning:
         fields["backlog_hygiene_warning"] = warning
+    archive_warning = completed_todo_archive_warning(
+        fields.get("agent_todos") if isinstance(fields.get("agent_todos"), dict) else None
+    )
+    if archive_warning:
+        fields["completed_todo_archive_warning"] = archive_warning
     if fields:
         fields = redacted_status_todo_fields(fields)
     return fields
@@ -1983,6 +2026,13 @@ def build_attention_queue(
                 )
                 if backlog_warning and isinstance(item.get("project_asset"), dict):
                     item["project_asset"]["backlog_hygiene_warning"] = backlog_warning
+                archive_warning = (
+                    item.get("completed_todo_archive_warning")
+                    if isinstance(item.get("completed_todo_archive_warning"), dict)
+                    else None
+                )
+                if archive_warning and isinstance(item.get("project_asset"), dict):
+                    item["project_asset"]["completed_todo_archive_warning"] = archive_warning
                 item["quota"] = quota_status(
                     goal,
                     waiting_on=str(item.get("waiting_on") or ""),
@@ -3222,6 +3272,19 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     f"requires_agent_todo={backlog_warning.get('requires_agent_todo')} "
                     f"evidence_count={backlog_warning.get('evidence_count')} "
                     f"source_sections={_markdown_scalar(','.join(backlog_warning.get('source_sections') or []))}"
+                )
+            archive_warning = (
+                project_asset.get("completed_todo_archive_warning")
+                if isinstance(project_asset.get("completed_todo_archive_warning"), dict)
+                else {}
+            )
+            if archive_warning:
+                lines.append(
+                    "    - completed_todo_archive_warning: "
+                    f"requires_archive={archive_warning.get('requires_archive')} "
+                    f"active_done={archive_warning.get('active_done_count')} "
+                    f"max_active_done={archive_warning.get('max_active_done_count')} "
+                    f"archive_section={_markdown_scalar(archive_warning.get('archive_section') or '')}"
                 )
             interface_budget_cadence = (
                 project_asset.get("interface_budget_cadence")

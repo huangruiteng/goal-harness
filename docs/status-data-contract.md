@@ -829,6 +829,15 @@ checkboxes before heartbeat scheduling relies on those narrative sections. The
 warning is a checklist hygiene signal only: it does not change quota eligibility,
 grant write or production permission, or make a quiet no-op valid when
 `execution_obligation.must_attempt_work=true`.
+When the payload includes `completed_todo_archive_warning`, the active
+`Agent Todo` checklist has accumulated too many completed entries for the
+dashboard/status surface to keep current open work visible. Executors should
+move older completed entries into a dedicated `Completed Work Archive` section
+and keep only current open work plus a small recent-done tail under active
+`Agent Todo`. Archive sections are intentionally ignored by active todo parsing.
+This warning is a checklist hygiene signal only: it does not change quota
+eligibility, grant write or production permission, or supersede open user/agent
+todo blockers.
 The payload also includes `execution_obligation`, which is the stronger worker
 contract. `heartbeat_recommendation.notify` is only a user-facing notification
 policy. It must not be interpreted as an execution gate. If
