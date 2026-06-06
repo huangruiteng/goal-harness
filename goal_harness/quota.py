@@ -891,6 +891,47 @@ def _heartbeat_recommendation(
     }
 
 
+def _execution_obligation(
+    *,
+    should_run: bool,
+    effective_action: str,
+    heartbeat_recommendation: dict[str, Any],
+) -> dict[str, Any]:
+    """Separate the worker execution contract from user-facing notification."""
+
+    recommended_mode = str(heartbeat_recommendation.get("recommended_mode") or "")
+    if heartbeat_recommendation.get("stop_if_unchanged"):
+        return {
+            "must_attempt_work": False,
+            "kind": "quiet_noop_if_unchanged",
+            "notify_is_execution_gate": False,
+            "reason": (
+                "this mode allows a quiet no-op only after confirming the mapped source "
+                "is unchanged and no concrete safe handoff exists"
+            ),
+        }
+    if should_run:
+        return {
+            "must_attempt_work": True,
+            "kind": effective_action or recommended_mode or "bounded_delivery",
+            "minimum": "one_bounded_segment",
+            "notify_is_execution_gate": False,
+            "reason": (
+                "should_run=true means a Codex-actionable turn exists; heartbeat notify "
+                "only controls whether to interrupt the user"
+            ),
+        }
+    return {
+        "must_attempt_work": False,
+        "kind": effective_action or recommended_mode or "skip",
+        "notify_is_execution_gate": False,
+        "reason": (
+            "should_run=false blocks delivery unless an explicit safe-bypass or "
+            "self-repair action is exposed"
+        ),
+    }
+
+
 def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
     queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
     queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
@@ -1226,6 +1267,15 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             state=state,
             quota=quota,
         )
+        heartbeat_recommendation = _heartbeat_recommendation(
+            item,
+            goal_id=safe_goal_id,
+            state=state,
+            should_run=should_run,
+            user_todo_summary=user_todo_summary,
+            agent_todo_summary=agent_todo_summary,
+            stall_self_repair=stall_self_repair,
+        )
         payload = {
             "ok": bool(plan.get("ok")) or self_repair_allowed,
             "status_health_ok": bool(plan.get("ok")),
@@ -1266,14 +1316,11 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "recommended_action": item.get("recommended_action"),
             "execution_profile": project_asset.get("execution_profile") if project_asset else None,
             "handoff_readiness": item.get("handoff_readiness"),
-            "heartbeat_recommendation": _heartbeat_recommendation(
-                item,
-                goal_id=safe_goal_id,
-                state=state,
+            "heartbeat_recommendation": heartbeat_recommendation,
+            "execution_obligation": _execution_obligation(
                 should_run=should_run,
-                user_todo_summary=user_todo_summary,
-                agent_todo_summary=agent_todo_summary,
-                stall_self_repair=stall_self_repair,
+                effective_action=effective_action,
+                heartbeat_recommendation=heartbeat_recommendation,
             ),
             "goal_boundary": _goal_boundary(item),
             "plan_summary": plan.get("summary"),
@@ -1927,6 +1974,20 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- heartbeat_spend_policy: {heartbeat_recommendation.get('spend_policy')}")
         if heartbeat_recommendation.get("reason"):
             lines.append(f"- heartbeat_reason: {heartbeat_recommendation.get('reason')}")
+    execution_obligation = (
+        payload.get("execution_obligation")
+        if isinstance(payload.get("execution_obligation"), dict)
+        else {}
+    )
+    if execution_obligation:
+        lines.append(
+            "- execution_obligation: "
+            f"must_attempt_work={execution_obligation.get('must_attempt_work')} "
+            f"kind={execution_obligation.get('kind')} "
+            f"notify_is_execution_gate={execution_obligation.get('notify_is_execution_gate')}"
+        )
+        if execution_obligation.get("reason"):
+            lines.append(f"- execution_obligation_reason: {execution_obligation.get('reason')}")
     stall_self_repair = (
         payload.get("stall_self_repair")
         if isinstance(payload.get("stall_self_repair"), dict)

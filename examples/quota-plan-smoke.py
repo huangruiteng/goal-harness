@@ -1037,8 +1037,16 @@ def assert_project_asset_backed_no_evidence_should_run() -> None:
     assert decision["agent_todo_summary"]["first_open_items"][0]["text"] == expected_agent_todo, decision
     assert decision["goal_boundary"]["stop_condition"] == expected_stop, decision
     assert decision["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", decision
+    assert decision["heartbeat_recommendation"]["notify"] == "DONT_NOTIFY", decision
+    assert decision["execution_obligation"]["must_attempt_work"] is True, decision
+    assert decision["execution_obligation"]["kind"] == "normal_run", decision
+    assert decision["execution_obligation"]["notify_is_execution_gate"] is False, decision
     assert "project_asset_source: project_asset" in markdown, markdown
     assert "quota: compute=1.0 slot_minutes=1 slots=0/1440" in markdown, markdown
+    assert (
+        "execution_obligation: must_attempt_work=True kind=normal_run notify_is_execution_gate=False"
+        in markdown
+    ), markdown
     assert f"goal_boundary_stop_condition: {expected_stop}" in markdown, markdown
     assert f"user_todo_next[1]: {expected_user_todo}" in markdown, markdown
     assert f"agent_todo_next[1]: {expected_agent_todo}" in markdown, markdown
@@ -1095,9 +1103,15 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert mapped_rec["recommended_mode"] == "mapped_noop_if_unchanged", mapped_rec
     assert mapped_rec["stop_if_unchanged"] is True, mapped_rec
     assert mapped_rec["notify"] == "DONT_NOTIFY", mapped_rec
+    assert mapped_decision["execution_obligation"]["must_attempt_work"] is False, mapped_decision
+    assert mapped_decision["execution_obligation"]["kind"] == "quiet_noop_if_unchanged", mapped_decision
     assert "do not run another dry-run" in mapped_rec["spend_policy"], mapped_rec
     assert "heartbeat_recommendation: mode=mapped_noop_if_unchanged notify=DONT_NOTIFY" in mapped_markdown
     assert "heartbeat_stop_if_unchanged: `True`" in mapped_markdown, mapped_markdown
+    assert (
+        "execution_obligation: must_attempt_work=False kind=quiet_noop_if_unchanged notify_is_execution_gate=False"
+        in mapped_markdown
+    ), mapped_markdown
 
 
 def assert_goal_boundary_in_should_run() -> None:

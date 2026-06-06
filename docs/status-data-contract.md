@@ -768,6 +768,15 @@ that generic lifecycle hint before inventing local automation behavior:
 once, while `mapped_noop_if_unchanged` returns a quiet no-op without another
 dry-run or quota spend if no new instruction, evidence, todo, stale source, or
 safe handoff exists.
+The payload also includes `execution_obligation`, which is the stronger worker
+contract. `heartbeat_recommendation.notify` is only a user-facing notification
+policy. It must not be interpreted as an execution gate. If
+`execution_obligation.must_attempt_work=true`, the worker should choose one
+bounded segment under `effective_action` / `goal_boundary`, validate it, write
+durable state/events, and spend once after delivery even when
+`notify=DONT_NOTIFY`. A quiet no-op requires
+`execution_obligation.must_attempt_work=false`, such as a verified
+`mapped_noop_if_unchanged` turn.
 When a registry-enabled goal has `control_plane.self_repair.enabled=true`,
 `quota should-run` may return `decision=self_repair`,
 `self_repair_allowed=true`, `stall_self_repair`, and an `effective_action` such
