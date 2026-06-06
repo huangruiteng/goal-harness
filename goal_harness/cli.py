@@ -885,6 +885,7 @@ def main(argv: list[str] | None = None) -> int:
                     "stale_prompt_count": 0,
                     "unknown_prompt_count": 0,
                     "not_installed_prompt_count": 0,
+                    "stage_deferred_goal_count": 0,
                     "ready_for_default_promotion": False,
                 },
                 "recommended_action": "fix upgrade-plan collection before default promotion",

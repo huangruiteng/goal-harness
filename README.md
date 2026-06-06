@@ -160,6 +160,11 @@ If the plan reports unknown or stale prompt digests, update those managed
 heartbeat automations/controller clients before running `scripts/install-local.sh`
 for default promotion. This keeps connected projects from continuing on stale
 prompt branches after the local default version changes.
+Goals whose adapter stage is still `planned` or whose registry attention status
+is `stage_deferred_not_installed` are reported separately under
+`stage_deferred_heartbeats`; they do not count as unknown/stale managed
+heartbeats and should not be installed until the operator explicitly authorizes
+that project stage.
 Each generated prompt summary also includes `interface_budget` fields
 (`mode`, `budget_char_count`, `max_chars`, and `within_budget`) so the local
 upgrade path can catch prompt bloat from the same machine contract that
