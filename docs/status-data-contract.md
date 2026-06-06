@@ -791,6 +791,14 @@ projection has moved ahead of the latest run-history snapshot. Executors should
 repair the control-plane projection with a fresh state refresh before relying on
 latest-run status, review packets, or handoff fields, but the warning alone does
 not authorize production actions or override `should_run`.
+When the payload includes `backlog_hygiene_warning`, the active state has
+multiple public-safe durable follow-up items in `Next Action` or
+`Operating Lessons` while the active `Agent Todo` checklist has no open item.
+Executors should mirror the durable follow-up work into concrete Agent Todo
+checkboxes before heartbeat scheduling relies on those narrative sections. The
+warning is a checklist hygiene signal only: it does not change quota eligibility,
+grant write or production permission, or make a quiet no-op valid when
+`execution_obligation.must_attempt_work=true`.
 The payload also includes `execution_obligation`, which is the stronger worker
 contract. `heartbeat_recommendation.notify` is only a user-facing notification
 policy. It must not be interpreted as an execution gate. If
