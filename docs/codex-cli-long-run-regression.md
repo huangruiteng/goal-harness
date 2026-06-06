@@ -11,8 +11,8 @@ Codex App thread history.
   registry, and active state fixture.
 - Use one small synthetic Goal Harness task that can complete in `3-5` worker
   steps.
-- Run through Codex CLI or a narrow shim only after the fixture contract is
-  stable. The spec smoke does not invoke Codex CLI yet.
+- Run through the deterministic shim by default. Real Codex CLI invocation is
+  an explicit low-frequency mode only after the fixture contract is stable.
 - Record a JSONL run log with one row per worker step.
 - Use the normal Goal Harness guard: `quota should-run` before work, validated
   artifact or state writeback before `quota spend-slot`.
@@ -90,12 +90,26 @@ shape expected from future real-worker runs.
 
 ## Real Codex CLI Worker Extension
 
-The next implementation stage should add an explicit, low-frequency runner mode
-that invokes a real Codex CLI worker against the same isolated fixture. The
-deterministic Goal Harness CLI shim remains the default public smoke so ordinary
-contract checks stay fast and reproducible. The real-worker mode should be
-opt-in, should start from an empty isolated `HOME`, and should not read real
-session history or Codex App thread state.
+The runner also supports an explicit, low-frequency real-worker mode:
+
+```bash
+python3 examples/codex-cli-long-run-regression-runner-smoke.py \
+  --worker-mode real-codex \
+  --codex-cli /path/to/codex
+```
+
+This mode invokes:
+
+```bash
+codex exec --skip-git-repo-check --ephemeral --ignore-user-config \
+  --ignore-rules --sandbox workspace-write --ask-for-approval never \
+  -C <isolated-fixture-project> <step-prompt>
+```
+
+The deterministic Goal Harness CLI shim remains the default public smoke so
+ordinary contract checks stay fast and reproducible. The real-worker mode is
+opt-in, starts from an empty isolated `HOME` and `CODEX_HOME`, and must not read
+real session history or Codex App thread state.
 
 The real-worker mode must reuse the same pass criteria as the shim: `3-5`
 bounded worker steps, one JSONL row per step, deterministic validation, durable
@@ -103,6 +117,14 @@ writeback, Goal Tick Output Protocol evidence, and exactly one quota spend
 after each validated work step. If the worker cannot complete the sequence, the
 log should record the public-safe blocker instead of hiding the stop condition
 in stdout.
+
+The public contract smoke does not call a real external Codex worker. It uses a
+temporary fake executable to verify the invocation shape, isolated environment,
+JSONL log, Goal Tick phases, validation, writeback, and spend accounting:
+
+```bash
+python3 examples/codex-cli-long-run-real-worker-contract-smoke.py
+```
 
 ## Failure Criteria
 
