@@ -12,6 +12,12 @@ from .registry import registry_goals, resolve_state_file
 
 
 DEFAULT_UPGRADE_MODES = ("thin",)
+STAGE_DEFERRED_ATTENTION_STATUSES = {
+    "stage_deferred_not_installed",
+}
+STAGE_DEFERRED_ADAPTER_STATUSES = {
+    "planned",
+}
 
 
 def prompt_digest(text: str) -> str:
@@ -101,6 +107,45 @@ def index_installed_entries(entries: list[dict[str, Any]]) -> dict[tuple[str, st
     return indexed
 
 
+def goal_adapter(goal: dict[str, Any]) -> dict[str, Any]:
+    adapter = goal.get("adapter")
+    return adapter if isinstance(adapter, dict) else {}
+
+
+def goal_adapter_status(goal: dict[str, Any]) -> str:
+    return str(goal_adapter(goal).get("status") or "")
+
+
+def goal_adapter_kind(goal: dict[str, Any]) -> str | None:
+    kind = goal_adapter(goal).get("kind")
+    return str(kind) if kind else None
+
+
+def goal_is_stage_deferred(goal: dict[str, Any]) -> bool:
+    attention_status = str(goal.get("attention_status") or "").replace("-", "_").lower()
+    if attention_status in STAGE_DEFERRED_ATTENTION_STATUSES:
+        return True
+    adapter_status = goal_adapter_status(goal).replace("-", "_").lower()
+    return adapter_status in STAGE_DEFERRED_ADAPTER_STATUSES
+
+
+def stage_deferred_goal_summary(goal: dict[str, Any], state_file: Path | None) -> dict[str, Any]:
+    return {
+        "goal_id": str(goal.get("id") or ""),
+        "adapter_kind": goal_adapter_kind(goal),
+        "adapter_status": goal_adapter_status(goal) or None,
+        "status": goal.get("status"),
+        "attention_status": goal.get("attention_status"),
+        "repo": str(Path(str(goal.get("repo") or ".")).expanduser()),
+        "state_file": str(state_file) if state_file else None,
+        "state_file_exists": bool(state_file and state_file.exists()),
+        "requires_update": False,
+        "deferred_reason": "stage_deferred_until_operator_authorizes_heartbeat",
+        "recommended_action": goal.get("recommended_action")
+        or "do not install or update this heartbeat until the operator authorizes the stage",
+    }
+
+
 def build_upgrade_plan(
     *,
     registry_path: Path,
@@ -124,6 +169,7 @@ def build_upgrade_plan(
     manifest = load_installed_manifest(installed_manifest)
     installed_by_key = index_installed_entries(manifest["entries"])
     managed: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
 
     for goal in registry_goals(registry):
         goal_id = str(goal.get("id") or "")
@@ -131,6 +177,9 @@ def build_upgrade_plan(
             continue
         repo = Path(str(goal.get("repo") or ".")).expanduser()
         state_file = resolve_state_file(repo, goal.get("state_file"))
+        if goal_is_stage_deferred(goal):
+            deferred.append(stage_deferred_goal_summary(goal, state_file))
+            continue
         prompt_summaries: dict[str, dict[str, Any]] = {}
         installed: dict[str, dict[str, Any]] = {}
         for mode in selected_modes:
@@ -167,8 +216,8 @@ def build_upgrade_plan(
         managed.append(
             {
                 "goal_id": goal_id,
-                "adapter_kind": (goal.get("adapter") or {}).get("kind") if isinstance(goal.get("adapter"), dict) else None,
-                "adapter_status": (goal.get("adapter") or {}).get("status") if isinstance(goal.get("adapter"), dict) else None,
+                "adapter_kind": goal_adapter_kind(goal),
+                "adapter_status": goal_adapter_status(goal) or None,
                 "repo": str(repo),
                 "state_file": str(state_file) if state_file else None,
                 "state_file_exists": bool(state_file and state_file.exists()),
@@ -203,6 +252,14 @@ def build_upgrade_plan(
         if installed["status"] == "not_installed"
     )
     ready = bool(managed) and unknown == 0 and stale == 0
+    if ready:
+        recommended_action = "promotion propagation is complete"
+    elif managed:
+        recommended_action = "refresh installed heartbeat automations/controller clients before default promotion"
+    elif deferred:
+        recommended_action = "selected heartbeats are stage-deferred; do not install until the operator authorizes that stage"
+    else:
+        recommended_action = "no registry-managed heartbeats matched the upgrade plan selection"
     return {
         "ok": True,
         "mode": "upgrade-plan",
@@ -217,12 +274,12 @@ def build_upgrade_plan(
             "stale_prompt_count": stale,
             "unknown_prompt_count": unknown,
             "not_installed_prompt_count": not_installed,
+            "stage_deferred_goal_count": len(deferred),
             "ready_for_default_promotion": ready,
         },
         "managed_heartbeats": managed,
-        "recommended_action": "promotion propagation is complete"
-        if ready
-        else "refresh installed heartbeat automations/controller clients before default promotion",
+        "stage_deferred_heartbeats": deferred,
+        "recommended_action": recommended_action,
     }
 
 
@@ -242,6 +299,7 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
         f"- stale_prompt_count: `{summary.get('stale_prompt_count')}`",
         f"- unknown_prompt_count: `{summary.get('unknown_prompt_count')}`",
         f"- not_installed_prompt_count: `{summary.get('not_installed_prompt_count')}`",
+        f"- stage_deferred_goal_count: `{summary.get('stage_deferred_goal_count')}`",
         f"- recommended_action: `{payload.get('recommended_action')}`",
     ]
     manifest = payload.get("installed_manifest") if isinstance(payload.get("installed_manifest"), dict) else {}
@@ -276,4 +334,14 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
                 f"  prompts: `{'; '.join(prompt_parts)}`",
             ]
         )
+    deferred = payload.get("stage_deferred_heartbeats") or []
+    if deferred:
+        lines.extend(["", "## Stage Deferred Heartbeats", ""])
+        for goal in deferred:
+            if not isinstance(goal, dict):
+                continue
+            lines.append(
+                f"- `{goal.get('goal_id')}` adapter=`{goal.get('adapter_kind')}:{goal.get('adapter_status')}` "
+                f"attention_status=`{goal.get('attention_status')}` requires_update=`{goal.get('requires_update')}`"
+            )
     return "\n".join(lines) + "\n"

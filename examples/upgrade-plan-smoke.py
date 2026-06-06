@@ -17,6 +17,7 @@ from goal_harness.upgrade import build_upgrade_plan, render_upgrade_plan_markdow
 
 
 GOAL_ID = "upgrade-plan-goal"
+DEFERRED_GOAL_ID = "planned-main-control"
 
 
 def write_fixture(root: Path) -> tuple[Path, Path]:
@@ -50,6 +51,17 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
                         "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
                         "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
                         "quota": {"compute": 1.0, "window_hours": 24},
+                    },
+                    {
+                        "id": DEFERRED_GOAL_ID,
+                        "domain": "fixture",
+                        "status": "planned-high-complexity",
+                        "attention_status": "stage_deferred_not_installed",
+                        "recommended_action": "Do not install this heartbeat until the operator authorizes the stage.",
+                        "repo": str(project),
+                        "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
+                        "adapter": {"kind": "planned_read_only_map_v0", "status": "planned"},
+                        "quota": {"compute": 1.0, "window_hours": 24},
                     }
                 ],
             },
@@ -67,9 +79,15 @@ def assert_unknown_manifest_blocks_promotion(registry_path: Path) -> dict:
     assert payload["ok"] is True, payload
     assert payload["prompt_modes"] == ["thin"], payload
     assert payload["summary"]["managed_goal_count"] == 1, payload
+    assert payload["summary"]["stage_deferred_goal_count"] == 1, payload
     assert payload["summary"]["unknown_prompt_count"] == 1, payload
     assert payload["summary"]["ready_for_default_promotion"] is False, payload
+    deferred = payload["stage_deferred_heartbeats"][0]
+    assert deferred["goal_id"] == DEFERRED_GOAL_ID, payload
+    assert deferred["requires_update"] is False, payload
+    assert deferred["attention_status"] == "stage_deferred_not_installed", payload
     goal = payload["managed_heartbeats"][0]
+    assert goal["goal_id"] == GOAL_ID, payload
     assert goal["state_file_exists"] is True, payload
     thin_prompt = goal["generated_prompts"]["thin"]
     assert thin_prompt["within_interface_budget"] is True, payload
@@ -78,6 +96,9 @@ def assert_unknown_manifest_blocks_promotion(registry_path: Path) -> dict:
     assert goal["installed_prompts"]["thin"]["status"] == "unknown", payload
     markdown = render_upgrade_plan_markdown(payload)
     assert "ready_for_default_promotion: `False`" in markdown, markdown
+    assert "stage_deferred_goal_count: `1`" in markdown, markdown
+    assert "## Stage Deferred Heartbeats" in markdown, markdown
+    assert DEFERRED_GOAL_ID in markdown, markdown
     return payload
 
 
@@ -111,6 +132,7 @@ def assert_matching_manifest_is_ready(registry_path: Path, manifest_path: Path, 
     assert payload["summary"]["stale_prompt_count"] == 0, payload
     assert payload["summary"]["current_prompt_count"] == 1, payload
     assert payload["summary"]["not_installed_prompt_count"] == 0, payload
+    assert payload["summary"]["stage_deferred_goal_count"] == 1, payload
     assert payload["summary"]["ready_for_default_promotion"] is True, payload
     assert payload["managed_heartbeats"][0]["installed_prompts"]["thin"]["status"] == "current", payload
 
@@ -143,6 +165,7 @@ def assert_not_installed_manifest_is_ready(registry_path: Path, manifest_path: P
     assert payload["summary"]["stale_prompt_count"] == 0, payload
     assert payload["summary"]["current_prompt_count"] == 0, payload
     assert payload["summary"]["not_installed_prompt_count"] == 1, payload
+    assert payload["summary"]["stage_deferred_goal_count"] == 1, payload
     assert payload["summary"]["ready_for_default_promotion"] is True, payload
     installed = payload["managed_heartbeats"][0]["installed_prompts"]["thin"]
     assert payload["managed_heartbeats"][0]["requires_update"] is False, payload
@@ -151,12 +174,29 @@ def assert_not_installed_manifest_is_ready(registry_path: Path, manifest_path: P
     assert installed["installed"] is False, payload
 
 
+def assert_stage_deferred_selection_is_not_upgrade_work(registry_path: Path) -> None:
+    payload = build_upgrade_plan(
+        registry_path=registry_path,
+        cli_bin="goal-harness",
+        goal_ids=[DEFERRED_GOAL_ID],
+    )
+    assert payload["summary"]["managed_goal_count"] == 0, payload
+    assert payload["summary"]["unknown_prompt_count"] == 0, payload
+    assert payload["summary"]["stale_prompt_count"] == 0, payload
+    assert payload["summary"]["stage_deferred_goal_count"] == 1, payload
+    assert payload["managed_heartbeats"] == [], payload
+    assert payload["stage_deferred_heartbeats"][0]["goal_id"] == DEFERRED_GOAL_ID, payload
+    assert payload["stage_deferred_heartbeats"][0]["requires_update"] is False, payload
+    assert "stage-deferred" in payload["recommended_action"], payload
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="goal-harness-upgrade-plan-smoke-") as raw_tmp:
         registry_path, manifest_path = write_fixture(Path(raw_tmp))
         first_payload = assert_unknown_manifest_blocks_promotion(registry_path)
         assert_matching_manifest_is_ready(registry_path, manifest_path, first_payload)
         assert_not_installed_manifest_is_ready(registry_path, manifest_path)
+        assert_stage_deferred_selection_is_not_upgrade_work(registry_path)
     print("upgrade-plan-smoke ok")
     return 0
 
