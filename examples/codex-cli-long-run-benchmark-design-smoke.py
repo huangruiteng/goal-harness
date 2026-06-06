@@ -38,6 +38,10 @@ REQUIRED_PHRASES = (
     "How much overhead did Goal Harness add in steps and wall time?",
     "default CI remains deterministic and uses fake or shim workers only",
     "real Codex CLI execution remains explicit and low-frequency",
+    "python3 examples/codex-cli-long-run-benchmark-smoke.py",
+    "`benchmark_comparison_v0`",
+    "The with-harness path records Goal Tick",
+    "The without-harness path performs the same public fixture repairs",
     "Do not benchmark against real user sessions or raw chat history",
 )
 

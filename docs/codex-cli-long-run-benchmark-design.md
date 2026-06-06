@@ -131,6 +131,23 @@ The benchmark design is ready for implementation when:
 - default CI remains deterministic and uses fake or shim workers only;
 - real Codex CLI execution remains explicit and low-frequency.
 
+## First Benchmark Smoke
+
+The first executable benchmark smoke is:
+
+```bash
+python3 examples/codex-cli-long-run-benchmark-smoke.py
+```
+
+It generates the same `mini_control_plane_repair_v0` fixture for
+`with_goal_harness` and `without_goal_harness`, runs deterministic workers by
+default, and emits `benchmark_result_v0` for both scenarios plus a
+`benchmark_comparison_v0` summary. The with-harness path records Goal Tick
+phase coverage, refresh-state writebacks, and quota spend after validation. The
+without-harness path performs the same public fixture repairs without Goal
+Harness quota/writeback surfaces, giving the comparison a real A/B baseline
+while keeping CI deterministic.
+
 ## Non-Goals
 
 - Do not benchmark against real user sessions or raw chat history.
