@@ -769,6 +769,61 @@ def _stall_self_repair_hint(
     return None
 
 
+def _control_plane_post_handoff_observation_hint(item: dict[str, Any]) -> dict[str, Any] | None:
+    control_plane = compact_control_plane_policy(item.get("control_plane"))
+    self_repair = (
+        control_plane.get("self_repair")
+        if isinstance(control_plane.get("self_repair"), dict)
+        else {}
+    )
+    if self_repair.get("enabled") is not True:
+        return None
+    if str(item.get("adapter_kind") or "") != "harness_self_improvement":
+        return None
+    if item.get("agent_command"):
+        return None
+
+    handoff_readiness = (
+        item.get("handoff_readiness")
+        if isinstance(item.get("handoff_readiness"), dict)
+        else {}
+    )
+    latest_run = (
+        handoff_readiness.get("post_handoff_latest_run")
+        if isinstance(handoff_readiness.get("post_handoff_latest_run"), dict)
+        else {}
+    )
+    if handoff_readiness.get("post_handoff_run_seen") is not True:
+        return None
+    if str(handoff_readiness.get("handoff_status") or "") != "post_handoff_run_seen":
+        return None
+    if str(latest_run.get("delivery_outcome") or "") != "primary_goal_outcome":
+        return None
+
+    return {
+        "source": "quota.should-run",
+        "recommended_mode": "post_handoff_observe_if_unchanged",
+        "stop_if_unchanged": True,
+        "notify": "DONT_NOTIFY",
+        "reason": (
+            "control-plane self-repair is enabled and the latest post-handoff "
+            "implementation run already reached the primary outcome; inspect "
+            "registry/status/run history/repo state, then stay quiet if no new "
+            "evidence or concrete safe work is found"
+        ),
+        "spend_policy": (
+            "do not append quota spend for an unchanged post-handoff observation; "
+            "spend only after a new validated artifact, repair, or durable state "
+            "writeback advances the control-plane contract"
+        ),
+        "latest_run": {
+            key: latest_run.get(key)
+            for key in POST_HANDOFF_RUN_COMPACT_FIELDS
+            if latest_run.get(key) is not None
+        },
+    }
+
+
 def _heartbeat_recommendation(
     item: dict[str, Any],
     *,
@@ -873,6 +928,13 @@ def _heartbeat_recommendation(
             "reason": "latest compact read-only map already exists; wait for new evidence or a concrete safe action",
         }
 
+    post_handoff_observation = _control_plane_post_handoff_observation_hint(item)
+    if post_handoff_observation and not has_user_todos:
+        return {
+            **base,
+            **post_handoff_observation,
+        }
+
     if item.get("agent_command"):
         return {
             **base,
@@ -906,8 +968,8 @@ def _execution_obligation(
             "kind": "quiet_noop_if_unchanged",
             "notify_is_execution_gate": False,
             "reason": (
-                "this mode allows a quiet no-op only after confirming the mapped source "
-                "is unchanged and no concrete safe handoff exists"
+                "this mode allows a quiet no-op only after confirming the current state "
+                "source is unchanged and no concrete safe handoff exists"
             ),
         }
     if should_run:
