@@ -84,6 +84,23 @@ def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> No
         print(markdown_renderer(payload))
 
 
+def add_subcommand_format(arg_parser: argparse.ArgumentParser) -> None:
+    arg_parser.add_argument(
+        "--format",
+        dest="subcommand_format",
+        choices=["markdown", "json"],
+        help="Output format for this subcommand. Equivalent to global --format before the command.",
+    )
+
+
+def output_format(args: argparse.Namespace, *local_dests: str) -> str:
+    for dest in (*local_dests, "subcommand_format"):
+        value = getattr(args, dest, None)
+        if value:
+            return str(value)
+    return str(args.format)
+
+
 def review_packet_handoff_only_payload(payload: dict[str, object]) -> dict[str, object]:
     result: dict[str, object] = {
         "ok": bool(payload.get("ok")),
@@ -267,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         "heartbeat-prompt",
         help="Generate a guarded Codex App heartbeat automation task body.",
     )
+    add_subcommand_format(heartbeat_prompt_parser)
     heartbeat_prompt_parser.add_argument("--goal-id", required=True, help="Stable Goal Harness goal id.")
     heartbeat_prompt_parser.add_argument(
         "--active-state",
@@ -318,15 +336,17 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("doctor", help="Diagnose local CLI installation, PATH, wrapper, and import health.")
 
-    sub.add_parser(
+    promotion_gate_parser = sub.add_parser(
         "promotion-gate",
         help="Emit a compact machine-readable canary promotion readiness gate result.",
     )
+    add_subcommand_format(promotion_gate_parser)
 
     upgrade_plan_parser = sub.add_parser(
         "upgrade-plan",
         help="Plan local default upgrade propagation for managed heartbeat automations.",
     )
+    add_subcommand_format(upgrade_plan_parser)
     upgrade_plan_parser.add_argument("--goal-id", action="append", default=[], help="Only include one goal id. Repeatable.")
     upgrade_plan_parser.add_argument(
         "--installed-manifest",
@@ -594,6 +614,7 @@ def main(argv: list[str] | None = None) -> int:
     check_parser.add_argument("--limit", type=int, default=5)
 
     status_parser = sub.add_parser("status", help="Show a first-screen goal status and attention queue.")
+    add_subcommand_format(status_parser)
     status_parser.add_argument(
         "--scan-root",
         default=default_public_scan_root(),
@@ -822,7 +843,7 @@ def main(argv: list[str] | None = None) -> int:
                 "goal_id": args.goal_id,
                 "error": str(exc),
             }
-        print_payload(payload, args.format, render_heartbeat_prompt_markdown)
+        print_payload(payload, output_format(args), render_heartbeat_prompt_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "demo":
@@ -869,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
                 "recommended_action": "fix promotion readiness gate collection before promotion",
             }
-        print_payload(payload, args.format, render_promotion_gate_markdown)
+        print_payload(payload, output_format(args), render_promotion_gate_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "upgrade-plan":
@@ -905,7 +926,7 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 "recommended_action": "fix upgrade-plan collection before default promotion",
             }
-        print_payload(payload, args.format, render_upgrade_plan_markdown)
+        print_payload(payload, output_format(args), render_upgrade_plan_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "registry":
@@ -1188,11 +1209,11 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                 },
             }
-        print_payload(payload, args.format, render_status_markdown)
+        print_payload(payload, output_format(args), render_status_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "review-packet":
-        output_format = args.review_packet_format or args.format
+        selected_format = output_format(args, "review_packet_format")
         try:
             scan_roots = [Path(item).expanduser() for item in args.scan_path]
             if not scan_roots:
@@ -1217,10 +1238,10 @@ def main(argv: list[str] | None = None) -> int:
             }
         if args.handoff_only:
             payload = review_packet_handoff_only_payload(payload)
-        if args.handoff_only and output_format != "json" and payload.get("ok"):
+        if args.handoff_only and selected_format != "json" and payload.get("ok"):
             print(str(payload.get("handoff_text") or ""))
         else:
-            print_payload(payload, output_format, render_review_packet_markdown)
+            print_payload(payload, selected_format, render_review_packet_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "todo":
