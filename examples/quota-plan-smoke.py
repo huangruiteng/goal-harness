@@ -903,6 +903,88 @@ def assert_control_plane_waiting_projection_self_repair_should_run() -> None:
     assert "control-plane self-repair" in spend_event["health_check"], spend_event
 
 
+def assert_control_plane_post_handoff_observe_if_unchanged() -> None:
+    goal_id = "goal-harness-meta"
+    meta_goal = goal(goal_id, compute=1.0)
+    meta_goal["adapter_kind"] = "harness_self_improvement"
+    meta_goal["adapter_status"] = "connected-read-only"
+    meta_goal["control_plane"] = {
+        "self_repair": {
+            "enabled": True,
+            "allow_health_blocker_repair": True,
+            "allow_waiting_projection_repair": True,
+        }
+    }
+    meta_item = attention(goal_id, compute=1.0)
+    meta_item["status"] = "handoff_only_budget_fields_merged"
+    meta_item["recommended_action"] = "continue the ongoing interface-budget observation loop"
+    meta_item["handoff_readiness"] = {
+        "ready": True,
+        "codex_ready": True,
+        "source": "project_asset",
+        "quota_state": "eligible",
+        "handoff_status": "post_handoff_run_seen",
+        "post_handoff_run_seen": True,
+        "post_handoff_small_scale_streak": 0,
+        "post_handoff_latest_run": {
+            "generated_at": "2026-06-06T21:35:46+08:00",
+            "classification": "handoff_only_budget_fields_merged",
+            "delivery_batch_scale": "implementation",
+            "delivery_outcome": "primary_goal_outcome",
+            "health_check": "state_file 1/1; registry_goal 1/1",
+            "json_exists": True,
+            "markdown_exists": True,
+        },
+    }
+    meta_item["agent_todos"] = {
+        "source_section": "Agent Todo",
+        "total_count": 1,
+        "open_count": 1,
+        "done_count": 0,
+        "items": [
+            {
+                "index": 1,
+                "done": False,
+                "text": "Keep heartbeat prompt and agent-to-CLI interaction lean as an ongoing interface-budget task.",
+            }
+        ],
+    }
+    payload = {
+        "ok": True,
+        "registry": "./fixtures/registry.json",
+        "runtime_root": "./fixtures/runtime",
+        "goal_count": 1,
+        "run_count": 1,
+        "attention_queue": {"items": [meta_item]},
+        "run_history": {"goals": [meta_goal]},
+    }
+
+    decision = build_quota_should_run(payload, goal_id=goal_id)
+    markdown = render_quota_should_run_markdown(decision)
+
+    assert decision["ok"] is True, decision
+    assert decision["decision"] == "run", decision
+    assert decision["should_run"] is True, decision
+    assert decision["normal_delivery_allowed"] is True, decision
+    assert decision["self_repair_allowed"] is False, decision
+    assert decision["effective_action"] == "normal_run", decision
+    assert decision["agent_todo_summary"]["open_count"] == 1, decision
+    assert (
+        decision["heartbeat_recommendation"]["recommended_mode"]
+        == "post_handoff_observe_if_unchanged"
+    ), decision
+    assert decision["heartbeat_recommendation"]["stop_if_unchanged"] is True, decision
+    assert decision["heartbeat_recommendation"]["latest_run"]["delivery_outcome"] == "primary_goal_outcome", decision
+    assert decision["execution_obligation"]["must_attempt_work"] is False, decision
+    assert decision["execution_obligation"]["kind"] == "quiet_noop_if_unchanged", decision
+    assert "post_handoff_observe_if_unchanged" in markdown, markdown
+    assert "heartbeat_stop_if_unchanged: `True`" in markdown, markdown
+    assert (
+        "execution_obligation: must_attempt_work=False kind=quiet_noop_if_unchanged notify_is_execution_gate=False"
+        in markdown
+    ), markdown
+
+
 def assert_attention_queue_overrides_stale_run_history() -> None:
     stale_goal = goal("queue-authority", compute=1.0)
     stale_goal["status"] = "operator_gate_deferred"
@@ -1359,6 +1441,7 @@ def main() -> int:
     assert_control_plane_health_self_repair_should_run()
     assert_control_plane_self_repair_default_off()
     assert_control_plane_waiting_projection_self_repair_should_run()
+    assert_control_plane_post_handoff_observe_if_unchanged()
     assert_attention_queue_overrides_stale_run_history()
     assert_project_asset_backed_no_evidence_should_run()
     assert_heartbeat_recommendation_lifecycle()
