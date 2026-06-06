@@ -350,6 +350,15 @@ common modes are:
   implementation/test/state batch is valid when scope and validation are clear;
   the contract is bounded, not tiny.
 
+The same response also includes `execution_obligation`, which separates worker
+execution from user-facing notification. `heartbeat_recommendation.notify`
+answers "should this heartbeat interrupt the user?", not "may the worker skip
+work?" When `execution_obligation.must_attempt_work=true`, a short heartbeat
+must attempt one bounded segment, validate it, write durable state/events, and
+spend once after successful delivery. A quiet no-op is only allowed when the
+machine contract explicitly says `must_attempt_work=false`, such as
+`mapped_noop_if_unchanged` after confirming the mapped source is unchanged.
+
 Unknown goals or status collection failures return non-zero so automations fail
 closed.
 
