@@ -441,6 +441,24 @@ function buildRewardApiUrls(source: DataSource) {
   }
 }
 
+function buildControlPlaneApiUrls(source: DataSource) {
+  if (source.kind !== "url" || !/^https?:\/\//i.test(source.label)) {
+    return { dryRunUrl: null, applyUrl: null };
+  }
+  try {
+    const url = new URL(source.label);
+    const isLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
+    return isLoopback
+      ? {
+          dryRunUrl: `${url.origin}/control-plane/configure-goal/dry-run`,
+          applyUrl: `${url.origin}/control-plane/configure-goal/apply`,
+        }
+      : { dryRunUrl: null, applyUrl: null };
+  } catch {
+    return { dryRunUrl: null, applyUrl: null };
+  }
+}
+
 function buildReviewMaterialUrl(source: DataSource, goalId: string, material: ReviewMaterial) {
   if (source.kind !== "url" || !/^https?:\/\//i.test(source.label) || !material.path) {
     return null;
@@ -1809,6 +1827,34 @@ type ControlPlaneSettingsDraft = {
   allowedDomains: string;
 };
 
+type ConfigureGoalRequestBody = {
+  allowed_domains: string[];
+  clear_allowed_domains: boolean;
+  goal_id: string;
+  max_children: number;
+  orchestration_mode: "default" | "multi_subagent";
+  quota_compute: number;
+  quota_window_hours: number;
+  self_repair_enabled: boolean;
+  self_repair_health: boolean;
+  self_repair_waiting_projection: boolean;
+  spawn_allowed: boolean;
+};
+
+type ConfigureGoalApiResponse = {
+  ok: boolean;
+  dry_run?: boolean;
+  execute?: boolean;
+  written?: boolean;
+  changed?: boolean;
+  goal_id?: string;
+  changed_fields?: string[];
+  preview_id?: string;
+  control_plane_summary?: string;
+  orchestration_summary?: string;
+  error?: string;
+};
+
 function buildControlPlaneSettingsDraft(goal?: RunGoal, queueItem?: QueueItem): ControlPlaneSettingsDraft {
   const quota = queueItem?.quota ?? queueItem?.project_asset?.quota ?? goal?.quota;
   const controlPlane = controlPlaneForTarget(goal, queueItem);
@@ -1825,6 +1871,31 @@ function buildControlPlaneSettingsDraft(goal?: RunGoal, queueItem?: QueueItem): 
     spawnAllowed: Boolean(orchestration?.spawn_allowed || orchestration?.allowed),
     maxChildren: String(orchestration?.max_children ?? 0),
     allowedDomains: orchestration?.allowed_domains?.length ? orchestration.allowed_domains.join(", ") : "",
+  };
+}
+
+function validDraftNumber(value: string, { min }: { min: number }) {
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) && parsed >= min;
+}
+
+function buildConfigureGoalRequestBody(draft: ControlPlaneSettingsDraft, goalId?: string): ConfigureGoalRequestBody | null {
+  if (!goalId || !validDraftNumber(draft.quotaCompute, { min: 0.000001 }) || !validDraftNumber(draft.quotaWindowHours, { min: 0.000001 }) || !validDraftNumber(draft.maxChildren, { min: 0 })) {
+    return null;
+  }
+  const domains = normalizedDomainList(draft.allowedDomains);
+  return {
+    allowed_domains: domains,
+    clear_allowed_domains: domains.length === 0,
+    goal_id: goalId,
+    max_children: Number(draft.maxChildren.trim()),
+    orchestration_mode: draft.orchestrationMode,
+    quota_compute: Number(draft.quotaCompute.trim()),
+    quota_window_hours: Number(draft.quotaWindowHours.trim()),
+    self_repair_enabled: draft.selfRepairEnabled,
+    self_repair_health: draft.selfRepairHealth,
+    self_repair_waiting_projection: draft.selfRepairWaitingProjection,
+    spawn_allowed: draft.spawnAllowed,
   };
 }
 
@@ -1884,11 +1955,17 @@ function buildConfigureGoalCommand({
 }
 
 function ControlPlaneSettingsPanel({
+  applyUrl,
+  dryRunUrl,
   goal,
+  onStatusRefresh,
   queueItem,
   registry,
 }: {
+  applyUrl: string | null;
+  dryRunUrl: string | null;
   goal?: RunGoal;
+  onStatusRefresh: () => Promise<void>;
   queueItem?: QueueItem;
   registry: string;
 }) {
@@ -1925,15 +2002,30 @@ function ControlPlaneSettingsPanel({
   );
   const [draft, setDraft] = useState(currentDraft);
   const [copyState, setCopyState] = useState<CopyState>("idle");
+  const [dryRunResult, setDryRunResult] = useState<ConfigureGoalApiResponse | null>(null);
+  const [dryRunBody, setDryRunBody] = useState<ConfigureGoalRequestBody | null>(null);
+  const [applyResult, setApplyResult] = useState<ConfigureGoalApiResponse | null>(null);
+  const [dryRunError, setDryRunError] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [isDryRunning, setIsDryRunning] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(currentDraft);
   const goalId = goal?.id ?? queueItem?.goal_id;
   const dryRunCommand = buildConfigureGoalCommand({ draft, execute: false, goalId, registry });
   const applyCommand = buildConfigureGoalCommand({ draft, execute: true, goalId, registry });
+  const requestBody = buildConfigureGoalRequestBody(draft, goalId);
   const canCopy = Boolean(goalId && dirty);
+  const canDryRun = Boolean(dryRunUrl && dirty && requestBody);
+  const canApply = Boolean(applyUrl && dryRunBody && dryRunResult?.ok && dryRunResult.preview_id && !applyResult?.written);
 
   useEffect(() => {
     setDraft(currentDraft);
     setCopyState("idle");
+    setDryRunResult(null);
+    setDryRunBody(null);
+    setApplyResult(null);
+    setDryRunError(null);
+    setApplyError(null);
   }, [currentDraft]);
 
   useEffect(() => {
@@ -1951,6 +2043,61 @@ function ControlPlaneSettingsPanel({
     setCopyState((await copyTextToClipboard(command)) ? "copied" : "failed");
   }
 
+  async function runDryRunCheck() {
+    if (!dryRunUrl || !requestBody) {
+      return;
+    }
+    setIsDryRunning(true);
+    setDryRunError(null);
+    setDryRunResult(null);
+    setDryRunBody(null);
+    setApplyResult(null);
+    setApplyError(null);
+    try {
+      const response = await fetch(dryRunUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      const payload = await response.json() as ConfigureGoalApiResponse;
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setDryRunResult(payload);
+      setDryRunBody(requestBody);
+    } catch (error) {
+      setDryRunError(formatStatusError(error));
+    } finally {
+      setIsDryRunning(false);
+    }
+  }
+
+  async function applySettings() {
+    if (!applyUrl || !dryRunBody || !dryRunResult?.preview_id) {
+      return;
+    }
+    setIsApplying(true);
+    setApplyError(null);
+    try {
+      const response = await fetch(applyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...dryRunBody, preview_id: dryRunResult.preview_id }),
+      });
+      const payload = await response.json() as ConfigureGoalApiResponse;
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setApplyResult(payload);
+      setDryRunResult(payload);
+      await onStatusRefresh();
+    } catch (error) {
+      setApplyError(formatStatusError(error));
+    } finally {
+      setIsApplying(false);
+    }
+  }
+
   return (
     <div
       className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-900"
@@ -1965,6 +2112,8 @@ function ControlPlaneSettingsPanel({
           <Badge variant={selfRepairEnabled ? "success" : "neutral"}>{selfRepairEnabled ? "repair enabled" : "repair off"}</Badge>
           <Badge variant={orchestrationVariant}>{mode}</Badge>
           <Badge variant={dirty ? "warning" : "success"}>{dirty ? "dirty" : "clean"}</Badge>
+          <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "local API" : "copy only"}</Badge>
+          {applyResult?.written ? <Badge variant="success">applied</Badge> : null}
         </div>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -2090,6 +2239,14 @@ function ControlPlaneSettingsPanel({
             <RotateCcw className="h-4 w-4" />
             Reset
           </Button>
+          <Button disabled={!canDryRun || isDryRunning} onClick={() => void runDryRunCheck()} size="sm">
+            {isDryRunning ? <RefreshCw className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+            Dry-run Check
+          </Button>
+          <Button disabled={!canApply || isApplying} onClick={() => void applySettings()} size="sm" variant="primary">
+            {isApplying ? <RefreshCw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+            Apply registry settings
+          </Button>
           <Button disabled={!canCopy} onClick={() => void copyCommand(dryRunCommand)} size="sm">
             <Copy className="h-4 w-4" />
             Copy dry-run
@@ -2100,7 +2257,23 @@ function ControlPlaneSettingsPanel({
           </Button>
           {copyState === "copied" ? <Badge variant="success">copied</Badge> : null}
           {copyState === "failed" ? <Badge variant="danger">copy failed</Badge> : null}
+          {dryRunError ? <Badge variant="danger">{dryRunError.slice(0, 96)}</Badge> : null}
+          {applyError ? <Badge variant="danger">{applyError.slice(0, 96)}</Badge> : null}
         </div>
+        {dryRunResult?.ok ? (
+          <div
+            className="space-y-1 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 lg:col-span-2"
+            data-testid="control-plane-settings-dry-run-result"
+          >
+            <div>
+              changed={String(Boolean(dryRunResult.changed))} · written={String(Boolean(dryRunResult.written))}
+              {dryRunResult.preview_id ? ` · preview=${dryRunResult.preview_id}` : ""}
+            </div>
+            {dryRunResult.changed_fields?.length ? <div>fields={dryRunResult.changed_fields.join(", ")}</div> : null}
+            {dryRunResult.control_plane_summary ? <div>{dryRunResult.control_plane_summary}</div> : null}
+            {dryRunResult.orchestration_summary ? <div>{dryRunResult.orchestration_summary}</div> : null}
+          </div>
+        ) : null}
         <pre
           className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800 lg:col-span-2"
           data-testid="control-plane-settings-command-preview"
@@ -4790,21 +4963,25 @@ function RewardCommandDraft({
 }
 
 function RunHistoryPanel({
+  controlPlaneApplyUrl,
+  controlPlaneDryRunUrl,
   goal,
+  onStatusRefresh,
   queueItem,
   registry,
   runtimeRoot,
   rewardDryRunUrl,
   rewardAppendUrl,
-  onStatusRefresh,
 }: {
+  controlPlaneApplyUrl: string | null;
+  controlPlaneDryRunUrl: string | null;
   goal?: RunGoal;
+  onStatusRefresh: () => Promise<void>;
   queueItem?: QueueItem;
   registry: string;
   runtimeRoot: string;
   rewardDryRunUrl: string | null;
   rewardAppendUrl: string | null;
-  onStatusRefresh: () => Promise<void>;
 }) {
   const latestRuns = goal?.latest_runs ?? [];
   const authorityCoverage = buildAuthorityCoverage({ goal, run: latestRuns[0] });
@@ -4855,7 +5032,14 @@ function RunHistoryPanel({
             runtimeRoot={runtimeRoot}
           />
 
-          <ControlPlaneSettingsPanel goal={goal} queueItem={queueItem} registry={registry} />
+          <ControlPlaneSettingsPanel
+            applyUrl={controlPlaneApplyUrl}
+            dryRunUrl={controlPlaneDryRunUrl}
+            goal={goal}
+            onStatusRefresh={onStatusRefresh}
+            queueItem={queueItem}
+            registry={registry}
+          />
 
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
@@ -5112,6 +5296,7 @@ export function DashboardPage() {
     [runHistory.goals, queue.items],
   );
   const rewardApiUrls = useMemo(() => buildRewardApiUrls(source), [source]);
+  const controlPlaneApiUrls = useMemo(() => buildControlPlaneApiUrls(source), [source]);
 
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
@@ -5512,6 +5697,8 @@ export function DashboardPage() {
                     </Select>
                   ) : null}
                   <RunHistoryPanel
+                    controlPlaneApplyUrl={controlPlaneApiUrls.applyUrl}
+                    controlPlaneDryRunUrl={controlPlaneApiUrls.dryRunUrl}
                     goal={selectedGoal}
                     onStatusRefresh={async () => {
                       if (source.kind === "url") {

@@ -700,6 +700,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Enable POST /reward/append on loopback only so the dashboard can append human_reward overlays.",
     )
     serve_status_parser.add_argument(
+        "--enable-control-plane-write-api",
+        action="store_true",
+        help="Enable POST /control-plane/configure-goal/apply on loopback only so the dashboard can write registry settings.",
+    )
+    serve_status_parser.add_argument(
         "--global-registry",
         action="store_true",
         help="Serve the shared global registry view even when invoked from a project directory.",
@@ -1321,6 +1326,7 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port,
                 status_path=args.path,
                 enable_reward_write_api=bool(args.enable_reward_write_api),
+                enable_control_plane_write_api=bool(args.enable_control_plane_write_api),
                 verbose=bool(args.verbose),
             )
         except Exception as exc:
