@@ -140,3 +140,11 @@ After the empty-state regression is stable, add fixed session-history replay
 fixtures. Replay fixtures should be compact synthetic transcripts, not copies of
 real user sessions, and should verify that replayed context updates the same
 durable state/event ledger as the empty-state path.
+
+## Capability Benchmark Extension
+
+The runner's current fixture proves the control-plane contract but is too easy
+to measure Codex task capability. Use
+`docs/codex-cli-long-run-benchmark-design.md` for the next benchmark task:
+`mini_control_plane_repair_v0`, a `3-5` step isolated control-plane repair with
+matching with/without Goal Harness scenarios and `benchmark_result_v0` metrics.
