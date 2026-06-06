@@ -616,8 +616,8 @@ Item fields:
 - `severity`: `high`, `action`, or `watch`.
 - `recommended_action`: exactly one next action.
 - `project_asset`: a compact control-plane projection derived from the same
-  item. It must carry `owner`, `gate`, `next_action`, and `stop_condition`, and
-  may include compact `user_todos`, `agent_todos`, `quota`, and
+  item. It must carry `owner`, `gate`, `support_mode`, `next_action`, and
+  `stop_condition`, and may include compact `user_todos`, `agent_todos`, `quota`, and
   `latest_validation` summaries. Registry-backed project assets also include
   `execution_profile`, the project-level delivery floor created by
   `goal-harness connect`, and `orchestration`, the compact projection of
@@ -635,10 +635,17 @@ Item fields:
   counts for observation only; it is not a lock service or write arbiter.
   This is the first-screen project asset surface for
   agents and dashboards; it lets consumers avoid reconstructing owner, gate,
-  next action, stop condition, todo counts, compute state, and latest validation
-  from scattered fields. It also keeps delivery-floor and
+  support mode, next action, stop condition, todo counts, compute state, and
+  latest validation from scattered fields. It also keeps delivery-floor and
   orchestration policy close to the project asset instead of forcing agents to
   infer them from history.
+  `support_mode` is a compact product-mode label: `read_only_observer`,
+  `decision_support`, `reward_capture`, or `selective_assist`. It describes the
+  current operator/agent relationship; it is not a permission bit and does not
+  override `gate`, `quota`, or `agent_command`. When an approved
+  `agent_command` is present and public-safe, `project_asset.next_safe_command`
+  may repeat that command so first-screen dashboards and handoff packets can
+  show the next executable local step without scanning top-level queue fields.
   Markdown renderers should
   include the first unfinished user and agent todo here when available, so
   hot-path readers do not need to scan the detailed todo sections. The richer

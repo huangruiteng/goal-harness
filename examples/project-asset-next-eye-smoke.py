@@ -28,6 +28,7 @@ AGENT_TODO = "Run the read-only map after the owner decision is recorded."
 NEXT_ACTION = "Use the current project asset to choose one bounded delivery step."
 STOP_CONDITION = "stop until the user or controller decision is recorded"
 VALIDATION_SUMMARY = "fixture validation passed; authority_sources 1"
+SAFE_AGENT_COMMAND = "goal-harness read-only-map --goal-id next-eye-fixture --dry-run"
 
 
 def assert_status_project_asset_next_eye() -> None:
@@ -80,12 +81,14 @@ def assert_status_project_asset_next_eye() -> None:
     )
 
     asset = item["project_asset"]
-    for field in ("owner", "gate", "next_action", "stop_condition"):
+    for field in ("owner", "gate", "support_mode", "next_action", "stop_condition"):
         assert asset.get(field), asset
     assert asset["owner"] == "user_or_controller", asset
     assert asset["gate"] == "operator_question", asset
+    assert asset["support_mode"] == "decision_support", asset
     assert asset["next_action"] == NEXT_ACTION, asset
     assert asset["stop_condition"] == STOP_CONDITION, asset
+    assert "next_safe_command" not in asset, asset
     assert asset["user_todos"]["open"] == 1, asset
     assert asset["user_todos"]["next"] == USER_TODO, asset
     assert asset["agent_todos"]["open"] == 1, asset
@@ -93,6 +96,30 @@ def assert_status_project_asset_next_eye() -> None:
     assert asset["quota"]["state"] == "operator_gate", asset
     assert asset["latest_validation"]["classification"] == "next_eye_fixture", asset
     assert asset["latest_validation"]["summary"] == VALIDATION_SUMMARY, asset
+    assert project_asset_summary_is_public_safe(asset), asset
+
+
+def assert_status_project_asset_safe_command_contract() -> None:
+    item = {
+        "goal_id": "next-eye-command-fixture",
+        "recommended_action": "Run the approved read-only map command.",
+        "project_asset": build_project_asset(
+            status="operator_gate_approved",
+            waiting_on="codex",
+            recommended_action="Run the approved read-only map command.",
+            operator_question=None,
+            agent_command=SAFE_AGENT_COMMAND,
+            missing_gates=None,
+            next_handoff_condition=None,
+        ),
+        "agent_command": SAFE_AGENT_COMMAND,
+    }
+    asset = item["project_asset"]
+    assert asset["owner"] == "codex", asset
+    assert asset["gate"] == "none", asset
+    assert asset["support_mode"] == "selective_assist", asset
+    assert asset["next_safe_command"] == SAFE_AGENT_COMMAND, asset
+    assert asset["stop_condition"] == "stop if the command fails or needs write, production, or additional approval", asset
     assert project_asset_summary_is_public_safe(asset), asset
 
 
@@ -110,12 +137,15 @@ def assert_dashboard_first_screen_render_contract() -> None:
         "Agent todo",
         "Validation",
         "Quota",
+        "Agent command",
+        "Safe CLI Path",
     ):
         assert marker in dashboard, marker
 
 
 def main() -> int:
     assert_status_project_asset_next_eye()
+    assert_status_project_asset_safe_command_contract()
     assert_dashboard_first_screen_render_contract()
     print("project-asset-next-eye-smoke ok")
     return 0

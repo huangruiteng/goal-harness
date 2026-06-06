@@ -623,6 +623,36 @@ def project_asset_stop_condition(
     return "stop if the next action needs reward, gate approval, write control, or production access"
 
 
+def project_asset_support_mode(
+    *,
+    waiting_on: str,
+    operator_question: str | None,
+    missing_gates: list[str] | None,
+    status: str,
+    recommended_action: str,
+    agent_command: str | None,
+) -> str:
+    surface = " ".join(
+        str(value or "")
+        for value in (status, recommended_action, agent_command, " ".join(missing_gates or []))
+    ).lower()
+    if "reward" in surface:
+        return "reward_capture"
+    if operator_question or missing_gates or waiting_on in {"user_or_controller", "controller"}:
+        return "decision_support"
+    if waiting_on == "external_evidence":
+        return "read_only_observer"
+    if agent_command or waiting_on == "codex":
+        return "selective_assist"
+    return "read_only_observer"
+
+
+def project_asset_next_safe_command(agent_command: str | None) -> str | None:
+    if not agent_command:
+        return None
+    return public_safe_compact_text(agent_command, limit=320)
+
+
 def open_todo_items(
     todos: dict[str, Any] | None,
     *,
@@ -1346,13 +1376,21 @@ def build_project_asset(
     missing_gates: list[str] | None,
     next_handoff_condition: str | None,
 ) -> dict[str, Any]:
-    return {
+    asset = {
         "owner": project_asset_owner(waiting_on),
         "gate": project_asset_gate(
             waiting_on=waiting_on,
             operator_question=operator_question,
             missing_gates=missing_gates,
             status=status,
+        ),
+        "support_mode": project_asset_support_mode(
+            waiting_on=waiting_on,
+            operator_question=operator_question,
+            missing_gates=missing_gates,
+            status=status,
+            recommended_action=recommended_action,
+            agent_command=agent_command,
         ),
         "next_action": recommended_action,
         "stop_condition": project_asset_stop_condition(
@@ -1361,6 +1399,10 @@ def build_project_asset(
             agent_command=agent_command,
         ),
     }
+    next_safe_command = project_asset_next_safe_command(agent_command)
+    if next_safe_command:
+        asset["next_safe_command"] = next_safe_command
+    return asset
 
 
 def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
