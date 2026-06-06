@@ -19,10 +19,11 @@ def shell_arg(value: str) -> str:
     return shlex.quote(value)
 
 
-def render_cli_preflight() -> str:
-    return """export PATH="$HOME/.local/bin:$PATH"
+def render_cli_preflight(*, cli_bin: str = "goal-harness") -> str:
+    cli_bin_arg = shell_arg(cli_bin)
+    return f"""export PATH="$HOME/.local/bin:$PATH"
 install_script="$HOME/goal-harness/scripts/install-local.sh"
-if ! command -v goal-harness >/dev/null 2>&1; then
+if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
   if [ -x "$install_script" ]; then
     "$install_script"
     export PATH="$HOME/.local/bin:$PATH"
@@ -31,20 +32,20 @@ if ! command -v goal-harness >/dev/null 2>&1; then
     exit 1
   fi
 fi
-goal-harness doctor >/dev/null"""
+{cli_bin_arg} doctor >/dev/null"""
 
 
-def render_quota_guard_command(goal_id: str) -> str:
+def render_quota_guard_command(goal_id: str, *, cli_bin: str = "goal-harness") -> str:
     return (
-        "goal-harness --format json "
+        f"{shell_arg(cli_bin)} --format json "
         f"--registry {SHARED_GLOBAL_REGISTRY} "
         f"quota should-run --goal-id {shell_arg(goal_id)}"
     )
 
 
-def render_quota_spend_command(goal_id: str, *, source: str = "adapter") -> str:
+def render_quota_spend_command(goal_id: str, *, source: str = "adapter", cli_bin: str = "goal-harness") -> str:
     return (
-        "goal-harness "
+        f"{shell_arg(cli_bin)} "
         f"--registry {SHARED_GLOBAL_REGISTRY} "
         "quota spend-slot "
         f"--goal-id {shell_arg(goal_id)} "
@@ -237,6 +238,10 @@ def render_prompt_text(
 4. 确认 `.goal-harness/registry.json` 和 `.codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md` 已创建或更新。
    如果目标状态包含私有证据，把 `.goal-harness/` 和 `.codex/goals/` 加入该项目 `.gitignore`。
    `goal-harness connect` 默认会同步到共享全局 registry；不要手动编辑其他项目的 registry。
+   接入后检查 registry 里的 `execution_profile`：它是本项目后续 heartbeat / adapter 的执行画像。
+   默认 cadence 是 `bounded_progress_segment`，连续小步达到阈值后，下一轮必须扩展到
+   `minimum_scale` 并包含 `must_include` 里的真实 artifact、targeted validation、state writeback；
+   如果做不到，先报 blocker，不 append quota spend。
 5. 在任何 heartbeat、scheduled tick、long-running adapter 或自主 delivery 前，先问 compute guard：
 
 ```bash

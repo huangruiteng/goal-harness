@@ -98,6 +98,11 @@ goal-harness new-project-prompt \
    加入该项目 `.gitignore`。
    `goal-harness connect` 默认会同步到共享全局 registry；不要手动编辑其他
    项目的 registry。
+   接入后检查 registry 里的 `execution_profile`：它是本项目后续 heartbeat /
+   adapter 的执行画像。默认 cadence 是 `bounded_progress_segment`，连续小步达到
+   阈值后，下一轮必须扩展到 `minimum_scale` 并包含 `must_include` 里的真实
+   artifact、targeted validation、state writeback；如果做不到，先报 blocker，
+   不 append quota spend。
 4. 在任何 heartbeat、scheduled tick、long-running adapter 或自主 delivery 前，
    先问 compute guard：
 

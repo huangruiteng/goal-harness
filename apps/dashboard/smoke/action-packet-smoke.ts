@@ -175,6 +175,8 @@ const firstScreenRequiredSource = [
   "const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos",
   "<Badge variant=\"neutral\">Project asset</Badge>",
   "Handoff readiness:",
+  "Handoff state:",
+  "Post-handoff run:",
   "Failed checks:",
   "Owner/Gate/Stop are not project_asset-backed; below uses raw status fallback.",
   "<span className=\"font-medium\">{buildQuotaView(item.quota)?.shortLine}</span>",

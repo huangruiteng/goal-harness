@@ -15,7 +15,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCAL_PATH_PATTERN = re.compile(r"(?<!<)/(?:Users|Volumes|var/folders|tmp|private/tmp)/[^\s`'\"<>]+")
 SECRET_PATTERN = re.compile(
-    r"(?i)(?:bearer\s+[a-z0-9._~+/=-]{16,}|ak[a-z0-9_=-]{12,}|sk[a-z0-9_=-]{12,}|token[=:][^\s`'\"<>]{12,})"
+    r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]{16,}|(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
 )
 
 
@@ -98,6 +98,13 @@ def assert_project_asset_handoff(args: argparse.Namespace) -> dict[str, Any]:
     assert should_run.get("state") == project_asset.get("quota", {}).get("state"), should_run
     assert should_run.get("quota", {}).get("compute") == project_asset.get("quota", {}).get("compute"), should_run
     assert should_run.get("goal_boundary", {}).get("stop_condition") == project_asset.get("stop_condition"), should_run
+    should_run_readiness = (
+        should_run.get("handoff_readiness")
+        if isinstance(should_run.get("handoff_readiness"), dict)
+        else {}
+    )
+    assert should_run_readiness.get("handoff_status") == readiness.get("handoff_status"), should_run
+    assert should_run_readiness.get("post_handoff_run_seen") == readiness.get("post_handoff_run_seen"), should_run
 
     for field, summary_key in (("user_todos", "user_todo_summary"), ("agent_todos", "agent_todo_summary")):
         asset_todos = project_asset.get(field) if isinstance(project_asset.get(field), dict) else {}

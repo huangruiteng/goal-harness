@@ -148,11 +148,52 @@ def project_asset_block(item: dict[str, Any]) -> str:
             f"{state}; codex_ready {readiness.get('codex_ready')}; "
             f"source {readiness.get('source')}; quota {readiness.get('quota_state')}"
         )
+        handoff_state = (
+            f"status {readiness.get('handoff_status')}; "
+            f"post_handoff_run_seen {readiness.get('post_handoff_run_seen')}; "
+            f"ready_at {readiness.get('handoff_ready_at')}"
+        )
+        latest_run = (
+            readiness.get("post_handoff_latest_run")
+            if isinstance(readiness.get("post_handoff_latest_run"), dict)
+            else {}
+        )
+        latest_run_line = ""
+        if latest_run:
+            scale_text = (
+                f" scale={esc(latest_run.get('delivery_batch_scale'))}"
+                if latest_run.get("delivery_batch_scale")
+                else ""
+            )
+            latest_run_line = (
+                f"<p><b>Post-handoff run</b> "
+                f"{esc(latest_run.get('classification'))} at {esc(latest_run.get('generated_at'))}"
+                f"{scale_text}</p>"
+            )
+        recent_runs = (
+            readiness.get("post_handoff_recent_runs")
+            if isinstance(readiness.get("post_handoff_recent_runs"), list)
+            else []
+        )
+        recent_scales = [
+            esc(str(run.get("delivery_batch_scale") or ""))
+            for run in recent_runs
+            if isinstance(run, dict) and run.get("delivery_batch_scale")
+        ]
+        recent_scale_line = ""
+        if recent_scales:
+            recent_scale_line = (
+                f"<p><b>Recent scales</b> {', '.join(recent_scales)}; "
+                f"small_streak {esc(readiness.get('post_handoff_small_scale_streak'))}</p>"
+            )
         readiness_block = f"""
             <div class="handoff-readiness {'ready' if readiness.get('ready') else 'blocked'}">
               <strong>Handoff readiness</strong>
               <span>{esc(readiness_summary)}</span>
               <p><b>Failed checks</b> {esc(failed_text)}</p>
+              <p><b>Handoff state</b> {esc(handoff_state)}</p>
+              {latest_run_line}
+              {recent_scale_line}
               <p><b>Probe</b> {esc(readiness.get("next_probe"))}</p>
             </div>
         """

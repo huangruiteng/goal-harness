@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .authority import authority_registry_summary
+from .execution_profile import compact_execution_profile, execution_profile_summary
 from .quota import goal_quota_config
 
 
@@ -84,6 +85,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
         repo_ids = repo_goal_ids.get(stable_path_key(repo), []) if repo else []
         adapter = raw_goal.get("adapter") if isinstance(raw_goal.get("adapter"), dict) else {}
         spawn_policy = raw_goal.get("spawn_policy") if isinstance(raw_goal.get("spawn_policy"), dict) else {}
+        execution_profile = compact_execution_profile(raw_goal.get("execution_profile"))
         authority_sources = raw_goal.get("authority_sources")
         if not isinstance(authority_sources, list):
             authority_sources = []
@@ -126,6 +128,7 @@ def inspect_registry(path: Path) -> dict[str, Any]:
                 "authority_source_count": len(authority_sources),
                 "authority_registry": authority_registry,
                 "quota": quota,
+                "execution_profile": execution_profile,
                 "waiting_on": raw_goal.get("waiting_on"),
                 "attention_status": raw_goal.get("attention_status"),
                 "operator_question": raw_goal.get("operator_question"),
@@ -195,6 +198,16 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
             authority_suffix += f" authority_registry=defaults:{default_count},topics:{topic_count}"
         quota = goal.get("quota") if isinstance(goal.get("quota"), dict) else {}
         quota_suffix = f" quota={quota.get('compute')}" if quota else ""
+        execution_profile = (
+            goal.get("execution_profile")
+            if isinstance(goal.get("execution_profile"), dict)
+            else None
+        )
+        execution_suffix = (
+            f" execution_profile={execution_profile_summary(execution_profile)}"
+            if execution_profile
+            else ""
+        )
         lines.append(
             "| "
             f"`{goal.get('id')}` | "
@@ -206,7 +219,7 @@ def render_registry_markdown(payload: dict[str, Any]) -> str:
             f"{goal.get('repo_goal_count')} | "
             f"{goal.get('state_file_exists')} | "
             f"{spawn} | "
-            f"{adapter}{authority_suffix}{quota_suffix} | "
+            f"{adapter}{authority_suffix}{quota_suffix}{execution_suffix} | "
             f"{next_probe} |"
         )
 

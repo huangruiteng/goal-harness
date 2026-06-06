@@ -4,6 +4,13 @@ import re
 import shlex
 from typing import Any
 
+from .execution_profile import (
+    compact_execution_profile,
+    execution_profile_outcome_floor,
+    execution_profile_threshold,
+    outcome_floor_threshold,
+)
+
 
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
@@ -61,6 +68,19 @@ def build_read_only_map_command(status_payload: dict[str, Any], goal_id: str) ->
             "  read-only-map \\",
             f"  --goal-id {shlex.quote(goal_id)} \\",
             "  --dry-run",
+        ]
+    )
+
+
+def build_quota_should_run_command(status_payload: dict[str, Any], goal_id: str) -> str:
+    return "\n".join(
+        [
+            "goal-harness \\",
+            f"  --registry {shlex.quote(str(status_payload.get('registry') or '<registry>'))} \\",
+            f"  --runtime-root {shlex.quote(str(status_payload.get('runtime_root') or '<runtime-root>'))} \\",
+            "  --format json \\",
+            "  quota should-run \\",
+            f"  --goal-id {shlex.quote(goal_id)}",
         ]
     )
 
@@ -125,6 +145,64 @@ def find_queue_item(status_payload: dict[str, Any], goal_id: str) -> dict[str, A
     return None
 
 
+def decision_freshness_warning(status_payload: dict[str, Any], goal_id: str) -> dict[str, Any] | None:
+    freshness = (
+        status_payload.get("decision_freshness_summary")
+        if isinstance(status_payload.get("decision_freshness_summary"), dict)
+        else {}
+    )
+    raw_items = freshness.get("items") if isinstance(freshness.get("items"), list) else []
+    items: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("goal_id") or "") != goal_id:
+            continue
+        if item.get("requires_decision_point_rebase") is not True:
+            continue
+        items.append(
+            {
+                "decision_kind": item.get("decision_kind"),
+                "freshness_state": item.get("freshness_state"),
+                "decision_at": item.get("decision_at"),
+                "classification": item.get("classification"),
+                "age_days": item.get("age_days"),
+                "newer_event_count_7d": item.get("newer_event_count_7d"),
+            }
+        )
+    if not items:
+        return None
+    return {
+        "source": freshness.get("source") or "run_history",
+        "window_days": freshness.get("window_days"),
+        "message": "旧 reward/gate 决策复用前需在当前 registry/state/quota/policy/run status 上重新对齐。",
+        "items": items[:3],
+    }
+
+
+def decision_freshness_packet_lines(warning: dict[str, Any] | None) -> list[str]:
+    if not isinstance(warning, dict) or not warning:
+        return []
+    lines = [
+        "",
+        "【决策 freshness 警告】",
+        str(warning.get("message") or "旧决策复用前需做 decision-point rebase。"),
+    ]
+    for item in warning.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        lines.append(
+            "- "
+            f"{compact_packet_text(str(item.get('decision_kind') or 'decision'), limit=60)} "
+            f"state={compact_packet_text(str(item.get('freshness_state') or 'unknown'), limit=80)} "
+            f"age_days={item.get('age_days')} "
+            f"newer_7d={item.get('newer_event_count_7d')} "
+            f"at={compact_packet_text(str(item.get('decision_at') or ''), limit=80)}"
+        )
+    lines.append("处理方式：这不是仓库回滚；只在审批/转交这一瞬间重读当前控制面状态后再复用旧决策。")
+    return [redact_local_absolute_paths(line) for line in lines]
+
+
 def first_open_todo_text(todos: Any) -> str | None:
     if not isinstance(todos, dict):
         return None
@@ -161,6 +239,159 @@ def project_asset_source_line(source: str) -> str:
     if source == "project_asset":
         return "project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）"
     return "legacy/raw fallback（未收到 project_asset；summary/action/todos 来自 raw queue/status 降级判断，不能当 owner/gate/stop authority）"
+
+
+def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
+    latest_run = (
+        readiness.get("post_handoff_latest_run")
+        if isinstance(readiness.get("post_handoff_latest_run"), dict)
+        else {}
+    )
+    if not latest_run:
+        return None
+    classification = str(latest_run.get("classification") or "unknown").strip() or "unknown"
+    scale = str(latest_run.get("delivery_batch_scale") or "unknown").strip() or "unknown"
+    generated_at = str(latest_run.get("generated_at") or "").strip()
+    streak = readiness.get("post_handoff_small_scale_streak")
+    streak_text = f", small_streak={streak}" if isinstance(streak, int) else ""
+    suffix = f", at={generated_at}" if generated_at else ""
+    return compact_packet_text(
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}",
+        limit=220,
+    )
+
+
+def _contract_minimum_text(value: str) -> str:
+    return value.replace("_or_", "/")
+
+
+def _contract_must_include_text(values: list[str]) -> str:
+    display = {
+        "coherent_artifact": "artifact",
+        "targeted_validation": "targeted validation",
+        "state_writeback": "state writeback",
+    }
+    return "、".join(display.get(value, value.replace("_", " ")) for value in values)
+
+
+def _contract_label_text(values: list[str]) -> str:
+    return "、".join(value.replace("_", " ") for value in values if value)
+
+
+def handoff_delivery_contract(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+    profile = compact_execution_profile(
+        project_asset.get("execution_profile")
+        if isinstance(project_asset.get("execution_profile"), dict)
+        else None
+    )
+    threshold = execution_profile_threshold(profile)
+    readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
+    streak = readiness.get("post_handoff_small_scale_streak")
+    outcome_floor = execution_profile_outcome_floor(profile)
+    outcome_threshold = outcome_floor_threshold(profile)
+    outcome_gap_streak = readiness.get("post_handoff_outcome_gap_streak")
+    small_degraded = isinstance(streak, int) and streak >= threshold
+    outcome_degraded = isinstance(outcome_gap_streak, int) and outcome_gap_streak >= outcome_threshold
+    if not small_degraded and not outcome_degraded:
+        return None
+    recent_runs = readiness.get("post_handoff_recent_runs")
+    recent_scales = [
+        str(run.get("delivery_batch_scale") or "unknown").strip() or "unknown"
+        for run in recent_runs or []
+        if isinstance(run, dict)
+    ][:3]
+    minimum_scale = str(profile.get("minimum_scale") or "multi_surface_or_implementation")
+    must_include = [
+        str(value)
+        for value in (profile.get("must_include") if isinstance(profile.get("must_include"), list) else [])
+        if str(value).strip()
+    ] or ["coherent_artifact", "targeted_validation", "state_writeback"]
+    spend_rule = str(profile.get("spend_rule") or "spend_only_after_artifact_validation_writeback")
+    must_advance = [
+        str(value)
+        for value in (
+            outcome_floor.get("must_advance")
+            if isinstance(outcome_floor.get("must_advance"), list)
+            else []
+        )
+        if str(value).strip()
+    ]
+    avoid = [
+        str(value)
+        for value in (
+            outcome_floor.get("avoid")
+            if isinstance(outcome_floor.get("avoid"), list)
+            else []
+        )
+        if str(value).strip()
+    ]
+    mode = (
+        "expand_after_surface_progress_loop"
+        if outcome_degraded and not small_degraded
+        else "expand_after_repeated_small_delivery"
+    )
+    outcome_summary = (
+        f"outcome_gap_streak={outcome_gap_streak}; outcome_threshold={outcome_threshold}; "
+        if outcome_degraded
+        else ""
+    )
+    summary = compact_packet_text(
+        f"{mode}; "
+        f"minimum_scale={minimum_scale}; "
+        f"include={'+'.join(must_include)}; "
+        f"spend_rule={spend_rule}; "
+        f"{outcome_summary}"
+        f"small_threshold={threshold}; "
+        "if_blocked=report_blocker_without_spend",
+        limit=220,
+    )
+    floor_sentence = ""
+    if outcome_degraded and (must_advance or avoid):
+        floor_sentence = (
+            f"推进 floor={_contract_label_text(must_advance)}；"
+            f"避免 {_contract_label_text(avoid)}；"
+        )
+    instruction = compact_packet_text(
+        "下一轮回到 active state P0/P1 outcome 做 audit，"
+        f"选连贯段，至少 {_contract_minimum_text(minimum_scale)}；"
+        f"{floor_sentence}"
+        f"含真实 {_contract_must_include_text(must_include)}；"
+        "禁止 isolated test/surface-only propagation；"
+        "若只能小步/表面，blocker，不 spend。",
+        limit=260,
+    )
+    return {
+        "mode": mode,
+        "minimum_scale": minimum_scale,
+        "must_include": must_include,
+        "outcome_floor": outcome_floor,
+        "spend_rule": spend_rule,
+        "small_scale_streak_threshold": threshold,
+        "outcome_gap_streak_threshold": outcome_threshold,
+        "if_blocked": "report_blocker_without_spend",
+        "post_handoff_small_scale_streak": streak,
+        "post_handoff_outcome_gap_streak": outcome_gap_streak,
+        "recent_scales": recent_scales,
+        "execution_profile": profile,
+        "summary": summary,
+        "instruction": instruction,
+    }
+
+
+def handoff_delivery_contract_summary(contract: dict[str, Any] | None) -> str | None:
+    if not isinstance(contract, dict):
+        return None
+    instruction = str(contract.get("instruction") or "").strip()
+    if instruction:
+        return instruction
+    summary = str(contract.get("summary") or "").strip()
+    return summary or None
 
 
 def authority_material_summary(goal: dict[str, Any] | None) -> str | None:
@@ -282,7 +513,13 @@ def suggested_decision(kind: str, item: dict[str, Any] | None, goal_id: str | No
     return "继续 / 不继续 / 继续观察，并补一句原因。"
 
 
-def project_agent_command(status_payload: dict[str, Any], goal_id: str, kind: str, item: dict[str, Any] | None) -> str:
+def project_agent_command(
+    status_payload: dict[str, Any],
+    goal_id: str,
+    kind: str,
+    item: dict[str, Any] | None,
+    goal: dict[str, Any] | None = None,
+) -> str:
     if kind == "reward":
         return build_history_command(status_payload, goal_id)
     if isinstance(item, dict) and item.get("agent_command") and kind in {"controller", "codex"}:
@@ -290,6 +527,8 @@ def project_agent_command(status_payload: dict[str, Any], goal_id: str, kind: st
     if kind == "controller":
         return build_read_only_map_command(status_payload, goal_id)
     if kind == "codex":
+        if connected_delivery_handoff(item, goal):
+            return build_quota_should_run_command(status_payload, goal_id)
         return build_history_command(status_payload, goal_id)
     if kind == "focus_wait":
         return build_history_command(status_payload, goal_id)
@@ -324,6 +563,20 @@ def operator_gate_approved_handoff(item: dict[str, Any] | None, goal: dict[str, 
     )
 
 
+def connected_delivery_handoff(item: dict[str, Any] | None, goal: dict[str, Any] | None = None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    adapter_status = str(item.get("adapter_status") or "").strip()
+    if adapter_status != "connected-delivery" and isinstance(goal, dict):
+        adapter_status = str(goal.get("adapter_status") or "").strip()
+    if adapter_status != "connected-delivery":
+        return False
+    if str(item.get("waiting_on") or "") != "codex":
+        return False
+    quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+    return str(quota.get("state") or "") == "eligible"
+
+
 def project_agent_section(
     kind: str,
     command: str,
@@ -332,13 +585,18 @@ def project_agent_section(
     agent_todo_text: str | None = None,
     authority_summary: str | None = None,
     project_asset_source_text: str | None = None,
+    handoff_followthrough_text: str | None = None,
+    handoff_delivery_contract_text: str | None = None,
     approved_operator_gate: bool = False,
+    connected_delivery: bool = False,
 ) -> str:
     goal_guard = target_goal_guard(goal_id)
     context_rule = agent_context_rule()
     todo_line = f"Agent 待办：{agent_todo_text}" if agent_todo_text else None
     authority_line = f"材料上下文：{authority_summary}；只用这些脱敏计数判断 freshness / owner gap，不要要求内部链接或原文。" if authority_summary else None
     source_line = f"项目资产来源：{project_asset_source_text}" if project_asset_source_text else None
+    followthrough_line = f"交付观测：{handoff_followthrough_text}" if handoff_followthrough_text else None
+    delivery_contract_line = f"交付合同：{handoff_delivery_contract_text}" if handoff_delivery_contract_text else None
     if approved_operator_gate:
         lines = [
             goal_guard,
@@ -346,9 +604,26 @@ def project_agent_section(
             source_line,
             todo_line,
             authority_line,
+            followthrough_line,
+            delivery_contract_line,
             "转发条件：operator gate 已记录为 approve；本段只用于把已批准的 agent_command 交给目标项目 Agent。",
             "执行边界：只执行下面命令；这是只读/dry-run 执行，不是写权限、主控接管或生产动作授权。",
             "停止条件：命令失败，或需要写入、run history append、生产动作、更高权限时，停下并用中文回报结果。",
+            "",
+            command_block(command),
+        ]
+    elif connected_delivery and kind == "codex":
+        lines = [
+            goal_guard,
+            context_rule,
+            source_line,
+            todo_line,
+            authority_line,
+            followthrough_line,
+            delivery_contract_line,
+            "转发条件：目标 registry 已是 connected-delivery，且 quota/owner/gate 显示 codex-ready；本段用于目标项目 Agent 做真实 delivery。",
+            "执行边界：先执行下面 quota guard；若 should_run=true，读取 active state/status/goal_boundary/execution_profile 后，选择一个 write_scope 内的 bounded delivery segment，可改文件、验证、写回、spend。",
+            "停止条件：只能继续 isolated test、surface-only 下游传播，或需要未授权写入范围、生产动作、destructive git、私密材料时，回报 blocker，不 spend。",
             "",
             command_block(command),
         ]
@@ -359,6 +634,8 @@ def project_agent_section(
             source_line,
             todo_line,
             authority_line,
+            followthrough_line,
+            delivery_contract_line,
             "转发条件：只有用户已经真实记录 run-bound human_reward 后，才把本段发给项目 Agent。",
             "执行边界：不要替用户写 reward；active state 只做摘要，reward 的权威来源是 run-bound human_reward overlay。",
             "停止条件：如果 reward 还停留在 dry-run / 草稿 / 口头判断，停下等待用户记录；如果已经记录，只用下面 history 路径读取。",
@@ -372,6 +649,8 @@ def project_agent_section(
             source_line,
             todo_line,
             authority_line,
+            followthrough_line,
+            delivery_contract_line,
             "转发条件：只有用户已经明确同意 read-only/controller dry-run 后，才把本段发给项目 Agent。",
             "执行边界：只执行下面只读或 dry-run 项目路径；不要运行用户本地 Gate 记录草稿。",
             "停止条件：需要真实 approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -385,6 +664,8 @@ def project_agent_section(
             source_line,
             todo_line,
             authority_line,
+            followthrough_line,
+            delivery_contract_line,
             "转发条件：仅当目标项目 Agent 需要当前等待边界时转发；这不是恢复 delivery 的授权。",
             "执行边界：只读 status/history，确认当前 owner blocker、证据入口和 stop condition；不要继续实现、adapter work、写入或生产动作。",
             "停止条件：没有新的 owner evidence、clean baseline 或外部 eval 时，保持 focus_wait 并用中文回报仍在等待什么。",
@@ -398,6 +679,8 @@ def project_agent_section(
             source_line,
             todo_line,
             authority_line,
+            followthrough_line,
+            delivery_contract_line,
             "转发条件：只有用户已经同意 safe local path 后，才把本段发给项目 Agent。",
             "执行边界：读取本项目 status/history 后，只执行下面只读或 dry-run 路径。",
             "停止条件：需要真实写 reward、approval、write-control、run history append、生产动作或命令失败时，停下等明确授权。",
@@ -432,8 +715,14 @@ def build_review_packet(
     asset_source = project_asset_source(item)
     asset_source_line = project_asset_source_line(asset_source)
     authority_summary = authority_material_summary(goal)
-    command = redact_local_absolute_paths(project_agent_command(status_payload, goal_id, kind, item))
+    followthrough_summary = handoff_followthrough_summary(item)
+    delivery_contract = handoff_delivery_contract(item)
+    delivery_contract_text = handoff_delivery_contract_summary(delivery_contract)
+    freshness_warning = decision_freshness_warning(status_payload, goal_id)
+    freshness_warning_lines = decision_freshness_packet_lines(freshness_warning)
+    command = redact_local_absolute_paths(project_agent_command(status_payload, goal_id, kind, item, goal))
     approved_handoff = operator_gate_approved_handoff(item, goal)
+    delivery_handoff = connected_delivery_handoff(item, goal) and kind == "codex"
     gate_commands = operator_gate_decision_commands(status_payload, goal_id) if kind == "controller" else {}
     gate_command = gate_commands.get("approve") if gate_commands else None
     decision = suggested_decision(kind, item, goal_id)
@@ -454,7 +743,10 @@ def build_review_packet(
         agent_todo_text=agent_todo_text,
         authority_summary=authority_summary,
         project_asset_source_text=asset_source_line,
+        handoff_followthrough_text=followthrough_summary,
+        handoff_delivery_contract_text=delivery_contract_text,
         approved_operator_gate=approved_handoff,
+        connected_delivery=delivery_handoff,
     )
     type_label = {
         "reward": "Reward",
@@ -472,6 +764,7 @@ def build_review_packet(
         f"摘要：{summary}",
         f"来源：{asset_source_line}",
         f"材料：{authority_summary}（仅脱敏计数；不含内部链接、路径或正文。）" if authority_summary else None,
+        *freshness_warning_lines,
         "",
         "【人只需判断】",
         f"解锁条件：{owner_blocker_text}（有新证据或明确暂缓后再调整 focus）" if owner_blocker_text else None,
@@ -512,12 +805,16 @@ def build_review_packet(
         "project_agent_command": command,
         "project_agent_handoff": agent_text,
         "operator_gate_approved_handoff": approved_handoff,
+        "connected_delivery_handoff": delivery_handoff,
         "operator_gate_dry_run_command": gate_command,
         "operator_gate_decision_commands": gate_commands,
         "user_todo_text": user_todo_text,
         "owner_blocker_text": owner_blocker_text,
         "agent_todo_text": agent_todo_text,
         "authority_summary": authority_summary,
+        "handoff_followthrough_summary": followthrough_summary,
+        "handoff_delivery_contract": delivery_contract,
+        "decision_freshness_warning": freshness_warning,
         "project_asset_source": asset_source,
         "packet": "\n".join(line for line in lines if line),
     }
