@@ -532,6 +532,19 @@ export const statusContractSchema = z.object({
   reload_hint: "scripts/macos-dashboard-launchagent.sh restart",
 });
 
+export const localDashboardApiSchema = z.object({
+  source: z.string().optional().default("serve-status"),
+  status_url: z.string().optional().nullable(),
+  health_url: z.string().optional().nullable(),
+  review_material_url: z.string().optional().nullable(),
+  reward_dry_run_url: z.string().optional().nullable(),
+  reward_append_url: z.string().optional().nullable(),
+  reward_write_enabled: z.boolean().optional().default(false),
+  configure_goal_dry_run_url: z.string().optional().nullable(),
+  configure_goal_apply_url: z.string().optional().nullable(),
+  control_plane_write_enabled: z.boolean().optional().default(false),
+}).optional().nullable();
+
 export const statusPayloadSchema = z.object({
   ok: z.boolean(),
   registry: z.string(),
@@ -539,6 +552,7 @@ export const statusPayloadSchema = z.object({
   goal_count: z.number(),
   run_count: z.number(),
   status_contract: statusContractSchema,
+  local_dashboard_api: localDashboardApiSchema,
   contract: z.object({
     ok: z.boolean(),
     summary: z.object({

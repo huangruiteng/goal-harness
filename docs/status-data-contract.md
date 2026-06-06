@@ -53,6 +53,35 @@ result with `appended=false`. It also returns the same coordination fields as
 the CLI: `active_state_summary` and `project_agent_visibility`. It does not
 mutate the run index and does not return private artifact paths.
 
+When status is served over loopback HTTP, `/status.json` also includes an
+optional `local_dashboard_api` capability block. CLI status exports may omit it
+because they are plain read-only snapshots. The block is the dashboard's machine
+contract for local write affordances:
+
+```json
+{
+  "local_dashboard_api": {
+    "source": "serve-status",
+    "reward_dry_run_url": "/reward/dry-run",
+    "reward_append_url": null,
+    "reward_write_enabled": false,
+    "configure_goal_dry_run_url": "/control-plane/configure-goal/dry-run",
+    "configure_goal_apply_url": null,
+    "control_plane_write_enabled": false
+  }
+}
+```
+
+The control-plane settings write path follows the same opt-in rule as reward
+append. By default `serve-status` validates dashboard setting drafts through
+`POST /control-plane/configure-goal/dry-run` but does not expose an apply
+capability. Starting the loopback server with
+`--enable-control-plane-write-api` exposes
+`POST /control-plane/configure-goal/apply`; the dashboard should enable Apply
+only when `local_dashboard_api.control_plane_write_enabled=true` and the apply
+URL is present. Apply requests must reuse the fresh `preview_id` from the
+dry-run response.
+
 ## Command
 
 ```bash

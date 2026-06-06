@@ -21,14 +21,19 @@ status_label="$label_prefix.status"
 dashboard_label="$label_prefix.dashboard"
 status_plist="$launch_agents_dir/$status_label.plist"
 dashboard_plist="$launch_agents_dir/$dashboard_label.plist"
+control_plane_write_api_enabled=false
 
 usage() {
   cat <<EOF
-Usage: $0 install|uninstall|start|stop|restart|status
+Usage: $0 [--enable-control-plane-write-api] install|uninstall|start|stop|restart|status
 
 Installs user-level macOS LaunchAgents for:
   - Goal Harness global status feed: http://$host:$status_port/status.json
   - Goal Harness dashboard:          http://$host:$dashboard_port/
+
+Default mode is read-only for control-plane settings. Pass
+--enable-control-plane-write-api with install or restart to write that explicit
+opt-in flag into the status LaunchAgent plist.
 
 Environment overrides:
   GOAL_HARNESS_REPO_ROOT
@@ -99,11 +104,15 @@ check_inputs() {
 }
 
 write_plists() {
-  local status_command python_command path_prefix status_shell dashboard_shell
+  local status_command python_command path_prefix status_shell dashboard_shell control_plane_write_arg
   status_command="$(resolve_status_command)"
   python_command="$(resolve_python_command)"
   path_prefix="$bin_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  status_shell="export PATH=\"$(xml_escape "$path_prefix"):\$PATH\"; exec \"$(xml_escape "$status_command")\" --registry \"$(xml_escape "$registry")\" serve-status --global-registry --host \"$(xml_escape "$host")\" --port \"$(xml_escape "$status_port")\" --limit \"$(xml_escape "$status_limit")\""
+  control_plane_write_arg=""
+  if [[ "$control_plane_write_api_enabled" == "true" ]]; then
+    control_plane_write_arg=" --enable-control-plane-write-api"
+  fi
+  status_shell="export PATH=\"$(xml_escape "$path_prefix"):\$PATH\"; exec \"$(xml_escape "$status_command")\" --registry \"$(xml_escape "$registry")\" serve-status --global-registry --host \"$(xml_escape "$host")\" --port \"$(xml_escape "$status_port")\" --limit \"$(xml_escape "$status_limit")\"$control_plane_write_arg"
   dashboard_shell="export PATH=\"$(xml_escape "$path_prefix"):\$PATH\"; exec \"$(xml_escape "$python_command")\" -m http.server \"$(xml_escape "$dashboard_port")\" --bind \"$(xml_escape "$host")\" --directory \"$(xml_escape "$dashboard_dist_dir")\""
 
   mkdir -p "$launch_agents_dir" "$logs_dir"
@@ -189,20 +198,31 @@ stop_agents() {
 }
 
 print_status_contract_health() {
-  local status_url python_command version producer
+  local status_url python_command status_json version producer control_plane_write
   status_url="http://$host:$status_port/status.json"
   python_command="$(resolve_python_command 2>/dev/null || true)"
   if ! command -v curl >/dev/null 2>&1 || [[ -z "$python_command" ]]; then
     echo "- status_contract: unknown (curl or python3 unavailable)"
+    echo "- control_plane_write_api: unknown"
     return
   fi
-  version="$(curl -fsS "$status_url" 2>/dev/null | "$python_command" -c 'import json,sys; data=json.load(sys.stdin); contract=data.get("status_contract") or {}; print(contract.get("schema_version", 0))' 2>/dev/null || true)"
-  producer="$(curl -fsS "$status_url" 2>/dev/null | "$python_command" -c 'import json,sys; data=json.load(sys.stdin); contract=data.get("status_contract") or {}; print(contract.get("producer") or "unknown")' 2>/dev/null || true)"
-  if [[ -z "$version" ]]; then
+  status_json="$(curl -fsS "$status_url" 2>/dev/null || true)"
+  if [[ -z "$status_json" ]]; then
     echo "- status_contract: unavailable (status feed not reachable)"
+    echo "- control_plane_write_api: unknown"
     return
   fi
+  version="$("$python_command" -c 'import json,sys; data=json.load(sys.stdin); contract=data.get("status_contract") or {}; print(contract.get("schema_version", 0))' <<<"$status_json" 2>/dev/null || true)"
+  producer="$("$python_command" -c 'import json,sys; data=json.load(sys.stdin); contract=data.get("status_contract") or {}; print(contract.get("producer") or "unknown")' <<<"$status_json" 2>/dev/null || true)"
+  control_plane_write="$("$python_command" -c 'import json,sys; data=json.load(sys.stdin); api=data.get("local_dashboard_api") or {}; print("enabled" if api.get("control_plane_write_enabled") else "disabled")' <<<"$status_json" 2>/dev/null || true)"
+  version="${version:-0}"
+  producer="${producer:-unknown}"
+  control_plane_write="${control_plane_write:-unknown}"
   echo "- status_contract: schema_version=$version producer=$producer expected>=$status_contract_min_version"
+  echo "- control_plane_write_api: $control_plane_write"
+  if [[ "$control_plane_write" == "enabled" ]]; then
+    echo "  warning: control-plane registry writes are enabled for this local status feed"
+  fi
   if [[ "$version" =~ ^[0-9]+$ ]] && (( version < status_contract_min_version )); then
     echo "  warning: status feed is using an old contract; run: $0 restart"
   fi
@@ -274,4 +294,23 @@ main() {
   esac
 }
 
-main "$@"
+parsed_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --enable-control-plane-write-api)
+      control_plane_write_api_enabled=true
+      shift
+      ;;
+    --)
+      shift
+      parsed_args+=("$@")
+      break
+      ;;
+    *)
+      parsed_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+main "${parsed_args[@]}"
