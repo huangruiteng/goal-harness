@@ -27,6 +27,23 @@ export const quotaSchema = z.object({
   };
 });
 
+export const controlPlaneSchema = z.object({
+  self_repair: z.object({
+    enabled: z.boolean().optional().default(false),
+    allow_health_blocker_repair: z.boolean().optional().default(false),
+    allow_waiting_projection_repair: z.boolean().optional().default(false),
+  }).optional().nullable(),
+}).passthrough();
+
+export const orchestrationPolicySchema = z.object({
+  mode: z.string().optional().default("default"),
+  orchestration_mode: z.string().optional().nullable(),
+  spawn_allowed: z.boolean().optional().default(false),
+  allowed: z.boolean().optional().nullable(),
+  max_children: z.number().optional().default(0),
+  allowed_domains: z.array(z.string()).optional().default([]),
+}).passthrough();
+
 export const reviewMaterialSchema = z.object({
   label: z.string().optional().nullable(),
   path: z.string(),
@@ -140,6 +157,8 @@ export const projectAssetSchema = z.object({
   user_todos: projectAssetTodoSummarySchema.optional().nullable(),
   agent_todos: projectAssetTodoSummarySchema.optional().nullable(),
   quota: quotaSchema.optional().nullable(),
+  control_plane: controlPlaneSchema.optional().nullable(),
+  orchestration: orchestrationPolicySchema.optional().nullable(),
   latest_validation: projectAssetLatestValidationSchema.optional().nullable(),
 });
 
@@ -160,6 +179,7 @@ export const queueItemSchema = z.object({
   missing_gates: z.array(z.string()).optional().default([]),
   next_handoff_condition: z.string().optional().nullable(),
   quota: quotaSchema.optional().nullable(),
+  control_plane: controlPlaneSchema.optional().nullable(),
   user_todos: todoGroupSchema.optional().nullable(),
   agent_todos: todoGroupSchema.optional().nullable(),
   dependency_blockers: dependencyBlockerSummarySchema.optional().nullable(),
@@ -295,6 +315,9 @@ export const runGoalSchema = z.object({
   adapter_status: z.string().optional().nullable(),
   authority_registry: authorityRegistrySchema.optional().nullable(),
   quota: quotaSchema.optional().nullable(),
+  control_plane: controlPlaneSchema.optional().nullable(),
+  spawn_policy: orchestrationPolicySchema.optional().nullable(),
+  orchestration: orchestrationPolicySchema.optional().nullable(),
   index_exists: z.boolean().optional().default(false),
   raw_index_records: z.number().optional().default(0),
   unique_runs: z.number().optional().default(0),
@@ -604,6 +627,8 @@ export type OperatorGateResumeContract = z.infer<typeof operatorGateResumeContra
 export type ControllerReadiness = z.infer<typeof controllerReadinessSchema>;
 export type AuthorityRegistry = z.infer<typeof authorityRegistrySchema>;
 export type ComputeQuota = z.infer<typeof quotaSchema>;
+export type ControlPlanePolicy = z.infer<typeof controlPlaneSchema>;
+export type OrchestrationPolicy = z.infer<typeof orchestrationPolicySchema>;
 export type ProjectAsset = z.infer<typeof projectAssetSchema>;
 export type ProjectAssetTodoSummary = z.infer<typeof projectAssetTodoSummarySchema>;
 export type ProjectAssetLatestValidation = z.infer<typeof projectAssetLatestValidationSchema>;

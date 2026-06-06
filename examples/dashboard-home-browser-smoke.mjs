@@ -152,6 +152,19 @@ const goalSpecs = [
       { done: false, text: "统一多项目看板的 serve-status --global-registry 命令说明。" },
       { done: true, text: "已硬化 heartbeat prompt，依赖项目 todo 不再吃掉当前 goal turn。" },
     ],
+    controlPlane: {
+      self_repair: {
+        enabled: true,
+        allow_health_blocker_repair: true,
+        allow_waiting_projection_repair: true,
+      },
+    },
+    orchestration: {
+      mode: "multi_subagent",
+      spawn_allowed: true,
+      max_children: 2,
+      allowed_domains: ["docs", "validation"],
+    },
     latest: {
       generated_at: "2026-01-01T00:03:00+00:00",
       classification: "dashboard_home_chinese_operator_copy_contract",
@@ -173,6 +186,8 @@ function projectAssetFor(spec) {
     user_todos: spec.userTodos,
     agent_todos: spec.agentTodos,
     quota: spec.quota,
+    control_plane: spec.controlPlane,
+    orchestration: spec.orchestration,
     latest_validation: {
       generated_at: spec.latest.generated_at,
       classification: spec.latest.classification,
@@ -275,6 +290,7 @@ const statusFixture = {
         project_asset: projectAssetFor(spec),
         handoff_readiness: spec.handoffReadiness,
         quota: spec.quota,
+        control_plane: spec.controlPlane,
         user_todos: todoGroupFor(spec, "user"),
         agent_todos: todoGroupFor(spec, "agent"),
         dependency_blockers: spec.id === "goal-harness-meta" && sideBypassUserTodo
@@ -311,6 +327,8 @@ const statusFixture = {
       adapter_kind: "dashboard_home_fixture",
       adapter_status: "connected",
       quota: spec.quota,
+      control_plane: spec.controlPlane,
+      spawn_policy: spec.orchestration,
       index_exists: true,
       raw_index_records: 1,
       unique_runs: 1,
@@ -520,6 +538,27 @@ async function main() {
     if (url.searchParams.get("view")) {
       throw new Error(`Canonical home should not keep a view search param: ${page.url()}`);
     }
+
+    await page.goto(`${baseUrl}/?view=ops&goalId=goal-harness-meta&statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-testid="control-plane-settings-panel"]', { timeout: 10_000 });
+    const settingsText = await page.locator('[data-testid="control-plane-settings-panel"]').innerText();
+    const requiredSettings = [
+      "Control Plane Settings",
+      "Quota 1",
+      "self_repair on",
+      "health=on",
+      "waiting_projection=on",
+      "Heartbeat install",
+      "observed",
+      "multi_subagent",
+      "max_children=2",
+      "domains=docs,validation",
+    ];
+    const missingSettings = requiredSettings.filter((text) => !settingsText.includes(text));
+    if (missingSettings.length) {
+      throw new Error(`Missing control-plane settings text: ${missingSettings.join(", ")}`);
+    }
+
     if (pageErrors.length) {
       throw new Error(`Dashboard page errors: ${pageErrors.join(" | ")}`);
     }
