@@ -89,6 +89,14 @@ def assert_handoff_interface_budget(payload: dict[str, Any], label: str, *, text
     assert budget["within_budget"] is True, (label, budget)
 
 
+def assert_handoff_only_top_level_budget(payload: dict[str, Any], label: str) -> None:
+    budget = payload.get("handoff_interface_budget")
+    assert isinstance(budget, dict), (label, payload)
+    assert payload["line_count"] == budget["line_count"], (label, payload)
+    assert payload["char_count"] == budget["char_count"], (label, payload)
+    assert payload["within_budget"] == budget["within_budget"], (label, payload)
+
+
 def assert_status_data_contract_documents_handoff_budget() -> None:
     contract = STATUS_DATA_CONTRACT_PATH.read_text(encoding="utf-8")
     compact_contract = " ".join(contract.split())
@@ -513,6 +521,7 @@ def assert_connected_delivery_surface_loop_requires_macro_evidence() -> None:
     assert_handoff_interface_budget(payload, "connected-delivery macro evidence handoff")
     handoff_only = review_packet_handoff_only_payload(payload)
     assert_handoff_interface_budget(handoff_only, "connected-delivery handoff-only payload")
+    assert_handoff_only_top_level_budget(handoff_only, "connected-delivery handoff-only payload")
     agent_contract = handoff_only["handoff_delivery_contract"]
     assert set(agent_contract) == {"mode", "instruction", "minimum_scale", "must_include", "if_blocked"}, handoff_only
     assert agent_contract["mode"] == "expand_after_surface_progress_loop", handoff_only
@@ -890,6 +899,7 @@ def main() -> int:
             "controller handoff-only json",
             text_key="handoff_text",
         )
+        assert_handoff_only_top_level_budget(controller_handoff_payload, "controller handoff-only json")
         controller_handoff_subcommand_format_result = run_cli(
             root,
             registry_path,
@@ -918,6 +928,10 @@ def main() -> int:
             controller_handoff_subcommand_format_payload,
             "controller handoff-only subcommand-format json",
             text_key="handoff_text",
+        )
+        assert_handoff_only_top_level_budget(
+            controller_handoff_subcommand_format_payload,
+            "controller handoff-only subcommand-format json",
         )
 
         append_operator_gate_approval_fixture(root)
@@ -1050,6 +1064,7 @@ def main() -> int:
             goal_id=GOAL_ID,
         )
         assert_handoff_interface_budget(handoff_payload, "handoff-only json", text_key="handoff_text")
+        assert_handoff_only_top_level_budget(handoff_payload, "handoff-only json")
 
         after_files = sorted(path.name for path in run_dir.iterdir())
         assert after_files == before_files, "approved review-packet must not write runtime runs"
