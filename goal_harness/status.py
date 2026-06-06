@@ -244,6 +244,7 @@ LIFECYCLE_PRIORITY = (
     "run_recorded",
 )
 TODO_TASK_PATTERN = re.compile(r"^\s*[-*]\s+\[([ xX-])\]\s+(.+?)\s*$")
+SECTION_HEADING_PATTERN = re.compile(r"^##+\s+(.+?)\s*$")
 LOCAL_PATH_SURFACE_PATTERN = re.compile(r"(?<!<)/(?:Users|Volumes|var/folders|tmp|private/tmp)/[^\s`'\"<>]+")
 SECRET_LIKE_SURFACE_PATTERN = re.compile(
     r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]{16,}|(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
@@ -264,7 +265,13 @@ MAX_DEPENDENCY_BLOCKERS = 4
 MAX_AUTONOMOUS_BACKLOG_CANDIDATES = 6
 MAX_SUBAGENT_ACTIVITY_ITEMS = 5
 MAX_SUBAGENT_SCOPE_ITEMS = 4
+MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS = 3
 AUTONOMOUS_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4][^\]]*)\]\s*(.+)$", re.IGNORECASE)
+BACKLOG_HYGIENE_SECTION_HEADINGS = ("Next Action", "Operating Lessons")
+BACKLOG_HYGIENE_BULLET_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$")
+BACKLOG_HYGIENE_HINT_PATTERN = re.compile(
+    r"(?i)(?:\[p[0-4]\]|todo|backlog|follow[- ]?up|queue|audit|regression|smoke|cadence|mirror|monitor|sub-?agent|待办|回归|审计|修复|检查|推进)"
+)
 
 
 def normalize_todo_text(text: str, *, limit: int = 500) -> str:
@@ -417,6 +424,60 @@ def parse_active_state_todos(state_text: str, *, goal: dict[str, Any] | None = N
     if agent:
         result["agent_todos"] = agent
     return result
+
+
+def active_state_sections(state_text: str, headings: tuple[str, ...]) -> dict[str, list[str]]:
+    wanted = {heading.lower(): heading for heading in headings}
+    current: str | None = None
+    sections: dict[str, list[str]] = {heading: [] for heading in headings}
+    for line in state_text.splitlines():
+        match = SECTION_HEADING_PATTERN.match(line)
+        if match:
+            normalized = match.group(1).strip().lower()
+            current = wanted.get(normalized)
+            continue
+        if current:
+            sections[current].append(line)
+    return sections
+
+
+def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | None) -> dict[str, Any] | None:
+    try:
+        agent_open_count = int(agent_todos.get("open_count") or 0) if isinstance(agent_todos, dict) else 0
+    except (TypeError, ValueError):
+        agent_open_count = 0
+    if agent_open_count > 0:
+        return None
+
+    evidence: list[dict[str, Any]] = []
+    sections = active_state_sections(state_text, BACKLOG_HYGIENE_SECTION_HEADINGS)
+    for section, lines in sections.items():
+        for line in lines:
+            bullet_match = BACKLOG_HYGIENE_BULLET_PATTERN.match(line)
+            if not bullet_match:
+                continue
+            text = public_safe_compact_text(bullet_match.group(1), limit=220)
+            if not text:
+                continue
+            if section.lower() == "next action" or BACKLOG_HYGIENE_HINT_PATTERN.search(text):
+                evidence.append({"section": section, "text": text})
+
+    if len(evidence) < 2:
+        return None
+
+    source_sections = sorted({str(item.get("section") or "") for item in evidence if item.get("section")})
+    return {
+        "kind": "hidden_backlog_without_agent_todo",
+        "requires_agent_todo": True,
+        "source_sections": source_sections,
+        "agent_open_count": agent_open_count,
+        "evidence_count": len(evidence),
+        "first_evidence": evidence[:MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS],
+        "recommended_action": (
+            "mirror durable follow-up work into Agent Todo before heartbeat scheduling relies on "
+            "Next Action or Operating Lessons"
+        ),
+    }
 
 
 def project_asset_owner(waiting_on: str) -> str:
@@ -1216,6 +1277,12 @@ def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
     except OSError:
         return {}
     fields = parse_active_state_todos(state_text, goal=goal, state_path=state_path)
+    warning = backlog_hygiene_warning(
+        state_text,
+        agent_todos=fields.get("agent_todos") if isinstance(fields.get("agent_todos"), dict) else None,
+    )
+    if warning:
+        fields["backlog_hygiene_warning"] = warning
     if fields:
         fields = redacted_status_todo_fields(fields)
     return fields
@@ -1903,6 +1970,13 @@ def build_attention_queue(
                     item["project_asset"]["stale_latest_run_warning"] = projection_warning
             if goal.get("registry_member"):
                 item.update(active_state_todo_fields(goal))
+                backlog_warning = (
+                    item.get("backlog_hygiene_warning")
+                    if isinstance(item.get("backlog_hygiene_warning"), dict)
+                    else None
+                )
+                if backlog_warning and isinstance(item.get("project_asset"), dict):
+                    item["project_asset"]["backlog_hygiene_warning"] = backlog_warning
                 item["quota"] = quota_status(
                     goal,
                     waiting_on=str(item.get("waiting_on") or ""),
@@ -3128,6 +3202,18 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     f"active_state_updated_at={_markdown_scalar(projection_warning.get('active_state_updated_at') or '')} "
                     f"latest_run_generated_at={_markdown_scalar(projection_warning.get('latest_run_generated_at') or '')} "
                     f"reason={_markdown_scalar(projection_warning.get('reason') or '')}"
+                )
+            backlog_warning = (
+                project_asset.get("backlog_hygiene_warning")
+                if isinstance(project_asset.get("backlog_hygiene_warning"), dict)
+                else {}
+            )
+            if backlog_warning:
+                lines.append(
+                    "    - backlog_hygiene_warning: "
+                    f"requires_agent_todo={backlog_warning.get('requires_agent_todo')} "
+                    f"evidence_count={backlog_warning.get('evidence_count')} "
+                    f"source_sections={_markdown_scalar(','.join(backlog_warning.get('source_sections') or []))}"
                 )
             latest_validation = (
                 project_asset.get("latest_validation")

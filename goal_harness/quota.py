@@ -1458,6 +1458,15 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         )
         if projection_warning:
             payload["stale_latest_run_warning"] = projection_warning
+        backlog_warning = (
+            item.get("backlog_hygiene_warning")
+            if isinstance(item.get("backlog_hygiene_warning"), dict)
+            else project_asset.get("backlog_hygiene_warning")
+            if isinstance(project_asset.get("backlog_hygiene_warning"), dict)
+            else None
+        )
+        if backlog_warning:
+            payload["backlog_hygiene_warning"] = backlog_warning
         decision_warning = _decision_freshness_warning(status_payload, goal_id=safe_goal_id)
         if decision_warning:
             payload["decision_freshness_warning"] = decision_warning
@@ -1963,6 +1972,20 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if stale_latest_run_warning.get("recommended_action"):
             lines.append(f"- stale_latest_run_action: {stale_latest_run_warning.get('recommended_action')}")
+    backlog_hygiene_warning = (
+        payload.get("backlog_hygiene_warning")
+        if isinstance(payload.get("backlog_hygiene_warning"), dict)
+        else {}
+    )
+    if backlog_hygiene_warning:
+        lines.append(
+            "- backlog_hygiene_warning: "
+            f"requires_agent_todo={backlog_hygiene_warning.get('requires_agent_todo')} "
+            f"evidence_count={backlog_hygiene_warning.get('evidence_count')} "
+            f"source_sections={','.join(backlog_hygiene_warning.get('source_sections') or [])}"
+        )
+        if backlog_hygiene_warning.get("recommended_action"):
+            lines.append(f"- backlog_hygiene_action: {backlog_hygiene_warning.get('recommended_action')}")
     execution_profile = (
         payload.get("execution_profile")
         if isinstance(payload.get("execution_profile"), dict)
