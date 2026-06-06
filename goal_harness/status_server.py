@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .configure_goal import configure_goal
 from .feedback import append_human_reward, compact_reward
 from .history import load_registry
 from .materials import read_review_material
@@ -19,6 +20,8 @@ DEFAULT_STATUS_PORT = 8765
 DEFAULT_STATUS_PATH = "/status.json"
 DEFAULT_REWARD_DRY_RUN_PATH = "/reward/dry-run"
 DEFAULT_REWARD_APPEND_PATH = "/reward/append"
+DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH = "/control-plane/configure-goal/dry-run"
+DEFAULT_CONFIGURE_GOAL_APPLY_PATH = "/control-plane/configure-goal/apply"
 DEFAULT_REVIEW_MATERIAL_PATH = "/review-material"
 
 REWARD_REQUEST_FIELDS = {
@@ -34,6 +37,20 @@ REWARD_APPEND_FIELDS = REWARD_REQUEST_FIELDS | {
     "preview_id",
     "write_active_state_summary",
 }
+CONFIGURE_GOAL_REQUEST_FIELDS = {
+    "goal_id",
+    "quota_compute",
+    "quota_window_hours",
+    "self_repair_enabled",
+    "self_repair_health",
+    "self_repair_waiting_projection",
+    "orchestration_mode",
+    "spawn_allowed",
+    "max_children",
+    "allowed_domains",
+    "clear_allowed_domains",
+}
+CONFIGURE_GOAL_APPLY_FIELDS = CONFIGURE_GOAL_REQUEST_FIELDS | {"preview_id"}
 
 
 def is_loopback_host(host: str) -> bool:
@@ -56,6 +73,18 @@ def reward_preview_id(payload: dict[str, Any]) -> str:
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
 
 
+def configure_goal_preview_id(payload: dict[str, Any]) -> str:
+    stable_payload = {
+        "goal_id": payload.get("goal_id"),
+        "changed": payload.get("changed"),
+        "changed_fields": payload.get("changed_fields"),
+        "before": payload.get("before"),
+        "after": payload.get("after"),
+    }
+    stable = json.dumps(stable_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
+
+
 class StatusHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
@@ -67,6 +96,9 @@ class StatusHTTPServer(ThreadingHTTPServer):
     reward_dry_run_path: str
     reward_append_path: str
     reward_write_enabled: bool
+    configure_goal_dry_run_path: str
+    configure_goal_apply_path: str
+    control_plane_write_enabled: bool
     verbose: bool
 
 
@@ -250,6 +282,141 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
 
         self._send_json(self._compact_reward_response(payload, dry_run=False, appended=True))
 
+    def _parse_configure_goal_body(self, body: dict[str, Any], *, apply: bool) -> dict[str, Any]:
+        allowed = CONFIGURE_GOAL_APPLY_FIELDS if apply else CONFIGURE_GOAL_REQUEST_FIELDS
+        unknown = sorted(set(body) - allowed)
+        if unknown:
+            raise ValueError(f"unknown configure-goal field(s): {', '.join(unknown)}")
+        goal_id = str(body.get("goal_id") or "").strip()
+        if not goal_id:
+            raise ValueError("goal_id is required")
+        allowed_domains = body.get("allowed_domains")
+        if allowed_domains is not None and not isinstance(allowed_domains, list):
+            raise ValueError("allowed_domains must be a list of strings")
+        return {
+            "goal_id": goal_id,
+            "quota_compute": body.get("quota_compute"),
+            "quota_window_hours": body.get("quota_window_hours"),
+            "self_repair_enabled": body.get("self_repair_enabled"),
+            "self_repair_health": body.get("self_repair_health"),
+            "self_repair_waiting_projection": body.get("self_repair_waiting_projection"),
+            "orchestration_mode": body.get("orchestration_mode"),
+            "spawn_allowed": body.get("spawn_allowed"),
+            "max_children": body.get("max_children"),
+            "allowed_domains": [str(item) for item in allowed_domains] if allowed_domains is not None else None,
+            "clear_allowed_domains": bool(body.get("clear_allowed_domains", False)),
+        }
+
+    def _configure_goal_payload(self, body: dict[str, Any], *, apply: bool, execute: bool) -> dict[str, Any]:
+        values = self._parse_configure_goal_body(body, apply=apply)
+        return configure_goal(
+            registry_path=self.server.registry_path,
+            goal_id=values["goal_id"],
+            quota_compute=values["quota_compute"],
+            quota_window_hours=values["quota_window_hours"],
+            self_repair_enabled=values["self_repair_enabled"],
+            self_repair_health=values["self_repair_health"],
+            self_repair_waiting_projection=values["self_repair_waiting_projection"],
+            orchestration_mode=values["orchestration_mode"],
+            spawn_allowed=values["spawn_allowed"],
+            max_children=values["max_children"],
+            allowed_domains=values["allowed_domains"],
+            clear_allowed_domains=values["clear_allowed_domains"],
+            execute=execute,
+        )
+
+    def _compact_configure_goal_response(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "dry_run": payload.get("dry_run"),
+            "execute": payload.get("execute"),
+            "written": payload.get("written"),
+            "changed": payload.get("changed"),
+            "goal_id": payload.get("goal_id"),
+            "changed_fields": payload.get("changed_fields"),
+            "before": payload.get("before"),
+            "after": payload.get("after"),
+            "preview_id": configure_goal_preview_id(payload),
+            "control_plane_summary": payload.get("control_plane_summary"),
+            "orchestration_summary": payload.get("orchestration_summary"),
+        }
+
+    def _handle_configure_goal_dry_run(self) -> None:
+        try:
+            payload = self._configure_goal_payload(self._read_json_body(), apply=False, execute=False)
+        except Exception as exc:  # noqa: BLE001 - preserve validation diagnostics for the local UI.
+            self._send_json(
+                {
+                    "ok": False,
+                    "dry_run": True,
+                    "execute": False,
+                    "written": False,
+                    "error": str(exc),
+                },
+                status=400,
+            )
+            return
+        self._send_json(self._compact_configure_goal_response(payload))
+
+    def _handle_configure_goal_apply(self) -> None:
+        if not self.server.control_plane_write_enabled:
+            self._send_json(
+                {
+                    "ok": False,
+                    "dry_run": False,
+                    "execute": True,
+                    "written": False,
+                    "error": "control-plane write API is not enabled; restart serve-status with --enable-control-plane-write-api",
+                },
+                status=403,
+            )
+            return
+        if not is_loopback_origin(self.headers.get("Origin")):
+            self._send_json(
+                {
+                    "ok": False,
+                    "dry_run": False,
+                    "execute": True,
+                    "written": False,
+                    "error": "control-plane apply only accepts loopback browser origins",
+                },
+                status=403,
+            )
+            return
+        try:
+            body = self._read_json_body()
+            preview_id = str(body.get("preview_id") or "").strip()
+            if not preview_id:
+                raise ValueError("preview_id is required")
+            dry_run_payload = self._configure_goal_payload(body, apply=True, execute=False)
+            expected_preview = self._compact_configure_goal_response(dry_run_payload).get("preview_id")
+            if preview_id != expected_preview:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "dry_run": False,
+                        "execute": True,
+                        "written": False,
+                        "error": "stale control-plane preview; run Dry-run Check again before applying",
+                    },
+                    status=409,
+                )
+                return
+            payload = self._configure_goal_payload(body, apply=True, execute=True)
+        except Exception as exc:  # noqa: BLE001 - preserve validation diagnostics for the local UI.
+            self._send_json(
+                {
+                    "ok": False,
+                    "dry_run": False,
+                    "execute": True,
+                    "written": False,
+                    "error": str(exc),
+                },
+                status=400,
+            )
+            return
+        self._send_json(self._compact_configure_goal_response(payload))
+
     def _handle_review_material(self, query: dict[str, list[str]]) -> None:
         if not is_loopback_host(str(self.server.server_address[0])):
             self._send_json(
@@ -308,8 +475,13 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                     "status_url": self.server.status_path,
                     "reward_dry_run_url": self.server.reward_dry_run_path,
                     "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
+                    "configure_goal_dry_run_url": self.server.configure_goal_dry_run_path,
+                    "configure_goal_apply_url": self.server.configure_goal_apply_path
+                    if self.server.control_plane_write_enabled
+                    else None,
                     "review_material_url": DEFAULT_REVIEW_MATERIAL_PATH,
                     "reward_write_enabled": self.server.reward_write_enabled,
+                    "control_plane_write_enabled": self.server.control_plane_write_enabled,
                     "health_url": "/healthz",
                 }
             )
@@ -354,12 +526,22 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         if path == self.server.reward_append_path:
             self._handle_reward_append()
             return
+        if path == self.server.configure_goal_dry_run_path:
+            self._handle_configure_goal_dry_run()
+            return
+        if path == self.server.configure_goal_apply_path:
+            self._handle_configure_goal_apply()
+            return
         self._send_json(
             {
                 "ok": False,
                 "error": f"unknown path: {path}",
                 "reward_dry_run_url": self.server.reward_dry_run_path,
                 "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
+                "configure_goal_dry_run_url": self.server.configure_goal_dry_run_path,
+                "configure_goal_apply_url": self.server.configure_goal_apply_path
+                if self.server.control_plane_write_enabled
+                else None,
             },
             status=404,
         )
@@ -386,11 +568,14 @@ def serve_status(
     port: int,
     status_path: str,
     enable_reward_write_api: bool,
+    enable_control_plane_write_api: bool,
     verbose: bool,
 ) -> None:
     normalized_path = normalize_status_path(status_path)
     if enable_reward_write_api and not is_loopback_host(host):
         raise ValueError("--enable-reward-write-api requires a loopback --host such as 127.0.0.1")
+    if enable_control_plane_write_api and not is_loopback_host(host):
+        raise ValueError("--enable-control-plane-write-api requires a loopback --host such as 127.0.0.1")
     server = StatusHTTPServer((host, port), StatusRequestHandler)
     server.registry_path = registry_path
     server.runtime_root_override = runtime_root_override
@@ -400,11 +585,17 @@ def serve_status(
     server.reward_dry_run_path = DEFAULT_REWARD_DRY_RUN_PATH
     server.reward_append_path = DEFAULT_REWARD_APPEND_PATH
     server.reward_write_enabled = enable_reward_write_api
+    server.configure_goal_dry_run_path = DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH
+    server.configure_goal_apply_path = DEFAULT_CONFIGURE_GOAL_APPLY_PATH
+    server.control_plane_write_enabled = enable_control_plane_write_api
     server.verbose = verbose
     print(f"Serving Goal Harness status at http://{host}:{port}{normalized_path}", flush=True)
     print(f"Reward dry-run: http://{host}:{port}{server.reward_dry_run_path}", flush=True)
     if enable_reward_write_api:
         print(f"Reward append: http://{host}:{port}{server.reward_append_path}", flush=True)
+    print(f"Control-plane settings dry-run: http://{host}:{port}{server.configure_goal_dry_run_path}", flush=True)
+    if enable_control_plane_write_api:
+        print(f"Control-plane settings apply: http://{host}:{port}{server.configure_goal_apply_path}", flush=True)
     print(f"Health check: http://{host}:{port}/healthz", flush=True)
     try:
         server.serve_forever()
