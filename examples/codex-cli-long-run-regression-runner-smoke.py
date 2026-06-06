@@ -22,6 +22,15 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOAL_ID = "codex-cli-long-run-fixture"
 STEP_COUNT = 3
+GOAL_TICK_PROTOCOL_VERSION = "goal_tick_output_protocol_v0"
+GOAL_TICK_PHASES = (
+    "read_state",
+    "propose_step",
+    "execute",
+    "validate",
+    "critic",
+    "writeback",
+)
 
 
 def iso_now() -> str:
@@ -132,6 +141,47 @@ def append_progress(project: Path, *, step_index: int, artifact_path: str) -> No
         stream.write(f"\n- step {step_index}: validated `{artifact_path}`\n")
 
 
+def tick_phase(name: str, *, status: str, evidence: dict[str, Any]) -> dict[str, Any]:
+    assert name in GOAL_TICK_PHASES, name
+    assert status in {"passed", "blocked", "skipped"}, status
+    return {
+        "phase": name,
+        "status": status,
+        "evidence": evidence,
+    }
+
+
+def goal_tick_protocol(phases: list[dict[str, Any]]) -> dict[str, Any]:
+    names = [str(phase.get("phase")) for phase in phases]
+    assert names == list(GOAL_TICK_PHASES), names
+    return {
+        "schema_version": GOAL_TICK_PROTOCOL_VERSION,
+        "phases": phases,
+    }
+
+
+def assert_goal_tick_protocol(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        protocol = row.get("goal_tick_output_protocol")
+        assert isinstance(protocol, dict), row
+        assert protocol.get("schema_version") == GOAL_TICK_PROTOCOL_VERSION, protocol
+        phases = protocol.get("phases")
+        assert isinstance(phases, list), protocol
+        assert [phase.get("phase") for phase in phases] == list(GOAL_TICK_PHASES), phases
+        for phase in phases:
+            assert phase.get("status") in {"passed", "blocked", "skipped"}, phase
+            assert isinstance(phase.get("evidence"), dict), phase
+
+        if row.get("action_kind") == "no_spend_stop":
+            assert row.get("spend_event") is None, row
+            continue
+
+        assert all(phase.get("status") == "passed" for phase in phases), phases
+        writeback = phases[-1].get("evidence", {})
+        assert writeback.get("writeback_event", {}).get("classification"), writeback
+        assert writeback.get("spend_event", {}).get("classification") == "quota_slot_spent", writeback
+
+
 def assert_public_log(rows: list[dict[str, Any]]) -> None:
     text = json.dumps(rows, ensure_ascii=False, sort_keys=True)
     forbidden = ("/Users/", "~/.codex/sessions", "raw_thread", "session_history")
@@ -181,6 +231,35 @@ def main() -> int:
                         "writeback_event": None,
                         "spend_event": None,
                     }
+                )
+                row["goal_tick_output_protocol"] = goal_tick_protocol(
+                    [
+                        tick_phase(
+                            "read_state",
+                            status="passed",
+                            evidence={
+                                "status_before": row["status_before"],
+                                "should_run_before": should_run,
+                            },
+                        ),
+                        tick_phase(
+                            "propose_step",
+                            status="blocked",
+                            evidence={"action_kind": "no_spend_stop"},
+                        ),
+                        tick_phase("execute", status="skipped", evidence={"reason": "should_run_false"}),
+                        tick_phase("validate", status="skipped", evidence=row["validation"]),
+                        tick_phase(
+                            "critic",
+                            status="blocked",
+                            evidence={"decision": "stop", "reason": "quota_guard_false"},
+                        ),
+                        tick_phase(
+                            "writeback",
+                            status="skipped",
+                            evidence={"writeback_event": None, "spend_event": None},
+                        ),
+                    ]
                 )
                 rows.append(row)
                 break
@@ -263,6 +342,52 @@ def main() -> int:
                     },
                 }
             )
+            row["goal_tick_output_protocol"] = goal_tick_protocol(
+                [
+                    tick_phase(
+                        "read_state",
+                        status="passed",
+                        evidence={
+                            "status_before": row["status_before"],
+                            "should_run_before": row["should_run_before"],
+                        },
+                    ),
+                    tick_phase(
+                        "propose_step",
+                        status="passed",
+                        evidence={
+                            "action_kind": row["action_kind"],
+                            "artifact_path": row["artifact_path"],
+                        },
+                    ),
+                    tick_phase(
+                        "execute",
+                        status="passed",
+                        evidence={
+                            "artifact_path": row["artifact_path"],
+                            "marker": marker,
+                        },
+                    ),
+                    tick_phase("validate", status="passed", evidence=row["validation"]),
+                    tick_phase(
+                        "critic",
+                        status="passed",
+                        evidence={
+                            "decision": "terminal" if step_index == STEP_COUNT else "continue",
+                            "classification": classification,
+                            "risk": "isolated_public_fixture",
+                        },
+                    ),
+                    tick_phase(
+                        "writeback",
+                        status="passed",
+                        evidence={
+                            "writeback_event": row["writeback_event"],
+                            "spend_event": row["spend_event"],
+                        },
+                    ),
+                ]
+            )
             rows.append(row)
 
         log_path.write_text(
@@ -288,6 +413,7 @@ def main() -> int:
         ]
         assert classifications.count("quota_slot_spent") == STEP_COUNT, classifications
         assert "long_run_regression_terminal" in classifications, classifications
+        assert_goal_tick_protocol(rows)
         assert_public_log(rows)
 
         print(f"steps={len(rows)} log_rows={len(log_path.read_text(encoding='utf-8').splitlines())}")
