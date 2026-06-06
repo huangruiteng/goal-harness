@@ -26,6 +26,7 @@ from .doctor import collect_doctor, render_doctor_markdown
 from .execution_profile import DEFAULT_EXECUTION_PROFILE
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
+from .handoff_budget import build_handoff_interface_budget
 from .heartbeat_prompt import build_heartbeat_prompt, render_heartbeat_prompt_markdown
 from .history import collect_history, load_registry, render_history_markdown
 from .operator_gate import (
@@ -121,6 +122,9 @@ def review_packet_handoff_only_payload(payload: dict[str, object]) -> dict[str, 
             "must_include": raw_contract.get("must_include"),
             "if_blocked": raw_contract.get("if_blocked"),
         }
+    handoff_budget = payload.get("handoff_interface_budget")
+    if not isinstance(handoff_budget, dict):
+        handoff_budget = build_handoff_interface_budget(handoff_text)
     result.update(
         {
             "kind": payload.get("kind"),
@@ -132,7 +136,10 @@ def review_packet_handoff_only_payload(payload: dict[str, object]) -> dict[str, 
             "operator_gate_approved_handoff": payload.get("operator_gate_approved_handoff"),
             "connected_delivery_handoff": payload.get("connected_delivery_handoff"),
             "handoff_delivery_contract": agent_contract,
-            "handoff_interface_budget": payload.get("handoff_interface_budget"),
+            "handoff_interface_budget": handoff_budget,
+            "line_count": handoff_budget.get("line_count"),
+            "char_count": handoff_budget.get("char_count"),
+            "within_budget": handoff_budget.get("within_budget"),
         }
     )
     return result
