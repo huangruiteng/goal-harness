@@ -634,6 +634,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print only the target project-agent handoff in markdown output; JSON output returns a minimized handoff payload.",
     )
+    review_packet_parser.add_argument(
+        "--format",
+        dest="review_packet_format",
+        choices=["markdown", "json"],
+        help="Output format for review-packet. This mirrors the global --format flag and may appear after the subcommand.",
+    )
     review_packet_parser.add_argument("--limit", type=int, default=5)
 
     todo_parser = sub.add_parser(
@@ -1186,6 +1192,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if payload.get("ok") else 1
 
     if args.command == "review-packet":
+        output_format = args.review_packet_format or args.format
         try:
             scan_roots = [Path(item).expanduser() for item in args.scan_path]
             if not scan_roots:
@@ -1210,10 +1217,10 @@ def main(argv: list[str] | None = None) -> int:
             }
         if args.handoff_only:
             payload = review_packet_handoff_only_payload(payload)
-        if args.handoff_only and args.format != "json" and payload.get("ok"):
+        if args.handoff_only and output_format != "json" and payload.get("ok"):
             print(str(payload.get("handoff_text") or ""))
         else:
-            print_payload(payload, args.format, render_review_packet_markdown)
+            print_payload(payload, output_format, render_review_packet_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "todo":

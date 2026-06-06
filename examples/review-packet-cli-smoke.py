@@ -890,6 +890,35 @@ def main() -> int:
             "controller handoff-only json",
             text_key="handoff_text",
         )
+        controller_handoff_subcommand_format_result = run_cli(
+            root,
+            registry_path,
+            "review-packet",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-root",
+            str(root / "project"),
+            "--handoff-only",
+            "--format",
+            "json",
+        )
+        controller_handoff_subcommand_format_payload = json.loads(
+            controller_handoff_subcommand_format_result.stdout
+        )
+        assert controller_handoff_subcommand_format_payload["ok"] is True, (
+            controller_handoff_subcommand_format_payload
+        )
+        assert controller_handoff_subcommand_format_payload["handoff_only"] is True, (
+            controller_handoff_subcommand_format_payload
+        )
+        assert "packet" not in controller_handoff_subcommand_format_payload, (
+            controller_handoff_subcommand_format_payload
+        )
+        assert_handoff_interface_budget(
+            controller_handoff_subcommand_format_payload,
+            "controller handoff-only subcommand-format json",
+            text_key="handoff_text",
+        )
 
         append_operator_gate_approval_fixture(root)
         before_files = sorted(path.name for path in run_dir.iterdir())
