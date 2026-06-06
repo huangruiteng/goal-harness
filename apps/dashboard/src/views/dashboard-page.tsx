@@ -37,6 +37,7 @@ import {
   QueueItem,
   AuthorityRegistry,
   ComputeQuota,
+  ControlPlanePolicy,
   ControllerReadiness,
   GlobalRegistryHealth,
   HumanReward,
@@ -47,6 +48,7 @@ import {
   RewardDryRunResponse,
   RunGoal,
   RunRecord,
+  OrchestrationPolicy,
   StatusPayload,
   ProjectAssetLatestValidation,
   ProjectAssetHandoffReadiness,
@@ -1693,6 +1695,171 @@ function QuotaChip({ quota }: { quota?: ComputeQuota | null }) {
     return null;
   }
   return <Badge variant={view.variant}>{view.label}</Badge>;
+}
+
+function controlPlaneForTarget(goal?: RunGoal, queueItem?: QueueItem): ControlPlanePolicy | null {
+  return queueItem?.control_plane ?? queueItem?.project_asset?.control_plane ?? goal?.control_plane ?? null;
+}
+
+function orchestrationForTarget(goal?: RunGoal, queueItem?: QueueItem): OrchestrationPolicy | null {
+  return queueItem?.project_asset?.orchestration ?? goal?.orchestration ?? goal?.spawn_policy ?? null;
+}
+
+function flagValue(value?: boolean | null) {
+  return value ? "on" : "off";
+}
+
+function orchestrationMode(policy?: OrchestrationPolicy | null) {
+  if (!policy) {
+    return "default";
+  }
+  const spawnAllowed = Boolean(policy.spawn_allowed || policy.allowed);
+  const maxChildren = policy.max_children ?? 0;
+  const explicitMode = policy.mode || policy.orchestration_mode || "";
+  if ((!explicitMode || explicitMode === "default") && spawnAllowed && maxChildren > 0) {
+    return "multi_subagent";
+  }
+  return explicitMode || "default";
+}
+
+function buildHeartbeatInstallView(goal?: RunGoal, queueItem?: QueueItem): {
+  badge: string;
+  detail: string;
+  variant: BadgeVariant;
+} {
+  const status = [queueItem?.status, goal?.status, goal?.adapter_status].filter(Boolean).join(" ").toLowerCase();
+  if (status.includes("not_installed")) {
+    return {
+      badge: "not installed",
+      detail: "status includes not_installed",
+      variant: "warning",
+    };
+  }
+  if (status.includes("paused")) {
+    return {
+      badge: "paused",
+      detail: "status includes paused",
+      variant: "neutral",
+    };
+  }
+  if (status.includes("stage_deferred") || status.includes("deferred")) {
+    return {
+      badge: "deferred",
+      detail: "status includes deferred",
+      variant: "warning",
+    };
+  }
+  if (queueItem || goal?.registry_member) {
+    return {
+      badge: "observed",
+      detail: queueItem?.source ? `queue source=${queueItem.source}` : "registry member observed in live status",
+      variant: "success",
+    };
+  }
+  return {
+    badge: "unknown",
+    detail: "no queue or registry heartbeat signal",
+    variant: "neutral",
+  };
+}
+
+function ControlPlaneSettingRow({
+  badge,
+  detail,
+  icon: Icon,
+  label,
+  variant,
+}: {
+  badge: string;
+  detail: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  variant: BadgeVariant;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-slate-500 dark:text-zinc-400" />
+          <span className="text-sm font-semibold text-slate-900 dark:text-zinc-100">{label}</span>
+        </div>
+        <Badge variant={variant}>{badge}</Badge>
+      </div>
+      <div className="mt-2 break-words text-xs leading-5 text-slate-500 dark:text-zinc-400">{detail}</div>
+    </div>
+  );
+}
+
+function ControlPlaneSettingsPanel({
+  goal,
+  queueItem,
+}: {
+  goal?: RunGoal;
+  queueItem?: QueueItem;
+}) {
+  const quota = queueItem?.quota ?? queueItem?.project_asset?.quota ?? goal?.quota;
+  const quotaView = buildQuotaView(quota);
+  const controlPlane = controlPlaneForTarget(goal, queueItem);
+  const selfRepair = controlPlane?.self_repair;
+  const heartbeat = buildHeartbeatInstallView(goal, queueItem);
+  const orchestration = orchestrationForTarget(goal, queueItem);
+  const mode = orchestrationMode(orchestration);
+  const domains = orchestration?.allowed_domains?.length ? `; domains=${orchestration.allowed_domains.join(",")}` : "";
+
+  const selfRepairEnabled = Boolean(selfRepair?.enabled);
+  const selfRepairBadge = selfRepair ? `self_repair ${selfRepairEnabled ? "on" : "off"}` : "self_repair default_off";
+  const selfRepairDetail = selfRepair
+    ? `health=${flagValue(selfRepair.allow_health_blocker_repair)}; waiting_projection=${flagValue(selfRepair.allow_waiting_projection_repair)}`
+    : "no per-goal self-repair override";
+  const orchestrationVariant: BadgeVariant = mode === "multi_subagent" ? "info" : "neutral";
+
+  return (
+    <div
+      className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-900"
+      data-testid="control-plane-settings-panel"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-slate-600 dark:text-zinc-300" />
+          <h3 className="text-sm font-semibold text-slate-950 dark:text-zinc-50">Control Plane Settings</h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={selfRepairEnabled ? "success" : "neutral"}>{selfRepairEnabled ? "repair enabled" : "repair off"}</Badge>
+          <Badge variant={orchestrationVariant}>{mode}</Badge>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <ControlPlaneSettingRow
+          badge={quotaView?.label ?? "quota unknown"}
+          detail={quotaView?.shortLine ?? "quota not projected"}
+          icon={Gauge}
+          label="Compute quota"
+          variant={quotaView?.variant ?? "neutral"}
+        />
+        <ControlPlaneSettingRow
+          badge={selfRepairBadge}
+          detail={selfRepairDetail}
+          icon={ShieldCheck}
+          label="Self repair"
+          variant={selfRepairEnabled ? "success" : "neutral"}
+        />
+        <ControlPlaneSettingRow
+          badge={heartbeat.badge}
+          detail={heartbeat.detail}
+          icon={Terminal}
+          label="Heartbeat install"
+          variant={heartbeat.variant}
+        />
+        <ControlPlaneSettingRow
+          badge={mode}
+          detail={`spawn_allowed=${flagValue(Boolean(orchestration?.spawn_allowed || orchestration?.allowed))}; max_children=${orchestration?.max_children ?? 0}${domains}`}
+          icon={Bot}
+          label="Orchestration"
+          variant={orchestrationVariant}
+        />
+      </div>
+    </div>
+  );
 }
 
 type ShareGoalSpec = {
@@ -4437,6 +4604,8 @@ function RunHistoryPanel({
             registry={registry}
             runtimeRoot={runtimeRoot}
           />
+
+          <ControlPlaneSettingsPanel goal={goal} queueItem={queueItem} />
 
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
