@@ -189,15 +189,23 @@ branch. Spend is allowed only after validation and durable writeback.
 advance the selected goal. When the selected goal's current projection is a
 dependency-only observation, the payload includes `work_lane_contract` with
 `lane=continuous_monitor`. If open agent todos remain, schema
-`work_lane_contract_v1` sets `next_lane=advancement_task`,
+`work_lane_contract_v1` now classifies todo items as
+`task_class=advancement_task` or `task_class=continuous_monitor`. It sets
+`next_lane=advancement_task`,
 `obligation=advance_unless_material_monitor_transition`,
 `must_attempt_work=true`, and reason codes such as `dependency_observation` and
-`open_agent_todo`. `heartbeat_recommendation` should then say
-`follow_work_lane_contract` instead of encoding another project-specific branch.
-An executor may still record one material dependency-state transition when it
-changes the selected goal decision, but unchanged monitor polls are quiet
-no-spend checks. This keeps monitoring useful without letting it consume every
-eligible turn, and it keeps the hard routing rule in one small machine contract.
+`open_agent_todo` only when at least one open todo is advancement-class work.
+If all visible open todos are monitor-class and no open todo is hidden, the
+same contract uses `obligation=quiet_until_material_monitor_transition` and
+`must_attempt_work=false`. Hidden open todos are treated as advancement work to
+avoid false quiet no-ops from a truncated top-N todo projection.
+`heartbeat_recommendation` should then say `follow_work_lane_contract` or
+`monitor_quiet_until_material_transition` instead of encoding another
+project-specific branch. An executor may still record one material
+dependency-state transition when it changes the selected goal decision, but
+unchanged monitor polls are quiet no-spend checks. This keeps monitoring useful
+without letting it consume every eligible turn, and it keeps the hard routing
+rule in one small machine contract.
 
 ## Compute States
 

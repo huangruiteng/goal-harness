@@ -88,6 +88,21 @@ DEPENDENCY_OBSERVATION_CLASSIFICATION_HINTS = (
     "dependency_monitor",
 )
 WORK_LANE_CONTRACT_SCHEMA_VERSION = "work_lane_contract_v1"
+TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
+TODO_TASK_CLASS_MONITOR = "continuous_monitor"
+TODO_TASK_CLASS_VALUES = {TODO_TASK_CLASS_ADVANCEMENT, TODO_TASK_CLASS_MONITOR}
+TODO_MONITOR_PATTERNS = (
+    re.compile(r"(?i)\bdependency monitor\b"),
+    re.compile(r"(?i)\bobservation lane\b"),
+    re.compile(r"(?i)(?:^|[:：]\s*)observe\b"),
+    re.compile(r"(?i)(?:^|[:：]\s*)poll\b"),
+    re.compile(r"(?i)(?:^|[:：]\s*)watch\b"),
+    re.compile(r"(?i)\bmonitor-only\b"),
+)
+TODO_ADVANCEMENT_PATTERNS = (
+    re.compile(r"(?i)(?:^|[:：]\s*)(?:implement|add|make|fix|build|wire|define|compare|run|repair|archive|publish|merge|write|attribute)\b"),
+    re.compile(r"(?i)\b(?:implementation slice|validation-backed patch|smoke fixture)\b"),
+)
 
 
 def _now_local() -> str:
@@ -233,9 +248,13 @@ def _work_lane_contract(
     agent_todo_summary: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     progress_scope = _item_progress_scope(item)
-    has_agent_todos = _open_todo_count(agent_todo_summary) > 0
+    todo_counts = _open_todo_task_counts(agent_todo_summary)
+    has_agent_todos = todo_counts["open"] > 0
+    has_advancement_todos = todo_counts["advancement"] > 0
+    has_monitor_todos = todo_counts["monitor"] > 0
+    monitor_only_todos = has_agent_todos and has_monitor_todos and not has_advancement_todos
     if progress_scope != "dependency_observation":
-        if has_agent_todos:
+        if has_advancement_todos:
             return {
                 "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
                 "lane": "advancement_task",
@@ -246,24 +265,41 @@ def _work_lane_contract(
                 "monitor_policy": "material_transition_only",
                 "action": "advance the first executable agent todo or write a concrete blocker",
             }
+        if monitor_only_todos:
+            return {
+                "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+                "lane": "continuous_monitor",
+                "monitor_kind": "todo_monitor",
+                "next_lane": "continuous_monitor",
+                "obligation": "quiet_until_material_monitor_transition",
+                "must_attempt_work": False,
+                "reason_codes": ["monitor_todo_only"],
+                "monitor_policy": "write_once_per_material_transition_else_no_spend",
+                "material_transition": (
+                    "a monitor todo may write back only material state transitions, regressions, or concrete blockers"
+                ),
+                "action": "wait quietly for material monitor evidence",
+            }
         return None
 
     reason_codes = ["dependency_observation"]
-    if has_agent_todos:
+    if has_advancement_todos:
         reason_codes.append("open_agent_todo")
+    elif monitor_only_todos:
+        reason_codes.append("monitor_todo_only")
     else:
         reason_codes.append("no_open_agent_todo")
     return {
         "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
         "lane": "continuous_monitor",
         "monitor_kind": "dependency_observation",
-        "next_lane": "advancement_task" if has_agent_todos else "continuous_monitor",
+        "next_lane": "advancement_task" if has_advancement_todos else "continuous_monitor",
         "obligation": (
             "advance_unless_material_monitor_transition"
-            if has_agent_todos
+            if has_advancement_todos
             else "quiet_until_material_monitor_transition"
         ),
-        "must_attempt_work": has_agent_todos,
+        "must_attempt_work": has_advancement_todos,
         "reason_codes": reason_codes,
         "monitor_policy": "write_once_per_material_transition_else_no_spend",
         "material_transition": (
@@ -271,7 +307,7 @@ def _work_lane_contract(
         ),
         "action": (
             "advance the first executable agent todo or write a concrete blocker"
-            if has_agent_todos
+            if has_advancement_todos
             else "wait quietly for new external evidence"
         ),
     }
@@ -530,9 +566,10 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
         "index": item.get("index"),
         "text": text if text is not None else item.get("text"),
     }
-    for key in ("schema_version", "todo_id", "role", "status", "priority", "title", "archive_state", "source_section"):
+    for key in ("schema_version", "todo_id", "role", "status", "priority", "title", "archive_state", "source_section", "task_class"):
         if item.get(key) is not None:
             compact[key] = item.get(key)
+    compact["task_class"] = _todo_task_class(compact)
     return compact
 
 
@@ -579,7 +616,10 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
 def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    if isinstance(value.get("items"), list) and (
+    if (
+        isinstance(value.get("items"), list)
+        or isinstance(value.get("first_open_items"), list)
+    ) and (
         "total_count" in value or "open_count" in value or "done_count" in value
     ):
         return _summarize_user_todos(value)
@@ -798,6 +838,45 @@ def _open_todo_count(summary: dict[str, Any] | None) -> int:
         return max(0, int(summary.get("open_count") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _todo_task_class(item: dict[str, Any]) -> str:
+    candidate = str(item.get("task_class") or "").strip()
+    if candidate in TODO_TASK_CLASS_VALUES:
+        return candidate
+    text = " ".join(
+        str(value or "")
+        for value in (item.get("title"), item.get("text"))
+        if str(value or "").strip()
+    )
+    for pattern in TODO_MONITOR_PATTERNS:
+        if pattern.search(text):
+            return TODO_TASK_CLASS_MONITOR
+    for pattern in TODO_ADVANCEMENT_PATTERNS:
+        if pattern.search(text):
+            return TODO_TASK_CLASS_ADVANCEMENT
+    return TODO_TASK_CLASS_ADVANCEMENT
+
+
+def _open_todo_task_counts(summary: dict[str, Any] | None) -> dict[str, int]:
+    open_count = _open_todo_count(summary)
+    first_open_items: list[dict[str, Any]] = []
+    if isinstance(summary, dict) and isinstance(summary.get("first_open_items"), list):
+        first_open_items = [item for item in summary["first_open_items"] if isinstance(item, dict)]
+    visible_open = min(open_count, len(first_open_items))
+    monitor_count = sum(
+        1
+        for item in first_open_items[:visible_open]
+        if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
+    )
+    hidden_count = max(0, open_count - visible_open)
+    advancement_count = visible_open - monitor_count + hidden_count
+    return {
+        "open": open_count,
+        "advancement": advancement_count,
+        "monitor": monitor_count,
+        "hidden": hidden_count,
+    }
 
 
 def _has_lifecycle_marker(*values: Any, marker: str) -> bool:
@@ -1045,6 +1124,22 @@ def _heartbeat_recommendation(
             ),
         }
         return payload
+
+    if (
+        work_lane_contract
+        and work_lane_contract.get("lane") == "continuous_monitor"
+        and work_lane_contract.get("must_attempt_work") is False
+        and not has_user_todos
+    ):
+        return {
+            **base,
+            "recommended_mode": "monitor_quiet_until_material_transition",
+            "spend_policy": (
+                "do not append quota spend until a material monitor transition, regression, "
+                "or concrete blocker is validated and written back"
+            ),
+            "reason": "all visible open agent todos are monitor-class work with no material transition to record",
+        }
 
     if (
         work_lane_contract

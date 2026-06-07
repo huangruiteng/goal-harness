@@ -126,14 +126,23 @@ The same guard may include `work_lane_contract`. Schema
 `work_lane_contract_v1` is the single machine contract for monitor versus
 advancement routing. It distinguishes `lane=continuous_monitor` from
 `lane=advancement_task`, carries the next lane, and exposes one `obligation`
-string such as `advance_unless_material_monitor_transition`.
+string such as `advance_unless_material_monitor_transition`. Agent todo items
+may include `task_class=advancement_task` or
+`task_class=continuous_monitor`; legacy todo text is classified conservatively
+by the producer. Hidden open todos are treated as advancement work rather than
+as monitor-only work, so a truncated top-N todo projection cannot accidentally
+silence an executable backlog.
 For a dependency-observation projection with open agent todos, the guard sets
 `next_lane=advancement_task`, `must_attempt_work=true`, and
-`reason_codes=["dependency_observation", "open_agent_todo"]`. The heartbeat
-recommendation may say `follow_work_lane_contract`, but it should not restate
-the lane semantics; unchanged monitor polls remain quiet no-spend checks, while
-a material dependency-state transition may be written back once when it changes
-the selected goal decision.
+`reason_codes=["dependency_observation", "open_agent_todo"]` only when at least
+one open todo is advancement-class work. If all visible open todos are
+monitor-class and no open todo is hidden, the guard sets
+`obligation=quiet_until_material_monitor_transition` and
+`must_attempt_work=false`. The heartbeat recommendation may say
+`follow_work_lane_contract` or `monitor_quiet_until_material_transition`, but it
+should not restate the lane semantics; unchanged monitor polls remain quiet
+no-spend checks, while a material dependency-state transition may be written
+back once when it changes the selected goal decision.
 `handoff_readiness.handoff_interface_budget` declares the machine-readable
 budget for the minimal project-agent handoff: `mode=project_agent_handoff`,
 `max_lines=16`, and `max_chars=1800`. `goal-harness review-packet
