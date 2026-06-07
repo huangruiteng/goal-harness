@@ -379,8 +379,43 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
             f"layer={benchmark_decision.get('evidence_layer') or 'unknown'}",
         ]
         benchmark_decision_text = "; " + ", ".join(decision_parts)
+    benchmark_report = (
+        latest_run.get("benchmark_experiment_report_summary")
+        if isinstance(latest_run.get("benchmark_experiment_report_summary"), dict)
+        else {}
+    )
+    benchmark_report_text = ""
+    if benchmark_report:
+        identity = (
+            benchmark_report.get("experiment_identity")
+            if isinstance(benchmark_report.get("experiment_identity"), dict)
+            else {}
+        )
+        next_decision = (
+            benchmark_report.get("next_decision")
+            if isinstance(benchmark_report.get("next_decision"), dict)
+            else {}
+        )
+        negative = (
+            benchmark_report.get("negative_results")
+            if isinstance(benchmark_report.get("negative_results"), dict)
+            else {}
+        )
+        layers = (
+            negative.get("negative_evidence_layers")
+            if isinstance(negative.get("negative_evidence_layers"), list)
+            else []
+        )
+        report_parts = [
+            f"report={identity.get('report_id') or identity.get('task_slice') or 'unknown'}",
+        ]
+        if next_decision.get("decision"):
+            report_parts.append(f"report_decision={next_decision.get('decision')}")
+        if layers:
+            report_parts.append(f"negative_layers={','.join(str(layer) for layer in layers[:2])}")
+        benchmark_report_text = "; " + ", ".join(report_parts)
     return compact_packet_text(
-        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}",
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}{benchmark_report_text}",
         limit=260,
     )
 

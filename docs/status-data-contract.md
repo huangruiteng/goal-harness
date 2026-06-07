@@ -1485,6 +1485,21 @@ delta versus control-plane delta separation and must not authorize real
 benchmark execution, model-backed simulator work, private traces, or
 leaderboard claims.
 
+When a compact run record includes `benchmark_experiment_report_summary`, it is
+a redacted projection of `benchmark_experiment_report_v0`. The summary keeps the
+paper/report surface separate from raw benchmark execution: compact experiment
+identity, official-score eligibility, passive control-plane score hints,
+operator-simulator ablation state, claim boundary, negative-result layers, and
+next-decision fields. It must not include raw benchmark logs, local artifact
+paths, Codex session transcripts, private traces, credentials, or leaderboard
+submission artifacts.
+
+`goal-harness history append-benchmark-report --benchmark-report-json <path>` is
+the matching append path for this projection. It is dry-run by default and
+accepts only a compact `benchmark_experiment_report_v0` JSON object; it does
+not run a benchmark, invoke a model or simulator, read runner directories, parse
+private artifacts, or infer leaderboard claims.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the
