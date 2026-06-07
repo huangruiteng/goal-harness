@@ -235,6 +235,8 @@ goals must stay out of the eligible lane even when they have a high
     "totals": {
       "events_24h": 2,
       "events_7d": 2,
+      "benchmark_runs_24h": 0,
+      "benchmark_runs_7d": 0,
       "by_class_24h": {
         "accounting": 1,
         "decision": 0,
@@ -1376,14 +1378,25 @@ The summary classifies sampled run records into:
 - `state`: state refresh and other compact state-projection rows;
 - `work`: remaining bounded delivery or implementation progress rows.
 
-The summary reports 24h/7d totals and per-goal counts by event class. It is a
-projection only: consumers should use it to understand what kind of facts the
-control plane has observed recently, then drill into `run_history` or the
-project-local history command for exact evidence. It must not replace append-only
-run, reward, quota, validation, artifact, blocker, or evidence events.
+The summary reports 24h/7d totals and per-goal counts by event class. It also
+reports optional `benchmark_runs_24h` and `benchmark_runs_7d` counts when
+sampled run-index records carry a compact `benchmark_run_v0` object. These
+benchmark counts are evidence projections, not official score claims.
+Consumers should use them to notice that benchmark evidence exists, then drill
+into `run_history` or the project-local history command for exact evidence. It
+must not replace append-only run, reward, quota, validation, artifact, blocker,
+or evidence events.
 Each per-goal row may also include `latest_event_class` and `latest_event_at`,
 which are compact routing hints for the dashboard, not replacements for the
 latest run record.
+
+When a compact run record includes `benchmark_run_summary`, it is a redacted
+projection of `benchmark_run_v0`: runner, benchmark id, job name, mode, agent
+summary, progress counts, token/cost metrics, validation state, up to three
+trial summaries, relative evidence categories, resume/inspect command
+templates, and stop conditions. It must not include raw Codex sessions, host
+absolute paths, credentials, private benchmark material, or leaderboard upload
+claims.
 
 ## Promotion Readiness Summary
 

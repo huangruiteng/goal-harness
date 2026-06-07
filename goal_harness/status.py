@@ -79,6 +79,9 @@ EVENT_LEDGER_CLASSES = (
     "work",
 )
 EVENT_LEDGER_PROXY_NOTE = "append-only run-history projection; compact event-class counts only"
+BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
+MAX_BENCHMARK_RUN_TRIALS = 3
+MAX_BENCHMARK_RUN_LIST_ITEMS = 5
 STATUS_CONTRACT_SCHEMA_VERSION = 2
 MINIMUM_DASHBOARD_STATUS_CONTRACT_SCHEMA_VERSION = 2
 STATUS_CONTRACT_RELOAD_HINT = "scripts/macos-dashboard-launchagent.sh restart"
@@ -312,6 +315,134 @@ def public_safe_compact_list(value: Any, *, limit: int = MAX_SUBAGENT_SCOPE_ITEM
         if len(result) >= limit:
             break
     return result
+
+
+def _compact_numeric_map(value: Any, *, keys: tuple[str, ...] | None = None) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    source = value
+    selected_keys = keys or tuple(str(key) for key in source.keys())
+    compact: dict[str, Any] = {}
+    for key in selected_keys:
+        raw = source.get(key)
+        if isinstance(raw, bool) or raw is None:
+            continue
+        if isinstance(raw, (int, float)):
+            compact[key] = raw
+            continue
+        try:
+            if isinstance(raw, str) and raw.strip():
+                compact[key] = float(raw) if "." in raw else int(raw)
+        except ValueError:
+            continue
+    return compact
+
+
+def _benchmark_run_source(run: dict[str, Any]) -> dict[str, Any] | None:
+    nested = run.get("benchmark_run")
+    if isinstance(nested, dict) and nested.get("schema_version") == BENCHMARK_RUN_SCHEMA_VERSION:
+        return nested
+    if run.get("schema_version") == BENCHMARK_RUN_SCHEMA_VERSION:
+        return run
+    return None
+
+
+def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
+    source = _benchmark_run_source(run)
+    if not source:
+        return None
+
+    compact: dict[str, Any] = {"schema_version": BENCHMARK_RUN_SCHEMA_VERSION}
+    for field in ("source_runner", "benchmark_id", "job_name", "mode"):
+        value = public_safe_compact_text(source.get(field), limit=120)
+        if value:
+            compact[field] = value
+
+    agent = source.get("agent") if isinstance(source.get("agent"), dict) else {}
+    compact_agent: dict[str, Any] = {}
+    for field in ("name", "import_path", "model"):
+        value = public_safe_compact_text(agent.get(field), limit=120)
+        if value:
+            compact_agent[field] = value
+    kwargs_keys = public_safe_compact_list(agent.get("kwargs_keys"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+    if kwargs_keys:
+        compact_agent["kwargs_keys"] = kwargs_keys
+    if compact_agent:
+        compact["agent"] = compact_agent
+
+    progress = _compact_numeric_map(
+        source.get("progress"),
+        keys=(
+            "n_total_trials",
+            "n_completed_trials",
+            "n_errored_trials",
+            "n_running_trials",
+            "n_pending_trials",
+            "n_cancelled_trials",
+            "n_retries",
+        ),
+    )
+    if progress:
+        compact["progress"] = progress
+
+    metrics = _compact_numeric_map(
+        source.get("metrics"),
+        keys=("input_tokens", "cache_tokens", "output_tokens", "cost_usd"),
+    )
+    if metrics:
+        compact["metrics"] = metrics
+
+    validation = source.get("validation") if isinstance(source.get("validation"), dict) else {}
+    if validation:
+        failed = [
+            str(key)
+            for key, value in validation.items()
+            if isinstance(key, str) and isinstance(value, bool) and not value
+        ][:MAX_BENCHMARK_RUN_LIST_ITEMS]
+        compact["validation"] = {
+            "all_passed": not failed and all(bool(value) for value in validation.values() if isinstance(value, bool)),
+            "failed_checks": failed,
+        }
+
+    trials: list[dict[str, Any]] = []
+    for trial in source.get("trials") or []:
+        if not isinstance(trial, dict):
+            continue
+        compact_trial: dict[str, Any] = {}
+        for field in ("task_id", "trial_name", "source", "exception_type"):
+            value = public_safe_compact_text(trial.get(field), limit=140)
+            if value:
+                compact_trial[field] = value
+        reward = _compact_numeric_map(trial.get("reward"))
+        if reward:
+            compact_trial["reward"] = reward
+        trial_metrics = _compact_numeric_map(
+            trial.get("metrics"),
+            keys=("input_tokens", "cache_tokens", "output_tokens", "cost_usd"),
+        )
+        if trial_metrics:
+            compact_trial["metrics"] = trial_metrics
+        for field in ("trajectory_present", "verifier_reward_present", "artifact_manifest_present", "trial_result_present"):
+            if isinstance(trial.get(field), bool):
+                compact_trial[field] = trial.get(field)
+        if compact_trial:
+            trials.append(compact_trial)
+            if len(trials) >= MAX_BENCHMARK_RUN_TRIALS:
+                break
+    if trials:
+        compact["trials"] = trials
+        raw_trials = source.get("trials")
+        if isinstance(raw_trials, list):
+            compact["trial_count"] = len(raw_trials)
+
+    for field in ("evidence_files", "resume_or_inspect_commands", "stop_conditions"):
+        values = public_safe_compact_list(source.get(field), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+        if values:
+            compact[field] = values
+
+    if set(compact.keys()) == {"schema_version"}:
+        return None
+    return compact
 
 
 def parse_state_frontmatter(state_text: str) -> dict[str, str]:
@@ -1154,6 +1285,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
     outcome = delivery_outcome_for_run(run, profile)
     if outcome != "not_configured":
         compact["delivery_outcome"] = outcome
+    benchmark_run = compact_benchmark_run(run)
+    if benchmark_run:
+        compact["benchmark_run_summary"] = benchmark_run
     return compact
 
 
@@ -2382,6 +2516,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     if subagents:
         compact["subagents"] = subagents[:MAX_SUBAGENT_ACTIVITY_ITEMS]
         compact["subagent_count"] = len(subagents)
+    benchmark_run = compact_benchmark_run(run)
+    if benchmark_run:
+        compact["benchmark_run_summary"] = benchmark_run
     return compact
 
 
@@ -2486,10 +2623,13 @@ def blank_event_ledger_goal(goal_id: str) -> dict[str, Any]:
         "goal_id": goal_id,
         "events_24h": 0,
         "events_7d": 0,
+        "benchmark_runs_24h": 0,
+        "benchmark_runs_7d": 0,
         "by_class_24h": blank_event_class_counts(),
         "by_class_7d": blank_event_class_counts(),
         "latest_event_class": None,
         "latest_event_at": None,
+        "latest_benchmark_run": None,
     }
 
 
@@ -2497,6 +2637,8 @@ def event_ledger_event_class(run: dict[str, Any]) -> str:
     classification = str(run.get("classification") or "").lower()
     if classification == "quota_slot_spent" or isinstance(run.get("quota_event"), dict):
         return "accounting"
+    if compact_benchmark_run(run):
+        return "evidence"
     if (
         classification in EVENT_LEDGER_DECISION_CLASSIFICATIONS
         or "operator_gate" in classification
@@ -2538,6 +2680,8 @@ def build_event_ledger_summary(history: dict[str, Any]) -> dict[str, Any]:
     totals = {
         "events_24h": 0,
         "events_7d": 0,
+        "benchmark_runs_24h": 0,
+        "benchmark_runs_7d": 0,
         "by_class_24h": blank_event_class_counts(),
         "by_class_7d": blank_event_class_counts(),
     }
@@ -2558,17 +2702,36 @@ def build_event_ledger_summary(history: dict[str, Any]) -> dict[str, Any]:
         if latest_event_at is None or generated_at > latest_event_at:
             goal["latest_event_class"] = event_class
             goal["latest_event_at"] = generated_at.isoformat()
+        benchmark_run = compact_benchmark_run(run)
+        if benchmark_run:
+            latest_benchmark_at = parse_timestamp(
+                (goal.get("latest_benchmark_run") or {}).get("generated_at")
+                if isinstance(goal.get("latest_benchmark_run"), dict)
+                else None
+            )
+            if latest_benchmark_at is None or generated_at > latest_benchmark_at:
+                goal["latest_benchmark_run"] = {
+                    "generated_at": generated_at.isoformat(),
+                    "classification": run.get("classification"),
+                    **benchmark_run,
+                }
 
         if generated_at >= cutoff_7d:
             totals["events_7d"] += 1
             totals["by_class_7d"][event_class] += 1
             goal["events_7d"] += 1
             goal["by_class_7d"][event_class] += 1
+            if benchmark_run:
+                totals["benchmark_runs_7d"] += 1
+                goal["benchmark_runs_7d"] += 1
         if generated_at >= cutoff_24h:
             totals["events_24h"] += 1
             totals["by_class_24h"][event_class] += 1
             goal["events_24h"] += 1
             goal["by_class_24h"][event_class] += 1
+            if benchmark_run:
+                totals["benchmark_runs_24h"] += 1
+                goal["benchmark_runs_24h"] += 1
 
     goal_rows = sorted(
         goals.values(),
@@ -3013,6 +3176,8 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 f"samples={event_ledger.get('sample_run_count')} "
                 f"events_24h={event_totals.get('events_24h')} "
                 f"events_7d={event_totals.get('events_7d')} "
+                f"benchmark_runs_24h={event_totals.get('benchmark_runs_24h', 0)} "
+                f"benchmark_runs_7d={event_totals.get('benchmark_runs_7d', 0)} "
                 f"classes_24h={_event_class_count_text(by_class_24h)} "
                 f"classes_7d={_event_class_count_text(by_class_7d)}",
             ]
@@ -3035,6 +3200,8 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 f"`{_markdown_scalar(goal.get('goal_id') or '')}`: "
                 f"events_24h={goal.get('events_24h')} "
                 f"events_7d={goal.get('events_7d')} "
+                f"benchmark_runs_24h={goal.get('benchmark_runs_24h', 0)} "
+                f"benchmark_runs_7d={goal.get('benchmark_runs_7d', 0)} "
                 f"latest={_markdown_scalar(goal.get('latest_event_class') or '')} "
                 f"classes_24h={_event_class_count_text(goal_by_class_24h)}"
             )

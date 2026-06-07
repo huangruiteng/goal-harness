@@ -303,8 +303,28 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     streak = readiness.get("post_handoff_small_scale_streak")
     streak_text = f", small_streak={streak}" if isinstance(streak, int) else ""
     suffix = f", at={generated_at}" if generated_at else ""
+    benchmark = latest_run.get("benchmark_run_summary") if isinstance(latest_run.get("benchmark_run_summary"), dict) else {}
+    benchmark_text = ""
+    if benchmark:
+        progress = benchmark.get("progress") if isinstance(benchmark.get("progress"), dict) else {}
+        trials = benchmark.get("trials") if isinstance(benchmark.get("trials"), list) else []
+        reward = None
+        if trials and isinstance(trials[0], dict):
+            reward_map = trials[0].get("reward") if isinstance(trials[0].get("reward"), dict) else {}
+            reward = reward_map.get("reward")
+        benchmark_parts = [
+            f"benchmark={benchmark.get('benchmark_id') or 'unknown'}",
+            f"runner={benchmark.get('source_runner') or 'unknown'}",
+        ]
+        if progress:
+            benchmark_parts.append(
+                f"completed={progress.get('n_completed_trials', 0)}/{progress.get('n_total_trials', 0)}"
+            )
+        if reward is not None:
+            benchmark_parts.append(f"reward={reward}")
+        benchmark_text = "; " + ", ".join(benchmark_parts)
     return compact_packet_text(
-        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}",
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}",
         limit=220,
     )
 
