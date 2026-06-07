@@ -322,6 +322,21 @@ TODO_ARCHIVE_HEADER_MARKERS = (
     "待办归档",
 )
 TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
+TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
+TODO_TASK_CLASS_MONITOR = "continuous_monitor"
+TODO_TASK_CLASS_VALUES = {TODO_TASK_CLASS_ADVANCEMENT, TODO_TASK_CLASS_MONITOR}
+TODO_MONITOR_PATTERNS = (
+    re.compile(r"(?i)\bdependency monitor\b"),
+    re.compile(r"(?i)\bobservation lane\b"),
+    re.compile(r"(?i)(?:^|[:：]\s*)observe\b"),
+    re.compile(r"(?i)(?:^|[:：]\s*)poll\b"),
+    re.compile(r"(?i)(?:^|[:：]\s*)watch\b"),
+    re.compile(r"(?i)\bmonitor-only\b"),
+)
+TODO_ADVANCEMENT_PATTERNS = (
+    re.compile(r"(?i)(?:^|[:：]\s*)(?:implement|add|make|fix|build|wire|define|compare|run|repair|archive|publish|merge|write|attribute)\b"),
+    re.compile(r"(?i)\b(?:implementation slice|validation-backed patch|smoke fixture)\b"),
+)
 
 
 def normalize_todo_text(text: str, *, limit: int = 500) -> str:
@@ -514,6 +529,24 @@ def todo_priority_parts(text: str) -> tuple[str | None, str]:
     return match.group(1).strip().upper(), match.group(2).strip()
 
 
+def todo_task_class_for_text(text: str) -> str:
+    compact = normalize_todo_text(text)
+    for pattern in TODO_MONITOR_PATTERNS:
+        if pattern.search(compact):
+            return TODO_TASK_CLASS_MONITOR
+    for pattern in TODO_ADVANCEMENT_PATTERNS:
+        if pattern.search(compact):
+            return TODO_TASK_CLASS_ADVANCEMENT
+    return TODO_TASK_CLASS_ADVANCEMENT
+
+
+def normalize_todo_task_class(value: Any, *, text: str) -> str:
+    candidate = str(value or "").strip()
+    if candidate in TODO_TASK_CLASS_VALUES:
+        return candidate
+    return todo_task_class_for_text(text)
+
+
 def structured_todo_item(
     item: dict[str, Any],
     *,
@@ -536,6 +569,7 @@ def structured_todo_item(
             "archive_state": archive_state,
             "source_section": source_section,
             "text": text,
+            "task_class": normalize_todo_task_class(item.get("task_class"), text=text),
         }
     )
     if priority:
@@ -550,7 +584,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "done": bool(item.get("done")),
         "text": item.get("text"),
     }
-    for key in ("schema_version", "todo_id", "role", "status", "priority", "title", "archive_state", "source_section"):
+    for key in ("schema_version", "todo_id", "role", "status", "priority", "title", "archive_state", "source_section", "task_class"):
         if item.get(key) is not None:
             compact[key] = item.get(key)
     return compact

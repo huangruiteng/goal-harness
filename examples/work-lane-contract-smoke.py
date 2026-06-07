@@ -15,14 +15,14 @@ from goal_harness.quota import build_quota_should_run, render_quota_should_run_m
 GOAL_ID = "work-lane-fixture"
 
 
-def status_payload(*, status: str, has_agent_todo: bool = True) -> dict:
-    agent_todos = {
-        "schema_version": "todo_summary_v0",
-        "source_section": "Agent Todo",
-        "total_count": 1 if has_agent_todo else 0,
-        "open_count": 1 if has_agent_todo else 0,
-        "done_count": 0,
-        "first_open_items": [
+def status_payload(
+    *,
+    status: str,
+    has_agent_todo: bool = True,
+    agent_todo_items: list[dict] | None = None,
+) -> dict:
+    if agent_todo_items is None:
+        agent_todo_items = [
             {
                 "index": 1,
                 "text": "[P1] Advance the self-repair planning slice with a validation-backed patch.",
@@ -31,8 +31,14 @@ def status_payload(*, status: str, has_agent_todo: bool = True) -> dict:
                 "priority": "P1",
             }
         ]
-        if has_agent_todo
-        else [],
+    open_items = agent_todo_items if has_agent_todo else []
+    agent_todos = {
+        "schema_version": "todo_summary_v0",
+        "source_section": "Agent Todo",
+        "total_count": len(open_items),
+        "open_count": len(open_items),
+        "done_count": 0,
+        "first_open_items": open_items,
     }
     return {
         "ok": True,
@@ -125,9 +131,84 @@ def assert_primary_status_stays_advancement_lane() -> None:
     assert lane["reason_codes"] == ["open_agent_todo"], lane
 
 
+def assert_monitor_only_todo_waits_quietly() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            status="typed_task_lane_planning_writeback",
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": "[P2] Side-bypass dependency monitor: observe public-safe replay state transitions only.",
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P2",
+                },
+                {
+                    "index": 2,
+                    "text": "[P2] Meta canary/readiness observation lane: keep release readiness observable.",
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P2",
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    lane = guard["work_lane_contract"]
+    assert lane["schema_version"] == "work_lane_contract_v1", lane
+    assert lane["lane"] == "continuous_monitor", lane
+    assert lane["monitor_kind"] == "todo_monitor", lane
+    assert lane["next_lane"] == "continuous_monitor", lane
+    assert lane["obligation"] == "quiet_until_material_monitor_transition", lane
+    assert lane["must_attempt_work"] is False, lane
+    assert lane["reason_codes"] == ["monitor_todo_only"], lane
+    assert guard["heartbeat_recommendation"]["recommended_mode"] == "monitor_quiet_until_material_transition", guard
+    assert guard["execution_obligation"]["kind"] == "work_lane_contract", guard
+    assert guard["execution_obligation"]["must_attempt_work"] is False, guard
+    first_items = guard["agent_todo_summary"]["first_open_items"]
+    assert [item["task_class"] for item in first_items] == ["continuous_monitor", "continuous_monitor"], guard
+    markdown = render_quota_should_run_markdown(guard)
+    assert "work_lane_contract: lane=continuous_monitor next=continuous_monitor" in markdown, markdown
+    assert "obligation=quiet_until_material_monitor_transition" in markdown, markdown
+
+
+def assert_mixed_monitor_and_advancement_routes_to_advancement() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            status="typed_task_lane_planning_writeback",
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": "[P2] Side-bypass dependency monitor: observe public-safe replay state transitions only.",
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P2",
+                },
+                {
+                    "index": 2,
+                    "text": "[P1] Add the typed task class routing smoke fixture.",
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P1",
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    lane = guard["work_lane_contract"]
+    assert lane["lane"] == "advancement_task", lane
+    assert lane["next_lane"] == "advancement_task", lane
+    assert lane["obligation"] == "advance_one_bounded_segment", lane
+    assert lane["must_attempt_work"] is True, lane
+    first_items = guard["agent_todo_summary"]["first_open_items"]
+    assert [item["task_class"] for item in first_items] == ["continuous_monitor", "advancement_task"], guard
+
+
 def main() -> int:
     assert_dependency_monitor_requires_advancement()
     assert_primary_status_stays_advancement_lane()
+    assert_monitor_only_todo_waits_quietly()
+    assert_mixed_monitor_and_advancement_routes_to_advancement()
     print("work-lane-contract-smoke ok")
     return 0
 
