@@ -1474,6 +1474,17 @@ default and accepts only a compact `benchmark_comparison_v0` JSON object; it
 does not discover result pairs from runner directories, parse raw task
 artifacts, invoke benchmark runners, or infer leaderboard claims.
 
+When `benchmark_comparison_summary` is present, status may also include
+`benchmark_comparison_decision_note`. This is a compact consumer-facing note,
+not a new benchmark event. It maps the paired deltas into report-ready
+`claim_boundary` and `next_decision` hints: whether the evidence is
+readiness-only, control-plane-only, an official-score candidate, failure
+analysis, or still boundary-gated; which claims are allowed; which claims are
+forbidden; and the minimum next evidence. The note must preserve official-score
+delta versus control-plane delta separation and must not authorize real
+benchmark execution, model-backed simulator work, private traces, or
+leaderboard claims.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the

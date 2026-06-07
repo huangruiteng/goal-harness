@@ -82,6 +82,7 @@ EVENT_LEDGER_PROXY_NOTE = "append-only run-history projection; compact event-cla
 BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
 BENCHMARK_RESULT_SCHEMA_VERSION = "benchmark_result_v0"
 BENCHMARK_COMPARISON_SCHEMA_VERSION = "benchmark_comparison_v0"
+BENCHMARK_COMPARISON_DECISION_SCHEMA_VERSION = "benchmark_comparison_decision_note_v0"
 CONTROL_PLANE_SCORE_SCHEMA_VERSION = "control_plane_score_core_v0"
 CONTROL_PLANE_SCORE_COMPONENTS = (
     "restartability",
@@ -691,6 +692,95 @@ def compact_benchmark_comparison(run: dict[str, Any]) -> dict[str, Any] | None:
     if set(compact.keys()) == {"schema_version"}:
         return None
     return compact
+
+
+def _comparison_delta_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        if isinstance(value, str) and value.strip():
+            return float(value)
+    except ValueError:
+        return None
+    return None
+
+
+def benchmark_comparison_decision_note(comparison: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(comparison, dict) or comparison.get("schema_version") != BENCHMARK_COMPARISON_SCHEMA_VERSION:
+        return None
+
+    official_delta = _comparison_delta_number(comparison.get("official_task_score_delta"))
+    control_delta = _comparison_delta_number(comparison.get("control_plane_score_delta"))
+    symbolic_official = (
+        comparison.get("official_task_score_delta")
+        if isinstance(comparison.get("official_task_score_delta"), str)
+        else None
+    )
+    both_success = comparison.get("both_success") if isinstance(comparison.get("both_success"), bool) else None
+    submit_ready = comparison.get("ready_to_submit_leaderboard")
+    real_ready = comparison.get("ready_to_run_real_benchmark")
+
+    evidence_layer = "comparison_summary"
+    decision = "repeat"
+    minimum_next_evidence = "repeat the paired comparison or record a blocker"
+    may_claim = ["compact paired comparison is available"]
+    must_not_claim = ["official leaderboard uplift"]
+
+    if symbolic_official == "not_applicable_readiness_only":
+        evidence_layer = "readiness_only"
+        decision = "continue"
+        minimum_next_evidence = "record no-submit setup evidence before any real benchmark run"
+        may_claim.append("readiness boundary is documented")
+        must_not_claim.append("benchmark pass/fail or score uplift")
+    elif official_delta == 0 and control_delta is not None and control_delta > 0:
+        evidence_layer = "control_plane_only"
+        decision = "continue"
+        minimum_next_evidence = "convert the control-plane delta into a report note or repeat on an official-runner-compatible output"
+        may_claim.append("control-plane delta improved while official score delta stayed zero")
+        must_not_claim.append("benchmark pass/fail improvement from control-plane-only evidence")
+    elif official_delta is not None and official_delta > 0:
+        evidence_layer = "official_score_candidate"
+        decision = "defer" if submit_ready is not True else "broaden"
+        minimum_next_evidence = "verify benchmark protocol, submit eligibility, and side-effect audit before claiming official uplift"
+        may_claim.append("official score candidate exists")
+        must_not_claim.append("official uplift before protocol and submit-eligibility verification")
+    elif both_success is False:
+        evidence_layer = "failure_analysis"
+        decision = "repeat"
+        minimum_next_evidence = "attribute the failed scenario before broadening"
+        may_claim.append("paired comparison found a failure needing attribution")
+    elif real_ready is False:
+        evidence_layer = "boundary_guarded"
+        decision = "defer"
+        minimum_next_evidence = "resolve real-run readiness blockers before execution"
+        may_claim.append("real benchmark execution remains gated")
+
+    note: dict[str, Any] = {
+        "schema_version": BENCHMARK_COMPARISON_DECISION_SCHEMA_VERSION,
+        "source_schema_version": BENCHMARK_COMPARISON_SCHEMA_VERSION,
+        "decision": decision,
+        "evidence_layer": evidence_layer,
+        "minimum_next_evidence": minimum_next_evidence,
+        "stop_condition": "stop before real benchmark execution, model-backed simulator work, private traces, or leaderboard claims without explicit approval",
+        "may_claim": may_claim[:MAX_BENCHMARK_RUN_LIST_ITEMS],
+        "must_not_claim": must_not_claim[:MAX_BENCHMARK_RUN_LIST_ITEMS],
+        "report_section_hint": ["claim_boundary", "next_decision"],
+    }
+    for field in ("task_id", "comparison_id"):
+        value = public_safe_compact_text(comparison.get(field), limit=140)
+        if value:
+            note[field] = value
+    if official_delta is not None:
+        note["official_task_score_delta"] = official_delta
+    elif symbolic_official:
+        note["official_task_score_delta"] = symbolic_official
+    if control_delta is not None:
+        note["control_plane_score_delta"] = control_delta
+    elif isinstance(comparison.get("control_plane_score_delta"), str):
+        note["control_plane_score_delta"] = public_safe_compact_text(comparison.get("control_plane_score_delta"), limit=120)
+    return note
 
 
 def parse_state_frontmatter(state_text: str) -> dict[str, str]:
@@ -1670,6 +1760,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
     benchmark_comparison = compact_benchmark_comparison(run)
     if benchmark_comparison:
         compact["benchmark_comparison_summary"] = benchmark_comparison
+        decision_note = benchmark_comparison_decision_note(benchmark_comparison)
+        if decision_note:
+            compact["benchmark_comparison_decision_note"] = decision_note
     return compact
 
 
@@ -2920,6 +3013,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     benchmark_comparison = compact_benchmark_comparison(run)
     if benchmark_comparison:
         compact["benchmark_comparison_summary"] = benchmark_comparison
+        decision_note = benchmark_comparison_decision_note(benchmark_comparison)
+        if decision_note:
+            compact["benchmark_comparison_decision_note"] = decision_note
     return compact
 
 

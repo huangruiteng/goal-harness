@@ -367,8 +367,20 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
         if benchmark_comparison.get("both_success") is not None:
             comparison_parts.append(f"both_success={benchmark_comparison.get('both_success')}")
         benchmark_comparison_text = "; " + ", ".join(comparison_parts)
+    benchmark_decision = (
+        latest_run.get("benchmark_comparison_decision_note")
+        if isinstance(latest_run.get("benchmark_comparison_decision_note"), dict)
+        else {}
+    )
+    benchmark_decision_text = ""
+    if benchmark_decision:
+        decision_parts = [
+            f"decision={benchmark_decision.get('decision') or 'unknown'}",
+            f"layer={benchmark_decision.get('evidence_layer') or 'unknown'}",
+        ]
+        benchmark_decision_text = "; " + ", ".join(decision_parts)
     return compact_packet_text(
-        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}",
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}",
         limit=260,
     )
 

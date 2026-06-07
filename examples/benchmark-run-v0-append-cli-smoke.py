@@ -446,6 +446,17 @@ def main() -> None:
         assert "raw_thread_path" not in comparison_summary, comparison_summary
         assert "raw_log_path" not in json.dumps(comparison_summary, sort_keys=True), comparison_summary
         assert_no_private_surface(comparison_summary)
+        decision_note = comparison_run["benchmark_comparison_decision_note"]
+        assert decision_note["schema_version"] == "benchmark_comparison_decision_note_v0", decision_note
+        assert decision_note["source_schema_version"] == "benchmark_comparison_v0", decision_note
+        assert decision_note["decision"] == "continue", decision_note
+        assert decision_note["evidence_layer"] == "control_plane_only", decision_note
+        assert decision_note["official_task_score_delta"] == 0.0, decision_note
+        assert decision_note["control_plane_score_delta"] == 0.143, decision_note
+        assert "control-plane delta improved while official score delta stayed zero" in decision_note["may_claim"], decision_note
+        assert "official leaderboard uplift" in decision_note["must_not_claim"], decision_note
+        assert decision_note["report_section_hint"] == ["claim_boundary", "next_decision"], decision_note
+        assert_no_private_surface(decision_note)
 
         index_records = [
             json.loads(line)
@@ -462,6 +473,8 @@ def main() -> None:
         assert "comparison=mini_control_plane_repair_v0_ab" in handoff, handoff
         assert "official_delta=0.0" in handoff, handoff
         assert "control_delta=0.143" in handoff, handoff
+        assert "decision=continue" in handoff, handoff
+        assert "layer=control_plane_only" in handoff, handoff
         assert_no_private_surface({"handoff": handoff})
         assert status["event_ledger_summary"]["totals"]["benchmark_runs_24h"] == 1, status
         assert_no_private_surface(summary)
