@@ -959,7 +959,11 @@ Review Packet source-of-truth rule:
   copy-minimal form for an already selected or approved target-agent relay: it
   prints only the `project_agent_handoff` text in markdown output, while JSON
   output returns a minimized handoff payload instead of the full operator
-  packet;
+  packet. When a latest post-handoff run carries
+  `benchmark_experiment_report_replay_decision_v0`, JSON handoff-only output may
+  also include `benchmark_report_chain_handoff` so agents can read
+  `chain_map`, `replay_decision`, `next_run_mode`, `readiness`, and
+  `authorization` without parsing the handoff sentence;
 - project-agent handoff commands redact local absolute registry/runtime paths
   before they enter `project_agent_command`, `project_agent_handoff`, or
   `handoff_text`;
@@ -1529,6 +1533,13 @@ benchmark path. When a latest run has a replay decision, the review-packet
 handoff follow-through summary may include
 `chain_map=benchmark-report-chain-map-v0.md` so a worker can jump from the
 compact replay decision back to the full reviewer-facing chain contract.
+The same information may appear in
+`goal-harness review-packet --handoff-only --format json` as
+`benchmark_report_chain_handoff` with
+`schema_version=benchmark_report_chain_handoff_v0`. That JSON projection is a
+read-only relay helper over existing status/run-history fields; it does not add
+a new event type, runner authority, simulator path, raw artifact pointer, or
+leaderboard claim.
 
 ## Promotion Readiness Summary
 
