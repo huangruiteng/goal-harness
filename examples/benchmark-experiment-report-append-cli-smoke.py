@@ -221,12 +221,28 @@ def main() -> None:
         assert "official leaderboard uplift" in readiness_note["must_not_claim"], readiness_note
         assert_no_private_surface(readiness_note)
 
+        replay_decision = report_run["benchmark_experiment_report_replay_decision"]
+        assert replay_decision["schema_version"] == "benchmark_experiment_report_replay_decision_v0", replay_decision
+        assert replay_decision["source_schema_version"] == "benchmark_experiment_report_readiness_note_v0", replay_decision
+        assert replay_decision["readiness"] == "negative_or_control_plane_only", replay_decision
+        assert replay_decision["authorization"] == "fixture_only", replay_decision
+        assert replay_decision["replay_decision"] == "continue_fixture_replay", replay_decision
+        assert replay_decision["next_run_mode"] == "fixture_replay", replay_decision
+        assert replay_decision["surface"] == "status_review_packet_only", replay_decision
+        assert replay_decision["report_id"] == "mini-control-plane-repair-report-v0", replay_decision
+        assert replay_decision["task_slice"] == "mini_control_plane_repair_v0", replay_decision
+        assert set(replay_decision["negative_evidence_layers"]) == {"readiness_only", "failure_analysis"}, replay_decision
+        assert "official leaderboard uplift" in replay_decision["must_not_claim"], replay_decision
+        assert_no_private_surface(replay_decision)
+
         packet = build_review_packet(status, goal_id=GOAL_ID)
         handoff = packet["project_agent_handoff"]
         assert "report=mini-control-plane-repair-report-v0" in handoff, handoff
         assert "report_decision=continue" in handoff, handoff
         assert "readiness=negative_or_control_plane_only" in handoff, handoff
         assert "next_run=fixture_only" in handoff, handoff
+        assert "replay=continue_fixture_replay" in handoff, handoff
+        assert "mode=fixture_replay" in handoff, handoff
         assert "negative_layers=readiness_only,failure_analysis" in handoff, handoff
         assert_no_private_surface({"handoff": handoff})
 
