@@ -84,6 +84,7 @@ BENCHMARK_RESULT_SCHEMA_VERSION = "benchmark_result_v0"
 BENCHMARK_COMPARISON_SCHEMA_VERSION = "benchmark_comparison_v0"
 BENCHMARK_COMPARISON_DECISION_SCHEMA_VERSION = "benchmark_comparison_decision_note_v0"
 BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION = "benchmark_experiment_report_v0"
+BENCHMARK_EXPERIMENT_REPORT_READINESS_SCHEMA_VERSION = "benchmark_experiment_report_readiness_note_v0"
 CONTROL_PLANE_SCORE_SCHEMA_VERSION = "control_plane_score_core_v0"
 CONTROL_PLANE_SCORE_COMPONENTS = (
     "restartability",
@@ -953,6 +954,95 @@ def compact_benchmark_experiment_report(run: dict[str, Any]) -> dict[str, Any] |
     if set(compact.keys()) == {"schema_version", "section_count"}:
         return None
     return compact
+
+
+def benchmark_experiment_report_readiness_note(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(report, dict) or report.get("schema_version") != BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION:
+        return None
+
+    identity = report.get("experiment_identity") if isinstance(report.get("experiment_identity"), dict) else {}
+    official = report.get("official_score") if isinstance(report.get("official_score"), dict) else {}
+    simulator = (
+        report.get("operator_simulator_ablation")
+        if isinstance(report.get("operator_simulator_ablation"), dict)
+        else {}
+    )
+    boundary = report.get("claim_boundary") if isinstance(report.get("claim_boundary"), dict) else {}
+    negative = report.get("negative_results") if isinstance(report.get("negative_results"), dict) else {}
+    next_decision = report.get("next_decision") if isinstance(report.get("next_decision"), dict) else {}
+
+    submit_eligible = official.get("submit_eligible") if isinstance(official.get("submit_eligible"), bool) else None
+    leaderboard_evidence = (
+        official.get("leaderboard_evidence") if isinstance(official.get("leaderboard_evidence"), bool) else None
+    )
+    simulator_enabled = simulator.get("enabled") if isinstance(simulator.get("enabled"), bool) else None
+    null_official_delta = (
+        negative.get("null_official_delta") if isinstance(negative.get("null_official_delta"), bool) else None
+    )
+    negative_layers = public_safe_compact_list(
+        negative.get("negative_evidence_layers"),
+        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
+    must_not_claim = public_safe_compact_list(boundary.get("must_not_claim"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+    may_claim = public_safe_compact_list(boundary.get("may_claim"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+
+    readiness = "fixture_ready"
+    next_run_authorization = "fixture_only"
+    minimum_next_evidence = public_safe_compact_text(
+        next_decision.get("minimum_next_evidence"),
+        limit=180,
+    ) or "compact report summary plus boundary-preserving replay evidence"
+    if submit_eligible is True and leaderboard_evidence is True:
+        readiness = "review_required"
+        next_run_authorization = "requires_operator_approval"
+        minimum_next_evidence = "operator review of leaderboard evidence before publication"
+    elif submit_eligible is True:
+        readiness = "review_required"
+        next_run_authorization = "requires_operator_approval"
+        minimum_next_evidence = "leaderboard evidence or an explicit downgrade to fixture-only"
+    elif simulator_enabled is True:
+        readiness = "assisted_mode_separate"
+        next_run_authorization = "requires_operator_approval"
+        minimum_next_evidence = "operator-simulator ablation evidence kept separate from passive report evidence"
+    elif null_official_delta is True or negative_layers:
+        readiness = "negative_or_control_plane_only"
+        next_run_authorization = "fixture_only"
+
+    stop_condition = public_safe_compact_text(next_decision.get("stop_condition"), limit=180) or (
+        "stop before real benchmark execution, model-backed simulator work, private traces, "
+        "or leaderboard claims without explicit approval"
+    )
+    report_decision = public_safe_compact_text(next_decision.get("decision"), limit=80) or "continue"
+
+    note: dict[str, Any] = {
+        "schema_version": BENCHMARK_EXPERIMENT_REPORT_READINESS_SCHEMA_VERSION,
+        "source_schema_version": BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION,
+        "readiness": readiness,
+        "next_run_authorization": next_run_authorization,
+        "report_decision": report_decision,
+        "minimum_next_evidence": minimum_next_evidence,
+        "stop_condition": stop_condition,
+        "report_section_hint": ["claim_boundary", "negative_results", "next_decision"],
+    }
+    for field in ("report_id", "benchmark_id", "task_slice"):
+        value = public_safe_compact_text(identity.get(field), limit=140)
+        if value:
+            note[field] = value
+    if may_claim:
+        note["may_claim"] = may_claim
+    if must_not_claim:
+        note["must_not_claim"] = must_not_claim
+    if negative_layers:
+        note["negative_evidence_layers"] = negative_layers
+    for field, value in (
+        ("submit_eligible", submit_eligible),
+        ("leaderboard_evidence", leaderboard_evidence),
+        ("simulator_enabled", simulator_enabled),
+        ("null_official_delta", null_official_delta),
+    ):
+        if isinstance(value, bool):
+            note[field] = value
+    return note
 
 
 def parse_state_frontmatter(state_text: str) -> dict[str, str]:
@@ -1938,6 +2028,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
     benchmark_report = compact_benchmark_experiment_report(run)
     if benchmark_report:
         compact["benchmark_experiment_report_summary"] = benchmark_report
+        readiness_note = benchmark_experiment_report_readiness_note(benchmark_report)
+        if readiness_note:
+            compact["benchmark_experiment_report_readiness_note"] = readiness_note
     return compact
 
 
@@ -3194,6 +3287,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     benchmark_report = compact_benchmark_experiment_report(run)
     if benchmark_report:
         compact["benchmark_experiment_report_summary"] = benchmark_report
+        readiness_note = benchmark_experiment_report_readiness_note(benchmark_report)
+        if readiness_note:
+            compact["benchmark_experiment_report_readiness_note"] = readiness_note
     return compact
 
 

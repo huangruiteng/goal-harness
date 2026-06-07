@@ -205,10 +205,28 @@ def main() -> None:
         assert "official leaderboard uplift" in boundary["must_not_claim"], boundary
         assert_no_private_surface(report_summary)
 
+        readiness_note = report_run["benchmark_experiment_report_readiness_note"]
+        assert readiness_note["schema_version"] == "benchmark_experiment_report_readiness_note_v0", readiness_note
+        assert readiness_note["source_schema_version"] == "benchmark_experiment_report_v0", readiness_note
+        assert readiness_note["readiness"] == "negative_or_control_plane_only", readiness_note
+        assert readiness_note["next_run_authorization"] == "fixture_only", readiness_note
+        assert readiness_note["report_decision"] == "continue", readiness_note
+        assert readiness_note["report_id"] == "mini-control-plane-repair-report-v0", readiness_note
+        assert readiness_note["task_slice"] == "mini_control_plane_repair_v0", readiness_note
+        assert readiness_note["submit_eligible"] is False, readiness_note
+        assert readiness_note["leaderboard_evidence"] is False, readiness_note
+        assert readiness_note["simulator_enabled"] is False, readiness_note
+        assert readiness_note["null_official_delta"] is True, readiness_note
+        assert set(readiness_note["negative_evidence_layers"]) == {"readiness_only", "failure_analysis"}, readiness_note
+        assert "official leaderboard uplift" in readiness_note["must_not_claim"], readiness_note
+        assert_no_private_surface(readiness_note)
+
         packet = build_review_packet(status, goal_id=GOAL_ID)
         handoff = packet["project_agent_handoff"]
         assert "report=mini-control-plane-repair-report-v0" in handoff, handoff
         assert "report_decision=continue" in handoff, handoff
+        assert "readiness=negative_or_control_plane_only" in handoff, handoff
+        assert "next_run=fixture_only" in handoff, handoff
         assert "negative_layers=readiness_only,failure_analysis" in handoff, handoff
         assert_no_private_surface({"handoff": handoff})
 
