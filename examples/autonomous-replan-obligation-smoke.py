@@ -47,10 +47,20 @@ def write_fixture(root: Path, *, include_replan_signals: bool) -> tuple[Path, Pa
     replan_section = ""
     if include_replan_signals:
         replan_section = (
-            "## Recent Progress\n\n"
+            "## Operating Lessons\n\n"
             "- no-progress streak: three eligible heartbeats repeated the same dependency observation.\n"
             "- repeated-action loop: the same monitor-only next action appeared again.\n"
             "- phase transition: readiness work is done and the next phase should advance planning-trigger work.\n\n"
+        )
+    historical_noise_section = ""
+    done_todo_line = ""
+    if not include_replan_signals:
+        historical_noise_section = (
+            "## Recent Progress\n\n"
+            "- 2026-01-01: An older no-progress streak repair was already completed.\n\n"
+        )
+        done_todo_line = (
+            "- [x] [P1] Completed autonomous planning-trigger work with a replan obligation.\n"
         )
     todo_text = (
         "[P1] Autonomous planning-trigger implementation slice: emit a machine-readable replan obligation."
@@ -66,7 +76,9 @@ def write_fixture(root: Path, *, include_replan_signals: bool) -> tuple[Path, Pa
         "## Next Action\n\n"
         "- Advance the first executable agent todo after observing current state.\n\n"
         f"{replan_section}"
+        f"{historical_noise_section}"
         "## Agent Todo\n\n"
+        f"{done_todo_line}"
         f"- [ ] {todo_text}\n",
         encoding="utf-8",
     )
