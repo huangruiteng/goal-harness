@@ -282,10 +282,6 @@ AUTONOMOUS_REPLAN_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
 AUTONOMOUS_REPLAN_SECTION_HEADINGS = (
     "Next Action",
     "Operating Lessons",
-    "Recent Progress",
-    "Agent Todo",
-    "Codex Todo",
-    "Project Agent Todo",
 )
 AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = (
     (
