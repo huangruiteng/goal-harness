@@ -20,6 +20,16 @@ from goal_harness.status import collect_status  # noqa: E402
 
 GOAL_ID = "benchmark-append-cli-fixture"
 BENCHMARK_ID = "terminal-bench@2.0"
+CONTROL_PLANE_SCORE_COMPONENTS = (
+    "restartability",
+    "stale_state_avoidance",
+    "evidence_discipline",
+    "boundary_safety",
+    "writeback_quality",
+    "gate_compliance",
+    "failure_attribution",
+    "overhead",
+)
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -100,12 +110,62 @@ def benchmark_run_event() -> dict[str, Any]:
     }
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path]:
+def benchmark_result_event() -> dict[str, Any]:
+    components = {
+        "restartability": 1.0,
+        "stale_state_avoidance": 1.0,
+        "evidence_discipline": 1.0,
+        "boundary_safety": 1.0,
+        "writeback_quality": 1.0,
+        "gate_compliance": 1.0,
+        "failure_attribution": 1.0,
+        "overhead": 0.0,
+    }
+    return {
+        "schema_version": "benchmark_result_v0",
+        "task_id": "mini_control_plane_repair_v0",
+        "scenario_id": "with_goal_harness",
+        "worker_mode": "deterministic",
+        "harness_identity": "goal_harness",
+        "worker_surface": "deterministic_shim",
+        "terminal_state": "success",
+        "official_task_score": {"kind": "deterministic_validation", "passed": True, "value": 1.0},
+        "control_plane_score": {
+            "schema_version": "control_plane_score_core_v0",
+            "kind": "core_v0",
+            "aggregation": "unweighted_mean",
+            "value": 0.875,
+            "components": components,
+            "component_order": list(CONTROL_PLANE_SCORE_COMPONENTS),
+        },
+        "step_count": 3,
+        "wall_time_ms": 42.0,
+        "validation_pass_count": 4,
+        "validation_fail_count": 0,
+        "changed_file_count": 3,
+        "changed_files": ["src/control_plane.py", "state/ACTIVE_GOAL_STATE.md"],
+        "forbidden_access_count": 0,
+        "stale_state_error_count": 0,
+        "open_todo_preserved": True,
+        "archive_hygiene_passed": True,
+        "queue_contract_passed": True,
+        "trace_publicness": "public",
+        "failure_attribution_labels": [],
+        "goal_tick_phase_coverage": 1.0,
+        "writeback_count": 3,
+        "spend_count": 3,
+        "spend_before_validation_count": 0,
+        "state_reconstructable": True,
+    }
+
+
+def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     registry_path = project / ".goal-harness" / "registry.json"
     benchmark_run_path = root / "benchmark_run.json"
+    benchmark_result_path = root / "benchmark_result.json"
 
     (project / Path(state_file).parent).mkdir(parents=True, exist_ok=True)
     (project / state_file).write_text(
@@ -115,9 +175,9 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "---\n\n"
         "# Benchmark Append CLI Fixture\n\n"
         "## Agent Todo\n\n"
-        "- [ ] Append a compact benchmark_run_v0 event through the CLI.\n\n"
+        "- [ ] Append compact benchmark_run_v0 and benchmark_result_v0 events through the CLI.\n\n"
         "## Next Action\n\n"
-        "- Inspect the appended benchmark_run_v0 status projection.\n",
+        "- Inspect the appended benchmark status/result projections.\n",
         encoding="utf-8",
     )
     write_json(
@@ -144,7 +204,8 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         },
     )
     write_json(benchmark_run_path, benchmark_run_event())
-    return registry_path, runtime, benchmark_run_path
+    write_json(benchmark_result_path, benchmark_result_event())
+    return registry_path, runtime, benchmark_run_path, benchmark_result_path
 
 
 def run_cli(args: list[str]) -> dict[str, Any]:
@@ -178,7 +239,7 @@ def assert_no_private_surface(summary: dict[str, Any]) -> None:
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="benchmark-run-v0-append-") as tmp:
-        registry_path, runtime, benchmark_run_path = write_fixture(Path(tmp))
+        registry_path, runtime, benchmark_run_path, benchmark_result_path = write_fixture(Path(tmp))
         index_path = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
 
         base_args = [
@@ -214,14 +275,50 @@ def main() -> None:
         assert index_path.exists(), index_path
         assert_no_private_surface(appended["benchmark_run"])
 
+        result_args = [
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime),
+            "--format",
+            "json",
+            "history",
+            "append-benchmark-result",
+            "--goal-id",
+            GOAL_ID,
+            "--benchmark-result-json",
+            str(benchmark_result_path),
+            "--delivery-batch-scale",
+            "implementation",
+            "--delivery-outcome",
+            "primary_goal_outcome",
+        ]
+
+        result_dry_run = run_cli(result_args)
+        assert result_dry_run["ok"], result_dry_run
+        assert result_dry_run["dry_run"] is True, result_dry_run
+        assert result_dry_run["appended"] is False, result_dry_run
+        assert_no_private_surface(result_dry_run["benchmark_result"])
+        assert "changed_files" not in result_dry_run["benchmark_result"], result_dry_run
+
+        result_appended = run_cli([*result_args, "--execute"])
+        assert result_appended["ok"], result_appended
+        assert result_appended["dry_run"] is False, result_appended
+        assert result_appended["appended"] is True, result_appended
+        assert_no_private_surface(result_appended["benchmark_result"])
+        assert "changed_files" not in result_appended["benchmark_result"], result_appended
+
         index_records = [
             json.loads(line)
             for line in index_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        assert len(index_records) == 1, index_records
+        assert len(index_records) == 2, index_records
         assert index_records[0]["classification"] == "benchmark_run_v0", index_records
         assert index_records[0]["benchmark_run"]["schema_version"] == "benchmark_run_v0", index_records
+        assert index_records[1]["classification"] == "benchmark_result_v0", index_records
+        assert index_records[1]["benchmark_result"]["schema_version"] == "benchmark_result_v0", index_records
+        assert "changed_files" not in index_records[1]["benchmark_result"], index_records
 
         status = collect_status(
             registry_path=registry_path,
@@ -230,8 +327,19 @@ def main() -> None:
             limit=10,
         )
         assert status["ok"], status
-        latest = status["run_history"]["goals"][0]["latest_runs"][0]
-        summary = latest["benchmark_run_summary"]
+        latest_runs = status["run_history"]["goals"][0]["latest_runs"]
+        result_run = next(run for run in latest_runs if run.get("classification") == "benchmark_result_v0")
+        run_event = next(run for run in latest_runs if run.get("classification") == "benchmark_run_v0")
+        result_summary = result_run["benchmark_result_summary"]
+        assert result_summary["schema_version"] == "benchmark_result_v0", result_summary
+        assert result_summary["official_task_score"]["value"] == 1.0, result_summary
+        assert result_summary["control_plane_score"]["schema_version"] == "control_plane_score_core_v0", result_summary
+        assert result_summary["control_plane_score"]["value"] == 0.875, result_summary
+        assert tuple(result_summary["control_plane_score"]["component_order"]) == CONTROL_PLANE_SCORE_COMPONENTS, result_summary
+        assert "changed_files" not in result_summary, result_summary
+        assert_no_private_surface(result_summary)
+
+        summary = run_event["benchmark_run_summary"]
         assert summary["benchmark_id"] == BENCHMARK_ID, summary
         assert summary["progress"]["n_completed_trials"] == 1, summary
         assert summary["metrics"]["cost_usd"] == 0.45, summary

@@ -1451,6 +1451,12 @@ writeback, spend, and forbidden-access totals. It must not include changed file
 paths, raw trajectories, local artifact paths, credentials, private traces, or
 leaderboard claims.
 
+`goal-harness history append-benchmark-result --benchmark-result-json <path>`
+is the matching append path for this projection. It is dry-run by default and
+accepts only a compact `benchmark_result_v0` JSON object; it does not discover
+or parse runner directories, task artifacts, Codex sessions, private traces, or
+leaderboard outputs.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the
