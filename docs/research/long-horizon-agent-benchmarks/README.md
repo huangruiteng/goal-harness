@@ -24,6 +24,10 @@ work still belongs in the existing code, examples, and contract documents:
 
 ## Current Artifacts
 
+- `benchmark-program-current-state-handoff-v0.md`: compact current-state
+  runbook for fresh workers, summarizing the active benchmark evidence layer,
+  docs-only projection decisions, allowed next transitions, and stop
+  conditions without adding hot-path projection keys.
 - `roadmap.md`: benchmark selection, passive baseline, operator-simulator, and
   publication-readiness roadmap.
 - `paper-runner-dossier.md`: first evidence-backed ranking of benchmark papers,
