@@ -1525,7 +1525,10 @@ order from `benchmark_run_v0` through
 `benchmark_experiment_report_replay_decision_v0` and the handoff fields a
 worker may inspect. The map is explanatory only: it does not add a status
 field, append a run-history event, or create authority to execute an external
-benchmark path.
+benchmark path. When a latest run has a replay decision, the review-packet
+handoff follow-through summary may include
+`chain_map=benchmark-report-chain-map-v0.md` so a worker can jump from the
+compact replay decision back to the full reviewer-facing chain contract.
 
 ## Promotion Readiness Summary
 
