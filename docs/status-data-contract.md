@@ -857,6 +857,17 @@ and keep only current open work plus a small recent-done tail under active
 This warning is a checklist hygiene signal only: it does not change quota
 eligibility, grant write or production permission, or supersede open user/agent
 todo blockers.
+When the payload includes `autonomous_replan_obligation`, the active state has
+public-safe evidence that the controller may be stuck in a periodic-review
+threshold, no-progress streak, repeated-action loop, phase transition, backlog
+mismatch, or evidence contradiction. Executors should treat the object as a
+machine-readable planning contract: inspect `triggers`, apply the compact
+`todo_actions` as split/add/retire guidance, run `next_validation_command` after
+the selected slice, and stop at `stop_condition`. For eligible goals without
+open user todos, `heartbeat_recommendation.recommended_mode` may become
+`autonomous_replan_required`; this is intended to keep monitor-only work from
+consuming the primary executable backlog, not to grant new private, destructive,
+production, or owner-only authority.
 The payload also includes `execution_obligation`, which is the stronger worker
 contract. `heartbeat_recommendation.notify` is only a user-facing notification
 policy. It must not be interpreted as an execution gate. If

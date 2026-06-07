@@ -271,11 +271,51 @@ MAX_AUTONOMOUS_BACKLOG_CANDIDATES = 6
 MAX_SUBAGENT_ACTIVITY_ITEMS = 5
 MAX_SUBAGENT_SCOPE_ITEMS = 4
 MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS = 3
+MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4][^\]]*)\]\s*(.+)$", re.IGNORECASE)
 BACKLOG_HYGIENE_SECTION_HEADINGS = ("Next Action", "Operating Lessons")
 BACKLOG_HYGIENE_BULLET_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$")
 BACKLOG_HYGIENE_HINT_PATTERN = re.compile(
     r"(?i)(?:\[p[0-4]\]|todo|backlog|follow[- ]?up|queue|audit|regression|smoke|cadence|mirror|monitor|sub-?agent|待办|回归|审计|修复|检查|推进)"
+)
+AUTONOMOUS_REPLAN_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
+AUTONOMOUS_REPLAN_SECTION_HEADINGS = (
+    "Next Action",
+    "Operating Lessons",
+    "Recent Progress",
+    "Agent Todo",
+    "Codex Todo",
+    "Project Agent Todo",
+)
+AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = (
+    (
+        "periodic_review",
+        re.compile(r"(?i)(?:periodic review|periodic replan|review cadence|规划复盘|周期复盘|每几十轮)"),
+    ),
+    (
+        "no_progress_streak",
+        re.compile(r"(?i)(?:no[- ]?progress|stalled?|stall streak|没有实质进展|停转|连续[^。；;]*无进展)"),
+    ),
+    (
+        "repeated_action_loop",
+        re.compile(r"(?i)(?:repeated[- ]?action|action loop|same action|looped|重复动作|循环观察|反复观察)"),
+    ),
+    (
+        "phase_transition",
+        re.compile(r"(?i)(?:phase transition|next phase|stage transition|readiness .*done|阶段切换|进入下一阶段)"),
+    ),
+    (
+        "backlog_mismatch",
+        re.compile(r"(?i)(?:backlog mismatch|todo mismatch|next action mismatch|todo.*淹没|待办.*不一致)"),
+    ),
+    (
+        "evidence_contradiction",
+        re.compile(r"(?i)(?:evidence contradiction|contradictory evidence|stale evidence|stale latest-run|证据矛盾|状态矛盾)"),
+    ),
+    (
+        "explicit_replan",
+        re.compile(r"(?i)(?:autonomous replan|replan obligation|planning[- ]?trigger|重新规划|重规划|规划触发)"),
+    ),
 )
 TODO_ARCHIVE_HEADER_MARKERS = (
     "todo archive",
@@ -639,6 +679,32 @@ def active_state_sections(state_text: str, headings: tuple[str, ...]) -> dict[st
     return sections
 
 
+def active_state_section_entries(lines: list[str]) -> list[str]:
+    entries: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        bullet_match = BACKLOG_HYGIENE_BULLET_PATTERN.match(line)
+        if bullet_match:
+            if current:
+                entries.append(normalize_todo_text(" ".join(current)))
+            current = [bullet_match.group(1)]
+            continue
+        if current and line.startswith((" ", "\t")):
+            continuation = line.strip()
+            if continuation:
+                current.append(continuation)
+            continue
+        if current:
+            entries.append(normalize_todo_text(" ".join(current)))
+            current = []
+        stripped = line.strip()
+        if stripped:
+            entries.append(stripped)
+    if current:
+        entries.append(normalize_todo_text(" ".join(current)))
+    return entries
+
+
 def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | None) -> dict[str, Any] | None:
     try:
         agent_open_count = int(agent_todos.get("open_count") or 0) if isinstance(agent_todos, dict) else 0
@@ -674,6 +740,89 @@ def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | No
         "recommended_action": (
             "mirror durable follow-up work into Agent Todo before heartbeat scheduling relies on "
             "Next Action or Operating Lessons"
+        ),
+    }
+
+
+def autonomous_replan_obligation(
+    state_text: str,
+    *,
+    agent_todos: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    evidence: list[dict[str, Any]] = []
+    seen_kinds: set[str] = set()
+    sections = active_state_sections(state_text, AUTONOMOUS_REPLAN_SECTION_HEADINGS)
+    for section, lines in sections.items():
+        for entry in active_state_section_entries(lines):
+            text = public_safe_compact_text(entry, limit=160)
+            if not text:
+                continue
+            for kind, pattern in AUTONOMOUS_REPLAN_TRIGGER_PATTERNS:
+                if kind in seen_kinds or not pattern.search(text):
+                    continue
+                evidence.append({"kind": kind, "section": section, "text": text})
+                seen_kinds.add(kind)
+                if len(evidence) >= MAX_AUTONOMOUS_REPLAN_TRIGGERS:
+                    break
+            if len(evidence) >= MAX_AUTONOMOUS_REPLAN_TRIGGERS:
+                break
+        if len(evidence) >= MAX_AUTONOMOUS_REPLAN_TRIGGERS:
+            break
+
+    if not evidence:
+        return None
+
+    first_open: dict[str, Any] = {}
+    if isinstance(agent_todos, dict):
+        open_items = agent_todos.get("first_open_items")
+        if isinstance(open_items, list) and open_items and isinstance(open_items[0], dict):
+            first_open = open_items[0]
+
+    todo_actions: list[dict[str, Any]] = []
+    first_open_text = public_safe_compact_text(first_open.get("text"), limit=140)
+    if first_open_text:
+        action: dict[str, Any] = {
+            "action": "split",
+            "role": "agent",
+            "text": first_open_text,
+        }
+        if first_open.get("priority"):
+            action["priority"] = first_open.get("priority")
+        todo_actions.append(action)
+    todo_actions.append(
+        {
+            "action": "add",
+            "role": "agent",
+            "priority": "P1",
+            "text": (
+                "write a compact replan record naming trigger, selected next slice, "
+                "validation command, and stop condition"
+            ),
+        }
+    )
+    if any(item.get("kind") in {"no_progress_streak", "repeated_action_loop"} for item in evidence):
+        todo_actions.append(
+            {
+                "action": "retire",
+                "role": "agent",
+                "priority": "P2",
+                "text": "retire or downgrade stale monitor-only next actions after the executable replan is selected",
+            }
+        )
+
+    return {
+        "schema_version": AUTONOMOUS_REPLAN_SCHEMA_VERSION,
+        "required": True,
+        "trigger_count": len(evidence),
+        "triggers": evidence,
+        "todo_actions": todo_actions[:3],
+        "next_validation_command": "python3 examples/autonomous-replan-obligation-smoke.py",
+        "stop_condition": (
+            "stop if the replan requires private material, credentials, destructive git, "
+            "production actions, or owner-only decisions"
+        ),
+        "recommended_action": (
+            "run an autonomous replan before another monitor-only or repeated action consumes the eligible turn"
         ),
     }
 
@@ -1559,6 +1708,12 @@ def active_state_todo_fields(goal: dict[str, Any]) -> dict[str, Any]:
     )
     if archive_warning:
         fields["completed_todo_archive_warning"] = archive_warning
+    replan_obligation = autonomous_replan_obligation(
+        state_text,
+        agent_todos=fields.get("agent_todos") if isinstance(fields.get("agent_todos"), dict) else None,
+    )
+    if replan_obligation:
+        fields["autonomous_replan_obligation"] = replan_obligation
     if fields:
         fields = redacted_status_todo_fields(fields)
     return fields
@@ -2262,6 +2417,13 @@ def build_attention_queue(
                 )
                 if archive_warning and isinstance(item.get("project_asset"), dict):
                     item["project_asset"]["completed_todo_archive_warning"] = archive_warning
+                replan_obligation = (
+                    item.get("autonomous_replan_obligation")
+                    if isinstance(item.get("autonomous_replan_obligation"), dict)
+                    else None
+                )
+                if replan_obligation and isinstance(item.get("project_asset"), dict):
+                    item["project_asset"]["autonomous_replan_obligation"] = replan_obligation
                 item["quota"] = quota_status(
                     goal,
                     waiting_on=str(item.get("waiting_on") or ""),
@@ -3547,6 +3709,23 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     f"active_done={archive_warning.get('active_done_count')} "
                     f"max_active_done={archive_warning.get('max_active_done_count')} "
                     f"archive_section={_markdown_scalar(archive_warning.get('archive_section') or '')}"
+                )
+            replan_obligation = (
+                project_asset.get("autonomous_replan_obligation")
+                if isinstance(project_asset.get("autonomous_replan_obligation"), dict)
+                else {}
+            )
+            if replan_obligation:
+                trigger_kinds = [
+                    str(trigger.get("kind") or "")
+                    for trigger in replan_obligation.get("triggers") or []
+                    if isinstance(trigger, dict) and trigger.get("kind")
+                ]
+                lines.append(
+                    "    - autonomous_replan_obligation: "
+                    f"required={replan_obligation.get('required')} "
+                    f"trigger_count={replan_obligation.get('trigger_count')} "
+                    f"triggers={_markdown_scalar(','.join(trigger_kinds))}"
                 )
             interface_budget_cadence = (
                 project_asset.get("interface_budget_cadence")
