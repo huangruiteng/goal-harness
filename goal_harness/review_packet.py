@@ -350,8 +350,25 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
         if control.get("schema_version"):
             result_parts.append(f"schema={control.get('schema_version')}")
         benchmark_result_text = "; " + ", ".join(result_parts)
+    benchmark_comparison = (
+        latest_run.get("benchmark_comparison_summary")
+        if isinstance(latest_run.get("benchmark_comparison_summary"), dict)
+        else {}
+    )
+    benchmark_comparison_text = ""
+    if benchmark_comparison:
+        comparison_parts = [
+            f"comparison={benchmark_comparison.get('comparison_id') or benchmark_comparison.get('task_id') or 'unknown'}",
+        ]
+        if benchmark_comparison.get("official_task_score_delta") is not None:
+            comparison_parts.append(f"official_delta={benchmark_comparison.get('official_task_score_delta')}")
+        if benchmark_comparison.get("control_plane_score_delta") is not None:
+            comparison_parts.append(f"control_delta={benchmark_comparison.get('control_plane_score_delta')}")
+        if benchmark_comparison.get("both_success") is not None:
+            comparison_parts.append(f"both_success={benchmark_comparison.get('both_success')}")
+        benchmark_comparison_text = "; " + ", ".join(comparison_parts)
     return compact_packet_text(
-        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}",
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}",
         limit=260,
     )
 

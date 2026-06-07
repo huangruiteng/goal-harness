@@ -1457,6 +1457,23 @@ accepts only a compact `benchmark_result_v0` JSON object; it does not discover
 or parse runner directories, task artifacts, Codex sessions, private traces, or
 leaderboard outputs.
 
+When a compact run record includes `benchmark_comparison_summary`, it is a
+redacted projection of `benchmark_comparison_v0`. The summary links paired
+`benchmark_result_v0` scenarios and exposes only compact comparison fields such
+as task/comparison id, mode pair, baseline/treatment scenario ids,
+official-task score delta, control-plane score delta, overhead/writeback/spend
+deltas, readiness booleans, compared metric names, and stop-condition labels.
+It may carry numeric deltas or public-safe symbolic deltas such as
+`not_applicable_readiness_only`. It must not include raw benchmark logs,
+changed file paths, absolute runner directories, Codex session transcripts,
+private traces, credentials, or leaderboard submission artifacts.
+
+`goal-harness history append-benchmark-comparison --benchmark-comparison-json
+<path>` is the matching append path for this projection. It is dry-run by
+default and accepts only a compact `benchmark_comparison_v0` JSON object; it
+does not discover result pairs from runner directories, parse raw task
+artifacts, invoke benchmark runners, or infer leaderboard claims.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test appending benchmark_run_v0 through the Goal Harness CLI."""
+"""Smoke-test appending compact benchmark events through the Goal Harness CLI."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from goal_harness.review_packet import build_review_packet  # noqa: E402
 from goal_harness.status import collect_status  # noqa: E402
 
 
@@ -159,13 +160,61 @@ def benchmark_result_event() -> dict[str, Any]:
     }
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
+def benchmark_comparison_event() -> dict[str, Any]:
+    return {
+        "schema_version": "benchmark_comparison_v0",
+        "task_id": "mini_control_plane_repair_v0",
+        "comparison_id": "mini_control_plane_repair_v0_ab",
+        "benchmark_id": "local-deterministic",
+        "mode_pair": ["without_goal_harness", "with_goal_harness"],
+        "baseline_scenario_id": "without_goal_harness",
+        "treatment_scenario_id": "with_goal_harness",
+        "scenario_count": 2,
+        "both_success": True,
+        "official_task_score_delta": 0.0,
+        "control_plane_score_delta": 0.143,
+        "with_goal_harness_overhead_ms": 12.5,
+        "with_goal_harness_extra_writebacks": 3,
+        "with_goal_harness_extra_spends": 3,
+        "result_refs": [
+            {
+                "scenario_id": "without_goal_harness",
+                "task_id": "mini_control_plane_repair_v0",
+                "result_id": "result_without_goal_harness",
+                "raw_log_path": "/" + "tmp/private/raw.log",
+            },
+            {
+                "scenario_id": "with_goal_harness",
+                "task_id": "mini_control_plane_repair_v0",
+                "result_id": "result_with_goal_harness",
+            },
+        ],
+        "metrics_compared": [
+            "official_task_score",
+            "control_plane_score",
+            "writeback_count",
+            "spend_count",
+        ],
+        "interrupt_fixture_markers": [
+            "worker_kill_after_partial_goal_tick_writeback",
+            "stale_latest_run_trap",
+        ],
+        "stop_conditions": [
+            "do_not_run_real_benchmark",
+            "do_not_upload_leaderboard_trace",
+        ],
+        "raw_thread_path": "/" + "Users/example/private/session.jsonl",
+    }
+
+
+def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     registry_path = project / ".goal-harness" / "registry.json"
     benchmark_run_path = root / "benchmark_run.json"
     benchmark_result_path = root / "benchmark_result.json"
+    benchmark_comparison_path = root / "benchmark_comparison.json"
 
     (project / Path(state_file).parent).mkdir(parents=True, exist_ok=True)
     (project / state_file).write_text(
@@ -175,7 +224,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
         "---\n\n"
         "# Benchmark Append CLI Fixture\n\n"
         "## Agent Todo\n\n"
-        "- [ ] Append compact benchmark_run_v0 and benchmark_result_v0 events through the CLI.\n\n"
+        "- [ ] Append compact benchmark_run_v0, benchmark_result_v0, and benchmark_comparison_v0 events through the CLI.\n\n"
         "## Next Action\n\n"
         "- Inspect the appended benchmark status/result projections.\n",
         encoding="utf-8",
@@ -205,7 +254,8 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
     )
     write_json(benchmark_run_path, benchmark_run_event())
     write_json(benchmark_result_path, benchmark_result_event())
-    return registry_path, runtime, benchmark_run_path, benchmark_result_path
+    write_json(benchmark_comparison_path, benchmark_comparison_event())
+    return registry_path, runtime, benchmark_run_path, benchmark_result_path, benchmark_comparison_path
 
 
 def run_cli(args: list[str]) -> dict[str, Any]:
@@ -239,7 +289,7 @@ def assert_no_private_surface(summary: dict[str, Any]) -> None:
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="benchmark-run-v0-append-") as tmp:
-        registry_path, runtime, benchmark_run_path, benchmark_result_path = write_fixture(Path(tmp))
+        registry_path, runtime, benchmark_run_path, benchmark_result_path, benchmark_comparison_path = write_fixture(Path(tmp))
         index_path = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
 
         base_args = [
@@ -339,11 +389,80 @@ def main() -> None:
         assert "changed_files" not in result_summary, result_summary
         assert_no_private_surface(result_summary)
 
+        comparison_args = [
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime),
+            "--format",
+            "json",
+            "history",
+            "append-benchmark-comparison",
+            "--goal-id",
+            GOAL_ID,
+            "--benchmark-comparison-json",
+            str(benchmark_comparison_path),
+            "--delivery-batch-scale",
+            "implementation",
+            "--delivery-outcome",
+            "primary_goal_outcome",
+        ]
+
+        comparison_dry_run = run_cli(comparison_args)
+        assert comparison_dry_run["ok"], comparison_dry_run
+        assert comparison_dry_run["dry_run"] is True, comparison_dry_run
+        assert comparison_dry_run["appended"] is False, comparison_dry_run
+        assert_no_private_surface(comparison_dry_run["benchmark_comparison"])
+        assert "raw_thread_path" not in comparison_dry_run["benchmark_comparison"], comparison_dry_run
+        assert "raw_log_path" not in json.dumps(comparison_dry_run["benchmark_comparison"], sort_keys=True), comparison_dry_run
+
+        comparison_appended = run_cli([*comparison_args, "--execute"])
+        assert comparison_appended["ok"], comparison_appended
+        assert comparison_appended["dry_run"] is False, comparison_appended
+        assert comparison_appended["appended"] is True, comparison_appended
+        assert_no_private_surface(comparison_appended["benchmark_comparison"])
+
         summary = run_event["benchmark_run_summary"]
         assert summary["benchmark_id"] == BENCHMARK_ID, summary
         assert summary["progress"]["n_completed_trials"] == 1, summary
         assert summary["metrics"]["cost_usd"] == 0.45, summary
         assert summary["validation"]["all_passed"] is True, summary
+        status = collect_status(
+            registry_path=registry_path,
+            runtime_root_override=str(runtime),
+            scan_roots=[],
+            limit=10,
+        )
+        assert status["ok"], status
+        latest_runs = status["run_history"]["goals"][0]["latest_runs"]
+        comparison_run = next(run for run in latest_runs if run.get("classification") == "benchmark_comparison_v0")
+        comparison_summary = comparison_run["benchmark_comparison_summary"]
+        assert comparison_summary["schema_version"] == "benchmark_comparison_v0", comparison_summary
+        assert comparison_summary["comparison_id"] == "mini_control_plane_repair_v0_ab", comparison_summary
+        assert comparison_summary["mode_pair"] == ["without_goal_harness", "with_goal_harness"], comparison_summary
+        assert comparison_summary["official_task_score_delta"] == 0.0, comparison_summary
+        assert comparison_summary["control_plane_score_delta"] == 0.143, comparison_summary
+        assert comparison_summary["both_success"] is True, comparison_summary
+        assert "raw_thread_path" not in comparison_summary, comparison_summary
+        assert "raw_log_path" not in json.dumps(comparison_summary, sort_keys=True), comparison_summary
+        assert_no_private_surface(comparison_summary)
+
+        index_records = [
+            json.loads(line)
+            for line in index_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(index_records) == 3, index_records
+        assert index_records[2]["classification"] == "benchmark_comparison_v0", index_records
+        assert "raw_thread_path" not in index_records[2]["benchmark_comparison"], index_records
+        assert "raw_log_path" not in json.dumps(index_records[2]["benchmark_comparison"], sort_keys=True), index_records
+
+        packet = build_review_packet(status, goal_id=GOAL_ID)
+        handoff = packet["project_agent_handoff"]
+        assert "comparison=mini_control_plane_repair_v0_ab" in handoff, handoff
+        assert "official_delta=0.0" in handoff, handoff
+        assert "control_delta=0.143" in handoff, handoff
+        assert_no_private_surface({"handoff": handoff})
         assert status["event_ledger_summary"]["totals"]["benchmark_runs_24h"] == 1, status
         assert_no_private_surface(summary)
 
