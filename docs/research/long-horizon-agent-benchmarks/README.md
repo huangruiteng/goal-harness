@@ -104,6 +104,10 @@ work still belongs in the existing code, examples, and contract documents:
   bounded local fixture command or a public-safe blocker while preserving
   fixture-only authorization, no-leaderboard claims, and real-run stop
   conditions.
+- `benchmark-restart-actionability-projection-decision-v0.md`: fixture-only
+  decision to keep `benchmark_restart_actionability_v0` research/docs-only
+  until a real restarted-worker consumer, approved no-submit setup evidence, or
+  repeated re-derivation justifies a compact hot-path projection.
 
 ## Relationship To Goal Harness Work
 
