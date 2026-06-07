@@ -85,6 +85,7 @@ BENCHMARK_COMPARISON_SCHEMA_VERSION = "benchmark_comparison_v0"
 BENCHMARK_COMPARISON_DECISION_SCHEMA_VERSION = "benchmark_comparison_decision_note_v0"
 BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION = "benchmark_experiment_report_v0"
 BENCHMARK_EXPERIMENT_REPORT_READINESS_SCHEMA_VERSION = "benchmark_experiment_report_readiness_note_v0"
+BENCHMARK_EXPERIMENT_REPORT_REPLAY_DECISION_SCHEMA_VERSION = "benchmark_experiment_report_replay_decision_v0"
 CONTROL_PLANE_SCORE_SCHEMA_VERSION = "control_plane_score_core_v0"
 CONTROL_PLANE_SCORE_COMPONENTS = (
     "restartability",
@@ -1043,6 +1044,70 @@ def benchmark_experiment_report_readiness_note(report: dict[str, Any] | None) ->
         if isinstance(value, bool):
             note[field] = value
     return note
+
+
+def benchmark_experiment_report_replay_decision(readiness_note: dict[str, Any] | None) -> dict[str, Any] | None:
+    if (
+        not isinstance(readiness_note, dict)
+        or readiness_note.get("schema_version") != BENCHMARK_EXPERIMENT_REPORT_READINESS_SCHEMA_VERSION
+    ):
+        return None
+
+    readiness = public_safe_compact_text(readiness_note.get("readiness"), limit=120) or "fixture_ready"
+    authorization = public_safe_compact_text(readiness_note.get("next_run_authorization"), limit=120) or "fixture_only"
+    report_decision = public_safe_compact_text(readiness_note.get("report_decision"), limit=80) or "continue"
+
+    if authorization == "fixture_only":
+        replay_decision = "continue_fixture_replay" if report_decision in {"continue", "broaden"} else "repeat_fixture_replay"
+        next_run_mode = "fixture_replay"
+    elif authorization == "requires_operator_approval":
+        replay_decision = "operator_review_required"
+        next_run_mode = "operator_review"
+    else:
+        replay_decision = "defer_until_authorized"
+        next_run_mode = "deferred"
+
+    if readiness == "assisted_mode_separate":
+        replay_decision = "separate_assisted_mode_before_replay"
+        next_run_mode = "operator_review"
+
+    minimum_next_evidence = public_safe_compact_text(
+        readiness_note.get("minimum_next_evidence"),
+        limit=180,
+    ) or "boundary-preserving replay decision evidence"
+    stop_condition = public_safe_compact_text(readiness_note.get("stop_condition"), limit=180) or (
+        "stop before real benchmark execution, model-backed simulator work, private traces, "
+        "or leaderboard claims without explicit approval"
+    )
+    negative_layers = public_safe_compact_list(
+        readiness_note.get("negative_evidence_layers"),
+        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
+    must_not_claim = public_safe_compact_list(
+        readiness_note.get("must_not_claim"),
+        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
+
+    decision: dict[str, Any] = {
+        "schema_version": BENCHMARK_EXPERIMENT_REPORT_REPLAY_DECISION_SCHEMA_VERSION,
+        "source_schema_version": BENCHMARK_EXPERIMENT_REPORT_READINESS_SCHEMA_VERSION,
+        "readiness": readiness,
+        "authorization": authorization,
+        "replay_decision": replay_decision,
+        "next_run_mode": next_run_mode,
+        "minimum_next_evidence": minimum_next_evidence,
+        "stop_condition": stop_condition,
+        "surface": "status_review_packet_only",
+    }
+    for field in ("report_id", "benchmark_id", "task_slice"):
+        value = public_safe_compact_text(readiness_note.get(field), limit=140)
+        if value:
+            decision[field] = value
+    if negative_layers:
+        decision["negative_evidence_layers"] = negative_layers
+    if must_not_claim:
+        decision["must_not_claim"] = must_not_claim
+    return decision
 
 
 def parse_state_frontmatter(state_text: str) -> dict[str, str]:
@@ -2031,6 +2096,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
         readiness_note = benchmark_experiment_report_readiness_note(benchmark_report)
         if readiness_note:
             compact["benchmark_experiment_report_readiness_note"] = readiness_note
+            replay_decision = benchmark_experiment_report_replay_decision(readiness_note)
+            if replay_decision:
+                compact["benchmark_experiment_report_replay_decision"] = replay_decision
     return compact
 
 
@@ -3290,6 +3358,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
         readiness_note = benchmark_experiment_report_readiness_note(benchmark_report)
         if readiness_note:
             compact["benchmark_experiment_report_readiness_note"] = readiness_note
+            replay_decision = benchmark_experiment_report_replay_decision(readiness_note)
+            if replay_decision:
+                compact["benchmark_experiment_report_replay_decision"] = replay_decision
     return compact
 
 

@@ -1511,6 +1511,14 @@ exist, and it must keep raw benchmark logs, local artifact paths, private
 traces, Codex session transcripts, credentials, and submission artifacts out of
 status and review packets.
 
+Status may also derive `benchmark_experiment_report_replay_decision` from the
+readiness note. This is the smallest next-run summary a worker should need
+before deciding whether to replay a fixture, ask for operator review, or defer.
+It is intentionally a status/review-packet-only consumer of an already durable
+run-history report event; it does not create runner authority, execute
+benchmarks, call model APIs, enable simulator work, or authorize leaderboard
+publication.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the
