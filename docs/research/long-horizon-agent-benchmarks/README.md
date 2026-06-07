@@ -26,6 +26,9 @@ work still belongs in the existing code, examples, and contract documents:
 
 - `roadmap.md`: benchmark selection, passive baseline, operator-simulator, and
   publication-readiness roadmap.
+- `paper-runner-dossier.md`: first evidence-backed ranking of benchmark papers,
+  runner surfaces, Codex compatibility signals, and the next Terminal-Bench
+  probe slice.
 
 ## Relationship To Goal Harness Work
 

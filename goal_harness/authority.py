@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 
 AUTHORITY_SOURCE_REGISTRATION_VERSION = "authority_source_registration_v0"
+DOC_REGISTRY_AUTHORITY_IMPORT_VERSION = "doc_registry_authority_import_v0"
 AUTHORITY_SOURCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 AUTHORITY_SOURCE_BOUNDARIES = {"public", "local_private", "private_redacted"}
 PRIVATE_TEXT_PATTERNS = (
@@ -231,6 +232,100 @@ def render_authority_source_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _strip_yaml_scalar(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    if text in {">", ">-", "|", "|-"}:
+        return ""
+    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        return text[1:-1]
+    return text
+
+
+def read_doc_registry_contract(doc_registry_path: Path) -> dict[str, Any]:
+    """Read the public-safe contract surface from a DOC_REGISTRY-like YAML file."""
+
+    path = doc_registry_path.expanduser()
+    text = path.read_text(encoding="utf-8")
+    result: dict[str, Any] = {
+        "version": None,
+        "updated_at": None,
+        "default_entry_docs": [],
+        "topic_authority": {},
+        "status_definition_count": 0,
+    }
+    current_section: str | None = None
+    status_definition_count = 0
+    in_status_definitions = False
+    for raw_line in text.splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        stripped = raw_line.strip()
+        if indent == 0 and ":" in stripped:
+            key, raw_value = stripped.split(":", 1)
+            key = key.strip()
+            value = _strip_yaml_scalar(raw_value)
+            current_section = key
+            in_status_definitions = key == "status_definitions"
+            if key in {"version", "updated_at"} and value:
+                result[key] = value
+            continue
+        if current_section == "default_entry_docs" and stripped.startswith("- "):
+            entry = _strip_yaml_scalar(stripped[2:])
+            if entry:
+                result["default_entry_docs"].append(entry)
+            continue
+        if current_section == "topic_authority" and ":" in stripped:
+            key, raw_value = stripped.split(":", 1)
+            topic = _strip_yaml_scalar(key)
+            authority = _strip_yaml_scalar(raw_value)
+            if topic and authority:
+                result["topic_authority"][topic] = authority
+            continue
+        if in_status_definitions and indent > 0 and ":" in stripped:
+            key, _raw_value = stripped.split(":", 1)
+            if _strip_yaml_scalar(key):
+                status_definition_count += 1
+    result["status_definition_count"] = status_definition_count
+    return result
+
+
+def render_doc_registry_authority_import_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Goal Harness Doc Registry Authority Import",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- dry_run: `{payload.get('dry_run')}`",
+        f"- written: `{payload.get('written')}`",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- source_id: `{payload.get('source_id')}`",
+    ]
+    if payload.get("error"):
+        lines.append(f"- error: {payload.get('error')}")
+        return "\n".join(lines)
+    entry = payload.get("entry") if isinstance(payload.get("entry"), dict) else {}
+    lines.extend(
+        [
+            f"- source_ref_redacted: `{entry.get('source_ref_redacted')}`",
+            f"- source_ref_kind: `{entry.get('source_ref_kind')}`",
+            f"- boundary: `{entry.get('boundary')}`",
+            f"- freshness: `{entry.get('freshness')}`",
+            f"- default_entry_count: `{entry.get('default_entry_count')}`",
+            f"- topic_authority_count: `{entry.get('topic_authority_count')}`",
+            f"- imported_topic_count: `{entry.get('imported_topic_count')}`",
+            f"- authority_registry_path: `{payload.get('authority_registry_path')}`",
+            f"- project_material_count: `{payload.get('authority_registry_summary', {}).get('project_material_count') if isinstance(payload.get('authority_registry_summary'), dict) else None}`",
+            f"- global_sync_wrote: `{payload.get('global_sync', {}).get('wrote') if isinstance(payload.get('global_sync'), dict) else None}`",
+            "",
+            "## Write Effect",
+            str(payload.get("write_effect") or ""),
+        ]
+    )
+    return "\n".join(lines)
+
+
 def register_authority_source(
     *,
     registry_path: Path,
@@ -342,6 +437,158 @@ def register_authority_source(
         "authority_registry_summary": summary,
         "write_effect": write_effect,
         "raw_source_ref_stored": False,
+    }
+
+
+def import_doc_registry_authority(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    source_id: str,
+    doc_registry_path: Path,
+    source_kind: str,
+    role: str,
+    freshness: str,
+    owner_status: str | None,
+    gate_status: str | None,
+    boundary: str,
+    revision: str | None,
+    conflict_rule: str | None,
+    topics: list[str],
+    import_topic_prefix: str | None,
+    max_imported_topics: int,
+    dry_run: bool,
+) -> dict[str, Any]:
+    if max_imported_topics < 0:
+        raise ValueError("max_imported_topics must be non-negative")
+    registry_path = registry_path.expanduser()
+    doc_registry_path = doc_registry_path.expanduser()
+    contract = read_doc_registry_contract(doc_registry_path)
+    registry = read_json(registry_path)
+    goal_index = find_goal_index(registry, goal_id)
+    updated_registry = copy.deepcopy(registry)
+    goals = updated_registry.get("goals")
+    if not isinstance(goals, list) or not isinstance(goals[goal_index], dict):
+        raise ValueError("registry goal entry must be an object")
+    goal = goals[goal_index]
+    registered_at = now_local()
+    entry = compact_registered_authority_source(
+        source_id=source_id,
+        source_ref=str(doc_registry_path),
+        source_kind=source_kind,
+        role=role,
+        freshness=freshness,
+        owner_status=owner_status,
+        gate_status=gate_status,
+        boundary=boundary,
+        revision=revision or str(contract.get("updated_at") or ""),
+        conflict_rule=conflict_rule,
+        registered_at=registered_at,
+    )
+    entry["schema_version"] = DOC_REGISTRY_AUTHORITY_IMPORT_VERSION
+    default_entries = [str(item) for item in contract.get("default_entry_docs") or []]
+    topic_authority = contract.get("topic_authority") if isinstance(contract.get("topic_authority"), dict) else {}
+    imported_topics: dict[str, str] = {}
+    if import_topic_prefix:
+        prefix = public_safe_optional("import_topic_prefix", import_topic_prefix) or ""
+        for topic in list(topic_authority.keys())[:max_imported_topics]:
+            local_topic = f"{prefix}{topic}"
+            public_safe_optional("imported_topic", local_topic)
+            imported_topics[local_topic] = entry["id"]
+    for topic in topics:
+        topic_text = public_safe_optional("topic", topic)
+        if topic_text:
+            imported_topics[topic_text] = entry["id"]
+    entry.update(
+        {
+            "registry_version": contract.get("version"),
+            "registry_updated_at": contract.get("updated_at"),
+            "default_entry_count": len(default_entries),
+            "topic_authority_count": len(topic_authority),
+            "status_definition_count": int(contract.get("status_definition_count") or 0),
+            "default_entry_sample": default_entries[:8],
+            "topic_sample": list(topic_authority.keys())[:12],
+            "imported_topic_count": len(imported_topics),
+            "imported_topic_prefix": import_topic_prefix,
+            "imported_topic_truncated": bool(import_topic_prefix and len(topic_authority) > max_imported_topics),
+        }
+    )
+
+    authority_registry = goal.get("authority_registry") if isinstance(goal.get("authority_registry"), dict) else {}
+    authority_registry = dict(authority_registry)
+    materials = normalize_project_materials(authority_registry.get("project_materials"))
+    previous_entry = materials.get(entry["id"])
+    materials[str(entry["id"])] = dict(entry)
+    authority_registry["project_materials"] = materials
+    authority_registry.setdefault("read_status", "registered")
+    if imported_topics:
+        topic_map = normalize_topic_authority(authority_registry.get("topic_authority"))
+        topic_map.update(imported_topics)
+        authority_registry["topic_authority"] = topic_map
+    goal["authority_registry"] = authority_registry
+
+    authority_sources = goal.get("authority_sources")
+    if not isinstance(authority_sources, list):
+        authority_sources = []
+    compact_source = {
+        key: entry[key]
+        for key in (
+            "schema_version",
+            "id",
+            "role",
+            "source_kind",
+            "freshness",
+            "boundary",
+            "source_ref_kind",
+            "source_ref_sha256",
+            "source_ref_redacted",
+            "owner_status",
+            "gate_status",
+            "revision",
+            "conflict_rule",
+            "registered_at",
+            "default_entry_count",
+            "topic_authority_count",
+            "imported_topic_count",
+        )
+        if key in entry
+    }
+    authority_sources = [
+        item
+        for item in authority_sources
+        if not (isinstance(item, dict) and str(item.get("id") or item.get("source_id") or "") == entry["id"])
+    ]
+    authority_sources.append(compact_source)
+    goal["authority_sources"] = authority_sources
+
+    updated_registry["updated_at"] = registered_at
+    summary = compact_authority_registry(goal, project=Path(str(goal.get("repo"))).expanduser() if goal.get("repo") else None)
+    summary.pop("default_entries", None)
+    if not dry_run:
+        write_json(registry_path, updated_registry)
+
+    action = "would import" if dry_run else "imported"
+    write_effect = (
+        f"{action} DOC_REGISTRY summary into goal `{goal_id}` "
+        f"authority_registry.project_materials[{entry['id']}] with "
+        f"{len(default_entries)} default entries and {len(topic_authority)} topic mappings; "
+        "raw doc_registry_path is hashed and not stored"
+    )
+    if previous_entry:
+        write_effect += "; previous entry with the same source_id is replaced"
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "written": not dry_run,
+        "registry": str(registry_path),
+        "goal_id": goal_id,
+        "source_id": entry["id"],
+        "entry": entry,
+        "authority_registry_path": "authority_registry.project_materials",
+        "authority_registry_summary": summary,
+        "write_effect": write_effect,
+        "raw_doc_registry_path_stored": False,
+        "imported_topics": imported_topics,
     }
 
 

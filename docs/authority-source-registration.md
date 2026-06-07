@@ -71,3 +71,38 @@ the existing authority-registry projection.
 - Do not read or summarize the source body as part of registration. This command
   records the source contract; later project-specific work decides whether a
   source can be read.
+
+## Importing A Doc Registry
+
+`goal-harness import-doc-registry-authority` imports the authority contract from
+a DOC_REGISTRY-style YAML file without copying the raw document body or the raw
+registry path into the stored payload. It reads only:
+
+- `default_entry_docs`;
+- `topic_authority`;
+- `status_definitions`;
+- `version` and `updated_at`.
+
+The raw `DOC_REGISTRY.yaml` path is hashed as `source_ref_sha256`. The local
+registry receives a `doc_registry_authority_import_v0` material entry with
+`default_entry_count`, `topic_authority_count`, `status_definition_count`, and
+small samples for local operator orientation. Shared global sync keeps the usual
+compact authority/material counts.
+
+```bash
+goal-harness import-doc-registry-authority \
+  --goal-id example-goal \
+  --source-id external-doc-registry \
+  --doc-registry-path ../external-project/docs/meta/DOC_REGISTRY.yaml \
+  --role external_doc_authority \
+  --freshness current \
+  --boundary private_redacted \
+  --topic external_doc_registry \
+  --import-topic-prefix external_ \
+  --max-imported-topics 50 \
+  --dry-run
+```
+
+Use `--topic` for a small hand-picked local topic key, and
+`--import-topic-prefix` only when the importing goal should route a bounded set
+of external registry topics through its own authority map.
