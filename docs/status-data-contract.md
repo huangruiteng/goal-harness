@@ -1500,6 +1500,17 @@ accepts only a compact `benchmark_experiment_report_v0` JSON object; it does
 not run a benchmark, invoke a model or simulator, read runner directories, parse
 private artifacts, or infer leaderboard claims.
 
+When `benchmark_experiment_report_summary` is present, status may also include
+`benchmark_experiment_report_readiness_note`. This is a derived consumer note,
+not a new benchmark event or publication approval. It turns the compact report
+into a small readiness and next-run authorization hint, such as
+`negative_or_control_plane_only`, `fixture_only`, `review_required`, or
+`assisted_mode_separate`. The note must preserve the no-leaderboard and
+no-simulator claim boundaries unless explicit evidence and operator approval
+exist, and it must keep raw benchmark logs, local artifact paths, private
+traces, Codex session transcripts, credentials, and submission artifacts out of
+status and review packets.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the

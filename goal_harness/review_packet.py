@@ -386,6 +386,11 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     )
     benchmark_report_text = ""
     if benchmark_report:
+        benchmark_report_readiness = (
+            latest_run.get("benchmark_experiment_report_readiness_note")
+            if isinstance(latest_run.get("benchmark_experiment_report_readiness_note"), dict)
+            else {}
+        )
         identity = (
             benchmark_report.get("experiment_identity")
             if isinstance(benchmark_report.get("experiment_identity"), dict)
@@ -411,12 +416,16 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
         ]
         if next_decision.get("decision"):
             report_parts.append(f"report_decision={next_decision.get('decision')}")
+        if benchmark_report_readiness.get("readiness"):
+            report_parts.append(f"readiness={benchmark_report_readiness.get('readiness')}")
+        if benchmark_report_readiness.get("next_run_authorization"):
+            report_parts.append(f"next_run={benchmark_report_readiness.get('next_run_authorization')}")
         if layers:
             report_parts.append(f"negative_layers={','.join(str(layer) for layer in layers[:2])}")
         benchmark_report_text = "; " + ", ".join(report_parts)
     return compact_packet_text(
         f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}{benchmark_report_text}",
-        limit=260,
+        limit=320,
     )
 
 
