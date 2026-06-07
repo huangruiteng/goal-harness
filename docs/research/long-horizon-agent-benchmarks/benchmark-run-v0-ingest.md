@@ -1,0 +1,102 @@
+# Benchmark Run V0 Ingestion Contract
+
+Checked at: 2026-06-07T18:30:00+08:00
+
+## Purpose
+
+`benchmark_run_v0` is the first Goal Harness event shape for public benchmark
+runs. It is intentionally passive: it reads official runner outputs and turns
+them into a compact, restartable control-plane event without changing benchmark
+prompts, task files, timeout settings, resources, scoring, or upload behavior.
+
+This contract starts with Harbor because Harbor is the official Terminal-Bench
+2.0 runner path and already writes structured job, trial, reward, and trajectory
+artifacts. The same event shape should later support the legacy `tb` runner and
+other long-horizon suites.
+
+## Input Surface
+
+For a Harbor job directory, read only these public-safe files:
+
+- job `lock.json`;
+- job `result.json`;
+- per-trial `config.json`;
+- per-trial `result.json`;
+- per-trial `agent/trajectory.json` when present;
+- per-trial `verifier/reward.json` or `verifier/reward.txt`;
+- per-trial `verifier/test-stdout.txt` and `verifier/test-stderr.txt` only as
+  existence evidence unless a later public-boundary pass allows excerpts;
+- per-trial `artifacts/manifest.json` as a list of collected artifact names.
+
+Do not read Codex raw session files, private runner logs, credentials, host
+absolute paths, cloud account metadata, or internal project material by default.
+
+## Event Shape
+
+Every ingested run should emit one `benchmark_run_v0` object:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Must equal `benchmark_run_v0`. |
+| `source_runner` | `harbor` for this first contract. |
+| `benchmark_id` | Dataset or benchmark id, such as `terminal-bench@2.0`. |
+| `job_name` | Redacted job name, not an absolute path. |
+| `mode` | `passive_observer` until a custom Goal Harness agent wrapper is approved. |
+| `agent` | Agent name, import path when used, model, and public-safe kwargs summary. |
+| `progress` | Total, completed, errored, running, pending, cancelled, and retry counts. |
+| `metrics` | Aggregate input/cache/output tokens and cost when official output supplies them. |
+| `trials` | Compact per-trial task id, trial name, reward map, exception type, timing, token/cost metrics, and evidence booleans. |
+| `validation` | Parser-side checks that official outputs are present and internally consistent. |
+| `evidence_files` | Relative evidence file categories, never host absolute paths. |
+| `resume_or_inspect_commands` | Public-safe command templates, such as `harbor job resume --job-path <job-dir>` and `harbor view <jobs-dir>`. |
+| `stop_conditions` | Conditions that block automatic execution or public claims. |
+
+## Validation Rules
+
+A default ingestion smoke should pass only when:
+
+- job `lock.json` and job `result.json` exist;
+- every completed trial has a trial `result.json`;
+- each parsed trial has verifier reward evidence or an explicit exception;
+- Codex/agent trajectory presence is recorded as a boolean, not assumed;
+- retry and progress counts are internally consistent;
+- invocation does not request `--upload`;
+- output paths are redacted before entering `benchmark_run_v0`;
+- no private document URL, credential-like value, local user path, internal task
+  id, or raw Codex session content is copied into the event.
+
+## Default Smoke
+
+The deterministic smoke is:
+
+```bash
+python3 examples/benchmark-run-v0-harbor-ingest-smoke.py
+```
+
+It creates a synthetic Harbor-style job directory with one completed
+Terminal-Bench trial, then parses it into `benchmark_run_v0`. The fixture writes
+only public-safe fake data and does not import Harbor, invoke Docker, call Codex,
+use model APIs, use cloud sandboxes, or upload leaderboard results.
+
+## Stop Conditions
+
+Stop before:
+
+- executing `harbor run`, `tb run`, Codex, Docker, cloud sandboxes, or model
+  APIs automatically from a heartbeat;
+- using `--upload`, `harbor upload`, or official leaderboard submission;
+- modifying benchmark task prompts, tests, resources, timeouts, scoring, or
+  official runner code;
+- claiming Goal Harness improves benchmark score without paired bare Codex and
+  passive Goal Harness runs;
+- copying private source material, credentials, host paths, or raw Codex session
+  content into public artifacts.
+
+## Next Slice
+
+After this smoke exists, the next bounded product step is to decide where
+`benchmark_run_v0` should live in the normal Goal Harness history/status
+pipeline. The default should stay generic: parse runner outputs, append a
+public-safe run event, refresh state, and let status/review-packet expose the
+compact benchmark summary without adding benchmark-specific heartbeat prompt
+branches.

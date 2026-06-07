@@ -33,6 +33,9 @@ work still belongs in the existing code, examples, and contract documents:
   Terminal-Bench and Harbor, including Codex CLI integration surfaces, output
   files for passive Goal Harness ingestion, and the stop condition before paid
   or leaderboard execution.
+- `benchmark-run-v0-ingest.md`: first passive `benchmark_run_v0` ingestion
+  contract for Harbor job outputs, with deterministic fixture coverage and no
+  default Docker, model, cloud, or leaderboard execution.
 
 ## Relationship To Goal Harness Work
 
