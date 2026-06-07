@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from goal_harness.cli import review_packet_handoff_only_payload  # noqa: E402
 from goal_harness.review_packet import build_review_packet  # noqa: E402
 from goal_harness.status import collect_status  # noqa: E402
 
@@ -246,6 +247,42 @@ def main() -> None:
         assert "chain_map=benchmark-report-chain-map-v0.md" in handoff, handoff
         assert "negative_layers=readiness_only,failure_analysis" in handoff, handoff
         assert_no_private_surface({"handoff": handoff})
+
+        handoff_only = review_packet_handoff_only_payload(packet)
+        chain_handoff = handoff_only["benchmark_report_chain_handoff"]
+        assert chain_handoff["schema_version"] == "benchmark_report_chain_handoff_v0", chain_handoff
+        assert chain_handoff["surface"] == "status_review_packet_only", chain_handoff
+        assert chain_handoff["chain_map"] == "benchmark-report-chain-map-v0.md", chain_handoff
+        assert chain_handoff["report_id"] == "mini-control-plane-repair-report-v0", chain_handoff
+        assert chain_handoff["task_slice"] == "mini_control_plane_repair_v0", chain_handoff
+        assert chain_handoff["report_decision"] == "continue", chain_handoff
+        assert chain_handoff["readiness"] == "negative_or_control_plane_only", chain_handoff
+        assert chain_handoff["authorization"] == "fixture_only", chain_handoff
+        assert chain_handoff["replay_decision"] == "continue_fixture_replay", chain_handoff
+        assert chain_handoff["next_run_mode"] == "fixture_replay", chain_handoff
+        assert set(chain_handoff["negative_evidence_layers"]) == {"readiness_only", "failure_analysis"}, chain_handoff
+        assert "official leaderboard uplift" in chain_handoff["must_not_claim"], chain_handoff
+        assert chain_handoff["source_run"]["classification"] == "benchmark_experiment_report_v0", chain_handoff
+        assert_no_private_surface(chain_handoff)
+
+        cli_handoff_only = run_cli(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime),
+                "review-packet",
+                "--goal-id",
+                GOAL_ID,
+                "--handoff-only",
+                "--format",
+                "json",
+            ]
+        )
+        cli_chain_handoff = cli_handoff_only["benchmark_report_chain_handoff"]
+        assert cli_chain_handoff == chain_handoff, cli_handoff_only
+        assert "benchmark_report_chain_handoff" in cli_handoff_only, cli_handoff_only
+        assert_no_private_surface(cli_handoff_only)
 
     print("benchmark-experiment-report-append-cli-smoke ok")
 

@@ -442,6 +442,65 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     )
 
 
+def benchmark_report_chain_handoff(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
+    latest_run = (
+        readiness.get("post_handoff_latest_run")
+        if isinstance(readiness.get("post_handoff_latest_run"), dict)
+        else {}
+    )
+    if not latest_run:
+        return None
+    replay = (
+        latest_run.get("benchmark_experiment_report_replay_decision")
+        if isinstance(latest_run.get("benchmark_experiment_report_replay_decision"), dict)
+        else {}
+    )
+    if not replay:
+        return None
+    report = (
+        latest_run.get("benchmark_experiment_report_summary")
+        if isinstance(latest_run.get("benchmark_experiment_report_summary"), dict)
+        else {}
+    )
+    readiness_note = (
+        latest_run.get("benchmark_experiment_report_readiness_note")
+        if isinstance(latest_run.get("benchmark_experiment_report_readiness_note"), dict)
+        else {}
+    )
+    identity = report.get("experiment_identity") if isinstance(report.get("experiment_identity"), dict) else {}
+    negative = report.get("negative_results") if isinstance(report.get("negative_results"), dict) else {}
+    next_decision = report.get("next_decision") if isinstance(report.get("next_decision"), dict) else {}
+    replay_layers = replay.get("negative_evidence_layers")
+    negative_layers = negative.get("negative_evidence_layers")
+    layers = replay_layers if isinstance(replay_layers, list) else negative_layers if isinstance(negative_layers, list) else []
+    must_not_claim = replay.get("must_not_claim")
+    if not isinstance(must_not_claim, list):
+        must_not_claim = readiness_note.get("must_not_claim") if isinstance(readiness_note.get("must_not_claim"), list) else []
+    return {
+        "schema_version": "benchmark_report_chain_handoff_v0",
+        "surface": "status_review_packet_only",
+        "chain_map": BENCHMARK_REPORT_CHAIN_MAP_DOC,
+        "source_run": {
+            "generated_at": latest_run.get("generated_at"),
+            "classification": latest_run.get("classification"),
+            "delivery_batch_scale": latest_run.get("delivery_batch_scale"),
+            "delivery_outcome": latest_run.get("delivery_outcome"),
+        },
+        "report_id": replay.get("report_id") or identity.get("report_id"),
+        "task_slice": replay.get("task_slice") or identity.get("task_slice"),
+        "report_decision": next_decision.get("decision"),
+        "readiness": replay.get("readiness") or readiness_note.get("readiness"),
+        "authorization": replay.get("authorization") or readiness_note.get("next_run_authorization"),
+        "replay_decision": replay.get("replay_decision"),
+        "next_run_mode": replay.get("next_run_mode"),
+        "negative_evidence_layers": [str(layer) for layer in layers if str(layer).strip()],
+        "must_not_claim": [str(claim) for claim in must_not_claim if str(claim).strip()],
+    }
+
+
 def _contract_minimum_text(value: str) -> str:
     return value.replace("_or_", "/")
 
@@ -907,6 +966,7 @@ def build_review_packet(
     asset_source_line = project_asset_source_line(asset_source)
     authority_summary = authority_material_summary(goal)
     followthrough_summary = handoff_followthrough_summary(item)
+    chain_handoff = benchmark_report_chain_handoff(item)
     delivery_contract = handoff_delivery_contract(item)
     delivery_contract_text = handoff_delivery_contract_summary(delivery_contract)
     freshness_warning = decision_freshness_warning(status_payload, goal_id)
@@ -1014,6 +1074,7 @@ def build_review_packet(
         "agent_todo_items": agent_todo_items,
         "authority_summary": authority_summary,
         "handoff_followthrough_summary": followthrough_summary,
+        "benchmark_report_chain_handoff": chain_handoff,
         "handoff_delivery_contract": delivery_contract,
         "handoff_interface_budget": handoff_interface_budget,
         "decision_freshness_warning": freshness_warning,
