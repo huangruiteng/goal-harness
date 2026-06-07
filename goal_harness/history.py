@@ -194,6 +194,79 @@ def append_benchmark_run(
     return payload
 
 
+def append_benchmark_result(
+    *,
+    registry_path: Path,
+    runtime_root_override: str | None,
+    goal_id: str,
+    benchmark_result: dict[str, Any],
+    classification: str = "benchmark_result_v0",
+    recommended_action: str | None = None,
+    delivery_batch_scale: str | None = None,
+    delivery_outcome: str | None = None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
+    if benchmark_result.get("schema_version") != "benchmark_result_v0":
+        raise ValueError("benchmark result must have schema_version=benchmark_result_v0")
+
+    registry = load_registry(registry_path)
+    runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    generated_at = now_local()
+    action = recommended_action or "inspect benchmark_result_v0 summary and continue benchmark comparison work"
+    health_check = "benchmark_result_v0 compact event public-safe"
+
+    runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
+    json_path, markdown_path = unique_run_paths(runs_dir, generated_at)
+    index_path = runs_dir / "index.jsonl"
+    record: dict[str, Any] = {
+        "generated_at": generated_at,
+        "goal_id": safe_goal_id,
+        "classification": classification,
+        "recommended_action": action,
+        "health_check": health_check,
+        "benchmark_result": benchmark_result,
+    }
+    if delivery_batch_scale:
+        record["delivery_batch_scale"] = delivery_batch_scale
+    if delivery_outcome:
+        record["delivery_outcome"] = delivery_outcome
+
+    index_record = {
+        **record,
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+    }
+    payload = {
+        "ok": True,
+        "dry_run": dry_run,
+        "appended": not dry_run,
+        "registry": str(registry_path),
+        "runtime_root": str(runtime_root),
+        "goal_id": safe_goal_id,
+        "classification": classification,
+        "recommended_action": action,
+        "generated_at": generated_at,
+        "health_check": health_check,
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "index_path": str(index_path),
+        "benchmark_result": benchmark_result,
+    }
+    if delivery_batch_scale:
+        payload["delivery_batch_scale"] = delivery_batch_scale
+    if delivery_outcome:
+        payload["delivery_outcome"] = delivery_outcome
+
+    if not dry_run:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        markdown_path.write_text(render_benchmark_result_append_markdown(payload) + "\n", encoding="utf-8")
+        with index_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+    return payload
+
+
 def latest_status_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     for run in runs:
         if str(run.get("classification") or "") in STATUS_NEUTRAL_CLASSIFICATIONS:
@@ -349,6 +422,57 @@ def render_benchmark_run_append_markdown(payload: dict[str, Any]) -> str:
                 f"- mode: `{benchmark_run.get('mode')}`",
                 f"- progress: completed={progress.get('n_completed_trials')} total={progress.get('n_total_trials')}",
                 f"- metrics: input_tokens={metrics.get('input_tokens')} output_tokens={metrics.get('output_tokens')} cost_usd={metrics.get('cost_usd')}",
+            ]
+        )
+    if payload.get("error"):
+        lines.append(f"- error: {payload.get('error')}")
+    return "\n".join(lines)
+
+
+def render_benchmark_result_append_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Goal Harness Benchmark Result Append",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- dry_run: `{payload.get('dry_run')}`",
+        f"- appended: `{payload.get('appended')}`",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- classification: `{payload.get('classification')}`",
+        f"- generated_at: `{payload.get('generated_at')}`",
+    ]
+    if payload.get("json_path"):
+        lines.append(f"- json_path: `{payload.get('json_path')}`")
+    if payload.get("index_path"):
+        lines.append(f"- index_path: `{payload.get('index_path')}`")
+    if payload.get("recommended_action"):
+        lines.append(f"- recommended_action: {payload.get('recommended_action')}")
+    benchmark_result = (
+        payload.get("benchmark_result")
+        if isinstance(payload.get("benchmark_result"), dict)
+        else {}
+    )
+    if benchmark_result:
+        official = (
+            benchmark_result.get("official_task_score")
+            if isinstance(benchmark_result.get("official_task_score"), dict)
+            else {}
+        )
+        control = (
+            benchmark_result.get("control_plane_score")
+            if isinstance(benchmark_result.get("control_plane_score"), dict)
+            else {}
+        )
+        lines.extend(
+            [
+                "",
+                "## Benchmark Result",
+                "",
+                f"- schema_version: `{benchmark_result.get('schema_version')}`",
+                f"- task_id: `{benchmark_result.get('task_id')}`",
+                f"- scenario_id: `{benchmark_result.get('scenario_id')}`",
+                f"- terminal_state: `{benchmark_result.get('terminal_state')}`",
+                f"- official_task_score: kind={official.get('kind')} value={official.get('value')} passed={official.get('passed')}",
+                f"- control_plane_score: schema={control.get('schema_version')} kind={control.get('kind')} value={control.get('value')} aggregation={control.get('aggregation')}",
             ]
         )
     if payload.get("error"):

@@ -36,9 +36,11 @@ from .global_registry import render_global_sync_markdown, sync_project_registry_
 from .handoff_budget import build_handoff_interface_budget
 from .heartbeat_prompt import build_heartbeat_prompt, render_heartbeat_prompt_markdown
 from .history import (
+    append_benchmark_result,
     append_benchmark_run,
     collect_history,
     load_registry,
+    render_benchmark_result_append_markdown,
     render_benchmark_run_append_markdown,
     render_history_markdown,
 )
@@ -80,7 +82,7 @@ from .state_refresh import (
     refresh_state_run,
     render_state_refresh_markdown,
 )
-from .status import collect_status, compact_benchmark_run, render_status_markdown
+from .status import collect_status, compact_benchmark_result, compact_benchmark_run, render_status_markdown
 from .status_server import (
     DEFAULT_STATUS_HOST,
     DEFAULT_STATUS_PATH,
@@ -449,8 +451,8 @@ def main(argv: list[str] | None = None) -> int:
     history_parser.add_argument(
         "history_action",
         nargs="?",
-        choices=["append-benchmark-run"],
-        help="Use append-benchmark-run to append a compact benchmark_run_v0 event.",
+        choices=["append-benchmark-run", "append-benchmark-result"],
+        help="Append a compact benchmark_run_v0 or benchmark_result_v0 event.",
     )
     history_parser.add_argument("--goal-id", help="Only show one goal.")
     history_parser.add_argument("--limit", type=int, default=10)
@@ -458,10 +460,14 @@ def main(argv: list[str] | None = None) -> int:
         "--benchmark-run-json",
         help="Path to a benchmark_run_v0 JSON object. Use '-' to read stdin.",
     )
-    history_parser.add_argument("--classification", default="benchmark_run_v0")
+    history_parser.add_argument(
+        "--benchmark-result-json",
+        help="Path to a benchmark_result_v0 JSON object. Use '-' to read stdin.",
+    )
+    history_parser.add_argument("--classification")
     history_parser.add_argument(
         "--recommended-action",
-        default="inspect benchmark_run_v0 summary and continue passive benchmark work",
+        help="Recommended next action for the compact append event.",
     )
     history_parser.add_argument(
         "--delivery-batch-scale",
@@ -474,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional delivery outcome label for the run index.",
     )
     history_parser.add_argument("--dry-run", action="store_true", help="Preview append without writing. This is the default.")
-    history_parser.add_argument("--execute", action="store_true", help="Append the compact benchmark_run_v0 event.")
+    history_parser.add_argument("--execute", action="store_true", help="Append the compact benchmark event.")
     history_parser.add_argument("--no-global-sync", action="store_true", help="Skip global registry sync after append.")
 
     archive_runtime_parser = sub.add_parser(
@@ -1131,7 +1137,7 @@ def main(argv: list[str] | None = None) -> int:
                     runtime_root_override=args.runtime_root,
                     goal_id=args.goal_id,
                     benchmark_run=benchmark_run,
-                    classification=args.classification,
+                    classification=args.classification or "benchmark_run_v0",
                     recommended_action=args.recommended_action,
                     delivery_batch_scale=args.delivery_batch_scale,
                     delivery_outcome=args.delivery_outcome,
@@ -1159,10 +1165,69 @@ def main(argv: list[str] | None = None) -> int:
                     "registry": str(registry_path),
                     "runtime_root": args.runtime_root,
                     "goal_id": args.goal_id,
-                    "classification": args.classification,
+                    "classification": args.classification or "benchmark_run_v0",
                     "error": str(exc),
                 }
             print_payload(payload, args.format, render_benchmark_run_append_markdown)
+            return 0 if payload.get("ok") else 1
+
+        if args.history_action == "append-benchmark-result":
+            try:
+                if args.dry_run and args.execute:
+                    raise ValueError("history append-benchmark-result accepts either --dry-run or --execute, not both")
+                if not args.goal_id:
+                    raise ValueError("history append-benchmark-result requires --goal-id")
+                if not args.benchmark_result_json:
+                    raise ValueError("history append-benchmark-result requires --benchmark-result-json")
+
+                if args.benchmark_result_json == "-":
+                    benchmark_result_input = json.loads(sys.stdin.read())
+                else:
+                    benchmark_result_input = json.loads(Path(args.benchmark_result_json).expanduser().read_text(encoding="utf-8"))
+                if not isinstance(benchmark_result_input, dict):
+                    raise ValueError("--benchmark-result-json must contain a JSON object")
+                benchmark_result = compact_benchmark_result(benchmark_result_input)
+                if not benchmark_result:
+                    raise ValueError("--benchmark-result-json did not contain a compactable benchmark_result_v0 object")
+
+                dry_run = not bool(args.execute)
+                payload = append_benchmark_result(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    benchmark_result=benchmark_result,
+                    classification=args.classification or "benchmark_result_v0",
+                    recommended_action=args.recommended_action,
+                    delivery_batch_scale=args.delivery_batch_scale,
+                    delivery_outcome=args.delivery_outcome,
+                    dry_run=dry_run,
+                )
+                if args.no_global_sync:
+                    payload["global_sync"] = {
+                        "ok": True,
+                        "dry_run": dry_run,
+                        "skipped": True,
+                        "reason": "disabled by --no-global-sync",
+                    }
+                else:
+                    payload["global_sync"] = sync_project_registry_to_global(
+                        registry_path=registry_path,
+                        runtime_root_override=args.runtime_root,
+                        goal_id=args.goal_id,
+                        dry_run=dry_run,
+                    )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "dry_run": not bool(args.execute),
+                    "appended": False,
+                    "registry": str(registry_path),
+                    "runtime_root": args.runtime_root,
+                    "goal_id": args.goal_id,
+                    "classification": args.classification or "benchmark_result_v0",
+                    "error": str(exc),
+                }
+            print_payload(payload, args.format, render_benchmark_result_append_markdown)
             return 0 if payload.get("ok") else 1
 
         try:
