@@ -243,6 +243,7 @@ def main() -> None:
         assert "next_run=fixture_only" in handoff, handoff
         assert "replay=continue_fixture_replay" in handoff, handoff
         assert "mode=fixture_replay" in handoff, handoff
+        assert "chain_map=benchmark-report-chain-map-v0.md" in handoff, handoff
         assert "negative_layers=readiness_only,failure_analysis" in handoff, handoff
         assert_no_private_surface({"handoff": handoff})
 

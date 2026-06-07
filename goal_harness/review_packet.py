@@ -13,6 +13,8 @@ from .execution_profile import (
 from .handoff_budget import build_handoff_interface_budget
 
 
+BENCHMARK_REPORT_CHAIN_MAP_DOC = "benchmark-report-chain-map-v0.md"
+
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
 )
@@ -429,12 +431,14 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
             report_parts.append(f"replay={benchmark_report_replay.get('replay_decision')}")
         if benchmark_report_replay.get("next_run_mode"):
             report_parts.append(f"mode={benchmark_report_replay.get('next_run_mode')}")
+        if benchmark_report_replay:
+            report_parts.append(f"chain_map={BENCHMARK_REPORT_CHAIN_MAP_DOC}")
         if layers:
             report_parts.append(f"negative_layers={','.join(str(layer) for layer in layers[:2])}")
         benchmark_report_text = "; " + ", ".join(report_parts)
     return compact_packet_text(
         f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}{benchmark_report_text}",
-        limit=380,
+        limit=440,
     )
 
 
