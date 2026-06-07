@@ -70,6 +70,10 @@ work still belongs in the existing code, examples, and contract documents:
   comparison between the non-interrupt and interrupt mini control-plane repair
   modes, preserving official-score versus control-plane-score separation and
   claim boundaries before any status/review-packet projection.
+- `mini-control-plane-interrupt-projection-decision-v0.md`: fixture-only
+  decision to keep `benchmark_interrupt_comparison_summary_v0` research-only
+  until a real consumer or passive benchmark run justifies status/review-packet
+  projection.
 - `terminal-bench-official-pilot-readiness-v0.md`: local-only readiness
   fixture for `terminal_bench_official_pilot_decision_packet_v0`, proving the
   `benchmark_result_v0` comparison shell and control-plane checklist before any
