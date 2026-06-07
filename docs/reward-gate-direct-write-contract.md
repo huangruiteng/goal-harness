@@ -79,4 +79,3 @@ The default dashboard remains read-mostly:
 Adding a new write surface requires a smoke that proves disabled-by-default
 behavior, stale-preview rejection, public-safe text validation, exactly one
 runtime append, status refresh, and no local path leakage in compact responses.
-

@@ -71,4 +71,3 @@ the existing authority-registry projection.
 - Do not read or summarize the source body as part of registration. This command
   records the source contract; later project-specific work decides whether a
   source can be read.
-
