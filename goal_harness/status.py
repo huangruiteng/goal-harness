@@ -83,6 +83,7 @@ BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
 BENCHMARK_RESULT_SCHEMA_VERSION = "benchmark_result_v0"
 BENCHMARK_COMPARISON_SCHEMA_VERSION = "benchmark_comparison_v0"
 BENCHMARK_COMPARISON_DECISION_SCHEMA_VERSION = "benchmark_comparison_decision_note_v0"
+BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION = "benchmark_experiment_report_v0"
 CONTROL_PLANE_SCORE_SCHEMA_VERSION = "control_plane_score_core_v0"
 CONTROL_PLANE_SCORE_COMPONENTS = (
     "restartability",
@@ -781,6 +782,177 @@ def benchmark_comparison_decision_note(comparison: dict[str, Any] | None) -> dic
     elif isinstance(comparison.get("control_plane_score_delta"), str):
         note["control_plane_score_delta"] = public_safe_compact_text(comparison.get("control_plane_score_delta"), limit=120)
     return note
+
+
+def _benchmark_experiment_report_source(run: dict[str, Any]) -> dict[str, Any] | None:
+    nested = run.get("benchmark_experiment_report")
+    if isinstance(nested, dict) and nested.get("schema_version") == BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION:
+        return nested
+    legacy_nested = run.get("benchmark_report")
+    if isinstance(legacy_nested, dict) and legacy_nested.get("schema_version") == BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION:
+        return legacy_nested
+    if run.get("schema_version") == BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION:
+        return run
+    return None
+
+
+def compact_benchmark_experiment_report(run: dict[str, Any]) -> dict[str, Any] | None:
+    source = _benchmark_experiment_report_source(run)
+    if not source:
+        return None
+
+    compact: dict[str, Any] = {"schema_version": BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION}
+
+    identity = source.get("experiment_identity") if isinstance(source.get("experiment_identity"), dict) else {}
+    compact_identity: dict[str, Any] = {}
+    for field in (
+        "report_id",
+        "benchmark_id",
+        "task_slice",
+        "worker_surface",
+        "harness_identity",
+        "harness_policy_version",
+        "trace_publicness",
+    ):
+        value = public_safe_compact_text(identity.get(field), limit=140)
+        if value:
+            compact_identity[field] = value
+    if compact_identity:
+        compact["experiment_identity"] = compact_identity
+
+    official = source.get("official_score") if isinstance(source.get("official_score"), dict) else {}
+    compact_official: dict[str, Any] = {}
+    for field in ("kind", "task_id_or_split", "runner_source"):
+        value = public_safe_compact_text(official.get(field), limit=140)
+        if value:
+            compact_official[field] = value
+    compact_official.update(
+        _compact_numeric_map(
+            official,
+            keys=("native_score", "wrapped_score", "delta", "repetitions"),
+        )
+    )
+    for field in ("submit_eligible", "leaderboard_evidence"):
+        if isinstance(official.get(field), bool):
+            compact_official[field] = official.get(field)
+    if compact_official:
+        compact["official_score"] = compact_official
+
+    passive = (
+        source.get("passive_control_plane_score")
+        if isinstance(source.get("passive_control_plane_score"), dict)
+        else {}
+    )
+    compact_passive = _compact_numeric_map(
+        passive,
+        keys=(
+            "restartability",
+            "stale_state_avoidance",
+            "evidence_discipline",
+            "writeback_quality",
+            "failure_attribution",
+        ),
+    )
+    for field in ("overhead_bounded", "regression_avoidance_passed"):
+        if isinstance(passive.get(field), bool):
+            compact_passive[field] = passive.get(field)
+    passive_events = public_safe_compact_list(passive.get("source_events"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+    if passive_events:
+        compact_passive["source_events"] = passive_events
+    if compact_passive:
+        compact["passive_control_plane_score"] = compact_passive
+
+    simulator = (
+        source.get("operator_simulator_ablation")
+        if isinstance(source.get("operator_simulator_ablation"), dict)
+        else {}
+    )
+    compact_simulator: dict[str, Any] = {}
+    for field in ("enabled", "leaderboard_evidence"):
+        if isinstance(simulator.get(field), bool):
+            compact_simulator[field] = simulator.get(field)
+    compact_simulator.update(_compact_numeric_map(simulator, keys=("intervention_count",)))
+    reason = public_safe_compact_text(simulator.get("reason"), limit=180)
+    if reason:
+        compact_simulator["reason"] = reason
+    if compact_simulator:
+        compact["operator_simulator_ablation"] = compact_simulator
+
+    claim_boundary = source.get("claim_boundary") if isinstance(source.get("claim_boundary"), dict) else {}
+    compact_boundary: dict[str, Any] = {}
+    for field in ("may_claim", "must_not_claim"):
+        values = public_safe_compact_list(claim_boundary.get(field), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+        if values:
+            compact_boundary[field] = values
+    for field in ("source_decision_note_schema", "source_evidence_layer"):
+        value = public_safe_compact_text(claim_boundary.get(field), limit=120)
+        if value:
+            compact_boundary[field] = value
+    if compact_boundary:
+        compact["claim_boundary"] = compact_boundary
+
+    negative = source.get("negative_results") if isinstance(source.get("negative_results"), dict) else {}
+    compact_negative: dict[str, Any] = {}
+    if isinstance(negative.get("null_official_delta"), bool):
+        compact_negative["null_official_delta"] = negative.get("null_official_delta")
+    existing_layers = public_safe_compact_list(negative.get("negative_evidence_layers"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+    failed_hypotheses = negative.get("failed_hypotheses") if isinstance(negative.get("failed_hypotheses"), list) else []
+    layers: list[str] = list(existing_layers)
+    for item in failed_hypotheses:
+        if not isinstance(item, dict):
+            continue
+        layer = public_safe_compact_text(item.get("evidence_layer"), limit=120)
+        if layer and layer not in layers:
+            layers.append(layer)
+        if len(layers) >= MAX_BENCHMARK_RUN_LIST_ITEMS:
+            break
+    if failed_hypotheses:
+        compact_negative["failed_hypothesis_count"] = len(failed_hypotheses)
+    elif isinstance(negative.get("failed_hypothesis_count"), int):
+        compact_negative["failed_hypothesis_count"] = negative.get("failed_hypothesis_count")
+    if layers:
+        compact_negative["negative_evidence_layers"] = layers
+    overhead_regressions = negative.get("overhead_regressions")
+    if isinstance(overhead_regressions, list):
+        compact_negative["overhead_regression_count"] = len(overhead_regressions)
+    elif isinstance(negative.get("overhead_regression_count"), int):
+        compact_negative["overhead_regression_count"] = negative.get("overhead_regression_count")
+    if compact_negative:
+        compact["negative_results"] = compact_negative
+
+    next_decision = source.get("next_decision") if isinstance(source.get("next_decision"), dict) else {}
+    compact_next: dict[str, Any] = {}
+    for field in (
+        "decision",
+        "minimum_next_evidence",
+        "stop_condition",
+        "source_decision_note_schema",
+        "readiness_decision",
+        "failure_decision",
+    ):
+        value = public_safe_compact_text(next_decision.get(field), limit=180)
+        if value:
+            compact_next[field] = value
+    if compact_next:
+        compact["next_decision"] = compact_next
+
+    report_sections = (
+        "experiment_identity",
+        "official_score",
+        "passive_control_plane_score",
+        "operator_simulator_ablation",
+        "cost_latency_overhead",
+        "failure_taxonomy",
+        "reproducibility_artifacts",
+        "claim_boundary",
+        "negative_results",
+        "next_decision",
+    )
+    compact["section_count"] = sum(1 for section in report_sections if isinstance(source.get(section), dict))
+
+    if set(compact.keys()) == {"schema_version", "section_count"}:
+        return None
+    return compact
 
 
 def parse_state_frontmatter(state_text: str) -> dict[str, str]:
@@ -1763,6 +1935,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
         decision_note = benchmark_comparison_decision_note(benchmark_comparison)
         if decision_note:
             compact["benchmark_comparison_decision_note"] = decision_note
+    benchmark_report = compact_benchmark_experiment_report(run)
+    if benchmark_report:
+        compact["benchmark_experiment_report_summary"] = benchmark_report
     return compact
 
 
@@ -3016,6 +3191,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
         decision_note = benchmark_comparison_decision_note(benchmark_comparison)
         if decision_note:
             compact["benchmark_comparison_decision_note"] = decision_note
+    benchmark_report = compact_benchmark_experiment_report(run)
+    if benchmark_report:
+        compact["benchmark_experiment_report_summary"] = benchmark_report
     return compact
 
 
@@ -3134,7 +3312,12 @@ def event_ledger_event_class(run: dict[str, Any]) -> str:
     classification = str(run.get("classification") or "").lower()
     if classification == "quota_slot_spent" or isinstance(run.get("quota_event"), dict):
         return "accounting"
-    if compact_benchmark_run(run) or compact_benchmark_result(run) or compact_benchmark_comparison(run):
+    if (
+        compact_benchmark_run(run)
+        or compact_benchmark_result(run)
+        or compact_benchmark_comparison(run)
+        or compact_benchmark_experiment_report(run)
+    ):
         return "evidence"
     if (
         classification in EVENT_LEDGER_DECISION_CLASSIFICATIONS

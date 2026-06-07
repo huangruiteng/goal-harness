@@ -37,11 +37,13 @@ from .handoff_budget import build_handoff_interface_budget
 from .heartbeat_prompt import build_heartbeat_prompt, render_heartbeat_prompt_markdown
 from .history import (
     append_benchmark_comparison,
+    append_benchmark_experiment_report,
     append_benchmark_result,
     append_benchmark_run,
     collect_history,
     load_registry,
     render_benchmark_comparison_append_markdown,
+    render_benchmark_experiment_report_append_markdown,
     render_benchmark_result_append_markdown,
     render_benchmark_run_append_markdown,
     render_history_markdown,
@@ -87,6 +89,7 @@ from .state_refresh import (
 from .status import (
     collect_status,
     compact_benchmark_comparison,
+    compact_benchmark_experiment_report,
     compact_benchmark_result,
     compact_benchmark_run,
     render_status_markdown,
@@ -459,8 +462,13 @@ def main(argv: list[str] | None = None) -> int:
     history_parser.add_argument(
         "history_action",
         nargs="?",
-        choices=["append-benchmark-run", "append-benchmark-result", "append-benchmark-comparison"],
-        help="Append a compact benchmark_run_v0, benchmark_result_v0, or benchmark_comparison_v0 event.",
+        choices=[
+            "append-benchmark-run",
+            "append-benchmark-result",
+            "append-benchmark-comparison",
+            "append-benchmark-report",
+        ],
+        help="Append a compact benchmark_run_v0, benchmark_result_v0, benchmark_comparison_v0, or benchmark_experiment_report_v0 event.",
     )
     history_parser.add_argument("--goal-id", help="Only show one goal.")
     history_parser.add_argument("--limit", type=int, default=10)
@@ -475,6 +483,10 @@ def main(argv: list[str] | None = None) -> int:
     history_parser.add_argument(
         "--benchmark-comparison-json",
         help="Path to a benchmark_comparison_v0 JSON object. Use '-' to read stdin.",
+    )
+    history_parser.add_argument(
+        "--benchmark-report-json",
+        help="Path to a benchmark_experiment_report_v0 JSON object. Use '-' to read stdin.",
     )
     history_parser.add_argument("--classification")
     history_parser.add_argument(
@@ -1303,6 +1315,69 @@ def main(argv: list[str] | None = None) -> int:
                     "error": str(exc),
                 }
             print_payload(payload, args.format, render_benchmark_comparison_append_markdown)
+            return 0 if payload.get("ok") else 1
+
+        if args.history_action == "append-benchmark-report":
+            try:
+                if args.dry_run and args.execute:
+                    raise ValueError("history append-benchmark-report accepts either --dry-run or --execute, not both")
+                if not args.goal_id:
+                    raise ValueError("history append-benchmark-report requires --goal-id")
+                if not args.benchmark_report_json:
+                    raise ValueError("history append-benchmark-report requires --benchmark-report-json")
+
+                if args.benchmark_report_json == "-":
+                    benchmark_report_input = json.loads(sys.stdin.read())
+                else:
+                    benchmark_report_input = json.loads(
+                        Path(args.benchmark_report_json).expanduser().read_text(encoding="utf-8")
+                    )
+                if not isinstance(benchmark_report_input, dict):
+                    raise ValueError("--benchmark-report-json must contain a JSON object")
+                benchmark_report = compact_benchmark_experiment_report(benchmark_report_input)
+                if not benchmark_report:
+                    raise ValueError(
+                        "--benchmark-report-json did not contain a compactable benchmark_experiment_report_v0 object"
+                    )
+
+                dry_run = not bool(args.execute)
+                payload = append_benchmark_experiment_report(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    benchmark_experiment_report=benchmark_report,
+                    classification=args.classification or "benchmark_experiment_report_v0",
+                    recommended_action=args.recommended_action,
+                    delivery_batch_scale=args.delivery_batch_scale,
+                    delivery_outcome=args.delivery_outcome,
+                    dry_run=dry_run,
+                )
+                if args.no_global_sync:
+                    payload["global_sync"] = {
+                        "ok": True,
+                        "dry_run": dry_run,
+                        "skipped": True,
+                        "reason": "disabled by --no-global-sync",
+                    }
+                else:
+                    payload["global_sync"] = sync_project_registry_to_global(
+                        registry_path=registry_path,
+                        runtime_root_override=args.runtime_root,
+                        goal_id=args.goal_id,
+                        dry_run=dry_run,
+                    )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "dry_run": not bool(args.execute),
+                    "appended": False,
+                    "registry": str(registry_path),
+                    "runtime_root": args.runtime_root,
+                    "goal_id": args.goal_id,
+                    "classification": args.classification or "benchmark_experiment_report_v0",
+                    "error": str(exc),
+                }
+            print_payload(payload, args.format, render_benchmark_experiment_report_append_markdown)
             return 0 if payload.get("ok") else 1
 
         try:
