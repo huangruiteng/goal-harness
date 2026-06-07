@@ -873,6 +873,14 @@ def _heartbeat_recommendation(
     lifecycle_phase = item.get("lifecycle_phase")
     lifecycle_flags = item.get("lifecycle_flags")
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+    replan_obligation = (
+        item.get("autonomous_replan_obligation")
+        if isinstance(item.get("autonomous_replan_obligation"), dict)
+        else project_asset.get("autonomous_replan_obligation")
+        if isinstance(project_asset.get("autonomous_replan_obligation"), dict)
+        else None
+    )
     has_user_todos = _open_todo_count(user_todo_summary) > 0
     has_agent_todos = _open_todo_count(agent_todo_summary) > 0
 
@@ -933,6 +941,27 @@ def _heartbeat_recommendation(
             **base,
             "recommended_mode": "quota_skip",
             "reason": f"quota state is {state}; skip delivery compute",
+        }
+    if replan_obligation and replan_obligation.get("required") and not has_user_todos:
+        return {
+            **base,
+            "recommended_mode": "autonomous_replan_required",
+            "notify": "DONT_NOTIFY",
+            "replan_obligation": {
+                "schema_version": replan_obligation.get("schema_version"),
+                "trigger_count": replan_obligation.get("trigger_count"),
+                "triggers": replan_obligation.get("triggers") or [],
+                "next_validation_command": replan_obligation.get("next_validation_command"),
+                "stop_condition": replan_obligation.get("stop_condition"),
+            },
+            "spend_policy": (
+                "append exactly one heartbeat spend only after executing the selected "
+                "replan slice, validating it, and writing back todo split/add/retire state"
+            ),
+            "reason": (
+                "active state exposes an autonomous replan obligation; advance the "
+                "planning-trigger slice before another monitor-only or repeated action"
+            ),
         }
 
     if status == "connected_without_run" and _supports_read_only_project_map(adapter_kind):
@@ -1531,6 +1560,15 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         )
         if archive_warning:
             payload["completed_todo_archive_warning"] = archive_warning
+        replan_obligation = (
+            item.get("autonomous_replan_obligation")
+            if isinstance(item.get("autonomous_replan_obligation"), dict)
+            else project_asset.get("autonomous_replan_obligation")
+            if isinstance(project_asset.get("autonomous_replan_obligation"), dict)
+            else None
+        )
+        if replan_obligation:
+            payload["autonomous_replan_obligation"] = replan_obligation
         interface_budget_cadence = (
             project_asset.get("interface_budget_cadence")
             if isinstance(project_asset.get("interface_budget_cadence"), dict)
@@ -2074,6 +2112,25 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- completed_todo_archive_action: {completed_todo_archive_warning.get('recommended_action')}"
             )
+    replan_obligation = (
+        payload.get("autonomous_replan_obligation")
+        if isinstance(payload.get("autonomous_replan_obligation"), dict)
+        else {}
+    )
+    if replan_obligation:
+        trigger_kinds = [
+            str(trigger.get("kind") or "")
+            for trigger in replan_obligation.get("triggers") or []
+            if isinstance(trigger, dict) and trigger.get("kind")
+        ]
+        lines.append(
+            "- autonomous_replan_obligation: "
+            f"required={replan_obligation.get('required')} "
+            f"trigger_count={replan_obligation.get('trigger_count')} "
+            f"triggers={','.join(trigger_kinds)}"
+        )
+        if replan_obligation.get("next_validation_command"):
+            lines.append(f"- autonomous_replan_validation: `{replan_obligation.get('next_validation_command')}`")
     interface_budget_cadence = (
         payload.get("interface_budget_cadence")
         if isinstance(payload.get("interface_budget_cadence"), dict)
