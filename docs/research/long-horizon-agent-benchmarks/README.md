@@ -90,6 +90,10 @@ work still belongs in the existing code, examples, and contract documents:
   public artifact shapes, side-effect budgets, stop conditions, and compact
   `benchmark_run_v0` / `benchmark_result_v0` ingestion rules without executing
   the runner path.
+- `terminal-bench-no-submit-approval-packet-projection-decision-v0.md`:
+  fixture-only decision to keep the no-submit approval packet research/docs-only
+  until an agent consumer, approved no-submit setup check, passive wrapper, or
+  repeated re-derivation justifies a compact hot-path projection.
 
 ## Relationship To Goal Harness Work
 
