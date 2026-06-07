@@ -84,6 +84,12 @@ work still belongs in the existing code, examples, and contract documents:
   command boundaries, submit eligibility, future event shape, and hard stop
   conditions without running Terminal-Bench, Harbor, Docker, Codex/model APIs,
   cloud sandboxes, paid compute, or leaderboard upload paths.
+- `terminal-bench-no-submit-approval-packet-v0.md`: smallest
+  `terminal_bench_no_submit_approval_packet_v0` operator packet for a future
+  no-submit setup check, listing exact candidate commands, forbidden surfaces,
+  public artifact shapes, side-effect budgets, stop conditions, and compact
+  `benchmark_run_v0` / `benchmark_result_v0` ingestion rules without executing
+  the runner path.
 
 ## Relationship To Goal Harness Work
 
