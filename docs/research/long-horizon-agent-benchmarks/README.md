@@ -49,6 +49,11 @@ work still belongs in the existing code, examples, and contract documents:
   passive control-plane metrics, assisted operator-simulator ablations,
   overhead, failure taxonomy, reproducibility artifacts, claim boundaries, and
   negative results in separate report sections.
+- `benchmark-result-control-plane-score-v0.md`: minimal
+  `control_plane_score_core_v0` schema for `benchmark_result_v0`, separating
+  official task score from restartability, stale-state avoidance, evidence
+  discipline, boundary safety, writeback quality, gate compliance, failure
+  attribution, and overhead.
 - `terminal-bench-official-pilot-readiness-v0.md`: local-only readiness
   fixture for `terminal_bench_official_pilot_decision_packet_v0`, proving the
   `benchmark_result_v0` comparison shell and control-plane checklist before any

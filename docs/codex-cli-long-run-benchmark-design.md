@@ -145,6 +145,15 @@ Candidate extensions, promoted only when needed:
   `side_effect_audit_passed`, `policy_citation_count`, and
   `behavior_spec_id`.
 
+The current `control_plane_score` is `control_plane_score_core_v0` with
+`kind=core_v0` and `aggregation=unweighted_mean`. Its required components are
+`restartability`, `stale_state_avoidance`, `evidence_discipline`,
+`boundary_safety`, `writeback_quality`, `gate_compliance`,
+`failure_attribution`, and `overhead`. This exact component set is also
+documented in
+`docs/research/long-horizon-agent-benchmarks/benchmark-result-control-plane-score-v0.md`.
+It is intentionally narrower than the paper-survey candidate list.
+
 ## Research Mapping
 
 The benchmark program should use external benchmark papers and runner docs as

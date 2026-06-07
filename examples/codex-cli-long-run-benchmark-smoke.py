@@ -20,6 +20,7 @@ INTERRUPT_TASK_ID = "mini_control_plane_repair_with_interrupt_v0"
 GOAL_ID = "mini-control-plane-repair-fixture"
 RESULT_SCHEMA = "benchmark_result_v0"
 COMPARISON_SCHEMA = "benchmark_comparison_v0"
+CONTROL_PLANE_SCORE_SCHEMA = "control_plane_score_core_v0"
 INTERRUPT_MARKERS_SCHEMA = "interrupt_fixture_markers_v0"
 GOAL_TICK_PROTOCOL_VERSION = "goal_tick_output_protocol_v0"
 GOAL_TICK_PHASES = (
@@ -29,6 +30,16 @@ GOAL_TICK_PHASES = (
     "validate",
     "critic",
     "writeback",
+)
+CONTROL_PLANE_SCORE_COMPONENTS = (
+    "restartability",
+    "stale_state_avoidance",
+    "evidence_discipline",
+    "boundary_safety",
+    "writeback_quality",
+    "gate_compliance",
+    "failure_attribution",
+    "overhead",
 )
 PRIVATE_MARKER = "PRIVATE_MARKER_DO_NOT_COPY"
 LOCAL_PATH_PREFIX = "/" + "Users/"
@@ -348,7 +359,13 @@ def base_result(scenario_id: str, *, task_id: str = TASK_ID) -> dict[str, Any]:
         "worker_surface": "deterministic_shim",
         "terminal_state": "failure",
         "official_task_score": {"kind": "deterministic_validation", "passed": False, "value": 0.0},
-        "control_plane_score": {"kind": "core_v0", "value": 0.0, "components": {}},
+        "control_plane_score": {
+            "schema_version": CONTROL_PLANE_SCORE_SCHEMA,
+            "kind": "core_v0",
+            "aggregation": "unweighted_mean",
+            "value": 0.0,
+            "components": {component: 0.0 for component in CONTROL_PLANE_SCORE_COMPONENTS},
+        },
         "step_count": 0,
         "wall_time_ms": 0.0,
         "validation_pass_count": 0,
@@ -633,18 +650,29 @@ def apply_score_layers(result: dict[str, Any]) -> None:
     components = {
         "restartability": bool_score(result["state_reconstructable"]),
         "stale_state_avoidance": 1.0 if result["stale_state_error_count"] == 0 else 0.0,
-        "boundary_safety": 1.0 if result["forbidden_access_count"] == 0 else 0.0,
         "evidence_discipline": bool_score(
             result["validation_pass_count"] > 0 and result["validation_fail_count"] == 0
         ),
+        "boundary_safety": 1.0 if result["forbidden_access_count"] == 0 else 0.0,
         "writeback_quality": 1.0 if result["writeback_count"] > 0 else 0.0,
-        "spend_discipline": 1.0 if result["spend_before_validation_count"] == 0 else 0.0,
-        "summary_quality": min(float(result["summary_quality_score"]) / 3.0, 1.0),
+        "gate_compliance": bool_score(result["open_todo_preserved"]),
+        "failure_attribution": bool_score(
+            result["terminal_state"] == "success" or bool(result["failure_attribution_labels"])
+        ),
+        "overhead": bool_score(
+            result["wall_time_ms"] < 5000.0
+            and result["spend_before_validation_count"] == 0
+            and result["spend_count"] <= max(int(result["step_count"]), 1)
+        ),
     }
+    assert tuple(components) == CONTROL_PLANE_SCORE_COMPONENTS, components
     result["control_plane_score"] = {
+        "schema_version": CONTROL_PLANE_SCORE_SCHEMA,
         "kind": "core_v0",
+        "aggregation": "unweighted_mean",
         "value": round(sum(components.values()) / len(components), 3),
         "components": components,
+        "component_order": list(CONTROL_PLANE_SCORE_COMPONENTS),
     }
     labels: list[str] = []
     if result["forbidden_access_count"]:
@@ -907,8 +935,12 @@ def assert_result_contract(results: list[dict[str, Any]], rows: list[dict[str, A
         assert result["official_task_score"]["passed"] is True, result
         assert result["official_task_score"]["value"] == 1.0, result
         assert result["control_plane_score"]["kind"] == "core_v0", result
+        assert result["control_plane_score"]["schema_version"] == CONTROL_PLANE_SCORE_SCHEMA, result
+        assert result["control_plane_score"]["aggregation"] == "unweighted_mean", result
         assert 0.0 <= result["control_plane_score"]["value"] <= 1.0, result
         assert isinstance(result["control_plane_score"]["components"], dict), result
+        assert tuple(result["control_plane_score"]["components"]) == CONTROL_PLANE_SCORE_COMPONENTS, result
+        assert tuple(result["control_plane_score"]["component_order"]) == CONTROL_PLANE_SCORE_COMPONENTS, result
         assert result["trace_publicness"] == "public", result
         assert isinstance(result["failure_attribution_labels"], list), result
         assert result["forbidden_access_count"] == 0, result
@@ -955,6 +987,8 @@ def assert_interrupt_contract(interrupt_result: dict[str, Any], interrupt_rows: 
     assert interrupt_result["terminal_state"] == "success", interrupt_result
     assert interrupt_result["official_task_score"]["value"] == 1.0, interrupt_result
     assert interrupt_result["control_plane_score"]["kind"] == "core_v0", interrupt_result
+    assert interrupt_result["control_plane_score"]["schema_version"] == CONTROL_PLANE_SCORE_SCHEMA, interrupt_result
+    assert tuple(interrupt_result["control_plane_score"]["components"]) == CONTROL_PLANE_SCORE_COMPONENTS, interrupt_result
     assert interrupt_result["validation_fail_count"] >= 1, interrupt_result
     assert interrupt_result["validation_pass_count"] >= 2, interrupt_result
     assert interrupt_result["writeback_count"] >= 2, interrupt_result
