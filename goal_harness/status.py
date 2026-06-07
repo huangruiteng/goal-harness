@@ -81,6 +81,7 @@ EVENT_LEDGER_CLASSES = (
 EVENT_LEDGER_PROXY_NOTE = "append-only run-history projection; compact event-class counts only"
 BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
 BENCHMARK_RESULT_SCHEMA_VERSION = "benchmark_result_v0"
+BENCHMARK_COMPARISON_SCHEMA_VERSION = "benchmark_comparison_v0"
 CONTROL_PLANE_SCORE_SCHEMA_VERSION = "control_plane_score_core_v0"
 CONTROL_PLANE_SCORE_COMPONENTS = (
     "restartability",
@@ -605,6 +606,87 @@ def compact_benchmark_result(run: dict[str, Any]) -> dict[str, Any] | None:
     labels = public_safe_compact_list(source.get("failure_attribution_labels"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
     if labels:
         compact["failure_attribution_labels"] = labels
+
+    if set(compact.keys()) == {"schema_version"}:
+        return None
+    return compact
+
+
+def _benchmark_comparison_source(run: dict[str, Any]) -> dict[str, Any] | None:
+    nested = run.get("benchmark_comparison")
+    if isinstance(nested, dict) and nested.get("schema_version") == BENCHMARK_COMPARISON_SCHEMA_VERSION:
+        return nested
+    if run.get("schema_version") == BENCHMARK_COMPARISON_SCHEMA_VERSION:
+        return run
+    return None
+
+
+def _compact_comparison_delta(value: Any) -> int | float | str | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return public_safe_compact_text(value, limit=120)
+
+
+def compact_benchmark_comparison(run: dict[str, Any]) -> dict[str, Any] | None:
+    source = _benchmark_comparison_source(run)
+    if not source:
+        return None
+
+    compact: dict[str, Any] = {"schema_version": BENCHMARK_COMPARISON_SCHEMA_VERSION}
+    for field in ("task_id", "comparison_id", "decision_id", "benchmark_id", "baseline_scenario_id", "treatment_scenario_id", "next_action"):
+        value = public_safe_compact_text(source.get(field), limit=180)
+        if value:
+            compact[field] = value
+
+    mode_pair = public_safe_compact_list(source.get("mode_pair"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+    if mode_pair:
+        compact["mode_pair"] = mode_pair
+
+    for field in (
+        "scenario_count",
+        "official_task_score_delta",
+        "control_plane_score_delta",
+        "with_goal_harness_overhead_ms",
+        "with_goal_harness_extra_writebacks",
+        "with_goal_harness_extra_spends",
+        "checklist_pass_count",
+    ):
+        delta = _compact_comparison_delta(source.get(field))
+        if delta is not None:
+            compact[field] = delta
+
+    for field in (
+        "both_success",
+        "ready_to_attempt_no_submit_setup_probe",
+        "ready_to_run_real_benchmark",
+        "ready_to_submit_leaderboard",
+        "requires_explicit_authorization_for_real_execution",
+    ):
+        if isinstance(source.get(field), bool):
+            compact[field] = source.get(field)
+
+    for field in ("metrics_compared", "interrupt_fixture_markers", "stop_conditions"):
+        values = public_safe_compact_list(source.get(field), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+        if values:
+            compact[field] = values
+
+    result_refs: list[dict[str, Any]] = []
+    for item in source.get("result_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        compact_ref: dict[str, Any] = {}
+        for field in ("scenario_id", "task_id", "result_id"):
+            value = public_safe_compact_text(item.get(field), limit=140)
+            if value:
+                compact_ref[field] = value
+        if compact_ref:
+            result_refs.append(compact_ref)
+            if len(result_refs) >= MAX_BENCHMARK_RUN_LIST_ITEMS:
+                break
+    if result_refs:
+        compact["result_refs"] = result_refs
 
     if set(compact.keys()) == {"schema_version"}:
         return None
@@ -1585,6 +1667,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
     benchmark_result = compact_benchmark_result(run)
     if benchmark_result:
         compact["benchmark_result_summary"] = benchmark_result
+    benchmark_comparison = compact_benchmark_comparison(run)
+    if benchmark_comparison:
+        compact["benchmark_comparison_summary"] = benchmark_comparison
     return compact
 
 
@@ -2832,6 +2917,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     benchmark_result = compact_benchmark_result(run)
     if benchmark_result:
         compact["benchmark_result_summary"] = benchmark_result
+    benchmark_comparison = compact_benchmark_comparison(run)
+    if benchmark_comparison:
+        compact["benchmark_comparison_summary"] = benchmark_comparison
     return compact
 
 
@@ -2950,7 +3038,7 @@ def event_ledger_event_class(run: dict[str, Any]) -> str:
     classification = str(run.get("classification") or "").lower()
     if classification == "quota_slot_spent" or isinstance(run.get("quota_event"), dict):
         return "accounting"
-    if compact_benchmark_run(run) or compact_benchmark_result(run):
+    if compact_benchmark_run(run) or compact_benchmark_result(run) or compact_benchmark_comparison(run):
         return "evidence"
     if (
         classification in EVENT_LEDGER_DECISION_CLASSIFICATIONS
