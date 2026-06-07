@@ -1519,6 +1519,14 @@ run-history report event; it does not create runner authority, execute
 benchmarks, call model APIs, enable simulator work, or authorize leaderboard
 publication.
 
+`docs/research/long-horizon-agent-benchmarks/benchmark-report-chain-map-v0.md`
+is the reviewer-facing map for this reporting chain. It names the public-safe
+order from `benchmark_run_v0` through
+`benchmark_experiment_report_replay_decision_v0` and the handoff fields a
+worker may inspect. The map is explanatory only: it does not add a status
+field, append a run-history event, or create authority to execute an external
+benchmark path.
+
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the

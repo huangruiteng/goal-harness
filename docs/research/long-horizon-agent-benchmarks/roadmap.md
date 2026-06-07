@@ -391,6 +391,11 @@ limitations, and benchmark-integrity safeguards. Use
 scores, passive control-plane metrics, assisted operator-simulator ablations,
 cost/latency overhead, failure taxonomy, reproducibility artifacts, claim
 boundaries, negative results, and next decisions in separate sections.
+Use `benchmark-report-chain-map-v0.md` as the reviewer-facing consolidation
+point before larger pilots: it lists the fixture-backed order from
+`benchmark_run_v0` through `benchmark_experiment_report_replay_decision_v0`,
+the fields a worker may trust, and the boundary that keeps chain repair
+separate from external benchmark execution.
 
 ## Active Agent Todo Seed
 
@@ -431,6 +436,14 @@ boundaries, negative results, and next decisions in separate sections.
   reproducibility artifacts. Completed 2026-06-07 via
   `benchmark-experiment-report-template-v0.md` and
   `benchmark-experiment-report-template-smoke.py`.
+- [x] [P2] Add the public benchmark report chain map that consolidates
+  `benchmark_run_v0`, `benchmark_result_v0`, `benchmark_comparison_v0`,
+  `benchmark_comparison_decision_note_v0`,
+  `benchmark_experiment_report_v0`,
+  `benchmark_experiment_report_readiness_note_v0`, and
+  `benchmark_experiment_report_replay_decision_v0` into one reviewer-facing
+  handoff. Completed 2026-06-08 via `benchmark-report-chain-map-v0.md` and
+  `benchmark-report-chain-map-smoke.py`.
 
 ## Non-Goals
 

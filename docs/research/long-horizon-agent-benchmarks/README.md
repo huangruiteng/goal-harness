@@ -49,6 +49,13 @@ work still belongs in the existing code, examples, and contract documents:
   passive control-plane metrics, assisted operator-simulator ablations,
   overhead, failure taxonomy, reproducibility artifacts, claim boundaries, and
   negative results in separate report sections.
+- `benchmark-report-chain-map-v0.md`: compact reviewer-facing chain map that
+  ties `benchmark_run_v0`, `benchmark_result_v0`, `benchmark_comparison_v0`,
+  `benchmark_comparison_decision_note_v0`,
+  `benchmark_experiment_report_v0`,
+  `benchmark_experiment_report_readiness_note_v0`, and
+  `benchmark_experiment_report_replay_decision_v0` into one fixture/status
+  handoff boundary.
 - `benchmark-result-control-plane-score-v0.md`: minimal
   `control_plane_score_core_v0` schema for `benchmark_result_v0`, separating
   official task score from restartability, stale-state avoidance, evidence
