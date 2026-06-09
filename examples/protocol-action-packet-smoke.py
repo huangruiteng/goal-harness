@@ -197,6 +197,26 @@ def assert_advancement_packet_prefers_backlog_candidate() -> None:
     assert "protocol_action_packet: schema=protocol_action_packet_v0 actor=agent" in markdown, markdown
 
 
+def assert_advancement_packet_keeps_user_todo_pending() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            agent_todos=[
+                todo(1, ADVANCEMENT_TODO, priority="P1", task_class="advancement_task"),
+            ],
+            user_todos=[user_todo(1, USER_TODO)],
+        ),
+        goal_id=GOAL_ID,
+    )
+    packet = guard["protocol_action_packet"]
+    assert "actor=agent" in packet["summary"], packet
+    assert "user_action_required=false" in packet["summary"], packet
+    assert "agent_action_required=true" in packet["summary"], packet
+    assert "user_action_pending=true" in packet["summary"], packet
+    assert f"user_action={USER_TODO}" in packet["summary"], packet
+    assert "agent_action=[P1] LLM-assisted protocol simplification research spike" in packet["summary"], packet
+    assert f"agent_action={USER_TODO}" not in packet["summary"], packet
+
+
 def assert_user_action_packet_blocks_agent_work() -> None:
     guard = build_quota_should_run(
         status_payload(
@@ -238,6 +258,7 @@ def assert_monitor_only_packet_allows_quiet_noop() -> None:
 
 def main() -> None:
     assert_advancement_packet_prefers_backlog_candidate()
+    assert_advancement_packet_keeps_user_todo_pending()
     assert_user_action_packet_blocks_agent_work()
     assert_monitor_only_packet_allows_quiet_noop()
     print("ok: protocol action packet smoke")

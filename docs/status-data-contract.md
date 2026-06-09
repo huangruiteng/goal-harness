@@ -935,6 +935,10 @@ user/agent action clarity before direct LLM API wiring is added. When an open
 todo uses the common `[P*] short title: details` shape, the packet uses the
 short title as the action label so long progress notes do not re-enter the hot
 path.
+If open user todos coexist with executable agent work, the packet keeps the
+primary actor as `agent` but adds `user_action_pending=true` plus a compact
+`user_action` label. This preserves the owner-visible blocker without
+mislabeling that owner todo as `agent_action`.
 When a registry-enabled goal has `control_plane.self_repair.enabled=true`,
 `quota should-run` may return `decision=self_repair`,
 `self_repair_allowed=true`, `stall_self_repair`, and an `effective_action` such

@@ -924,7 +924,7 @@ def _protocol_action_packet(payload: dict[str, Any]) -> dict[str, Any]:
         agent_action = _protocol_monitor_action(payload) or "quiet no-op; no material transition"
 
     action_key = "user_action" if requires_user_action else "agent_action"
-    action_value = user_actions[0] if user_actions else agent_action
+    action_value = user_actions[0] if requires_user_action and user_actions else agent_action
     summary_parts = [
         f"actor={primary_actor}",
         f"user_action_required={str(requires_user_action).lower()}",
@@ -934,6 +934,11 @@ def _protocol_action_packet(payload: dict[str, Any]) -> dict[str, Any]:
     if work_lane.get("lane"):
         summary_parts.append(f"lane={work_lane.get('lane')}")
     summary_parts.append("llm=no_api")
+    if user_actions and not requires_user_action:
+        summary_parts.append("user_action_pending=true")
+        text = _protocol_action_text(user_actions[0], limit=80)
+        if text:
+            summary_parts.append(f"user_action={text}")
     text = _protocol_action_text(action_value, limit=80)
     if text:
         summary_parts.append(f"{action_key}={text}")
