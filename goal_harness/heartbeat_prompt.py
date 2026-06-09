@@ -182,16 +182,15 @@ If the result says `should_run=false`:
   when no new user actions were discovered; never summarize this case as "no
   new user action". Do not execute `agent_command`, adapter work,
   write-control, production actions, or the gated path while asking.
-- If `notify_user_on_open_todo=true`, treat existing open `user_todo_summary`
-  as a blocker-push opportunity, not a silent skip. For `state=focus_wait`,
-  `state=waiting`, and `waiting_on=external_evidence`, a short user/owner
-  answer can unlock the project. If not surfaced recently, return heartbeat
-  `NOTIFY` with one concise Chinese ask listing at most three
-  `first_open_items`, `open_todo_notify_reason`, and expected reply format:
-  `done`, `defer/not now`, or a new evidence link/date/conclusion. No
-  implementation, adapter work, edits, research, exploration, or spend for
-  that blocker-push turn. If already surfaced recently, return quiet
-  `DONT_NOTIFY` and do not append quota spend.
+- If `notify_user_on_open_todo=true`, existing open `user_todo_summary` is a
+  blocker-push opportunity, not a silent skip. For focus/wait/evidence or
+  monitor-only no-transition lanes, a user/owner answer can unlock progress.
+  For `monitor_user_todo_notify` /
+  `open_todo_notification_policy=repeat_until_resolved`,
+  `NOTIFY` every poll until done/deferred/replaced. Other blockers may de-dupe
+  if surfaced recently; otherwise `NOTIFY` in Chinese with up to three
+  `first_open_items`, `open_todo_notify_reason`, and reply format: `done`,
+  `defer/not now`, or evidence link/date/conclusion. No delivery/spend.
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   do exactly one bounded safe-bypass step from the Priority Stack that does not
@@ -236,7 +235,8 @@ If the result says `should_run=true`:
    surface propagation, or synthetic-only chains.
    Read `execution_obligation`: `notify` is not an execution gate;
    `must_attempt_work=true` means one bounded segment even with
-   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false`. Then use
+   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
+   `notify_user_on_open_todo=true` blocker-push notification. Then use
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
    run its `command` as a real read-only map, then
    validate/save the `read_only_project_map` result, append exactly one
@@ -404,10 +404,9 @@ def render_compact_heartbeat_task_body(
 ) -> str:
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-This compact Goal Harness heartbeat body keeps project-specific branches out of
-the automation prompt. Put local policy in registry, active state, adapter, or
-`goal_boundary`. Expanded lifecycle contract:
-`{expanded_prompt_command}`; inspect it for ambiguous edge branches.
+This compact Goal Harness heartbeat body keeps project-specific branches out.
+Put local policy in registry/state/adapter/`goal_boundary`.
+Expanded lifecycle contract: `{expanded_prompt_command}`.
 
 Before delivery, make CLI reachable; run quota guard:
 
@@ -419,10 +418,10 @@ Before delivery, make CLI reachable; run quota guard:
 If preflight fails: quiet `DONT_NOTIFY`; no work/spend.
 
 If `should_run=false`:
-- `state=operator_gate` or `notify_user_on_open_todo=true`: blocker-push. If
-  not surfaced recently, concise Chinese `NOTIFY` with gate or up to three
-  user todos/first_open_items, reason, and reply format (`done`,
-  `defer/not now`, or evidence link/date/conclusion). No delivery/spend.
+- `state=operator_gate` or `notify_user_on_open_todo=true`: blocker-push.
+  `open_todo_notification_policy=repeat_until_resolved` means
+  `NOTIFY` every poll until done/deferred/replaced. Else de-dupe recent asks.
+  Ask gate or up to three todos with reason/reply format. No delivery/spend.
 - `safe_bypass_allowed=true`: do one gate-independent safe-bypass step.
   Validate/writeback/spend once; refresh if needed.
 - `waiting_on=external_evidence` or `state=waiting` with explicit monitor
@@ -438,7 +437,7 @@ If `should_run=true`:
    Legacy/raw fallback is not owner/gate/stop authority. Treat
    `run_history.latest_runs` as drill-down only.
 2. Stop only for this goal's own blocker todo: Chinese `NOTIFY`, no work/spend.
-   Dependency/sibling todos: record/surface, do not skip; continue P0/P1/P2 audit.
+   Dependency/sibling todos: record/surface; continue audit.
 3. If `effective_action=outcome_floor_recovery` or
    `recovery_delivery_allowed=true` or
    `safe_bypass_kind=outcome_floor_recovery`, run only ranker/cross-domain
@@ -446,7 +445,8 @@ If `should_run=true`:
    surface/synthetic-only work.
 4. Follow `execution_obligation`: `notify` is not an execution gate.
    `must_attempt_work=true` means one bounded segment even with
-   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false`.
+   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
+   `notify_user_on_open_todo=true` blocker-push notification.
    Then follow `heartbeat_recommendation`:
    `run_first_read_only_map` means run exact real-map command, then
    validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus

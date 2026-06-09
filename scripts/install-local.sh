@@ -8,7 +8,6 @@ bin_dir="${GOAL_HARNESS_BIN_DIR:-$HOME/.local/bin}"
 shell_profile="${GOAL_HARNESS_SHELL_PROFILE:-}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 skills_dir="${GOAL_HARNESS_SKILLS_DIR:-$codex_home/skills}"
-skill_target="$skills_dir/goal-harness-project"
 install_skill="${GOAL_HARNESS_INSTALL_SKILL:-1}"
 install_canary="${GOAL_HARNESS_INSTALL_CANARY:-1}"
 releases_dir="${GOAL_HARNESS_RELEASES_DIR:-$HOME/.local/share/goal-harness/releases}"
@@ -111,13 +110,19 @@ if [[ "$install_canary" != "0" ]]; then
 fi
 
 skill_line="- skill: skipped"
-skill_source="$release_dir/skills/goal-harness-project"
-if [[ "$install_skill" != "0" && -d "$skill_source" ]]; then
+skills_source="$release_dir/skills"
+if [[ "$install_skill" != "0" && -d "$skills_source" ]]; then
   mkdir -p "$skills_dir"
-  rm -rf "$skill_target"
-  mkdir -p "$skill_target"
-  cp "$skill_source/SKILL.md" "$skill_target/SKILL.md"
-  skill_line="- skill: $skill_target"
+  skill_line=""
+  while IFS= read -r skill_source; do
+    skill_name="$(basename "$skill_source")"
+    skill_target="$skills_dir/$skill_name"
+    rm -rf "$skill_target"
+    mkdir -p "$skill_target"
+    cp "$skill_source/SKILL.md" "$skill_target/SKILL.md"
+    skill_line="${skill_line}- skill: $skill_target"$'\n'
+  done < <(find "$skills_source" -mindepth 1 -maxdepth 1 -type d -print | sort)
+  skill_line="${skill_line%$'\n'}"
 fi
 
 cat <<EOF

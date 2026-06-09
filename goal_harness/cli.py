@@ -18,6 +18,17 @@ from .bootstrap import (
     bootstrap_project,
     render_bootstrap_markdown,
 )
+from .benchmark import (
+    TERMINAL_BENCH_DEFAULT_DATASET,
+    TERMINAL_BENCH_DEFAULT_MODEL,
+    TERMINAL_BENCH_DEFAULT_TASK,
+    TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE,
+    TERMINAL_BENCH_MODES,
+    build_terminal_bench_benchmark_run,
+    build_terminal_bench_harbor_result_benchmark_run,
+    collect_terminal_bench_goal_harness_cli_bridge_trace,
+    terminal_bench_recommended_action,
+)
 from .configure_goal import configure_goal, render_configure_goal_markdown
 from .contract import check_contract, render_contract_markdown
 from .demo import (
@@ -74,6 +85,7 @@ from .quota import (
     render_quota_should_run_markdown,
     render_quota_slot_preview_markdown,
     spend_quota_slot,
+    void_quota_slot,
 )
 from .registry import inspect_registry, registry_goals, render_registry_markdown, resolve_state_file
 from .review_packet import build_review_packet, render_review_packet_markdown
@@ -102,6 +114,19 @@ from .status_server import (
 )
 from .todos import add_goal_todo, render_todo_markdown
 from .upgrade import build_upgrade_plan, render_upgrade_plan_markdown
+from .worker_bridge import (
+    DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
+    DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
+    DEFAULT_WORKER_BRIDGE_MODULE,
+    DEFAULT_WORKER_BRIDGE_PYTHON_BIN,
+    DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
+    GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER,
+    GOAL_HARNESS_RUNTIME_ROOT_PLACEHOLDER,
+    build_worker_bridge_benchmark_run,
+    build_worker_bridge_install_contract,
+    build_worker_bridge_outcome,
+    render_worker_bridge_install_contract_markdown,
+)
 
 
 def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> None:
@@ -370,6 +395,223 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("doctor", help="Diagnose local CLI installation, PATH, wrapper, and import health.")
 
+    worker_bridge_parser = sub.add_parser(
+        "worker-bridge",
+        help="Render runner-agnostic worker bridge/install contracts.",
+    )
+    worker_bridge_sub = worker_bridge_parser.add_subparsers(dest="worker_bridge_command")
+    worker_bridge_contract_parser = worker_bridge_sub.add_parser(
+        "contract",
+        help="Render a Goal Harness worker bridge/install contract.",
+    )
+    add_subcommand_format(worker_bridge_contract_parser)
+    worker_bridge_contract_parser.add_argument(
+        "--project-root",
+        default=GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER,
+        help="Container-visible Goal Harness project root. Defaults to a public placeholder.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--runtime-root",
+        dest="worker_bridge_runtime_root",
+        default=GOAL_HARNESS_RUNTIME_ROOT_PLACEHOLDER,
+        help="Container-visible Goal Harness runtime root. Defaults to a public placeholder.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--python-bin",
+        default=DEFAULT_WORKER_BRIDGE_PYTHON_BIN,
+        help="Python executable inside the worker environment.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--module",
+        default=DEFAULT_WORKER_BRIDGE_MODULE,
+        help="Goal Harness CLI module import path.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--scan-path",
+        help="Container-visible public scan path. Defaults to the Goal Harness benchmark module.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--benchmark-run-json",
+        default=DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
+        help="Worker-visible benchmark_run_v0 JSON write path.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--counter-trace-json",
+        default=DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
+        help="Worker-visible compact counter trace JSONL path.",
+    )
+    worker_bridge_contract_parser.add_argument(
+        "--classification",
+        default="<classification>",
+        help="Classification label for worker-side compact writeback.",
+    )
+    worker_bridge_outcome_parser = worker_bridge_sub.add_parser(
+        "outcome",
+        help="Render compact worker bridge evidence and runner-return outcome.",
+    )
+    add_subcommand_format(worker_bridge_outcome_parser)
+    worker_bridge_outcome_parser.add_argument(
+        "--worker-cli-call-total",
+        type=int,
+        default=0,
+        help="Compact count of in-worker Goal Harness CLI calls.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--required-worker-cli-call-total-min",
+        type=int,
+        default=1,
+        help="Minimum worker CLI call count required to claim bridge verification.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--counter-trace-present",
+        action="store_true",
+        help="Whether a compact worker counter trace was observed.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--runner-return-completed",
+        action="store_true",
+        help="Whether the runner returned a completed case result.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--official-score-completed",
+        action="store_true",
+        help="Whether an official task score is available.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--official-score-value",
+        type=float,
+        help="Official task score value when --official-score-completed is set.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--interrupted",
+        action="store_true",
+        help="Whether the controller interrupted the worker run.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--interrupt-reason",
+        default="",
+        help="Public-safe interrupt reason label.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--wall-time-seconds",
+        type=float,
+        help="Observed wall time in seconds, if available.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--wall-time-limit-seconds",
+        type=float,
+        default=DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
+        help="Controller wall-time limit for this worker bridge outcome.",
+    )
+    worker_bridge_outcome_parser.add_argument(
+        "--side-effect-audit-failed",
+        action="store_true",
+        help="Mark the side-effect audit as failed.",
+    )
+    worker_bridge_benchmark_run_parser = worker_bridge_sub.add_parser(
+        "benchmark-run",
+        help="Render a worker-side benchmark_run_v0 writeback payload.",
+    )
+    add_subcommand_format(worker_bridge_benchmark_run_parser)
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--source-runner",
+        default="worker_bridge_runner",
+        help="Public-safe runner label for the worker-side benchmark_run_v0 payload.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--benchmark-id",
+        default="worker-bridge-sample@v0",
+        help="Public-safe benchmark id.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--job-name",
+        default="goal_harness_worker_bridge_sample",
+        help="Public-safe job name.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--mode",
+        dest="worker_bridge_benchmark_mode",
+        default="codex_goal_harness_active_worker",
+        help="Benchmark treatment mode.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--worker-mode",
+        default="codex_goal_harness_cli",
+        help="Worker mode label.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--task-id",
+        default="worker-bridge-sample",
+        help="Public-safe task id.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--trial-name",
+        default="worker-bridge-sample-worker",
+        help="Public-safe trial name.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--official-score-kind",
+        help="Official score kind label. Defaults to a blocker or sample-success label.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--worker-cli-call-total",
+        type=int,
+        default=0,
+        help="Compact count of in-worker Goal Harness CLI calls.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--required-worker-cli-call-total-min",
+        type=int,
+        default=1,
+        help="Minimum worker CLI call count required to claim bridge verification.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--counter-trace-present",
+        action="store_true",
+        help="Whether a compact worker counter trace was observed.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--runner-return-completed",
+        action="store_true",
+        help="Whether the runner returned a completed case result.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--official-score-completed",
+        action="store_true",
+        help="Whether an official task score is available.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--official-score-value",
+        type=float,
+        help="Official task score value when --official-score-completed is set.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--interrupted",
+        action="store_true",
+        help="Whether the controller interrupted the worker run.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--interrupt-reason",
+        default="",
+        help="Public-safe interrupt reason label.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--wall-time-seconds",
+        type=float,
+        help="Observed wall time in seconds, if available.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--wall-time-limit-seconds",
+        type=float,
+        default=DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
+        help="Controller wall-time limit for this worker bridge outcome.",
+    )
+    worker_bridge_benchmark_run_parser.add_argument(
+        "--side-effect-audit-failed",
+        action="store_true",
+        help="Mark the side-effect audit as failed.",
+    )
+
     promotion_gate_parser = sub.add_parser(
         "promotion-gate",
         help="Emit a compact machine-readable canary promotion readiness gate result.",
@@ -507,6 +749,123 @@ def main(argv: list[str] | None = None) -> int:
     history_parser.add_argument("--dry-run", action="store_true", help="Preview append without writing. This is the default.")
     history_parser.add_argument("--execute", action="store_true", help="Append the compact benchmark event.")
     history_parser.add_argument("--no-global-sync", action="store_true", help="Skip global registry sync after append.")
+
+    benchmark_parser = sub.add_parser(
+        "benchmark",
+        help="Benchmark runner skeletons. Current public surface is fixture-only and no-run by default.",
+    )
+    benchmark_sub = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
+    benchmark_run_parser = benchmark_sub.add_parser(
+        "run",
+        help="Build or append a compact benchmark_run_v0 fixture or ingest a Harbor job result.",
+    )
+    benchmark_run_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench has a public fixture skeleton.",
+    )
+    benchmark_run_parser.add_argument("--goal-id", required=True, help="Goal id for dry-run/append context.")
+    benchmark_run_parser.add_argument(
+        "--mode",
+        choices=TERMINAL_BENCH_MODES,
+        default="goal-harness-managed-codex",
+        help="Terminal-Bench worker mode. Defaults to the managed Goal Harness treatment.",
+    )
+    benchmark_run_parser.add_argument("--dataset", default=TERMINAL_BENCH_DEFAULT_DATASET)
+    benchmark_run_parser.add_argument("--include-task-name", default=TERMINAL_BENCH_DEFAULT_TASK)
+    benchmark_run_parser.add_argument("--runner", choices=["harbor"], default="harbor")
+    benchmark_run_parser.add_argument("--agent", choices=["codex"], default="codex")
+    benchmark_run_parser.add_argument("--model", default=TERMINAL_BENCH_DEFAULT_MODEL)
+    benchmark_run_parser.add_argument(
+        "--timeout-multiplier",
+        type=float,
+        help="Preview Harbor --timeout-multiplier for private long-horizon tiers.",
+    )
+    benchmark_run_parser.add_argument(
+        "--agent-timeout-multiplier",
+        type=float,
+        help="Preview Harbor --agent-timeout-multiplier for private long-horizon tiers.",
+    )
+    benchmark_run_parser.add_argument(
+        "--verifier-timeout-multiplier",
+        type=float,
+        help="Preview Harbor --verifier-timeout-multiplier for private long-horizon tiers.",
+    )
+    benchmark_run_parser.add_argument(
+        "--agent-setup-timeout-multiplier",
+        type=float,
+        help="Preview Harbor --agent-setup-timeout-multiplier for private long-horizon tiers.",
+    )
+    benchmark_run_parser.add_argument(
+        "--environment-build-timeout-multiplier",
+        type=float,
+        help="Preview Harbor --environment-build-timeout-multiplier for private long-horizon tiers.",
+    )
+    benchmark_run_parser.add_argument(
+        "--harbor-job-dir",
+        help=(
+            "Ingest an existing Harbor job directory into a compact benchmark_run_v0. "
+            "This reads runner artifacts and worker counter files only; it does not run "
+            "Harbor, Terminal-Bench, Codex, Docker, model APIs, or upload."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--fake-worker",
+        action="store_true",
+        help="Use the deterministic fake managed-worker event path. No real Codex is invoked.",
+    )
+    benchmark_run_parser.add_argument(
+        "--preflight-guard",
+        action="store_true",
+        help=(
+            "Build a managed real-run preflight guard event. This may probe local CLI surfaces "
+            "but does not run Harbor, Terminal-Bench, Codex workers, task containers, or uploads."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--cli-bridge-contract",
+        action="store_true",
+        help=(
+            "Execute the host-agent Goal Harness CLI bridge contract fixture for "
+            "codex-goal-harness. This runs Goal Harness CLI read commands and an "
+            "append-benchmark-run dry-run only; no Harbor, Terminal-Bench, Codex "
+            "worker, model API, or upload is invoked."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--worker-cli-bridge-fixture",
+        action="store_true",
+        help=(
+            "Build the codex-goal-harness worker in-case CLI bridge fixture. "
+            "This records worker-side Goal Harness call counters separately "
+            "from runner bridge calls and does not run Harbor, Terminal-Bench, "
+            "Codex workers, model APIs, or uploads."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--active-cli-bridge",
+        action="store_true",
+        help=(
+            "With codex-goal-harness --preflight-guard, build the private no-upload "
+            "repeat preflight that enables the worker Goal Harness CLI bridge and "
+            "requires worker-side CLI call counters before any in-case use claim."
+        ),
+    )
+    benchmark_run_parser.add_argument("--classification")
+    benchmark_run_parser.add_argument("--recommended-action")
+    benchmark_run_parser.add_argument(
+        "--delivery-batch-scale",
+        choices=DELIVERY_BATCH_SCALE_CHOICES,
+        help="Optional delivery scale label for the run index.",
+    )
+    benchmark_run_parser.add_argument(
+        "--delivery-outcome",
+        choices=DELIVERY_OUTCOME_CHOICES,
+        help="Optional delivery outcome label for the run index.",
+    )
+    benchmark_run_parser.add_argument("--dry-run", action="store_true", help="Preview append without writing. This is the default.")
+    benchmark_run_parser.add_argument("--execute", action="store_true", help="Append the compact fixture event.")
+    benchmark_run_parser.add_argument("--no-global-sync", action="store_true", help="Skip global registry sync after append.")
 
     archive_runtime_parser = sub.add_parser(
         "archive-runtime",
@@ -859,15 +1218,17 @@ def main(argv: list[str] | None = None) -> int:
     quota_parser.add_argument(
         "quota_command",
         nargs="?",
-        choices=["status", "plan", "should-run", "spend-slot"],
+        choices=["status", "plan", "should-run", "spend-slot", "void-slot"],
         default="status",
-        help="Use status for all groups, plan for next-turn groups, should-run for one goal, or spend-slot for a slot accounting preview/write.",
+        help="Use status for all groups, plan for next-turn groups, should-run for one goal, spend-slot for accounting, or void-slot for a non-destructive accounting correction.",
     )
-    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run` and `quota spend-slot`.")
+    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run`, `quota spend-slot`, and `quota void-slot`.")
     quota_parser.add_argument("--slots", type=int, default=1, help="Slots to account for `quota spend-slot`.")
     quota_parser.add_argument("--source", choices=["heartbeat", "controller", "adapter"], default="heartbeat", help="Source label for `quota spend-slot`.")
-    quota_parser.add_argument("--dry-run", action="store_true", help="Keep `quota spend-slot` as preview-only. This is the default.")
-    quota_parser.add_argument("--execute", action="store_true", help="Append the compact quota_slot_spent runtime event for `quota spend-slot`.")
+    quota_parser.add_argument("--void-generated-at", help="generated_at timestamp of the quota_slot_spent run to void.")
+    quota_parser.add_argument("--reason-summary", help="Public-safe reason for `quota void-slot`.")
+    quota_parser.add_argument("--dry-run", action="store_true", help="Keep quota accounting writes as preview-only. This is the default.")
+    quota_parser.add_argument("--execute", action="store_true", help="Append the compact quota accounting runtime event for spend-slot or void-slot.")
     quota_parser.add_argument(
         "--scan-root",
         default=default_public_scan_root(),
@@ -1042,6 +1403,79 @@ def main(argv: list[str] | None = None) -> int:
         print_payload(payload, args.format, render_doctor_markdown)
         return 0 if payload.get("ok") else 1
 
+    if args.command == "worker-bridge":
+        if args.worker_bridge_command not in ("contract", "outcome", "benchmark-run"):
+            payload = {
+                "ok": False,
+                "mode": "worker-bridge",
+                "error": (
+                    "worker-bridge requires a subcommand; use `contract`, "
+                    "`outcome`, or `benchmark-run`."
+                ),
+            }
+            print_payload(payload, args.format, render_worker_bridge_install_contract_markdown)
+            return 1
+        try:
+            if args.worker_bridge_command == "contract":
+                payload = build_worker_bridge_install_contract(
+                    project_root=args.project_root,
+                    runtime_root=args.worker_bridge_runtime_root,
+                    python_bin=args.python_bin,
+                    module=args.module,
+                    scan_path=args.scan_path,
+                    benchmark_run_json=args.benchmark_run_json,
+                    counter_trace_json=args.counter_trace_json,
+                    classification=args.classification,
+                )
+            elif args.worker_bridge_command == "outcome":
+                payload = build_worker_bridge_outcome(
+                    worker_goal_harness_cli_call_total=args.worker_cli_call_total,
+                    counter_trace_present=bool(args.counter_trace_present),
+                    runner_return_completed=bool(args.runner_return_completed),
+                    official_score_completed=bool(args.official_score_completed),
+                    official_score_value=args.official_score_value,
+                    interrupted=bool(args.interrupted),
+                    interrupt_reason=args.interrupt_reason,
+                    wall_time_seconds=args.wall_time_seconds,
+                    wall_time_limit_seconds=args.wall_time_limit_seconds,
+                    required_worker_goal_harness_cli_call_total_min=(
+                        args.required_worker_cli_call_total_min
+                    ),
+                    side_effect_audit_passed=not bool(args.side_effect_audit_failed),
+                )
+            else:
+                payload = build_worker_bridge_benchmark_run(
+                    source_runner=args.source_runner,
+                    benchmark_id=args.benchmark_id,
+                    job_name=args.job_name,
+                    mode=args.worker_bridge_benchmark_mode,
+                    worker_mode=args.worker_mode,
+                    task_id=args.task_id,
+                    trial_name=args.trial_name,
+                    official_score_kind=args.official_score_kind,
+                    worker_goal_harness_cli_call_total=args.worker_cli_call_total,
+                    counter_trace_present=bool(args.counter_trace_present),
+                    runner_return_completed=bool(args.runner_return_completed),
+                    official_score_completed=bool(args.official_score_completed),
+                    official_score_value=args.official_score_value,
+                    interrupted=bool(args.interrupted),
+                    interrupt_reason=args.interrupt_reason,
+                    wall_time_seconds=args.wall_time_seconds,
+                    wall_time_limit_seconds=args.wall_time_limit_seconds,
+                    required_worker_goal_harness_cli_call_total_min=(
+                        args.required_worker_cli_call_total_min
+                    ),
+                    side_effect_audit_passed=not bool(args.side_effect_audit_failed),
+                )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "mode": "worker-bridge",
+                "error": str(exc),
+            }
+        print_payload(payload, output_format(args), render_worker_bridge_install_contract_markdown)
+        return 0 if payload.get("ok") else 1
+
     if args.command == "promotion-gate":
         try:
             payload = build_promotion_gate(
@@ -1135,6 +1569,217 @@ def main(argv: list[str] | None = None) -> int:
             }
         print_payload(payload, args.format, render_configure_goal_markdown)
         return 0 if payload.get("ok") else 1
+
+    if args.command == "benchmark":
+        if args.benchmark_command == "run":
+            try:
+                if args.dry_run and args.execute:
+                    raise ValueError("benchmark run accepts either --dry-run or --execute, not both")
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                classification = args.classification or (
+                    "terminal_bench_harbor_runner_result_ingest_v0"
+                    if args.harbor_job_dir
+                    else
+                    "terminal_bench_codex_goal_harness_active_cli_bridge_preflight_v0"
+                    if args.active_cli_bridge
+                    else
+                    "terminal_bench_codex_goal_harness_worker_cli_bridge_fixture_v0"
+                    if args.worker_cli_bridge_fixture
+                    else
+                    "terminal_bench_codex_goal_harness_cli_bridge_contract_runner_fixture_v0"
+                    if args.cli_bridge_contract
+                    else (
+                        (
+                            "terminal_bench_codex_goal_harness_preflight_guard_v0"
+                            if args.mode == "codex-goal-harness"
+                            else (
+                                TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE
+                                + "_v0"
+                            )
+                            if args.mode == "hardened-codex"
+                            else "terminal_bench_managed_real_run_preflight_guard_v0"
+                        )
+                        if args.preflight_guard
+                        else (
+                            (
+                                "terminal_bench_codex_goal_harness_fake_worker_v0"
+                                if args.mode == "codex-goal-harness"
+                                else "terminal_bench_cli_fake_worker_v0"
+                            )
+                            if args.fake_worker
+                            else (
+                                "terminal_bench_codex_goal_harness_dry_run_v0"
+                                if args.mode == "codex-goal-harness"
+                                else "terminal_bench_cli_dry_run_v0"
+                            )
+                        )
+                    )
+                )
+                if args.harbor_job_dir and (
+                    args.fake_worker
+                    or args.preflight_guard
+                    or args.cli_bridge_contract
+                    or args.worker_cli_bridge_fixture
+                    or args.active_cli_bridge
+                ):
+                    raise ValueError(
+                        "--harbor-job-dir cannot be combined with fixture or preflight flags"
+                    )
+                timeout_multiplier_preview_requested = any(
+                    value is not None
+                    for value in (
+                        args.timeout_multiplier,
+                        args.agent_timeout_multiplier,
+                        args.verifier_timeout_multiplier,
+                        args.agent_setup_timeout_multiplier,
+                        args.environment_build_timeout_multiplier,
+                    )
+                )
+                timeout_multiplier_preview_defaulted = (
+                    args.active_cli_bridge and args.agent_timeout_multiplier is None
+                )
+                if args.harbor_job_dir and timeout_multiplier_preview_requested:
+                    raise ValueError(
+                        "--harbor-job-dir reads timeout policy from Harbor artifacts; "
+                        "do not pass preview timeout multiplier flags"
+                    )
+                cli_bridge_trace = None
+                if args.cli_bridge_contract:
+                    runtime_root = resolve_runtime_root(
+                        load_registry(registry_path),
+                        args.runtime_root,
+                    )
+                    cli_bridge_trace = collect_terminal_bench_goal_harness_cli_bridge_trace(
+                        goal_id=args.goal_id,
+                        registry=str(registry_path),
+                        runtime_root=str(runtime_root),
+                        command_prefix=[sys.executable, "-m", "goal_harness.cli"],
+                        scan_path="goal_harness/benchmark.py",
+                        classification=classification,
+                    )
+                if args.harbor_job_dir:
+                    benchmark_run_input = build_terminal_bench_harbor_result_benchmark_run(
+                        args.harbor_job_dir,
+                    )
+                else:
+                    benchmark_run_input = build_terminal_bench_benchmark_run(
+                        mode=args.mode,
+                        dataset=args.dataset,
+                        task_id=args.include_task_name,
+                        runner=args.runner,
+                        agent=args.agent,
+                        model=args.model,
+                        fake_worker=bool(args.fake_worker),
+                        preflight_guard=bool(args.preflight_guard),
+                        cli_bridge_contract=bool(args.cli_bridge_contract),
+                        cli_bridge_trace=cli_bridge_trace,
+                        worker_cli_bridge_fixture=bool(args.worker_cli_bridge_fixture),
+                        active_cli_bridge_preflight=bool(args.active_cli_bridge),
+                        timeout_multiplier=args.timeout_multiplier,
+                        agent_timeout_multiplier=args.agent_timeout_multiplier,
+                        verifier_timeout_multiplier=args.verifier_timeout_multiplier,
+                        agent_setup_timeout_multiplier=args.agent_setup_timeout_multiplier,
+                        environment_build_timeout_multiplier=args.environment_build_timeout_multiplier,
+                    )
+                benchmark_run = compact_benchmark_run(benchmark_run_input)
+                if not benchmark_run:
+                    raise ValueError("terminal-bench benchmark command did not produce a compactable benchmark_run_v0")
+                benchmark_cli_mode = (
+                    str(benchmark_run.get("mode") or args.mode)
+                    if args.harbor_job_dir
+                    else args.mode
+                )
+                benchmark_cli_mode_source = (
+                    "harbor_job_result" if args.harbor_job_dir else "cli_arg"
+                )
+
+                dry_run = not bool(args.execute)
+                payload = append_benchmark_run(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    benchmark_run=benchmark_run,
+                    classification=classification,
+                    recommended_action=args.recommended_action
+                    or (
+                        "inspect runner-side Terminal-Bench result and refine worker closure/writeback"
+                        if args.harbor_job_dir
+                        else terminal_bench_recommended_action(
+                        mode=args.mode,
+                        fake_worker=bool(args.fake_worker),
+                        preflight_guard=bool(args.preflight_guard),
+                        cli_bridge_contract=bool(args.cli_bridge_contract),
+                        worker_cli_bridge_fixture=bool(args.worker_cli_bridge_fixture),
+                        active_cli_bridge_preflight=bool(args.active_cli_bridge),
+                        )
+                    ),
+                    delivery_batch_scale=args.delivery_batch_scale,
+                    delivery_outcome=args.delivery_outcome,
+                    dry_run=dry_run,
+                )
+                payload["benchmark_cli"] = {
+                    "benchmark": args.benchmark_name,
+                    "mode": benchmark_cli_mode,
+                    "requested_mode": args.mode,
+                    "mode_source": benchmark_cli_mode_source,
+                    "fake_worker": bool(args.fake_worker),
+                    "preflight_guard": bool(args.preflight_guard),
+                    "cli_bridge_contract": bool(args.cli_bridge_contract),
+                    "worker_cli_bridge_fixture": bool(args.worker_cli_bridge_fixture),
+                    "active_cli_bridge": bool(args.active_cli_bridge),
+                    "harbor_job_result_ingested": bool(args.harbor_job_dir),
+                    "timeout_multiplier_preview_requested": (
+                        timeout_multiplier_preview_requested
+                        or timeout_multiplier_preview_defaulted
+                    ),
+                    "timeout_multiplier_preview_defaulted": timeout_multiplier_preview_defaulted,
+                    "cli_bridge_trace_observed": bool(
+                        isinstance(cli_bridge_trace, dict)
+                        and cli_bridge_trace.get("bridge_available") is True
+                    ),
+                    "real_runner_invoked": False,
+                    "real_codex_invoked": False,
+                    "auth_values_read": False,
+                    "submit_eligible": False,
+                }
+                if args.no_global_sync:
+                    payload["global_sync"] = {
+                        "ok": True,
+                        "dry_run": dry_run,
+                        "skipped": True,
+                        "reason": "disabled by --no-global-sync",
+                    }
+                else:
+                    payload["global_sync"] = sync_project_registry_to_global(
+                        registry_path=registry_path,
+                        runtime_root_override=args.runtime_root,
+                        goal_id=args.goal_id,
+                        dry_run=dry_run,
+                    )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "dry_run": not bool(args.execute),
+                    "appended": False,
+                    "registry": str(registry_path),
+                    "runtime_root": args.runtime_root,
+                    "goal_id": args.goal_id,
+                    "classification": args.classification
+                    or (
+                        "terminal_bench_codex_goal_harness_worker_cli_bridge_fixture_v0"
+                        if getattr(args, "worker_cli_bridge_fixture", False)
+                        else
+                        "terminal_bench_codex_goal_harness_cli_bridge_contract_runner_fixture_v0"
+                        if getattr(args, "cli_bridge_contract", False)
+                        else "terminal_bench_managed_real_run_preflight_guard_v0"
+                        if getattr(args, "preflight_guard", False)
+                        else "terminal_bench_cli_dry_run_v0"
+                    ),
+                    "error": str(exc),
+                }
+            print_payload(payload, args.format, render_benchmark_run_append_markdown)
+            return 0 if payload.get("ok") else 1
 
     if args.command == "history":
         if args.history_action == "append-benchmark-run":
@@ -1803,10 +2448,25 @@ def main(argv: list[str] | None = None) -> int:
                     execute=bool(args.execute),
                     source=args.source,
                 )
+            elif args.quota_command == "void-slot":
+                if not args.goal_id:
+                    raise ValueError("`goal-harness quota void-slot` requires --goal-id")
+                if not args.void_generated_at:
+                    raise ValueError("`goal-harness quota void-slot` requires --void-generated-at")
+                if args.dry_run and args.execute:
+                    raise ValueError("`goal-harness quota void-slot` accepts only one of --dry-run or --execute")
+                payload = void_quota_slot(
+                    status_payload,
+                    goal_id=args.goal_id,
+                    voided_run_generated_at=args.void_generated_at,
+                    execute=bool(args.execute),
+                    source=args.source,
+                    reason_summary=args.reason_summary,
+                )
             else:
                 payload = build_quota_plan(status_payload, mode=args.quota_command)
         except Exception as exc:
-            if args.quota_command in {"should-run", "spend-slot"}:
+            if args.quota_command in {"should-run", "spend-slot", "void-slot"}:
                 payload = {
                     "ok": False,
                     "mode": args.quota_command,
@@ -1849,7 +2509,7 @@ def main(argv: list[str] | None = None) -> int:
             render_quota_should_run_markdown
             if args.quota_command == "should-run"
             else render_quota_slot_preview_markdown
-            if args.quota_command == "spend-slot"
+            if args.quota_command in {"spend-slot", "void-slot"}
             else render_quota_markdown
         )
         print_payload(payload, args.format, renderer)

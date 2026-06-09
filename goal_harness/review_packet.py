@@ -381,6 +381,20 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
             f"layer={benchmark_decision.get('evidence_layer') or 'unknown'}",
         ]
         benchmark_decision_text = "; " + ", ".join(decision_parts)
+    worker_bridge_health = (
+        latest_run.get("worker_bridge_ingest_health_note")
+        if isinstance(latest_run.get("worker_bridge_ingest_health_note"), dict)
+        else {}
+    )
+    worker_bridge_health_text = ""
+    if worker_bridge_health:
+        health_parts = [
+            f"worker_bridge_health={worker_bridge_health.get('health_state') or 'unknown'}",
+            f"layer={worker_bridge_health.get('evidence_layer') or 'unknown'}",
+        ]
+        if worker_bridge_health.get("next_action"):
+            health_parts.append(f"next={worker_bridge_health.get('next_action')}")
+        worker_bridge_health_text = "; " + ", ".join(health_parts)
     benchmark_report = (
         latest_run.get("benchmark_experiment_report_summary")
         if isinstance(latest_run.get("benchmark_experiment_report_summary"), dict)
@@ -437,7 +451,7 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
             report_parts.append(f"negative_layers={','.join(str(layer) for layer in layers[:2])}")
         benchmark_report_text = "; " + ", ".join(report_parts)
     return compact_packet_text(
-        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}{benchmark_report_text}",
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}{worker_bridge_health_text}{benchmark_report_text}",
         limit=440,
     )
 
