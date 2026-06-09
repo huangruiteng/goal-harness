@@ -98,6 +98,90 @@ work still belongs in the existing code, examples, and contract documents:
   fixture-only decision to keep the no-submit approval packet research/docs-only
   until an agent consumer, approved no-submit setup check, passive wrapper, or
   repeated re-derivation justifies a compact hot-path projection.
+- `terminal-bench-treatment-arm-taxonomy-v0.md`: no-run taxonomy correction
+  separating `hardened_codex_baseline`, Codex runtime `codex_goal_mode`,
+  true `codex_goal_harness`, and `passive_goal_harness_observer`. It records
+  that `create_goal` / `update_goal` are Codex runtime goal-tool calls, not
+  Goal Harness CLI calls, and requires future results to count
+  `codex_runtime_goal_tool_calls`, `goal_harness_cli_calls`,
+  `goal_harness_state_reads`, and `goal_harness_state_writes` separately.
+- `terminal-bench-goal-harness-access-packet-v0.md`: no-run access-packet and
+  interaction-counter fixture for the true `codex_goal_harness` arm. It defines
+  the public worker packet, keeps Codex runtime goal tools separate from Goal
+  Harness CLI/state calls, and adds compact `benchmark_run_v0` counter
+  projection before any fake-worker or real benchmark repeat.
+- `terminal-bench-goal-harness-cli-bridge-contract-v0.md`: host-agent bridge
+  contract for the future true `codex_goal_harness` arm. It maps
+  `status`, `quota_should_run`, `todo_list`, `history`, `check`, and
+  `append_benchmark_run` to executable Goal Harness CLI templates, with a smoke
+  that runs those templates against a temporary registry. The same contract is
+  now wired into `goal-harness benchmark run terminal-bench --mode
+  codex-goal-harness --cli-bridge-contract`, producing compact runner-side
+  bridge availability and `goal_harness_cli_calls.total=6` counters while
+  keeping Terminal-Bench/Codex/model execution disabled.
+- `terminal-bench-codex-goal-harness-active-cli-bridge-v0.md`: core
+  `codex_goal_harness` treatment surface. It adds
+  `goal_harness_cli_bridge_enabled=true` to `GoalHarnessManagedCodex`, injects
+  worker-side `goal-harness ... status/quota/todo/history/check/append` command
+  templates into the Codex instruction, and keeps worker in-case
+  `goal_harness_cli_calls.total=6` separate from runner-side bridge probes. It
+  also exposes the no-run `--preflight-guard --active-cli-bridge` route for the
+  next private repeat and records a claim gate requiring nonzero worker-side
+  Goal Harness CLI calls before any in-case use claim.
+- `terminal-bench-codex-goal-harness-fake-worker-v0.md`: first executable
+  fixture mode for the true `codex_goal_harness` arm:
+  `goal-harness benchmark run terminal-bench --mode codex-goal-harness
+  --fake-worker`. It appends a no-run/no-submit `benchmark_run_v0` event with
+  nonzero Goal Harness CLI/state interaction counters, while keeping Codex
+  runtime goal-tool calls separate and preserving no-uplift/no-leaderboard
+  boundaries.
+- `terminal-bench-codex-goal-harness-custom-agent-v0.md`: custom-agent prompt
+  surface for the true `codex_goal_harness` arm. It wires the Goal Harness
+  access packet into `GoalHarnessManagedCodex` through
+  `goal_harness_mode=codex_goal_harness`, adds compact trace-audited counter
+  extraction, and verifies the Harbor command preview before any real repeat.
+- `terminal-bench-codex-goal-harness-preflight-guard-v0.md`: no-upload
+  preflight guard for `goal-harness benchmark run terminal-bench --mode
+  codex-goal-harness --preflight-guard`. It checks runner/Codex/local execution
+  surfaces, access-packet prompt injection, trace-counter contract availability,
+  and compact preflight/status projection without running Harbor tasks, Codex
+  workers, model APIs, uploads, or leaderboard paths.
+- `terminal-bench-runner-mode-contract-v0.md`: no-run mode contract for the
+  future `goal-harness benchmark run terminal-bench ...` wrapper, separating
+  parent runner control-plane behavior from per-case worker modes
+  `hardened-codex` and `codex-goal-harness`. The contract treats hardened
+  Codex as the true paired baseline for this experiment and
+  `codex-goal-harness` as the core `model + harness` pair.
+- `terminal-bench-official-hard-case-selection-v0.md`: no-run selection
+  contract that moves the next evidence target from `terminal-bench-sample@2.0`
+  to official `terminal-bench@2.0`, selects a three-case hard/long-horizon
+  primary batch (`fix-code-vulnerability`, `modernize-scientific-stack`, and
+  `llm-inference-batching-scheduler`), defines a backup queue, and preserves
+  paired-run invariants for `hardened-codex` versus `codex-goal-harness`,
+  claim boundaries, metrics, and stop conditions before any full 89-task run or
+  leaderboard path.
+- `terminal-bench-cli-dry-run-fake-worker-v0.md`: public CLI skeleton for
+  `goal-harness benchmark run terminal-bench`. The command defaults to dry-run,
+  exposes `hardened-codex`, `codex-goal-harness`, passive observation, and
+  `goal-harness-managed-codex`, and can append only compact fixture
+  `benchmark_run_v0` rows when `--execute` is passed. The current fake-worker
+  path is allowed only for managed mode and records
+  `goal_harness_managed_codex_fake_worker_wrapper` without invoking real
+  Harbor, Terminal-Bench, Docker, Codex, model APIs, uploads, or leaderboard
+  paths.
+- `terminal-bench-managed-real-run-preflight-guard-v0.md`: no-run guard packet
+  for the first managed Goal Harness Terminal-Bench case. It rechecks runner,
+  local Docker/Colima, Codex CLI, auth-surface-name, no-upload, and artifact
+  redaction boundaries, appends only a compact readiness `benchmark_run_v0`
+  when executed, and stops before Harbor, Terminal-Bench, Codex worker,
+  benchmark task container, model API, uploads, or leaderboard paths.
+- `terminal-bench-managed-codex-custom-agent-v0.md`: first concrete Harbor
+  custom-agent bridge for the core managed treatment, using
+  `--agent-import-path goal_harness.terminal_bench_agent:GoalHarnessManagedCodex`
+  to subclass Harbor's built-in Codex adapter, inject a minimal Goal Harness
+  policy envelope, defer public-safe managed metadata until Codex post-run
+  session ingestion, and preserve no-upload/private pilot boundaries while
+  stopping before leaderboard, uplift, or paper-ready claims.
 - `benchmark-history-reconstructability-v0.md`: restartability fixture proving
   compact benchmark run history can reconstruct official-score,
   control-plane-score, claim-boundary, readiness, authorization,

@@ -2871,7 +2871,7 @@ def build_terminal_bench_benchmark_run(
             if mode == "hardened-codex"
             else [
                 "doc:terminal-bench-runner-mode-contract-v0.md",
-                "doc:terminal-bench-managed-codex-fake-wrapper-v0.md",
+                "doc:terminal-bench-cli-dry-run-fake-worker-v0.md",
                 "smoke:terminal-bench-cli-dry-run-fake-worker-smoke.py",
             ]
         ),
