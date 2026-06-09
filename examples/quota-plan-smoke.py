@@ -19,13 +19,16 @@ from goal_harness.quota import (  # noqa: E402
     build_quota_plan,
     build_quota_should_run,
     build_quota_slot_spend_event,
+    build_quota_slot_void_event,
     build_quota_slot_preview,
+    build_quota_slot_void_preview,
     goal_quota_with_spend_ledger,
     goal_quota_config,
     quota_status,
     render_quota_markdown,
     render_quota_slot_preview_markdown,
     render_quota_should_run_markdown,
+    void_quota_slot,
 )
 
 
@@ -532,6 +535,85 @@ def run_cli_slot_spend_execute(root: Path) -> tuple[dict, dict, str, str]:
     )
 
 
+def run_cli_slot_void_execute(root: Path) -> tuple[dict, dict, dict, str, str]:
+    registry_path, runtime, project = write_cli_fixture(root)
+    registry_before = registry_path.read_text(encoding="utf-8")
+    base_args = [
+        sys.executable,
+        "-m",
+        "goal_harness.cli",
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "quota",
+    ]
+    spend_result = subprocess.run(
+        [
+            *base_args,
+            "spend-slot",
+            "--goal-id",
+            "near-limit-half",
+            "--slots",
+            "1",
+            "--source",
+            "heartbeat",
+            "--execute",
+            "--scan-path",
+            str(project),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    spend_payload = json.loads(spend_result.stdout)
+    void_result = subprocess.run(
+        [
+            *base_args,
+            "void-slot",
+            "--goal-id",
+            "near-limit-half",
+            "--void-generated-at",
+            str(spend_payload["generated_at"]),
+            "--source",
+            "heartbeat",
+            "--reason-summary",
+            "duplicate heartbeat spend",
+            "--execute",
+            "--scan-path",
+            str(project),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    should_run_result = subprocess.run(
+        [
+            *base_args,
+            "should-run",
+            "--goal-id",
+            "near-limit-half",
+            "--scan-path",
+            str(project),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return (
+        spend_payload,
+        json.loads(void_result.stdout),
+        json.loads(should_run_result.stdout),
+        registry_before,
+        registry_path.read_text(encoding="utf-8"),
+    )
+
+
 def assert_plan_shape(plan: dict, markdown: str | None = None) -> None:
     eligible_ids = [item["goal_id"] for item in plan["groups"]["eligible"]]
     operator_gate_ids = [item["goal_id"] for item in plan["groups"]["operator_gate"]]
@@ -780,6 +862,8 @@ def assert_focus_wait_should_run() -> None:
     assert decision["safe_bypass_allowed"] is False, decision
     assert decision["user_todo_summary"]["open_count"] == 1, decision
     assert decision["notify_user_on_open_todo"] is True, decision
+    assert decision["heartbeat_recommendation"]["repeat_notification_required"] is True, decision
+    assert decision["open_todo_notification_policy"] == "repeat_until_resolved", decision
     assert "focus_wait" in decision["open_todo_notify_reason"], decision
     assert decision["plan_summary"]["next_automatic_turn"] is None, decision
     assert decision["lifecycle_phase"] == "focus_wait", decision
@@ -787,6 +871,7 @@ def assert_focus_wait_should_run() -> None:
     assert "agent_command" not in decision, decision
     assert "- state: `focus_wait`" in markdown, markdown
     assert "- notify_user_on_open_todo: `True`" in markdown, markdown
+    assert "- open_todo_notification_policy: repeat_until_resolved" in markdown, markdown
     assert "- user_todo_next[1]: Provide new owner evidence" in markdown, markdown
 
 
@@ -1582,6 +1667,101 @@ def assert_slot_spend_execute(payload: dict, next_should_run: dict, registry_bef
     assert next_should_run["quota"]["allowed_slots"] == 12, next_should_run
 
 
+def assert_slot_void_execute(
+    spend_payload: dict,
+    void_payload: dict,
+    next_should_run: dict,
+    registry_before: str,
+    registry_after: str,
+) -> None:
+    quota_event = void_payload["quota_event"]
+    json_path = Path(void_payload["json_path"])
+    index_path = Path(void_payload["index_path"])
+    markdown = render_quota_slot_preview_markdown(void_payload)
+
+    assert spend_payload["classification"] == "quota_slot_spent", spend_payload
+    assert void_payload["ok"] is True, void_payload
+    assert void_payload["dry_run"] is False, void_payload
+    assert void_payload["appended"] is True, void_payload
+    assert void_payload["registry_mutated"] is False, void_payload
+    assert void_payload["classification"] == "quota_slot_voided", void_payload
+    assert void_payload["source"] == "heartbeat", void_payload
+    assert registry_after == registry_before
+    assert json_path.exists(), void_payload
+    assert index_path.exists(), void_payload
+    assert quota_event["event_type"] == "quota_slot_voided", void_payload
+    assert quota_event["slots"] == 1, void_payload
+    assert quota_event["voided_run_generated_at"] == spend_payload["generated_at"], void_payload
+    assert "duplicate heartbeat spend" in quota_event["reason_summary"], void_payload
+    assert "quota_slot_voided" in markdown, markdown
+
+    record = json.loads(json_path.read_text(encoding="utf-8"))
+    assert record["classification"] == "quota_slot_voided", record
+    assert record["quota_event"] == quota_event, record
+    forbidden = {"human_reward", "operator_gate", "write_control", "private_evidence", "agent_command"}
+    assert forbidden.isdisjoint(record), record
+    assert forbidden.isdisjoint(record["quota_event"]), record
+    index_lines = index_path.read_text(encoding="utf-8").splitlines()
+    assert any('"classification": "quota_slot_spent"' in line for line in index_lines), index_lines
+    assert any('"classification": "quota_slot_voided"' in line for line in index_lines), index_lines
+
+    assert next_should_run["goal_id"] == "near-limit-half", next_should_run
+    assert next_should_run["should_run"] is True, next_should_run
+    assert next_should_run["state"] == "eligible", next_should_run
+    assert next_should_run["quota"]["spent_slots"] == 11, next_should_run
+    assert next_should_run["quota"]["allowed_slots"] == 12, next_should_run
+
+
+def assert_quota_void_event_net_ledger() -> None:
+    goal_id = "void-ledger-goal"
+    with tempfile.TemporaryDirectory(prefix="goal-harness-quota-void-ledger-") as tmp:
+        runtime = Path(tmp) / "runtime"
+        run_dir = runtime / "goals" / goal_id / "runs"
+        run_dir.mkdir(parents=True)
+        spend_at = (datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=1)).isoformat()
+        append_quota_slot_spend_fixture(
+            run_dir,
+            goal_id=goal_id,
+            compute=1.0,
+            slot_index=0,
+            generated_at=spend_at,
+            allowed_slots=1440,
+        )
+        records = [json.loads(line) for line in (run_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()]
+        goal_record = goal(goal_id, compute=1.0)
+        before = goal_quota_with_spend_ledger(goal_record, records)
+        assert before["spent_slots"] == 1, before
+
+        status_payload = {
+            "ok": True,
+            "registry": "./fixtures/registry.json",
+            "runtime_root": str(runtime),
+            "goal_count": 1,
+            "run_count": 1,
+            "attention_queue": {"items": [attention(goal_id, compute=1.0)]},
+            "run_history": {"goals": [goal_record]},
+        }
+        preview = build_quota_slot_void_preview(status_payload, goal_id=goal_id, voided_run_generated_at=spend_at)
+        event = build_quota_slot_void_event(preview, source="heartbeat", reason_summary="duplicate fixture spend")
+        assert preview["classification"] == "quota_slot_voided", preview
+        assert event["quota_event"]["event_type"] == "quota_slot_voided", event
+        void_payload = void_quota_slot(
+            status_payload,
+            goal_id=goal_id,
+            voided_run_generated_at=spend_at,
+            execute=True,
+            source="heartbeat",
+            reason_summary="duplicate fixture spend",
+        )
+        assert void_payload["appended"] is True, void_payload
+
+        records = [json.loads(line) for line in (run_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()]
+        after = goal_quota_with_spend_ledger(goal_record, records)
+        assert after["spent_slots"] == 0, after
+        assert after["spend_event_count"] == 1, after
+        assert after["void_event_count"] == 1, after
+
+
 def main() -> int:
     assert_default_quota_is_duty_cycle()
     assert_rolling_window_ledger_expires_old_spends()
@@ -1606,6 +1786,7 @@ def main() -> int:
     assert_goal_boundary_in_should_run()
     assert_decision_freshness_warning_in_should_run()
     assert_safe_bypass_slot_preview(status_payload)
+    assert_quota_void_event_net_ledger()
     assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-plan-smoke-") as tmp:
         cli_plan, cli_markdown = run_cli_quota_plan(Path(tmp))
@@ -1618,6 +1799,8 @@ def main() -> int:
     assert_dry_run_left_cli_fixture_unchanged(should_run_after_preview)
     with tempfile.TemporaryDirectory(prefix="goal-harness-quota-slot-execute-smoke-") as tmp:
         assert_slot_spend_execute(*run_cli_slot_spend_execute(Path(tmp)))
+    with tempfile.TemporaryDirectory(prefix="goal-harness-quota-slot-void-smoke-") as tmp:
+        assert_slot_void_execute(*run_cli_slot_void_execute(Path(tmp)))
     print("quota-plan-smoke ok")
     return 0
 

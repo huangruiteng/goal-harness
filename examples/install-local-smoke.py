@@ -84,6 +84,7 @@ def main() -> int:
         assert f"- executable: {bin_dir / 'goal-harness'}" in install.stdout, install.stdout
         assert "- release: " in install.stdout, install.stdout
         assert f"- canary executable: {bin_dir / 'goal-harness-canary'}" in install.stdout, install.stdout
+        assert f"- skill: {codex_home / 'skills' / 'goal-harness-doc-registry'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'goal-harness-project'}" in install.stdout, install.stdout
 
         wrapper = bin_dir / "goal-harness"
@@ -128,6 +129,15 @@ def main() -> int:
         ):
             assert phrase in compact_skill_text, phrase
         assert "JSON output still keeps the full payload" not in compact_skill_text, compact_skill_text
+        doc_registry_skill = codex_home / "skills" / "goal-harness-doc-registry" / "SKILL.md"
+        doc_registry_text = " ".join(doc_registry_skill.read_text(encoding="utf-8").split())
+        for phrase in (
+            "Use even when the user does not mention Goal Harness or doc registry",
+            "use `.goal-harness/registry.json` as the project-local doc registry",
+            "not a substitute for project-local authority registration",
+            "goal-harness --registry .goal-harness/registry.json register-authority-source",
+        ):
+            assert phrase in doc_registry_text, phrase
 
         cli_env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
         runtime_run_dir = home / ".codex" / "goal-harness" / "goals" / "goal-harness-meta" / "runs"
@@ -152,6 +162,10 @@ def main() -> int:
         assert doctor_payload["skill"]["path"] == str(skill), doctor_payload
         assert doctor_payload["skill"]["exists"] is True, doctor_payload
         assert doctor_payload["skill"]["delivery_hints"] is True, doctor_payload
+        assert doctor_payload["skills"]["goal-harness-project"]["exists"] is True, doctor_payload
+        assert doctor_payload["skills"]["goal-harness-project"]["required_phrases"] is True, doctor_payload
+        assert doctor_payload["skills"]["goal-harness-doc-registry"]["exists"] is True, doctor_payload
+        assert doctor_payload["skills"]["goal-harness-doc-registry"]["required_phrases"] is True, doctor_payload
         provenance = doctor_payload["release_provenance"]
         assert provenance["default_release"]["root"] == str(release_root), provenance
         assert provenance["default_release"]["release_id"] == release_root.name, provenance
@@ -176,6 +190,8 @@ def main() -> int:
             "canary_separate_from_default",
             "installed_skill_exists",
             "installed_skill_delivery_hints",
+            "installed_required_skills",
+            "installed_required_skill_routes",
         ):
             assert doctor_checks[check_id]["ok"] is True, doctor_payload
 
@@ -188,6 +204,7 @@ def main() -> int:
             text=True,
         ).stdout
         assert "installed_skill_delivery_hints: `True`" in doctor_markdown, doctor_markdown
+        assert "installed_required_skills: `goal-harness-doc-registry,goal-harness-project`" in doctor_markdown, doctor_markdown
         assert "canary_realpath:" in doctor_markdown, doctor_markdown
         assert "release_root:" in doctor_markdown, doctor_markdown
         assert "## Release Provenance" in doctor_markdown, doctor_markdown

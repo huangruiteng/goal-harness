@@ -20,6 +20,7 @@ def status_payload(
     status: str,
     has_agent_todo: bool = True,
     agent_todo_items: list[dict] | None = None,
+    user_todo_items: list[dict] | None = None,
     next_action: str = "Observe dependency state and then advance backlog if unchanged.",
 ) -> dict:
     if agent_todo_items is None:
@@ -41,33 +42,42 @@ def status_payload(
         "done_count": 0,
         "first_open_items": open_items,
     }
+    item = {
+        "goal_id": GOAL_ID,
+        "status": status,
+        "waiting_on": "codex",
+        "severity": "info",
+        "source": "project_asset",
+        "recommended_action": next_action,
+        "quota": {
+            "compute": 1.0,
+            "window_hours": 24,
+            "slot_minutes": 1,
+            "allowed_slots": 10,
+            "spent_slots": 0,
+            "state": "eligible",
+            "reason": "eligible fixture",
+        },
+        "project_asset": {
+            "next_action": next_action,
+            "stop_condition": "stop on private material",
+            "agent_todos": agent_todos,
+        },
+    }
+    if user_todo_items:
+        item["user_todos"] = {
+            "schema_version": "todo_summary_v0",
+            "source_section": "User Todo / Owner Review Reading Queue",
+            "total_count": len(user_todo_items),
+            "open_count": len(user_todo_items),
+            "done_count": 0,
+            "first_open_items": user_todo_items,
+            "items": user_todo_items,
+        }
     return {
         "ok": True,
         "attention_queue": {
-            "items": [
-                {
-                    "goal_id": GOAL_ID,
-                    "status": status,
-                    "waiting_on": "codex",
-                    "severity": "info",
-                    "source": "project_asset",
-                    "recommended_action": next_action,
-                    "quota": {
-                        "compute": 1.0,
-                        "window_hours": 24,
-                        "slot_minutes": 1,
-                        "allowed_slots": 10,
-                        "spent_slots": 0,
-                        "state": "eligible",
-                        "reason": "eligible fixture",
-                    },
-                    "project_asset": {
-                        "next_action": next_action,
-                        "stop_condition": "stop on private material",
-                        "agent_todos": agent_todos,
-                    },
-                }
-            ]
+            "items": [item]
         },
         "run_history": {
             "goals": [
@@ -173,6 +183,61 @@ def assert_monitor_only_todo_waits_quietly() -> None:
     assert "obligation=quiet_until_material_monitor_transition" in markdown, markdown
 
 
+def assert_monitor_only_with_user_todo_notifies_action() -> None:
+    user_todo = (
+        "[P1] Decide whether to approve a no-submit Terminal-Bench setup check "
+        "or provide public official-runner output."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="typed_task_lane_planning_writeback",
+            user_todo_items=[
+                {
+                    "index": 1,
+                    "text": user_todo,
+                    "role": "user",
+                    "status": "open",
+                    "priority": "P1",
+                }
+            ],
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": "[P2] Side-bypass dependency monitor: observe public-safe replay state transitions only.",
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P2",
+                },
+                {
+                    "index": 2,
+                    "text": "[P2] Meta canary/readiness observation lane: keep release readiness observable.",
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P2",
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    lane = guard["work_lane_contract"]
+    assert lane["lane"] == "continuous_monitor", lane
+    assert lane["must_attempt_work"] is False, lane
+    recommendation = guard["heartbeat_recommendation"]
+    assert recommendation["recommended_mode"] == "monitor_user_todo_notify", recommendation
+    assert recommendation["notify"] == "NOTIFY", recommendation
+    assert recommendation["repeat_notification_required"] is True, recommendation
+    assert guard["notify_user_on_open_todo"] is True, guard
+    assert guard["open_todo_notification_policy"] == "repeat_until_resolved", guard
+    assert guard["requires_user_action"] is True, guard
+    assert guard["execution_obligation"]["must_attempt_work"] is False, guard
+    markdown = render_quota_should_run_markdown(guard)
+    assert "monitor_user_todo_notify" in markdown, markdown
+    assert "heartbeat_repeat_notification_required: `True`" in markdown, markdown
+    assert "notify_user_on_open_todo: `True`" in markdown, markdown
+    assert "open_todo_notification_policy: repeat_until_resolved" in markdown, markdown
+    assert user_todo in markdown, markdown
+
+
 def assert_monitor_only_with_planning_next_action_materializes_advancement() -> None:
     guard = build_quota_should_run(
         status_payload(
@@ -252,6 +317,7 @@ def main() -> int:
     assert_dependency_monitor_requires_advancement()
     assert_primary_status_stays_advancement_lane()
     assert_monitor_only_todo_waits_quietly()
+    assert_monitor_only_with_user_todo_notifies_action()
     assert_monitor_only_with_planning_next_action_materializes_advancement()
     assert_mixed_monitor_and_advancement_routes_to_advancement()
     print("work-lane-contract-smoke ok")

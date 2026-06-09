@@ -331,12 +331,19 @@ should use that summary as its next safe follow-up checklist instead of mining
 chat history or an overlong `Next Action`.
 For `state=focus_wait`, `state=waiting`, or
 `waiting_on=external_evidence`, an open user todo can be the smallest unlock
-for a quiet project. In that case, `quota should-run` should set
+for a quiet project. The same rule applies when an eligible monitor-only poll
+has no material transition: do not silently report "nothing to do" while a
+current open user todo explains what the user can do next. In that case,
+`quota should-run` should set
 `notify_user_on_open_todo=true` and include `open_todo_notify_reason`. The
 target heartbeat should return a compact `NOTIFY` listing at most three open
 user todos and the expected reply (`done`, `defer/not now`, or new evidence
 link/date/conclusion), while skipping delivery work and quota spend for that
-blocker-push turn unless the same blocker was already surfaced recently.
+blocker-push turn. For monitor-only no-transition polls, quota also sets
+`open_todo_notification_policy=repeat_until_resolved`; repeat
+that notification on every such poll until the todo is done, deferred, or
+replaced. Other blocker-push cases may still be de-duplicated when the same
+blocker was already surfaced recently.
 For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,
@@ -387,8 +394,11 @@ point the worker to that object. When
 `execution_obligation.must_attempt_work=true`, a short heartbeat must attempt
 one bounded segment, validate it, write durable state/events, and spend once
 after successful delivery. A quiet no-op is only allowed when the machine
-contract explicitly says `must_attempt_work=false`, such as
-`mapped_noop_if_unchanged` after confirming the mapped source is unchanged.
+contract explicitly says `must_attempt_work=false` and no blocker-push
+notification is required. If `notify_user_on_open_todo=true`, the turn should
+notify the user and skip spend instead of disappearing silently; verified
+`mapped_noop_if_unchanged` after confirming the mapped source is unchanged
+remains a quiet no-op case.
 
 Unknown goals or status collection failures return non-zero so automations fail
 closed.

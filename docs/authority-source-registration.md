@@ -65,7 +65,11 @@ the existing authority-registry projection.
 Doc registry is a general Goal Harness mechanism, not an agent-harness-specific
 import path. Each managed project should own its authority surface in its own
 project-local registry, usually `docs/meta/DOC_REGISTRY.yaml` plus the goal's
-ignored `.goal-harness/registry.json`.
+ignored `.goal-harness/registry.json`. For connected projects without a tracked
+`DOC_REGISTRY.yaml`, the ignored `.goal-harness/registry.json` is still the
+project-local doc registry surface through `authority_registry.topic_authority`
+and `authority_registry.project_materials`; project agents should not downgrade
+new durable materials to memory-only notes.
 
 When a project agent discovers a relevant design doc, research note, benchmark
 paper, owner packet, migration report, or external material, the default order
@@ -84,6 +88,9 @@ is:
    the project-local/private authority surface.
 5. Refresh status or state so future review packets, read-only maps, and
    heartbeat workers can find the new authority without relying on chat memory.
+   Memory extensions may duplicate the reminder, but only after the
+   project-local authority registration is complete or a concrete blocker was
+   recorded.
 
 Use `import-doc-registry-authority` when a goal needs another project's
 DOC_REGISTRY-style map as context. Use `register-authority-source` when the
@@ -98,7 +105,8 @@ workflow, not as a meta-project side effect. The doc-registry skill trigger is
 any task that introduces a durable authority source or research material that
 future agents may need to route work, validate decisions, or resolve conflicts.
 Register that material in the target project's own doc registry before relying
-on chat memory.
+on chat memory. A user's "remember this design doc" request inside a connected
+project is a doc-registry trigger even when it does not mention Goal Harness.
 
 The minimal executor sequence is:
 

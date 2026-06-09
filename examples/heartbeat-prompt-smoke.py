@@ -121,6 +121,7 @@ def main() -> int:
         'goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "state=operator_gate",
         "notify_user_on_open_todo=true",
+        "open_todo_notification_policy=repeat_until_resolved",
         "safe_bypass_allowed=true",
         "safe_bypass_kind=outcome_floor_recovery",
         "ranker/cross-domain evidence artifact",
@@ -250,12 +251,13 @@ def main() -> int:
         "NOTIFY",
         "notify_user_on_open_todo=true",
         "blocker-push opportunity",
+        "open_todo_notification_policy=repeat_until_resolved",
         "state=focus_wait",
         "waiting_on=external_evidence",
         "listing at most three first_open_items",
         "open_todo_notify_reason",
         "done, defer/not now, or a new evidence link/date/conclusion",
-        "do not append quota spend",
+        "no spend",
         "safe_bypass_allowed=true",
         "gate blocks only the gated delivery path",
         "one bounded safe-bypass step",
@@ -352,13 +354,11 @@ def main() -> int:
         "never summarize this case as \"no new user action\"",
         "NOTIFY",
         "notify_user_on_open_todo=true",
-        "blocker-push opportunity",
-        "state=focus_wait",
-        "waiting_on=external_evidence",
-        "listing at most three `first_open_items`",
+        "blocker-push",
+        "open_todo_notification_policy=repeat_until_resolved",
+        "every poll until done/deferred/replaced",
         "open_todo_notify_reason",
-        "new evidence link/date/conclusion",
-        "do not append quota spend",
+        "No delivery/spend",
         "safe_bypass_allowed=true",
         "gate blocks only the gated delivery path",
         "one bounded safe-bypass step",
@@ -377,7 +377,7 @@ def main() -> int:
         "do not decide whether a gate is pending or approved from latest runs alone",
         "goal_boundary",
         "then use the blocker-push pattern above",
-        "do not append quota spend",
+        "no spend",
         "heartbeat_recommendation",
         "recommended_mode=run_first_read_only_map",
         "run its `command` as a real read-only map",
@@ -433,6 +433,7 @@ def main() -> int:
             "gate_prompt",
             "notify_user_on_open_todo=true",
             "blocker-push opportunity",
+            "open_todo_notification_policy=repeat_until_resolved",
             "safe_bypass_allowed=true",
             "explicitly a monitor",
             "status/log/metric/marker surfaces",
@@ -444,7 +445,6 @@ def main() -> int:
             "Also inspect goal_boundary",
             "then use the blocker-push pattern above",
             "execution_obligation",
-            "heartbeat_recommendation",
             "heartbeat_recommendation.notify is only the user-notification policy",
             "not an execution gate",
             "must_attempt_work=true",
@@ -514,6 +514,7 @@ def main() -> int:
     assert "Routine public repo publication is a boundary decision" in project_skill, project_skill
     assert "Do not reintroduce a user gate for public-safe publication itself" in project_skill, project_skill
     assert "notify_user_on_open_todo=true" in project_skill, project_skill
+    assert "open_todo_notification_policy=repeat_until_resolved" in project_skill, project_skill
     assert "blocker-push `NOTIFY`" in project_skill, project_skill
     assert "sibling-goal todos" in project_skill, project_skill
     assert "must not consume the whole eligible turn" in project_skill, project_skill
