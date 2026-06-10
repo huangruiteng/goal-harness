@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +18,11 @@ from goal_harness.benchmark import (
     TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODES,
     TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS,
     TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_VERSION,
+    TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_CALL_POLICY_MODE,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_CALL_POLICY_VERSION,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_CONTRACT_VERSION,
+    TERMINAL_BENCH_GOAL_HARNESS_COUNTER_TRACE_COMMANDS,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_DEFAULT_REQUIRED_CALLS,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_OPTIONAL_CONTEXT_CALLS,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_REQUIRED_CALL_MINIMUM,
@@ -65,6 +68,71 @@ DEFAULT_GOAL_HARNESS_WORKER_REGISTRY_ARG = (
 DEFAULT_GOAL_HARNESS_WORKER_SCAN_PATH = (
     GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER + "/goal_harness/benchmark.py"
 )
+UNRESOLVED_ANGLE_PLACEHOLDER_RE = re.compile(r"<[^>\s]+>")
+
+
+def _concrete_active_user_observe_command(
+    command: str,
+    *,
+    worker_start_seq: int = 0,
+) -> str | None:
+    """Return a worker-runnable active-user observe command when it is concrete."""
+
+    text = str(command or "").strip()
+    if not text or text in {
+        "<active-user-observe-command>",
+        "<active-user-observe-command-redacted>",
+    }:
+        return None
+    text = text.replace("<worker-start-seq>", str(worker_start_seq))
+    if UNRESOLVED_ANGLE_PLACEHOLDER_RE.search(text):
+        return None
+    return text
+
+
+def build_private_active_user_observe_instruction(
+    *,
+    enabled: bool,
+    observe_command: str,
+    observation_json: str,
+    counter_trace_json: str,
+    goal_id: str,
+    mode: str,
+    classification: str,
+) -> str:
+    """Build the private worker-only active-user observe checkpoint."""
+
+    if not enabled:
+        return ""
+    concrete_command = _concrete_active_user_observe_command(
+        observe_command,
+        worker_start_seq=0,
+    )
+    if concrete_command is None:
+        return (
+            "\nActive-user observe checkpoint for this case:\n"
+            "- The active-user channel is enabled, but no runnable private observe command was provided.\n"
+            "- Do not claim active-user observation unless a concrete observe command is available and executed.\n\n"
+        )
+    trace_example = {
+        "kind": "goal_harness_cli_call",
+        "command": TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND,
+        "ok": True,
+        "goal_id": goal_id,
+        "mode": mode,
+        "classification": classification,
+    }
+    return (
+        "\nActive-user observe checkpoint for this case:\n"
+        "- The active-user channel is enabled. This private worker checkpoint supplies the runnable observe command; the public access packet may redact it.\n"
+        "- Before broad task work, run this exact command once:\n"
+        f"  {concrete_command}\n"
+        "- If no post-start intervention is observed, run the same observe command once more before final validation or a terminal blocker decision.\n"
+        f"- Read {observation_json} after the command. If observed_after_worker_start is true, apply only the compact latest_intervention.message and boundary fields.\n"
+        f"- Append one compact trace row to {counter_trace_json} for each observe attempt; use command={TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND} and public-safe fields like:\n"
+        f"  {json.dumps(trace_example, sort_keys=True)}\n"
+        "- Do not paste raw feed contents, raw paths, credentials, hidden tests, expected solutions, or transcripts into the final answer.\n\n"
+    )
 
 
 def build_managed_terminal_bench_instruction(
@@ -135,6 +203,19 @@ def build_managed_terminal_bench_instruction(
             f"{access_packet_body}\n"
             "----- END GOAL-HARNESS ACCESS PACKET -----\n\n"
         )
+    active_user_observe_instruction = build_private_active_user_observe_instruction(
+        enabled=(
+            access_packet_enabled
+            and goal_harness_cli_bridge_enabled
+            and goal_harness_active_user_intervention_enabled
+        ),
+        observe_command=goal_harness_active_user_observe_command,
+        observation_json=goal_harness_active_user_observation_json,
+        counter_trace_json=goal_harness_counter_trace_json,
+        goal_id=goal_id,
+        mode=goal_harness_mode,
+        classification=goal_harness_classification,
+    )
 
     return (
         "You are running one Terminal-Bench task under Goal Harness managed Codex mode.\n"
@@ -149,6 +230,7 @@ def build_managed_terminal_bench_instruction(
         "- If a Goal Harness CLI bridge packet is present, treat command lines as templates: replace placeholders before execution, quote paths as single argv values, and do not run commands containing unresolved angle-bracket placeholders.\n"
         "- Write the compact Goal Harness case result only after final validation and cleanup, or after a terminal blocker decision; the runner still performs guaranteed final archive writeback.\n"
         "- Treat this as a model plus harness pair; do not present it as a native Codex baseline.\n\n"
+        f"{active_user_observe_instruction}"
         f"{access_packet}"
         "Benchmark task instruction follows.\n\n"
         "----- TERMINAL-BENCH TASK -----\n"
@@ -197,7 +279,7 @@ def extract_goal_harness_interaction_counters_from_trace(
         "update_goal": 0,
     }
     goal_harness_cli_calls = {
-        command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS
+        command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_COUNTER_TRACE_COMMANDS
     }
     state_reads = 0
     state_writes = 0
@@ -227,6 +309,8 @@ def extract_goal_harness_interaction_counters_from_trace(
             command = _compact_trace_event_text(event.get("command") or event.get("call"))
             if command in goal_harness_cli_calls:
                 goal_harness_cli_calls[command] += 1
+            if command == TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND:
+                state_reads += 1
             if command == "append_benchmark_run":
                 append_attempted = True
                 append_schema_rejected = append_schema_rejected or (

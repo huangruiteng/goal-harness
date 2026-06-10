@@ -132,6 +132,11 @@ TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS = (
     "check",
     "append_benchmark_run",
 )
+TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND = "active_user_observe"
+TERMINAL_BENCH_GOAL_HARNESS_COUNTER_TRACE_COMMANDS = (
+    *TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS,
+    TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND,
+)
 TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_CALL_POLICY_VERSION = (
     "terminal_bench_goal_harness_cli_bridge_call_policy_v1"
 )
@@ -787,9 +792,16 @@ def _counter_trace_interaction_counters(
         return None
 
     observed_calls = {
-        command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS
+        command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_COUNTER_TRACE_COMMANDS
     }
-    read_commands = {"status", "quota_should_run", "todo_list", "history", "check"}
+    read_commands = {
+        "status",
+        "quota_should_run",
+        "todo_list",
+        "history",
+        "check",
+        TERMINAL_BENCH_GOAL_HARNESS_ACTIVE_USER_OBSERVE_COMMAND,
+    }
     state_reads = 0
     state_writes = 0
     append_attempted = False
@@ -1783,7 +1795,7 @@ def build_terminal_bench_goal_harness_interaction_counters(
         **(codex_runtime_goal_tool_calls or {}),
     }
     cli_calls = {
-        command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS
+        command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_COUNTER_TRACE_COMMANDS
     }
     cli_calls.update(goal_harness_cli_calls or {})
     return {

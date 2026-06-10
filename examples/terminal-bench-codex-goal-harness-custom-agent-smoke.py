@@ -217,11 +217,71 @@ def assert_prompt_and_metadata() -> None:
     assert_public_safe(prompt_only_context.metadata["goal_harness"])
 
 
+def assert_active_user_private_observe_prompt() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    task = "Build the extension and make the test pass."
+    observe_command = (
+        "PYTHONPATH=/goal-harness-source python3 -m goal_harness.cli "
+        "worker-bridge active-user-observe "
+        "--feed-jsonl /goal-harness-active-user/goal-harness-active-user-interventions.jsonl "
+        "--worker-start-seq <worker-start-seq> "
+        "--observation-json /goal-harness-active-user/goal-harness-active-user-observation.json "
+        "--format json"
+    )
+    instruction = module.build_managed_terminal_bench_instruction(
+        task,
+        goal_harness_mode="codex_goal_harness",
+        goal_id="terminal-bench-active-user-fixture",
+        goal_harness_cli_bridge_enabled=True,
+        goal_harness_classification="terminal_bench_active_user_fixture_v0",
+        goal_harness_active_user_intervention_enabled=True,
+        goal_harness_active_user_feed_jsonl=(
+            "/goal-harness-active-user/goal-harness-active-user-interventions.jsonl"
+        ),
+        goal_harness_active_user_observation_json=(
+            "/goal-harness-active-user/goal-harness-active-user-observation.json"
+        ),
+        goal_harness_active_user_observe_command=observe_command,
+    )
+    assert "Active-user observe checkpoint for this case:" in instruction, instruction
+    assert "Before broad task work, run this exact command once:" in instruction, instruction
+    assert "--worker-start-seq 0" in instruction, instruction
+    assert "<worker-start-seq>" not in instruction, instruction
+    assert "<active-user-observe-command-redacted>" in instruction, instruction
+    assert "command=active_user_observe" in instruction, instruction
+    assert '"command": "active_user_observe"' in instruction, instruction
+    assert "active_user_worker_must_poll_after_start: true" in instruction, instruction
+    assert_public_safe(instruction)
+
+    counters = module.extract_goal_harness_interaction_counters_from_trace(
+        [
+            {
+                "kind": "goal_harness_cli_call",
+                "command": "active_user_observe",
+                "ok": True,
+                "goal_id": "terminal-bench-active-user-fixture",
+                "mode": "codex_goal_harness",
+                "classification": "terminal_bench_active_user_fixture_v0",
+            }
+        ],
+        prompt_policy_injected=True,
+        harness_skill_or_packet_injected=True,
+    )
+    assert counters["goal_harness_cli_calls"]["active_user_observe"] == 1, counters
+    assert counters["goal_harness_cli_calls"]["total"] == 1, counters
+    assert counters["goal_harness_state_reads"] == 1, counters
+    assert counters["goal_harness_state_writes"] == 0, counters
+    assert counters["counter_trust_level"] == "compact_trace_audited", counters
+    assert_public_safe(counters)
+
+
 def main() -> None:
     assert_doc_contract()
     assert_command_preview()
     assert_prompt_and_metadata()
-    print("terminal-bench-codex-goal-harness-custom-agent-smoke ok cli_calls=6 runtime_goal_calls=1")
+    assert_active_user_private_observe_prompt()
+    print("terminal-bench-codex-goal-harness-custom-agent-smoke ok cli_calls=6 runtime_goal_calls=1 active_user_observe=1")
 
 
 if __name__ == "__main__":
