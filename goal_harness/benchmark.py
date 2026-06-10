@@ -934,6 +934,7 @@ def _terminal_bench_overhead_attribution_counters(
     worker_counter_trace_trial_count: int,
     worker_benchmark_run_file_count: int,
     worker_benchmark_run_schema_ok_count: int,
+    worker_bridge_writeback_loss_count: int,
     pre_worker_agent_setup_failure_count: int,
     codex_runtime_goal_tool_trial_count: int,
     trace_publicness: str,
@@ -1008,6 +1009,7 @@ def _terminal_bench_overhead_attribution_counters(
         "worker_counter_trace_trial_count": worker_counter_trace_trial_count,
         "worker_benchmark_run_file_count": worker_benchmark_run_file_count,
         "worker_benchmark_run_schema_ok_count": worker_benchmark_run_schema_ok_count,
+        "worker_bridge_writeback_loss_count": worker_bridge_writeback_loss_count,
         "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,
         "codex_runtime_goal_tool_trial_count": codex_runtime_goal_tool_trial_count,
         "goal_harness_cli_call_total": cli_call_total,
@@ -1247,6 +1249,28 @@ def build_terminal_bench_harbor_result_benchmark_run(
         else "pending"
     )
     official_score_status = "completed" if official_score is not None else "missing"
+    worker_bridge_writeback_loss_count = (
+        max(0, worker_counter_trace_trial_count - worker_benchmark_run_file_count)
+        if worker_bridge_required
+        else 0
+    )
+    if worker_bridge_writeback_loss_count and agent_timeout_observed:
+        worker_bridge_writeback_loss_reason = (
+            "agent_timeout_after_worker_trace_before_benchmark_run_writeback"
+        )
+    elif worker_bridge_writeback_loss_count:
+        worker_bridge_writeback_loss_reason = (
+            "worker_trace_without_benchmark_run_writeback"
+        )
+    else:
+        worker_bridge_writeback_loss_reason = "none"
+    if interaction_counters:
+        interaction_counters["worker_bridge_writeback_loss_count"] = (
+            worker_bridge_writeback_loss_count
+        )
+        interaction_counters["worker_bridge_writeback_loss_reason"] = (
+            worker_bridge_writeback_loss_reason
+        )
     wall_time_seconds = _iso_duration_seconds(
         job_result.get("started_at"),
         job_result.get("finished_at") or job_result.get("updated_at"),
@@ -1267,6 +1291,7 @@ def build_terminal_bench_harbor_result_benchmark_run(
         worker_counter_trace_trial_count=worker_counter_trace_trial_count,
         worker_benchmark_run_file_count=worker_benchmark_run_file_count,
         worker_benchmark_run_schema_ok_count=worker_benchmark_run_schema_ok_count,
+        worker_bridge_writeback_loss_count=worker_bridge_writeback_loss_count,
         pre_worker_agent_setup_failure_count=pre_worker_agent_setup_failure_count,
         codex_runtime_goal_tool_trial_count=codex_runtime_goal_tool_trial_count,
         trace_publicness=trace_publicness,
@@ -1345,6 +1370,8 @@ def build_terminal_bench_harbor_result_benchmark_run(
         "worker_counter_trace_trial_count": worker_counter_trace_trial_count,
         "worker_benchmark_run_file_count": worker_benchmark_run_file_count,
         "worker_benchmark_run_schema_ok_count": worker_benchmark_run_schema_ok_count,
+        "worker_bridge_writeback_loss_count": worker_bridge_writeback_loss_count,
+        "worker_bridge_writeback_loss_reason": worker_bridge_writeback_loss_reason,
         "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,
         "verifier_failure_attribution_count": verifier_failure_attribution_count,
         "verifier_dependency_failure_count": verifier_dependency_failure_count,
@@ -1413,6 +1440,11 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "raw_trace_recorded": False,
             "credential_values_recorded": False,
             "runner_side_writeback_guaranteed": True,
+            "worker_bridge_writeback_loss_observed": bool(
+                worker_bridge_writeback_loss_count
+            ),
+            "worker_bridge_writeback_loss_count": worker_bridge_writeback_loss_count,
+            "worker_bridge_writeback_loss_reason": worker_bridge_writeback_loss_reason,
             "worker_goal_harness_cli_call_total": worker_cli_total,
             "required_worker_goal_harness_cli_call_total_min": required_worker_cli_call_min,
             "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,

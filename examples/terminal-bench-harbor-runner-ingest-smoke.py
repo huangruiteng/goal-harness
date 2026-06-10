@@ -408,6 +408,104 @@ def write_verifier_platform_probe_failure_fixture(root: Path) -> Path:
     return job_dir
 
 
+def write_worker_trace_timeout_writeback_loss_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_worker_trace_timeout_writeback_loss"
+    trial_dir = job_dir / "qemu-alpine-ssh__timeout"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+            "goal_harness_active_user_intervention_enabled": True,
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench@2.0",
+                "--include-task-name",
+                "qemu-alpine-ssh",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "qemu-alpine-ssh",
+                        "source": "terminal-bench",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-08T19:20:00Z",
+            "updated_at": "2026-06-08T19:39:40Z",
+            "finished_at": "2026-06-08T19:39:40Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+                "n_input_tokens": 1665520,
+                "n_cache_tokens": 1587456,
+                "n_output_tokens": 7534,
+                "cost_usd": 1.410068,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "qemu-alpine-ssh",
+            "trial_name": "qemu-alpine-ssh__timeout",
+            "source": "terminal-bench",
+            "config": {"agent": agent},
+            "agent_result": {
+                "n_input_tokens": 1665520,
+                "n_cache_tokens": 1587456,
+                "n_output_tokens": 7534,
+                "cost_usd": 1.410068,
+            },
+            "verifier_result": {"rewards": {"reward": 0.0}},
+            "exception_info": {
+                "exception_type": "AgentTimeoutError",
+                "exception_message": "Agent execution timed out after 900.0 seconds",
+            },
+        },
+    )
+    (trial_dir / "agent").mkdir(parents=True, exist_ok=True)
+    (trial_dir / "agent" / "trajectory.json").write_text("{}\n", encoding="utf-8")
+    trace_rows = [
+        {"command": "active_user_observe", "ok": True},
+        {"command": "check", "ok": True},
+    ]
+    (trial_dir / "agent" / "goal-harness-counter-trace.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in trace_rows),
+        encoding="utf-8",
+    )
+    (trial_dir / "verifier").mkdir(parents=True, exist_ok=True)
+    (trial_dir / "verifier" / "reward.txt").write_text("0.0\n", encoding="utf-8")
+    (trial_dir / "verifier" / "test-stdout.txt").write_text(
+        "platform probe failed: unknown platform bitness\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
 def write_bare_codex_fixture(root: Path) -> Path:
     job_dir = root / "terminal_bench_sample_bare_codex_baseline"
     trial_dir = job_dir / "build-cython-ext__bare"
@@ -1089,6 +1187,84 @@ def main() -> None:
     ), platform_compact
     assert_public_safe(platform_payload)
     assert_public_safe(platform_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-timeout-writeback-loss-") as tmp:
+        writeback_loss_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_worker_trace_timeout_writeback_loss_fixture(Path(tmp))
+        )
+    assert writeback_loss_payload["official_task_score"]["value"] == 0.0, writeback_loss_payload
+    assert (
+        writeback_loss_payload["score_failure_attribution"]
+        == "verifier_platform_probe_failure"
+    ), writeback_loss_payload
+    assert writeback_loss_payload["worker_counter_trace_trial_count"] == 1, writeback_loss_payload
+    assert writeback_loss_payload["worker_benchmark_run_file_count"] == 0, writeback_loss_payload
+    assert writeback_loss_payload["worker_benchmark_run_schema_ok_count"] == 0, writeback_loss_payload
+    assert writeback_loss_payload["worker_bridge_writeback_loss_count"] == 1, writeback_loss_payload
+    assert (
+        writeback_loss_payload["worker_bridge_writeback_loss_reason"]
+        == "agent_timeout_after_worker_trace_before_benchmark_run_writeback"
+    ), writeback_loss_payload
+    writeback_loss_counters = writeback_loss_payload["interaction_counters"]
+    assert writeback_loss_counters["goal_harness_cli_calls"]["active_user_observe"] == 1, writeback_loss_counters
+    assert writeback_loss_counters["goal_harness_cli_calls"]["check"] == 1, writeback_loss_counters
+    assert writeback_loss_counters["worker_bridge_writeback_loss_count"] == 1, writeback_loss_counters
+    assert (
+        writeback_loss_counters["worker_bridge_writeback_loss_reason"]
+        == "agent_timeout_after_worker_trace_before_benchmark_run_writeback"
+    ), writeback_loss_counters
+    writeback_loss_outcome = writeback_loss_payload["worker_bridge_outcome"]
+    assert (
+        writeback_loss_outcome["runner_return_status"]
+        == "completed_with_agent_timeout"
+    ), writeback_loss_outcome
+    assert writeback_loss_outcome["worker_bridge_verified"] is True, writeback_loss_outcome
+    assert writeback_loss_outcome["worker_bridge_writeback_loss_observed"] is True, writeback_loss_outcome
+    assert writeback_loss_outcome["worker_bridge_writeback_loss_count"] == 1, writeback_loss_outcome
+    assert (
+        writeback_loss_outcome["worker_bridge_writeback_loss_reason"]
+        == "agent_timeout_after_worker_trace_before_benchmark_run_writeback"
+    ), writeback_loss_outcome
+    writeback_loss_validation = writeback_loss_payload["validation"]
+    assert (
+        writeback_loss_validation["worker_benchmark_run_file_present"] is False
+    ), writeback_loss_validation
+    assert (
+        writeback_loss_validation["worker_benchmark_run_schema_ok"] is False
+    ), writeback_loss_validation
+    assert (
+        writeback_loss_validation["worker_benchmark_run_present_for_traced_trials"]
+        is False
+    ), writeback_loss_validation
+    writeback_loss_compact = compact_benchmark_run(writeback_loss_payload)
+    assert writeback_loss_compact["validation"]["all_passed"] is False, writeback_loss_compact
+    assert "worker_benchmark_run_file_present" in writeback_loss_compact[
+        "validation"
+    ]["failed_checks"], writeback_loss_compact
+    assert writeback_loss_compact["worker_bridge_writeback_loss_count"] == 1, writeback_loss_compact
+    assert (
+        writeback_loss_compact["worker_bridge_writeback_loss_reason"]
+        == "agent_timeout_after_worker_trace_before_benchmark_run_writeback"
+    ), writeback_loss_compact
+    assert (
+        writeback_loss_compact["overhead_attribution_counters"][
+            "worker_bridge_writeback_loss_count"
+        ]
+        == 1
+    ), writeback_loss_compact
+    assert (
+        writeback_loss_compact["worker_bridge_outcome"][
+            "worker_bridge_writeback_loss_observed"
+        ]
+        is True
+    ), writeback_loss_compact
+    assert (
+        writeback_loss_compact["worker_bridge_outcome"][
+            "worker_bridge_writeback_loss_count"
+        ]
+        == 1
+    ), writeback_loss_compact
+    assert_public_safe(writeback_loss_payload)
+    assert_public_safe(writeback_loss_compact)
     print("terminal-bench-harbor-runner-ingest-smoke ok")
 
 
