@@ -434,12 +434,17 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "worker_counter_trace_trial_count",
         "worker_benchmark_run_file_count",
         "worker_benchmark_run_schema_ok_count",
+        "worker_bridge_writeback_loss_count",
         "pre_worker_agent_setup_failure_count",
         "codex_runtime_goal_tool_trial_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
-    for field in ("case_result_writeback", "counter_trust_level"):
+    for field in (
+        "case_result_writeback",
+        "counter_trust_level",
+        "worker_bridge_writeback_loss_reason",
+    ):
         text = public_safe_compact_text(value.get(field), limit=100)
         if text:
             compact[field] = text
@@ -495,6 +500,7 @@ def _compact_benchmark_overhead_attribution_counters(value: Any) -> dict[str, An
         "worker_counter_trace_trial_count",
         "worker_benchmark_run_file_count",
         "worker_benchmark_run_schema_ok_count",
+        "worker_bridge_writeback_loss_count",
         "pre_worker_agent_setup_failure_count",
         "codex_runtime_goal_tool_trial_count",
         "goal_harness_cli_call_total",
@@ -926,6 +932,7 @@ def _compact_worker_bridge_outcome(value: Any) -> dict[str, Any]:
         "trace_publicness",
         "next_action",
         "score_failure_attribution",
+        "worker_bridge_writeback_loss_reason",
     ):
         text = public_safe_compact_text(value.get(field), limit=160)
         if text:
@@ -940,12 +947,14 @@ def _compact_worker_bridge_outcome(value: Any) -> dict[str, Any]:
         "raw_trace_recorded",
         "credential_values_recorded",
         "runner_side_writeback_guaranteed",
+        "worker_bridge_writeback_loss_observed",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
     for field in (
         "worker_goal_harness_cli_call_total",
         "required_worker_goal_harness_cli_call_total_min",
+        "worker_bridge_writeback_loss_count",
         "pre_worker_agent_setup_failure_count",
         "verifier_failure_attribution_count",
         "verifier_dependency_failure_count",
@@ -1069,6 +1078,7 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         "trace_publicness",
         "first_blocker",
         "score_failure_attribution",
+        "worker_bridge_writeback_loss_reason",
     ):
         value = public_safe_compact_text(source.get(field), limit=140)
         if value:
@@ -1111,6 +1121,7 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         "worker_counter_trace_trial_count",
         "worker_benchmark_run_file_count",
         "worker_benchmark_run_schema_ok_count",
+        "worker_bridge_writeback_loss_count",
         "pre_worker_agent_setup_failure_count",
         "verifier_failure_attribution_count",
         "verifier_dependency_failure_count",
