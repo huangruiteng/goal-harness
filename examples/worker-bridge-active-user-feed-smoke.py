@@ -168,6 +168,8 @@ def main() -> int:
         root = Path(tmp)
         feed = root / "feed.jsonl"
         observation_path = root / "observation.json"
+        counter_trace_path = root / "counter-trace.jsonl"
+        benchmark_run_path = root / "worker-benchmark-run.json"
         feed.write_text(
             json.dumps(before_start, sort_keys=True) + "\n"
             + json.dumps(after_start, sort_keys=True)
@@ -191,14 +193,55 @@ def main() -> int:
                 "1",
                 "--observation-json",
                 str(observation_path),
+                "--counter-trace-json",
+                str(counter_trace_path),
+                "--benchmark-run-json",
+                str(benchmark_run_path),
                 "--format",
                 "json",
             ]
         )
         assert cli_observation["observation_written"] is True, cli_observation
+        assert cli_observation["counter_trace_written"] is True, cli_observation
+        assert (
+            cli_observation["benchmark_run_checkpoint_written"] is True
+        ), cli_observation
+        assert (
+            cli_observation["benchmark_run_checkpoint_schema_version"]
+            == "benchmark_run_v0"
+        ), cli_observation
         assert observation_path.exists(), cli_observation
+        assert counter_trace_path.exists(), cli_observation
+        assert benchmark_run_path.exists(), cli_observation
         assert_observation(cli_observation, observed=True)
         assert_public_safe(json.loads(observation_path.read_text(encoding="utf-8")))
+        counter_rows = [
+            json.loads(line)
+            for line in counter_trace_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert counter_rows == [
+            {
+                "classification": "active_user_observe_checkpoint",
+                "command": "active_user_observe",
+                "goal_id": "worker-bridge-active-user",
+                "kind": "goal_harness_cli_call",
+                "mode": "codex_goal_harness_active_worker",
+                "observed_after_worker_start": True,
+                "ok": True,
+                "worker_observation_proof": True,
+            }
+        ], counter_rows
+        checkpoint = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+        assert checkpoint["schema_version"] == "benchmark_run_v0", checkpoint
+        assert checkpoint["source_runner"] == "worker_bridge_active_user_observe", checkpoint
+        assert checkpoint["worker_goal_harness_cli_call_total"] == 1, checkpoint
+        assert checkpoint["worker_bridge_outcome"]["worker_bridge_verified"] is True, checkpoint
+        assert (
+            checkpoint["worker_bridge_checkpoint"]["checkpoint_kind"]
+            == "active_user_observe"
+        ), checkpoint
+        assert_public_safe(checkpoint)
 
         no_new_observation = run_cli_json(
             [
