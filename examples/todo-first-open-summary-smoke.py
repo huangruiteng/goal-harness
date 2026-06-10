@@ -41,7 +41,9 @@ def build_truncated_todo_group() -> dict:
     assert group is not None, group
     assert group["schema_version"] == "todo_summary_v0", group
     assert len(group["items"]) == 12, group
-    assert all(item["done"] for item in group["items"]), group
+    assert [item["index"] for item in group["items"][:3]] == [14, 15, 16], group
+    assert all(not item["done"] for item in group["items"][:3]), group
+    assert all(item["done"] for item in group["items"][3:]), group
     assert group["open_count"] == 3, group
     assert group["first_open_items"][0]["index"] == 14, group
     assert group["first_open_items"][0]["text"] == OPEN_TODO, group
@@ -70,6 +72,9 @@ def parse_multiline_deep_open_todo() -> dict:
     )
     group = parse_active_state_todos(state_text)["agent_todos"]
     assert len(group["items"]) == 12, group
+    assert [item["index"] for item in group["items"][:3]] == [14, 15, 16], group
+    assert all(not item["done"] for item in group["items"][:3]), group
+    assert all(item["done"] for item in group["items"][3:]), group
     assert group["open_count"] == 3, group
     assert group["first_open_items"][0]["index"] == 14, group
     assert group["first_open_items"][0]["text"] == OPEN_TODO, group

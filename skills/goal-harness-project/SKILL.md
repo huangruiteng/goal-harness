@@ -1,6 +1,6 @@
 ---
 name: goal-harness-project
-description: Use when connecting a repository or project goal document to Goal Harness, maintaining project-local goal state, refreshing stale dashboard status, syncing local projects into the shared global registry, or diagnosing Goal Harness CLI/PATH/status/history issues across multiple repos.
+description: Use when connecting a repository or project goal document to Goal Harness, maintaining project-local goal state, refreshing stale dashboard status, syncing local projects into the shared global registry, or diagnosing Goal Harness CLI/PATH/status/history issues across multiple repos. For registering durable project materials such as Lark/wiki/design docs, prefer the narrower goal-harness-doc-registry skill.
 ---
 
 # Goal Harness Project Workflow
@@ -8,7 +8,9 @@ description: Use when connecting a repository or project goal document to Goal H
 Use this skill when the task mentions Goal Harness, goal-harness, a project goal
 document, multi-project dashboard/status, stale latest run,
 `.goal-harness/registry.json`, `.codex/goals`, `refresh-state`,
-`sync-global`, or connecting a new repo.
+`sync-global`, or connecting a new repo. If the task is mainly about reading,
+remembering, recording, indexing, or registering a durable project material,
+load `goal-harness-doc-registry` and use that narrower workflow first.
 
 Goal Harness has two layers:
 
@@ -244,7 +246,8 @@ quiet no-op: `heartbeat_recommendation.notify` is only the user-notification
 policy, not an execution gate. If
 `execution_obligation.must_attempt_work=true`, attempt one bounded segment even
 when `notify=DONT_NOTIFY`; a quiet no-op requires
-`execution_obligation.must_attempt_work=false`. New connected read-only goals
+`execution_obligation.must_attempt_work=false` and no
+`notify_user_on_open_todo=true` blocker-push notification. New connected read-only goals
 should follow `recommended_mode=run_first_read_only_map`: run one real
 `goal-harness read-only-map --goal-id <STABLE_GOAL_ID>`, validate the saved
 `read_only_project_map`, spend exactly once after validation, then sync or
@@ -263,10 +266,14 @@ The same generated task body also makes routine public commit, push, and PR
 creation autonomous after validation plus a clean public/private boundary scan.
 Do not reintroduce a user gate for public-safe publication itself.
 It also respects `notify_user_on_open_todo=true`: open user todos in
-focus-wait, waiting, or external-evidence lanes should become a compact
+focus-wait, waiting, external-evidence, or monitor-only no-transition lanes
+should become a compact
 blocker-push `NOTIFY` with at most three items, while skipping delivery work
-and quota spend for that blocker-push turn unless the same blocker was already
-surfaced recently.
+and quota spend for that blocker-push turn. If the payload includes
+`open_todo_notification_policy=repeat_until_resolved`, repeat
+that `NOTIFY` on every such poll until the todo is done, deferred, or replaced;
+do not suppress it as a recently surfaced blocker. Other blocker-push cases may
+still be de-duplicated when the same blocker was already surfaced recently.
 
 Keep the Codex App visible goal text short, for example
 `按 ACTIVE_GOAL_STATE.md，基于 Goal Harness 体系，推进项目`. Do not use that short

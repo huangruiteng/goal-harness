@@ -16,7 +16,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from goal_harness.review_packet import build_review_packet  # noqa: E402
-from goal_harness.status import collect_status, render_status_markdown  # noqa: E402
+from goal_harness.status import collect_status, compact_benchmark_run, render_status_markdown  # noqa: E402
+from goal_harness.worker_bridge import build_worker_bridge_outcome  # noqa: E402
 
 
 GOAL_ID = "benchmark-projection-fixture"
@@ -93,6 +94,15 @@ def benchmark_run_event() -> dict[str, Any]:
             "no_leaderboard_upload_requested": True,
             "paths_redacted": True,
         },
+        "worker_bridge_outcome": build_worker_bridge_outcome(
+            worker_goal_harness_cli_call_total=6,
+            counter_trace_present=True,
+            runner_return_completed=True,
+            official_score_completed=True,
+            official_score_value=1.0,
+            wall_time_seconds=60,
+            wall_time_limit_seconds=900,
+        ),
         "evidence_files": [
             "job:lock.json",
             "job:result.json",
@@ -246,7 +256,46 @@ def assert_no_private_surface(summary: dict[str, Any]) -> None:
     assert not leaked, leaked
 
 
+def assert_interrupted_worker_bridge_outcome_projection() -> None:
+    compact = compact_benchmark_run(
+        {
+            "schema_version": "benchmark_run_v0",
+            "benchmark_id": BENCHMARK_ID,
+            "mode": "codex_goal_harness_active_worker",
+            "real_run": True,
+            "submit_eligible": False,
+            "worker_bridge_outcome": build_worker_bridge_outcome(
+                worker_goal_harness_cli_call_total=4,
+                counter_trace_present=True,
+                interrupted=True,
+                interrupt_reason="controller_interrupt_after_wall_time_limit",
+                wall_time_seconds=720,
+                wall_time_limit_seconds=900,
+            ),
+            "official_task_score": {
+                "kind": "sample_private_no_upload_interrupted",
+            },
+        }
+    )
+    assert compact is not None
+    outcome = compact["worker_bridge_outcome"]
+    assert outcome["schema_version"] == "goal_harness_worker_bridge_outcome_v0", outcome
+    assert outcome["worker_bridge_verified"] is True, outcome
+    assert outcome["runner_return_status"] == "interrupted_after_worker_bridge_success", outcome
+    assert outcome["official_score_status"] == "blocked_pending_runner_return", outcome
+    assert outcome["worker_goal_harness_cli_call_total"] == 4, outcome
+    assert outcome["counter_trace_present"] is True, outcome
+    policy = outcome["wall_time_policy"]
+    assert policy["interrupted"] is True, outcome
+    assert policy["changes_official_benchmark_timeout"] is False, outcome
+    assert policy["changes_official_task_resources"] is False, outcome
+    assert policy["leaderboard_claim_allowed"] is False, outcome
+    assert "official_reward_complete" in outcome["claim_boundary"]["forbidden_claims"], outcome
+    assert_no_private_surface(compact)
+
+
 def main() -> None:
+    assert_interrupted_worker_bridge_outcome_projection()
     with tempfile.TemporaryDirectory(prefix="benchmark-run-v0-status-") as tmp:
         registry_path = write_fixture(Path(tmp))
         status = collect_status(
@@ -264,9 +313,21 @@ def main() -> None:
         assert summary["benchmark_id"] == BENCHMARK_ID, summary
         assert summary["progress"]["n_completed_trials"] == 1, summary
         assert summary["metrics"]["cost_usd"] == 0.42, summary
+        outcome = summary["worker_bridge_outcome"]
+        assert outcome["worker_bridge_verified"] is True, outcome
+        assert outcome["runner_return_status"] == "completed", outcome
+        assert outcome["official_score_status"] == "completed", outcome
+        assert outcome["official_score_value"] == 1.0, outcome
+        health = latest["worker_bridge_ingest_health_note"]
+        assert health["schema_version"] == "worker_bridge_ingest_health_note_v0", health
+        assert health["health_state"] == "official_score_ingested", health
+        assert health["evidence_layer"] == "official_sample_score", health
+        assert health["worker_goal_harness_cli_call_total"] == 6, health
+        assert "leaderboard uplift" in health["must_not_claim"], health
         assert summary["validation"]["all_passed"] is True, summary
         assert summary["trials"][0]["reward"]["reward"] == 1.0, summary
         assert_no_private_surface(summary)
+        assert_no_private_surface(health)
 
         result_summary = latest["benchmark_result_summary"]
         assert result_summary["schema_version"] == "benchmark_result_v0", result_summary
@@ -296,6 +357,7 @@ def main() -> None:
         assert "benchmark=terminal-bench@2.0" in packet["project_agent_handoff"], packet["project_agent_handoff"]
         assert "completed=1/1" in packet["project_agent_handoff"], packet["project_agent_handoff"]
         assert "reward=1.0" in packet["project_agent_handoff"], packet["project_agent_handoff"]
+        assert "worker_bridge_health=official_score_ingested" in packet["project_agent_handoff"], packet["project_agent_handoff"]
         assert "result=mini_control_plane_repair_v0" in packet["project_agent_handoff"], packet["project_agent_handoff"]
         assert "control=0.875" in packet["project_agent_handoff"], packet["project_agent_handoff"]
         assert_no_private_surface({"project_agent_handoff": packet["project_agent_handoff"]})

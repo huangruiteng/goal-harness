@@ -56,6 +56,7 @@ EXPLICIT_REFRESH_CLASSIFICATION = "dashboard_home_browser_smoke_regression"
 DEPENDENCY_CURRENT_GOAL_ID = "meta-hardening-fixture"
 DEPENDENCY_BLOCKER_GOAL_ID = "dependency-owner-gate"
 DEPENDENCY_AGENT_TODO = "Continue the gate-independent P1/P2 product-hardening slice."
+DEPENDENCY_MONITOR_TODO = "Side-bypass dependency monitor: observe public-safe replay transitions only."
 DEPENDENCY_USER_TODO = "Confirm the sibling project evidence gate before its controller resumes delivery."
 
 
@@ -309,7 +310,8 @@ def write_dependency_blocker_registry(root: Path) -> Path:
         "---\n\n"
         "# Meta Hardening Fixture\n\n"
         "## Agent Todo\n\n"
-        f"- [ ] {DEPENDENCY_AGENT_TODO}\n",
+        f"- [ ] {DEPENDENCY_AGENT_TODO}\n"
+        f"- [ ] {DEPENDENCY_MONITOR_TODO}\n",
         encoding="utf-8",
     )
     (project / Path(blocker_state_file).parent).mkdir(parents=True, exist_ok=True)
@@ -1566,7 +1568,7 @@ def assert_dependency_blockers_stay_separate(payload: dict, markdown: str) -> No
     current_item = items_by_goal[DEPENDENCY_CURRENT_GOAL_ID]
     blocker_item = items_by_goal[DEPENDENCY_BLOCKER_GOAL_ID]
     assert current_item["waiting_on"] == "codex", current_item
-    assert current_item["agent_todos"]["open_count"] == 1, current_item
+    assert current_item["agent_todos"]["open_count"] == 2, current_item
     assert "user_todos" not in current_item, current_item
     blockers = current_item["dependency_blockers"]
     assert blockers["open_count"] == 1, blockers
@@ -1580,14 +1582,31 @@ def assert_dependency_blockers_stay_separate(payload: dict, markdown: str) -> No
     backlog = payload["attention_queue"]["autonomous_backlog_candidates"]
     assert backlog["open_count"] == 1, backlog
     assert backlog["source"] == "attention_queue.agent_todos", backlog
+    assert backlog["task_class"] == "advancement_task", backlog
     assert backlog["items"][0]["goal_id"] == DEPENDENCY_CURRENT_GOAL_ID, backlog
     assert backlog["items"][0]["text"] == DEPENDENCY_AGENT_TODO, backlog
-    assert "autonomous_backlog_candidates: open=1 source=attention_queue.agent_todos" in markdown, markdown
+    assert DEPENDENCY_MONITOR_TODO not in [item["text"] for item in backlog["items"]], backlog
+    assert (
+        "autonomous_backlog_candidates: open=1 task_class=advancement_task source=attention_queue.agent_todos"
+        in markdown
+    ), markdown
     assert f"autonomous_candidate: goal={DEPENDENCY_CURRENT_GOAL_ID}" in markdown, markdown
+    monitors = payload["attention_queue"]["autonomous_monitor_candidates"]
+    assert monitors["open_count"] == 1, monitors
+    assert monitors["task_class"] == "continuous_monitor", monitors
+    assert monitors["items"][0]["goal_id"] == DEPENDENCY_CURRENT_GOAL_ID, monitors
+    assert monitors["items"][0]["text"] == DEPENDENCY_MONITOR_TODO, monitors
+    assert (
+        "autonomous_monitor_candidates: open=1 task_class=continuous_monitor source=attention_queue.agent_todos"
+        in markdown
+    ), markdown
+    assert f"autonomous_monitor_candidate: goal={DEPENDENCY_CURRENT_GOAL_ID}" in markdown, markdown
     quota_payload = build_quota_should_run(payload, goal_id=DEPENDENCY_CURRENT_GOAL_ID)
     assert quota_payload["should_run"] is True, quota_payload
     assert quota_payload["state"] == "eligible", quota_payload
     assert quota_payload["waiting_on"] == "codex", quota_payload
+    assert quota_payload["autonomous_backlog_candidates"]["items"][0]["text"] == DEPENDENCY_AGENT_TODO
+    assert quota_payload["autonomous_monitor_candidates"]["items"][0]["text"] == DEPENDENCY_MONITOR_TODO
 
 
 def assert_connected_delivery_no_baseline_small_streak(payload: dict, markdown: str) -> None:

@@ -170,6 +170,8 @@ def main() -> int:
         assert decision["should_run"] is False, decision
         assert decision["state"] == "focus_wait", decision
         assert decision["notify_user_on_open_todo"] is True, decision
+        assert decision["heartbeat_recommendation"]["repeat_notification_required"] is True, decision
+        assert decision["open_todo_notification_policy"] == "repeat_until_resolved", decision
         assert "focus_wait" in decision["open_todo_notify_reason"], decision
         assert decision["user_todo_summary"]["open_count"] == 1, decision
         assert decision["user_todo_summary"]["first_open_items"][0]["text"] == USER_TODO, decision
@@ -188,7 +190,7 @@ def main() -> int:
         compact_prompt = " ".join(prompt.split())
         assert "notify_user_on_open_todo=true" in compact_prompt, prompt
         assert "return heartbeat `NOTIFY`" in compact_prompt, prompt
-        assert "No implementation, adapter work, edits, research, exploration, or spend for that blocker-push turn" in compact_prompt, prompt
+        assert "No delivery/spend" in compact_prompt, prompt
 
     print("blocker-push-runtime-smoke ok")
     return 0

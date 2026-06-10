@@ -33,6 +33,7 @@ QUOTA_STATE_ORDER = (
     "paused",
 )
 QUOTA_SLOT_SPENT_CLASSIFICATION = "quota_slot_spent"
+QUOTA_SLOT_VOIDED_CLASSIFICATION = "quota_slot_voided"
 DEFAULT_SLOT_SPEND_SOURCE = "heartbeat"
 VALID_SLOT_SPEND_SOURCES = {"heartbeat", "controller", "adapter"}
 FOCUS_WAIT_LIFECYCLE_MARKERS = {
@@ -69,6 +70,12 @@ POST_HANDOFF_RUN_COMPACT_FIELDS = (
     "json_exists",
     "markdown_exists",
 )
+AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS = (
+    "source",
+    "open_count",
+    "task_class",
+    "items",
+)
 SELF_REPAIR_SPEND_ACTIONS = {
     "control_plane_health_repair",
     "control_plane_projection_repair",
@@ -88,6 +95,7 @@ DEPENDENCY_OBSERVATION_CLASSIFICATION_HINTS = (
     "dependency_monitor",
 )
 WORK_LANE_CONTRACT_SCHEMA_VERSION = "work_lane_contract_v1"
+PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
 TODO_TASK_CLASS_VALUES = {TODO_TASK_CLASS_ADVANCEMENT, TODO_TASK_CLASS_MONITOR}
@@ -452,7 +460,10 @@ def goal_quota_config(goal: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _load_quota_event_from_run(run: dict[str, Any]) -> dict[str, Any] | None:
-    if str(run.get("classification") or "") != QUOTA_SLOT_SPENT_CLASSIFICATION:
+    if str(run.get("classification") or "") not in {
+        QUOTA_SLOT_SPENT_CLASSIFICATION,
+        QUOTA_SLOT_VOIDED_CLASSIFICATION,
+    }:
         return None
     event = run.get("quota_event") if isinstance(run.get("quota_event"), dict) else None
     if event:
@@ -474,6 +485,10 @@ def _load_quota_event_from_run(run: dict[str, Any]) -> dict[str, Any] | None:
     return event
 
 
+def _quota_event_run_key(run: dict[str, Any], event: dict[str, Any]) -> str:
+    return str(event.get("run_generated_at") or run.get("generated_at") or "")
+
+
 def goal_quota_with_spend_ledger(
     goal: dict[str, Any] | None,
     runs: list[dict[str, Any]],
@@ -486,8 +501,10 @@ def goal_quota_with_spend_ledger(
     if current_time.tzinfo is None:
         current_time = current_time.replace(tzinfo=timezone.utc)
     window_start = current_time - timedelta(hours=int(payload["window_hours"]))
-    spent_slots = 0
+    spent_by_run: dict[str, int] = {}
+    voided_by_run: dict[str, int] = {}
     spend_event_count = 0
+    void_event_count = 0
 
     for run in runs:
         if not isinstance(run, dict):
@@ -498,17 +515,33 @@ def goal_quota_with_spend_ledger(
         if generated_at is None or generated_at < window_start or generated_at > current_time:
             continue
         event = _load_quota_event_from_run(run)
-        if not event or str(event.get("event_type") or "") != QUOTA_SLOT_SPENT_CLASSIFICATION:
+        if not event:
             continue
+        event_type = str(event.get("event_type") or "")
         slots = max(0, _int_number(event.get("slots"), default=0))
         if slots <= 0:
             continue
-        spent_slots += slots
-        spend_event_count += 1
+        if event_type == QUOTA_SLOT_SPENT_CLASSIFICATION:
+            run_key = _quota_event_run_key(run, event)
+            if not run_key:
+                continue
+            spent_by_run[run_key] = spent_by_run.get(run_key, 0) + slots
+            spend_event_count += 1
+        elif event_type == QUOTA_SLOT_VOIDED_CLASSIFICATION:
+            voided_run_generated_at = str(event.get("voided_run_generated_at") or "")
+            if not voided_run_generated_at:
+                continue
+            voided_by_run[voided_run_generated_at] = voided_by_run.get(voided_run_generated_at, 0) + slots
+            void_event_count += 1
 
+    spent_slots = 0
+    for run_key, slots in spent_by_run.items():
+        spent_slots += max(0, slots - voided_by_run.get(run_key, 0))
     payload["spent_slots"] = spent_slots
     payload["spend_source"] = "runtime_events"
     payload["spend_event_count"] = spend_event_count
+    if void_event_count:
+        payload["void_event_count"] = void_event_count
     return payload
 
 
@@ -729,6 +762,190 @@ def _compact_handoff_readiness(value: Any) -> dict[str, Any] | None:
     if compact_recent_runs:
         compact["post_handoff_recent_runs"] = compact_recent_runs[:3]
     return compact or None
+
+
+def _compact_autonomous_candidate_context(value: Any, *, limit: int = 3) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    compact = {field: value[field] for field in AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS if field in value}
+    items = compact.get("items")
+    if isinstance(items, list):
+        compact["items"] = [item for item in items[:limit] if isinstance(item, dict)]
+    return compact or None
+
+
+def _protocol_action_text(value: Any, *, limit: int = 220) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).strip().split())
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _protocol_action_label(value: Any, *, limit: int = 80) -> str | None:
+    text = _protocol_action_text(value)
+    if not text:
+        return None
+    head, separator, _tail = text.partition(":")
+    if separator and "[" in head and "]" in head and 8 <= len(head) <= limit:
+        return head.strip()
+    return _protocol_action_text(text, limit=limit)
+
+
+def _protocol_todo_actions(summary: Any, *, limit: int = 3) -> list[str]:
+    if not isinstance(summary, dict):
+        return []
+    first_open_items = summary.get("first_open_items")
+    if not isinstance(first_open_items, list):
+        return []
+    actions: list[str] = []
+    for item in first_open_items:
+        if not isinstance(item, dict):
+            continue
+        text = _protocol_action_label(item.get("text"))
+        if not text:
+            continue
+        actions.append(text)
+        if len(actions) >= limit:
+            break
+    return actions
+
+
+def _protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
+    backlog = (
+        payload.get("autonomous_backlog_candidates")
+        if isinstance(payload.get("autonomous_backlog_candidates"), dict)
+        else {}
+    )
+    items = backlog.get("items") if isinstance(backlog.get("items"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = _protocol_action_label(item.get("text"))
+        if text:
+            return text
+
+    agent_todos = (
+        payload.get("agent_todo_summary")
+        if isinstance(payload.get("agent_todo_summary"), dict)
+        else {}
+    )
+    first_open_items = (
+        agent_todos.get("first_open_items")
+        if isinstance(agent_todos.get("first_open_items"), list)
+        else []
+    )
+    for item in first_open_items:
+        if not isinstance(item, dict):
+            continue
+        if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+            continue
+        text = _protocol_action_label(item.get("text"))
+        if text:
+            return text
+
+    work_lane = (
+        payload.get("work_lane_contract")
+        if isinstance(payload.get("work_lane_contract"), dict)
+        else {}
+    )
+    for key in ("action", "obligation"):
+        text = _protocol_action_text(work_lane.get(key))
+        if text:
+            return text
+    return _protocol_action_text(payload.get("recommended_action"))
+
+
+def _protocol_monitor_action(payload: dict[str, Any]) -> str | None:
+    work_lane = (
+        payload.get("work_lane_contract")
+        if isinstance(payload.get("work_lane_contract"), dict)
+        else {}
+    )
+    if work_lane.get("obligation") == "quiet_until_material_monitor_transition":
+        return "quiet until a material monitor transition, regression, or concrete blocker appears"
+    monitors = (
+        payload.get("autonomous_monitor_candidates")
+        if isinstance(payload.get("autonomous_monitor_candidates"), dict)
+        else {}
+    )
+    items = monitors.get("items") if isinstance(monitors.get("items"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = _protocol_action_label(item.get("text"), limit=160)
+        if text:
+            return text
+    return None
+
+
+def _protocol_action_packet(payload: dict[str, Any]) -> dict[str, Any]:
+    heartbeat_recommendation = (
+        payload.get("heartbeat_recommendation")
+        if isinstance(payload.get("heartbeat_recommendation"), dict)
+        else {}
+    )
+    execution_obligation = (
+        payload.get("execution_obligation")
+        if isinstance(payload.get("execution_obligation"), dict)
+        else {}
+    )
+    work_lane = (
+        payload.get("work_lane_contract")
+        if isinstance(payload.get("work_lane_contract"), dict)
+        else {}
+    )
+    requires_user_action = bool(payload.get("requires_user_action"))
+    must_attempt_work = bool(execution_obligation.get("must_attempt_work"))
+    quiet_noop_allowed = not requires_user_action and not must_attempt_work
+
+    user_actions = _protocol_todo_actions(payload.get("user_todo_summary"))
+    if requires_user_action and not user_actions:
+        for key in ("gate_prompt", "operator_question", "open_todo_notify_reason"):
+            text = _protocol_action_text(payload.get(key))
+            if text:
+                user_actions = [text]
+                break
+
+    if requires_user_action:
+        primary_actor = "user"
+        agent_action_required = False
+        agent_action = "wait for user/owner action after surfacing the blocker or gate"
+    elif must_attempt_work:
+        primary_actor = "agent"
+        agent_action_required = True
+        agent_action = _protocol_first_candidate_action(payload) or "advance one bounded segment"
+    else:
+        primary_actor = "agent"
+        agent_action_required = False
+        agent_action = _protocol_monitor_action(payload) or "quiet no-op; no material transition"
+
+    action_key = "user_action" if requires_user_action else "agent_action"
+    action_value = user_actions[0] if requires_user_action and user_actions else agent_action
+    summary_parts = [
+        f"actor={primary_actor}",
+        f"user_action_required={str(requires_user_action).lower()}",
+        f"agent_action_required={str(agent_action_required).lower()}",
+        f"quiet_noop_allowed={str(quiet_noop_allowed).lower()}",
+    ]
+    if work_lane.get("lane"):
+        summary_parts.append(f"lane={work_lane.get('lane')}")
+    summary_parts.append("llm=no_api")
+    if user_actions and not requires_user_action:
+        summary_parts.append("user_action_pending=true")
+        text = _protocol_action_text(user_actions[0], limit=80)
+        if text:
+            summary_parts.append(f"user_action={text}")
+    text = _protocol_action_text(action_value, limit=80)
+    if text:
+        summary_parts.append(f"{action_key}={text}")
+    return {
+        "schema_version": PROTOCOL_ACTION_PACKET_SCHEMA_VERSION,
+        "summary": " ".join(summary_parts),
+    }
 
 
 def _goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -1108,6 +1325,7 @@ def _heartbeat_recommendation(
             **base,
             "recommended_mode": "blocker_push_notify",
             "notify": "NOTIFY",
+            "repeat_notification_required": True,
             "spend_policy": "do not append quota spend for the blocker-push turn",
             "reason": _open_todo_notify_reason(state=state, waiting_on=waiting_on),
         }
@@ -1159,6 +1377,27 @@ def _heartbeat_recommendation(
             ),
         }
         return payload
+
+    if (
+        work_lane_contract
+        and work_lane_contract.get("lane") == "continuous_monitor"
+        and work_lane_contract.get("must_attempt_work") is False
+        and has_user_todos
+    ):
+        return {
+            **base,
+            "recommended_mode": "monitor_user_todo_notify",
+            "notify": "NOTIFY",
+            "repeat_notification_required": True,
+            "spend_policy": (
+                "do not append quota spend for a monitor-only poll; notify the user of "
+                "the current open user todo because it is the actionable unblocker"
+            ),
+            "reason": (
+                "monitor-only polling has no material transition to write back; the "
+                "current open user todo is the next required action"
+            ),
+        }
 
     if (
         work_lane_contract
@@ -1778,21 +2017,41 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["missing_gates"] = item.get("missing_gates")
         if user_todo_summary:
             payload["user_todo_summary"] = user_todo_summary
+            repeat_open_todo_notification = (
+                heartbeat_recommendation.get("repeat_notification_required") is True
+            )
             if _should_notify_user_on_open_todo(
                 state=state,
                 waiting_on=str(item.get("waiting_on") or ""),
                 user_todo_summary=user_todo_summary,
-            ):
+            ) or repeat_open_todo_notification:
                 payload["notify_user_on_open_todo"] = True
                 payload["open_todo_notify_reason"] = _open_todo_notify_reason(
                     state=state,
                     waiting_on=str(item.get("waiting_on") or ""),
                 )
+                if repeat_open_todo_notification:
+                    payload["open_todo_notify_reason"] = (
+                        heartbeat_recommendation.get("reason")
+                        or "no-work polling should ask the current open user todo"
+                    )
+                    payload["open_todo_notification_policy"] = "repeat_until_resolved"
         payload["requires_user_action"] = bool(
             state == "operator_gate" or payload.get("notify_user_on_open_todo") is True
         )
         if agent_todo_summary:
             payload["agent_todo_summary"] = agent_todo_summary
+        attention_queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
+        backlog_context = _compact_autonomous_candidate_context(
+            attention_queue.get("autonomous_backlog_candidates")
+        )
+        if backlog_context:
+            payload["autonomous_backlog_candidates"] = backlog_context
+        monitor_context = _compact_autonomous_candidate_context(
+            attention_queue.get("autonomous_monitor_candidates")
+        )
+        if monitor_context:
+            payload["autonomous_monitor_candidates"] = monitor_context
         projection_warning = (
             item.get("stale_latest_run_warning")
             if isinstance(item.get("stale_latest_run_warning"), dict)
@@ -1850,6 +2109,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["next_handoff_condition"] = item.get("next_handoff_condition")
         if should_run and item.get("agent_command"):
             payload["agent_command"] = item.get("agent_command")
+        payload["protocol_action_packet"] = _protocol_action_packet(payload)
         return payload
 
     if health_item:
@@ -2105,6 +2365,220 @@ def build_quota_slot_spend_event(
             "after": after_compact,
         },
     }
+
+
+def _load_goal_run_index_records(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]:
+    index_path = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
+    if not index_path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        lines = index_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def _find_quota_spend_run(
+    runtime_root: Path,
+    *,
+    goal_id: str,
+    generated_at: str,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    for run in reversed(_load_goal_run_index_records(runtime_root, goal_id)):
+        if str(run.get("goal_id") or goal_id) != goal_id:
+            continue
+        if str(run.get("generated_at") or "") != generated_at:
+            continue
+        if str(run.get("classification") or "") != QUOTA_SLOT_SPENT_CLASSIFICATION:
+            continue
+        event = _load_quota_event_from_run(run)
+        if not event or str(event.get("event_type") or "") != QUOTA_SLOT_SPENT_CLASSIFICATION:
+            continue
+        return run, event
+    return None
+
+
+def build_quota_slot_void_preview(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    voided_run_generated_at: str,
+) -> dict[str, Any]:
+    safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    safe_voided_at = str(voided_run_generated_at or "").strip()
+    if not safe_voided_at:
+        return {
+            "ok": False,
+            "mode": "void-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": "`quota void-slot` requires --void-generated-at",
+        }
+
+    raw_runtime_root = status_payload.get("runtime_root")
+    if not raw_runtime_root:
+        raise ValueError("status payload does not include runtime_root")
+    runtime_root = Path(str(raw_runtime_root)).expanduser()
+    target = _find_quota_spend_run(runtime_root, goal_id=safe_goal_id, generated_at=safe_voided_at)
+    if target is None:
+        return {
+            "ok": False,
+            "mode": "void-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "voided_run_generated_at": safe_voided_at,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": "target quota_slot_spent run was not found in the goal runtime index",
+        }
+    target_run, target_event = target
+    slots = max(1, _int_number(target_event.get("slots"), default=1))
+    before = build_quota_should_run(status_payload, goal_id=safe_goal_id)
+    before_quota = before.get("quota") if isinstance(before.get("quota"), dict) else {}
+    after = deepcopy(before)
+    after_quota = deepcopy(before_quota)
+    after_quota["spent_slots"] = max(0, _int_number(before_quota.get("spent_slots"), default=0) - slots)
+    after["quota"] = after_quota
+    return {
+        "ok": True,
+        "mode": "void-slot",
+        "dry_run": True,
+        "goal_id": safe_goal_id,
+        "slots": slots,
+        "voided_run_generated_at": safe_voided_at,
+        "voided_run_classification": target_run.get("classification"),
+        "voided_run_json_path": target_run.get("json_path"),
+        "appended": False,
+        "registry_mutated": False,
+        "before": before,
+        "after": after,
+        "would_throttle": False,
+        "reason": (
+            f"dry-run preview: voiding {slots} slot(s) from {safe_goal_id} "
+            f"quota spend run {safe_voided_at}"
+        ),
+        "rolling_window_note": (
+            "quota void-slot appends a quota_slot_voided accounting event. It does not delete the "
+            "original spend event; rolling-window ledgers subtract the void only when the target "
+            "spend event is inside the same accounting window."
+        ),
+        "classification": QUOTA_SLOT_VOIDED_CLASSIFICATION,
+    }
+
+
+def build_quota_slot_void_event(
+    preview: dict[str, Any],
+    *,
+    source: str = DEFAULT_SLOT_SPEND_SOURCE,
+    reason_summary: str | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    if not preview.get("ok"):
+        raise ValueError(preview.get("reason") or "quota slot void requires a valid preview")
+    safe_source = str(source or DEFAULT_SLOT_SPEND_SOURCE).strip()
+    if safe_source not in VALID_SLOT_SPEND_SOURCES:
+        raise ValueError(f"quota slot void source must be one of: {', '.join(sorted(VALID_SLOT_SPEND_SOURCES))}")
+    safe_reason = str(reason_summary or "").strip() or "void duplicate or invalid quota slot spend event"
+    before = preview.get("before") if isinstance(preview.get("before"), dict) else {}
+    after = preview.get("after") if isinstance(preview.get("after"), dict) else {}
+    return {
+        "generated_at": generated_at or _now_local(),
+        "goal_id": preview.get("goal_id"),
+        "classification": QUOTA_SLOT_VOIDED_CLASSIFICATION,
+        "recommended_action": safe_reason,
+        "health_check": "quota slot void event public-safe; original spend preserved for audit",
+        "quota_event": {
+            "event_type": QUOTA_SLOT_VOIDED_CLASSIFICATION,
+            "source": safe_source,
+            "slots": max(1, _int_number(preview.get("slots"), default=1)),
+            "reason_summary": safe_reason,
+            "voided_run_generated_at": preview.get("voided_run_generated_at"),
+            "voided_run_classification": preview.get("voided_run_classification"),
+            "before": _compact_quota_decision(before) if before else {},
+            "after": _compact_quota_decision(after) if after else {},
+        },
+    }
+
+
+def void_quota_slot(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    voided_run_generated_at: str,
+    execute: bool = False,
+    source: str = DEFAULT_SLOT_SPEND_SOURCE,
+    reason_summary: str | None = None,
+) -> dict[str, Any]:
+    safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    preview = build_quota_slot_void_preview(
+        status_payload,
+        goal_id=safe_goal_id,
+        voided_run_generated_at=voided_run_generated_at,
+    )
+    if not preview.get("ok"):
+        return preview
+
+    generated_at = _now_local()
+    record = build_quota_slot_void_event(
+        preview,
+        source=source,
+        reason_summary=reason_summary,
+        generated_at=generated_at,
+    )
+    raw_runtime_root = status_payload.get("runtime_root")
+    if not raw_runtime_root:
+        raise ValueError("status payload does not include runtime_root")
+    runtime_root = Path(str(raw_runtime_root)).expanduser()
+    runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
+    stem = _run_file_stem(generated_at)
+    json_path, markdown_path = _unique_run_artifact_paths(runs_dir, stem, "quota-slot-voided")
+    index_path = runs_dir / "index.jsonl"
+    index_record = {
+        "generated_at": generated_at,
+        "goal_id": safe_goal_id,
+        "classification": QUOTA_SLOT_VOIDED_CLASSIFICATION,
+        "recommended_action": record["recommended_action"],
+        "health_check": record["health_check"],
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+    }
+    payload = {
+        **preview,
+        "dry_run": not execute,
+        "appended": execute,
+        "registry_mutated": False,
+        "source": record["quota_event"]["source"],
+        "classification": QUOTA_SLOT_VOIDED_CLASSIFICATION,
+        "generated_at": generated_at,
+        "quota_event": record["quota_event"],
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "index_path": str(index_path),
+        "reason": (
+            f"{'appended' if execute else 'dry-run preview'} quota slot void event: "
+            f"{safe_goal_id} voided {record['quota_event']['slots']} slot(s) from "
+            f"{record['quota_event']['voided_run_generated_at']}"
+        ),
+    }
+    if execute:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        markdown_path.write_text(render_quota_slot_preview_markdown(payload) + "\n", encoding="utf-8")
+        with index_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+    return payload
 
 
 def spend_quota_slot(
@@ -2560,6 +3034,8 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- heartbeat_command: `{heartbeat_recommendation.get('command')}`")
         if heartbeat_recommendation.get("stop_if_unchanged"):
             lines.append("- heartbeat_stop_if_unchanged: `True`")
+        if heartbeat_recommendation.get("repeat_notification_required"):
+            lines.append("- heartbeat_repeat_notification_required: `True`")
         if heartbeat_recommendation.get("spend_policy"):
             lines.append(f"- heartbeat_spend_policy: {heartbeat_recommendation.get('spend_policy')}")
         if heartbeat_recommendation.get("reason"):
@@ -2580,6 +3056,17 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- execution_contract_obligation: {execution_obligation.get('contract_obligation')}")
         if execution_obligation.get("reason"):
             lines.append(f"- execution_obligation_reason: {execution_obligation.get('reason')}")
+    protocol_action_packet = (
+        payload.get("protocol_action_packet")
+        if isinstance(payload.get("protocol_action_packet"), dict)
+        else {}
+    )
+    if protocol_action_packet:
+        lines.append(
+            "- protocol_action_packet: "
+            f"schema={protocol_action_packet.get('schema_version')} "
+            f"{protocol_action_packet.get('summary') or ''}"
+        )
     stall_self_repair = (
         payload.get("stall_self_repair")
         if isinstance(payload.get("stall_self_repair"), dict)
@@ -2709,6 +3196,8 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- notify_user_on_open_todo: `{payload.get('notify_user_on_open_todo')}`")
     if payload.get("open_todo_notify_reason"):
         lines.append(f"- open_todo_notify_reason: {payload.get('open_todo_notify_reason')}")
+    if payload.get("open_todo_notification_policy"):
+        lines.append(f"- open_todo_notification_policy: {payload.get('open_todo_notification_policy')}")
     if payload.get("gate_prompt"):
         lines.extend(["", "## Gate Prompt", str(payload.get("gate_prompt"))])
     user_todo_summary = (

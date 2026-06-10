@@ -234,12 +234,14 @@ goals must stay out of the eligible lane even when they have a high
     "autonomous_backlog_candidates": {
       "source": "attention_queue.agent_todos",
       "open_count": 1,
+      "task_class": "advancement_task",
       "items": [
         {
           "goal_id": "goal-harness-meta",
           "quota_state": "eligible",
           "priority": "P1",
           "todo_index": 1,
+          "task_class": "advancement_task",
           "text": "Add an autonomous backlog candidate surface for eligible goals.",
           "source": "agent_todos"
         }
@@ -791,13 +793,17 @@ state-only refresh solely to make `quota spend-slot` eligible.
 ### Autonomous Backlog Candidates
 
 `attention_queue.autonomous_backlog_candidates` is an optional compact list of
-unfinished agent todos from current queue items where `waiting_on=codex` and
-the goal quota is `eligible`. It is meant for heartbeat dispatchers and
-dashboards that need to keep P0/P1/P2 product-hardening moving while the most
-visible project card is waiting on user/controller/evidence. It is a candidate
-surface only: consumers must still obey the selected goal's quota,
-`goal_boundary`, owner/gate, public/private boundary, and validation/writeback
-rules before spending a turn.
+unfinished `advancement_task` agent todos from current queue items where
+`waiting_on=codex` and the goal quota is `eligible`. Monitor-class todos are
+intentionally excluded from this backlog so dependency/readiness observation
+cannot crowd out implementation, planning, or blocker-writeback candidates.
+`attention_queue.autonomous_monitor_candidates` may separately expose compact
+`continuous_monitor` todos so heartbeat dispatchers still see the current
+watch surfaces without treating them as primary advancement work.
+
+Both lists are candidate surfaces only: consumers must still obey the selected
+goal's quota, `goal_boundary`, owner/gate, public/private boundary, and
+validation/writeback rules before spending a turn.
 
 `quota should-run` includes `goal_boundary.orchestration` when the selected goal
 has registry `spawn_policy` or project-asset orchestration state. Consumers use
@@ -852,11 +858,17 @@ gate was already asked recently; the guard should not collapse a user decision
 into a silent skip.
 When the payload includes `notify_user_on_open_todo=true`, the open
 `user_todo_summary` is the current blocker-push surface even if there is no
-operator gate. This is intended for `focus_wait`, `waiting`, and
-`external_evidence` lanes where a short user/owner answer can unlock progress.
-Executors should list at most three open todos, include
+operator gate. This is intended for `focus_wait`, `waiting`,
+`external_evidence`, and monitor-only eligible lanes where a short user/owner
+answer can unlock progress or stop repeated meaningless polling. Executors
+should list at most three open todos, include
 `open_todo_notify_reason`, skip implementation work, and skip quota spend for
-that blocker-push turn unless the same blocker was surfaced recently.
+that blocker-push turn. When the payload also includes
+`open_todo_notification_policy=repeat_until_resolved`, the
+executor should repeat the notification on every monitor-only no-transition poll
+until the todo is done, deferred, or replaced; do not suppress it as a recently
+surfaced blocker. Other blocker-push cases may still be de-duplicated when the
+same blocker was surfaced recently.
 When the payload includes `heartbeat_recommendation`, executors should follow
 that generic lifecycle hint before inventing local automation behavior:
 `run_first_read_only_map` runs and saves one real read-only map before spending
@@ -906,8 +918,27 @@ must not be interpreted as an execution gate. If
 bounded segment under `work_lane_contract` when present, otherwise under
 `effective_action` / `goal_boundary`, validate it, write durable state/events,
 and spend once after delivery even when `notify=DONT_NOTIFY`. A quiet no-op
-requires `execution_obligation.must_attempt_work=false`, such as a verified
-`mapped_noop_if_unchanged` turn.
+requires `execution_obligation.must_attempt_work=false` and no blocker-push
+notification such as `notify_user_on_open_todo=true`; when both are present,
+notify the user and do not spend. Verified `mapped_noop_if_unchanged` remains a
+quiet no-op case.
+The guard also emits `protocol_action_packet.schema_version =
+protocol_action_packet_v0`, a compact rule-only packet for executor and future
+LLM-router experiments. It distills the same quota guard into one primary actor,
+user/agent action requirement, quiet-noop allowance, execution lane, and a short
+`llm=no_api` marker inside a single `summary` string so the hot path stays
+within interface budget. The detailed spend policy remains in
+`heartbeat_recommendation.spend_policy`. This packet is not a new source of
+authority and does not authorize model/API use; it is the deterministic baseline
+that an optional Codex/LLM summarizer must beat on payload shrinkage and
+user/agent action clarity before direct LLM API wiring is added. When an open
+todo uses the common `[P*] short title: details` shape, the packet uses the
+short title as the action label so long progress notes do not re-enter the hot
+path.
+If open user todos coexist with executable agent work, the packet keeps the
+primary actor as `agent` but adds `user_action_pending=true` plus a compact
+`user_action` label. This preserves the owner-visible blocker without
+mislabeling that owner todo as `agent_action`.
 When a registry-enabled goal has `control_plane.self_repair.enabled=true`,
 `quota should-run` may return `decision=self_repair`,
 `self_repair_allowed=true`, `stall_self_repair`, and an `effective_action` such
@@ -1443,9 +1474,18 @@ When a compact run record includes `benchmark_run_summary`, it is a redacted
 projection of `benchmark_run_v0`: runner, benchmark id, job name, mode, agent
 summary, progress counts, token/cost metrics, validation state, up to three
 trial summaries, relative evidence categories, resume/inspect command
-templates, and stop conditions. It must not include raw Codex sessions, host
-absolute paths, credentials, private benchmark material, or leaderboard upload
-claims.
+templates, and stop conditions. For long-horizon benchmark evidence it may also
+carry compact `worker_bridge_outcome.wall_time_policy` fields: timeout tier,
+whether official timeout/resources changed, comparability, observed wall time,
+effective wall-time limit, and whether the observed or expected run meets the
+true long-task bar (`>=1800s`). These fields are claim guards, not scoring
+changes. It may also carry `overhead_attribution_counters`, a compact
+runner-side summary of wall time, usage metrics, worker bridge event counts,
+Goal Harness CLI call totals, and Codex runtime goal-tool counts. That summary
+is for private paired-run diagnosis only; it is not a raw phase trace and must
+not be used as a score uplift claim. These fields must not include raw Codex
+sessions, host absolute paths, credentials, private benchmark material, or
+leaderboard upload claims.
 
 When a compact run record includes `benchmark_result_summary`, it is a redacted
 projection of `benchmark_result_v0`, not a raw benchmark log reader. The summary

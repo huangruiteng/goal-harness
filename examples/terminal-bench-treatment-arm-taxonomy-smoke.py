@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Smoke-test Terminal-Bench treatment arm taxonomy boundaries."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TOPIC_DIR = REPO_ROOT / "docs" / "research" / "long-horizon-agent-benchmarks"
+DOC = TOPIC_DIR / "terminal-bench-treatment-arm-taxonomy-v0.md"
+README = TOPIC_DIR / "README.md"
+
+ARMS = (
+    "hardened_codex_baseline",
+    "codex_goal_mode",
+    "codex_goal_harness",
+    "passive_goal_harness_observer",
+)
+
+FORBIDDEN_TEXT = [
+    "/" + "Users/",
+    "/" + "tmp/",
+    ".local/benchmark-runs",
+    "OPENAI" + "_API_KEY=",
+    "ARK" + "_API_KEY=",
+    "DOUBAO" + "_MODEL=",
+    "CODEX" + "_AUTH_JSON_PATH=",
+    "auth.json" + "\":",
+    "raw" + "_thread",
+    "session" + "_history",
+    "lark" + "office",
+    "fei" + "shu.cn",
+    "sk-" + "example",
+    "-----BEGIN",
+]
+
+REQUIRED_SNIPPETS = [
+    "Terminal-Bench Treatment Arm Taxonomy V0",
+    "hardened_codex_baseline",
+    "hardened_install_baseline",
+    "codex_goal_mode",
+    "codex_goal_harness",
+    "passive_goal_harness_observer",
+    "codex_runtime_goal_tool_calls",
+    "goal_harness_cli_calls",
+    "goal_harness_state_reads",
+    "goal_harness_state_writes",
+    "harness_skill_or_packet_injected",
+    "prompt_packet_only_no_cli_bridge",
+    "codex_runtime_goal_tool_calls=2",
+    "goal_harness_cli_calls=0",
+    "create_goal",
+    "update_goal",
+    "Goal Harness Access Packet",
+    "python3 examples/terminal-bench-treatment-arm-taxonomy-smoke.py",
+]
+
+
+def taxonomy_payload() -> dict[str, Any]:
+    return {
+        "schema_version": "terminal_bench_treatment_arm_taxonomy_v0",
+        "arms": {
+            "hardened_codex_baseline": {
+                "goal_harness_inside_case": False,
+                "official_score_comparable_to_native_codex": False,
+                "official_score_comparable_to_goal_harness_treatment": True,
+                "uses_codex_runtime_goal_tools": False,
+                "uses_goal_harness_interfaces": False,
+                "hardened_install_baseline": True,
+                "task_prompt_changed": False,
+            },
+            "codex_goal_mode": {
+                "goal_harness_inside_case": False,
+                "official_score_comparable_to_native_codex": False,
+                "uses_codex_runtime_goal_tools": True,
+                "uses_goal_harness_interfaces": False,
+            },
+            "codex_goal_harness": {
+                "goal_harness_inside_case": True,
+                "official_score_comparable_to_native_codex": False,
+                "uses_codex_runtime_goal_tools": "allowed_but_separately_counted",
+                "uses_goal_harness_interfaces": "requires_cli_bridge_or_trace",
+                "current_v0_interface_surface": "prompt_packet_only_no_cli_bridge",
+                "current_v0_cli_bridge_available": False,
+            },
+            "passive_goal_harness_observer": {
+                "goal_harness_inside_case": False,
+                "official_score_comparable_to_native_codex": True,
+                "uses_codex_runtime_goal_tools": False,
+                "uses_goal_harness_interfaces": "outside_case_only",
+            },
+        },
+        "first_managed_sample_reclassification": {
+            "prompt_policy_injected": True,
+            "codex_runtime_goal_tool_calls": {
+                "create_goal": 1,
+                "update_goal": 1,
+                "total": 2,
+            },
+            "goal_harness_cli_calls": 0,
+            "goal_harness_state_reads": 0,
+            "goal_harness_state_writes": 0,
+            "harness_skill_or_packet_injected": False,
+            "case_result_writeback": "runner_only",
+            "correct_arm": "codex_goal_mode",
+            "incorrect_arm": "codex_goal_harness",
+        },
+        "codex_goal_harness_required_packet": [
+            "goal_harness_interface_surface",
+            "goal_harness_cli_bridge_available",
+            "declared_goal_harness_interface_commands",
+            "when_to_call_status_todo_history_check_or_writeback",
+            "public_safety_boundaries",
+            "compact_counter_reporting",
+        ],
+        "real_run": False,
+        "submit_eligible": False,
+    }
+
+
+def assert_public_safe(payload: object) -> None:
+    text = json.dumps(payload, sort_keys=True) if not isinstance(payload, str) else payload
+    leaked = [marker for marker in FORBIDDEN_TEXT if marker in text]
+    assert not leaked, leaked
+    assert len(text) < 18000, len(text)
+
+
+def main() -> None:
+    text = DOC.read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
+    missing = [snippet for snippet in REQUIRED_SNIPPETS if snippet not in text]
+    assert not missing, missing
+    assert "terminal-bench-treatment-arm-taxonomy-v0.md" in readme, readme
+    assert_public_safe(text)
+
+    payload = taxonomy_payload()
+    assert tuple(payload["arms"]) == ARMS, payload
+    hardened = payload["arms"]["hardened_codex_baseline"]
+    codex_goal = payload["arms"]["codex_goal_mode"]
+    harness = payload["arms"]["codex_goal_harness"]
+    passive = payload["arms"]["passive_goal_harness_observer"]
+    sample = payload["first_managed_sample_reclassification"]
+
+    assert hardened["hardened_install_baseline"] is True, hardened
+    assert hardened["task_prompt_changed"] is False, hardened
+    assert hardened["uses_goal_harness_interfaces"] is False, hardened
+    assert hardened["official_score_comparable_to_native_codex"] is False, hardened
+    assert hardened["official_score_comparable_to_goal_harness_treatment"] is True, hardened
+    assert codex_goal["uses_codex_runtime_goal_tools"] is True, codex_goal
+    assert codex_goal["uses_goal_harness_interfaces"] is False, codex_goal
+    assert harness["goal_harness_inside_case"] is True, harness
+    assert harness["uses_goal_harness_interfaces"] == "requires_cli_bridge_or_trace", harness
+    assert harness["current_v0_interface_surface"] == "prompt_packet_only_no_cli_bridge", harness
+    assert harness["current_v0_cli_bridge_available"] is False, harness
+    assert passive["uses_goal_harness_interfaces"] == "outside_case_only", passive
+    assert sample["codex_runtime_goal_tool_calls"]["total"] == 2, sample
+    assert sample["goal_harness_cli_calls"] == 0, sample
+    assert sample["goal_harness_state_reads"] == 0, sample
+    assert sample["goal_harness_state_writes"] == 0, sample
+    assert sample["harness_skill_or_packet_injected"] is False, sample
+    assert sample["correct_arm"] == "codex_goal_mode", sample
+    assert sample["incorrect_arm"] == "codex_goal_harness", sample
+    assert payload["real_run"] is False, payload
+    assert payload["submit_eligible"] is False, payload
+    assert_public_safe(payload)
+    print("terminal-bench-treatment-arm-taxonomy-smoke ok arms=4 sample_cli_calls=0")
+
+
+if __name__ == "__main__":
+    main()

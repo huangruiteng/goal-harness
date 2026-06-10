@@ -15,6 +15,18 @@ PROMOTION_READINESS_CLASSIFICATIONS = {
     "canary_promotion_readiness_smoke_group",
 }
 PROMOTION_READINESS_FRESHNESS_HOURS = 24
+REQUIRED_INSTALLED_SKILL_PHRASES = {
+    "goal-harness-project": (
+        "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
+        "--delivery-batch-scale multi_surface",
+        "--delivery-outcome outcome_progress",
+    ),
+    "goal-harness-doc-registry": (
+        "Use even when the user does not mention Goal Harness or doc registry",
+        "use `.goal-harness/registry.json` as the project-local doc registry",
+        "not a substitute for project-local authority registration",
+    ),
+}
 
 
 def user_local_bin() -> Path:
@@ -115,15 +127,27 @@ def add_promotion_readiness_freshness(
 def skill_has_delivery_hints(skill_path: Path) -> bool:
     if not skill_path.exists():
         return False
-    text = skill_path.read_text(encoding="utf-8")
-    return all(
-        phrase in text
-        for phrase in (
-            "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-            "--delivery-batch-scale multi_surface",
-            "--delivery-outcome outcome_progress",
-        )
-    )
+    text = " ".join(skill_path.read_text(encoding="utf-8").split())
+    return all(phrase in text for phrase in REQUIRED_INSTALLED_SKILL_PHRASES["goal-harness-project"])
+
+
+def skill_has_required_phrases(skill_path: Path, phrases: tuple[str, ...]) -> bool:
+    if not skill_path.exists():
+        return False
+    text = " ".join(skill_path.read_text(encoding="utf-8").split())
+    return all(phrase in text for phrase in phrases)
+
+
+def installed_skill_summary(skills_root: Path) -> dict[str, dict[str, Any]]:
+    summaries: dict[str, dict[str, Any]] = {}
+    for skill_name, phrases in REQUIRED_INSTALLED_SKILL_PHRASES.items():
+        skill_path = skills_root / skill_name / "SKILL.md"
+        summaries[skill_name] = {
+            "path": str(skill_path),
+            "exists": skill_path.exists(),
+            "required_phrases": skill_has_required_phrases(skill_path, phrases),
+        }
+    return summaries
 
 
 def latest_promotion_readiness_event(runtime_root: Path) -> dict[str, Any]:
@@ -198,7 +222,9 @@ def collect_doctor() -> dict[str, Any]:
     canary_root = command_release_root(canary_realpath)
     path_entries = os.environ.get("PATH", "").split(os.pathsep)
     local_bin = user_local_bin()
-    skill_path = codex_home() / "skills" / "goal-harness-project" / "SKILL.md"
+    skills_root = codex_home() / "skills"
+    skill_path = skills_root / "goal-harness-project" / "SKILL.md"
+    skills = installed_skill_summary(skills_root)
     release_provenance = {
         "runtime_root": str(DEFAULT_RUNTIME_ROOT),
         "default_release": command_root_summary(command_path, command_realpath),
@@ -282,6 +308,20 @@ def collect_doctor() -> dict[str, Any]:
             "ok": skill_has_delivery_hints(skill_path),
             "detail": str(skill_path),
         },
+        {
+            "id": "installed_required_skills",
+            "required": False,
+            "ok": all(skill.get("exists") for skill in skills.values()),
+            "detail": ",".join(sorted(skills)),
+        },
+        {
+            "id": "installed_required_skill_routes",
+            "required": False,
+            "ok": all(skill.get("required_phrases") for skill in skills.values()),
+            "detail": ",".join(
+                f"{name}={skill.get('required_phrases')}" for name, skill in sorted(skills.items())
+            ),
+        },
     ]
     return {
         "ok": all(check["ok"] for check in checks if check["required"]),
@@ -311,6 +351,7 @@ def collect_doctor() -> dict[str, Any]:
             "exists": skill_path.exists(),
             "delivery_hints": skill_has_delivery_hints(skill_path),
         },
+        "skills": skills,
         "checks": checks,
         "fix": f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, or export PATH=\"{local_bin}:$PATH\".",
     }
@@ -329,6 +370,7 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
         f"- canary_root: `{(payload.get('package') or {}).get('canary_root')}`",
         f"- installed_skill: `{(payload.get('skill') or {}).get('path')}`",
         f"- installed_skill_delivery_hints: `{(payload.get('skill') or {}).get('delivery_hints')}`",
+        f"- installed_required_skills: `{','.join(sorted((payload.get('skills') or {}).keys()))}`",
         f"- user_local_bin_on_path: `{(payload.get('path') or {}).get('user_local_bin_on_path')}`",
         f"- python: `{(payload.get('python') or {}).get('executable')}`",
         "",
