@@ -976,6 +976,15 @@ def main(argv: list[str] | None = None) -> int:
             "run Harbor, Codex, a simulator, or inject user messages."
         ),
     )
+    benchmark_run_parser.add_argument(
+        "--active-user-observation-fixture",
+        action="store_true",
+        help=(
+            "With --active-user-assisted-treatment, build the deterministic worker "
+            "after-start active-user observation fixture. This does not run Harbor, "
+            "Codex, a model-backed simulator, task containers, or uploads."
+        ),
+    )
     benchmark_run_parser.add_argument("--classification")
     benchmark_run_parser.add_argument("--recommended-action")
     benchmark_run_parser.add_argument(
@@ -1746,6 +1755,9 @@ def main(argv: list[str] | None = None) -> int:
                     "terminal_bench_harbor_runner_result_ingest_v0"
                     if args.harbor_job_dir
                     else
+                    "terminal_bench_active_user_assisted_observation_fixture_v0"
+                    if args.active_user_observation_fixture
+                    else
                     "terminal_bench_active_user_assisted_treatment_preflight_v0"
                     if args.active_user_assisted_treatment
                     else
@@ -1791,6 +1803,7 @@ def main(argv: list[str] | None = None) -> int:
                     or args.worker_cli_bridge_fixture
                     or args.active_cli_bridge
                     or args.active_user_assisted_treatment
+                    or args.active_user_observation_fixture
                 ):
                     raise ValueError(
                         "--harbor-job-dir cannot be combined with fixture or preflight flags"
@@ -1847,6 +1860,9 @@ def main(argv: list[str] | None = None) -> int:
                         active_cli_bridge_preflight=bool(args.active_cli_bridge),
                         active_user_assisted_treatment_preflight=bool(
                             args.active_user_assisted_treatment
+                        ),
+                        active_user_observation_fixture=bool(
+                            args.active_user_observation_fixture
                         ),
                         timeout_multiplier=args.timeout_multiplier,
                         agent_timeout_multiplier=args.agent_timeout_multiplier,

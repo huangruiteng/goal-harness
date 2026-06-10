@@ -51,7 +51,10 @@ work still belongs in the existing code, examples, and contract documents:
 - `active-user-assisted-pilot-v0.md`: deterministic active-user assisted pilot
   shape for a previously failed compact Terminal-Bench case, keeping proactive
   user interventions, no-oracle audits, frequency budgets, and official score
-  separation in one public-safe fixture.
+  separation in one public-safe fixture. The Terminal-Bench wrapper now also
+  has a deterministic active-user observation fixture that proves a worker can
+  observe one post-start simulator intervention without running the real
+  benchmark or claiming an official score.
 - `benchmark-experiment-report-template-v0.md`: paper-ready
   `benchmark_experiment_report_v0` template that keeps official scores,
   passive control-plane metrics, assisted operator-simulator ablations,

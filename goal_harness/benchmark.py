@@ -13,6 +13,7 @@ from typing import Any
 from .worker_bridge import (
     ACTIVE_USER_INTERVENTION_CHANNEL_CONTRACT_VERSION,
     ACTIVE_USER_INTERVENTION_CHANNEL_SURFACE,
+    ACTIVE_USER_INTERVENTION_OBSERVATION_VERSION,
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL as TERMINAL_BENCH_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_OBSERVATION_JSON as TERMINAL_BENCH_WORKER_BRIDGE_ACTIVE_USER_OBSERVATION_JSON,
     DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON as TERMINAL_BENCH_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
@@ -22,6 +23,8 @@ from .worker_bridge import (
     WORKER_BRIDGE_BENCHMARK_RUN_FORBIDDEN_PUBLIC_FIELDS,
     WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_TOP_LEVEL_FIELDS,
     WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION,
+    WORKER_BRIDGE_SURFACE,
+    build_active_user_intervention,
     build_worker_bridge_install_contract,
 )
 
@@ -50,6 +53,12 @@ TERMINAL_BENCH_ACTIVE_USER_ASSISTED_TREATMENT_PREFLIGHT_MODE = (
 TERMINAL_BENCH_ACTIVE_USER_ASSISTED_TREATMENT_PREFLIGHT_SCHEMA = (
     "terminal_bench_active_user_assisted_treatment_preflight_v0"
 )
+TERMINAL_BENCH_ACTIVE_USER_ASSISTED_OBSERVATION_FIXTURE_MODE = (
+    "codex_goal_harness_active_user_assisted_observation_fixture"
+)
+TERMINAL_BENCH_ACTIVE_USER_ASSISTED_OBSERVATION_FIXTURE_SCHEMA = (
+    "terminal_bench_active_user_assisted_observation_fixture_v0"
+)
 TERMINAL_BENCH_ACTIVE_USER_SIMULATOR_INJECTION_CHANNEL_SCHEMA = (
     "terminal_bench_active_user_simulator_injection_channel_v0"
 )
@@ -58,6 +67,9 @@ TERMINAL_BENCH_ACTIVE_USER_SIMULATOR_INJECTION_FIRST_BLOCKER = (
 )
 TERMINAL_BENCH_ACTIVE_USER_REAL_WORKER_OBSERVATION_FIRST_BLOCKER = (
     "missing_real_assisted_worker_observation"
+)
+TERMINAL_BENCH_ACTIVE_USER_OBSERVATION_FIXTURE_FIRST_BLOCKER = (
+    "real_assisted_worker_observation_fixture_only_no_real_case"
 )
 TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE = (
     "hardened_codex_baseline_preflight_guard"
@@ -213,6 +225,57 @@ def build_terminal_bench_active_user_injection_channel_probe(
         "checked_channels": checked_channels,
         "next_channel_requirement": "wire_worker_prompt_to_poll_active_user_observe_during_assisted_treatment",
         "minimum_next_implementation": "run a worker sample that observes a post-start active-user intervention",
+    }
+
+
+def build_terminal_bench_active_user_observation_fixture() -> dict[str, Any]:
+    """Build the deterministic worker-observed active-user intervention fixture."""
+
+    latest = build_active_user_intervention(
+        seq=2,
+        message="Run the focused public validation before broader edits.",
+        trigger="public_progress_or_stall_signal",
+        created_after_worker_start=True,
+    )
+    latest_summary = {
+        "seq": latest["seq"],
+        "channel": latest["channel"],
+        "type": latest["type"],
+        "trigger": latest["trigger"],
+        "message": latest["message"],
+        "oracle_free": latest["oracle_free"] is True,
+        "hidden_tests_visible": latest["hidden_tests_visible"] is True,
+        "expected_solution_visible": latest["expected_solution_visible"] is True,
+        "credential_values_visible": latest["credential_values_visible"] is True,
+        "private_material_visible": latest["private_material_visible"] is True,
+    }
+    return {
+        "ok": True,
+        "schema_version": ACTIVE_USER_INTERVENTION_OBSERVATION_VERSION,
+        "bridge_surface": WORKER_BRIDGE_SURFACE,
+        "channel_surface": ACTIVE_USER_INTERVENTION_CHANNEL_SURFACE,
+        "feed_present": True,
+        "feed_path_recorded": False,
+        "worker_start_seq": 1,
+        "valid_intervention_count": 2,
+        "invalid_line_count": 0,
+        "observed_after_worker_start": True,
+        "observed_intervention_count": 1,
+        "latest_intervention": latest_summary,
+        "worker_observation_proof": True,
+        "claim_boundary": {
+            "official_score_claim_allowed": False,
+            "leaderboard_claim_allowed": False,
+            "assisted_collaboration_claim_allowed": True,
+            "direct_codex_chat_injection": False,
+            "worker_pull_channel": True,
+        },
+        "public_boundary": {
+            "raw_paths_recorded": False,
+            "raw_transcript_recorded": False,
+            "credential_values_recorded": False,
+        },
+        "next_action": "run a real assisted worker sample or append a compact blocker",
     }
 
 
@@ -2503,6 +2566,7 @@ def build_terminal_bench_benchmark_run(
     worker_cli_bridge_fixture: bool = False,
     active_cli_bridge_preflight: bool = False,
     active_user_assisted_treatment_preflight: bool = False,
+    active_user_observation_fixture: bool = False,
     timeout_multiplier: float | None = None,
     agent_timeout_multiplier: float | None = None,
     verifier_timeout_multiplier: float | None = None,
@@ -2565,6 +2629,10 @@ def build_terminal_bench_benchmark_run(
         raise ValueError("--active-user-assisted-treatment cannot be combined with --worker-cli-bridge-fixture")
     if active_user_assisted_treatment_preflight and cli_bridge_contract:
         raise ValueError("--active-user-assisted-treatment cannot be combined with --cli-bridge-contract")
+    if active_user_observation_fixture and not active_user_assisted_treatment_preflight:
+        raise ValueError(
+            "--active-user-observation-fixture requires --active-user-assisted-treatment"
+        )
     if active_cli_bridge_preflight and agent_timeout_multiplier is None:
         agent_timeout_multiplier = (
             TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_TIMEOUT_MULTIPLIER
@@ -2602,7 +2670,9 @@ def build_terminal_bench_benchmark_run(
         surface = preflight_surface or collect_terminal_bench_managed_preflight_surface()
         first_blocker = _managed_preflight_first_blocker(surface)
         event_mode = (
-            TERMINAL_BENCH_ACTIVE_USER_ASSISTED_TREATMENT_PREFLIGHT_MODE
+            TERMINAL_BENCH_ACTIVE_USER_ASSISTED_OBSERVATION_FIXTURE_MODE
+            if active_user_observation_fixture
+            else TERMINAL_BENCH_ACTIVE_USER_ASSISTED_TREATMENT_PREFLIGHT_MODE
             if active_user_assisted_treatment_preflight
             else "codex_goal_harness_active_cli_bridge_preflight"
             if active_cli_bridge_preflight and mode == "codex-goal-harness"
@@ -2613,7 +2683,9 @@ def build_terminal_bench_benchmark_run(
             else TERMINAL_BENCH_PREFLIGHT_MODE
         )
         trace_publicness = (
-            "public_active_user_assisted_treatment_preflight"
+            "public_active_user_assisted_observation_fixture"
+            if active_user_observation_fixture
+            else "public_active_user_assisted_treatment_preflight"
             if active_user_assisted_treatment_preflight
             else "public_codex_goal_harness_active_cli_bridge_preflight"
             if active_cli_bridge_preflight and mode == "codex-goal-harness"
@@ -2628,7 +2700,9 @@ def build_terminal_bench_benchmark_run(
             "event_mode": event_mode,
             "trace_publicness": trace_publicness,
             "first_blocker": (
-                TERMINAL_BENCH_ACTIVE_USER_REAL_WORKER_OBSERVATION_FIRST_BLOCKER
+                TERMINAL_BENCH_ACTIVE_USER_OBSERVATION_FIXTURE_FIRST_BLOCKER
+                if active_user_observation_fixture
+                else TERMINAL_BENCH_ACTIVE_USER_REAL_WORKER_OBSERVATION_FIRST_BLOCKER
                 if active_user_assisted_treatment_preflight
                 else first_blocker
             ),
@@ -2694,7 +2768,12 @@ def build_terminal_bench_benchmark_run(
         validation["simulator_to_worker_external_update_loop_available"] = bool(
             validation_channel_probe.get("audited_external_update_loop_available")
         )
-        validation["real_assisted_worker_observation_missing"] = True
+        if active_user_observation_fixture:
+            validation["active_user_observation_fixture"] = True
+            validation["worker_observation_proof"] = True
+            validation["scripted_active_user_intervention_observed"] = True
+        else:
+            validation["real_assisted_worker_observation_missing"] = True
         validation["no_real_user_message_injected"] = True
         validation["no_model_backed_simulator_invoked"] = True
         validation["no_oracle_audit_required"] = True
@@ -2751,6 +2830,10 @@ def build_terminal_bench_benchmark_run(
             if bridge_trace_observed
             else preflight_fixture_calls
         )
+        active_user_observation_calls = {
+            **preflight_fixture_calls,
+            "active_user_observe": 1,
+        }
         interaction_counters = build_terminal_bench_goal_harness_interaction_counters(
             prompt_policy_injected=True,
             harness_skill_or_packet_injected=True,
@@ -2777,6 +2860,8 @@ def build_terminal_bench_benchmark_run(
                     "append_benchmark_run": 1,
                 }
                 if fake_worker
+                else active_user_observation_calls
+                if active_user_observation_fixture
                 else preflight_fixture_calls if preflight_guard else None
             ),
             goal_harness_state_reads=(
@@ -2785,6 +2870,7 @@ def build_terminal_bench_benchmark_run(
                 else
                 int(cli_bridge_trace.get("goal_harness_state_reads", 0))
                 if bridge_trace_observed
+                else 1 if active_user_observation_fixture
                 else 4 if fake_worker else 0
             ),
             goal_harness_state_writes=(
@@ -2806,6 +2892,8 @@ def build_terminal_bench_benchmark_run(
                 else
                 "worker_goal_harness_writeback"
                 if fake_worker
+                else "worker_active_user_observe_fixture_no_official_run"
+                if active_user_observation_fixture
                 else "not_observed_active_user_assisted_treatment_preflight"
                 if active_user_assisted_treatment_preflight
                 else "not_observed_active_cli_bridge_preflight"
@@ -2825,6 +2913,8 @@ def build_terminal_bench_benchmark_run(
                 else
                 "fake_worker_fixture_observed"
                 if fake_worker
+                else "active_user_observation_fixture_audited"
+                if active_user_observation_fixture
                 else "active_user_assisted_treatment_preflight_external_update_loop_no_worker_observation"
                 if active_user_assisted_treatment_preflight
                 else "active_bridge_preflight_no_worker_trace"
@@ -3126,6 +3216,9 @@ def build_terminal_bench_benchmark_run(
         ],
     }
     benchmark_run["goal_harness_counter_scope"] = (
+        "worker_active_user_observation_fixture"
+        if active_user_observation_fixture
+        else
         "worker_in_case_cli_bridge_fixture"
         if worker_cli_bridge_fixture
         else "worker_in_case_cli_bridge_preflight"
@@ -3140,6 +3233,9 @@ def build_terminal_bench_benchmark_run(
         6 if cli_bridge_contract and bridge_trace_observed else 0
     )
     benchmark_run["worker_goal_harness_cli_call_total"] = (
+        1
+        if active_user_observation_fixture
+        else
         6
         if worker_cli_bridge_fixture or (fake_worker and mode == "codex-goal-harness")
         else 0
@@ -3181,6 +3277,10 @@ def build_terminal_bench_benchmark_run(
         benchmark_run["active_user_simulator_injection_channel_available"] = bool(
             injection_channel_probe.get("channel_available")
         )
+        if active_user_observation_fixture:
+            benchmark_run["active_user_observation"] = (
+                build_terminal_bench_active_user_observation_fixture()
+            )
     if mode == "codex-goal-harness":
         benchmark_run["goal_harness_access_packet"] = {
             "schema_version": TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_VERSION,
@@ -3224,6 +3324,7 @@ def build_terminal_bench_benchmark_run(
             "packet_public_preview": build_terminal_bench_goal_harness_access_packet(
                 cli_bridge_available=active_cli_bridge_preflight
                 or worker_cli_bridge_fixture,
+                active_user_intervention_enabled=active_user_assisted_treatment_preflight,
             ),
             "raw_prompt_recorded": False,
         }
