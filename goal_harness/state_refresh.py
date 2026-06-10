@@ -9,7 +9,7 @@ from typing import Any
 
 from .feedback import validate_public_safe_text
 from .global_registry import sync_project_registry_to_global
-from .history import load_registry
+from .history import load_registry, unique_run_paths
 from .paths import resolve_runtime_root
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
@@ -294,9 +294,7 @@ def refresh_state_run(
     )
 
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
-    stem = run_file_stem(generated_at)
-    json_path = runs_dir / f"{stem}.json"
-    markdown_path = runs_dir / f"{stem}.md"
+    json_path, markdown_path = unique_run_paths(runs_dir, generated_at)
     index_path = runs_dir / "index.jsonl"
     index_record = {
         "generated_at": generated_at,
