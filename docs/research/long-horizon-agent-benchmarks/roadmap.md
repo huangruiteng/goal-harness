@@ -342,8 +342,10 @@ the same or similar long-horizon task slice:
 
 - fixed operator-simulator model and intervention budget;
 - no access to hidden tests, expected solutions, or benchmark answer keys;
-- allowed interventions limited to plan approval, scope clarification,
-  continue/stop decisions, validation triage, and process-drift correction;
+- allowed interventions may be proactive user-style injections, including
+  directive strategy redirects, validation triage, continue/stop decisions, and
+  process-drift correction, as long as every message passes the no-oracle
+  visibility audit and stays within frequency and token budgets;
 - separate reporting from official leaderboard metrics;
 - comparison against native and passive control-plane modes.
 
