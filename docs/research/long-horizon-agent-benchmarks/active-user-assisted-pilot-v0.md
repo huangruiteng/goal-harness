@@ -81,6 +81,7 @@ python3 examples/active-user-assisted-pilot-smoke.py
 python3 examples/worker-bridge-active-user-feed-smoke.py
 python3 examples/worker-bridge-active-user-after-start-observation-smoke.py
 python3 examples/benchmark-run-v0-active-user-observation-ingest-smoke.py
+python3 examples/terminal-bench-active-user-assisted-observation-fixture-smoke.py
 ```
 
 It performs no model call, no benchmark run, no Docker or cloud sandbox use, no
