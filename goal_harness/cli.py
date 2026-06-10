@@ -136,16 +136,21 @@ from .worker_bridge import (
     DEFAULT_ACTIVE_USER_SIMULATOR_PROMPT_JSON,
     GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER,
     GOAL_HARNESS_RUNTIME_ROOT_PLACEHOLDER,
+    append_worker_bridge_counter_trace_row,
     build_active_user_codex_simulator_contract,
     build_active_user_intervention,
     build_active_user_intervention_channel_contract,
     build_active_user_intervention_from_simulator_output,
     build_worker_bridge_benchmark_run,
+    build_worker_bridge_benchmark_run_from_counters,
     build_worker_bridge_install_contract,
+    build_worker_bridge_interaction_counters_from_trace,
     build_worker_bridge_outcome,
+    load_worker_bridge_counter_trace_file,
     observe_active_user_intervention_feed,
     render_worker_bridge_install_contract_markdown,
     write_active_user_observation_file,
+    write_worker_bridge_benchmark_run_file,
 )
 
 
@@ -668,6 +673,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Worker-visible active-user observation JSON path.",
     )
     active_user_contract_parser.add_argument(
+        "--counter-trace-json",
+        default=DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
+        help="Worker-visible compact counter trace JSONL path.",
+    )
+    active_user_contract_parser.add_argument(
+        "--benchmark-run-json",
+        default=DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
+        help="Worker-visible compact benchmark_run checkpoint JSON path.",
+    )
+    active_user_contract_parser.add_argument(
+        "--classification",
+        default="active_user_observe_checkpoint",
+        help="Compact classification label for observe checkpoints.",
+    )
+    active_user_contract_parser.add_argument(
         "--min-interval-seconds",
         type=int,
         default=300,
@@ -796,6 +816,39 @@ def main(argv: list[str] | None = None) -> int:
     active_user_observe_parser.add_argument(
         "--observation-json",
         help="Optional path to write the compact observation JSON.",
+    )
+    active_user_observe_parser.add_argument(
+        "--counter-trace-json",
+        help="Optional worker counter trace JSONL path to append active_user_observe.",
+    )
+    active_user_observe_parser.add_argument(
+        "--benchmark-run-json",
+        help="Optional compact worker benchmark_run checkpoint JSON path to write.",
+    )
+    active_user_observe_parser.add_argument(
+        "--goal-id",
+        default="worker-bridge-active-user",
+        help="Compact goal id label for optional counter/checkpoint writeback.",
+    )
+    active_user_observe_parser.add_argument(
+        "--bridge-mode",
+        default="codex_goal_harness_active_worker",
+        help="Compact worker bridge mode label for optional counter/checkpoint writeback.",
+    )
+    active_user_observe_parser.add_argument(
+        "--classification",
+        default="active_user_observe_checkpoint",
+        help="Compact classification label for optional counter/checkpoint writeback.",
+    )
+    active_user_observe_parser.add_argument(
+        "--task-id",
+        default="worker-bridge-active-user",
+        help="Compact task id label for optional benchmark_run checkpoint.",
+    )
+    active_user_observe_parser.add_argument(
+        "--trial-name",
+        default="worker-bridge-active-user-observe-checkpoint",
+        help="Compact trial name for optional benchmark_run checkpoint.",
     )
 
     promotion_gate_parser = sub.add_parser(
@@ -1711,6 +1764,9 @@ def main(argv: list[str] | None = None) -> int:
                     module=args.module,
                     feed_jsonl=args.feed_jsonl,
                     observation_json=args.observation_json,
+                    benchmark_run_json=args.benchmark_run_json,
+                    counter_trace_json=args.counter_trace_json,
+                    classification=args.classification,
                     min_interval_seconds=args.min_interval_seconds,
                     max_interventions_per_task=args.max_interventions_per_task,
                 )
@@ -1763,6 +1819,59 @@ def main(argv: list[str] | None = None) -> int:
                     payload["observation_written"] = write_active_user_observation_file(
                         args.observation_json,
                         payload,
+                    )
+                if args.counter_trace_json:
+                    payload["counter_trace_written"] = (
+                        append_worker_bridge_counter_trace_row(
+                            args.counter_trace_json,
+                            command="active_user_observe",
+                            ok=bool(payload.get("ok")),
+                            goal_id=args.goal_id,
+                            mode=args.bridge_mode,
+                            classification=args.classification,
+                            observed_after_worker_start=payload.get(
+                                "observed_after_worker_start"
+                            ),
+                            worker_observation_proof=payload.get(
+                                "worker_observation_proof"
+                            ),
+                        )
+                    )
+                if args.benchmark_run_json:
+                    trace_rows = load_worker_bridge_counter_trace_file(
+                        args.counter_trace_json
+                    )
+                    interaction_counters = (
+                        build_worker_bridge_interaction_counters_from_trace(
+                            trace_rows
+                        )
+                    )
+                    checkpoint = build_worker_bridge_benchmark_run_from_counters(
+                        interaction_counters,
+                        counter_trace_present=bool(trace_rows),
+                        source_runner="worker_bridge_active_user_observe",
+                        benchmark_id="worker-bridge-active-user@v0",
+                        job_name="goal_harness_active_user_observe_checkpoint",
+                        mode=args.bridge_mode,
+                        task_id=args.task_id,
+                        trial_name=args.trial_name,
+                    )
+                    checkpoint["worker_bridge_checkpoint"] = {
+                        "schema_version": "goal_harness_worker_bridge_checkpoint_v0",
+                        "checkpoint_kind": "active_user_observe",
+                        "interrupted": False,
+                        "trace_row_count": len(trace_rows),
+                        "raw_trace_recorded": False,
+                        "raw_paths_recorded": False,
+                    }
+                    payload["benchmark_run_checkpoint_written"] = (
+                        write_worker_bridge_benchmark_run_file(
+                            args.benchmark_run_json,
+                            checkpoint,
+                        )
+                    )
+                    payload["benchmark_run_checkpoint_schema_version"] = (
+                        checkpoint.get("schema_version")
                     )
         except Exception as exc:
             payload = {

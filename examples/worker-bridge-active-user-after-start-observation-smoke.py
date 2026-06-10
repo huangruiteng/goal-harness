@@ -105,15 +105,21 @@ def main() -> int:
         root = Path(tmp)
         feed = root / "active-user-feed.jsonl"
         observation = root / "active-user-observation.json"
+        counter_trace = root / "counter-trace.jsonl"
+        benchmark_run = root / "worker-benchmark-run.json"
 
         contract = build_active_user_intervention_channel_contract(
             project_root=str(REPO_ROOT),
             feed_jsonl=str(feed),
             observation_json=str(observation),
+            counter_trace_json=str(counter_trace),
+            benchmark_run_json=str(benchmark_run),
         )
         assert contract["worker_start_marker"]["kind"] == "worker_start_seq", contract
         assert contract["claim_boundary"]["worker_pull_required"] is True, contract
         assert contract["claim_boundary"]["direct_codex_chat_injection"] is False, contract
+        assert "--counter-trace-json" in contract["worker_observe_command"], contract
+        assert "--benchmark-run-json" in contract["worker_observe_command"], contract
 
         access_packet = build_terminal_bench_goal_harness_access_packet(
             cli_bridge_available=True,
@@ -149,6 +155,8 @@ def main() -> int:
         )
         assert no_update["observed_after_worker_start"] is False, no_update
         assert no_update["worker_observation_proof"] is False, no_update
+        assert no_update["counter_trace_written"] is True, no_update
+        assert no_update["benchmark_run_checkpoint_written"] is True, no_update
 
         append_command = (
             contract["simulator_append_command"]
@@ -172,9 +180,29 @@ def main() -> int:
             contract["worker_observe_command"].replace("<worker-start-seq>", "1")
         )
         assert observed["observation_written"] is True, observed
+        assert observed["counter_trace_written"] is True, observed
+        assert observed["benchmark_run_checkpoint_written"] is True, observed
         assert observation.exists(), observed
+        assert counter_trace.exists(), observed
+        assert benchmark_run.exists(), observed
         assert_worker_observation(observed)
         assert_worker_observation(json.loads(observation.read_text(encoding="utf-8")))
+        trace_rows = [
+            json.loads(line)
+            for line in counter_trace.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(trace_rows) == 2, trace_rows
+        assert trace_rows[-1]["command"] == "active_user_observe", trace_rows
+        checkpoint = json.loads(benchmark_run.read_text(encoding="utf-8"))
+        assert checkpoint["schema_version"] == "benchmark_run_v0", checkpoint
+        assert checkpoint["worker_goal_harness_cli_call_total"] == 2, checkpoint
+        assert checkpoint["worker_bridge_outcome"]["worker_bridge_verified"] is True, checkpoint
+        assert (
+            checkpoint["worker_bridge_checkpoint"]["checkpoint_kind"]
+            == "active_user_observe"
+        ), checkpoint
+        assert_public_safe(checkpoint)
 
     print("worker-bridge-active-user-after-start-observation-smoke ok proof=true")
     return 0

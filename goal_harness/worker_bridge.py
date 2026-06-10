@@ -278,6 +278,9 @@ def build_active_user_intervention_channel_contract(
     module: str = DEFAULT_WORKER_BRIDGE_MODULE,
     feed_jsonl: str = DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
     observation_json: str = DEFAULT_WORKER_BRIDGE_ACTIVE_USER_OBSERVATION_JSON,
+    benchmark_run_json: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
+    counter_trace_json: str = DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
+    classification: str = "active_user_observe_checkpoint",
     min_interval_seconds: int = 300,
     max_interventions_per_task: int = 3,
 ) -> dict[str, Any]:
@@ -303,6 +306,9 @@ def build_active_user_intervention_channel_contract(
         f"--feed-jsonl {shlex.quote(feed_jsonl)} "
         "--worker-start-seq <worker-start-seq> "
         f"--observation-json {shlex.quote(observation_json)} "
+        f"--counter-trace-json {shlex.quote(counter_trace_json)} "
+        f"--benchmark-run-json {shlex.quote(benchmark_run_json)} "
+        f"--classification {shlex.quote(classification)} "
         "--format json"
     )
     simulator_append_command = (
@@ -321,6 +327,8 @@ def build_active_user_intervention_channel_contract(
         "mode": "audited_external_update_loop",
         "feed_jsonl": feed_jsonl,
         "observation_json": observation_json,
+        "benchmark_run_json": benchmark_run_json,
+        "counter_trace_json": counter_trace_json,
         "worker_observe_command": observe_command,
         "simulator_append_command": simulator_append_command,
         "worker_start_marker": {
@@ -753,6 +761,106 @@ def write_active_user_observation_file(
     return True
 
 
+def _compact_counter_trace_label(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def append_worker_bridge_counter_trace_row(
+    path: str | Path | None,
+    *,
+    command: str,
+    ok: bool,
+    goal_id: str,
+    mode: str,
+    classification: str,
+    observed_after_worker_start: bool | None = None,
+    worker_observation_proof: bool | None = None,
+) -> bool:
+    """Append one compact worker-side Goal Harness CLI call trace row."""
+
+    if not path:
+        return False
+    trace_path = Path(path)
+    row: dict[str, Any] = {
+        "kind": "goal_harness_cli_call",
+        "command": _compact_counter_trace_label(command),
+        "ok": bool(ok),
+        "goal_id": str(goal_id or "").strip() or "worker-bridge",
+        "mode": str(mode or "").strip() or DEFAULT_WORKER_BRIDGE_MODE,
+        "classification": (
+            str(classification or "").strip() or "worker_bridge_checkpoint"
+        ),
+    }
+    if observed_after_worker_start is not None:
+        row["observed_after_worker_start"] = bool(observed_after_worker_start)
+    if worker_observation_proof is not None:
+        row["worker_observation_proof"] = bool(worker_observation_proof)
+    try:
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=True, sort_keys=True) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def load_worker_bridge_counter_trace_file(path: str | Path | None) -> list[dict[str, Any]]:
+    """Load compact worker-side counter trace rows, ignoring malformed rows."""
+
+    if not path:
+        return []
+    trace_path = Path(path)
+    if not trace_path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        for line in trace_path.read_text(encoding="utf-8").splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                row = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    except OSError:
+        return []
+    return rows
+
+
+def build_worker_bridge_interaction_counters_from_trace(
+    trace_rows: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Build generic compact interaction counters from worker bridge trace rows."""
+
+    goal_harness_cli_calls: dict[str, int] = {}
+    total = 0
+    for row in trace_rows or []:
+        if not isinstance(row, dict):
+            continue
+        kind = _compact_counter_trace_label(
+            row.get("kind") or row.get("type") or row.get("event")
+        )
+        command = _compact_counter_trace_label(row.get("command") or row.get("call"))
+        if kind and kind != "goal_harness_cli_call":
+            continue
+        if not command:
+            continue
+        total += 1
+        goal_harness_cli_calls[command] = goal_harness_cli_calls.get(command, 0) + 1
+    goal_harness_cli_calls["total"] = total
+    return {
+        "schema_version": "goal_harness_worker_bridge_interaction_counters_v0",
+        "goal_harness_cli_calls": goal_harness_cli_calls,
+        "trace_row_count": len(trace_rows or []),
+        "state_reads": goal_harness_cli_calls.get("active_user_observe", 0),
+        "state_writes": goal_harness_cli_calls.get("append_benchmark_run", 0),
+        "raw_trace_recorded": False,
+        "raw_paths_recorded": False,
+    }
+
+
 def build_worker_bridge_install_contract(
     *,
     project_root: str = GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER,
@@ -805,6 +913,9 @@ def build_worker_bridge_install_contract(
             module=module,
             feed_jsonl=active_user_feed_jsonl,
             observation_json=active_user_observation_json,
+            benchmark_run_json=benchmark_run_json,
+            counter_trace_json=counter_trace_json,
+            classification=classification,
         )
     )
     return {
