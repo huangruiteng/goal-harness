@@ -575,6 +575,118 @@ def collect_history(
     }
 
 
+def inspect_index_duplicates(
+    *,
+    registry_path: Path,
+    runtime_root_override: str | None,
+    goal_id: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    registry = load_registry(registry_path)
+    runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    groups: list[dict[str, Any]] = []
+    checked_goal_count = 0
+    raw_index_records = 0
+    duplicate_row_count = 0
+
+    for current_goal_id in discover_goal_ids(runtime_root, registry, goal_id):
+        checked_goal_count += 1
+        index_path = runtime_root / "goals" / current_goal_id / "runs" / "index.jsonl"
+        if not index_path.exists():
+            continue
+
+        grouped: dict[tuple[str, str, str], list[tuple[int, dict[str, Any]]]] = {}
+        with index_path.open(encoding="utf-8") as f:
+            for line_number, line in enumerate(f, start=1):
+                if not line.strip():
+                    continue
+                raw_index_records += 1
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                key = (
+                    str(item.get("generated_at") or ""),
+                    str(item.get("json_path") or ""),
+                    str(item.get("markdown_path") or ""),
+                )
+                grouped.setdefault(key, []).append((line_number, item))
+
+        for key, records in grouped.items():
+            if len(records) <= 1:
+                continue
+            duplicate_row_count += len(records) - 1
+            generated_at, json_path, markdown_path = key
+            normalized = [
+                {record_key: value for record_key, value in record.items() if record_key != "human_reward"}
+                for _, record in records
+            ]
+            normalized_keys = {json.dumps(record, sort_keys=True, ensure_ascii=False) for record in normalized}
+            reward_records = sum(1 for _, record in records if isinstance(record.get("human_reward"), dict))
+            classifications = sorted({str(record.get("classification") or "") for _, record in records})
+            health_checks = sorted({str(record.get("health_check") or "") for _, record in records if record.get("health_check")})
+            if reward_records and len(normalized_keys) == 1:
+                duplicate_kind = "reward_overlay"
+                severity = "info"
+                repair_hint = "no index repair needed; reward overlay rows merge into the base run"
+            elif len(normalized_keys) == 1:
+                duplicate_kind = "plain_duplicate"
+                severity = "warning"
+                repair_hint = "append-only ledger repair can archive or supersede the extra identical index row"
+            else:
+                duplicate_kind = "artifact_identity_collision"
+                severity = "warning"
+                repair_hint = (
+                    "do not delete blindly; inspect artifacts and append an explicit repair/supersede event "
+                    "or rebuild a reviewed index copy"
+                )
+            groups.append(
+                {
+                    "goal_id": current_goal_id,
+                    "index_path": str(index_path),
+                    "generated_at": generated_at,
+                    "json_path": json_path,
+                    "markdown_path": markdown_path,
+                    "json_exists": Path(json_path).exists() if json_path else False,
+                    "markdown_exists": Path(markdown_path).exists() if markdown_path else False,
+                    "line_numbers": [line_number for line_number, _ in records],
+                    "raw_rows": len(records),
+                    "duplicate_rows": len(records) - 1,
+                    "duplicate_kind": duplicate_kind,
+                    "severity": severity,
+                    "classifications": classifications,
+                    "health_checks": health_checks,
+                    "reward_overlay_rows": reward_records,
+                    "repair_hint": repair_hint,
+                }
+            )
+
+    severity_priority = {"warning": 0, "info": 1}
+    groups.sort(
+        key=lambda item: (
+            severity_priority.get(str(item.get("severity")), 99),
+            str(item.get("goal_id")),
+            str(item.get("generated_at")),
+        )
+    )
+    limited_groups = groups[: max(0, limit)]
+    return {
+        "ok": True,
+        "registry": str(registry_path),
+        "runtime_root": str(runtime_root),
+        "goal_filter": goal_id,
+        "checked_goal_count": checked_goal_count,
+        "raw_index_records": raw_index_records,
+        "duplicate_group_count": len(groups),
+        "duplicate_row_count": duplicate_row_count,
+        "groups": limited_groups,
+        "truncated": len(groups) > len(limited_groups),
+        "limit": limit,
+    }
+
+
 def render_history_markdown(payload: dict[str, Any]) -> str:
     if not payload.get("ok"):
         return "# Goal Harness Run History\n\n- ok: `False`\n- error: " + str(payload.get("error"))
@@ -612,6 +724,41 @@ def render_history_markdown(payload: dict[str, Any]) -> str:
             f"index_exists=`{goal.get('index_exists')}`, "
             f"records=`{goal.get('raw_index_records')}`, "
             f"unique_runs=`{goal.get('unique_runs')}`"
+        )
+    return "\n".join(lines)
+
+
+def render_index_duplicate_inspection_markdown(payload: dict[str, Any]) -> str:
+    if not payload.get("ok"):
+        return "# Goal Harness Index Duplicate Inspection\n\n- ok: `False`\n- error: " + str(payload.get("error"))
+
+    lines = [
+        "# Goal Harness Index Duplicate Inspection",
+        "",
+        f"- runtime_root: `{payload.get('runtime_root')}`",
+        f"- registry: `{payload.get('registry')}`",
+        f"- goal_filter: `{payload.get('goal_filter')}`",
+        f"- checked_goals: `{payload.get('checked_goal_count')}`",
+        f"- raw_index_records: `{payload.get('raw_index_records')}`",
+        f"- duplicate_groups: `{payload.get('duplicate_group_count')}`",
+        f"- duplicate_rows: `{payload.get('duplicate_row_count')}`",
+        f"- truncated: `{payload.get('truncated')}`",
+        "",
+        "| goal | generated_at | kind | severity | rows | classifications | repair_hint |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for group in payload.get("groups") or []:
+        classifications = ", ".join(str(item) for item in group.get("classifications") or [])
+        hint = str(group.get("repair_hint") or "").replace("|", "\\|")
+        lines.append(
+            "| "
+            f"`{group.get('goal_id')}` | "
+            f"`{group.get('generated_at')}` | "
+            f"`{group.get('duplicate_kind')}` | "
+            f"`{group.get('severity')}` | "
+            f"`{group.get('line_numbers')}` | "
+            f"`{classifications}` | "
+            f"{hint} |"
         )
     return "\n".join(lines)
 

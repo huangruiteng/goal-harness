@@ -53,6 +53,7 @@ from .history import (
     append_benchmark_result,
     append_benchmark_run,
     collect_history,
+    inspect_index_duplicates,
     load_registry,
     render_active_user_assisted_pilot_append_markdown,
     render_benchmark_comparison_append_markdown,
@@ -60,6 +61,7 @@ from .history import (
     render_benchmark_result_append_markdown,
     render_benchmark_run_append_markdown,
     render_history_markdown,
+    render_index_duplicate_inspection_markdown,
 )
 from .operator_gate import (
     DEFAULT_OPERATOR_GATE,
@@ -815,8 +817,13 @@ def main(argv: list[str] | None = None) -> int:
             "append-benchmark-comparison",
             "append-benchmark-report",
             "append-active-user-assisted-pilot",
+            "inspect-index-duplicates",
         ],
-        help="Append a compact benchmark_run_v0, benchmark_result_v0, benchmark_comparison_v0, benchmark_experiment_report_v0, or active_user_assisted_pilot_v0 event.",
+        help=(
+            "Append a compact benchmark_run_v0, benchmark_result_v0, benchmark_comparison_v0, "
+            "benchmark_experiment_report_v0, or active_user_assisted_pilot_v0 event; or inspect "
+            "duplicate run-index identities without writing runtime state."
+        ),
     )
     history_parser.add_argument("--goal-id", help="Only show one goal.")
     history_parser.add_argument("--limit", type=int, default=10)
@@ -1956,6 +1963,27 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload.get("ok") else 1
 
     if args.command == "history":
+        if args.history_action == "inspect-index-duplicates":
+            try:
+                payload = inspect_index_duplicates(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    limit=args.limit,
+                )
+            except Exception as exc:
+                registry = load_registry(registry_path)
+                runtime_root = resolve_runtime_root(registry, args.runtime_root)
+                payload = {
+                    "ok": False,
+                    "registry": str(registry_path),
+                    "runtime_root": str(runtime_root),
+                    "goal_filter": args.goal_id,
+                    "error": str(exc),
+                }
+            print_payload(payload, args.format, render_index_duplicate_inspection_markdown)
+            return 0 if payload.get("ok") else 1
+
         if args.history_action == "append-benchmark-run":
             try:
                 if args.dry_run and args.execute:
