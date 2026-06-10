@@ -112,6 +112,8 @@ def main() -> None:
             "127.0.0.1",
             "--port",
             str(port),
+            "--scan-path",
+            str(REPO_ROOT / "README.md"),
             "--limit",
             "10",
         ]
