@@ -1353,6 +1353,17 @@ def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[st
             **resolved_command_kwargs,
         )
     elif mode in ("", "codex-goal-harness", "goal-harness-managed-codex"):
+        if mode == "codex-goal-harness":
+            resolved_command_kwargs.setdefault("goal_harness_mode", "codex_goal_harness")
+            resolved_command_kwargs.setdefault(
+                "job_name",
+                "terminal_bench_codex_goal_harness_pilot",
+            )
+        elif mode == "goal-harness-managed-codex":
+            resolved_command_kwargs.setdefault(
+                "goal_harness_mode",
+                "goal_harness_managed_codex",
+            )
         argv = build_terminal_bench_managed_harbor_command(
             resolve_cli_paths=True,
             **resolved_command_kwargs,

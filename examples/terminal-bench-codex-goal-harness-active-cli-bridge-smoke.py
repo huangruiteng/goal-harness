@@ -585,6 +585,10 @@ def assert_harbor_command_preview() -> None:
         goal_harness_mode="codex_goal_harness",
         goal_harness_cli_bridge_enabled=True,
     )
+    mode_launch = build_terminal_bench_private_runner_launch(
+        mode="codex-goal-harness",
+        goal_harness_cli_bridge_enabled=True,
+    )
     batch_launch = build_terminal_bench_private_runner_launch(
         dataset=str(REPO_ROOT / ".local" / "harbor-datasets" / "terminal-bench-sample-gh-e2e-subset"),
         task_id=None,
@@ -619,6 +623,8 @@ def assert_harbor_command_preview() -> None:
     assert launch_summary["raw_paths_recorded"] is False, launch_summary
     assert_public_safe(launch_summary)
     assert "goal_harness_mode=codex_goal_harness" in command, command
+    assert "goal_harness_mode=codex_goal_harness" in mode_launch["argv"], mode_launch["argv"]
+    assert "goal_harness_cli_bridge_enabled=true" in mode_launch["argv"], mode_launch["argv"]
     assert "goal_harness_mode=hardened_codex_baseline" in baseline_command, baseline_command
     assert "goal_harness_ablation_mode=hardened_codex_baseline" in baseline_command, baseline_command
     assert "goal_harness_access_packet_mode=none" in baseline_command, baseline_command
