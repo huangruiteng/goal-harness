@@ -186,6 +186,9 @@ AGENTS_LAST_EXAM_RESULT_INGEST_POLICY_VERSION = "ale-result-ingest-contract-v0"
 AGENTS_LAST_EXAM_LOCAL_PREFLIGHT_SCHEMA_VERSION = (
     "agents_last_exam_local_preflight_v0"
 )
+AGENTS_LAST_EXAM_LOCAL_DRY_RUN_PLAN_SCHEMA_VERSION = (
+    "agents_last_exam_local_dry_run_plan_v0"
+)
 AGENTS_LAST_EXAM_TRACE_PUBLICNESS = (
     "compact_public_safe_no_task_body_no_trajectory_no_output"
 )
@@ -1776,6 +1779,167 @@ def build_agents_last_exam_local_preflight(
             "task_text_read": False,
             "raw_artifacts_read": False,
             "local_paths_recorded": False,
+        },
+    }
+
+
+def build_agents_last_exam_local_dry_run_plan(
+    *,
+    selected_task_id: str | None = None,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+    preflight: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Plan an ALE local adapter dry-run without running the adapter."""
+
+    preflight_payload = (
+        preflight
+        if isinstance(preflight, dict)
+        else build_agents_last_exam_local_preflight(
+            selected_task_id=selected_task_id,
+            snapshot=snapshot,
+            provider_kind=provider_kind,
+            image_ref=image_ref,
+            alternate_image_ref=alternate_image_ref,
+            image_metadata=image_metadata,
+            alternate_image_metadata=alternate_image_metadata,
+            disk_headroom=disk_headroom,
+        )
+    )
+    boundary = (
+        preflight_payload.get("boundary")
+        if isinstance(preflight_payload.get("boundary"), dict)
+        else {}
+    )
+    read_boundary = (
+        preflight_payload.get("read_boundary")
+        if isinstance(preflight_payload.get("read_boundary"), dict)
+        else {}
+    )
+    forbidden_side_effects = {
+        "container_started": False,
+        "task_body_read": False,
+        "model_api_invoked": False,
+        "raw_trajectory_read": False,
+        "screenshot_captured": False,
+        "credential_values_recorded": False,
+        "local_paths_recorded": False,
+        "submit_eligible": False,
+        "leaderboard_evidence": False,
+    }
+    boundary_preserved = (
+        boundary.get("local_only") is True
+        and boundary.get("no_cloud") is True
+        and boundary.get("no_upload") is True
+        and all(
+            boundary.get(field) is expected
+            for field, expected in forbidden_side_effects.items()
+        )
+        and read_boundary.get("compact_only") is True
+        and read_boundary.get("task_text_read") is False
+        and read_boundary.get("raw_artifacts_read") is False
+        and read_boundary.get("local_paths_recorded") is False
+    )
+    preflight_ready = preflight_payload.get("ready") is True
+    blockers: list[str] = []
+    if not preflight_ready:
+        blockers.append(
+            _agents_last_exam_public_id(
+                preflight_payload.get("first_blocker"),
+                limit=80,
+            )
+            or "ale_local_preflight_not_ready"
+        )
+    if not boundary_preserved:
+        blockers.append("ale_local_boundary_not_preserved")
+    ready = preflight_ready and boundary_preserved
+
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_DRY_RUN_PLAN_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": preflight_payload.get("task_id") or "metadata_only_candidate",
+        "snapshot": preflight_payload.get("snapshot")
+        or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "preflight": preflight_payload,
+        "ready": ready,
+        "first_blocker": blockers[0] if blockers else "ready_for_contract_only_dry_run_plan",
+        "blockers": blockers,
+        "adapter_plan": {
+            "mode": "contract_only_no_execution",
+            "provider": "local_docker",
+            "will_start_container": False,
+            "will_read_task_body": False,
+            "will_invoke_model_api": False,
+            "will_upload": False,
+            "will_submit": False,
+            "will_capture_screenshot": False,
+            "will_record_credentials": False,
+            "will_record_local_paths": False,
+            "allowed_probes": [
+                "local_docker_image_inspect",
+                "disk_headroom_summary",
+                "public_task_id_label",
+                "compact_boundary_flags",
+            ],
+            "required_before_real_dry_run": [
+                "selected_public_task_id_label",
+                "local_docker_provider_confirmed",
+                "submit_eligible_false",
+                "compact_result_writer_boundary_declared",
+                "stop_before_task_body_or_raw_outputs",
+            ],
+        },
+        "paired_run_requirements": {
+            "same_task": True,
+            "same_model": True,
+            "same_sandbox_provider": True,
+            "same_timeout": True,
+            "same_attempt_count": True,
+            "same_grading_path": True,
+            "baseline_arm": "hardened-codex",
+            "treatment_arm": "codex-goal-harness",
+        },
+        "claim_boundary": {
+            "may_claim": [
+                "ALE local adapter dry-run prerequisites are represented as a compact gate",
+                "The gate did not start containers, read task bodies, invoke model APIs, upload, or submit",
+                "A future real dry-run must preserve the same no-cloud/no-upload boundary",
+            ],
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+                "raw trajectory or screenshot evidence",
+            ],
+        },
+        "decision": {
+            "next_allowed_action": "run_operator_authorized_no_upload_ale_adapter_dry_run"
+            if ready
+            else "repair_ale_local_dry_run_plan_blocker",
+            "minimum_next_evidence": (
+                "A real no-cloud/no-upload adapter dry-run may only proceed if "
+                "it preserves the same boundary flags and produces compact "
+                "run/eval/events metadata without raw task or trajectory content."
+            ),
+            "stop_condition": (
+                "Stop before task body, hidden references, raw trajectory, "
+                "screenshots, credential values, local absolute paths, model "
+                "APIs, uploads, submissions, leaderboard claims, paid compute, "
+                "or production actions."
+            ),
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
         },
     }
 
