@@ -43,6 +43,9 @@ TERMINAL_BENCH_DEFAULT_DATASET = "terminal-bench@2.0"
 TERMINAL_BENCH_DEFAULT_TASK = "build-cython-ext"
 TERMINAL_BENCH_DEFAULT_MODEL = "gpt-5.5"
 BENCHMARK_CLAIM_REVIEW_SCHEMA_VERSION = "benchmark_claim_review_v0"
+BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION = (
+    "benchmark_verifier_attribution_review_v0"
+)
 TERMINAL_BENCH_HARBOR_REF = (
     "git+https://github.com/harbor-framework/harbor@"
     "a56546feb7d2da0b3196bbd7b05adacb72449391"
@@ -478,6 +481,243 @@ def build_benchmark_claim_review(
             "claim_strength": claim_strength,
             "validation_enhancement_candidate": candidate_validation,
             "clean_validation_enhancement": clean_validation,
+            "blockers": blockers,
+            "next_action": next_action,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+def _compact_positive_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    return 0
+
+
+def _verifier_attribution_labels(run: dict[str, Any]) -> list[str]:
+    labels = set(_claim_review_failure_labels(run))
+    outcome = run.get("worker_bridge_outcome")
+    if isinstance(outcome, dict):
+        labels.update(_claim_review_failure_labels(outcome))
+    trials = run.get("trials")
+    if isinstance(trials, list):
+        for trial in trials[:8]:
+            if not isinstance(trial, dict):
+                continue
+            label_values = trial.get("verifier_failure_attribution_labels")
+            if isinstance(label_values, list):
+                labels.update(
+                    str(label)
+                    for label in label_values
+                    if isinstance(label, (str, int, float))
+                    and not isinstance(label, bool)
+                )
+            attribution = trial.get("verifier_failure_attribution")
+            if isinstance(attribution, str) and attribution.strip():
+                labels.add(attribution.strip())
+    return sorted(labels)[:12]
+
+
+def _verifier_attribution_class(
+    *,
+    score: float | None,
+    score_attribution: str,
+    labels: list[str],
+    verifier_failure_count: int,
+    verifier_dependency_failure_count: int,
+) -> str:
+    if score is not None and score > 0:
+        return "no_score_failure"
+    if (
+        score_attribution == "verifier_dependency_install_failure"
+        or verifier_dependency_failure_count > 0
+        or "verifier_dependency_install_failure" in labels
+    ):
+        return "verifier_dependency_install_failure"
+    if score_attribution == "verifier_platform_probe_failure" or (
+        "verifier_platform_probe_failure" in labels
+    ):
+        return "verifier_platform_probe_failure"
+    if score_attribution in {"verifier_infrastructure_failure", "verifier_failure"}:
+        return "verifier_infrastructure_failure"
+    if any(label.startswith("verifier_") for label in labels) or (
+        verifier_failure_count > 0
+    ):
+        return "verifier_infrastructure_failure"
+    if score_attribution in {
+        "model_solution_failure",
+        "agent_solution_failure",
+        "task_solution_failure",
+        "solution_incorrect",
+        "official_verifier_solution_failure",
+    }:
+        return "model_or_solution_failure"
+    if score is not None and score == 0:
+        return "unattributed_score_failure"
+    return "missing_official_score"
+
+
+def _compact_validation_failed_checks(run: dict[str, Any]) -> list[str]:
+    validation = run.get("validation")
+    if not isinstance(validation, dict):
+        return []
+    failed = validation.get("failed_checks")
+    if not isinstance(failed, list):
+        return []
+    return [
+        str(item)
+        for item in failed
+        if isinstance(item, (str, int, float)) and not isinstance(item, bool)
+    ][:12]
+
+
+def _verifier_attribution_run_review(run: dict[str, Any]) -> dict[str, Any]:
+    score = _claim_review_run_score(run)
+    score_attribution = _claim_review_score_failure_attribution(run)
+    labels = _verifier_attribution_labels(run)
+    verifier_failure_count = _compact_positive_int(
+        run.get("verifier_failure_attribution_count")
+    )
+    verifier_dependency_failure_count = _compact_positive_int(
+        run.get("verifier_dependency_failure_count")
+    )
+    attribution_class = _verifier_attribution_class(
+        score=score,
+        score_attribution=score_attribution,
+        labels=labels,
+        verifier_failure_count=verifier_failure_count,
+        verifier_dependency_failure_count=verifier_dependency_failure_count,
+    )
+    verifier_caveat = attribution_class in {
+        "verifier_dependency_install_failure",
+        "verifier_platform_probe_failure",
+        "verifier_infrastructure_failure",
+        "unattributed_score_failure",
+        "missing_official_score",
+    }
+    caveat_resolved = attribution_class == "model_or_solution_failure"
+    if attribution_class.startswith("verifier_"):
+        next_action = (
+            "keep attribution caveat; require same-protocol repeat or finer "
+            "compact verifier evidence"
+        )
+    elif attribution_class == "unattributed_score_failure":
+        next_action = (
+            "keep attribution caveat; compact score failure is not yet attributed"
+        )
+    elif attribution_class == "missing_official_score":
+        next_action = "wait for compact official score before attribution review"
+    elif caveat_resolved:
+        next_action = "claim caveat resolved by compact non-verifier failure attribution"
+    else:
+        next_action = "no score-failure caveat for this run"
+
+    return {
+        "mode": run.get("mode"),
+        "job_name_present": bool(run.get("job_name")),
+        "task_ids": [
+            str(trial.get("task_id"))
+            for trial in (
+                run.get("trials") if isinstance(run.get("trials"), list) else []
+            )
+            if isinstance(trial, dict) and trial.get("task_id")
+        ][:4],
+        "official_score": score,
+        "official_passed": bool(
+            (run.get("official_task_score") or {}).get("passed")
+        )
+        if isinstance(run.get("official_task_score"), dict)
+        else None,
+        "score_failure_attribution": score_attribution,
+        "failure_attribution_labels": labels,
+        "verifier_failure_attribution_count": verifier_failure_count,
+        "verifier_dependency_failure_count": verifier_dependency_failure_count,
+        "validation_failed_checks": _compact_validation_failed_checks(run),
+        "worker_submit_eligible_mismatch_count": _compact_positive_int(
+            run.get("worker_submit_eligible_mismatch_count")
+        ),
+        "attribution_class": attribution_class,
+        "verifier_caveat": verifier_caveat,
+        "claim_caveat_resolved": caveat_resolved,
+        "next_action": next_action,
+    }
+
+
+def build_benchmark_verifier_attribution_review(
+    *,
+    benchmark_runs: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Classify compact verifier attribution without opening raw verifier logs."""
+
+    runs = [run for run in benchmark_runs if isinstance(run, dict)]
+    baseline, _treatment = _claim_review_pick_runs(runs)
+    run_reviews = [_verifier_attribution_run_review(run) for run in runs]
+    baseline_index = 0
+    if baseline is not None:
+        for index, run in enumerate(runs):
+            if run is baseline:
+                baseline_index = index
+                break
+    baseline_review = run_reviews[baseline_index] if run_reviews else None
+
+    blockers: list[str] = []
+    if baseline_review is None:
+        blockers.append("missing_compact_baseline_run")
+    elif baseline_review["attribution_class"].startswith("verifier_"):
+        blockers.append("baseline_verifier_attribution_caveat")
+    elif baseline_review["attribution_class"] == "unattributed_score_failure":
+        blockers.append("baseline_score_failure_unattributed")
+    elif baseline_review["attribution_class"] == "missing_official_score":
+        blockers.append("baseline_official_score_missing")
+    elif _compact_positive_int(
+        baseline_review.get("worker_submit_eligible_mismatch_count")
+    ):
+        blockers.append("baseline_submit_boundary_mismatch")
+
+    baseline_caveat_resolved = bool(
+        baseline_review
+        and baseline_review.get("claim_caveat_resolved")
+        and not blockers
+    )
+    if baseline_caveat_resolved:
+        next_action = (
+            "baseline compact verifier caveat resolved; rerun claim review "
+            "before upgrading proof strength"
+        )
+    elif "baseline_verifier_attribution_caveat" in blockers:
+        next_action = (
+            "do not upgrade claim; run same-protocol repeat or collect finer "
+            "compact verifier-side attribution"
+        )
+    elif "baseline_score_failure_unattributed" in blockers:
+        next_action = (
+            "do not upgrade claim; compact baseline score failure is unattributed"
+        )
+    elif "missing_compact_baseline_run" in blockers:
+        next_action = "provide a compact benchmark_run_v0 for the baseline arm"
+    else:
+        next_action = "keep claim blocked until compact attribution blockers are resolved"
+
+    return {
+        "schema_version": BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION,
+        "input_schema_versions": {
+            "benchmark_runs": [
+                run.get("schema_version") for run in runs if run.get("schema_version")
+            ],
+        },
+        "reviewed_run_count": len(run_reviews),
+        "baseline_run_index": baseline_index if run_reviews else None,
+        "run_reviews": run_reviews,
+        "decision": {
+            "baseline_claim_caveat_resolved": baseline_caveat_resolved,
+            "clean_model_failure_attribution": baseline_caveat_resolved,
             "blockers": blockers,
             "next_action": next_action,
         },

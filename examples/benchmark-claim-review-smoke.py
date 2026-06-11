@@ -15,7 +15,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.benchmark import build_benchmark_claim_review  # noqa: E402
+from goal_harness.benchmark import (  # noqa: E402
+    build_benchmark_claim_review,
+    build_benchmark_verifier_attribution_review,
+)
 
 
 def comparison(delta: float, *, comparison_id: str = "fixture-pair") -> dict[str, Any]:
@@ -164,10 +167,105 @@ def test_cli_review_claim() -> None:
         assert str(root) not in result.stdout, result.stdout
 
 
+def test_verifier_attribution_keeps_compact_caveat() -> None:
+    baseline = benchmark_run(
+        "hardened-codex",
+        0.0,
+        attribution="verifier_platform_probe_failure",
+        labels=["verifier_platform_probe_failure"],
+    )
+    treatment = benchmark_run("codex-goal-harness", 1.0, worker_calls=4)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+    decision = payload["decision"]
+
+    assert payload["schema_version"] == "benchmark_verifier_attribution_review_v0", payload
+    assert payload["reviewed_run_count"] == 2, payload
+    assert decision["baseline_claim_caveat_resolved"] is False, payload
+    assert "baseline_verifier_attribution_caveat" in decision["blockers"], payload
+    assert (
+        payload["run_reviews"][0]["attribution_class"]
+        == "verifier_platform_probe_failure"
+    ), payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_resolves_explicit_model_failure() -> None:
+    baseline = benchmark_run(
+        "hardened-codex",
+        0.0,
+        attribution="model_solution_failure",
+        labels=[],
+    )
+    treatment = benchmark_run("codex-goal-harness", 1.0, worker_calls=4)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
+    assert payload["decision"]["clean_model_failure_attribution"] is True, payload
+    assert payload["decision"]["blockers"] == [], payload
+    assert payload["run_reviews"][0]["attribution_class"] == "model_or_solution_failure", payload
+
+
+def test_cli_review_verifier_attribution() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        baseline_path = root / "baseline.compact.json"
+        treatment_path = root / "treatment.compact.json"
+        baseline_path.write_text(
+            json.dumps(
+                benchmark_run(
+                    "hardened-codex",
+                    0.0,
+                    attribution="verifier_platform_probe_failure",
+                    labels=["verifier_platform_probe_failure"],
+                )
+            ),
+            encoding="utf-8",
+        )
+        treatment_path.write_text(
+            json.dumps(benchmark_run("codex-goal-harness", 1.0, worker_calls=4)),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--format",
+                "json",
+                "benchmark",
+                "review-verifier-attribution",
+                "--benchmark-run-json",
+                str(baseline_path),
+                "--benchmark-run-json",
+                str(treatment_path),
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is True, payload
+        assert payload["decision"]["baseline_claim_caveat_resolved"] is False, payload
+        assert "baseline_verifier_attribution_caveat" in payload["decision"]["blockers"], payload
+        assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+        assert str(root) not in result.stdout, result.stdout
+
+
 def main() -> int:
     test_candidate_with_baseline_attribution_caveat()
     test_loop_validation_without_score_uplift()
     test_cli_review_claim()
+    test_verifier_attribution_keeps_compact_caveat()
+    test_verifier_attribution_resolves_explicit_model_failure()
+    test_cli_review_verifier_attribution()
     print("benchmark-claim-review-smoke ok")
     return 0
 
