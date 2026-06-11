@@ -51,6 +51,9 @@ BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION = "benchmark_lifecycle_state_v0"
 BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION = (
     "benchmark_verifier_attribution_review_v0"
 )
+BENCHMARK_RUNNER_INVARIANT_REVIEW_SCHEMA_VERSION = (
+    "benchmark_runner_invariant_review_v0"
+)
 TERMINAL_BENCH_HARBOR_REF = (
     "git+https://github.com/harbor-framework/harbor@"
     "a56546feb7d2da0b3196bbd7b05adacb72449391"
@@ -1189,6 +1192,151 @@ def build_benchmark_verifier_attribution_review(
             "blockers": blockers,
             "next_action": next_action,
         },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+DEFAULT_BENCHMARK_RUNNER_OWNED_FLAG_INVARIANTS = {
+    "submit_eligible": WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS[
+        "submit_eligible"
+    ],
+    "leaderboard_evidence": WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS[
+        "leaderboard_evidence"
+    ],
+}
+DEFAULT_BENCHMARK_RUNNER_OWNED_READ_BOUNDARY_INVARIANTS = {
+    "compact_only": True,
+    "raw_artifacts_read": False,
+    "task_text_read": False,
+    "local_paths_recorded": False,
+}
+
+
+def _runner_invariant_compare_bool(
+    *,
+    source: dict[str, Any],
+    field: str,
+    expected: bool,
+    namespace: str,
+    observed: dict[str, bool],
+    mismatches: list[dict[str, Any]],
+    missing_fields: list[str],
+) -> None:
+    actual = source.get(field)
+    qualified_field = f"{namespace}.{field}" if namespace else field
+    if isinstance(actual, bool):
+        observed[qualified_field] = actual
+        if actual != expected:
+            mismatches.append(
+                {
+                    "field": qualified_field,
+                    "expected": expected,
+                    "actual": actual,
+                    "owner": "runner",
+                    "reason": "worker_writeback_conflicts_with_runner_owned_boundary",
+                }
+            )
+        return
+    missing_fields.append(qualified_field)
+
+
+def build_benchmark_runner_invariant_review(
+    benchmark_run: dict[str, Any],
+    *,
+    expected_flags: dict[str, bool] | None = None,
+    expected_read_boundary: dict[str, bool] | None = None,
+    runner_label: str | None = None,
+) -> dict[str, Any]:
+    """Compare compact worker writeback against runner-owned boundary facts."""
+
+    flags = expected_flags or DEFAULT_BENCHMARK_RUNNER_OWNED_FLAG_INVARIANTS
+    read_boundary_expectations = (
+        expected_read_boundary
+        or DEFAULT_BENCHMARK_RUNNER_OWNED_READ_BOUNDARY_INVARIANTS
+    )
+    read_boundary = (
+        benchmark_run.get("read_boundary")
+        if isinstance(benchmark_run.get("read_boundary"), dict)
+        else {}
+    )
+    observed: dict[str, bool] = {}
+    mismatches: list[dict[str, Any]] = []
+    missing_fields: list[str] = []
+
+    for field, expected in flags.items():
+        _runner_invariant_compare_bool(
+            source=benchmark_run,
+            field=field,
+            expected=bool(expected),
+            namespace="",
+            observed=observed,
+            mismatches=mismatches,
+            missing_fields=missing_fields,
+        )
+    for field, expected in read_boundary_expectations.items():
+        _runner_invariant_compare_bool(
+            source=read_boundary,
+            field=field,
+            expected=bool(expected),
+            namespace="read_boundary",
+            observed=observed,
+            mismatches=mismatches,
+            missing_fields=missing_fields,
+        )
+
+    if mismatches:
+        classification = "runner_owned_boundary_mismatch"
+        repair_recommendation = (
+            "treat worker writeback as boundary-mismatch evidence; preserve "
+            "runner-owned launch/preflight facts and do not widen no-upload, "
+            "no-submit, leaderboard, or raw-read claims"
+        )
+    elif missing_fields:
+        classification = "runner_owned_boundary_incomplete"
+        repair_recommendation = (
+            "require compact runner-owned boundary fields before trusting the "
+            "worker writeback for public claim review"
+        )
+    else:
+        classification = "runner_owned_boundary_ok"
+        repair_recommendation = (
+            "accept compact boundary echo for review while keeping runner-owned "
+            "fields authoritative"
+        )
+
+    return {
+        "schema_version": BENCHMARK_RUNNER_INVARIANT_REVIEW_SCHEMA_VERSION,
+        "benchmark_id": benchmark_run.get("benchmark_id"),
+        "job_name_present": bool(benchmark_run.get("job_name")),
+        "mode": benchmark_run.get("mode"),
+        "runner_label": runner_label or benchmark_run.get("source_runner"),
+        "classification": classification,
+        "clean": not mismatches and not missing_fields,
+        "mismatch_count": len(mismatches),
+        "missing_field_count": len(missing_fields),
+        "mismatches": mismatches,
+        "missing_fields": missing_fields[:12],
+        "observed_runner_owned_fields": observed,
+        "expected_runner_owned_fields": {
+            **{field: bool(value) for field, value in flags.items()},
+            **{
+                f"read_boundary.{field}": bool(value)
+                for field, value in read_boundary_expectations.items()
+            },
+        },
+        "claim_boundary": {
+            "runner_owned_fields_authoritative": True,
+            "worker_may_override_runner_owned_fields": False,
+            "submit_eligible": flags.get("submit_eligible") is True,
+            "leaderboard_evidence": flags.get("leaderboard_evidence") is True,
+            "raw_trace_excluded": True,
+        },
+        "repair_recommendation": repair_recommendation,
         "read_boundary": {
             "compact_only": True,
             "raw_artifacts_read": False,

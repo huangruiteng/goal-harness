@@ -36,6 +36,7 @@ from .benchmark import (
     build_benchmark_claim_review,
     build_benchmark_learning_ledger,
     build_benchmark_lifecycle_state,
+    build_benchmark_runner_invariant_review,
     build_benchmark_verifier_attribution_review,
     build_terminal_bench_benchmark_run,
     build_terminal_bench_harbor_result_benchmark_run,
@@ -517,6 +518,32 @@ def render_benchmark_verifier_attribution_review_markdown(
         f"- Clean model attribution: `{decision.get('clean_model_failure_attribution')}`",
         f"- Blockers: `{decision.get('blockers')}`",
         f"- Next action: {decision.get('next_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_runner_invariant_review_markdown(
+    payload: dict[str, object],
+) -> str:
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Runner Invariant Review",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Benchmark: `{payload.get('benchmark_id')}`",
+        f"- Mode: `{payload.get('mode')}`",
+        f"- Runner label: `{payload.get('runner_label')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Clean: `{payload.get('clean')}`",
+        f"- Mismatches: `{payload.get('mismatch_count')}`",
+        f"- Missing fields: `{payload.get('missing_field_count')}`",
+        f"- Repair: {payload.get('repair_recommendation')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
@@ -2032,6 +2059,67 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    benchmark_runner_invariant_parser = benchmark_sub.add_parser(
+        "review-runner-invariants",
+        help=(
+            "Review compact benchmark_run_v0 runner-owned boundary invariants "
+            "before trusting worker writeback. This reads only compact JSON, not "
+            "raw task text, logs, traces, Harbor job directories, Docker, model "
+            "APIs, uploads, or screenshots."
+        ),
+    )
+    add_subcommand_format(benchmark_runner_invariant_parser)
+    benchmark_runner_invariant_parser.add_argument(
+        "--benchmark-run-json",
+        required=True,
+        help="Path to a compact benchmark_run_v0 JSON object.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--runner-label",
+        help="Public-safe runner label to include in the review payload.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-submit-eligible",
+        choices=["true", "false"],
+        default="false",
+        help="Expected runner-owned submit_eligible value. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-leaderboard-evidence",
+        choices=["true", "false"],
+        default="false",
+        help="Expected runner-owned leaderboard_evidence value. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-compact-only",
+        choices=["true", "false"],
+        default="true",
+        help="Expected compact read boundary. Defaults to true.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-raw-artifacts-read",
+        choices=["true", "false"],
+        default="false",
+        help="Expected raw artifact read boundary. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-task-text-read",
+        choices=["true", "false"],
+        default="false",
+        help="Expected task text read boundary. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-local-paths-recorded",
+        choices=["true", "false"],
+        default="false",
+        help="Expected local path recording boundary. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--require-clean",
+        action="store_true",
+        help="Return non-zero unless all runner-owned invariant fields match.",
+    )
+
     archive_runtime_parser = sub.add_parser(
         "archive-runtime",
         help="Move an obsolete runtime goal directory into the archive area. Defaults to dry-run.",
@@ -3383,6 +3471,60 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_benchmark_verifier_attribution_review_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "review-runner-invariants":
+            try:
+                run_input = json.loads(
+                    Path(args.benchmark_run_json).expanduser().read_text(encoding="utf-8")
+                )
+                if not isinstance(run_input, dict):
+                    raise ValueError("--benchmark-run-json must contain a JSON object")
+                run = compact_benchmark_run(run_input)
+                if not run:
+                    raise ValueError(
+                        "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                    )
+                payload = build_benchmark_runner_invariant_review(
+                    run,
+                    expected_flags={
+                        "submit_eligible": args.expect_submit_eligible == "true",
+                        "leaderboard_evidence": args.expect_leaderboard_evidence
+                        == "true",
+                    },
+                    expected_read_boundary={
+                        "compact_only": args.expect_compact_only == "true",
+                        "raw_artifacts_read": args.expect_raw_artifacts_read
+                        == "true",
+                        "task_text_read": args.expect_task_text_read == "true",
+                        "local_paths_recorded": args.expect_local_paths_recorded
+                        == "true",
+                    },
+                    runner_label=args.runner_label,
+                )
+                payload["ok"] = True
+                if args.require_clean and payload.get("clean") is not True:
+                    payload["ok"] = False
+                    payload["error"] = payload.get("classification") or (
+                        "benchmark_runner_invariant_review_not_clean"
+                    )
+                payload["require_clean"] = bool(args.require_clean)
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_runner_invariant_review_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_runner_invariant_review_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "summarize-post-launch":
