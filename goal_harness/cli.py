@@ -26,6 +26,7 @@ from .benchmark import (
     TERMINAL_BENCH_MODES,
     build_agents_last_exam_result_benchmark_report,
     build_benchmark_claim_review,
+    build_benchmark_verifier_attribution_review,
     build_terminal_bench_benchmark_run,
     build_terminal_bench_harbor_result_benchmark_run,
     collect_terminal_bench_goal_harness_cli_bridge_trace,
@@ -209,6 +210,34 @@ def render_benchmark_claim_review_markdown(payload: dict[str, object]) -> str:
         f"- Next action: {decision.get('next_action')}",
         f"- Treatment worker GH calls: `{treatment.get('worker_goal_harness_cli_call_total')}`",
         f"- Baseline attribution: `{payload.get('baseline_score_failure_attribution')}`",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_verifier_attribution_review_markdown(
+    payload: dict[str, object],
+) -> str:
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Verifier Attribution Review",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Reviewed runs: `{payload.get('reviewed_run_count')}`",
+        f"- Baseline index: `{payload.get('baseline_run_index')}`",
+        "- Baseline caveat resolved: "
+        f"`{decision.get('baseline_claim_caveat_resolved')}`",
+        f"- Clean model attribution: `{decision.get('clean_model_failure_attribution')}`",
+        f"- Blockers: `{decision.get('blockers')}`",
+        f"- Next action: {decision.get('next_action')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
@@ -1252,6 +1281,25 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    benchmark_verifier_attribution_parser = benchmark_sub.add_parser(
+        "review-verifier-attribution",
+        help=(
+            "Review compact benchmark_run_v0 verifier attribution and decide "
+            "whether a score-failure caveat is resolved without opening raw logs, "
+            "task text, traces, Harbor job directories, Docker, model APIs, or uploads."
+        ),
+    )
+    add_subcommand_format(benchmark_verifier_attribution_parser)
+    benchmark_verifier_attribution_parser.add_argument(
+        "--benchmark-run-json",
+        action="append",
+        required=True,
+        help=(
+            "Path to a compact benchmark_run_v0 JSON object. Repeat for baseline "
+            "and treatment compact run files."
+        ),
+    )
+
     archive_runtime_parser = sub.add_parser(
         "archive-runtime",
         help="Move an obsolete runtime goal directory into the archive area. Defaults to dry-run.",
@@ -2107,7 +2155,9 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 runs = []
                 for run_json in args.benchmark_run_json:
-                    run_input = json.loads(Path(run_json).expanduser().read_text(encoding="utf-8"))
+                    run_input = json.loads(
+                        Path(run_json).expanduser().read_text(encoding="utf-8")
+                    )
                     if not isinstance(run_input, dict):
                         raise ValueError("--benchmark-run-json must contain JSON objects")
                     run = compact_benchmark_run(run_input)
@@ -2138,6 +2188,42 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_benchmark_claim_review_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "review-verifier-attribution":
+            try:
+                runs = []
+                for run_json in args.benchmark_run_json:
+                    run_input = json.loads(Path(run_json).expanduser().read_text(encoding="utf-8"))
+                    if not isinstance(run_input, dict):
+                        raise ValueError("--benchmark-run-json must contain JSON objects")
+                    run = compact_benchmark_run(run_input)
+                    if not run:
+                        raise ValueError(
+                            "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                        )
+                    runs.append(run)
+                payload = build_benchmark_verifier_attribution_review(
+                    benchmark_runs=runs,
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_verifier_attribution_review_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_verifier_attribution_review_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "run":
