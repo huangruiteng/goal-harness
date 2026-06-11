@@ -130,7 +130,7 @@ from .status_server import (
     DEFAULT_STATUS_PORT,
     serve_status,
 )
-from .todos import add_goal_todo, render_todo_markdown
+from .todos import archive_completed_todos, add_goal_todo, render_todo_markdown
 from .upgrade import build_upgrade_plan, render_upgrade_plan_markdown
 from .worker_bridge import (
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
@@ -1958,16 +1958,26 @@ def main(argv: list[str] | None = None) -> int:
     todo_parser.add_argument(
         "todo_command",
         nargs="?",
-        choices=["add"],
+        choices=["add", "archive-completed"],
         default="add",
-        help="Use add to append a checkbox todo to the active state.",
+        help=(
+            "Use add to append a checkbox todo, or archive-completed to move "
+            "older completed todos into Completed Work Archive."
+        ),
     )
     todo_parser.add_argument("--goal-id", required=True, help="Goal id whose active state should receive the todo.")
-    todo_parser.add_argument("--role", required=True, choices=["user", "agent"], help="Todo owner.")
-    todo_parser.add_argument("--text", required=True, help="Todo text. Keep it short and public-safe enough for local status.")
+    todo_parser.add_argument("--role", choices=["user", "agent"], help="Todo owner. Defaults to agent for archive-completed.")
+    todo_parser.add_argument("--text", help="Todo text. Required for add; keep it short and public-safe enough for local status.")
+    todo_parser.add_argument(
+        "--max-active-done",
+        type=int,
+        default=12,
+        help="For archive-completed, keep this many completed todos in the active section.",
+    )
     todo_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
     todo_parser.add_argument("--state-file", help="Active goal state path. Defaults to the registry goal state_file.")
     todo_parser.add_argument("--dry-run", action="store_true", help="Preview the active-state edit without writing.")
+    todo_parser.add_argument("--execute", action="store_true", help="For archive-completed, write the active-state edit.")
 
     quota_parser = sub.add_parser(
         "quota",
@@ -3801,26 +3811,43 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "todo":
         try:
-            if args.todo_command != "add":
-                raise ValueError("only `goal-harness todo add` is supported")
-            payload = add_goal_todo(
-                registry_path=registry_path,
-                goal_id=args.goal_id,
-                role=args.role,
-                text=args.text,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
-                dry_run=bool(args.dry_run),
-            )
+            if args.todo_command == "add":
+                if not args.role:
+                    raise ValueError("todo add requires --role")
+                if not args.text:
+                    raise ValueError("todo add requires --text")
+                payload = add_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    role=args.role,
+                    text=args.text,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=bool(args.dry_run),
+                )
+            elif args.todo_command == "archive-completed":
+                payload = archive_completed_todos(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    role=args.role or "agent",
+                    max_active_done=args.max_active_done,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=not bool(args.execute),
+                )
+            else:
+                raise ValueError("unsupported todo command")
         except Exception as exc:
             payload = {
                 "ok": False,
-                "dry_run": bool(args.dry_run),
+                "dry_run": not bool(args.execute)
+                if args.todo_command == "archive-completed"
+                else bool(args.dry_run),
                 "added": False,
                 "already_exists": False,
                 "goal_id": args.goal_id,
                 "role": args.role,
-                "todo": args.text,
+                "todo": args.text or "",
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_todo_markdown)
