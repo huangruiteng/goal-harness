@@ -44,6 +44,7 @@ TERMINAL_BENCH_DEFAULT_DATASET = "terminal-bench@2.0"
 TERMINAL_BENCH_DEFAULT_TASK = "build-cython-ext"
 TERMINAL_BENCH_DEFAULT_MODEL = "gpt-5.5"
 BENCHMARK_CLAIM_REVIEW_SCHEMA_VERSION = "benchmark_claim_review_v0"
+BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION = "benchmark_learning_ledger_v0"
 BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION = (
     "benchmark_verifier_attribution_review_v0"
 )
@@ -488,6 +489,263 @@ def build_benchmark_claim_review(
             "clean_validation_enhancement": clean_validation,
             "blockers": blockers,
             "next_action": next_action,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+def _learning_ledger_failure_labels(
+    benchmark_comparison: dict[str, Any],
+    runs: Iterable[dict[str, Any]],
+) -> set[str]:
+    labels = set(
+        item
+        for item in benchmark_comparison.get("failure_attribution_labels") or []
+        if isinstance(item, str)
+    )
+    for run in runs:
+        labels.update(_claim_review_failure_labels(run))
+        first_blocker = run.get("first_blocker")
+        if isinstance(first_blocker, str) and first_blocker:
+            labels.add(first_blocker)
+        worker_start_status = run.get("worker_start_status")
+        if isinstance(worker_start_status, str) and worker_start_status:
+            labels.add(worker_start_status)
+    return labels
+
+
+def _learning_ledger_repair_candidates(
+    claim_review: dict[str, Any],
+    benchmark_comparison: dict[str, Any],
+    runs: Iterable[dict[str, Any]],
+) -> list[str]:
+    labels = _learning_ledger_failure_labels(benchmark_comparison, runs)
+    blockers = set(
+        item
+        for item in (
+            (claim_review.get("decision") or {}).get("blockers")
+            if isinstance(claim_review.get("decision"), dict)
+            else []
+        )
+        if isinstance(item, str)
+    )
+    candidates: list[str] = []
+
+    if any(
+        label in labels
+        for label in (
+            "pre_worker_agent_setup_failed",
+            "treatment_pre_worker_agent_setup_failed",
+        )
+    ):
+        candidates.append("adapter_startup_argument_contract")
+    if any(
+        label in labels
+        for label in (
+            "runner_compact_result_missing",
+            "harbor_job_root_missing",
+            "post_launch_job_dir_materialization_missing",
+            "reducer_validation_failed",
+        )
+    ):
+        candidates.append("benchmark_lifecycle_materialization_gate")
+    if "worker_submit_eligible_boundary_mismatch" in blockers:
+        candidates.append("runner_owned_submit_boundary_invariant")
+    if "missing_treatment_worker_goal_harness_evidence" in blockers:
+        candidates.append("worker_visible_goal_harness_evidence_gate")
+    if "baseline_failure_attribution_caveat" in blockers:
+        candidates.append("compact_verifier_attribution_review")
+    if not candidates and bool(
+        (claim_review.get("treatment_worker_evidence") or {}).get("present")
+        if isinstance(claim_review.get("treatment_worker_evidence"), dict)
+        else False
+    ):
+        candidates.append("claim_cost_overhead_guard")
+    return candidates
+
+
+def _learning_ledger_overhead_label(
+    official_delta: float | None,
+    cost_delta: float | None,
+    wall_time_delta: float | None,
+) -> str:
+    extra_cost = cost_delta is not None and cost_delta > 0
+    extra_time = wall_time_delta is not None and wall_time_delta > 0
+    positive_delta = official_delta is not None and official_delta > 0
+    if extra_cost and not positive_delta:
+        return "extra_cost_without_official_gain"
+    if extra_time and not positive_delta:
+        return "extra_wall_time_without_official_gain"
+    if (extra_cost or extra_time) and positive_delta:
+        return "positive_delta_with_overhead"
+    if cost_delta is not None and cost_delta < 0:
+        return "treatment_cheaper"
+    return "overhead_not_material_or_unknown"
+
+
+def _learning_ledger_lifecycle_gate(
+    benchmark_comparison: dict[str, Any],
+) -> dict[str, Any]:
+    official_delta = benchmark_comparison.get("official_task_score_delta")
+    labels = benchmark_comparison.get("failure_attribution_labels")
+    compact_blocker = isinstance(labels, list) and bool(labels)
+    compact_score = _claim_review_numeric(official_delta) is not None
+    budget_count_allowed = compact_score or compact_blocker
+    return {
+        "schema_version": "benchmark_lifecycle_gate_v0",
+        "paired_comparison_present": True,
+        "compact_score_or_blocker_present": budget_count_allowed,
+        "budget_count_allowed": budget_count_allowed,
+        "blocked_reason": None
+        if budget_count_allowed
+        else "missing_compact_score_or_blocker_evidence",
+    }
+
+
+def _learning_ledger_learning_quota_gate(
+    *,
+    lifecycle_gate: dict[str, Any],
+    repair_candidates: list[str],
+    clean_validation: bool,
+    validation_candidate: bool,
+) -> dict[str, Any]:
+    actionable_reasons: list[str] = []
+    if repair_candidates:
+        actionable_reasons.append("generic_repair_candidate")
+    if clean_validation:
+        actionable_reasons.append("clean_score_recovery_evidence")
+    elif validation_candidate:
+        actionable_reasons.append("candidate_score_recovery_needs_review")
+
+    lifecycle_ready = bool(lifecycle_gate.get("budget_count_allowed"))
+    actionable = bool(actionable_reasons)
+    if not lifecycle_ready:
+        blocked_reason = "missing_compact_score_or_blocker_evidence"
+    elif not actionable:
+        blocked_reason = "compact_result_has_no_goal_harness_learning_signal"
+    else:
+        blocked_reason = None
+
+    return {
+        "schema_version": "benchmark_learning_quota_gate_v0",
+        "actionable_learning_present": actionable,
+        "spend_allowed": lifecycle_ready and actionable,
+        "actionable_reasons": actionable_reasons,
+        "blocked_reason": blocked_reason,
+    }
+
+
+def build_benchmark_learning_ledger(
+    benchmark_comparison: dict[str, Any],
+    *,
+    benchmark_runs: Iterable[dict[str, Any]] = (),
+) -> dict[str, Any]:
+    """Build a compact benchmark learning row from public-safe summaries."""
+
+    runs = [run for run in benchmark_runs if isinstance(run, dict)]
+    claim_review = build_benchmark_claim_review(
+        benchmark_comparison,
+        benchmark_runs=runs,
+    )
+    official_delta = claim_review.get("official_task_score_delta")
+    official_delta_num = (
+        official_delta if isinstance(official_delta, (int, float)) else None
+    )
+    cost_delta = _claim_review_numeric(benchmark_comparison.get("cost_delta_usd"))
+    wall_time_delta = _claim_review_numeric(
+        benchmark_comparison.get("wall_time_delta_seconds")
+        or benchmark_comparison.get("with_goal_harness_overhead_ms")
+    )
+    repair_candidates = _learning_ledger_repair_candidates(
+        claim_review,
+        benchmark_comparison,
+        runs,
+    )
+    lifecycle_gate = _learning_ledger_lifecycle_gate(benchmark_comparison)
+    decision = (
+        claim_review.get("decision")
+        if isinstance(claim_review.get("decision"), dict)
+        else {}
+    )
+    clean = bool(decision.get("clean_validation_enhancement"))
+    validation_candidate = bool(decision.get("validation_enhancement_candidate"))
+    if clean:
+        learning_status = "clean_score_recovery_evidence"
+    elif repair_candidates:
+        learning_status = "generic_goal_harness_repair_or_attribution_required"
+    elif validation_candidate:
+        learning_status = "candidate_score_recovery_needs_review"
+    elif bool(
+        (claim_review.get("treatment_worker_evidence") or {}).get("present")
+        if isinstance(claim_review.get("treatment_worker_evidence"), dict)
+        else False
+    ):
+        learning_status = "loop_validation_or_overhead_evidence_only"
+    else:
+        learning_status = "no_goal_harness_validation_gain"
+    learning_quota_gate = _learning_ledger_learning_quota_gate(
+        lifecycle_gate=lifecycle_gate,
+        repair_candidates=repair_candidates,
+        clean_validation=clean,
+        validation_candidate=validation_candidate,
+    )
+
+    if repair_candidates:
+        next_allowed_action = f"repair_or_validate_{repair_candidates[0]}"
+        repeat_allowed = False
+    elif not lifecycle_gate["budget_count_allowed"]:
+        next_allowed_action = "write_compact_blocker_before_repeat_or_new_candidate"
+        repeat_allowed = False
+    elif not learning_quota_gate["spend_allowed"]:
+        next_allowed_action = "stop_without_spend_and_record_no_learning_signal"
+        repeat_allowed = False
+    elif clean:
+        next_allowed_action = "record_clean_evidence_then_select_next_benchmark_lane"
+        repeat_allowed = True
+    else:
+        next_allowed_action = "only_repeat_with_named_attribution_or_stability_hypothesis"
+        repeat_allowed = True
+
+    return {
+        "schema_version": BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION,
+        "input_schema_versions": {
+            "benchmark_comparison": benchmark_comparison.get("schema_version"),
+            "benchmark_runs": [
+                run.get("schema_version") for run in runs if run.get("schema_version")
+            ],
+            "claim_review": claim_review.get("schema_version"),
+        },
+        "task_id": benchmark_comparison.get("task_id"),
+        "comparison_id": benchmark_comparison.get("comparison_id"),
+        "official_task_score_delta": official_delta,
+        "control_plane_score_delta": benchmark_comparison.get(
+            "control_plane_score_delta"
+        ),
+        "learning_status": learning_status,
+        "repair_candidates": repair_candidates,
+        "lifecycle_gate": lifecycle_gate,
+        "claim_strength": decision.get("claim_strength"),
+        "claim_blockers": decision.get("blockers") or [],
+        "learning_quota_gate": learning_quota_gate,
+        "overhead": {
+            "cost_delta_usd": cost_delta,
+            "wall_time_delta_seconds_or_ms": wall_time_delta,
+            "label": _learning_ledger_overhead_label(
+                official_delta_num,
+                cost_delta,
+                wall_time_delta,
+            ),
+        },
+        "routing": {
+            "repeat_allowed": repeat_allowed,
+            "new_candidate_allowed": not repair_candidates
+            and bool(learning_quota_gate["spend_allowed"]),
+            "next_allowed_action": next_allowed_action,
         },
         "read_boundary": {
             "compact_only": True,

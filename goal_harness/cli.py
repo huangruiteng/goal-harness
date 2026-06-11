@@ -26,6 +26,7 @@ from .benchmark import (
     TERMINAL_BENCH_MODES,
     build_agents_last_exam_result_benchmark_report,
     build_benchmark_claim_review,
+    build_benchmark_learning_ledger,
     build_benchmark_verifier_attribution_review,
     build_terminal_bench_benchmark_run,
     build_terminal_bench_harbor_result_benchmark_run,
@@ -211,6 +212,52 @@ def render_benchmark_claim_review_markdown(payload: dict[str, object]) -> str:
         f"- Next action: {decision.get('next_action')}",
         f"- Treatment worker GH calls: `{treatment.get('worker_goal_harness_cli_call_total')}`",
         f"- Baseline attribution: `{payload.get('baseline_score_failure_attribution')}`",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_learning_ledger_markdown(payload: dict[str, object]) -> str:
+    lifecycle_gate = (
+        payload.get("lifecycle_gate")
+        if isinstance(payload.get("lifecycle_gate"), dict)
+        else {}
+    )
+    learning_quota_gate = (
+        payload.get("learning_quota_gate")
+        if isinstance(payload.get("learning_quota_gate"), dict)
+        else {}
+    )
+    routing = (
+        payload.get("routing") if isinstance(payload.get("routing"), dict) else {}
+    )
+    overhead = (
+        payload.get("overhead") if isinstance(payload.get("overhead"), dict) else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Learning Ledger",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Task: `{payload.get('task_id')}`",
+        f"- Comparison: `{payload.get('comparison_id')}`",
+        f"- Official delta: `{payload.get('official_task_score_delta')}`",
+        f"- Learning status: `{payload.get('learning_status')}`",
+        f"- Claim strength: `{payload.get('claim_strength')}`",
+        f"- Repair candidates: `{payload.get('repair_candidates')}`",
+        f"- Claim blockers: `{payload.get('claim_blockers')}`",
+        f"- Budget count allowed: `{lifecycle_gate.get('budget_count_allowed')}`",
+        f"- Learning spend allowed: `{learning_quota_gate.get('spend_allowed')}`",
+        f"- Actionable reasons: `{learning_quota_gate.get('actionable_reasons')}`",
+        f"- Overhead label: `{overhead.get('label')}`",
+        f"- Repeat allowed: `{routing.get('repeat_allowed')}`",
+        f"- New candidate allowed: `{routing.get('new_candidate_allowed')}`",
+        f"- Next action: {routing.get('next_allowed_action')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
@@ -1346,6 +1393,40 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    benchmark_learning_ledger_parser = benchmark_sub.add_parser(
+        "learning-ledger",
+        help=(
+            "Build a compact benchmark learning ledger row from comparison/run "
+            "JSON. This turns paired outcomes into repair-vs-repeat guidance "
+            "without opening raw task text, logs, traces, Harbor job directories, "
+            "Docker, model APIs, or uploads."
+        ),
+    )
+    add_subcommand_format(benchmark_learning_ledger_parser)
+    benchmark_learning_ledger_parser.add_argument(
+        "--benchmark-comparison-json",
+        required=True,
+        help="Path to a compact benchmark_comparison_v0 JSON object.",
+    )
+    benchmark_learning_ledger_parser.add_argument(
+        "--benchmark-run-json",
+        action="append",
+        default=[],
+        help=(
+            "Path to a compact benchmark_run_v0 JSON object. Repeat for baseline "
+            "and treatment compact run files."
+        ),
+    )
+    benchmark_learning_ledger_parser.add_argument(
+        "--require-actionable-learning",
+        action="store_true",
+        help=(
+            "Return non-zero unless the compact ledger contains an actionable "
+            "Goal Harness learning signal, such as a repair candidate or clean "
+            "score-recovery evidence."
+        ),
+    )
+
     benchmark_verifier_attribution_parser = benchmark_sub.add_parser(
         "review-verifier-attribution",
         help=(
@@ -2253,6 +2334,69 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_benchmark_claim_review_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "learning-ledger":
+            try:
+                comparison_input = json.loads(
+                    Path(args.benchmark_comparison_json).expanduser().read_text(encoding="utf-8")
+                )
+                if not isinstance(comparison_input, dict):
+                    raise ValueError("--benchmark-comparison-json must contain a JSON object")
+                comparison = compact_benchmark_comparison(comparison_input)
+                if not comparison:
+                    raise ValueError(
+                        "--benchmark-comparison-json did not contain a compactable benchmark_comparison_v0 object"
+                    )
+                runs = []
+                for run_json in args.benchmark_run_json:
+                    run_input = json.loads(
+                        Path(run_json).expanduser().read_text(encoding="utf-8")
+                    )
+                    if not isinstance(run_input, dict):
+                        raise ValueError("--benchmark-run-json must contain JSON objects")
+                    run = compact_benchmark_run(run_input)
+                    if not run:
+                        raise ValueError(
+                            "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                        )
+                    runs.append(run)
+                payload = build_benchmark_learning_ledger(
+                    comparison,
+                    benchmark_runs=runs,
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_learning_ledger_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                learning_gate = (
+                    payload.get("learning_quota_gate")
+                    if isinstance(payload.get("learning_quota_gate"), dict)
+                    else {}
+                )
+                if (
+                    args.require_actionable_learning
+                    and learning_gate.get("spend_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        learning_gate.get("blocked_reason")
+                        or "missing_actionable_goal_harness_learning_signal"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_learning_ledger_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "review-verifier-attribution":
