@@ -1175,6 +1175,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Clear allowed child-agent domains.",
     )
     configure_goal_parser.add_argument(
+        "--waiting-on",
+        choices=["codex", "user_or_controller", "controller", "external_evidence"],
+        help="Override registry waiting owner for status/quota routing.",
+    )
+    configure_goal_parser.add_argument(
+        "--clear-waiting-on",
+        action="store_true",
+        help="Remove the registry waiting_on override.",
+    )
+    configure_goal_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the registry. Without this flag, configure-goal is a dry-run preview.",
@@ -2451,6 +2461,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_children=args.max_children,
                 allowed_domains=args.allowed_domain,
                 clear_allowed_domains=bool(args.clear_allowed_domains),
+                waiting_on=args.waiting_on,
+                clear_waiting_on=bool(args.clear_waiting_on),
                 execute=bool(args.execute),
             )
         except Exception as exc:

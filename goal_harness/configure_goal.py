@@ -12,6 +12,14 @@ from .quota import goal_quota_config
 from .registry import read_json, registry_goals
 
 
+WAITING_ON_CHOICES = (
+    "codex",
+    "user_or_controller",
+    "controller",
+    "external_evidence",
+)
+
+
 def _now_iso() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
@@ -55,6 +63,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         },
         "control_plane": control_plane,
         "orchestration": orchestration,
+        "waiting_on": goal.get("waiting_on"),
     }
 
 
@@ -81,12 +90,18 @@ def configure_goal(
     max_children: int | None = None,
     allowed_domains: list[str] | None = None,
     clear_allowed_domains: bool = False,
+    waiting_on: str | None = None,
+    clear_waiting_on: bool = False,
     execute: bool = False,
 ) -> dict[str, Any]:
     if not registry_path.exists():
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
     if clear_allowed_domains and allowed_domains:
         raise ValueError("--clear-allowed-domains cannot be combined with --allowed-domain")
+    if clear_waiting_on and waiting_on:
+        raise ValueError("--clear-waiting-on cannot be combined with --waiting-on")
+    if waiting_on and waiting_on not in WAITING_ON_CHOICES:
+        raise ValueError("--waiting-on must be one of: " + ", ".join(WAITING_ON_CHOICES))
 
     quota_compute = _positive_number(quota_compute, field="quota_compute")
     quota_window_hours = _positive_number(quota_window_hours, field="quota_window_hours")
@@ -145,6 +160,11 @@ def configure_goal(
         elif allowed_domains is not None:
             spawn_policy["allowed_domains"] = allowed_domains
         goal["spawn_policy"] = spawn_policy
+
+    if waiting_on is not None:
+        goal["waiting_on"] = waiting_on
+    elif clear_waiting_on:
+        goal.pop("waiting_on", None)
 
     after = _settings_summary(goal)
     changed_fields = _changed_fields(before, after)
