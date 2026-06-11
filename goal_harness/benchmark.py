@@ -50,6 +50,9 @@ BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION = "benchmark_learning_ledger_v0"
 BENCHMARK_ATTEMPT_LEARNING_GATE_SCHEMA_VERSION = (
     "benchmark_attempt_learning_gate_v0"
 )
+BENCHMARK_ADAPTER_KWARG_ABSORPTION_REVIEW_SCHEMA_VERSION = (
+    "benchmark_adapter_kwarg_absorption_review_v0"
+)
 BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION = "benchmark_lifecycle_state_v0"
 BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION = (
     "benchmark_verifier_attribution_review_v0"
@@ -126,6 +129,33 @@ TERMINAL_BENCH_MANAGED_AGENT_IMPORT_PATH = (
 TERMINAL_BENCH_MANAGED_POLICY_VERSION = "goal_harness_terminal_bench_policy_v0"
 TERMINAL_BENCH_MANAGED_BEHAVIOR_SPEC_ID = (
     "terminal_bench_goal_harness_managed_codex_v0"
+)
+TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS = (
+    "goal_harness_policy_version",
+    "goal_harness_behavior_spec_id",
+    "goal_harness_ablation_mode",
+    "goal_harness_mode",
+    "goal_harness_goal_id",
+    "goal_harness_access_packet_mode",
+    "goal_harness_trace_publicness",
+    "goal_harness_counter_trace",
+    "goal_harness_cli_bridge_enabled",
+    "goal_harness_command_prefix",
+    "goal_harness_runtime_preflight_command",
+    "goal_harness_registry_arg",
+    "goal_harness_runtime_root_arg",
+    "goal_harness_scan_path",
+    "goal_harness_benchmark_run_json",
+    "goal_harness_benchmark_run_schema_version",
+    "goal_harness_benchmark_run_writeback_contract",
+    "goal_harness_counter_trace_json",
+    "goal_harness_classification",
+    "goal_harness_append_execute_enabled",
+    "goal_harness_active_user_intervention_enabled",
+    "goal_harness_active_user_feed_jsonl",
+    "goal_harness_active_user_observation_json",
+    "goal_harness_active_user_observe_command",
+    "goal_harness_active_user_channel_surface",
 )
 TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_VERSION = (
     "terminal_bench_goal_harness_access_packet_v0"
@@ -948,6 +978,103 @@ def build_benchmark_attempt_learning_gate(
             "raw_artifacts_read": False,
             "task_text_read": False,
             "local_paths_recorded": False,
+        },
+    }
+
+
+def agent_kwargs_from_invocation(invocation: Iterable[Any]) -> dict[str, str]:
+    """Extract --agent-kwarg key/value pairs without interpreting values."""
+
+    argv = [str(item) for item in invocation if isinstance(item, (str, int, float))]
+    kwargs: dict[str, str] = {}
+    for index, value in enumerate(argv):
+        if value != "--agent-kwarg" or index + 1 >= len(argv):
+            continue
+        raw = argv[index + 1]
+        key, separator, val = raw.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            continue
+        kwargs[key] = val
+    return kwargs
+
+
+def _public_safe_kwarg_key_list(values: Iterable[Any]) -> list[str]:
+    keys: list[str] = []
+    for value in values:
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            continue
+        key = str(value).strip()
+        if not key:
+            continue
+        if "=" in key:
+            key = key.split("=", 1)[0].strip()
+        if key.startswith("goal_harness_") and key not in keys:
+            keys.append(key)
+    return sorted(keys)[:80]
+
+
+def build_benchmark_adapter_kwarg_absorption_review(
+    *,
+    adapter_label: str,
+    agent_kwargs: dict[str, Any],
+    accepted_goal_harness_kwargs: Iterable[Any],
+    allowed_base_passthrough: Iterable[Any] = (),
+) -> dict[str, Any]:
+    """Review whether generated goal_harness_* kwargs are adapter-absorbed."""
+
+    generated_keys = _public_safe_kwarg_key_list(agent_kwargs.keys())
+    accepted_keys = set(_public_safe_kwarg_key_list(accepted_goal_harness_kwargs))
+    passthrough_keys = set(_public_safe_kwarg_key_list(allowed_base_passthrough))
+    absorbed_keys = sorted(
+        key for key in generated_keys if key in accepted_keys or key in passthrough_keys
+    )
+    leaked_keys = sorted(
+        key
+        for key in generated_keys
+        if key not in accepted_keys and key not in passthrough_keys
+    )
+
+    if leaked_keys:
+        classification = "adapter_kwarg_leak_risk"
+        next_required_action = (
+            "consume_or_reject_generated_goal_harness_kwargs_before_worker_start"
+        )
+    elif generated_keys:
+        classification = "adapter_kwargs_absorbed"
+        next_required_action = "adapter_kwarg_absorption_guard_passed"
+    else:
+        classification = "adapter_goal_harness_kwargs_missing"
+        next_required_action = "record_generated_goal_harness_kwargs_before_run"
+
+    return {
+        "schema_version": BENCHMARK_ADAPTER_KWARG_ABSORPTION_REVIEW_SCHEMA_VERSION,
+        "adapter_label": adapter_label,
+        "classification": classification,
+        "clean": bool(generated_keys) and not leaked_keys,
+        "generated_goal_harness_kwarg_count": len(generated_keys),
+        "absorbed_goal_harness_kwarg_count": len(absorbed_keys),
+        "leaked_goal_harness_kwarg_count": len(leaked_keys),
+        "generated_goal_harness_kwarg_keys": generated_keys,
+        "absorbed_goal_harness_kwarg_keys": absorbed_keys,
+        "leaked_goal_harness_kwarg_keys": leaked_keys,
+        "accepted_goal_harness_kwarg_keys": sorted(accepted_keys)[:80],
+        "allowed_base_passthrough_keys": sorted(passthrough_keys)[:40],
+        "next_required_action": next_required_action,
+        "claim_boundary": {
+            "kwarg_values_recorded": False,
+            "local_paths_recorded": False,
+            "adapter_absorption_required_before_worker_start": True,
+            "base_constructor_may_receive_generated_goal_harness_kwargs": False,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
         },
     }
 

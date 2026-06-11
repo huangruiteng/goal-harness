@@ -28,6 +28,8 @@ from .benchmark import (
     TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE,
     TERMINAL_BENCH_MODES,
     build_agents_last_exam_result_benchmark_report,
+    TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS,
+    agent_kwargs_from_invocation,
     build_agents_last_exam_local_dry_run_plan,
     build_agents_last_exam_local_preflight,
     build_agents_last_exam_local_runner_readiness,
@@ -35,6 +37,7 @@ from .benchmark import (
     build_agents_last_exam_local_launch_packet,
     build_benchmark_claim_review,
     build_benchmark_attempt_learning_gate,
+    build_benchmark_adapter_kwarg_absorption_review,
     build_benchmark_learning_ledger,
     build_benchmark_lifecycle_state,
     build_benchmark_runner_invariant_review,
@@ -493,6 +496,33 @@ def render_benchmark_attempt_learning_gate_markdown(
         f"- Budget count allowed: `{payload.get('budget_count_allowed')}`",
         f"- Repair candidates: `{payload.get('repair_candidates')}`",
         f"- Next action: {payload.get('next_required_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_adapter_kwarg_absorption_review_markdown(
+    payload: dict[str, object],
+) -> str:
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Adapter Kwarg Absorption Review",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Adapter: `{payload.get('adapter_label')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Clean: `{payload.get('clean')}`",
+        f"- Generated GH kwargs: `{payload.get('generated_goal_harness_kwarg_count')}`",
+        f"- Absorbed GH kwargs: `{payload.get('absorbed_goal_harness_kwarg_count')}`",
+        f"- Leaked GH kwargs: `{payload.get('leaked_goal_harness_kwarg_count')}`",
+        f"- Leaked keys: `{payload.get('leaked_goal_harness_kwarg_keys')}`",
+        f"- Next action: {payload.get('next_required_action')}",
+        f"- Kwarg values recorded: `{(payload.get('claim_boundary') or {}).get('kwarg_values_recorded') if isinstance(payload.get('claim_boundary'), dict) else None}`",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
@@ -2052,6 +2082,60 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    benchmark_adapter_kwarg_review_parser = benchmark_sub.add_parser(
+        "review-adapter-kwargs",
+        help=(
+            "Review generated benchmark adapter kwargs and flag goal_harness_* "
+            "keys that are not absorbed by the adapter contract. Values are not "
+            "recorded. This does not start workers, Docker, model APIs, uploads, "
+            "or read task material."
+        ),
+    )
+    add_subcommand_format(benchmark_adapter_kwarg_review_parser)
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--adapter-label",
+        default="benchmark-adapter",
+        help="Public-safe adapter label.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--agent-kwarg",
+        action="append",
+        default=[],
+        help="Generated agent kwarg in KEY=VALUE form. Repeat as needed.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--command-json",
+        help=(
+            "Optional JSON file containing a command argv list from which "
+            "--agent-kwarg entries will be extracted. The path is not recorded."
+        ),
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--accepted-goal-harness-kwarg",
+        action="append",
+        default=[],
+        help=(
+            "Goal Harness kwarg key explicitly consumed by the adapter. Repeat "
+            "as needed unless --terminal-bench-managed-codex is used."
+        ),
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--allowed-base-passthrough",
+        action="append",
+        default=[],
+        help="Optional goal_harness_* kwarg key allowed to pass to the base constructor.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--terminal-bench-managed-codex",
+        action="store_true",
+        help="Use the built-in GoalHarnessManagedCodex accepted kwarg contract.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--require-clean",
+        action="store_true",
+        help="Return non-zero unless all generated goal_harness_* kwargs are absorbed.",
+    )
+
     benchmark_lifecycle_state_parser = benchmark_sub.add_parser(
         "lifecycle-state",
         help=(
@@ -3463,6 +3547,60 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_benchmark_attempt_learning_gate_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "review-adapter-kwargs":
+            try:
+                agent_kwargs: dict[str, Any] = {}
+                if args.command_json:
+                    command_input = json.loads(
+                        Path(args.command_json).expanduser().read_text(encoding="utf-8")
+                    )
+                    if not isinstance(command_input, list):
+                        raise ValueError("--command-json must contain a JSON argv list")
+                    agent_kwargs.update(agent_kwargs_from_invocation(command_input))
+                for raw_kwarg in args.agent_kwarg:
+                    key, separator, value = str(raw_kwarg).partition("=")
+                    key = key.strip()
+                    if not separator or not key:
+                        raise ValueError("--agent-kwarg values must use KEY=VALUE form")
+                    agent_kwargs[key] = value
+                accepted = list(args.accepted_goal_harness_kwarg)
+                if args.terminal_bench_managed_codex:
+                    accepted.extend(TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS)
+                payload = build_benchmark_adapter_kwarg_absorption_review(
+                    adapter_label=args.adapter_label,
+                    agent_kwargs=agent_kwargs,
+                    accepted_goal_harness_kwargs=accepted,
+                    allowed_base_passthrough=args.allowed_base_passthrough,
+                )
+                payload["ok"] = True
+                if args.require_clean and payload.get("clean") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("classification")
+                        or "benchmark_adapter_kwarg_absorption_not_clean"
+                    )
+                payload["require_clean"] = bool(args.require_clean)
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_adapter_kwarg_absorption_review_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_adapter_kwarg_absorption_review_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "lifecycle-state":
