@@ -41,6 +41,7 @@ from goal_harness.worker_bridge import (
     DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
     GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER,
     GOAL_HARNESS_RUNTIME_ROOT_PLACEHOLDER,
+    WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION,
     build_worker_bridge_benchmark_run_from_counters,
     build_worker_bridge_command_prefix,
     build_worker_bridge_python_runtime_preflight_command,
@@ -505,6 +506,10 @@ class GoalHarnessManagedCodex(Codex):
         goal_harness_runtime_root_arg: str = GOAL_HARNESS_RUNTIME_ROOT_PLACEHOLDER,
         goal_harness_scan_path: str = DEFAULT_GOAL_HARNESS_WORKER_SCAN_PATH,
         goal_harness_benchmark_run_json: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
+        goal_harness_benchmark_run_schema_version: str = "benchmark_run_v0",
+        goal_harness_benchmark_run_writeback_contract: str = (
+            WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION
+        ),
         goal_harness_counter_trace_json: str = DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
         goal_harness_classification: str = "<classification>",
         goal_harness_append_execute_enabled: bool = False,
@@ -535,6 +540,12 @@ class GoalHarnessManagedCodex(Codex):
         self.goal_harness_runtime_root_arg = goal_harness_runtime_root_arg
         self.goal_harness_scan_path = goal_harness_scan_path
         self.goal_harness_benchmark_run_json = goal_harness_benchmark_run_json
+        self.goal_harness_benchmark_run_schema_version = (
+            goal_harness_benchmark_run_schema_version
+        )
+        self.goal_harness_benchmark_run_writeback_contract = (
+            goal_harness_benchmark_run_writeback_contract
+        )
         self.goal_harness_counter_trace_json = goal_harness_counter_trace_json
         self.goal_harness_classification = goal_harness_classification
         self.goal_harness_append_execute_enabled = bool(
@@ -914,6 +925,16 @@ class GoalHarnessManagedCodex(Codex):
                 if access_packet_injected and self.goal_harness_cli_bridge_enabled
                 else False
             ),
+            "goal_harness_benchmark_run_schema_version": (
+                self.goal_harness_benchmark_run_schema_version
+                if access_packet_injected and self.goal_harness_cli_bridge_enabled
+                else None
+            ),
+            "goal_harness_benchmark_run_writeback_contract": (
+                self.goal_harness_benchmark_run_writeback_contract
+                if access_packet_injected and self.goal_harness_cli_bridge_enabled
+                else None
+            ),
             "declared_goal_harness_interface_commands": (
                 list(TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS)
                 if access_packet_injected
@@ -1053,6 +1074,16 @@ class GoalHarnessManagedCodex(Codex):
             "goal_harness_counter_trace_row_count": len(trace_rows),
             "goal_harness_benchmark_run_json_declared": (
                 benchmark_run_json_declared if active_cli_bridge else False
+            ),
+            "goal_harness_benchmark_run_schema_version": (
+                self.goal_harness_benchmark_run_schema_version
+                if active_cli_bridge
+                else None
+            ),
+            "goal_harness_benchmark_run_writeback_contract": (
+                self.goal_harness_benchmark_run_writeback_contract
+                if active_cli_bridge
+                else None
             ),
             "goal_harness_benchmark_run_json_written": benchmark_run_written,
             "goal_harness_benchmark_run_writeback_status": benchmark_run_writeback_status,

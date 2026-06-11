@@ -276,12 +276,66 @@ def assert_active_user_private_observe_prompt() -> None:
     assert_public_safe(counters)
 
 
+def assert_active_user_launch_kwargs_consumed() -> None:
+    from goal_harness.worker_bridge import (
+        WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION,
+        build_worker_bridge_install_contract,
+    )
+
+    helper = helper_module()
+    module = helper.load_agent_module()
+    contract = build_worker_bridge_install_contract(
+        classification="terminal_bench_active_user_fixture_v0",
+        active_user_host_dir="<active-user-host-dir>",
+    )
+    agent_kwargs = dict(contract["agent_kwargs"])
+    agent = module.GoalHarnessManagedCodex(
+        logs_dir=Path("logs"),
+        model_name="gpt-5.5",
+        goal_harness_mode="codex_goal_harness",
+        goal_harness_goal_id="terminal-bench-active-user-fixture",
+        goal_harness_cli_bridge_enabled=True,
+        goal_harness_active_user_intervention_enabled=True,
+        **agent_kwargs,
+    )
+    leaked = sorted(
+        key for key in agent.kwargs if str(key).startswith("goal_harness_")
+    )
+    assert leaked == [], leaked
+    assert agent.goal_harness_benchmark_run_schema_version == "benchmark_run_v0", (
+        agent.__dict__
+    )
+    assert (
+        agent.goal_harness_benchmark_run_writeback_contract
+        == WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION
+    ), agent.__dict__
+    context = helper.FakeAgentContext()
+    asyncio.run(
+        agent.run("Build the extension and make the test pass.", object(), context)
+    )
+    agent.populate_context_post_run(context)
+    metadata = context.metadata["goal_harness"]
+    assert metadata["goal_harness_benchmark_run_schema_version"] == "benchmark_run_v0", (
+        metadata
+    )
+    assert (
+        metadata["goal_harness_benchmark_run_writeback_contract"]
+        == WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION
+    ), metadata
+    assert_public_safe(metadata)
+
+
 def main() -> None:
     assert_doc_contract()
     assert_command_preview()
     assert_prompt_and_metadata()
     assert_active_user_private_observe_prompt()
-    print("terminal-bench-codex-goal-harness-custom-agent-smoke ok cli_calls=6 runtime_goal_calls=1 active_user_observe=1")
+    assert_active_user_launch_kwargs_consumed()
+    print(
+        "terminal-bench-codex-goal-harness-custom-agent-smoke ok "
+        "cli_calls=6 runtime_goal_calls=1 active_user_observe=1 "
+        "launch_kwargs=consumed"
+    )
 
 
 if __name__ == "__main__":
