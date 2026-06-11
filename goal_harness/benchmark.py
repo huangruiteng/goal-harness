@@ -197,6 +197,9 @@ AGENTS_LAST_EXAM_LOCAL_RUNNER_READINESS_SCHEMA_VERSION = (
 AGENTS_LAST_EXAM_LOCAL_SOURCE_READINESS_SCHEMA_VERSION = (
     "agents_last_exam_local_source_readiness_v0"
 )
+AGENTS_LAST_EXAM_LOCAL_LAUNCH_PACKET_SCHEMA_VERSION = (
+    "agents_last_exam_local_launch_packet_v0"
+)
 AGENTS_LAST_EXAM_TRACE_PUBLICNESS = (
     "compact_public_safe_no_task_body_no_trajectory_no_output"
 )
@@ -2255,6 +2258,235 @@ def build_agents_last_exam_local_source_readiness(
         "read_boundary": {
             "compact_only": True,
             "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+
+def _agents_last_exam_relative_file_probe(
+    source_root: str | None,
+    relative_path: str | None,
+) -> dict[str, Any]:
+    label = _agents_last_exam_public_id(relative_path, limit=160)
+    if not relative_path:
+        return {
+            "relative_path": None,
+            "declared": False,
+            "exists": False,
+            "first_blocker": "experiment_spec_missing",
+            "source_root_path_recorded": False,
+        }
+    text = relative_path.replace("\\", "/").strip()
+    parts = [part for part in text.split("/") if part]
+    if text.startswith("/") or text.startswith("~") or any(
+        part in {".", ".."} for part in parts
+    ):
+        return {
+            "relative_path": label,
+            "declared": True,
+            "exists": False,
+            "first_blocker": "experiment_spec_relative_path_not_public_safe",
+            "source_root_path_recorded": False,
+        }
+    if not source_root:
+        return {
+            "relative_path": label,
+            "declared": True,
+            "exists": False,
+            "first_blocker": "source_root_missing",
+            "source_root_path_recorded": False,
+        }
+    try:
+        source_path = Path(source_root).expanduser()
+    except (OSError, RuntimeError):
+        source_path = None
+    if source_path is None or not source_path.is_dir():
+        return {
+            "relative_path": label,
+            "declared": True,
+            "exists": False,
+            "first_blocker": "source_root_not_available",
+            "source_root_path_recorded": False,
+        }
+    candidate = source_path.joinpath(*parts)
+    try:
+        resolved_source = source_path.resolve()
+        resolved_candidate = candidate.resolve()
+        inside_root = resolved_candidate == resolved_source or (
+            resolved_source in resolved_candidate.parents
+        )
+    except OSError:
+        inside_root = False
+    exists = bool(inside_root and candidate.is_file())
+    return {
+        "relative_path": label,
+        "declared": True,
+        "exists": exists,
+        "first_blocker": None if exists else "experiment_spec_file_missing",
+        "source_root_path_recorded": False,
+    }
+
+
+def build_agents_last_exam_local_launch_packet(
+    *,
+    source_root: str | None,
+    experiment_spec_relative_path: str | None,
+    selected_task_id: str | None = None,
+    expected_repo_url: str = AGENTS_LAST_EXAM_DEFAULT_REPO_URL,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    runner_binary: str | None = "python3",
+    runner_python_module: str | None = "ale_run",
+    runner_command_label: str | None = "python-m-ale-run",
+    operator_authorized: bool = False,
+    allow_public_task_material: bool = False,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a redacted no-execution packet for a future ALE dry-run."""
+
+    source_readiness = build_agents_last_exam_local_source_readiness(
+        source_root=source_root,
+        expected_repo_url=expected_repo_url,
+        runner_python_module=runner_python_module or "ale_run",
+    )
+    runner_readiness = build_agents_last_exam_local_runner_readiness(
+        selected_task_id=selected_task_id,
+        snapshot=snapshot,
+        provider_kind=provider_kind,
+        image_ref=image_ref,
+        alternate_image_ref=alternate_image_ref,
+        runner_binary=runner_binary,
+        runner_python_module=runner_python_module,
+        runner_source_root=source_root,
+        runner_command_label=runner_command_label,
+        operator_authorized=operator_authorized,
+        allow_public_task_material=allow_public_task_material,
+        image_metadata=image_metadata,
+        alternate_image_metadata=alternate_image_metadata,
+        disk_headroom=disk_headroom,
+    )
+    spec_probe = _agents_last_exam_relative_file_probe(
+        source_root,
+        experiment_spec_relative_path,
+    )
+    blockers: list[str] = []
+    if source_readiness.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(source_readiness.get("first_blocker"), limit=80)
+            or "ale_source_not_ready"
+        )
+    if runner_readiness.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(runner_readiness.get("first_blocker"), limit=80)
+            or "ale_runner_not_ready"
+        )
+    if spec_probe.get("exists") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(spec_probe.get("first_blocker"), limit=80)
+            or "experiment_spec_not_ready"
+        )
+    ready = not blockers
+    source = (
+        source_readiness.get("source")
+        if isinstance(source_readiness.get("source"), dict)
+        else {}
+    )
+    runner_probe = (
+        runner_readiness.get("runner_probe")
+        if isinstance(runner_readiness.get("runner_probe"), dict)
+        else {}
+    )
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_LAUNCH_PACKET_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": _agents_last_exam_public_id(selected_task_id, limit=160)
+        or "metadata_only_candidate",
+        "snapshot": _agents_last_exam_public_id(snapshot, limit=80)
+        or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_operator_triggered_no_upload_ale_dry_run",
+        "blockers": blockers,
+        "source_lock": {
+            "expected_repo": source.get("expected_repo"),
+            "remote": source.get("remote"),
+            "remote_matches_expected": source.get("remote_matches_expected") is True,
+            "head": source.get("head"),
+            "source_root_path_recorded": False,
+        },
+        "runner": {
+            "command_label": runner_probe.get("command_label"),
+            "binary": runner_probe.get("binary"),
+            "python_module": runner_probe.get("python_module"),
+            "binary_available": runner_probe.get("binary_available") is True,
+            "python_module_available": runner_probe.get("python_module_available")
+            is True,
+            "source_root_path_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "experiment_spec": {
+            "relative_path": spec_probe.get("relative_path"),
+            "declared": spec_probe.get("declared") is True,
+            "exists": spec_probe.get("exists") is True,
+            "content_read": False,
+            "source_root_path_recorded": False,
+        },
+        "launch_packet": {
+            "mode": "no_execution_launch_packet",
+            "command_shape": "python-m-ale-run-dry-run",
+            "will_execute": False,
+            "will_start_container": False,
+            "will_read_task_body": False,
+            "will_invoke_model_api": False,
+            "will_upload": False,
+            "will_submit": False,
+            "will_capture_screenshot": False,
+            "will_record_credentials": False,
+            "will_record_local_paths": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "operator_trigger_exact_no_upload_ale_dry_run"
+            if ready
+            else "repair_ale_launch_packet_blocker_before_execution",
+            "minimum_next_evidence": (
+                "A human/operator-triggered ALE dry-run using the redacted source "
+                "lock, runner label, and experiment spec, followed by compact "
+                "run/eval/events ingest only."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "experiment_spec_content_read": False,
             "raw_artifacts_read": False,
             "local_paths_recorded": False,
             "container_started": False,

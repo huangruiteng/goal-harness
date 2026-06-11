@@ -32,6 +32,7 @@ from .benchmark import (
     build_agents_last_exam_local_preflight,
     build_agents_last_exam_local_runner_readiness,
     build_agents_last_exam_local_source_readiness,
+    build_agents_last_exam_local_launch_packet,
     build_benchmark_claim_review,
     build_benchmark_learning_ledger,
     build_benchmark_verifier_attribution_review,
@@ -340,6 +341,48 @@ def render_agents_last_exam_local_source_readiness_markdown(
         f"- Container started: `{boundary.get('container_started')}`",
         f"- Task body read: `{boundary.get('task_body_read')}`",
         f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_launch_packet_markdown(
+    payload: dict[str, object],
+) -> str:
+    source_lock = (
+        payload.get("source_lock")
+        if isinstance(payload.get("source_lock"), dict)
+        else {}
+    )
+    runner = payload.get("runner") if isinstance(payload.get("runner"), dict) else {}
+    experiment_spec = (
+        payload.get("experiment_spec")
+        if isinstance(payload.get("experiment_spec"), dict)
+        else {}
+    )
+    launch_packet = (
+        payload.get("launch_packet")
+        if isinstance(payload.get("launch_packet"), dict)
+        else {}
+    )
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Launch Packet",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Source head: `{source_lock.get('head')}`",
+        f"- Source root path recorded: `{source_lock.get('source_root_path_recorded')}`",
+        f"- Runner command label: `{runner.get('command_label')}`",
+        f"- Runner module available: `{runner.get('python_module_available')}`",
+        f"- Experiment spec: `{experiment_spec.get('relative_path')}`",
+        f"- Experiment spec exists/content read: `{experiment_spec.get('exists')}`/`{experiment_spec.get('content_read')}`",
+        f"- Mode: `{launch_packet.get('mode')}`",
+        f"- Will execute/start container: `{launch_packet.get('will_execute')}`/`{launch_packet.get('will_start_container')}`",
+        f"- Will upload/submit: `{launch_packet.get('will_upload')}`/`{launch_packet.get('will_submit')}`",
         f"- Next action: {decision.get('next_allowed_action')}",
     ]
     return "\n".join(lines) + "\n"
@@ -1718,6 +1761,86 @@ def main(argv: list[str] | None = None) -> int:
         help="Return non-zero unless the source readiness gate is ready.",
     )
 
+    ale_local_launch_packet_parser = benchmark_sub.add_parser(
+        "ale-local-launch-packet",
+        help=(
+            "Build a no-execution Agents' Last Exam local dry-run launch packet. "
+            "This combines source, runner, Docker preflight, and experiment-spec "
+            "existence gates without starting containers, reading task bodies, "
+            "invoking model APIs, uploading, or submitting."
+        ),
+    )
+    add_subcommand_format(ale_local_launch_packet_parser)
+    ale_local_launch_packet_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to probe. The path is never recorded.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--experiment-spec",
+        required=True,
+        help="Public relative path to the ALE experiment spec under source root.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--selected-task-id",
+        help="Optional public task id label for the metadata-only candidate.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--expected-repo-url",
+        default="https://github.com/rdi-berkeley/agents-last-exam.git",
+        help="Expected public ALE repository URL.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--runner-binary",
+        default="python3",
+        help="PATH-visible runner binary name to probe.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--runner-python-module",
+        default="ale_run",
+        help="Python module expected to provide the ALE runner CLI.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--runner-command-label",
+        default="python-m-ale-run",
+        help="Public-safe label for the configured runner command.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--snapshot",
+        default=AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        help="ALE snapshot label to check. Defaults to cpu-free-ubuntu.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Primary local Docker image ref to inspect.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--alternate-image",
+        default=AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+        help="Optional alternate local Docker image ref to inspect.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--operator-authorized",
+        action="store_true",
+        help="Mark that the operator authorized local container start for dry-run.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--allow-public-task-material",
+        action="store_true",
+        help="Mark that public ALE task material may be touched by a later dry-run.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the launch packet is ready.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--no-docker-probe",
+        action="store_true",
+        help="Do not call Docker; emit a fixture-like blocked launch packet.",
+    )
+
     benchmark_post_launch_parser = benchmark_sub.add_parser(
         "summarize-post-launch",
         help=(
@@ -2880,6 +3003,67 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_agents_last_exam_local_source_readiness_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-launch-packet":
+            try:
+                image_metadata = None
+                alternate_image_metadata = None
+                if args.no_docker_probe:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                    alternate_image_metadata = {
+                        "image_ref": args.alternate_image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                payload = build_agents_last_exam_local_launch_packet(
+                    source_root=args.source_root,
+                    experiment_spec_relative_path=args.experiment_spec,
+                    selected_task_id=args.selected_task_id,
+                    expected_repo_url=args.expected_repo_url,
+                    snapshot=args.snapshot,
+                    image_ref=args.image,
+                    alternate_image_ref=args.alternate_image,
+                    runner_binary=args.runner_binary,
+                    runner_python_module=args.runner_python_module,
+                    runner_command_label=args.runner_command_label,
+                    operator_authorized=bool(args.operator_authorized),
+                    allow_public_task_material=bool(args.allow_public_task_material),
+                    image_metadata=image_metadata,
+                    alternate_image_metadata=alternate_image_metadata,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_launch_packet_v0",
+                    "error": "ale_local_launch_packet_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "experiment_spec_content_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_launch_packet_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_launch_packet_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "review-claim":
