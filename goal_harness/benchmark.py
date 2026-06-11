@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1984,14 +1985,41 @@ def _agents_last_exam_runner_binary_probe(runner_binary: str | None) -> dict[str
     }
 
 
-def _agents_last_exam_python_module_probe(module_name: str | None) -> dict[str, Any]:
+def _agents_last_exam_python_module_probe(
+    module_name: str | None,
+    *,
+    source_root: str | None = None,
+) -> dict[str, Any]:
     module = _agents_last_exam_public_id(module_name, limit=100)
+    source_root_declared = bool(source_root)
+    source_root_available = False
+    source_root_path: Path | None = None
+    if source_root:
+        try:
+            source_root_path = Path(source_root).expanduser()
+        except (OSError, RuntimeError):
+            source_root_path = None
+        source_root_available = bool(source_root_path and source_root_path.is_dir())
     if not module_name:
         return {
             "module": None,
             "declared": False,
             "available": False,
             "first_blocker": "runner_python_module_missing",
+            "source_root_declared": source_root_declared,
+            "source_root_available": source_root_available,
+            "source_root_path_recorded": False,
+            "path_recorded": False,
+        }
+    if source_root_declared and not source_root_available:
+        return {
+            "module": module,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_source_root_missing",
+            "source_root_declared": True,
+            "source_root_available": False,
+            "source_root_path_recorded": False,
             "path_recorded": False,
         }
     if not module or "/" in module_name or "\\" in module_name:
@@ -2000,6 +2028,9 @@ def _agents_last_exam_python_module_probe(module_name: str | None) -> dict[str, 
             "declared": True,
             "available": False,
             "first_blocker": "runner_python_module_not_public_safe",
+            "source_root_declared": source_root_declared,
+            "source_root_available": source_root_available,
+            "source_root_path_recorded": False,
             "path_recorded": False,
         }
     parts = module_name.split(".")
@@ -2009,14 +2040,33 @@ def _agents_last_exam_python_module_probe(module_name: str | None) -> dict[str, 
             "declared": True,
             "available": False,
             "first_blocker": "runner_python_module_not_public_safe",
+            "source_root_declared": source_root_declared,
+            "source_root_available": source_root_available,
+            "source_root_path_recorded": False,
             "path_recorded": False,
         }
-    available = importlib.util.find_spec(module_name) is not None
+    if source_root_path is not None:
+        source_root_text = str(source_root_path)
+        sys.path.insert(0, source_root_text)
+        importlib.invalidate_caches()
+        try:
+            available = importlib.util.find_spec(module_name) is not None
+        finally:
+            try:
+                sys.path.remove(source_root_text)
+            except ValueError:
+                pass
+            importlib.invalidate_caches()
+    else:
+        available = importlib.util.find_spec(module_name) is not None
     return {
         "module": module,
         "declared": True,
         "available": available,
         "first_blocker": None if available else "runner_python_module_not_found",
+        "source_root_declared": source_root_declared,
+        "source_root_available": source_root_available,
+        "source_root_path_recorded": False,
         "path_recorded": False,
     }
 
@@ -2039,6 +2089,7 @@ def build_agents_last_exam_local_runner_readiness(
     alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
     runner_binary: str | None = None,
     runner_python_module: str | None = None,
+    runner_source_root: str | None = None,
     runner_command_label: str | None = None,
     operator_authorized: bool = False,
     allow_public_task_material: bool = False,
@@ -2085,7 +2136,10 @@ def build_agents_last_exam_local_runner_readiness(
         )
     )
     runner_probe = _agents_last_exam_runner_binary_probe(runner_binary)
-    module_probe = _agents_last_exam_python_module_probe(runner_python_module)
+    module_probe = _agents_last_exam_python_module_probe(
+        runner_python_module,
+        source_root=runner_source_root,
+    )
     command_label = _agents_last_exam_public_id(
         runner_command_label
         or (
@@ -2145,6 +2199,9 @@ def build_agents_last_exam_local_runner_readiness(
             "python_module": module_probe.get("module"),
             "python_module_declared": module_probe.get("declared") is True,
             "python_module_available": module_probe.get("available") is True,
+            "source_root_declared": module_probe.get("source_root_declared") is True,
+            "source_root_available": module_probe.get("source_root_available") is True,
+            "source_root_path_recorded": False,
             "python_module_path_recorded": False,
             "binary_path_recorded": False,
             "command_argv_recorded": False,

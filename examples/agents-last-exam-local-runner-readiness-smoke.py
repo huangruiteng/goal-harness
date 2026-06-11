@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,8 @@ def assert_no_execution(payload: dict[str, object]) -> None:
     assert isinstance(runner_probe, dict)
     assert runner_probe["binary_path_recorded"] is False
     assert runner_probe["command_argv_recorded"] is False
+    if "source_root_path_recorded" in runner_probe:
+        assert runner_probe["source_root_path_recorded"] is False
 
 
 def run_fixture_smoke() -> None:
@@ -126,6 +129,25 @@ def run_fixture_smoke() -> None:
     assert missing_runner["first_blocker"] == "runner_command_missing"
     assert "runner_binary_missing" in missing_runner["blockers"]
     assert_no_execution(missing_runner)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source_root = Path(tmp)
+        (source_root / "ale_run").mkdir()
+        (source_root / "ale_run" / "__init__.py").write_text("", encoding="utf-8")
+        source_ready = build_agents_last_exam_local_runner_readiness(
+            preflight=ready_preflight(),
+            runner_binary="python3",
+            runner_python_module="ale_run",
+            runner_source_root=str(source_root),
+            runner_command_label="ale-local-no-upload-dry-run",
+            operator_authorized=True,
+            allow_public_task_material=True,
+        )
+        assert source_ready["ready"] is True
+        assert source_ready["runner_probe"]["source_root_declared"] is True
+        assert source_ready["runner_probe"]["source_root_available"] is True
+        assert source_ready["runner_probe"]["source_root_path_recorded"] is False
+        assert_no_execution(source_ready)
 
     missing_module = build_agents_last_exam_local_runner_readiness(
         preflight=ready_preflight(),
@@ -165,6 +187,8 @@ def run_cli_smoke() -> None:
         "python3",
         "--runner-python-module",
         "ale_run",
+        "--runner-source-root",
+        str(REPO_ROOT),
         "--runner-command-label",
         "ale-local-no-upload-dry-run",
         "--operator-authorized",
@@ -184,6 +208,8 @@ def run_cli_smoke() -> None:
     assert payload["first_blocker"] == "docker_probe_disabled"
     assert payload["runner_probe"]["python_module"] == "ale_run"
     assert payload["runner_probe"]["python_module_available"] is False
+    assert payload["runner_probe"]["source_root_declared"] is True
+    assert payload["runner_probe"]["source_root_path_recorded"] is False
     assert_no_execution(payload)
 
     require_ready = subprocess.run(
