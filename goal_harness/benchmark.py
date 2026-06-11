@@ -270,29 +270,136 @@ BENCHMARK_RAW_PRIVATE_PATH_MARKERS = (
     "origin_log",
     "instruction.md",
     "task.md",
+    "/screenshots/",
+    "screenshot",
 )
 BENCHMARK_PRIVATE_MANIFEST_SUFFIXES = (
     ".local.json",
     ".private.json",
 )
+BENCHMARK_ARTIFACT_POLICY_REGISTRY: dict[str, dict[str, tuple[str, ...]]] = {
+    "default": {
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
+        "public_filenames": BENCHMARK_PUBLIC_ARTIFACT_FILENAMES,
+        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
+    },
+    "terminal-bench": {
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
+        "public_filenames": BENCHMARK_PUBLIC_ARTIFACT_FILENAMES,
+        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
+    },
+    "agents-last-exam": {
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
+        "public_filenames": (
+            "agents-last-exam-local-preflight.json",
+            "agents-last-exam-local-dry-run-plan.json",
+            "agents-last-exam-local-runner-readiness.json",
+            "agents-last-exam-local-source-readiness.json",
+            "agents-last-exam-local-launch-packet.json",
+        ),
+        "raw_private_markers": (
+            "trajectory.json",
+            "origin_log",
+            "/output/",
+            "/outputs/",
+            "/screenshots/",
+            "screenshot",
+            "hidden_refs",
+            "credentials",
+            "instruction.md",
+            "task.md",
+        ),
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
+    },
+}
 
 
-def classify_benchmark_artifact_path(path: str | Path) -> dict[str, Any]:
+def _safe_artifact_policy_key(adapter_kind: str | None) -> str:
+    key = str(adapter_kind or "default").strip().lower().replace("_", "-")
+    if key in BENCHMARK_ARTIFACT_POLICY_REGISTRY:
+        return key
+    return "default"
+
+
+def _safe_public_artifact_basename(value: Any) -> str:
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return ""
+    basename = str(value).replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    if not basename or basename in {".", ".."}:
+        return ""
+    if basename.endswith(BENCHMARK_PRIVATE_MANIFEST_SUFFIXES):
+        return ""
+    if any(marker in basename for marker in ("trajectory", "credential", "secret")):
+        return ""
+    return basename
+
+
+def _benchmark_artifact_policy(
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
+) -> dict[str, Any]:
+    policy_key = _safe_artifact_policy_key(adapter_kind)
+    default_policy = BENCHMARK_ARTIFACT_POLICY_REGISTRY["default"]
+    policy = BENCHMARK_ARTIFACT_POLICY_REGISTRY[policy_key]
+    filenames = set(default_policy["public_filenames"])
+    filenames.update(policy["public_filenames"])
+    filenames.update(
+        basename
+        for basename in (
+            _safe_public_artifact_basename(value)
+            for value in extra_public_filenames
+        )
+        if basename
+    )
+    return {
+        "adapter_kind": policy_key,
+        "public_suffixes": tuple(
+            sorted(set(default_policy["public_suffixes"]) | set(policy["public_suffixes"]))
+        ),
+        "public_filenames": tuple(sorted(filenames)),
+        "raw_private_markers": tuple(
+            sorted(
+                set(default_policy["raw_private_markers"])
+                | set(policy["raw_private_markers"])
+            )
+        ),
+        "private_suffixes": tuple(
+            sorted(
+                set(default_policy["private_suffixes"])
+                | set(policy["private_suffixes"])
+            )
+        ),
+    }
+
+
+def classify_benchmark_artifact_path(
+    path: str | Path,
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
+) -> dict[str, Any]:
     """Classify a benchmark artifact path without echoing host directories."""
 
+    policy = _benchmark_artifact_policy(
+        adapter_kind=adapter_kind,
+        extra_public_filenames=extra_public_filenames,
+    )
     normalized = str(path).replace("\\", "/").rstrip("/")
     basename = normalized.rsplit("/", 1)[-1] if normalized else ""
     lower_path = normalized.lower()
     lower_basename = basename.lower()
     public_compact_candidate = (
-        lower_basename.endswith(BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES)
-        or lower_basename in BENCHMARK_PUBLIC_ARTIFACT_FILENAMES
+        lower_basename.endswith(policy["public_suffixes"])
+        or lower_basename in policy["public_filenames"]
     )
     raw_marker = next(
-        (marker for marker in BENCHMARK_RAW_PRIVATE_PATH_MARKERS if marker in lower_path),
+        (marker for marker in policy["raw_private_markers"] if marker in lower_path),
         "",
     )
-    private_manifest = lower_basename.endswith(BENCHMARK_PRIVATE_MANIFEST_SUFFIXES)
+    private_manifest = lower_basename.endswith(policy["private_suffixes"])
 
     allowed_to_read = (
         public_compact_candidate
@@ -321,13 +428,33 @@ def classify_benchmark_artifact_path(path: str | Path) -> dict[str, Any]:
         "first_blocker": first_blocker,
         "allowed_to_read": allowed_to_read,
         "recommended_action": recommended_action,
+        "artifact_policy": {
+            "adapter_kind": policy["adapter_kind"],
+            "registry_backed": True,
+            "public_filename_allowlist_count": len(policy["public_filenames"]),
+            "raw_private_marker_count": len(policy["raw_private_markers"]),
+        },
     }
 
 
 def filter_public_benchmark_artifact_paths(
     paths: Iterable[str | Path],
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
 ) -> dict[str, Any]:
-    classifications = [classify_benchmark_artifact_path(path) for path in paths]
+    policy = _benchmark_artifact_policy(
+        adapter_kind=adapter_kind,
+        extra_public_filenames=extra_public_filenames,
+    )
+    classifications = [
+        classify_benchmark_artifact_path(
+            path,
+            adapter_kind=policy["adapter_kind"],
+            extra_public_filenames=extra_public_filenames,
+        )
+        for path in paths
+    ]
     allowed = [item for item in classifications if item["allowed_to_read"]]
     blocked = [item for item in classifications if not item["allowed_to_read"]]
     blocked_reasons: dict[str, int] = {}
@@ -343,6 +470,12 @@ def filter_public_benchmark_artifact_paths(
         "blocked_artifact_basenames": [item["basename"] for item in blocked],
         "blocked_reasons": blocked_reasons,
         "classifications": classifications,
+        "artifact_policy": {
+            "adapter_kind": policy["adapter_kind"],
+            "registry_backed": True,
+            "public_filename_allowlist_count": len(policy["public_filenames"]),
+            "raw_private_marker_count": len(policy["raw_private_markers"]),
+        },
         "public_boundary": {
             "full_paths_recorded": False,
             "raw_task_text_read": False,

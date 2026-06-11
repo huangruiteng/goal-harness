@@ -185,10 +185,16 @@ def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> No
 
 
 def render_benchmark_artifact_path_filter_markdown(payload: dict[str, object]) -> str:
+    artifact_policy = (
+        payload.get("artifact_policy")
+        if isinstance(payload.get("artifact_policy"), dict)
+        else {}
+    )
     lines = [
         "# Benchmark Artifact Path Filter",
         "",
         f"- Schema: `{payload.get('schema_version')}`",
+        f"- Adapter policy: `{artifact_policy.get('adapter_kind')}`",
         f"- Allowed to read: `{payload.get('allowed_to_read_count')}`",
         f"- Blocked: `{payload.get('blocked_count')}`",
         f"- Full paths recorded: `{payload.get('path_recorded')}`",
@@ -1663,6 +1669,23 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         help="Candidate benchmark artifact paths to classify without reading.",
     )
+    benchmark_artifact_filter_parser.add_argument(
+        "--adapter-kind",
+        default="default",
+        help=(
+            "Benchmark adapter artifact policy key. Unknown values fall back to "
+            "default without recording paths."
+        ),
+    )
+    benchmark_artifact_filter_parser.add_argument(
+        "--allow-public-filename",
+        action="append",
+        default=[],
+        help=(
+            "Additional public compact basename to allow for this classification "
+            "run. Only the basename is used and values are filtered."
+        ),
+    )
 
     ale_local_preflight_parser = benchmark_sub.add_parser(
         "ale-local-preflight",
@@ -3106,7 +3129,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "benchmark":
         if args.benchmark_command == "classify-artifacts":
-            payload = filter_public_benchmark_artifact_paths(args.artifact_paths)
+            payload = filter_public_benchmark_artifact_paths(
+                args.artifact_paths,
+                adapter_kind=args.adapter_kind,
+                extra_public_filenames=args.allow_public_filename,
+            )
             print_payload(
                 payload,
                 output_format(args),
