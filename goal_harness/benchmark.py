@@ -194,12 +194,18 @@ AGENTS_LAST_EXAM_LOCAL_DRY_RUN_PLAN_SCHEMA_VERSION = (
 AGENTS_LAST_EXAM_LOCAL_RUNNER_READINESS_SCHEMA_VERSION = (
     "agents_last_exam_local_runner_readiness_v0"
 )
+AGENTS_LAST_EXAM_LOCAL_SOURCE_READINESS_SCHEMA_VERSION = (
+    "agents_last_exam_local_source_readiness_v0"
+)
 AGENTS_LAST_EXAM_TRACE_PUBLICNESS = (
     "compact_public_safe_no_task_body_no_trajectory_no_output"
 )
 AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE = "agentslastexam/ale-kasm:latest"
 AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE = "ale-ubuntu22-docker:latest"
 AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT = "cpu-free-ubuntu"
+AGENTS_LAST_EXAM_DEFAULT_REPO_URL = (
+    "https://github.com/rdi-berkeley/agents-last-exam.git"
+)
 AGENTS_LAST_EXAM_RAW_SURFACES_EXCLUDED = (
     "trajectory.json",
     "origin_log",
@@ -2078,6 +2084,182 @@ def _agents_last_exam_runner_binary_requires_python_module(
         return False
     binary = Path(runner_binary).name.lower()
     return binary == "python" or binary.startswith("python3")
+
+
+def _agents_last_exam_normalized_repo_label(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.endswith(".git"):
+        text = text[:-4]
+    text = text.replace("git@github.com:", "https://github.com/")
+    text = text.replace("http://github.com/", "https://github.com/")
+    return _agents_last_exam_public_id(text, limit=180)
+
+
+def _agents_last_exam_source_git_metadata(
+    source_root: str | None,
+    *,
+    expected_repo_url: str = AGENTS_LAST_EXAM_DEFAULT_REPO_URL,
+) -> dict[str, Any]:
+    expected = _agents_last_exam_normalized_repo_label(expected_repo_url)
+    source_root_declared = bool(source_root)
+    source_root_path: Path | None = None
+    if source_root:
+        try:
+            source_root_path = Path(source_root).expanduser()
+        except (OSError, RuntimeError):
+            source_root_path = None
+    source_root_available = bool(source_root_path and source_root_path.is_dir())
+    base = {
+        "source_root_declared": source_root_declared,
+        "source_root_available": source_root_available,
+        "source_root_path_recorded": False,
+        "expected_repo": expected,
+        "remote": None,
+        "remote_matches_expected": False,
+        "head": None,
+        "git_probe_available": shutil.which("git") is not None,
+        "is_git_checkout": False,
+    }
+    if not source_root_declared:
+        return {**base, "first_blocker": "source_root_missing"}
+    if not source_root_available or source_root_path is None:
+        return {**base, "first_blocker": "source_root_not_available"}
+    if not shutil.which("git"):
+        return {**base, "first_blocker": "git_cli_missing"}
+
+    def git_output(*args: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(source_root_path), *args],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+
+    top_level = git_output("rev-parse", "--show-toplevel")
+    is_git_checkout = bool(top_level)
+    remote = _agents_last_exam_normalized_repo_label(
+        git_output("remote", "get-url", "origin")
+    )
+    head = _agents_last_exam_public_id(git_output("rev-parse", "HEAD"), limit=80)
+    metadata = {
+        **base,
+        "remote": remote,
+        "remote_matches_expected": bool(remote and expected and remote == expected),
+        "head": head,
+        "is_git_checkout": is_git_checkout,
+    }
+    if not is_git_checkout:
+        return {**metadata, "first_blocker": "source_root_not_git_checkout"}
+    if not remote:
+        return {**metadata, "first_blocker": "source_root_origin_missing"}
+    if expected and remote != expected:
+        return {**metadata, "first_blocker": "source_root_origin_mismatch"}
+    if not head:
+        return {**metadata, "first_blocker": "source_root_head_missing"}
+    return {**metadata, "first_blocker": None}
+
+
+def build_agents_last_exam_local_source_readiness(
+    *,
+    source_root: str | None,
+    expected_repo_url: str = AGENTS_LAST_EXAM_DEFAULT_REPO_URL,
+    runner_python_module: str = "ale_run",
+) -> dict[str, Any]:
+    """Verify a redacted public ALE source checkout contract without running ALE."""
+
+    git_metadata = _agents_last_exam_source_git_metadata(
+        source_root,
+        expected_repo_url=expected_repo_url,
+    )
+    module_probe = _agents_last_exam_python_module_probe(
+        runner_python_module,
+        source_root=source_root,
+    )
+    blockers: list[str] = []
+    if git_metadata.get("first_blocker"):
+        blockers.append(str(git_metadata["first_blocker"]))
+    if module_probe.get("available") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(module_probe.get("first_blocker"), limit=80)
+            or "runner_python_module_not_available"
+        )
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_SOURCE_READINESS_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_redacted_ale_source_lock",
+        "blockers": blockers,
+        "source": {
+            "kind": "git_source_root",
+            "expected_repo": git_metadata.get("expected_repo"),
+            "remote": git_metadata.get("remote"),
+            "remote_matches_expected": git_metadata.get("remote_matches_expected")
+            is True,
+            "head": git_metadata.get("head"),
+            "git_probe_available": git_metadata.get("git_probe_available") is True,
+            "is_git_checkout": git_metadata.get("is_git_checkout") is True,
+            "source_root_declared": git_metadata.get("source_root_declared") is True,
+            "source_root_available": git_metadata.get("source_root_available") is True,
+            "source_root_path_recorded": False,
+        },
+        "runner_probe": {
+            "python_module": module_probe.get("module"),
+            "python_module_declared": module_probe.get("declared") is True,
+            "python_module_available": module_probe.get("available") is True,
+            "python_module_path_recorded": False,
+            "source_root_path_recorded": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "use_redacted_source_lock_for_runner_readiness"
+            if ready
+            else "repair_public_ale_source_lock_before_runner_execution",
+            "minimum_next_evidence": (
+                "A durable public ALE checkout with matching origin, commit, and "
+                "importable runner module, followed by no-upload runner readiness."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
 
 
 def build_agents_last_exam_local_runner_readiness(

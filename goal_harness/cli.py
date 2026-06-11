@@ -31,6 +31,7 @@ from .benchmark import (
     build_agents_last_exam_local_dry_run_plan,
     build_agents_last_exam_local_preflight,
     build_agents_last_exam_local_runner_readiness,
+    build_agents_last_exam_local_source_readiness,
     build_benchmark_claim_review,
     build_benchmark_learning_ledger,
     build_benchmark_verifier_attribution_review,
@@ -307,6 +308,39 @@ def render_agents_last_exam_local_runner_readiness_markdown(
         f"- Next action: {decision.get('next_allowed_action')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_source_readiness_markdown(
+    payload: dict[str, object],
+) -> str:
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    runner_probe = (
+        payload.get("runner_probe")
+        if isinstance(payload.get("runner_probe"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Source Readiness",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Expected repo: `{source.get('expected_repo')}`",
+        f"- Remote matches expected: `{source.get('remote_matches_expected')}`",
+        f"- Source head: `{source.get('head')}`",
+        f"- Source root path recorded: `{source.get('source_root_path_recorded')}`",
+        f"- Runner Python module: `{runner_probe.get('python_module')}`",
+        f"- Runner Python module available: `{runner_probe.get('python_module_available')}`",
+        f"- Container started: `{boundary.get('container_started')}`",
+        f"- Task body read: `{boundary.get('task_body_read')}`",
+        f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1653,6 +1687,37 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    ale_local_source_readiness_parser = benchmark_sub.add_parser(
+        "ale-local-source-readiness",
+        help=(
+            "Check whether a local Agents' Last Exam source checkout can be used "
+            "as a redacted public runner source lock. This reads git metadata and "
+            "module availability only; it does not start containers, read task "
+            "bodies, invoke model APIs, upload, or submit."
+        ),
+    )
+    add_subcommand_format(ale_local_source_readiness_parser)
+    ale_local_source_readiness_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to probe. The path is never recorded.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--expected-repo-url",
+        default="https://github.com/rdi-berkeley/agents-last-exam.git",
+        help="Expected public ALE repository URL.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--runner-python-module",
+        default="ale_run",
+        help="Python module expected to provide the ALE runner CLI.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the source readiness gate is ready.",
+    )
+
     benchmark_post_launch_parser = benchmark_sub.add_parser(
         "summarize-post-launch",
         help=(
@@ -2781,6 +2846,40 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_agents_last_exam_local_runner_readiness_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-source-readiness":
+            try:
+                payload = build_agents_last_exam_local_source_readiness(
+                    source_root=args.source_root,
+                    expected_repo_url=args.expected_repo_url,
+                    runner_python_module=args.runner_python_module,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_source_readiness_v0",
+                    "error": "ale_local_source_readiness_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_source_readiness_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_source_readiness_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "review-claim":
