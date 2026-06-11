@@ -47,6 +47,9 @@ TERMINAL_BENCH_DEFAULT_TASK = "build-cython-ext"
 TERMINAL_BENCH_DEFAULT_MODEL = "gpt-5.5"
 BENCHMARK_CLAIM_REVIEW_SCHEMA_VERSION = "benchmark_claim_review_v0"
 BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION = "benchmark_learning_ledger_v0"
+BENCHMARK_ATTEMPT_LEARNING_GATE_SCHEMA_VERSION = (
+    "benchmark_attempt_learning_gate_v0"
+)
 BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION = "benchmark_lifecycle_state_v0"
 BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION = (
     "benchmark_verifier_attribution_review_v0"
@@ -773,6 +776,172 @@ def build_benchmark_learning_ledger(
             "new_candidate_allowed": not repair_candidates
             and bool(learning_quota_gate["spend_allowed"]),
             "next_allowed_action": next_allowed_action,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+def _attempt_learning_task_ids(run: dict[str, Any]) -> list[str]:
+    task_ids: list[str] = []
+    trials = run.get("trials")
+    if isinstance(trials, list):
+        for trial in trials[:8]:
+            if not isinstance(trial, dict):
+                continue
+            task_id = trial.get("task_id")
+            if isinstance(task_id, str) and task_id and task_id not in task_ids:
+                task_ids.append(task_id)
+    return task_ids[:4]
+
+
+def _attempt_learning_repair_candidates(run: dict[str, Any]) -> list[str]:
+    labels = set(_claim_review_failure_labels(run))
+    first_blocker = run.get("first_blocker")
+    if isinstance(first_blocker, str) and first_blocker:
+        labels.add(first_blocker)
+    candidates: list[str] = []
+    if any(
+        label in labels
+        for label in (
+            "pre_worker_agent_setup_failed",
+            "treatment_pre_worker_agent_setup_failed",
+        )
+    ):
+        candidates.append("adapter_startup_argument_contract")
+    if any(
+        label in labels
+        for label in (
+            "runner_compact_result_missing",
+            "harbor_job_root_missing",
+            "post_launch_job_dir_materialization_missing",
+            "reducer_validation_failed",
+        )
+    ):
+        candidates.append("benchmark_lifecycle_materialization_gate")
+    if _compact_positive_int(run.get("worker_submit_eligible_mismatch_count")):
+        candidates.append("runner_owned_submit_boundary_invariant")
+    if not candidates and labels:
+        candidates.append("compact_failure_attribution_review")
+    return candidates
+
+
+def _attempt_learning_run_countable(run: dict[str, Any]) -> bool:
+    if not run:
+        return False
+    official = (
+        run.get("official_task_score")
+        if isinstance(run.get("official_task_score"), dict)
+        else {}
+    )
+    compact_score = any(
+        isinstance(official.get(field), (bool, int, float))
+        for field in ("value", "passed")
+    )
+    compact_blocker = bool(run.get("first_blocker")) or bool(
+        _claim_review_failure_labels(run)
+    )
+    return compact_score or compact_blocker
+
+
+def _attempt_learning_ledger_actionable(
+    learning_ledger: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(learning_ledger, dict):
+        return False
+    learning_gate = (
+        learning_ledger.get("learning_quota_gate")
+        if isinstance(learning_ledger.get("learning_quota_gate"), dict)
+        else {}
+    )
+    routing = (
+        learning_ledger.get("routing")
+        if isinstance(learning_ledger.get("routing"), dict)
+        else {}
+    )
+    return (
+        learning_gate.get("spend_allowed") is True
+        and isinstance(routing.get("next_allowed_action"), str)
+        and bool(str(routing.get("next_allowed_action")).strip())
+    )
+
+
+def build_benchmark_attempt_learning_gate(
+    benchmark_run: dict[str, Any],
+    *,
+    benchmark_learning_ledger: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Gate benchmark budget counting on durable compact learning evidence."""
+
+    countable_attempt = _attempt_learning_run_countable(benchmark_run)
+    repair_candidates = _attempt_learning_repair_candidates(benchmark_run)
+    ledger_present = (
+        isinstance(benchmark_learning_ledger, dict)
+        and benchmark_learning_ledger.get("schema_version")
+        == BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION
+    )
+    ledger_actionable = _attempt_learning_ledger_actionable(
+        benchmark_learning_ledger
+    )
+
+    if not countable_attempt:
+        classification = "benchmark_attempt_not_countable"
+        next_required_action = "record_compact_score_or_blocker_before_budget_count"
+    elif not ledger_present:
+        classification = "benchmark_attempt_learning_row_missing"
+        next_required_action = "build_compact_benchmark_learning_ledger_before_repeat_or_new_candidate"
+    elif not ledger_actionable:
+        classification = "benchmark_attempt_learning_row_nonactionable"
+        next_required_action = (
+            "stop_without_spend_or_add_named_repair_caveat_before_repeat"
+        )
+    else:
+        classification = "benchmark_attempt_learning_ready"
+        routing = (
+            benchmark_learning_ledger.get("routing")
+            if isinstance(benchmark_learning_ledger, dict)
+            and isinstance(benchmark_learning_ledger.get("routing"), dict)
+            else {}
+        )
+        next_required_action = str(
+            routing.get("next_allowed_action")
+            or "record_learning_row_and_continue"
+        )
+
+    return {
+        "schema_version": BENCHMARK_ATTEMPT_LEARNING_GATE_SCHEMA_VERSION,
+        "benchmark_id": benchmark_run.get("benchmark_id"),
+        "mode": benchmark_run.get("mode"),
+        "task_ids": _attempt_learning_task_ids(benchmark_run),
+        "classification": classification,
+        "countable_attempt": countable_attempt,
+        "learning_row_present": ledger_present,
+        "learning_row_actionable": ledger_actionable,
+        "budget_count_allowed": countable_attempt and ledger_actionable,
+        "repeat_allowed": bool(
+            benchmark_learning_ledger
+            and isinstance(benchmark_learning_ledger.get("routing"), dict)
+            and benchmark_learning_ledger["routing"].get("repeat_allowed") is True
+            and ledger_actionable
+        ),
+        "new_candidate_allowed": bool(
+            benchmark_learning_ledger
+            and isinstance(benchmark_learning_ledger.get("routing"), dict)
+            and benchmark_learning_ledger["routing"].get("new_candidate_allowed")
+            is True
+            and ledger_actionable
+        ),
+        "repair_candidates": repair_candidates,
+        "next_required_action": next_required_action,
+        "claim_boundary": {
+            "requires_learning_row_before_budget_count": True,
+            "requires_learning_row_before_repeat_or_new_candidate": True,
+            "raw_trace_excluded": True,
+            "leaderboard_claim_allowed": False,
         },
         "read_boundary": {
             "compact_only": True,

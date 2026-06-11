@@ -34,6 +34,7 @@ from .benchmark import (
     build_agents_last_exam_local_source_readiness,
     build_agents_last_exam_local_launch_packet,
     build_benchmark_claim_review,
+    build_benchmark_attempt_learning_gate,
     build_benchmark_learning_ledger,
     build_benchmark_lifecycle_state,
     build_benchmark_runner_invariant_review,
@@ -465,6 +466,33 @@ def render_benchmark_learning_ledger_markdown(payload: dict[str, object]) -> str
         f"- Repeat allowed: `{routing.get('repeat_allowed')}`",
         f"- New candidate allowed: `{routing.get('new_candidate_allowed')}`",
         f"- Next action: {routing.get('next_allowed_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_attempt_learning_gate_markdown(
+    payload: dict[str, object],
+) -> str:
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Attempt Learning Gate",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Benchmark: `{payload.get('benchmark_id')}`",
+        f"- Mode: `{payload.get('mode')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Countable attempt: `{payload.get('countable_attempt')}`",
+        f"- Learning row present: `{payload.get('learning_row_present')}`",
+        f"- Learning row actionable: `{payload.get('learning_row_actionable')}`",
+        f"- Budget count allowed: `{payload.get('budget_count_allowed')}`",
+        f"- Repair candidates: `{payload.get('repair_candidates')}`",
+        f"- Next action: {payload.get('next_required_action')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
@@ -1996,6 +2024,34 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    benchmark_attempt_learning_gate_parser = benchmark_sub.add_parser(
+        "attempt-learning-gate",
+        help=(
+            "Gate benchmark budget counting and follow-up routing on a durable "
+            "compact learning ledger row. This reads only compact JSON, not raw "
+            "task text, logs, traces, Harbor job directories, Docker, model APIs, "
+            "uploads, screenshots, or credentials."
+        ),
+    )
+    add_subcommand_format(benchmark_attempt_learning_gate_parser)
+    benchmark_attempt_learning_gate_parser.add_argument(
+        "--benchmark-run-json",
+        required=True,
+        help="Path to a compact benchmark_run_v0 JSON object.",
+    )
+    benchmark_attempt_learning_gate_parser.add_argument(
+        "--benchmark-learning-ledger-json",
+        help="Optional path to a compact benchmark_learning_ledger_v0 JSON object.",
+    )
+    benchmark_attempt_learning_gate_parser.add_argument(
+        "--require-budget-count-allowed",
+        action="store_true",
+        help=(
+            "Return non-zero unless the compact attempt has an actionable "
+            "learning row and may be counted."
+        ),
+    )
+
     benchmark_lifecycle_state_parser = benchmark_sub.add_parser(
         "lifecycle-state",
         help=(
@@ -3342,6 +3398,71 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_benchmark_learning_ledger_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "attempt-learning-gate":
+            try:
+                run_input = json.loads(
+                    Path(args.benchmark_run_json).expanduser().read_text(encoding="utf-8")
+                )
+                if not isinstance(run_input, dict):
+                    raise ValueError("--benchmark-run-json must contain a JSON object")
+                run = compact_benchmark_run(run_input)
+                if not run:
+                    raise ValueError(
+                        "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                    )
+
+                learning_ledger = None
+                if args.benchmark_learning_ledger_json:
+                    ledger_input = json.loads(
+                        Path(args.benchmark_learning_ledger_json)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
+                    if not isinstance(ledger_input, dict):
+                        raise ValueError(
+                            "--benchmark-learning-ledger-json must contain a JSON object"
+                        )
+                    learning_ledger = compact_benchmark_learning_ledger(ledger_input)
+                    if not learning_ledger:
+                        raise ValueError(
+                            "--benchmark-learning-ledger-json did not contain a compactable benchmark_learning_ledger_v0 object"
+                        )
+
+                payload = build_benchmark_attempt_learning_gate(
+                    run,
+                    benchmark_learning_ledger=learning_ledger,
+                )
+                payload["ok"] = True
+                if (
+                    args.require_budget_count_allowed
+                    and payload.get("budget_count_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("classification")
+                        or "benchmark_attempt_learning_gate_not_ready"
+                    )
+                payload["require_budget_count_allowed"] = bool(
+                    args.require_budget_count_allowed
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_attempt_learning_gate_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_attempt_learning_gate_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "lifecycle-state":
