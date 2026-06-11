@@ -189,6 +189,9 @@ AGENTS_LAST_EXAM_LOCAL_PREFLIGHT_SCHEMA_VERSION = (
 AGENTS_LAST_EXAM_LOCAL_DRY_RUN_PLAN_SCHEMA_VERSION = (
     "agents_last_exam_local_dry_run_plan_v0"
 )
+AGENTS_LAST_EXAM_LOCAL_RUNNER_READINESS_SCHEMA_VERSION = (
+    "agents_last_exam_local_runner_readiness_v0"
+)
 AGENTS_LAST_EXAM_TRACE_PUBLICNESS = (
     "compact_public_safe_no_task_body_no_trajectory_no_output"
 )
@@ -1933,6 +1936,193 @@ def build_agents_last_exam_local_dry_run_plan(
                 "APIs, uploads, submissions, leaderboard claims, paid compute, "
                 "or production actions."
             ),
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+
+def _agents_last_exam_runner_binary_probe(runner_binary: str | None) -> dict[str, Any]:
+    binary = _agents_last_exam_public_id(runner_binary, limit=80)
+    if not runner_binary:
+        return {
+            "binary": None,
+            "declared": False,
+            "available": False,
+            "first_blocker": "runner_binary_missing",
+            "path_recorded": False,
+        }
+    if not binary:
+        return {
+            "binary": None,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_binary_not_public_safe",
+            "path_recorded": False,
+        }
+    if "/" in runner_binary or "\\" in runner_binary:
+        return {
+            "binary": binary,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_binary_must_be_name_not_path",
+            "path_recorded": False,
+        }
+    available = shutil.which(runner_binary) is not None
+    return {
+        "binary": binary,
+        "declared": True,
+        "available": available,
+        "first_blocker": None if available else "runner_binary_not_found",
+        "path_recorded": False,
+    }
+
+
+def build_agents_last_exam_local_runner_readiness(
+    *,
+    selected_task_id: str | None = None,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    runner_binary: str | None = None,
+    runner_command_label: str | None = None,
+    operator_authorized: bool = False,
+    allow_public_task_material: bool = False,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+    preflight: dict[str, Any] | None = None,
+    dry_run_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Check whether a real local ALE dry-run runner is configured.
+
+    This is still a no-execution gate: it may inspect Docker image metadata and
+    the local PATH for a runner binary, but it does not start containers, read
+    task bodies, invoke model APIs, upload, submit, or record command argv.
+    """
+
+    preflight_payload = (
+        preflight
+        if isinstance(preflight, dict)
+        else build_agents_last_exam_local_preflight(
+            selected_task_id=selected_task_id,
+            snapshot=snapshot,
+            provider_kind=provider_kind,
+            image_ref=image_ref,
+            alternate_image_ref=alternate_image_ref,
+            image_metadata=image_metadata,
+            alternate_image_metadata=alternate_image_metadata,
+            disk_headroom=disk_headroom,
+        )
+    )
+    plan_payload = (
+        dry_run_plan
+        if isinstance(dry_run_plan, dict)
+        else build_agents_last_exam_local_dry_run_plan(
+            selected_task_id=selected_task_id,
+            snapshot=snapshot,
+            provider_kind=provider_kind,
+            image_ref=image_ref,
+            alternate_image_ref=alternate_image_ref,
+            image_metadata=image_metadata,
+            alternate_image_metadata=alternate_image_metadata,
+            disk_headroom=disk_headroom,
+            preflight=preflight_payload,
+        )
+    )
+    runner_probe = _agents_last_exam_runner_binary_probe(runner_binary)
+    command_label = _agents_last_exam_public_id(
+        runner_command_label or runner_probe.get("binary"),
+        limit=120,
+    )
+    blockers: list[str] = []
+    if operator_authorized is not True:
+        blockers.append("operator_authorization_missing")
+    if allow_public_task_material is not True:
+        blockers.append("public_task_material_authorization_missing")
+    if plan_payload.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(plan_payload.get("first_blocker"), limit=80)
+            or "ale_local_dry_run_plan_not_ready"
+        )
+    if not command_label:
+        blockers.append("runner_command_missing")
+    if runner_probe.get("available") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(runner_probe.get("first_blocker"), limit=80)
+            or "runner_binary_not_available"
+        )
+    ready = not blockers
+
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_RUNNER_READINESS_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": plan_payload.get("task_id") or "metadata_only_candidate",
+        "snapshot": plan_payload.get("snapshot") or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "preflight_ready": preflight_payload.get("ready") is True,
+        "dry_run_plan_ready": plan_payload.get("ready") is True,
+        "runner_ready": ready,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_local_ale_dry_run_runner",
+        "blockers": blockers,
+        "runner_probe": {
+            "command_label": command_label,
+            "binary": runner_probe.get("binary"),
+            "binary_declared": runner_probe.get("declared") is True,
+            "binary_available": runner_probe.get("available") is True,
+            "binary_path_recorded": False,
+            "command_argv_recorded": False,
+            "first_blocker": _agents_last_exam_public_id(
+                runner_probe.get("first_blocker"),
+                limit=80,
+            ),
+        },
+        "boundary": {
+            "local_only": True,
+            "no_cloud": provider_kind == "docker",
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "operator_authorized_local_container_start": operator_authorized is True,
+            "operator_authorized_public_task_material": (
+                allow_public_task_material is True
+            ),
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "model_api_allowed": False,
+            "upload_allowed": False,
+            "submit_allowed": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "run_configured_no_upload_ale_local_dry_run"
+            if ready
+            else "configure_verified_ale_local_runner_before_execution",
+            "minimum_next_evidence": (
+                "A configured local runner command label and PATH-visible runner "
+                "binary, followed by one no-upload dry-run that produces compact "
+                "run/eval/events metadata only."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
         },
         "read_boundary": {
             "compact_only": True,
