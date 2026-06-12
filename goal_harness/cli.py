@@ -24,6 +24,7 @@ from .benchmark import (
     AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_SYNTHETIC_STAGING_SCHEMA_VERSION,
+    AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION,
     AGENTISSUE_DEFAULT_TAG,
@@ -32,6 +33,7 @@ from .benchmark import (
     materialize_agentissue_codex_cli_runner_first_run_handoff,
     materialize_agentissue_codex_cli_runner_run_gate,
     materialize_agentissue_codex_cli_runner_synthetic_staging,
+    materialize_agentissue_codex_cli_runner_target_handoff,
     materialize_agentissue_codex_cli_runner_workflow_check,
     TERMINAL_BENCH_DEFAULT_DATASET,
     TERMINAL_BENCH_DEFAULT_MODEL,
@@ -1353,6 +1355,15 @@ def main(argv: list[str] | None = None) -> int:
             "model APIs, upload, submit, or real task material."
         ),
     )
+    agentissue_runner_flow_parser.add_argument(
+        "--target-runner-handoff-root",
+        help=(
+            "Materialize a no-execute target-runner handoff packet at PATH. It "
+            "includes the run-specific gate plus a compact checklist for a "
+            "separate benchmark execution thread without running Codex, Docker, "
+            "model APIs, upload, submit, ranking paths, or real task material."
+        ),
+    )
     agentissue_runner_flow_parser.add_argument("--classification")
     agentissue_runner_flow_parser.add_argument("--recommended-action")
     agentissue_runner_flow_parser.add_argument(
@@ -2312,21 +2323,25 @@ def main(argv: list[str] | None = None) -> int:
             classification = (
                 args.classification
                 or (
-                    AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION
-                    if args.workflow_check_root
+                    AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION
+                    if args.target_runner_handoff_root
                     else (
-                        AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION
-                        if args.run_gate_root
+                        AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION
+                        if args.workflow_check_root
                         else (
-                            AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION
-                            if args.first_run_handoff_root
+                            AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION
+                            if args.run_gate_root
                             else (
-                                AGENTISSUE_CODEX_CLI_RUNNER_EXECUTION_GATE_SCHEMA_VERSION
-                                if args.execution_gate_root
+                                AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION
+                                if args.first_run_handoff_root
                                 else (
-                                    AGENTISSUE_CODEX_CLI_RUNNER_SYNTHETIC_STAGING_SCHEMA_VERSION
-                                    if args.synthetic_staging_root
-                                    else AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION
+                                    AGENTISSUE_CODEX_CLI_RUNNER_EXECUTION_GATE_SCHEMA_VERSION
+                                    if args.execution_gate_root
+                                    else (
+                                        AGENTISSUE_CODEX_CLI_RUNNER_SYNTHETIC_STAGING_SCHEMA_VERSION
+                                        if args.synthetic_staging_root
+                                        else AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION
+                                    )
                                 )
                             )
                         )
@@ -2346,12 +2361,13 @@ def main(argv: list[str] | None = None) -> int:
                         args.first_run_handoff_root,
                         args.workflow_check_root,
                         args.run_gate_root,
+                        args.target_runner_handoff_root,
                     )
                     if value
                 ]
                 if len(selected_roots) > 1:
                     raise ValueError(
-                        "agentissue-codex-runner-flow accepts at most one root option, not both: --synthetic-staging-root, --execution-gate-root, --first-run-handoff-root, --workflow-check-root, or --run-gate-root"
+                        "agentissue-codex-runner-flow accepts at most one root option, not both: --synthetic-staging-root, --execution-gate-root, --first-run-handoff-root, --workflow-check-root, --run-gate-root, or --target-runner-handoff-root"
                     )
                 wrapper = build_agentissue_codex_cli_runner_wrapper(
                     selected_tag=args.tag,
@@ -2363,8 +2379,17 @@ def main(argv: list[str] | None = None) -> int:
                 first_run_handoff = None
                 workflow_check = None
                 run_gate = None
+                target_handoff = None
                 benchmark_run_source = wrapper["benchmark_run"]
-                if args.run_gate_root:
+                if args.target_runner_handoff_root:
+                    target_handoff = materialize_agentissue_codex_cli_runner_target_handoff(
+                        args.target_runner_handoff_root,
+                        selected_tag=args.tag,
+                        codex_binary=args.codex_binary,
+                        docker_binary=args.docker_binary,
+                    )
+                    benchmark_run_source = target_handoff["benchmark_run"]
+                elif args.run_gate_root:
                     run_gate = materialize_agentissue_codex_cli_runner_run_gate(
                         args.run_gate_root,
                         selected_tag=args.tag,
@@ -2422,21 +2447,25 @@ def main(argv: list[str] | None = None) -> int:
                     classification=classification,
                     recommended_action=args.recommended_action
                     or (
-                        run_gate["recommended_next_action"]
-                        if run_gate
+                        target_handoff["recommended_next_action"]
+                        if target_handoff
                         else (
-                            workflow_check["recommended_next_action"]
-                            if workflow_check
+                            run_gate["recommended_next_action"]
+                            if run_gate
                             else (
-                                first_run_handoff["recommended_next_action"]
-                                if first_run_handoff
+                                workflow_check["recommended_next_action"]
+                                if workflow_check
                                 else (
-                                    execution_gate["recommended_next_action"]
-                                    if execution_gate
+                                    first_run_handoff["recommended_next_action"]
+                                    if first_run_handoff
                                     else (
-                                        synthetic_staging["recommended_next_action"]
-                                        if synthetic_staging
-                                        else wrapper["recommended_next_action"]
+                                        execution_gate["recommended_next_action"]
+                                        if execution_gate
+                                        else (
+                                            synthetic_staging["recommended_next_action"]
+                                            if synthetic_staging
+                                            else wrapper["recommended_next_action"]
+                                        )
                                     )
                                 )
                             )
@@ -2468,6 +2497,8 @@ def main(argv: list[str] | None = None) -> int:
                     "workflow_check_root_path_recorded": False,
                     "run_gate_materialized": bool(run_gate),
                     "run_gate_root_path_recorded": False,
+                    "target_handoff_materialized": bool(target_handoff),
+                    "target_handoff_root_path_recorded": False,
                 }
                 payload["agentissue_runner_flow"] = wrapper
                 if synthetic_staging:
@@ -2480,6 +2511,8 @@ def main(argv: list[str] | None = None) -> int:
                     payload["agentissue_workflow_check"] = workflow_check
                 if run_gate:
                     payload["agentissue_run_gate"] = run_gate
+                if target_handoff:
+                    payload["agentissue_target_handoff"] = target_handoff
                 if args.no_global_sync:
                     payload["global_sync"] = {
                         "ok": True,

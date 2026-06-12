@@ -234,16 +234,22 @@ work still belongs in the existing code, examples, and contract documents:
   real-run blockers: private job root selection, explicit real-run trigger,
   selected-container source extraction, private git baseline, and host-local
   Codex execution from the extracted buggy source.
+- `agentissue-bench-codex-cli-runner-target-handoff-v0.md`: no-execute
+  `--target-runner-handoff-root` packet for `lagent_239`. It materializes the
+  run-specific gate plus `target-runner-handoff.public.json` and
+  `target-runner-handoff.md`, turning the gate packet into a compact
+  target-runner checklist for a separate benchmark execution thread while
+  keeping the meta heartbeat no-execute/no-upload.
 - `agentissue-bench-codex-cli-runner-pr-ready-packet-v0.md`: public-safe
   consolidation packet for the full `lagent_239` runner-flow chain. It ties
   together the contract, flow plan, dry-run wrapper, synthetic staging,
-  execution gate, first-run handoff, workflow check, run-specific gate, and
-  nine matching smokes into one reviewable route while preserving no-run/
-  no-upload/no-submit/
+  execution gate, first-run handoff, workflow check, run-specific gate,
+  target-runner handoff, and ten matching smokes into one reviewable route
+  while preserving no-run/no-upload/no-submit/
   no-public-ranking boundaries.
 - `agentissue-bench-codex-cli-runner-publication-change-set-v0.md`: staging
   and review packet for publishing only the AgentIssue runner-flow change set.
-  It lists the ten docs and ten smokes that should move together, marks
+  It lists the eleven docs and eleven smokes that should move together, marks
   `goal_harness/benchmark.py`, `goal_harness/cli.py`, and this README as mixed
   tracked files that need hunk-level staging, and excludes unrelated benchmark
   lanes, runtime state, credentials, raw artifacts, uploads, submits, and

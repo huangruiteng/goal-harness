@@ -228,6 +228,12 @@ AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION = (
 AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_MODE = (
     "agentissue_codex_cli_runner_run_gate_packet"
 )
+AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION = (
+    "agentissue_bench_codex_cli_runner_target_handoff_v0"
+)
+AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_MODE = (
+    "agentissue_codex_cli_runner_target_handoff_packet"
+)
 AGENTISSUE_CODEX_CLI_RUNNER_SOURCE_RUNNER = (
     "goal_harness_agentissue_codex_cli_runner"
 )
@@ -1700,6 +1706,276 @@ def materialize_agentissue_codex_cli_runner_run_gate(
         "recommended_next_action": (
             "review run-specific gate packet before any later real no-upload "
             "AgentIssue-Bench lagent_239 Docker/Codex execution"
+        ),
+    }
+
+def materialize_agentissue_codex_cli_runner_target_handoff(
+    target_handoff_root: str | Path,
+    *,
+    selected_tag: str = AGENTISSUE_DEFAULT_TAG,
+    codex_binary: str = "codex",
+    docker_binary: str = "docker",
+) -> dict[str, Any]:
+    """Create a no-execute target-runner handoff packet for AgentIssue lagent_239."""
+
+    tag = _agentissue_public_label(selected_tag)
+    if tag != AGENTISSUE_DEFAULT_TAG:
+        raise ValueError(
+            "agentissue Codex runner target handoff currently only supports selected tag lagent_239"
+        )
+    root = Path(target_handoff_root).expanduser()
+    run_gate = materialize_agentissue_codex_cli_runner_run_gate(
+        root,
+        selected_tag=tag,
+        codex_binary=codex_binary,
+        docker_binary=docker_binary,
+    )
+    run_gate_path = root / "run-specific-gate.public.json"
+    target_handoff_path = root / "target-runner-handoff.public.json"
+    target_handoff_markdown_path = root / "target-runner-handoff.md"
+    compact_run_path = root / "benchmark_run.compact.json"
+
+    run_gate_public = json.loads(run_gate_path.read_text(encoding="utf-8"))
+    command_sources = run_gate_public["rendered_command_sources"]
+    gate_item_ids = [
+        item["id"] for item in run_gate_public["owner_agent_gate_items"]
+    ]
+    required_before_execution = [
+        "private_job_root_selected",
+        "operator_explicit_real_run_trigger",
+        "selected_container_source_extracted",
+        "private_git_baseline_created_before_codex",
+        "host_codex_exec_ephemeral_from_buggy_source",
+        "attempt_patch_reducer_configured",
+        "selected_tag_eval_no_upload_submit_ranking",
+        "compact_public_reducer_enabled",
+        "host_codex_auth_local_only",
+    ]
+    missing_from_gate = [
+        gate_id for gate_id in required_before_execution if gate_id not in gate_item_ids
+    ]
+    no_execute_boundary = {
+        **run_gate_public["execution_boundary"],
+        "target_thread_started": False,
+        "target_runner_executed": False,
+        "benchmark_execution_authorized_by_packet": False,
+    }
+    target_handoff = {
+        "schema_version": AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "selected_tag": tag,
+        "selected_image": AGENTISSUE_DEFAULT_IMAGE,
+        "default_mode": "no_execute",
+        "materialized": True,
+        "path_recorded": False,
+        "target_handoff_root_path_recorded": False,
+        "handoff_target": "separate_benchmark_execution_thread",
+        "meta_heartbeat_must_not_execute": True,
+        "real_run_authorized_by_packet": False,
+        "ready_for_real_run": False,
+        "ready_for_separate_execution_thread_after_gate_satisfied": (
+            not missing_from_gate
+        ),
+        "source_packets": {
+            "runner_plan": "runner-flow-plan.public.json",
+            "execution_gate": "execution-gate.public.json",
+            "first_run_handoff": "first-run-handoff.public.json",
+            "workflow_check": "workflow-check.public.json",
+            "run_gate": "run-specific-gate.public.json",
+        },
+        "target_runner_prerequisites": required_before_execution,
+        "missing_from_run_gate": missing_from_gate,
+        "execution_thread_checklist": [
+            {
+                "phase": "select_private_job_root",
+                "required": True,
+                "public_packet_only": False,
+                "private_state_allowed_in_execution_thread": True,
+                "meta_thread_must_not_run": True,
+            },
+            {
+                "phase": "extract_selected_container_buggy_source",
+                "required": True,
+                "command_shape_source": "run-specific-gate.public.json:rendered_command_sources.source_extraction_gate",
+                "commands": command_sources["source_extraction_gate"],
+            },
+            {
+                "phase": "create_private_git_baseline",
+                "required": True,
+                "command_shape_source": "run-specific-gate.public.json:rendered_command_sources.private_git_baseline_gate",
+                "commands": command_sources["private_git_baseline_gate"],
+            },
+            {
+                "phase": "run_host_codex_exec_ephemeral_from_buggy_source",
+                "required": True,
+                "command_shape_source": "run-specific-gate.public.json:rendered_command_sources.host_codex_gate",
+                "command": command_sources["host_codex_gate"],
+                "auth_boundary": "host_local_only_no_auth_sync",
+            },
+            {
+                "phase": "export_attempt_patch_from_buggy_source_git_diff",
+                "required": True,
+                "command_shape_source": "run-specific-gate.public.json:rendered_command_sources.patch_output_gate",
+                "output_relative_path": AGENTISSUE_PATCH_RELATIVE_PATH,
+                "patch_content_public": False,
+            },
+            {
+                "phase": "run_selected_tag_eval_no_upload_submit_ranking",
+                "required": True,
+                "command_shape_source": "run-specific-gate.public.json:rendered_command_sources.eval_gate",
+                "upload": False,
+                "submit": False,
+                "public_ranking_path": False,
+            },
+            {
+                "phase": "reduce_to_compact_public_result",
+                "required": True,
+                "public_outputs": [
+                    "benchmark_run.compact.json",
+                    "target-runner-handoff.public.json",
+                ],
+                "private_outputs_not_public": [
+                    AGENTISSUE_PATCH_RELATIVE_PATH,
+                    "raw logs",
+                    "task material",
+                    "model transcript",
+                    "screenshots",
+                    "credentials",
+                ],
+            },
+        ],
+        "public_output_contract": {
+            "allowed_public_relative_files": [
+                "target-runner-handoff.public.json",
+                "target-runner-handoff.md",
+                *run_gate_public["public_artifact_policy"][
+                    "allowed_public_relative_files"
+                ],
+            ],
+            "raw_task_material_public": False,
+            "patch_content_public": False,
+            "raw_logs_public": False,
+            "trajectories_public": False,
+            "screenshots_public": False,
+            "absolute_paths_public": False,
+            "credential_values_public": False,
+        },
+        "credential_boundary": {
+            "codex_auth_values_read_by_packet": False,
+            "codex_home_synced": False,
+            "shared_remote_host_receives_codex_auth": False,
+            "host_codex_auth_local_only": True,
+        },
+        "execution_boundary": no_execute_boundary,
+        "stop_conditions": [
+            "do_not_execute_in_meta_heartbeat_thread",
+            *run_gate_public["stop_conditions"],
+            "public_handoff_contains_raw_task_patch_log_transcript_screenshot_auth_or_absolute_path",
+        ],
+    }
+    markdown = (
+        "# AgentIssue-Bench lagent_239 Target-Runner Handoff\n\n"
+        "This packet is no-execute. It is a compact public handoff for a "
+        "separate benchmark execution thread, not permission for the meta "
+        "heartbeat thread to run the benchmark.\n\n"
+        "## Target\n\n"
+        "- handoff target: separate benchmark execution thread\n"
+        "- meta heartbeat must not execute Codex, Docker, model APIs, source "
+        "extraction, patch generation, eval, upload, submit, or ranking paths\n"
+        "- real_run_authorized_by_packet=false\n\n"
+        "## Required Gates\n\n"
+        + "\n".join(f"- {gate_id}" for gate_id in required_before_execution)
+        + "\n\n## Public Outputs\n\n"
+        "- benchmark_run.compact.json\n"
+        "- run-specific-gate.public.json\n"
+        "- target-runner-handoff.public.json\n"
+        "- target-runner-handoff.md\n\n"
+        "Private execution artifacts stay private and must be reduced before "
+        "any public writeback.\n"
+    )
+
+    benchmark_run = json.loads(json.dumps(run_gate["benchmark_run"]))
+    benchmark_run.update(
+        {
+            "job_name": "agentissue_lagent_239_codex_cli_runner_target_handoff",
+            "mode": AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_MODE,
+            "worker_mode": "trusted_host_codex_cli_no_execute_target_handoff",
+            "first_blocker": "target_handoff_packet_only_no_meta_execution",
+            "score_failure_attribution": "not_run_target_handoff_only",
+            "failure_attribution_labels": [
+                "target_runner_handoff_packet_only",
+                "ready_for_separate_execution_thread_after_gate_satisfied",
+            ],
+            "evidence_files": target_handoff["public_output_contract"][
+                "allowed_public_relative_files"
+            ],
+        }
+    )
+    benchmark_run["validation"].update(
+        {
+            "target_runner_handoff_materialized": True,
+            "handoff_target_declared": True,
+            "meta_heartbeat_must_not_execute": True,
+            "target_runner_prerequisites_declared": True,
+            "real_run_authorized_by_packet": False,
+            "target_thread_started": False,
+            "target_runner_executed": False,
+            "no_upload_submit_or_public_ranking": True,
+            "no_auth_sync_to_shared_host": True,
+            "public_output_contract_declared": True,
+            "ready_for_separate_execution_thread_after_gate_satisfied": (
+                not missing_from_gate
+            ),
+        }
+    )
+    for trial in benchmark_run.get("trials") or []:
+        if isinstance(trial, dict):
+            trial["exception_type"] = "target_handoff_packet_only_no_real_case"
+
+    target_handoff_path.write_text(
+        json.dumps(target_handoff, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    target_handoff_markdown_path.write_text(markdown, encoding="utf-8")
+    compact_run_path.write_text(
+        json.dumps(benchmark_run, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "selected_tag": tag,
+        "selected_image": AGENTISSUE_DEFAULT_IMAGE,
+        "handoff_target": "separate_benchmark_execution_thread",
+        "ready_for_real_run": False,
+        "ready_for_separate_execution_thread_after_gate_satisfied": (
+            not missing_from_gate
+        ),
+        "materialized": True,
+        "path_recorded": False,
+        "target_handoff_root_path_recorded": False,
+        "real_run_authorized_by_packet": False,
+        "run_gate": {
+            "schema_version": run_gate["schema_version"],
+            "ready_for_operator_review": run_gate["ready_for_operator_review"],
+            "ready_for_real_run": run_gate["ready_for_real_run"],
+            "run_gate_relative_path": run_gate["run_gate_relative_path"],
+            "path_recorded": False,
+        },
+        "created_relative_paths": [
+            *run_gate["created_relative_paths"],
+            "target-runner-handoff.public.json",
+            "target-runner-handoff.md",
+        ],
+        "target_handoff_relative_path": "target-runner-handoff.public.json",
+        "target_handoff_markdown_relative_path": "target-runner-handoff.md",
+        "compact_run_relative_path": "benchmark_run.compact.json",
+        "execution_boundary": target_handoff["execution_boundary"],
+        "target_runner_prerequisites": required_before_execution,
+        "benchmark_run": benchmark_run,
+        "recommended_next_action": (
+            "hand off target-runner packet to a separate benchmark execution "
+            "thread; keep meta heartbeat no-execute/no-upload"
         ),
     }
 

@@ -23,6 +23,7 @@ DOCS = [
     "agentissue-bench-codex-cli-runner-first-run-handoff-v0.md",
     "agentissue-bench-codex-cli-runner-workflow-check-v0.md",
     "agentissue-bench-codex-cli-runner-run-gate-v0.md",
+    "agentissue-bench-codex-cli-runner-target-handoff-v0.md",
     "agentissue-bench-codex-cli-runner-pr-ready-packet-v0.md",
     "agentissue-bench-codex-cli-runner-publication-change-set-v0.md",
 ]
@@ -36,6 +37,7 @@ SMOKES = [
     "agentissue-bench-codex-cli-runner-first-run-handoff-smoke.py",
     "agentissue-bench-codex-cli-runner-workflow-check-smoke.py",
     "agentissue-bench-codex-cli-runner-run-gate-smoke.py",
+    "agentissue-bench-codex-cli-runner-target-handoff-smoke.py",
     "agentissue-bench-codex-cli-runner-pr-ready-packet-smoke.py",
     "agentissue-bench-codex-cli-runner-publication-change-set-smoke.py",
 ]
@@ -55,18 +57,21 @@ REQUIRED_SOURCE_SNIPPETS = [
     "AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION",
     "AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION",
     "AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION",
+    "AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION",
     "build_agentissue_codex_cli_runner_wrapper",
     "materialize_agentissue_codex_cli_runner_synthetic_staging",
     "materialize_agentissue_codex_cli_runner_execution_gate",
     "materialize_agentissue_codex_cli_runner_first_run_handoff",
     "materialize_agentissue_codex_cli_runner_workflow_check",
     "materialize_agentissue_codex_cli_runner_run_gate",
+    "materialize_agentissue_codex_cli_runner_target_handoff",
     "agentissue-codex-runner-flow",
     "--synthetic-staging-root",
     "--execution-gate-root",
     "--first-run-handoff-root",
     "--workflow-check-root",
     "--run-gate-root",
+    "--target-runner-handoff-root",
     "read_boundary",
 ]
 
@@ -167,7 +172,7 @@ def main() -> None:
     assert_public_boundary()
     print(
         "agentissue-bench-codex-cli-runner-publication-change-set-smoke ok "
-        "docs=10 smokes=10 mixed_files_subset_documented real_run=False"
+        "docs=11 smokes=11 mixed_files_subset_documented real_run=False"
     )
 
 

@@ -22,6 +22,7 @@ DOCS = [
     "agentissue-bench-codex-cli-runner-first-run-handoff-v0.md",
     "agentissue-bench-codex-cli-runner-workflow-check-v0.md",
     "agentissue-bench-codex-cli-runner-run-gate-v0.md",
+    "agentissue-bench-codex-cli-runner-target-handoff-v0.md",
     "agentissue-bench-codex-cli-runner-pr-ready-packet-v0.md",
 ]
 
@@ -34,17 +35,19 @@ SMOKES = [
     "agentissue-bench-codex-cli-runner-first-run-handoff-smoke.py",
     "agentissue-bench-codex-cli-runner-workflow-check-smoke.py",
     "agentissue-bench-codex-cli-runner-run-gate-smoke.py",
+    "agentissue-bench-codex-cli-runner-target-handoff-smoke.py",
     "agentissue-bench-codex-cli-runner-pr-ready-packet-smoke.py",
 ]
 
 REQUIRED_PACKET_SNIPPETS = [
     "AgentIssue-Bench Codex CLI Runner PR-Ready Packet V0",
-    "contract -> flow plan -> dry-run wrapper -> synthetic staging -> execution gate -> first-run handoff -> workflow check -> run-specific gate -> PR-ready packet",
+    "contract -> flow plan -> dry-run wrapper -> synthetic staging -> execution gate -> first-run handoff -> workflow check -> run-specific gate -> target-runner handoff -> PR-ready packet",
     "--synthetic-staging-root",
     "--execution-gate-root",
     "--first-run-handoff-root",
     "--workflow-check-root",
     "--run-gate-root",
+    "--target-runner-handoff-root",
     "real_run=false",
     "submit_eligible=false",
     "leaderboard_evidence=false",
@@ -57,14 +60,17 @@ REQUIRED_SOURCE_SNIPPETS = [
     "AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION",
     "AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION",
     "AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION",
+    "AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION",
     "materialize_agentissue_codex_cli_runner_synthetic_staging",
     "materialize_agentissue_codex_cli_runner_execution_gate",
     "materialize_agentissue_codex_cli_runner_first_run_handoff",
     "materialize_agentissue_codex_cli_runner_workflow_check",
     "materialize_agentissue_codex_cli_runner_run_gate",
+    "materialize_agentissue_codex_cli_runner_target_handoff",
     "--first-run-handoff-root",
     "--workflow-check-root",
     "--run-gate-root",
+    "--target-runner-handoff-root",
 ]
 
 FORBIDDEN_TEXT = [
@@ -133,7 +139,7 @@ def main() -> None:
     assert_public_boundary()
     print(
         "agentissue-bench-codex-cli-runner-pr-ready-packet-smoke ok "
-        "docs=9 smokes=9 real_run=False"
+        "docs=10 smokes=10 real_run=False"
     )
 
 
