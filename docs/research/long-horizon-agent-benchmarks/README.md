@@ -565,6 +565,12 @@ work still belongs in the existing code, examples, and contract documents:
   backup candidates, selects `db-wal-recovery` as a protocol-calibration case
   for Codex goal-mode versus `codex-goal-harness`, and preserves the no-upload
   paired protocol.
+- `terminal-bench-next-candidate-after-db-wal-recovery-20260614.md`:
+  public-safe P0 routing packet after the `db-wal-recovery` paired compact
+  review. It records the baseline-pass/treatment-fail outcome, blocks same-task
+  repeat or treatment claims, selects `build-cython-ext` as the next
+  material-ready setup-heavy case, and preserves the no-upload paired protocol
+  for Codex goal-mode versus `codex-goal-harness`.
 - `agents-last-exam-triage-v0.md`: source-backed triage note adding Agents'
   Last Exam to the benchmark backlog. It records the Xiaohongshu discovery
   signal, verifies the arXiv and public GitHub surfaces, and keeps ALE behind
