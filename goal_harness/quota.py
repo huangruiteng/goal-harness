@@ -104,6 +104,21 @@ EXTERNAL_EVIDENCE_OBSERVATION_SCHEMA_VERSION = "external_evidence_observation_ob
 INTERACTION_CONTRACT_SCHEMA_VERSION = "goal_harness_interaction_contract_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 AUTOMATION_LIVENESS_SCHEMA_VERSION = "automation_liveness_v0"
+EXTERNAL_EVIDENCE_OBSERVE_PATTERNS = (
+    re.compile(
+        r"(?i)\b(?:poll(?:ing)?|observ(?:e|ing)|watch(?:ing)?|await(?:ing)?|wait\s+for|monitor(?:ing)?)\b.*\b"
+        r"(?:compact|result|artifact|marker|job|thread|run[-_\s]?id|worker|controller|writeback|trial[_\s-]?result)\b"
+    ),
+    re.compile(
+        r"(?i)\bwhen\b.*\b(?:result|artifact|marker|trial[_\s-]?result)\b.*\b"
+        r"(?:ingest|write\s*back|writeback|validate|review)\b"
+    ),
+)
+EXTERNAL_EVIDENCE_LAUNCHED_PATTERNS = (
+    re.compile(r"(?i)\b(?:launched|started|spawned|running|alive|materialized)\b.*\b(?:polling|result|marker)\b"),
+    re.compile(r"(?i)\bready_for_compact_polling\b"),
+    re.compile(r"(?i)\bcompact\b.*\bresult\b.*\b(?:not\s+ready|ingest\s+not\s+ready)\b"),
+)
 
 
 def _now_local() -> str:
@@ -243,12 +258,92 @@ def _item_progress_scope(item: dict[str, Any]) -> str:
     )
 
 
+def _external_evidence_poll_signal(
+    item: dict[str, Any],
+    *,
+    agent_todo_summary: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Detect launched external work whose next safe step is observation."""
+
+    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+    action_texts = [
+        str(value or "").strip()
+        for value in (
+            project_asset.get("next_action"),
+            project_asset.get("recommended_action"),
+            item.get("next_action"),
+            item.get("recommended_action"),
+        )
+        if str(value or "").strip()
+    ]
+    todo_texts: list[str] = []
+    launched_texts: list[str] = []
+    if isinstance(agent_todo_summary, dict):
+        items = agent_todo_summary.get("first_open_items")
+        if isinstance(items, list):
+            for item_value in items:
+                if not isinstance(item_value, dict):
+                    continue
+                for key in ("title", "text"):
+                    value = str(item_value.get(key) or "").strip()
+                    if value:
+                        todo_texts.append(value)
+                for key in ("note", "evidence", "reason"):
+                    value = str(item_value.get(key) or "").strip()
+                    if value:
+                        launched_texts.append(value)
+
+    all_texts = [*action_texts, *todo_texts, *launched_texts]
+    if not all_texts:
+        return None
+
+    direct_observe = any(
+        pattern.search(text)
+        for pattern in EXTERNAL_EVIDENCE_OBSERVE_PATTERNS
+        for text in all_texts
+    )
+    launched_wait = bool(action_texts) and any(
+        pattern.search(text)
+        for pattern in EXTERNAL_EVIDENCE_LAUNCHED_PATTERNS
+        for text in launched_texts
+    )
+    if not direct_observe and not launched_wait:
+        return None
+
+    observation_target = next((text for text in action_texts if text), None) or next(
+        (text for text in todo_texts if text),
+        "",
+    )
+    return {
+        "source": "active_state_or_latest_run",
+        "trigger": "implicit_launched_external_poll",
+        "observation_target": observation_target,
+        "matched_signal": "direct_observe" if direct_observe else "launched_wait",
+    }
+
+
 def _work_lane_contract(
     item: dict[str, Any],
     *,
     agent_todo_summary: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     progress_scope = _item_progress_scope(item)
+    external_poll_signal = _external_evidence_poll_signal(item, agent_todo_summary=agent_todo_summary)
+    if external_poll_signal:
+        return {
+            "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+            "lane": "continuous_monitor",
+            "monitor_kind": "external_evidence",
+            "next_lane": "continuous_monitor",
+            "obligation": "observe_external_evidence_or_blocker",
+            "must_attempt_work": True,
+            "reason_codes": ["external_evidence_poll_signal"],
+            "monitor_policy": "read_only_observation_then_no_spend_if_unchanged",
+            "action": (
+                "verify the observable external result handle; if it is absent, "
+                "write a compact blocker instead of rerunning launched work"
+            ),
+        }
     todo_counts = _open_todo_task_counts(agent_todo_summary)
     has_agent_todos = todo_counts["open"] > 0
     has_advancement_todos = todo_counts["advancement"] > 0
@@ -336,7 +431,9 @@ def _external_evidence_observation_obligation(
 ) -> dict[str, Any] | None:
     """Return the machine contract for a waiting external-evidence monitor."""
 
-    if state != "waiting" or str(item.get("waiting_on") or "") != "external_evidence":
+    explicit_wait = state == "waiting" and str(item.get("waiting_on") or "") == "external_evidence"
+    poll_signal = _external_evidence_poll_signal(item, agent_todo_summary=agent_todo_summary)
+    if not explicit_wait and not poll_signal:
         return None
     next_todo = ""
     if isinstance(agent_todo_summary, dict):
@@ -352,11 +449,17 @@ def _external_evidence_observation_obligation(
     observation_target = next_todo or str(
         project_asset.get("next_action") or item.get("recommended_action") or ""
     ).strip()
+    if poll_signal and poll_signal.get("observation_target"):
+        observation_target = str(poll_signal.get("observation_target") or observation_target)
 
     return {
         "schema_version": EXTERNAL_EVIDENCE_OBSERVATION_SCHEMA_VERSION,
         "required": True,
-        "kind": "external_evidence_monitor",
+        "kind": "external_evidence_monitor" if explicit_wait else "launched_external_work_monitor",
+        "trigger": "registry_waiting_on_external_evidence"
+        if explicit_wait
+        else poll_signal.get("trigger"),
+        "signal_source": poll_signal.get("source") if poll_signal else "registry",
         "scope": "read_only_observation",
         "must_attempt_observation": True,
         "delivery_allowed": False,
@@ -2414,6 +2517,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             work_lane_contract=work_lane_contract,
         )
         if external_evidence_observation:
+            normal_delivery_allowed = False
+            should_run = bool(recovery_allowed or self_repair_allowed)
             heartbeat_recommendation = {
                 **heartbeat_recommendation,
                 "recommended_mode": "external_evidence_observe_or_blocker",
@@ -2464,7 +2569,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "recovery_delivery_allowed": recovery_allowed,
             "self_repair_allowed": self_repair_allowed,
             "effective_action": effective_action,
-            "actionable_by_codex": bool(should_run or recovery_allowed),
+            "actionable_by_codex": bool(should_run or recovery_allowed or external_evidence_observation),
             "reason": (
                 str(stall_self_repair.get("reason"))
                 if self_repair_allowed and isinstance(stall_self_repair, dict)

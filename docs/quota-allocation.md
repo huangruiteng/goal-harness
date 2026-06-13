@@ -233,7 +233,9 @@ one small machine contract.
 
 External-evidence waits have an additional CLI-level observation contract. When
 the selected goal is `state=waiting`, `waiting_on=external_evidence`, and its
-current lane is a continuous monitor, `quota should-run` returns
+current lane is a continuous monitor, or when the active state says a
+long-running external worker was launched and the current action is to poll a
+compact result/marker, `quota should-run` returns
 `external_evidence_observation.schema_version =
 external_evidence_observation_obligation_v0`. The guard keeps
 `should_run=false` so ordinary delivery remains blocked, but sets

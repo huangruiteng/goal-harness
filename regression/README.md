@@ -14,8 +14,13 @@ python3 regression/external-evidence-observation-real-codex.py
 ```
 
 Runs the contract-only path. It creates an isolated Goal Harness fixture and
-checks that `quota should-run` returns an external-evidence observation
-obligation.
+checks two projection contracts:
+
+- explicit `waiting_on=external_evidence` goals return an
+  external-evidence observation obligation;
+- already-launched long-running work with an observable compact-result poll
+  target is treated as read-only external evidence, even when the open todo
+  still carries its original `advancement_task/run_eval` metadata.
 
 ```bash
 python3 regression/external-evidence-observation-real-codex.py --real-codex

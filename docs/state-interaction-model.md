@@ -157,8 +157,10 @@ Legacy todo text classification exists only to keep older states readable.
   does not spend, and should not describe the turn as "no user action".
 - `external_evidence_observation`: Codex does not run benchmark/model/Docker
   delivery. It must first verify an observable handle such as a thread id, job
-  id, marker, or compact writeback channel. If no handle exists, write a compact
-  blocker instead of quiet waiting.
+  id, marker, or compact writeback channel. This applies both to explicit
+  `waiting_on=external_evidence` goals and to already-launched long-running
+  work whose current action is compact-result polling. If no handle exists,
+  write a compact blocker instead of quiet waiting.
 - `monitor_quiet_skip`: no material transition is present. The agent may append
   at most one no-spend monitor-poll event, rerun the guard, then stay quiet.
   The automation stays active.
