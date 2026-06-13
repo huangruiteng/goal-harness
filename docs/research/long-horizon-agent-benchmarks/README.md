@@ -547,6 +547,12 @@ work still belongs in the existing code, examples, and contract documents:
   `compile-compcert` after cross-history compact evidence shows it was already
   completed, and selects `install-windows-3.11` as the next private no-upload
   paired pilot.
+- `terminal-bench-next-candidate-after-install-windows-20260614.md`:
+  public-safe P0 routing packet after the `install-windows-3.11` paired compact
+  result. It records the baseline verifier-attribution caveat, blocks
+  same-task repeat or treatment claims, selects `financial-document-processor`
+  as the next material-ready case, and preserves the no-upload paired protocol
+  for Codex goal-mode versus `codex-goal-harness`.
 - `agents-last-exam-triage-v0.md`: source-backed triage note adding Agents'
   Last Exam to the benchmark backlog. It records the Xiaohongshu discovery
   signal, verifies the arXiv and public GitHub surfaces, and keeps ALE behind
