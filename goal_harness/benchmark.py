@@ -4058,6 +4058,75 @@ def _verifier_attribution_run_review(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _verifier_attribution_review_routing(
+    *,
+    baseline_review: dict[str, Any] | None,
+    blockers: list[str],
+    baseline_caveat_resolved: bool,
+) -> dict[str, Any]:
+    """Project compact attribution into machine-readable routing decisions."""
+
+    attribution_class = (
+        str(baseline_review.get("attribution_class") or "")
+        if isinstance(baseline_review, dict)
+        else ""
+    )
+    verifier_blocked = "baseline_verifier_attribution_caveat" in blockers
+    missing_baseline = "missing_compact_baseline_run" in blockers
+    missing_score = "baseline_official_score_missing" in blockers
+    unattributed = "baseline_score_failure_unattributed" in blockers
+    boundary_mismatch = "baseline_submit_boundary_mismatch" in blockers
+    requires_preflight_repair = attribution_class in {
+        "verifier_dependency_install_failure",
+        "verifier_platform_probe_failure",
+        "verifier_infrastructure_failure",
+    }
+
+    treatment_eligible = baseline_caveat_resolved
+    repeat_allowed = baseline_caveat_resolved
+    new_candidate_allowed = baseline_caveat_resolved or verifier_blocked
+
+    if missing_baseline:
+        next_allowed_action = "provide_compact_baseline_run"
+    elif missing_score:
+        next_allowed_action = "wait_for_compact_official_score"
+    elif boundary_mismatch:
+        next_allowed_action = "repair_submit_boundary_mismatch"
+    elif requires_preflight_repair:
+        next_allowed_action = (
+            "repair_verifier_preflight_or_select_new_material_ready_case"
+        )
+        repeat_allowed = False
+    elif unattributed:
+        next_allowed_action = "collect_finer_compact_failure_attribution"
+        repeat_allowed = False
+        new_candidate_allowed = False
+    elif baseline_caveat_resolved:
+        next_allowed_action = "baseline_failure_is_control_plane_addressable"
+    else:
+        next_allowed_action = "keep_treatment_blocked_until_attribution_resolves"
+        repeat_allowed = False
+        new_candidate_allowed = False
+
+    return {
+        "treatment_eligible": treatment_eligible,
+        "repeat_allowed": repeat_allowed,
+        "new_candidate_allowed": new_candidate_allowed,
+        "requires_verifier_preflight_repair": requires_preflight_repair,
+        "requires_compact_official_score": missing_score,
+        "requires_compact_baseline_run": missing_baseline,
+        "requires_finer_compact_attribution": unattributed,
+        "next_allowed_action": next_allowed_action,
+        "blocked_action_scope": (
+            "treatment_and_same_task_repeat"
+            if requires_preflight_repair
+            else "treatment"
+            if blockers and not baseline_caveat_resolved
+            else ""
+        ),
+    }
+
+
 def _benchmark_lifecycle_schema(value: dict[str, Any] | None) -> str:
     if not isinstance(value, dict):
         return ""
@@ -4293,6 +4362,11 @@ def build_benchmark_verifier_attribution_review(
         next_action = "provide a compact benchmark_run_v0 for the baseline arm"
     else:
         next_action = "keep claim blocked until compact attribution blockers are resolved"
+    routing = _verifier_attribution_review_routing(
+        baseline_review=baseline_review,
+        blockers=blockers,
+        baseline_caveat_resolved=baseline_caveat_resolved,
+    )
 
     return {
         "schema_version": BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION,
@@ -4310,6 +4384,7 @@ def build_benchmark_verifier_attribution_review(
             "blockers": blockers,
             "next_action": next_action,
         },
+        "routing": routing,
         "read_boundary": {
             "compact_only": True,
             "raw_artifacts_read": False,

@@ -185,6 +185,16 @@ def test_verifier_attribution_keeps_compact_caveat() -> None:
     assert payload["reviewed_run_count"] == 2, payload
     assert decision["baseline_claim_caveat_resolved"] is False, payload
     assert "baseline_verifier_attribution_caveat" in decision["blockers"], payload
+    assert payload["routing"]["treatment_eligible"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["requires_verifier_preflight_repair"] is True, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "repair_verifier_preflight_or_select_new_material_ready_case"
+    ), payload
+    assert payload["routing"]["blocked_action_scope"] == (
+        "treatment_and_same_task_repeat"
+    ), payload
     assert (
         payload["run_reviews"][0]["attribution_class"]
         == "verifier_platform_probe_failure"
@@ -208,6 +218,13 @@ def test_verifier_attribution_resolves_explicit_model_failure() -> None:
     assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
     assert payload["decision"]["clean_model_failure_attribution"] is True, payload
     assert payload["decision"]["blockers"] == [], payload
+    assert payload["routing"]["treatment_eligible"] is True, payload
+    assert payload["routing"]["repeat_allowed"] is True, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["requires_verifier_preflight_repair"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "baseline_failure_is_control_plane_addressable"
+    ), payload
     assert payload["run_reviews"][0]["attribution_class"] == "model_or_solution_failure", payload
 
 
@@ -255,6 +272,10 @@ def test_cli_review_verifier_attribution() -> None:
         assert payload["ok"] is True, payload
         assert payload["decision"]["baseline_claim_caveat_resolved"] is False, payload
         assert "baseline_verifier_attribution_caveat" in payload["decision"]["blockers"], payload
+        assert payload["routing"]["treatment_eligible"] is False, payload
+        assert payload["routing"]["repeat_allowed"] is False, payload
+        assert payload["routing"]["new_candidate_allowed"] is True, payload
+        assert payload["routing"]["requires_verifier_preflight_repair"] is True, payload
         assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
         assert str(root) not in result.stdout, result.stdout
 

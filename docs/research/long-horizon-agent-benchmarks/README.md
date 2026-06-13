@@ -609,6 +609,11 @@ work still belongs in the existing code, examples, and contract documents:
   control-plane-score, claim-boundary, readiness, authorization,
   replay-decision, next-run-mode, and stop-condition state without raw logs,
   private traces, local artifact paths, chat history, or extra hot-path keys.
+- `benchmark-result-control-plane-score-v0.md`: compact score and attribution
+  boundary contract. It keeps official task score separate from Goal Harness
+  control-plane value and defines `benchmark_verifier_attribution_review_v0`
+  routing fields so verifier dependency/platform failures block treatment and
+  same-task repeat while still allowing a new material-ready candidate.
 - `benchmark-restart-actionability-v0.md`: restarted-worker actionability
   fixture proving a compact reconstructed decision can produce exactly one
   bounded local fixture command or a public-safe blocker while preserving

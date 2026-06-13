@@ -52,14 +52,37 @@ clean for the current public fixture.
 - Real Terminal-Bench, Harbor, Docker, Codex/model API, cloud, paid compute, or
   leaderboard paths require explicit operator approval.
 
+## Verifier Attribution Routing
+
+`benchmark_verifier_attribution_review_v0` is a compact-only review over
+`benchmark_run_v0` rows. It does not open raw verifier logs, task text,
+trajectories, Harbor job directories, Docker, model APIs, or upload paths.
+
+The review keeps human-readable `decision` fields and also emits a
+machine-readable `routing` object:
+
+| Field | Meaning |
+| --- | --- |
+| `treatment_eligible` | A treatment run may proceed because the baseline failure is not a verifier/platform caveat. |
+| `repeat_allowed` | The same task may be repeated under the current protocol. |
+| `new_candidate_allowed` | The runner may move to another material-ready hard case. |
+| `requires_verifier_preflight_repair` | The baseline compact labels indicate verifier dependency/platform repair or finer compact verifier evidence is needed before same-task repeat. |
+| `blocked_action_scope` | Which action class is blocked, for example `treatment_and_same_task_repeat`. |
+| `next_allowed_action` | Stable action token for automation, such as `repair_verifier_preflight_or_select_new_material_ready_case`. |
+
+This routing prevents a failed baseline caused by verifier dependency or
+platform setup from being misread as a Goal Harness treatment opportunity.
+
 ## Smoke
 
 The deterministic fixture is:
 
 ```bash
 python3 examples/codex-cli-long-run-benchmark-smoke.py
+python3 examples/benchmark-claim-review-smoke.py
 ```
 
 The smoke verifies that with/without Goal Harness results keep
 `official_task_score_delta == 0.0` while the with-harness path has a higher
-`control_plane_score.value`.
+`control_plane_score.value`. The claim-review smoke also verifies verifier
+attribution routing for treatment, repeat, and new-candidate decisions.

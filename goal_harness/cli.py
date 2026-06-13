@@ -947,6 +947,9 @@ def render_benchmark_verifier_attribution_review_markdown(
     decision = (
         payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
     )
+    routing = (
+        payload.get("routing") if isinstance(payload.get("routing"), dict) else {}
+    )
     read_boundary = (
         payload.get("read_boundary")
         if isinstance(payload.get("read_boundary"), dict)
@@ -963,6 +966,10 @@ def render_benchmark_verifier_attribution_review_markdown(
         f"- Clean model attribution: `{decision.get('clean_model_failure_attribution')}`",
         f"- Blockers: `{decision.get('blockers')}`",
         f"- Next action: {decision.get('next_action')}",
+        f"- Treatment eligible: `{routing.get('treatment_eligible')}`",
+        f"- Repeat allowed: `{routing.get('repeat_allowed')}`",
+        f"- New candidate allowed: `{routing.get('new_candidate_allowed')}`",
+        f"- Routing action: {routing.get('next_allowed_action')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
