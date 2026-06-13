@@ -228,6 +228,28 @@ def test_verifier_attribution_resolves_explicit_model_failure() -> None:
     assert payload["run_reviews"][0]["attribution_class"] == "model_or_solution_failure", payload
 
 
+def test_verifier_attribution_all_passed_moves_to_new_candidate() -> None:
+    baseline = benchmark_run("codex-goal-mode", 1.0)
+    treatment = benchmark_run("codex-goal-harness", 1.0, worker_calls=2)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is False, payload
+    assert payload["decision"]["clean_model_failure_attribution"] is False, payload
+    assert payload["decision"]["blockers"] == [], payload
+    assert payload["routing"]["treatment_eligible"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["requires_verifier_preflight_repair"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "select_new_material_ready_case_no_score_failure"
+    ), payload
+    assert payload["routing"]["blocked_action_scope"] == "same_task_claim", payload
+    assert payload["run_reviews"][0]["attribution_class"] == "no_score_failure", payload
+
+
 def test_cli_review_verifier_attribution() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -286,6 +308,7 @@ def main() -> int:
     test_cli_review_claim()
     test_verifier_attribution_keeps_compact_caveat()
     test_verifier_attribution_resolves_explicit_model_failure()
+    test_verifier_attribution_all_passed_moves_to_new_candidate()
     test_cli_review_verifier_attribution()
     print("benchmark-claim-review-smoke ok")
     return 0

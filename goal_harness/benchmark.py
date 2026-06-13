@@ -4076,6 +4076,7 @@ def _verifier_attribution_review_routing(
     missing_score = "baseline_official_score_missing" in blockers
     unattributed = "baseline_score_failure_unattributed" in blockers
     boundary_mismatch = "baseline_submit_boundary_mismatch" in blockers
+    no_score_failure = attribution_class == "no_score_failure" and not blockers
     requires_preflight_repair = attribution_class in {
         "verifier_dependency_install_failure",
         "verifier_platform_probe_failure",
@@ -4101,6 +4102,11 @@ def _verifier_attribution_review_routing(
         next_allowed_action = "collect_finer_compact_failure_attribution"
         repeat_allowed = False
         new_candidate_allowed = False
+    elif no_score_failure:
+        next_allowed_action = "select_new_material_ready_case_no_score_failure"
+        treatment_eligible = False
+        repeat_allowed = False
+        new_candidate_allowed = True
     elif baseline_caveat_resolved:
         next_allowed_action = "baseline_failure_is_control_plane_addressable"
     else:
@@ -4120,6 +4126,8 @@ def _verifier_attribution_review_routing(
         "blocked_action_scope": (
             "treatment_and_same_task_repeat"
             if requires_preflight_repair
+            else "same_task_claim"
+            if no_score_failure
             else "treatment"
             if blockers and not baseline_caveat_resolved
             else ""
@@ -4360,6 +4368,15 @@ def build_benchmark_verifier_attribution_review(
         )
     elif "missing_compact_baseline_run" in blockers:
         next_action = "provide a compact benchmark_run_v0 for the baseline arm"
+    elif (
+        baseline_review
+        and baseline_review.get("attribution_class") == "no_score_failure"
+        and not blockers
+    ):
+        next_action = (
+            "no baseline score-failure caveat; do not claim same-task uplift, "
+            "select a new material-ready case"
+        )
     else:
         next_action = "keep claim blocked until compact attribution blockers are resolved"
     routing = _verifier_attribution_review_routing(
