@@ -559,6 +559,12 @@ work still belongs in the existing code, examples, and contract documents:
   repeat or treatment claims, selects `multi-source-data-merger` as the next
   material-ready case, and preserves the no-upload paired protocol for Codex
   goal-mode versus `codex-goal-harness`.
+- `terminal-bench-next-candidate-after-multi-source-data-merger-20260614.md`:
+  public-safe P0 routing packet after the `multi-source-data-merger` paired
+  compact result. It records the both-pass/no-uplift outcome, rejects exhausted
+  backup candidates, selects `db-wal-recovery` as a protocol-calibration case
+  for Codex goal-mode versus `codex-goal-harness`, and preserves the no-upload
+  paired protocol.
 - `agents-last-exam-triage-v0.md`: source-backed triage note adding Agents'
   Last Exam to the benchmark backlog. It records the Xiaohongshu discovery
   signal, verifies the arXiv and public GitHub surfaces, and keeps ALE behind
