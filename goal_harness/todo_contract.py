@@ -1,17 +1,39 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
+from urllib.parse import quote, unquote
 
 
 TODO_TASK_PATTERN = re.compile(r"^\s*[-*]\s+\[([ xX-])\]\s+(.+?)\s*$")
 TODO_METADATA_PATTERN = re.compile(r"^\s*<!--\s*goal-harness:(?:todo\s+)?(?P<body>.*?)\s*-->\s*$")
-TODO_METADATA_TOKEN_PATTERN = re.compile(r"(?P<key>[a-z_][a-z0-9_-]*)=(?P<value>[A-Za-z0-9_.:-]+)")
+TODO_METADATA_TOKEN_PATTERN = re.compile(r"(?P<key>[a-z_][a-z0-9_-]*)=(?P<value>[^\s<>]+)")
 TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
 
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
-TODO_TASK_CLASS_VALUES = {TODO_TASK_CLASS_ADVANCEMENT, TODO_TASK_CLASS_MONITOR}
+TODO_TASK_CLASS_USER_GATE = "user_gate"
+TODO_TASK_CLASS_BLOCKER = "blocker"
+TODO_TASK_CLASS_VALUES = {
+    TODO_TASK_CLASS_ADVANCEMENT,
+    TODO_TASK_CLASS_MONITOR,
+    TODO_TASK_CLASS_USER_GATE,
+    TODO_TASK_CLASS_BLOCKER,
+}
+
+TODO_STATUS_OPEN = "open"
+TODO_STATUS_DONE = "done"
+TODO_STATUS_BLOCKED = "blocked"
+TODO_STATUS_DEFERRED = "deferred"
+TODO_STATUS_VALUES = {
+    TODO_STATUS_OPEN,
+    TODO_STATUS_DONE,
+    TODO_STATUS_BLOCKED,
+    TODO_STATUS_DEFERRED,
+}
+TODO_TERMINAL_STATUS_VALUES = {TODO_STATUS_DONE, TODO_STATUS_DEFERRED}
 
 TODO_ACTION_KIND_ADVANCEMENT_VALUES = {
     "advance",
@@ -112,6 +134,69 @@ def normalize_todo_action_kind(value: Any) -> str | None:
     return None
 
 
+def normalize_todo_id(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if candidate and TODO_ID_PATTERN.match(candidate):
+        return candidate
+    return None
+
+
+def build_todo_id(
+    *,
+    role: Any,
+    source_section: Any,
+    index: Any,
+    text: Any,
+) -> str:
+    identity = "|".join(str(part or "") for part in (role, source_section, index, compact_todo_text(text)))
+    return f"todo_{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:12]}"
+
+
+def normalize_explicit_todo_task_class(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if candidate in TODO_TASK_CLASS_VALUES:
+        return candidate
+    return None
+
+
+def normalize_todo_status(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if candidate in TODO_STATUS_VALUES:
+        return candidate
+    return None
+
+
+def todo_done_for_status(status: Any) -> bool:
+    return normalize_todo_status(status) in TODO_TERMINAL_STATUS_VALUES
+
+
+def todo_status_from_marker(marker: Any) -> str:
+    candidate = str(marker or "").strip().lower()
+    if candidate == "x":
+        return TODO_STATUS_DONE
+    if candidate == "-":
+        return TODO_STATUS_DEFERRED
+    return TODO_STATUS_OPEN
+
+
+def todo_marker_for_status(status: Any) -> str:
+    normalized = normalize_todo_status(status) or TODO_STATUS_OPEN
+    if normalized == TODO_STATUS_DEFERRED:
+        return "-"
+    if normalized == TODO_STATUS_DONE:
+        return "x"
+    return " "
+
+
+def encode_metadata_value(value: Any) -> str:
+    compact = compact_todo_text(value)
+    return quote(compact, safe="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:-")
+
+
+def decode_metadata_value(value: Any) -> str:
+    return compact_todo_text(unquote(str(value or "")))
+
+
 def parse_todo_metadata_line(line: str) -> dict[str, str] | None:
     match = TODO_METADATA_PATTERN.match(line)
     if not match:
@@ -119,31 +204,81 @@ def parse_todo_metadata_line(line: str) -> dict[str, str] | None:
     metadata: dict[str, str] = {}
     for token in TODO_METADATA_TOKEN_PATTERN.finditer(match.group("body")):
         key = token.group("key").replace("-", "_")
-        value = token.group("value")
-        if key == "task_class" and value in TODO_TASK_CLASS_VALUES:
-            metadata["task_class"] = value
+        value = decode_metadata_value(token.group("value"))
+        if key == "todo_id":
+            todo_id = normalize_todo_id(value)
+            if todo_id:
+                metadata["todo_id"] = todo_id
+        elif key == "status":
+            status = normalize_todo_status(value)
+            if status:
+                metadata["status"] = status
+        elif key == "task_class":
+            task_class = normalize_explicit_todo_task_class(value)
+            if task_class:
+                metadata["task_class"] = task_class
         elif key == "action_kind":
             action_kind = normalize_todo_action_kind(value)
             if action_kind:
                 metadata["action_kind"] = action_kind
+        elif key in {"note", "evidence", "reason", "completed_at", "updated_at"}:
+            if value:
+                metadata[key] = value
+        elif key == "superseded_by":
+            todo_id = normalize_todo_id(value)
+            if todo_id:
+                metadata["superseded_by"] = todo_id
     return metadata or None
 
 
 def format_todo_metadata_line(
     *,
+    todo_id: str | None = None,
+    status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    note: str | None = None,
+    evidence: str | None = None,
+    reason: str | None = None,
+    completed_at: str | None = None,
+    updated_at: str | None = None,
+    superseded_by: str | None = None,
 ) -> str | None:
     fields: list[str] = []
+    normalized_todo_id = normalize_todo_id(todo_id)
+    if todo_id and not normalized_todo_id:
+        raise ValueError("todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+    if normalized_todo_id:
+        fields.append(f"todo_id={encode_metadata_value(normalized_todo_id)}")
+    normalized_status = normalize_todo_status(status)
+    if status and not normalized_status:
+        raise ValueError(f"todo status must be one of: {', '.join(sorted(TODO_STATUS_VALUES))}")
+    if normalized_status:
+        fields.append(f"status={encode_metadata_value(normalized_status)}")
     if task_class:
-        if task_class not in TODO_TASK_CLASS_VALUES:
+        task_class = normalize_explicit_todo_task_class(task_class)
+        if not task_class:
             raise ValueError(f"todo task_class must be one of: {', '.join(sorted(TODO_TASK_CLASS_VALUES))}")
-        fields.append(f"task_class={task_class}")
+        fields.append(f"task_class={encode_metadata_value(task_class)}")
     normalized_action_kind = normalize_todo_action_kind(action_kind)
     if action_kind and not normalized_action_kind:
         raise ValueError("todo action_kind must be a public-safe token: lowercase letters, digits, '_' or '-'")
     if normalized_action_kind:
-        fields.append(f"action_kind={normalized_action_kind}")
+        fields.append(f"action_kind={encode_metadata_value(normalized_action_kind)}")
+    for key, value in (
+        ("note", note),
+        ("evidence", evidence),
+        ("reason", reason),
+        ("completed_at", completed_at),
+        ("updated_at", updated_at),
+    ):
+        if value:
+            fields.append(f"{key}={encode_metadata_value(value)}")
+    normalized_superseded_by = normalize_todo_id(superseded_by)
+    if superseded_by and not normalized_superseded_by:
+        raise ValueError("superseded_by must use the public token shape todo_<letters-digits-underscore-hyphen>")
+    if normalized_superseded_by:
+        fields.append(f"superseded_by={encode_metadata_value(normalized_superseded_by)}")
     if not fields:
         return None
     return f"  <!-- goal-harness:todo {' '.join(fields)} -->"
@@ -170,8 +305,8 @@ def todo_task_class_for_text(text: str) -> str:
 
 
 def normalize_todo_task_class(value: Any, *, text: str, action_kind: Any = None) -> str:
-    candidate = str(value or "").strip()
-    if candidate in TODO_TASK_CLASS_VALUES:
+    candidate = normalize_explicit_todo_task_class(value)
+    if candidate:
         return candidate
     normalized_action_kind = normalize_todo_action_kind(action_kind)
     if normalized_action_kind in TODO_ACTION_KIND_ADVANCEMENT_VALUES:

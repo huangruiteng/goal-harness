@@ -34,9 +34,13 @@ from .todo_contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_PATTERN,
+    build_todo_id,
     normalize_todo_action_kind,
+    normalize_todo_status,
     normalize_todo_task_class,
     parse_todo_metadata_line,
+    todo_done_for_status,
+    todo_status_from_marker,
 )
 
 
@@ -2514,15 +2518,23 @@ def structured_todo_item(
     text = normalize_todo_text(str(item.get("text") or ""))
     priority, title = todo_priority_parts(text)
     index = item.get("index")
-    status = "done" if item.get("done") else "open"
-    identity = "|".join(str(part or "") for part in (role, source_section, index, text))
+    explicit_status = normalize_todo_status(item.get("status"))
+    status = explicit_status or ("done" if item.get("done") else "open")
+    done = todo_done_for_status(status) if explicit_status else bool(item.get("done"))
+    todo_id = item.get("todo_id") or build_todo_id(
+        role=role,
+        source_section=source_section,
+        index=index,
+        text=text,
+    )
     normalized = dict(item)
     normalized.update(
         {
             "schema_version": TODO_ITEM_SCHEMA_VERSION,
-            "todo_id": f"todo_{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:12]}",
+            "todo_id": todo_id,
             "role": role,
             "status": status,
+            "done": done,
             "archive_state": archive_state,
             "source_section": source_section,
             "text": text,
@@ -2559,6 +2571,12 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "source_section",
         "task_class",
         "action_kind",
+        "note",
+        "evidence",
+        "reason",
+        "completed_at",
+        "updated_at",
+        "superseded_by",
     ):
         if item.get(key) is not None:
             compact[key] = item.get(key)
@@ -2642,9 +2660,11 @@ def parse_active_state_todos(state_text: str, *, goal: dict[str, Any] | None = N
         match = TODO_TASK_PATTERN.match(line)
         if match:
             marker, text = match.groups()
+            status = todo_status_from_marker(marker)
             todo: dict[str, Any] = {
                 "index": len(items[role]) + 1,
-                "done": marker.lower() == "x",
+                "done": todo_done_for_status(status),
+                "status": status,
                 "text": normalize_todo_text(text),
             }
             if goal is not None:

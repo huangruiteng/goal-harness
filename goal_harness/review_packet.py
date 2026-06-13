@@ -15,7 +15,7 @@ from .handoff_budget import build_handoff_interface_budget
 
 BENCHMARK_REPORT_CHAIN_MAP_DOC = "benchmark-report-chain-map-v0.md"
 HANDOFF_TODO_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4])", re.IGNORECASE)
-HANDOFF_MONITOR_TASK_CLASSES = {"continuous_monitor", "monitor"}
+HANDOFF_MONITOR_TASK_CLASSES = {"blocker", "continuous_monitor", "monitor", "user_gate"}
 HANDOFF_ADVANCEMENT_TASK_CLASSES = {"advancement_task", "execution_task", "delivery_task"}
 HANDOFF_MONITOR_MARKERS = (
     "monitor",

@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""Smoke-test structured todo lifecycle transitions by todo_id."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from goal_harness.status import parse_active_state_todos  # noqa: E402
+
+
+GOAL_ID = "todo-lifecycle-goal"
+RUN_TODO = "Run a fresh-seed full PR3-r8 treatment repeat after the support-blocked seed failed."
+REBUILD_TODO = "Rebuild labels and scorer after the fresh repeat."
+VALIDATE_TODO = "Validate scorer labels and write back the compact result."
+
+
+def write_fixture(root: Path) -> tuple[Path, Path]:
+    project = root / "project"
+    runtime = root / "runtime"
+    state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    registry_path = project / ".goal-harness" / "registry.json"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text(
+        "---\n"
+        "status: active\n"
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Active Goal State\n\n"
+        "## Objective\n\n"
+        "Exercise todo lifecycle transitions.\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] Legacy monitor-only placeholder.\n",
+        encoding="utf-8",
+    )
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "todo-lifecycle-fixture",
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": ".codex/goals/todo-lifecycle-goal/ACTIVE_GOAL_STATE.md",
+                        "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
+                        "authority_sources": [],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return registry_path, state_file
+
+
+def run_cli(registry_path: Path, *args: str) -> dict:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "goal_harness.cli",
+            "--registry",
+            str(registry_path),
+            "--format",
+            "json",
+            *args,
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
+def parsed_items(state_file: Path) -> list[dict]:
+    fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
+    return fields["agent_todos"]["items"]
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="goal-harness-todo-lifecycle-smoke-") as tmp:
+        root = Path(tmp)
+        registry_path, state_file = write_fixture(root)
+
+        added = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            RUN_TODO,
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "run_eval",
+        )
+        assert added["added"] is True, added
+        run_todo_id = added["todo_id"]
+        items = parsed_items(state_file)
+        run_item = next(item for item in items if item["todo_id"] == run_todo_id)
+        assert run_item["task_class"] == "advancement_task", run_item
+        assert run_item["action_kind"] == "run_eval", run_item
+
+        archive_open = run_cli(
+            registry_path,
+            "todo",
+            "archive-completed",
+            "--goal-id",
+            GOAL_ID,
+            "--execute",
+            "--max-active-done",
+            "0",
+        )
+        assert archive_open["moved_count"] == 0, archive_open
+        assert any(item["todo_id"] == run_todo_id and not item["done"] for item in parsed_items(state_file))
+
+        completed = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            run_todo_id,
+            "--evidence",
+            "fresh-repeat-result-ready",
+            "--next-agent-todo",
+            REBUILD_TODO,
+            "--next-action-kind",
+            "rebuild_score",
+        )
+        assert completed["changed"] is True, completed
+        assert completed["next_todos"][0]["added"] is True, completed
+        rebuild_todo_id = completed["next_todos"][0]["todo_id"]
+        items = parsed_items(state_file)
+        completed_item = next(item for item in items if item["todo_id"] == run_todo_id)
+        rebuild_item = next(item for item in items if item["todo_id"] == rebuild_todo_id)
+        assert completed_item["done"] is True and completed_item["status"] == "done", completed_item
+        assert completed_item["evidence"] == "fresh-repeat-result-ready", completed_item
+        assert rebuild_item["done"] is False and rebuild_item["task_class"] == "advancement_task", rebuild_item
+        assert rebuild_item["action_kind"] == "rebuild_score", rebuild_item
+
+        repeated = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            run_todo_id,
+            "--evidence",
+            "fresh-repeat-result-ready",
+            "--next-agent-todo",
+            REBUILD_TODO,
+            "--next-action-kind",
+            "rebuild_score",
+        )
+        assert repeated["changed"] is False, repeated
+        assert state_file.read_text(encoding="utf-8").count(REBUILD_TODO) == 1
+
+        superseded = run_cli(
+            registry_path,
+            "todo",
+            "supersede",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            rebuild_todo_id,
+            "--reason",
+            "folded-into-validation-step",
+            "--next-agent-todo",
+            VALIDATE_TODO,
+            "--next-action-kind",
+            "validate",
+        )
+        assert superseded["changed"] is True, superseded
+        validate_todo_id = superseded["next_todos"][0]["todo_id"]
+        items = parsed_items(state_file)
+        rebuild_item = next(item for item in items if item["todo_id"] == rebuild_todo_id)
+        validate_item = next(item for item in items if item["todo_id"] == validate_todo_id)
+        assert rebuild_item["done"] is True and rebuild_item["superseded_by"] == validate_todo_id, rebuild_item
+        assert validate_item["done"] is False and validate_item["task_class"] == "advancement_task", validate_item
+
+        blocked = run_cli(
+            registry_path,
+            "todo",
+            "update",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            validate_todo_id,
+            "--status",
+            "blocked",
+            "--reason",
+            "waiting-on-public-scorer-source",
+            "--task-class",
+            "blocker",
+        )
+        assert blocked["changed"] is True, blocked
+        validate_item = next(item for item in parsed_items(state_file) if item["todo_id"] == validate_todo_id)
+        assert validate_item["status"] == "blocked", validate_item
+        assert validate_item["done"] is False, validate_item
+        assert validate_item["task_class"] == "blocker", validate_item
+
+    print("todo-lifecycle-cli-smoke ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -70,6 +70,9 @@ goal-harness todo add \
 CLI project the lane consistently, but explicit `--task-class` is the authority
 when both are present. If an exact todo already exists, `todo add` updates or
 inserts the metadata comment instead of creating a duplicate checkbox.
+`--task-class user_gate` and `--task-class blocker` are non-executable control
+lanes for owner input and concrete blockers; quota/executor code must not treat
+them as advancement work.
 
 The command resolves the active state from the project registry, creates the
 canonical section when needed, updates `updated_at`, and avoids duplicate exact
@@ -80,6 +83,52 @@ refresh the status projection after the write:
 goal-harness refresh-state --goal-id <goal-id>
 ```
 
+## Lifecycle Contract
+
+Agents should not patch active-state checkboxes directly to move work forward.
+Use the lifecycle commands so Goal Harness can preserve `todo_id`, status,
+classification metadata, timestamps, and idempotency in one write.
+
+Complete the current todo and atomically register the next executable todo:
+
+```bash
+goal-harness todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --evidence "<public-safe artifact or result>" \
+  --next-agent-todo "<public-safe next executable action>" \
+  --next-task-class advancement_task \
+  --next-action-kind run_eval
+```
+
+Use `todo update` for lower-level status changes:
+
+```bash
+goal-harness todo update \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --status blocked \
+  --reason "<public-safe blocker>" \
+  --task-class blocker
+```
+
+Use `todo supersede` when the current open todo should be retired and replaced:
+
+```bash
+goal-harness todo supersede \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --reason "<public-safe reason>" \
+  --next-agent-todo "<replacement executable action>"
+```
+
+`todo complete` and `todo supersede` are intentionally idempotent for repeated
+heartbeats: if the old todo is already complete and the next todo already
+exists with the same metadata, the command returns `changed=false` and does not
+duplicate the next checkbox. `todo archive-completed` is only a hygiene command:
+it moves already-completed active todos into `Completed Work Archive`; it does
+not mark open todos as done.
+
 ## Parsed Schema
 
 Projects may keep writing ordinary Markdown checkboxes, but readers should use
@@ -88,16 +137,17 @@ carry `schema_version=todo_summary_v0`; individual items carry
 `schema_version=todo_item_v0`, `todo_id`, `role`, `status`, `priority`,
 `title`, `archive_state`, `source_section`, `index`, `text`, `task_class`, and
 optional `action_kind`. The `todo_id`
-is parser-derived from the local section/index/text, so it is stable enough for
-local selection and regression checks but not a durable database id across major
-rewrites. Future timestamp, dependency, and evidence-link fields should extend
-this item shape instead of adding another todo format.
+is first-class when written by the CLI. Legacy Markdown without metadata still
+gets a parser-derived compatibility id from local section/index/text, and the
+first lifecycle command will materialize that id back into metadata. Future
+timestamp, dependency, and evidence-link fields should extend this item shape
+instead of adding another todo format.
 In Markdown, lane metadata is stored as an indented HTML comment directly under
 the checkbox, for example:
 
 ```markdown
 - [ ] Run one validated benchmark case and write back result or blocker.
-  <!-- goal-harness:todo task_class=advancement_task action_kind=run_eval -->
+  <!-- goal-harness:todo todo_id=todo_8e280be49441 status=open task_class=advancement_task action_kind=run_eval -->
 ```
 
 Plain checkbox text remains a compatibility fallback. New automation-facing
@@ -125,9 +175,12 @@ Two dependency-free public fixtures cover this contract:
 
 ```bash
 python3 examples/todo-cli-smoke.py
+python3 examples/todo-lifecycle-cli-smoke.py
 python3 examples/project-agent-adoption-smoke.py
 ```
 
 The first verifies the todo CLI writes canonical active-state sections. The
-second verifies an executor-facing path from quota guard hint, to user todo
+second verifies lifecycle transitions by `todo_id`, including complete,
+supersede, idempotent next-todo insertion, and non-executable blocker lanes.
+The third verifies an executor-facing path from quota guard hint, to user todo
 write, to status projection, to approved project-agent handoff.

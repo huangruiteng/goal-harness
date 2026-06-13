@@ -1515,13 +1515,14 @@ def _open_todo_task_counts(summary: dict[str, Any] | None) -> dict[str, int]:
     if isinstance(summary, dict) and isinstance(summary.get("first_open_items"), list):
         first_open_items = [item for item in summary["first_open_items"] if isinstance(item, dict)]
     visible_open = min(open_count, len(first_open_items))
-    monitor_count = sum(
+    advancement_visible_count = sum(
         1
         for item in first_open_items[:visible_open]
-        if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
+        if _todo_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
     )
     hidden_count = max(0, open_count - visible_open)
-    advancement_count = visible_open - monitor_count + hidden_count
+    monitor_count = visible_open - advancement_visible_count
+    advancement_count = advancement_visible_count + hidden_count
     return {
         "open": open_count,
         "advancement": advancement_count,

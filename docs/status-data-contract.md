@@ -751,11 +751,13 @@ Item fields:
   `schema_version=todo_item_v0`. The source active state can remain ordinary
   Markdown checkboxes, but status/quota/dashboard consumers should prefer the
   structured item fields when present: `todo_id`, `role`, `status`,
-  `priority`, `title`, `archive_state`, `source_section`, `index`, and `text`.
-  `todo_id` is a short parser-derived identifier for the current item text and
-  section, suitable for local UI selection and smoke assertions, not a durable
-  cross-rewrite database primary key. Optional future fields such as
-  `created_at`, `completed_at`, dependencies, or evidence links should extend
+  `priority`, `title`, `archive_state`, `source_section`, `index`, `text`,
+  `task_class`, `action_kind`, `note`, `evidence`, `reason`, `completed_at`,
+  `updated_at`, and `superseded_by`. `todo_id` is first-class when written by
+  the todo CLI; legacy Markdown without metadata still gets a parser-derived
+  compatibility id from the current item text and section, and the first
+  lifecycle command materializes that id back into metadata. Optional future
+  fields such as `created_at`, dependencies, or evidence links should extend
   this item shape rather than inventing another todo surface.
 - `dependency_blockers`: optional compact summary of unfinished user todos from
   other current attention-queue goals. This lets dashboards and heartbeat
@@ -914,7 +916,9 @@ and keep only current open work plus a small recent-done tail under active
 `Agent Todo`. Archive sections are intentionally ignored by active todo parsing.
 This warning is a checklist hygiene signal only: it does not change quota
 eligibility, grant write or production permission, or supersede open user/agent
-todo blockers.
+todo blockers. It also does not mark an open todo complete; executors should
+use `goal-harness todo complete`, `todo update`, or `todo supersede` for
+structured lifecycle transitions by `todo_id`.
 When the payload includes `autonomous_replan_obligation`, the active state's
 current `Next Action` or `Operating Lessons`, or the recent public run history,
 carries public-safe evidence that the controller may be stuck in a

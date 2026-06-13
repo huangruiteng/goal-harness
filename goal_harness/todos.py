@@ -11,7 +11,19 @@ from .status import (
     normalize_todo_text,
     todo_role_for_heading,
 )
-from .todo_contract import TODO_TASK_PATTERN, format_todo_metadata_line, parse_todo_metadata_line
+from .todo_contract import (
+    TODO_STATUS_DONE,
+    TODO_STATUS_OPEN,
+    TODO_TASK_PATTERN,
+    build_todo_id,
+    format_todo_metadata_line,
+    normalize_todo_id,
+    normalize_todo_status,
+    parse_todo_metadata_line,
+    todo_done_for_status,
+    todo_marker_for_status,
+    todo_status_from_marker,
+)
 
 
 TODO_SECTION_HEADINGS = {
@@ -19,6 +31,18 @@ TODO_SECTION_HEADINGS = {
     "agent": "Agent Todo",
 }
 COMPLETED_WORK_ARCHIVE_HEADING = "Completed Work Archive"
+TODO_METADATA_FIELDS = (
+    "todo_id",
+    "status",
+    "task_class",
+    "action_kind",
+    "note",
+    "evidence",
+    "reason",
+    "completed_at",
+    "updated_at",
+    "superseded_by",
+)
 
 
 def normalize_new_todo(text: str) -> str:
@@ -107,20 +131,50 @@ def ensure_archive_section(lines: list[str]) -> tuple[int, int]:
     return start, len(lines)
 
 
-def todo_blocks(lines: list[str], start: int, end: int) -> list[dict[str, Any]]:
+def ensure_block_identity(block: dict[str, Any], *, role: str | None, source_section: str | None) -> dict[str, Any]:
+    if block.get("status"):
+        status = normalize_todo_status(block.get("status")) or TODO_STATUS_OPEN
+    else:
+        status = TODO_STATUS_DONE if block.get("done") else TODO_STATUS_OPEN
+    block["status"] = status
+    block["done"] = todo_done_for_status(status)
+    if not block.get("todo_id"):
+        block["todo_id"] = build_todo_id(
+            role=role,
+            source_section=source_section,
+            index=block.get("index"),
+            text=block.get("text"),
+        )
+    return block
+
+
+def todo_blocks(
+    lines: list[str],
+    start: int,
+    end: int,
+    *,
+    role: str | None = None,
+    source_section: str | None = None,
+) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+    todo_index = 0
     for index in range(start + 1, end):
         match = TODO_TASK_PATTERN.match(lines[index])
         if match:
             if current is not None:
                 current["end"] = index
+                ensure_block_identity(current, role=role, source_section=source_section)
                 blocks.append(current)
             marker, text = match.groups()
+            todo_index += 1
+            status = todo_status_from_marker(marker)
             current = {
                 "start": index,
                 "end": end,
-                "done": marker.lower() == "x",
+                "index": todo_index,
+                "done": todo_done_for_status(status),
+                "status": status,
                 "text": normalize_todo_text(text),
             }
             continue
@@ -136,6 +190,7 @@ def todo_blocks(lines: list[str], start: int, end: int) -> list[dict[str, Any]]:
                 )
     if current is not None:
         current["end"] = end
+        ensure_block_identity(current, role=role, source_section=source_section)
         blocks.append(current)
     return blocks
 
@@ -172,12 +227,44 @@ def replace_updated_at(text: str, updated_at: str) -> str:
     return "---" + frontmatter + "---" + body
 
 
-def matching_todo_block(lines: list[str], start: int, end: int, text: str) -> dict[str, Any] | None:
+def matching_todo_block(
+    lines: list[str],
+    start: int,
+    end: int,
+    text: str,
+    *,
+    role: str | None = None,
+    source_section: str | None = None,
+) -> dict[str, Any] | None:
     expected = normalize_todo_text(text)
-    for block in todo_blocks(lines, start, end):
+    for block in todo_blocks(lines, start, end, role=role, source_section=source_section):
         if normalize_todo_text(str(block.get("text") or "")) == expected:
             return block
     return None
+
+
+def block_metadata(block: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: str(block[key])
+        for key in TODO_METADATA_FIELDS
+        if block.get(key) is not None and str(block.get(key) or "").strip()
+    }
+
+
+def metadata_line_for_block(block: dict[str, Any], updates: dict[str, Any]) -> str | None:
+    metadata = block_metadata(block)
+    for key, value in updates.items():
+        if key not in TODO_METADATA_FIELDS:
+            continue
+        if value is None:
+            metadata.pop(key, None)
+        elif str(value).strip():
+            metadata[key] = str(value).strip()
+    if "todo_id" not in metadata and block.get("todo_id"):
+        metadata["todo_id"] = str(block["todo_id"])
+    if "status" not in metadata:
+        metadata["status"] = TODO_STATUS_DONE if block.get("done") else TODO_STATUS_OPEN
+    return format_todo_metadata_line(**metadata)
 
 
 def upsert_todo_metadata(lines: list[str], block: dict[str, Any], metadata_line: str | None) -> bool:
@@ -196,6 +283,124 @@ def upsert_todo_metadata(lines: list[str], block: dict[str, Any], metadata_line:
         insert_at -= 1
     lines.insert(insert_at, metadata_line)
     return True
+
+
+def todo_metadata_would_change(lines: list[str], block: dict[str, Any], metadata_line: str | None) -> bool:
+    if not metadata_line:
+        return False
+    start = int(block["start"])
+    end = int(block["end"])
+    for index in range(start + 1, end):
+        if parse_todo_metadata_line(lines[index]) is not None:
+            return lines[index] != metadata_line
+    return True
+
+
+def set_todo_marker(lines: list[str], block: dict[str, Any], status: str) -> bool:
+    marker = todo_marker_for_status(status)
+    index = int(block["start"])
+    updated = re.sub(r"^(\s*[-*]\s+\[)[ xX-](\]\s+)", rf"\1{marker}\2", lines[index], count=1)
+    if updated == lines[index]:
+        return False
+    lines[index] = updated
+    return True
+
+
+def find_todo_block(
+    lines: list[str],
+    *,
+    todo_id: str,
+    role: str | None = None,
+) -> tuple[str, str, int, int, dict[str, Any]] | None:
+    roles = [role] if role else list(TODO_SECTION_HEADINGS)
+    for candidate_role in roles:
+        if candidate_role not in TODO_SECTION_HEADINGS:
+            continue
+        bounds = section_bounds(lines, candidate_role)
+        if not bounds:
+            continue
+        start, end, section = bounds
+        for block in todo_blocks(
+            lines,
+            start,
+            end,
+            role=candidate_role,
+            source_section=section,
+        ):
+            if block.get("todo_id") == todo_id:
+                return candidate_role, section, start, end, block
+    return None
+
+
+def add_todo_to_lines(
+    lines: list[str],
+    *,
+    role: str,
+    text: str,
+    task_class: str | None = None,
+    action_kind: str | None = None,
+) -> dict[str, Any]:
+    todo_text = normalize_new_todo(text)
+    bounds = section_bounds(lines, role)
+    section = bounds[2] if bounds else TODO_SECTION_HEADINGS[role]
+    existing_blocks = (
+        todo_blocks(lines, bounds[0], bounds[1], role=role, source_section=section)
+        if bounds
+        else []
+    )
+    block = matching_todo_block(
+        lines,
+        bounds[0],
+        bounds[1],
+        todo_text,
+        role=role,
+        source_section=section,
+    ) if bounds else None
+    added = block is None
+    metadata_updated = False
+
+    if block is None:
+        todo_id = build_todo_id(
+            role=role,
+            source_section=section,
+            index=len(existing_blocks) + 1,
+            text=todo_text,
+        )
+        metadata_line = format_todo_metadata_line(
+            todo_id=todo_id,
+            status=TODO_STATUS_OPEN,
+            task_class=task_class,
+            action_kind=action_kind,
+        )
+        todo_line = "\n".join([f"- [ ] {todo_text}", metadata_line] if metadata_line else [f"- [ ] {todo_text}"])
+        if bounds:
+            insert_into_existing_section(lines, bounds[0], bounds[1], todo_line)
+        else:
+            insert_new_section(lines, role, todo_line)
+    else:
+        updates: dict[str, Any] = {
+            "todo_id": block.get("todo_id"),
+            "status": block.get("status") or TODO_STATUS_OPEN,
+        }
+        if task_class:
+            updates["task_class"] = task_class
+        if action_kind:
+            updates["action_kind"] = action_kind
+        metadata_line = metadata_line_for_block(block, updates)
+        metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
+        todo_id = str(block.get("todo_id") or "")
+
+    return {
+        "added": added,
+        "already_exists": not added,
+        "metadata_updated": metadata_updated,
+        "role": role,
+        "section": section,
+        "todo": todo_text,
+        "todo_id": todo_id,
+        "task_class": task_class,
+        "action_kind": action_kind,
+    }
 
 
 def add_goal_todo(
@@ -227,26 +432,15 @@ def add_goal_todo(
 
     original = resolved_state_file.read_text(encoding="utf-8")
     lines = original.splitlines()
-    bounds = section_bounds(lines, role)
-    section = bounds[2] if bounds else TODO_SECTION_HEADINGS[role]
-    metadata_line = format_todo_metadata_line(task_class=task_class, action_kind=action_kind)
-    metadata = parse_todo_metadata_line(metadata_line) if metadata_line else {}
-    todo_lines = [f"- [ ] {todo_text}"]
-    if metadata_line:
-        todo_lines.append(metadata_line)
-    todo_line = "\n".join(todo_lines)
-    block = matching_todo_block(lines, bounds[0], bounds[1], todo_text) if bounds else None
-    added = block is None
-    already_exists = not added
-    metadata_updated = False
-
-    if added:
-        if bounds:
-            insert_into_existing_section(lines, bounds[0], bounds[1], todo_line)
-        else:
-            insert_new_section(lines, role, todo_line)
-    elif block and metadata_line:
-        metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
+    add_result = add_todo_to_lines(
+        lines,
+        role=role,
+        text=todo_text,
+        task_class=task_class,
+        action_kind=action_kind,
+    )
+    added = bool(add_result["added"])
+    metadata_updated = bool(add_result["metadata_updated"])
 
     updated_at = now_local()
     new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
@@ -259,17 +453,302 @@ def add_goal_todo(
         "ok": True,
         "dry_run": dry_run,
         "added": added,
-        "already_exists": already_exists,
+        "already_exists": bool(add_result["already_exists"]),
         "metadata_updated": metadata_updated,
         "goal_id": goal_id,
         "role": role,
-        "section": section,
+        "section": add_result.get("section"),
         "todo": todo_text,
-        "task_class": metadata.get("task_class") if metadata else None,
-        "action_kind": metadata.get("action_kind") if metadata else None,
+        "todo_id": add_result.get("todo_id"),
+        "task_class": add_result.get("task_class"),
+        "action_kind": add_result.get("action_kind"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if added or metadata_updated else None,
+    }
+
+
+def resolve_todo_state(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    project: Path | None = None,
+    state_file: Path | None = None,
+) -> tuple[Path | None, Path, str, list[str]]:
+    registry = load_registry(registry_path)
+    goal, resolved_project, resolved_state_file = resolve_goal_state(
+        registry=registry,
+        goal_id=goal_id,
+        project_override=project,
+        state_file_override=state_file,
+    )
+    if goal is None:
+        raise ValueError(f"goal {goal_id!r} is not present in the registry")
+    if not resolved_state_file.exists():
+        raise ValueError(f"active state file does not exist: {resolved_state_file}")
+    original = resolved_state_file.read_text(encoding="utf-8")
+    return resolved_project, resolved_state_file, original, original.splitlines()
+
+
+def apply_todo_update_to_lines(
+    lines: list[str],
+    *,
+    todo_id: str,
+    status: str | None = None,
+    role: str | None = None,
+    note: str | None = None,
+    evidence: str | None = None,
+    reason: str | None = None,
+    task_class: str | None = None,
+    action_kind: str | None = None,
+    updated_at: str,
+) -> dict[str, Any]:
+    normalized_todo_id = normalize_todo_id(todo_id)
+    if not normalized_todo_id:
+        raise ValueError("todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+    if role is not None and role not in TODO_SECTION_HEADINGS:
+        raise ValueError("todo role must be one of: user, agent")
+    block_match = find_todo_block(lines, todo_id=normalized_todo_id, role=role)
+    if not block_match:
+        raise ValueError(f"todo_id {normalized_todo_id!r} was not found in active user or agent todos")
+    resolved_role, section, _start, _end, block = block_match
+    normalized_status = normalize_todo_status(status) if status else None
+    if status and not normalized_status:
+        raise ValueError("todo status must be one of: open, done, blocked, deferred")
+    target_status = normalized_status or str(block.get("status") or TODO_STATUS_OPEN)
+    status_changed = False
+    if normalized_status:
+        status_changed = set_todo_marker(lines, block, normalized_status)
+
+    updates: dict[str, Any] = {
+        "todo_id": normalized_todo_id,
+        "status": target_status,
+    }
+    if normalized_status == TODO_STATUS_DONE and not block.get("completed_at"):
+        updates["completed_at"] = updated_at
+    elif normalized_status and not todo_done_for_status(normalized_status):
+        updates["completed_at"] = None
+    if note:
+        updates["note"] = note
+    if evidence:
+        updates["evidence"] = evidence
+    if reason:
+        updates["reason"] = reason
+    if task_class:
+        updates["task_class"] = task_class
+    if action_kind:
+        updates["action_kind"] = action_kind
+    metadata_line = metadata_line_for_block(block, updates)
+    semantic_metadata_changed = todo_metadata_would_change(lines, block, metadata_line)
+    if status_changed or semantic_metadata_changed:
+        updates["updated_at"] = updated_at
+        metadata_line = metadata_line_for_block(block, updates)
+    metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
+    return {
+        "role": resolved_role,
+        "section": section,
+        "todo": block.get("text"),
+        "todo_id": normalized_todo_id,
+        "status": target_status,
+        "status_changed": status_changed,
+        "metadata_updated": metadata_updated,
+        "changed": status_changed or metadata_updated,
+    }
+
+
+def update_goal_todo(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    status: str | None = None,
+    role: str | None = None,
+    note: str | None = None,
+    evidence: str | None = None,
+    reason: str | None = None,
+    task_class: str | None = None,
+    action_kind: str | None = None,
+    project: Path | None = None,
+    state_file: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    resolved_project, resolved_state_file, original, lines = resolve_todo_state(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        project=project,
+        state_file=state_file,
+    )
+    updated_at = now_local()
+    update_result = apply_todo_update_to_lines(
+        lines,
+        todo_id=todo_id,
+        status=status,
+        role=role,
+        note=note,
+        evidence=evidence,
+        reason=reason,
+        task_class=task_class,
+        action_kind=action_kind,
+        updated_at=updated_at,
+    )
+    changed = bool(update_result["changed"])
+    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+    if changed:
+        new_text = replace_updated_at(new_text, updated_at)
+    if changed and not dry_run:
+        resolved_state_file.write_text(new_text, encoding="utf-8")
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "changed": changed,
+        "goal_id": goal_id,
+        **update_result,
+        "state_file": str(resolved_state_file),
+        "project": str(resolved_project) if resolved_project else None,
+        "updated_at": updated_at if changed else None,
+    }
+
+
+def complete_goal_todo(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    role: str | None = None,
+    evidence: str | None = None,
+    note: str | None = None,
+    next_agent_todo: str | None = None,
+    next_user_todo: str | None = None,
+    next_task_class: str | None = None,
+    next_action_kind: str | None = None,
+    project: Path | None = None,
+    state_file: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    resolved_project, resolved_state_file, original, lines = resolve_todo_state(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        project=project,
+        state_file=state_file,
+    )
+    updated_at = now_local()
+    update_result = apply_todo_update_to_lines(
+        lines,
+        todo_id=todo_id,
+        status=TODO_STATUS_DONE,
+        role=role,
+        note=note,
+        evidence=evidence,
+        updated_at=updated_at,
+    )
+    next_results: list[dict[str, Any]] = []
+    if next_agent_todo:
+        next_results.append(
+            add_todo_to_lines(
+                lines,
+                role="agent",
+                text=next_agent_todo,
+                task_class=next_task_class or "advancement_task",
+                action_kind=next_action_kind,
+            )
+        )
+    if next_user_todo:
+        next_results.append(add_todo_to_lines(lines, role="user", text=next_user_todo, task_class="user_gate"))
+    next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
+    changed = bool(update_result["changed"] or next_changed)
+    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+    if changed:
+        new_text = replace_updated_at(new_text, updated_at)
+    if changed and not dry_run:
+        resolved_state_file.write_text(new_text, encoding="utf-8")
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "completed": True,
+        "goal_id": goal_id,
+        **update_result,
+        "changed": changed,
+        "next_todos": next_results,
+        "state_file": str(resolved_state_file),
+        "project": str(resolved_project) if resolved_project else None,
+        "updated_at": updated_at if changed else None,
+    }
+
+
+def supersede_goal_todo(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    role: str | None = None,
+    reason: str | None = None,
+    next_agent_todo: str | None = None,
+    next_user_todo: str | None = None,
+    next_task_class: str | None = None,
+    next_action_kind: str | None = None,
+    project: Path | None = None,
+    state_file: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    resolved_project, resolved_state_file, original, lines = resolve_todo_state(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        project=project,
+        state_file=state_file,
+    )
+    updated_at = now_local()
+    update_result = apply_todo_update_to_lines(
+        lines,
+        todo_id=todo_id,
+        status=TODO_STATUS_DONE,
+        role=role,
+        reason=reason,
+        note="superseded",
+        updated_at=updated_at,
+    )
+    next_results: list[dict[str, Any]] = []
+    if next_agent_todo:
+        next_results.append(
+            add_todo_to_lines(
+                lines,
+                role="agent",
+                text=next_agent_todo,
+                task_class=next_task_class or "advancement_task",
+                action_kind=next_action_kind,
+            )
+        )
+    if next_user_todo:
+        next_results.append(add_todo_to_lines(lines, role="user", text=next_user_todo, task_class="user_gate"))
+    superseded_by = next((item.get("todo_id") for item in next_results if item.get("todo_id")), None)
+    if superseded_by:
+        block_match = find_todo_block(lines, todo_id=str(update_result["todo_id"]), role=role)
+        if block_match:
+            _resolved_role, _section, _start, _end, block = block_match
+            update_result["metadata_updated"] = upsert_todo_metadata(
+                lines,
+                block,
+                metadata_line_for_block(block, {"superseded_by": superseded_by}),
+            ) or update_result["metadata_updated"]
+            update_result["superseded_by"] = superseded_by
+            update_result["changed"] = True
+    next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
+    changed = bool(update_result["changed"] or next_changed)
+    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+    if changed:
+        new_text = replace_updated_at(new_text, updated_at)
+    if changed and not dry_run:
+        resolved_state_file.write_text(new_text, encoding="utf-8")
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "superseded": True,
+        "goal_id": goal_id,
+        **update_result,
+        "changed": changed,
+        "next_todos": next_results,
+        "state_file": str(resolved_state_file),
+        "project": str(resolved_project) if resolved_project else None,
+        "updated_at": updated_at if changed else None,
     }
 
 
@@ -309,7 +788,7 @@ def archive_completed_todos(
     kept_done_count = 0
 
     if bounds:
-        blocks = todo_blocks(lines, bounds[0], bounds[1])
+        blocks = todo_blocks(lines, bounds[0], bounds[1], role=role, source_section=section)
         done_blocks = [block for block in blocks if block.get("done") is True]
         active_done_count = len(done_blocks)
         move_count = max(0, active_done_count - max_active_done)
@@ -393,8 +872,11 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
     else:
         lines.extend(
             [
+                f"- changed: `{payload.get('changed')}`",
                 f"- added: `{payload.get('added')}`",
                 f"- already_exists: `{payload.get('already_exists')}`",
+                f"- todo_id: `{payload.get('todo_id')}`",
+                f"- status: `{payload.get('status')}`",
             ]
         )
     if payload.get("error"):

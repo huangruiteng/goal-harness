@@ -172,7 +172,14 @@ from .status_server import (
     DEFAULT_STATUS_PORT,
     serve_status,
 )
-from .todos import archive_completed_todos, add_goal_todo, render_todo_markdown
+from .todos import (
+    archive_completed_todos,
+    add_goal_todo,
+    complete_goal_todo,
+    render_todo_markdown,
+    supersede_goal_todo,
+    update_goal_todo,
+)
 from .upgrade import build_upgrade_plan, render_upgrade_plan_markdown
 from .worker_bridge import (
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
@@ -3573,22 +3580,29 @@ def main(argv: list[str] | None = None) -> int:
     todo_parser.add_argument(
         "todo_command",
         nargs="?",
-        choices=["add", "archive-completed"],
+        choices=["add", "update", "complete", "supersede", "archive-completed"],
         default="add",
         help=(
-            "Use add to append a checkbox todo, or archive-completed to move "
-            "older completed todos into Completed Work Archive."
+            "Use add to append a checkbox todo, update/complete/supersede to "
+            "transition by todo_id, or archive-completed to move older completed "
+            "todos into Completed Work Archive."
         ),
     )
     todo_parser.add_argument("--goal-id", required=True, help="Goal id whose active state should receive the todo.")
-    todo_parser.add_argument("--role", choices=["user", "agent"], help="Todo owner. Defaults to agent for archive-completed.")
+    todo_parser.add_argument("--role", choices=["user", "agent"], help="Todo owner. Required for add; optional todo_id search scope for lifecycle commands. Defaults to agent for archive-completed.")
     todo_parser.add_argument("--text", help="Todo text. Required for add; keep it short and public-safe enough for local status.")
+    todo_parser.add_argument("--todo-id", help="Structured todo id from status/quota, such as todo_ab12cd34ef56.")
+    todo_parser.add_argument("--status", choices=["open", "done", "blocked", "deferred"], help="For todo update, set the lifecycle status by todo_id.")
+    todo_parser.add_argument("--note", help="Public-safe note to attach to a lifecycle transition.")
+    todo_parser.add_argument("--evidence", help="Public-safe evidence pointer or short result for complete/update.")
+    todo_parser.add_argument("--reason", help="Public-safe reason for blocked/deferred/supersede transitions.")
     todo_parser.add_argument(
         "--task-class",
-        choices=["advancement_task", "continuous_monitor"],
+        choices=["advancement_task", "continuous_monitor", "user_gate", "blocker"],
         help=(
-            "For todo add, explicitly register the routing lane. "
-            "Use advancement_task for executable delivery work and continuous_monitor for watch-only work."
+            "For todo add/update, explicitly register the routing lane. Use "
+            "advancement_task for executable delivery work; continuous_monitor, "
+            "user_gate, and blocker are non-executable lanes."
         ),
     )
     todo_parser.add_argument(
@@ -3598,6 +3612,14 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild_score, compact_blocker_writeback, or monitor."
         ),
     )
+    todo_parser.add_argument("--next-agent-todo", help="For complete/supersede, atomically add or update the next agent todo.")
+    todo_parser.add_argument("--next-user-todo", help="For complete/supersede, atomically add or update the next user todo.")
+    todo_parser.add_argument(
+        "--next-task-class",
+        choices=["advancement_task", "continuous_monitor", "user_gate", "blocker"],
+        help="Task class for --next-agent-todo. Defaults to advancement_task.",
+    )
+    todo_parser.add_argument("--next-action-kind", help="Action kind for --next-agent-todo.")
     todo_parser.add_argument(
         "--max-active-done",
         type=int,
@@ -6639,6 +6661,61 @@ def main(argv: list[str] | None = None) -> int:
                     text=args.text,
                     task_class=args.task_class,
                     action_kind=args.action_kind,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=bool(args.dry_run),
+                )
+            elif args.todo_command == "update":
+                if not args.todo_id:
+                    raise ValueError("todo update requires --todo-id")
+                if not any([args.status, args.note, args.evidence, args.reason, args.task_class, args.action_kind]):
+                    raise ValueError("todo update requires at least one of --status, --note, --evidence, --reason, --task-class, or --action-kind")
+                payload = update_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    todo_id=args.todo_id,
+                    status=args.status,
+                    role=args.role,
+                    note=args.note,
+                    evidence=args.evidence,
+                    reason=args.reason,
+                    task_class=args.task_class,
+                    action_kind=args.action_kind,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=bool(args.dry_run),
+                )
+            elif args.todo_command == "complete":
+                if not args.todo_id:
+                    raise ValueError("todo complete requires --todo-id")
+                payload = complete_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    todo_id=args.todo_id,
+                    role=args.role,
+                    evidence=args.evidence,
+                    note=args.note,
+                    next_agent_todo=args.next_agent_todo,
+                    next_user_todo=args.next_user_todo,
+                    next_task_class=args.next_task_class,
+                    next_action_kind=args.next_action_kind,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=bool(args.dry_run),
+                )
+            elif args.todo_command == "supersede":
+                if not args.todo_id:
+                    raise ValueError("todo supersede requires --todo-id")
+                payload = supersede_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    todo_id=args.todo_id,
+                    role=args.role,
+                    reason=args.reason,
+                    next_agent_todo=args.next_agent_todo,
+                    next_user_todo=args.next_user_todo,
+                    next_task_class=args.next_task_class,
+                    next_action_kind=args.next_action_kind,
                     project=Path(args.project).expanduser() if args.project else None,
                     state_file=Path(args.state_file).expanduser() if args.state_file else None,
                     dry_run=bool(args.dry_run),
