@@ -15,15 +15,18 @@ README = TOPIC_DIR / "README.md"
 
 SCHEMA = "terminal_bench_next_candidate_selection_20260614_v0"
 BENCHMARK_ID = "terminal-bench@2.0"
-SELECTED_TASK = "compile-compcert"
+SELECTED_TASK = "install-windows-3.11"
+REJECTED_TASKS = {
+    "compile-compcert": "rejected_already_completed_true_long",
+}
 FALLBACK_ORDER = (
-    "install-windows-3.11",
-    "pytorch-model-recovery",
     "financial-document-processor",
     "multi-source-data-merger",
+    "repair_llm_inference_batching_scheduler_verifier_preflight",
+    "fresh_public_safe_candidate_screen",
 )
 PREFLIGHTED_CANDIDATES = (
-    SELECTED_TASK,
+    "compile-compcert",
     "install-windows-3.11",
     "financial-document-processor",
     "multi-source-data-merger",
@@ -37,6 +40,10 @@ REQUIRED_DOC_SNIPPETS = [
     "repeat_allowed=false",
     "new_candidate_allowed=true",
     "requires_verifier_preflight_repair=true",
+    "active-state and run-history compact summaries",
+    "rejected_already_completed_true_long",
+    "Self-Repair Finding",
+    "compile-compcert",
     SELECTED_TASK,
     "Codex goal-mode baseline",
     "Goal Harness treatment",
@@ -81,6 +88,7 @@ def selection_payload() -> dict[str, Any]:
         "cached_official_task_count": 89,
         "attempted_task_or_repeat_directory_count": 22,
         "unused_cached_task_count": 69,
+        "history_cross_check_performed": True,
         "blocked_task": {
             "task_id": "llm-inference-batching-scheduler",
             "treatment_eligible": False,
@@ -88,6 +96,7 @@ def selection_payload() -> dict[str, Any]:
             "new_candidate_allowed": True,
             "requires_verifier_preflight_repair": True,
         },
+        "rejected_tasks": REJECTED_TASKS,
         "preflighted_candidates": [
             {
                 "task_id": task_id,
@@ -139,6 +148,10 @@ def assert_selection_payload(payload: dict[str, Any]) -> None:
     assert payload["blocked_task"]["repeat_allowed"] is False, payload
     assert payload["blocked_task"]["new_candidate_allowed"] is True, payload
     assert payload["blocked_task"]["requires_verifier_preflight_repair"] is True, payload
+    assert payload["history_cross_check_performed"] is True, payload
+    assert payload["rejected_tasks"]["compile-compcert"] == (
+        "rejected_already_completed_true_long"
+    ), payload
     assert payload["unused_cached_task_count"] > 0, payload
     assert [item["task_id"] for item in payload["preflighted_candidates"]] == list(
         PREFLIGHTED_CANDIDATES

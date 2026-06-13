@@ -1,6 +1,6 @@
 # Terminal-Bench Next Candidate Selection 2026-06-14
 
-Checked at: 2026-06-14T04:12:00+08:00.
+Checked at: 2026-06-14T04:10:00+08:00.
 
 This packet advances the Terminal-Bench P0 after the
 `llm-inference-batching-scheduler` verifier-attribution routing repair. It is a
@@ -30,6 +30,9 @@ Selection used only compact control-plane surfaces:
 
 - local task ids from the cached official `terminal-bench@2.0` material;
 - paired-run directory names to exclude already attempted tasks;
+- active-state and run-history compact summaries to exclude previously closed
+  benchmark evidence, including tasks whose old artifacts are no longer visible
+  in the current private job directory listing;
 - existing compact candidate-screen summaries;
 - strict no-run preflight summaries for candidate names.
 
@@ -45,12 +48,12 @@ screens were also consumed: their ready candidates have already been attempted
 except `security-celery-redis-rce`, which was not material-ready in the latest
 screen.
 
-Five unused cached candidates were strict-preflighted with the correct paired
-baseline shape:
+Five cached candidates were strict-preflighted with the correct paired baseline
+shape:
 
 | Candidate | Codex goal-mode baseline | Goal Harness treatment | Notes |
 | --- | --- | --- | --- |
-| `compile-compcert` | ready | ready | Original backup-queue task; compile/toolchain-heavy. |
+| `compile-compcert` | ready | ready | Rejected after cross-history audit: already closed as a true-long paired case. |
 | `install-windows-3.11` | ready | ready | System-state recovery; likely high environment friction. |
 | `financial-document-processor` | ready | ready | Multi-step document/data processing candidate. |
 | `multi-source-data-merger` | ready | ready | Integration/data-merging candidate. |
@@ -65,33 +68,52 @@ For all five candidates and both arms, the strict preflight summary reported:
 - `raw_paths_recorded=false`;
 - no real runner, real Codex worker, model API, upload, or leaderboard action.
 
-## Selection
+## Self-Repair Finding
 
-Select `compile-compcert` as the next Terminal-Bench candidate.
+Reject `compile-compcert` from this launch.
 
 Rationale:
 
-- It is already named in the original Terminal-Bench backup queue.
-- It is unused in the current paired-run history.
+- The previous selection treated current paired-run directory names as the only
+  attempted-task exclusion surface.
+- The active state and run history already contain compact evidence that
+  `compile-compcert` closed as a true-long paired `terminal-bench@2.0` case,
+  with a recorded instruction not to relaunch it as the next candidate.
+- Therefore `compile-compcert` is
+  `rejected_already_completed_true_long`, even though strict no-run preflight
+  can still verify that both arms are material-ready.
+
+This is a candidate-selection control-plane repair, not a benchmark run. It did
+not invoke Harbor, Docker, Codex, model APIs, uploads, or any task container.
+
+## Selection
+
+Select `install-windows-3.11` as the next Terminal-Bench candidate.
+
+Rationale:
+
 - It is material-ready under strict no-run preflight for both arms.
-- It is likely to stress long-horizon build, dependency, toolchain, and verifier
-  reasoning, which is closer to Goal Harness's intended value than easy parsing
-  or already-solved calibration tasks.
+- Cross-history search found no active-state or run-history evidence for
+  `install-windows-3.11`, unlike `compile-compcert` and
+  `pytorch-model-recovery`.
+- Its system-state recovery shape is likely to stress long-horizon environment,
+  dependency, and verifier reasoning.
 - It avoids the current `llm-inference-batching-scheduler` verifier-preflight
   blocker without discarding that blocker.
 
-If `compile-compcert` becomes blocked before launch, use this fallback order:
+If `install-windows-3.11` becomes blocked before launch, use this fallback
+order:
 
-1. `install-windows-3.11`;
-2. `pytorch-model-recovery`;
-3. `financial-document-processor`;
-4. `multi-source-data-merger`;
-5. repair the `llm-inference-batching-scheduler` verifier preflight.
+1. `financial-document-processor`;
+2. `multi-source-data-merger`;
+3. repair the `llm-inference-batching-scheduler` verifier preflight;
+4. run a fresh public-safe candidate screen before choosing any task with prior
+   compact benchmark evidence.
 
 ## Next Allowed Action
 
 Run exactly one private no-upload paired pilot for
-`terminal-bench@2.0` / `compile-compcert`:
+`terminal-bench@2.0` / `install-windows-3.11`:
 
 1. run the Codex goal-mode baseline, with no Goal Harness access packet or
    worker bridge;
@@ -123,4 +145,3 @@ Stop before:
 ```bash
 python3 examples/terminal-bench-next-candidate-selection-smoke.py
 ```
-
