@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,8 +47,19 @@ TERMINAL_BENCH_DEFAULT_DATASET = "terminal-bench@2.0"
 TERMINAL_BENCH_DEFAULT_TASK = "build-cython-ext"
 TERMINAL_BENCH_DEFAULT_MODEL = "gpt-5.5"
 BENCHMARK_CLAIM_REVIEW_SCHEMA_VERSION = "benchmark_claim_review_v0"
+BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION = "benchmark_learning_ledger_v0"
+BENCHMARK_ATTEMPT_LEARNING_GATE_SCHEMA_VERSION = (
+    "benchmark_attempt_learning_gate_v0"
+)
+BENCHMARK_ADAPTER_KWARG_ABSORPTION_REVIEW_SCHEMA_VERSION = (
+    "benchmark_adapter_kwarg_absorption_review_v0"
+)
+BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION = "benchmark_lifecycle_state_v0"
 BENCHMARK_VERIFIER_ATTRIBUTION_REVIEW_SCHEMA_VERSION = (
     "benchmark_verifier_attribution_review_v0"
+)
+BENCHMARK_RUNNER_INVARIANT_REVIEW_SCHEMA_VERSION = (
+    "benchmark_runner_invariant_review_v0"
 )
 TERMINAL_BENCH_HARBOR_REF = (
     "git+https://github.com/harbor-framework/harbor@"
@@ -118,6 +131,33 @@ TERMINAL_BENCH_MANAGED_POLICY_VERSION = "goal_harness_terminal_bench_policy_v0"
 TERMINAL_BENCH_MANAGED_BEHAVIOR_SPEC_ID = (
     "terminal_bench_goal_harness_managed_codex_v0"
 )
+TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS = (
+    "goal_harness_policy_version",
+    "goal_harness_behavior_spec_id",
+    "goal_harness_ablation_mode",
+    "goal_harness_mode",
+    "goal_harness_goal_id",
+    "goal_harness_access_packet_mode",
+    "goal_harness_trace_publicness",
+    "goal_harness_counter_trace",
+    "goal_harness_cli_bridge_enabled",
+    "goal_harness_command_prefix",
+    "goal_harness_runtime_preflight_command",
+    "goal_harness_registry_arg",
+    "goal_harness_runtime_root_arg",
+    "goal_harness_scan_path",
+    "goal_harness_benchmark_run_json",
+    "goal_harness_benchmark_run_schema_version",
+    "goal_harness_benchmark_run_writeback_contract",
+    "goal_harness_counter_trace_json",
+    "goal_harness_classification",
+    "goal_harness_append_execute_enabled",
+    "goal_harness_active_user_intervention_enabled",
+    "goal_harness_active_user_feed_jsonl",
+    "goal_harness_active_user_observation_json",
+    "goal_harness_active_user_observe_command",
+    "goal_harness_active_user_channel_surface",
+)
 TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_VERSION = (
     "terminal_bench_goal_harness_access_packet_v0"
 )
@@ -183,8 +223,59 @@ TERMINAL_BENCH_CODEX_WORKER_CLI_BRIDGE_SURFACE = (
 )
 AGENTS_LAST_EXAM_BENCHMARK_ID = "agents-last-exam"
 AGENTS_LAST_EXAM_RESULT_INGEST_POLICY_VERSION = "ale-result-ingest-contract-v0"
+AGENTS_LAST_EXAM_LOCAL_PREFLIGHT_SCHEMA_VERSION = (
+    "agents_last_exam_local_preflight_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_DRY_RUN_PLAN_SCHEMA_VERSION = (
+    "agents_last_exam_local_dry_run_plan_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_RUNNER_READINESS_SCHEMA_VERSION = (
+    "agents_last_exam_local_runner_readiness_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_SOURCE_READINESS_SCHEMA_VERSION = (
+    "agents_last_exam_local_source_readiness_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_LAUNCH_PACKET_SCHEMA_VERSION = (
+    "agents_last_exam_local_launch_packet_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_EXACT_DRY_RUN_RESULT_SCHEMA_VERSION = (
+    "agents_last_exam_local_exact_dry_run_result_v0"
+)
+AGENTS_LAST_EXAM_TASK_MATERIAL_READINESS_SCHEMA_VERSION = (
+    "agents_last_exam_task_material_readiness_v0"
+)
+AGENTS_LAST_EXAM_BAKED_TASK_INPUT_READINESS_SCHEMA_VERSION = (
+    "agents_last_exam_baked_task_input_readiness_v0"
+)
+AGENTS_LAST_EXAM_BAKED_TASK_INPUT_SCAN_SCHEMA_VERSION = (
+    "agents_last_exam_baked_task_input_scan_v0"
+)
+AGENTS_LAST_EXAM_CANDIDATE_TASK_DATA_SCAN_SCHEMA_VERSION = (
+    "agents_last_exam_candidate_task_data_scan_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_LAUNCH_PACKET_SCHEMA_VERSION = (
+    "agents_last_exam_local_launch_packet_v0"
+)
+AGENTS_LAST_EXAM_LOCAL_EXACT_DRY_RUN_RESULT_SCHEMA_VERSION = (
+    "agents_last_exam_local_exact_dry_run_result_v0"
+)
+AGENTS_LAST_EXAM_HOST_CODEX_CLI_ROUTE_SCHEMA_VERSION = (
+    "agents_last_exam_host_codex_cli_route_v0"
+)
+AGENTS_LAST_EXAM_HOST_CODEX_CUA_NO_TASK_SMOKE_SCHEMA_VERSION = (
+    "agents_last_exam_host_codex_cua_no_task_smoke_v0"
+)
+AGENTS_LAST_EXAM_VALIDATION_RUN_GATE_SCHEMA_VERSION = (
+    "agents_last_exam_validation_run_gate_v0"
+)
 AGENTS_LAST_EXAM_TRACE_PUBLICNESS = (
     "compact_public_safe_no_task_body_no_trajectory_no_output"
+)
+AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE = "agentslastexam/ale-kasm:latest"
+AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE = "ale-ubuntu22-docker:latest"
+AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT = "cpu-free-ubuntu"
+AGENTS_LAST_EXAM_DEFAULT_REPO_URL = (
+    "https://github.com/rdi-berkeley/agents-last-exam.git"
 )
 AGENTS_LAST_EXAM_RAW_SURFACES_EXCLUDED = (
     "trajectory.json",
@@ -234,6 +325,18 @@ AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION = (
 AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_MODE = (
     "agentissue_codex_cli_runner_target_handoff_packet"
 )
+AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_SCHEMA_VERSION = (
+    "agentissue_bench_codex_cli_runner_real_result_reducer_v0"
+)
+AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_MODE = (
+    "agentissue_codex_cli_runner_real_result_reducer"
+)
+AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_SCHEMA_VERSION = (
+    "agentissue_bench_codex_cli_runner_private_script_v0"
+)
+AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_MODE = (
+    "agentissue_codex_cli_runner_private_script"
+)
 AGENTISSUE_CODEX_CLI_RUNNER_SOURCE_RUNNER = (
     "goal_harness_agentissue_codex_cli_runner"
 )
@@ -259,29 +362,144 @@ BENCHMARK_RAW_PRIVATE_PATH_MARKERS = (
     "origin_log",
     "instruction.md",
     "task.md",
+    "/screenshots/",
+    "screenshot",
 )
 BENCHMARK_PRIVATE_MANIFEST_SUFFIXES = (
     ".local.json",
     ".private.json",
 )
+BENCHMARK_ARTIFACT_POLICY_REGISTRY: dict[str, dict[str, tuple[str, ...]]] = {
+    "default": {
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
+        "public_filenames": BENCHMARK_PUBLIC_ARTIFACT_FILENAMES,
+        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
+    },
+    "terminal-bench": {
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
+        "public_filenames": BENCHMARK_PUBLIC_ARTIFACT_FILENAMES,
+        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
+    },
+    "agents-last-exam": {
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
+        "public_filenames": (
+            "agents-last-exam-local-preflight.json",
+            "agents-last-exam-local-dry-run-plan.json",
+            "agents-last-exam-local-runner-readiness.json",
+            "agents-last-exam-local-source-readiness.json",
+            "agents-last-exam-task-material-readiness.json",
+            "agents-last-exam-baked-task-input-readiness.json",
+            "agents-last-exam-baked-task-input-scan.json",
+            "agents-last-exam-candidate-task-data-scan.json",
+            "agents-last-exam-local-launch-packet.json",
+            "agents-last-exam-local-exact-dry-run-result.json",
+            "agents-last-exam-host-codex-cli-route.json",
+            "agents-last-exam-host-codex-cua-no-task-smoke.json",
+            "agents-last-exam-validation-run-gate.json",
+        ),
+        "raw_private_markers": (
+            "trajectory.json",
+            "origin_log",
+            "/output/",
+            "/outputs/",
+            "/screenshots/",
+            "screenshot",
+            "hidden_refs",
+            "credentials",
+            "instruction.md",
+            "task.md",
+        ),
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
+    },
+}
 
 
-def classify_benchmark_artifact_path(path: str | Path) -> dict[str, Any]:
+def _safe_artifact_policy_key(adapter_kind: str | None) -> str:
+    key = str(adapter_kind or "default").strip().lower().replace("_", "-")
+    if key in BENCHMARK_ARTIFACT_POLICY_REGISTRY:
+        return key
+    return "default"
+
+
+def _safe_public_artifact_basename(value: Any) -> str:
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return ""
+    basename = str(value).replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    if not basename or basename in {".", ".."}:
+        return ""
+    if basename.endswith(BENCHMARK_PRIVATE_MANIFEST_SUFFIXES):
+        return ""
+    if any(marker in basename for marker in ("trajectory", "credential", "secret")):
+        return ""
+    return basename
+
+
+def _benchmark_artifact_policy(
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
+) -> dict[str, Any]:
+    policy_key = _safe_artifact_policy_key(adapter_kind)
+    default_policy = BENCHMARK_ARTIFACT_POLICY_REGISTRY["default"]
+    policy = BENCHMARK_ARTIFACT_POLICY_REGISTRY[policy_key]
+    filenames = set(default_policy["public_filenames"])
+    filenames.update(policy["public_filenames"])
+    filenames.update(
+        basename
+        for basename in (
+            _safe_public_artifact_basename(value)
+            for value in extra_public_filenames
+        )
+        if basename
+    )
+    return {
+        "adapter_kind": policy_key,
+        "public_suffixes": tuple(
+            sorted(set(default_policy["public_suffixes"]) | set(policy["public_suffixes"]))
+        ),
+        "public_filenames": tuple(sorted(filenames)),
+        "raw_private_markers": tuple(
+            sorted(
+                set(default_policy["raw_private_markers"])
+                | set(policy["raw_private_markers"])
+            )
+        ),
+        "private_suffixes": tuple(
+            sorted(
+                set(default_policy["private_suffixes"])
+                | set(policy["private_suffixes"])
+            )
+        ),
+    }
+
+
+def classify_benchmark_artifact_path(
+    path: str | Path,
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
+) -> dict[str, Any]:
     """Classify a benchmark artifact path without echoing host directories."""
 
+    policy = _benchmark_artifact_policy(
+        adapter_kind=adapter_kind,
+        extra_public_filenames=extra_public_filenames,
+    )
     normalized = str(path).replace("\\", "/").rstrip("/")
     basename = normalized.rsplit("/", 1)[-1] if normalized else ""
     lower_path = normalized.lower()
     lower_basename = basename.lower()
     public_compact_candidate = (
-        lower_basename.endswith(BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES)
-        or lower_basename in BENCHMARK_PUBLIC_ARTIFACT_FILENAMES
+        lower_basename.endswith(policy["public_suffixes"])
+        or lower_basename in policy["public_filenames"]
     )
     raw_marker = next(
-        (marker for marker in BENCHMARK_RAW_PRIVATE_PATH_MARKERS if marker in lower_path),
+        (marker for marker in policy["raw_private_markers"] if marker in lower_path),
         "",
     )
-    private_manifest = lower_basename.endswith(BENCHMARK_PRIVATE_MANIFEST_SUFFIXES)
+    private_manifest = lower_basename.endswith(policy["private_suffixes"])
 
     allowed_to_read = (
         public_compact_candidate
@@ -310,13 +528,33 @@ def classify_benchmark_artifact_path(path: str | Path) -> dict[str, Any]:
         "first_blocker": first_blocker,
         "allowed_to_read": allowed_to_read,
         "recommended_action": recommended_action,
+        "artifact_policy": {
+            "adapter_kind": policy["adapter_kind"],
+            "registry_backed": True,
+            "public_filename_allowlist_count": len(policy["public_filenames"]),
+            "raw_private_marker_count": len(policy["raw_private_markers"]),
+        },
     }
 
 
 def filter_public_benchmark_artifact_paths(
     paths: Iterable[str | Path],
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
 ) -> dict[str, Any]:
-    classifications = [classify_benchmark_artifact_path(path) for path in paths]
+    policy = _benchmark_artifact_policy(
+        adapter_kind=adapter_kind,
+        extra_public_filenames=extra_public_filenames,
+    )
+    classifications = [
+        classify_benchmark_artifact_path(
+            path,
+            adapter_kind=policy["adapter_kind"],
+            extra_public_filenames=extra_public_filenames,
+        )
+        for path in paths
+    ]
     allowed = [item for item in classifications if item["allowed_to_read"]]
     blocked = [item for item in classifications if not item["allowed_to_read"]]
     blocked_reasons: dict[str, int] = {}
@@ -332,6 +570,12 @@ def filter_public_benchmark_artifact_paths(
         "blocked_artifact_basenames": [item["basename"] for item in blocked],
         "blocked_reasons": blocked_reasons,
         "classifications": classifications,
+        "artifact_policy": {
+            "adapter_kind": policy["adapter_kind"],
+            "registry_backed": True,
+            "public_filename_allowlist_count": len(policy["public_filenames"]),
+            "raw_private_marker_count": len(policy["raw_private_markers"]),
+        },
         "public_boundary": {
             "full_paths_recorded": False,
             "raw_task_text_read": False,
@@ -1979,6 +2223,900 @@ def materialize_agentissue_codex_cli_runner_target_handoff(
         ),
     }
 
+def _agentissue_private_runner_script_text(
+    *,
+    tag: str,
+    image: str,
+    codex_binary: str,
+    docker_binary: str,
+) -> str:
+    codex = shlex.quote(_agentissue_public_label(codex_binary, limit=80))
+    docker = shlex.quote(_agentissue_public_label(docker_binary, limit=80))
+    quoted_tag = shlex.quote(tag)
+    quoted_image = shlex.quote(image)
+    eval_apply = "apply_patch < /patches/attempt.patch"
+    eval_test = "test_patched"
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+TAG="${{TAG:-{quoted_tag}}}"
+IMAGE="${{IMAGE:-{quoted_image}}}"
+CODEX_BIN="${{CODEX_BIN:-{codex}}}"
+DOCKER_BIN="${{DOCKER_BIN:-{docker}}}"
+GOAL_HARNESS_BIN="${{GOAL_HARNESS_BIN:-goal-harness}}"
+GOAL_ID="${{GOAL_ID:-goal-harness-meta}}"
+ALLOW_DOCKER_PULL="${{ALLOW_DOCKER_PULL:-0}}"
+APPEND_HISTORY="${{APPEND_HISTORY:-0}}"
+PATCH_APPLY_SH="${{PATCH_APPLY_SH:-{eval_apply}}}"
+PATCH_TEST_SH="${{PATCH_TEST_SH:-{eval_test}}}"
+JOB_ROOT="${{JOB_ROOT:-$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)}}"
+CONTEXT_DIR="$JOB_ROOT/context"
+PROMPT_PATH="${{PROMPT_PATH:-$CONTEXT_DIR/prompt.md}}"
+BUGGY_SOURCE="$JOB_ROOT/buggy-source"
+PATCH_DIR="$JOB_ROOT/Patches/lagent_239"
+PATCH_PATH="$PATCH_DIR/attempt.patch"
+LAST_MESSAGE="$JOB_ROOT/codex-last-message.txt"
+MARKER_DIR="$JOB_ROOT/result-markers"
+BENCHMARK_RUN_JSON="$JOB_ROOT/benchmark_run.compact.json"
+BENCHMARK_RESULT_JSON="$JOB_ROOT/benchmark_result.compact.json"
+TMP_CONTAINER=""
+
+fail() {{
+  printf 'agentissue-runner: %s\\n' "$*" >&2
+  exit 1
+}}
+
+cleanup() {{
+  if [ -n "$TMP_CONTAINER" ]; then
+    "$DOCKER_BIN" rm -f "$TMP_CONTAINER" >/dev/null 2>&1 || true
+  fi
+}}
+trap cleanup EXIT
+
+require_selected_lagent239() {{
+  [ "$TAG" = "lagent_239" ] || fail "only lagent_239 is supported"
+  [ "$IMAGE" = "{image}" ] || fail "only the selected lagent_239 image is supported"
+}}
+
+prepare_private_job_root() {{
+  require_selected_lagent239
+  mkdir -p "$CONTEXT_DIR" "$PATCH_DIR" "$MARKER_DIR"
+  [ -s "$PROMPT_PATH" ] || fail "missing private context/prompt.md"
+  if grep -q "Synthetic AgentIssue-Bench lagent_239 Prompt Placeholder" "$PROMPT_PATH"; then
+    fail "replace the synthetic prompt placeholder before running Codex"
+  fi
+}}
+
+extract_buggy_source_from_selected_container() {{
+  if [ -d "$BUGGY_SOURCE/.git" ]; then
+    return 0
+  fi
+  if [ -e "$BUGGY_SOURCE" ] && [ "$(find "$BUGGY_SOURCE" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" != "0" ]; then
+    fail "buggy-source is non-empty but has no git baseline; move it aside or set up baseline first"
+  fi
+  mkdir -p "$BUGGY_SOURCE"
+  if ! "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1; then
+    [ "$ALLOW_DOCKER_PULL" = "1" ] || fail "selected image is missing; set ALLOW_DOCKER_PULL=1 to pull it"
+    "$DOCKER_BIN" pull "$IMAGE"
+  fi
+  TMP_CONTAINER="agentissue-lagent-239-extract-$$"
+  "$DOCKER_BIN" create --name "$TMP_CONTAINER" "$IMAGE" >/dev/null
+  "$DOCKER_BIN" cp "$TMP_CONTAINER:/workspace/." "$BUGGY_SOURCE"
+  "$DOCKER_BIN" rm "$TMP_CONTAINER" >/dev/null
+  TMP_CONTAINER=""
+  [ "$(find "$BUGGY_SOURCE" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" != "0" ] || fail "buggy source extraction produced no files"
+}}
+
+initialize_git_baseline_in_buggy_source() {{
+  git -C "$BUGGY_SOURCE" rev-parse --is-inside-work-tree >/dev/null 2>&1 && return 0
+  git -C "$BUGGY_SOURCE" init
+  git -C "$BUGGY_SOURCE" config user.email "goal-harness@example.invalid"
+  git -C "$BUGGY_SOURCE" config user.name "Goal Harness"
+  git -C "$BUGGY_SOURCE" add .
+  git -C "$BUGGY_SOURCE" commit -m "agentissue-bench-buggy-source-baseline"
+}}
+
+run_host_local_codex_cli_patch_worker() {{
+  "$CODEX_BIN" exec \\
+    --ephemeral \\
+    --ignore-rules \\
+    --sandbox workspace-write \\
+    --cd "$BUGGY_SOURCE" \\
+    --add-dir "$JOB_ROOT" \\
+    --output-last-message "$LAST_MESSAGE" \\
+    "$PROMPT_PATH"
+  touch "$MARKER_DIR/host_codex_cli_invoked"
+}}
+
+write_attempt_patch_from_buggy_source_git_diff() {{
+  git -C "$BUGGY_SOURCE" diff --binary > "$PATCH_PATH"
+  [ -s "$PATCH_PATH" ] || fail "Codex run produced an empty git diff"
+}}
+
+evaluate_selected_tag_container() {{
+  rm -f "$MARKER_DIR/patch_applied" "$MARKER_DIR/test_success"
+  set +e
+  "$DOCKER_BIN" run \\
+    --platform linux/amd64 \\
+    --rm \\
+    --entrypoint bash \\
+    -v "$PATCH_DIR:/patches:ro" \\
+    -v "$MARKER_DIR:/markers" \\
+    -e PATCH_APPLY_SH="$PATCH_APPLY_SH" \\
+    -e PATCH_TEST_SH="$PATCH_TEST_SH" \\
+    "$IMAGE" \\
+    -lc 'set -euo pipefail; eval "$PATCH_APPLY_SH"; touch /markers/patch_applied; eval "$PATCH_TEST_SH"; touch /markers/test_success'
+  local exit_code=$?
+  set -e
+  printf '%s\\n' "$exit_code" > "$MARKER_DIR/patched_exit_code"
+}}
+
+write_compact_public_evidence() {{
+  python3 - "$BENCHMARK_RUN_JSON" "$BENCHMARK_RESULT_JSON" <<'PY'
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+run_path = Path(sys.argv[1])
+result_path = Path(sys.argv[2])
+tag = os.environ["TAG"]
+image = os.environ["IMAGE"]
+source = Path(os.environ["BUGGY_SOURCE"])
+patch = Path(os.environ["PATCH_PATH"])
+markers = Path(os.environ["MARKER_DIR"])
+patched_exit = int((markers / "patched_exit_code").read_text().strip())
+patch_bytes = patch.stat().st_size if patch.exists() else 0
+patch_sha = hashlib.sha256(patch.read_bytes()).hexdigest() if patch.exists() else "missing"
+name_result = subprocess.run(
+    ["git", "-C", str(source), "diff", "--name-only"],
+    check=False,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    text=True,
+)
+changed_files = [line for line in name_result.stdout.splitlines() if line.strip()]
+hunk_count = 0
+if patch.exists():
+    hunk_count = sum(1 for line in patch.read_text(errors="ignore").splitlines() if line.startswith("@@ "))
+patch_applied = (markers / "patch_applied").exists()
+test_success = (markers / "test_success").exists()
+resolved = patched_exit == 0 and test_success
+score = {{
+    "kind": "agentissue_bench_single_tag_container_eval",
+    "resolved": resolved,
+    "value": 1 if resolved else 0,
+}}
+validation = {{
+    "selected_image_only": image == "alfin06/agentissue-bench:lagent_239",
+    "single_tag_only": tag == "lagent_239",
+    "buggy_source_extracted": source.exists(),
+    "fixed_source_not_extracted_to_host": True,
+    "host_codex_cli_invoked": (markers / "host_codex_cli_invoked").exists(),
+    "patch_exported_from_buggy_source_git_diff": patch.exists() and patch_bytes > 0,
+    "patch_applied_in_container": patch_applied,
+    "patched_eval_exit_zero": patched_exit == 0,
+    "patched_eval_success_marker": test_success,
+    "no_upload": True,
+    "no_submit": True,
+    "no_public_ranking_path": True,
+    "raw_logs_public": False,
+    "patch_content_public": False,
+    "credential_values_recorded": False,
+    "codex_auth_synced_to_container_or_remote": False,
+}}
+benchmark_run = {{
+    "schema_version": "benchmark_run_v0",
+    "source_runner": "goal_harness_agentissue_codex_cli_runner",
+    "benchmark_id": "agentissue-bench",
+    "selected_tag": tag,
+    "selected_image": image,
+    "real_run": True,
+    "no_upload": True,
+    "no_submit": True,
+    "no_public_ranking_path": True,
+    "patch_sha256": patch_sha,
+    "patch_bytes": patch_bytes,
+    "changed_file_count": len(changed_files),
+    "hunk_count": hunk_count,
+    "patched_exit_code": patched_exit,
+    "official_task_score": score,
+    "validation": validation,
+}}
+benchmark_result = {{
+    "schema_version": "benchmark_result_v0",
+    "benchmark_id": "agentissue-bench",
+    "selected_tag": tag,
+    "official_task_score": score,
+    "no_upload": True,
+    "no_submit": True,
+    "no_public_ranking_path": True,
+    "patch_sha256": patch_sha,
+    "patch_bytes": patch_bytes,
+    "changed_file_count": len(changed_files),
+}}
+run_path.write_text(json.dumps(benchmark_run, indent=2, sort_keys=True) + "\\n")
+result_path.write_text(json.dumps(benchmark_result, indent=2, sort_keys=True) + "\\n")
+PY
+}}
+
+reduce_compact_public_evidence() {{
+  local args=("$GOAL_HARNESS_BIN" "benchmark" "agentissue-codex-runner-flow" "--goal-id" "$GOAL_ID" "--tag" "$TAG" "--real-result-root" "$JOB_ROOT")
+  if [ "$APPEND_HISTORY" = "1" ]; then
+    args+=("--delivery-batch-scale" "multi_surface" "--delivery-outcome" "primary_goal_outcome" "--execute")
+  fi
+  "${{args[@]}}"
+}}
+
+main() {{
+  prepare_private_job_root
+  extract_buggy_source_from_selected_container
+  initialize_git_baseline_in_buggy_source
+  run_host_local_codex_cli_patch_worker
+  write_attempt_patch_from_buggy_source_git_diff
+  evaluate_selected_tag_container
+  write_compact_public_evidence
+  reduce_compact_public_evidence
+}}
+
+main "$@"
+"""
+
+
+def materialize_agentissue_codex_cli_runner_private_script(
+    script_root: str | Path,
+    *,
+    selected_tag: str = AGENTISSUE_DEFAULT_TAG,
+    codex_binary: str = "codex",
+    docker_binary: str = "docker",
+) -> dict[str, Any]:
+    """Create a private runner script plus public manifest without executing it."""
+
+    tag = _agentissue_public_label(selected_tag)
+    if tag != AGENTISSUE_DEFAULT_TAG:
+        raise ValueError(
+            "agentissue Codex runner private script currently only supports selected tag lagent_239"
+        )
+    root = Path(script_root).expanduser()
+    handoff = materialize_agentissue_codex_cli_runner_first_run_handoff(
+        root,
+        selected_tag=tag,
+        codex_binary=codex_binary,
+        docker_binary=docker_binary,
+    )
+    script_path = root / "run-lagent239.private.sh"
+    manifest_path = root / "private-runner.public.json"
+    compact_run_path = root / "benchmark_run.compact.json"
+    phase_order = [
+        "prepare_private_job_root",
+        "extract_buggy_source_from_selected_container",
+        "initialize_git_baseline_in_buggy_source",
+        "run_host_local_codex_cli_patch_worker",
+        "write_attempt_patch_from_buggy_source_git_diff",
+        "evaluate_selected_tag_container",
+        "write_compact_public_evidence",
+        "reduce_compact_public_evidence",
+    ]
+    script_text = _agentissue_private_runner_script_text(
+        tag=tag,
+        image=AGENTISSUE_DEFAULT_IMAGE,
+        codex_binary=codex_binary,
+        docker_binary=docker_binary,
+    )
+    script_path.write_text(script_text, encoding="utf-8")
+    script_path.chmod(0o700)
+
+    manifest = {
+        "schema_version": AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_SCHEMA_VERSION,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "selected_tag": tag,
+        "selected_image": AGENTISSUE_DEFAULT_IMAGE,
+        "path_recorded": False,
+        "root_path_recorded": False,
+        "private_script_relative_path": "run-lagent239.private.sh",
+        "script_content_public": False,
+        "default_generator_mode": "no_execute",
+        "phase_order": phase_order,
+        "relative_outputs": {
+            "attempt_patch": AGENTISSUE_PATCH_RELATIVE_PATH,
+            "benchmark_run": "benchmark_run.compact.json",
+            "benchmark_result": "benchmark_result.compact.json",
+            "real_result": "real-result.public.json",
+            "private_runner_manifest": "private-runner.public.json",
+        },
+        "operator_inputs_required": [
+            "private context/prompt.md with public issue/task context",
+            "host-local Codex CLI auth already present on the trusted host",
+            "selected lagent_239 image present or ALLOW_DOCKER_PULL=1",
+        ],
+        "script_checks": {
+            "strict_mode": True,
+            "selected_tag_guard": True,
+            "selected_image_guard": True,
+            "buggy_source_extraction_phase": True,
+            "git_baseline_phase": True,
+            "host_codex_phase": True,
+            "patch_export_phase": True,
+            "selected_container_eval_phase": True,
+            "compact_reducer_phase": True,
+            "appends_history_only_when_append_history_is_one": True,
+        },
+        "generator_boundary": {
+            "codex_cli_invoked": False,
+            "model_api_invoked": False,
+            "docker_image_pulled": False,
+            "docker_container_started": False,
+            "source_extracted": False,
+            "patch_generated": False,
+            "patch_evaluated": False,
+            "upload": False,
+            "submit": False,
+            "public_ranking_path": False,
+            "auth_material_synced": False,
+            "credential_values_recorded": False,
+            "raw_logs_public": False,
+            "patch_content_public": False,
+            "absolute_paths_public": False,
+        },
+        "later_script_boundary": {
+            "will_invoke_host_codex_cli": True,
+            "will_start_selected_container": True,
+            "will_write_compact_files": True,
+            "upload": False,
+            "submit": False,
+            "public_ranking_path": False,
+            "auth_material_sync": False,
+            "raw_logs_public": False,
+            "patch_content_public": False,
+        },
+    }
+    _agentissue_assert_compact_public_safe(manifest, label="private-runner.public.json")
+
+    benchmark_run = json.loads(json.dumps(handoff["benchmark_run"]))
+    benchmark_run.update(
+        {
+            "job_name": "agentissue_lagent_239_codex_cli_runner_private_script",
+            "mode": AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_MODE,
+            "worker_mode": "trusted_host_codex_cli_private_script_generator",
+            "first_blocker": "private_runner_script_generated_not_executed",
+            "score_failure_attribution": "not_run_private_runner_script_generator_only",
+            "failure_attribution_labels": [
+                "private_runner_script_generator_only",
+                "ready_for_controlled_script_execution_or_real_codex_regression",
+            ],
+            "evidence_files": [
+                "private-runner.public.json",
+                "benchmark_run.compact.json",
+                "first-run-handoff.public.json",
+                "execution-gate.public.json",
+            ],
+        }
+    )
+    benchmark_run["validation"].update(
+        {
+            "private_runner_script_materialized": True,
+            "private_runner_manifest_materialized": True,
+            "script_executable_bit_set": True,
+            "script_content_not_public": True,
+            "script_path_relative_only": True,
+            "phase_order_rendered": True,
+            "script_renders_source_extraction": True,
+            "script_renders_git_baseline": True,
+            "script_renders_host_codex": True,
+            "script_renders_patch_export": True,
+            "script_renders_selected_tag_eval": True,
+            "script_renders_compact_evidence": True,
+            "script_renders_real_result_reducer": True,
+            "no_generator_codex_execution": True,
+            "no_generator_docker_execution": True,
+            "no_generator_model_api_invoked": True,
+            "no_generator_upload": True,
+            "no_generator_submit": True,
+            "no_generator_public_ranking_path": True,
+            "no_auth_material_sync": True,
+            "no_raw_logs_public": True,
+            "no_patch_content_public": True,
+            "no_absolute_paths_public": True,
+        }
+    )
+    for trial in benchmark_run.get("trials") or []:
+        if isinstance(trial, dict):
+            trial["exception_type"] = "private_runner_script_generated_not_executed"
+
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    compact_run_path.write_text(
+        json.dumps(benchmark_run, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_SCHEMA_VERSION,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "selected_tag": tag,
+        "selected_image": AGENTISSUE_DEFAULT_IMAGE,
+        "ready": True,
+        "materialized": True,
+        "path_recorded": False,
+        "script_root_path_recorded": False,
+        "script_relative_path": "run-lagent239.private.sh",
+        "manifest_relative_path": "private-runner.public.json",
+        "compact_run_relative_path": "benchmark_run.compact.json",
+        "benchmark_result_relative_path": "benchmark_result.compact.json",
+        "real_result_relative_path": "real-result.public.json",
+        "created_relative_paths": [
+            *handoff["created_relative_paths"],
+            "run-lagent239.private.sh",
+            "private-runner.public.json",
+        ],
+        "phase_order": phase_order,
+        "script_checks": manifest["script_checks"],
+        "execution_boundary": manifest["generator_boundary"],
+        "later_script_boundary": manifest["later_script_boundary"],
+        "benchmark_run": benchmark_run,
+        "recommended_next_action": (
+            "run the private script only from a trusted local operator context, "
+            "or add a low-frequency real Codex CLI regression that executes it "
+            "without syncing auth material, uploading, submitting, or claiming a public ranking"
+        ),
+    }
+
+
+AGENTISSUE_REAL_RESULT_FORBIDDEN_KEYS = {
+    "access_token",
+    "api_key",
+    "authorization",
+    "codex_auth",
+    "credential",
+    "environment",
+    "file_content",
+    "fixed_diff",
+    "gold_material",
+    "local_path",
+    "password",
+    "patch_content",
+    "problem_statement",
+    "raw_artifact",
+    "raw_comment",
+    "raw_diff",
+    "raw_issue_body",
+    "raw_issue_title",
+    "raw_log",
+    "raw_output",
+    "raw_patch",
+    "screenshot",
+    "session",
+    "solution",
+    "source_diff",
+    "test_body",
+    "test_patch",
+    "trajectory",
+}
+AGENTISSUE_REAL_RESULT_FORBIDDEN_TEXT = (
+    "/" + "Users/",
+    "~/.codex",
+    ".codex/auth.json",
+    "CODEX" + "_ACCESS_TOKEN",
+    "OPENAI" + "_API_KEY",
+    "ANTHROPIC" + "_API_KEY",
+    "GOOGLE" + "_API_KEY",
+    "raw_issue_body",
+    "raw_patch",
+    "trajectory.json",
+)
+
+AGENTISSUE_REAL_RESULT_REQUIRED_PHASE_CHECKS = (
+    "selected_image_only",
+    "single_tag_only",
+    "buggy_source_extracted",
+    "fixed_source_not_extracted_to_host",
+    "host_codex_cli_invoked",
+    "patch_exported_from_buggy_source_git_diff",
+    "patch_applied_in_container",
+)
+
+
+def _agentissue_key_paths(value: Any, *, prefix: str = "") -> list[str]:
+    if isinstance(value, dict):
+        paths: list[str] = []
+        for key, child in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            paths.append(path)
+            paths.extend(_agentissue_key_paths(child, prefix=path))
+        return paths
+    if isinstance(value, list):
+        paths: list[str] = []
+        for index, child in enumerate(value):
+            paths.extend(_agentissue_key_paths(child, prefix=f"{prefix}[{index}]"))
+        return paths
+    return []
+
+
+def _agentissue_leaf(path: str) -> str:
+    segment = path.rsplit(".", 1)[-1]
+    if "[" in segment:
+        segment = segment.split("[", 1)[0]
+    return segment.lower()
+
+
+def _agentissue_public_bool(value: Any) -> bool:
+    return bool(value) if isinstance(value, bool) else False
+
+
+def _agentissue_public_number(value: Any, *, default: int | float = 0) -> int | float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    return default
+
+
+def _agentissue_assert_compact_public_safe(payload: dict[str, Any], *, label: str) -> None:
+    key_hits = [
+        path
+        for path in _agentissue_key_paths(payload)
+        if _agentissue_leaf(path) in AGENTISSUE_REAL_RESULT_FORBIDDEN_KEYS
+    ]
+    if key_hits:
+        raise ValueError(f"{label} contains forbidden compact key(s): {', '.join(key_hits[:4])}")
+    rendered = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    leaked = [marker for marker in AGENTISSUE_REAL_RESULT_FORBIDDEN_TEXT if marker in rendered]
+    if leaked:
+        raise ValueError(f"{label} contains forbidden private marker(s): {', '.join(leaked[:4])}")
+
+
+def _agentissue_compact_official_score(
+    run: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    run_score = run.get("official_task_score") if isinstance(run.get("official_task_score"), dict) else {}
+    result_score = (
+        result.get("official_task_score")
+        if isinstance(result.get("official_task_score"), dict)
+        else {}
+    )
+    source = result_score or run_score
+    kind = _agentissue_public_label(
+        source.get("kind") or "agentissue_bench_single_tag_container_eval",
+        limit=80,
+    )
+    value = _agentissue_public_number(source.get("value"), default=0)
+    resolved = source.get("resolved")
+    if not isinstance(resolved, bool):
+        resolved = value == 1
+    return {
+        "kind": kind,
+        "value": value,
+        "passed": bool(resolved),
+    }
+
+
+def _agentissue_required_phase_checks(validation: dict[str, Any]) -> dict[str, bool]:
+    checks: dict[str, bool] = {}
+    missing: list[str] = []
+    for key in AGENTISSUE_REAL_RESULT_REQUIRED_PHASE_CHECKS:
+        checks[key] = validation.get(key) is True
+        if not checks[key]:
+            missing.append(key)
+    if missing:
+        raise ValueError(
+            "real-result compact inputs are missing required runner phase proof(s): "
+            + ", ".join(missing)
+        )
+    return checks
+
+
+def materialize_agentissue_codex_cli_runner_real_result(
+    real_result_root: str | Path,
+    *,
+    selected_tag: str = AGENTISSUE_DEFAULT_TAG,
+) -> dict[str, Any]:
+    """Reduce an already-completed private AgentIssue run from compact files only."""
+
+    tag = _agentissue_public_label(selected_tag)
+    if tag != AGENTISSUE_DEFAULT_TAG:
+        raise ValueError(
+            "agentissue Codex runner real-result reducer currently only supports selected tag lagent_239"
+        )
+    root = Path(real_result_root).expanduser()
+    run_path = root / "benchmark_run.compact.json"
+    result_path = root / "benchmark_result.compact.json"
+    public_packet_path = root / "real-result.public.json"
+    if not run_path.exists():
+        raise ValueError("real-result root is missing benchmark_run.compact.json")
+    if not result_path.exists():
+        raise ValueError("real-result root is missing benchmark_result.compact.json")
+    run_input = json.loads(run_path.read_text(encoding="utf-8"))
+    result_input = json.loads(result_path.read_text(encoding="utf-8"))
+    if not isinstance(run_input, dict) or run_input.get("schema_version") != "benchmark_run_v0":
+        raise ValueError("benchmark_run.compact.json must contain benchmark_run_v0")
+    if not isinstance(result_input, dict) or result_input.get("schema_version") != "benchmark_result_v0":
+        raise ValueError("benchmark_result.compact.json must contain benchmark_result_v0")
+    _agentissue_assert_compact_public_safe(run_input, label="benchmark_run.compact.json")
+    _agentissue_assert_compact_public_safe(result_input, label="benchmark_result.compact.json")
+
+    selected = _agentissue_public_label(
+        run_input.get("selected_tag")
+        or run_input.get("task_selector_hash")
+        or result_input.get("selected_tag")
+        or tag
+    )
+    if selected != tag:
+        raise ValueError(f"real-result selected tag mismatch: expected {tag}, got {selected}")
+
+    official_score = _agentissue_compact_official_score(run_input, result_input)
+    resolved = bool(official_score.get("passed"))
+    patch_sha = _agentissue_public_label(
+        run_input.get("patch_sha256") or result_input.get("patch_sha256") or "missing",
+        limit=120,
+    )
+    patch_bytes = int(_agentissue_public_number(run_input.get("patch_bytes"), default=0))
+    changed_files = int(
+        _agentissue_public_number(
+            run_input.get("changed_file_count") or result_input.get("changed_file_count"),
+            default=0,
+        )
+    )
+    hunk_count = int(_agentissue_public_number(run_input.get("hunk_count"), default=0))
+    patched_exit = int(_agentissue_public_number(run_input.get("patched_exit_code"), default=0))
+    baseline_exit = int(_agentissue_public_number(run_input.get("baseline_exit_code"), default=0))
+
+    validation = run_input.get("validation") if isinstance(run_input.get("validation"), dict) else {}
+    phase_checks = _agentissue_required_phase_checks(validation)
+    patched_eval_exit_zero = (
+        validation.get("patched_eval_exit_zero")
+        if isinstance(validation.get("patched_eval_exit_zero"), bool)
+        else patched_exit == 0
+    )
+    patched_eval_success_marker = (
+        validation.get("patched_eval_success_marker")
+        if isinstance(validation.get("patched_eval_success_marker"), bool)
+        else resolved
+    )
+    no_upload = _agentissue_public_bool(run_input.get("no_upload")) or _agentissue_public_bool(
+        validation.get("no_upload")
+    )
+    no_submit = _agentissue_public_bool(run_input.get("no_submit")) or _agentissue_public_bool(
+        validation.get("no_submit")
+    )
+    no_public_ranking = _agentissue_public_bool(
+        run_input.get("no_public_ranking_path")
+    ) or _agentissue_public_bool(validation.get("no_public_ranking_path"))
+    if not (no_upload and no_submit and no_public_ranking):
+        raise ValueError(
+            "real-result compact inputs must prove no_upload, no_submit, and no_public_ranking_path"
+        )
+    if validation.get("codex_auth_synced_to_container_or_remote") is True:
+        raise ValueError("real-result compact inputs report Codex auth sync")
+    if validation.get("credential_values_recorded") is True:
+        raise ValueError("real-result compact inputs report credential value recording")
+    if validation.get("raw_logs_public") is True or validation.get("patch_content_public") is True:
+        raise ValueError("real-result compact inputs report raw logs or patch content public")
+
+    result_packet = {
+        "schema_version": AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_SCHEMA_VERSION,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "selected_tag": tag,
+        "selected_image": AGENTISSUE_DEFAULT_IMAGE,
+        "path_recorded": False,
+        "real_run_done": True,
+        "real_runner_invoked_by_reducer": False,
+        "real_codex_invoked_by_reducer": False,
+        "real_docker_invoked_by_reducer": False,
+        "input_files": {
+            "benchmark_run": {
+                "relative_path": "benchmark_run.compact.json",
+                "schema_version": run_input.get("schema_version"),
+                "read": True,
+            },
+            "benchmark_result": {
+                "relative_path": "benchmark_result.compact.json",
+                "schema_version": result_input.get("schema_version"),
+                "read": True,
+            },
+        },
+        "result_summary": {
+            "official_task_score": official_score,
+            "resolved": resolved,
+            "patch_sha256": patch_sha,
+            "patch_bytes": patch_bytes,
+            "changed_file_count": changed_files,
+            "hunk_count": hunk_count,
+            "patched_exit_code": patched_exit,
+            "baseline_exit_code": baseline_exit,
+        },
+        "phase_checks": {
+            **phase_checks,
+            "patched_eval_exit_zero": patched_eval_exit_zero,
+            "patched_eval_success_marker": patched_eval_success_marker,
+        },
+        "boundary": {
+            "no_upload": no_upload,
+            "no_submit": no_submit,
+            "no_public_ranking_path": no_public_ranking,
+            "codex_auth_synced": False,
+            "credential_values_recorded": False,
+            "raw_logs_public": False,
+            "patch_content_public": False,
+            "absolute_paths_public": False,
+        },
+        "public_outputs": [
+            "real-result.public.json",
+            "benchmark_run.compact.json",
+            "benchmark_result.compact.json",
+        ],
+    }
+    _agentissue_assert_compact_public_safe(result_packet, label="real-result.public.json")
+
+    benchmark_run = {
+        "schema_version": "benchmark_run_v0",
+        "source_runner": AGENTISSUE_CODEX_CLI_RUNNER_SOURCE_RUNNER,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "job_name": "agentissue_lagent_239_codex_cli_runner_real_result_reducer",
+        "mode": AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_MODE,
+        "worker_mode": "trusted_host_codex_cli_real_result_reducer",
+        "trace_publicness": "compact_public_no_issue_text_no_patch_no_logs",
+        "score_failure_attribution": (
+            "resolved_single_tag_eval"
+            if resolved
+            else "unresolved_single_tag_eval_compact_result"
+        ),
+        "real_run": True,
+        "submit_eligible": False,
+        "leaderboard_evidence": False,
+        "official_score_comparable_to_native_codex": False,
+        "official_score_claim_allowed": False,
+        "control_plane_score_applicable": True,
+        "official_task_score": official_score,
+        "progress": {
+            "n_total_trials": 1,
+            "n_completed_trials": 1,
+            "n_errored_trials": 0 if resolved else 1,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+        },
+        "metrics": {
+            "input_tokens": 0,
+            "cache_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0,
+        },
+        "validation": {
+            "real_result_reducer_materialized": True,
+            "compact_run_read": True,
+            "compact_result_read": True,
+            "selected_tag_checked": True,
+            **phase_checks,
+            "patch_hash_recorded": bool(patch_sha and patch_sha != "missing"),
+            "patched_eval_exit_zero": patched_eval_exit_zero,
+            "patched_eval_success_marker": patched_eval_success_marker,
+            "no_upload": no_upload,
+            "no_submit": no_submit,
+            "no_public_ranking_path": no_public_ranking,
+            "no_raw_logs_public": True,
+            "no_patch_content_public": True,
+            "no_absolute_paths_public": True,
+            "no_codex_auth_sync": True,
+            "no_credential_values_recorded": True,
+            "no_reducer_codex_execution": True,
+            "no_reducer_docker_execution": True,
+        },
+        "trials": [
+            {
+                "task_id": tag,
+                "trial_name": tag,
+                "source": "selected_public_tag",
+                "exception_type": "" if resolved else "unresolved_single_tag_eval",
+                "trajectory_present": False,
+                "artifact_manifest_present": False,
+                "trial_result_present": True,
+            }
+        ],
+        "failure_attribution_labels": (
+            ["resolved_single_tag_eval"]
+            if resolved
+            else ["unresolved_single_tag_eval_compact_result"]
+        ),
+        "evidence_files": [
+            "real-result.public.json",
+            "benchmark_run.compact.json",
+            "benchmark_result.compact.json",
+        ],
+        "stop_conditions": [
+            "raw_log_requested",
+            "patch_content_requested",
+            "absolute_private_path_publication_requested",
+            "upload_submit_or_public_ranking_requested",
+            "codex_auth_sync_requested",
+        ],
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+    benchmark_result = {
+        "schema_version": "benchmark_result_v0",
+        "task_id": "agentissue_bench_lagent_239",
+        "scenario_id": AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_MODE,
+        "worker_mode": "trusted_host_codex_cli_real_result_reducer",
+        "harness_identity": "goal_harness",
+        "terminal_state": "resolved" if resolved else "evaluated_unresolved",
+        "trace_publicness": "compact_public_no_issue_text_no_patch_no_logs",
+        "official_task_score": official_score,
+        "validation_pass_count": 14,
+        "validation_fail_count": 0 if resolved else 1,
+        "changed_file_count": changed_files,
+        "forbidden_access_count": 0,
+        "phase_checks": {
+            **phase_checks,
+            "patched_eval_exit_zero": patched_eval_exit_zero,
+            "patched_eval_success_marker": patched_eval_success_marker,
+        },
+        "failure_attribution_labels": benchmark_run["failure_attribution_labels"],
+    }
+    public_packet_path.write_text(
+        json.dumps(result_packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_SCHEMA_VERSION,
+        "benchmark_id": AGENTISSUE_BENCHMARK_ID,
+        "selected_tag": tag,
+        "selected_image": AGENTISSUE_DEFAULT_IMAGE,
+        "ready": True,
+        "materialized": True,
+        "path_recorded": False,
+        "result_root_path_recorded": False,
+        "real_run_done": True,
+        "result_relative_path": "real-result.public.json",
+        "compact_run_relative_path": "benchmark_run.compact.json",
+        "compact_result_relative_path": "benchmark_result.compact.json",
+        "result_checks": {
+            "compact_run_read": True,
+            "compact_result_read": True,
+            "selected_tag_checked": True,
+            **phase_checks,
+            "patched_eval_exit_zero": patched_eval_exit_zero,
+            "patched_eval_success_marker": patched_eval_success_marker,
+            "resolved": resolved,
+            "no_upload": no_upload,
+            "no_submit": no_submit,
+            "no_public_ranking_path": no_public_ranking,
+            "raw_logs_public": False,
+            "patch_content_public": False,
+            "absolute_paths_public": False,
+        },
+        "execution_boundary": {
+            "codex_cli_invoked_by_reducer": False,
+            "model_api_invoked_by_reducer": False,
+            "docker_container_started_by_reducer": False,
+            "source_extracted_by_reducer": False,
+            "patch_generated_by_reducer": False,
+            "patch_evaluated_by_reducer": False,
+            "upload": False,
+            "submit": False,
+            "public_ranking_path": False,
+        },
+        "benchmark_run": benchmark_run,
+        "benchmark_result": benchmark_result,
+        "public_packet": result_packet,
+        "recommended_next_action": (
+            "use --real-result-root for future AgentIssue-Bench lagent_239 compact "
+            "result reductions, then compare repeat runs or extend to the next selected tag"
+        ),
+    }
+
 def _claim_review_numeric(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -2186,6 +3324,526 @@ def build_benchmark_claim_review(
     }
 
 
+def _learning_ledger_failure_labels(
+    benchmark_comparison: dict[str, Any],
+    runs: Iterable[dict[str, Any]],
+) -> set[str]:
+    labels = set(
+        item
+        for item in benchmark_comparison.get("failure_attribution_labels") or []
+        if isinstance(item, str)
+    )
+    for run in runs:
+        labels.update(_claim_review_failure_labels(run))
+        first_blocker = run.get("first_blocker")
+        if isinstance(first_blocker, str) and first_blocker:
+            labels.add(first_blocker)
+        worker_start_status = run.get("worker_start_status")
+        if isinstance(worker_start_status, str) and worker_start_status:
+            labels.add(worker_start_status)
+    return labels
+
+
+def _learning_ledger_repair_candidates(
+    claim_review: dict[str, Any],
+    benchmark_comparison: dict[str, Any],
+    runs: Iterable[dict[str, Any]],
+) -> list[str]:
+    labels = _learning_ledger_failure_labels(benchmark_comparison, runs)
+    blockers = set(
+        item
+        for item in (
+            (claim_review.get("decision") or {}).get("blockers")
+            if isinstance(claim_review.get("decision"), dict)
+            else []
+        )
+        if isinstance(item, str)
+    )
+    candidates: list[str] = []
+
+    if any(
+        label in labels
+        for label in (
+            "pre_worker_agent_setup_failed",
+            "treatment_pre_worker_agent_setup_failed",
+        )
+    ):
+        candidates.append("adapter_startup_argument_contract")
+    if any(
+        label in labels
+        for label in (
+            "runner_compact_result_missing",
+            "harbor_job_root_missing",
+            "post_launch_job_dir_materialization_missing",
+            "reducer_validation_failed",
+        )
+    ):
+        candidates.append("benchmark_lifecycle_materialization_gate")
+    if "worker_submit_eligible_boundary_mismatch" in blockers:
+        candidates.append("runner_owned_submit_boundary_invariant")
+    if "missing_treatment_worker_goal_harness_evidence" in blockers:
+        candidates.append("worker_visible_goal_harness_evidence_gate")
+    if "baseline_failure_attribution_caveat" in blockers:
+        candidates.append("compact_verifier_attribution_review")
+    if not candidates and bool(
+        (claim_review.get("treatment_worker_evidence") or {}).get("present")
+        if isinstance(claim_review.get("treatment_worker_evidence"), dict)
+        else False
+    ):
+        candidates.append("claim_cost_overhead_guard")
+    return candidates
+
+
+def _learning_ledger_overhead_label(
+    official_delta: float | None,
+    cost_delta: float | None,
+    wall_time_delta: float | None,
+) -> str:
+    extra_cost = cost_delta is not None and cost_delta > 0
+    extra_time = wall_time_delta is not None and wall_time_delta > 0
+    positive_delta = official_delta is not None and official_delta > 0
+    if extra_cost and not positive_delta:
+        return "extra_cost_without_official_gain"
+    if extra_time and not positive_delta:
+        return "extra_wall_time_without_official_gain"
+    if (extra_cost or extra_time) and positive_delta:
+        return "positive_delta_with_overhead"
+    if cost_delta is not None and cost_delta < 0:
+        return "treatment_cheaper"
+    return "overhead_not_material_or_unknown"
+
+
+def _learning_ledger_lifecycle_gate(
+    benchmark_comparison: dict[str, Any],
+) -> dict[str, Any]:
+    official_delta = benchmark_comparison.get("official_task_score_delta")
+    labels = benchmark_comparison.get("failure_attribution_labels")
+    compact_blocker = isinstance(labels, list) and bool(labels)
+    compact_score = _claim_review_numeric(official_delta) is not None
+    budget_count_allowed = compact_score or compact_blocker
+    return {
+        "schema_version": "benchmark_lifecycle_gate_v0",
+        "paired_comparison_present": True,
+        "compact_score_or_blocker_present": budget_count_allowed,
+        "budget_count_allowed": budget_count_allowed,
+        "blocked_reason": None
+        if budget_count_allowed
+        else "missing_compact_score_or_blocker_evidence",
+    }
+
+
+def _learning_ledger_learning_quota_gate(
+    *,
+    lifecycle_gate: dict[str, Any],
+    repair_candidates: list[str],
+    clean_validation: bool,
+    validation_candidate: bool,
+) -> dict[str, Any]:
+    actionable_reasons: list[str] = []
+    if repair_candidates:
+        actionable_reasons.append("generic_repair_candidate")
+    if clean_validation:
+        actionable_reasons.append("clean_score_recovery_evidence")
+    elif validation_candidate:
+        actionable_reasons.append("candidate_score_recovery_needs_review")
+
+    lifecycle_ready = bool(lifecycle_gate.get("budget_count_allowed"))
+    actionable = bool(actionable_reasons)
+    if not lifecycle_ready:
+        blocked_reason = "missing_compact_score_or_blocker_evidence"
+    elif not actionable:
+        blocked_reason = "compact_result_has_no_goal_harness_learning_signal"
+    else:
+        blocked_reason = None
+
+    return {
+        "schema_version": "benchmark_learning_quota_gate_v0",
+        "actionable_learning_present": actionable,
+        "spend_allowed": lifecycle_ready and actionable,
+        "actionable_reasons": actionable_reasons,
+        "blocked_reason": blocked_reason,
+    }
+
+
+def build_benchmark_learning_ledger(
+    benchmark_comparison: dict[str, Any],
+    *,
+    benchmark_runs: Iterable[dict[str, Any]] = (),
+) -> dict[str, Any]:
+    """Build a compact benchmark learning row from public-safe summaries."""
+
+    runs = [run for run in benchmark_runs if isinstance(run, dict)]
+    claim_review = build_benchmark_claim_review(
+        benchmark_comparison,
+        benchmark_runs=runs,
+    )
+    official_delta = claim_review.get("official_task_score_delta")
+    official_delta_num = (
+        official_delta if isinstance(official_delta, (int, float)) else None
+    )
+    cost_delta = _claim_review_numeric(benchmark_comparison.get("cost_delta_usd"))
+    wall_time_delta = _claim_review_numeric(
+        benchmark_comparison.get("wall_time_delta_seconds")
+        or benchmark_comparison.get("with_goal_harness_overhead_ms")
+    )
+    repair_candidates = _learning_ledger_repair_candidates(
+        claim_review,
+        benchmark_comparison,
+        runs,
+    )
+    lifecycle_gate = _learning_ledger_lifecycle_gate(benchmark_comparison)
+    decision = (
+        claim_review.get("decision")
+        if isinstance(claim_review.get("decision"), dict)
+        else {}
+    )
+    clean = bool(decision.get("clean_validation_enhancement"))
+    validation_candidate = bool(decision.get("validation_enhancement_candidate"))
+    if clean:
+        learning_status = "clean_score_recovery_evidence"
+    elif repair_candidates:
+        learning_status = "generic_goal_harness_repair_or_attribution_required"
+    elif validation_candidate:
+        learning_status = "candidate_score_recovery_needs_review"
+    elif bool(
+        (claim_review.get("treatment_worker_evidence") or {}).get("present")
+        if isinstance(claim_review.get("treatment_worker_evidence"), dict)
+        else False
+    ):
+        learning_status = "loop_validation_or_overhead_evidence_only"
+    else:
+        learning_status = "no_goal_harness_validation_gain"
+    learning_quota_gate = _learning_ledger_learning_quota_gate(
+        lifecycle_gate=lifecycle_gate,
+        repair_candidates=repair_candidates,
+        clean_validation=clean,
+        validation_candidate=validation_candidate,
+    )
+
+    if repair_candidates:
+        next_allowed_action = f"repair_or_validate_{repair_candidates[0]}"
+        repeat_allowed = False
+    elif not lifecycle_gate["budget_count_allowed"]:
+        next_allowed_action = "write_compact_blocker_before_repeat_or_new_candidate"
+        repeat_allowed = False
+    elif not learning_quota_gate["spend_allowed"]:
+        next_allowed_action = "stop_without_spend_and_record_no_learning_signal"
+        repeat_allowed = False
+    elif clean:
+        next_allowed_action = "record_clean_evidence_then_select_next_benchmark_lane"
+        repeat_allowed = True
+    else:
+        next_allowed_action = "only_repeat_with_named_attribution_or_stability_hypothesis"
+        repeat_allowed = True
+
+    return {
+        "schema_version": BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION,
+        "input_schema_versions": {
+            "benchmark_comparison": benchmark_comparison.get("schema_version"),
+            "benchmark_runs": [
+                run.get("schema_version") for run in runs if run.get("schema_version")
+            ],
+            "claim_review": claim_review.get("schema_version"),
+        },
+        "task_id": benchmark_comparison.get("task_id"),
+        "comparison_id": benchmark_comparison.get("comparison_id"),
+        "official_task_score_delta": official_delta,
+        "control_plane_score_delta": benchmark_comparison.get(
+            "control_plane_score_delta"
+        ),
+        "learning_status": learning_status,
+        "repair_candidates": repair_candidates,
+        "lifecycle_gate": lifecycle_gate,
+        "claim_strength": decision.get("claim_strength"),
+        "claim_blockers": decision.get("blockers") or [],
+        "learning_quota_gate": learning_quota_gate,
+        "overhead": {
+            "cost_delta_usd": cost_delta,
+            "wall_time_delta_seconds_or_ms": wall_time_delta,
+            "label": _learning_ledger_overhead_label(
+                official_delta_num,
+                cost_delta,
+                wall_time_delta,
+            ),
+        },
+        "routing": {
+            "repeat_allowed": repeat_allowed,
+            "new_candidate_allowed": not repair_candidates
+            and bool(learning_quota_gate["spend_allowed"]),
+            "next_allowed_action": next_allowed_action,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+def _attempt_learning_task_ids(run: dict[str, Any]) -> list[str]:
+    task_ids: list[str] = []
+    trials = run.get("trials")
+    if isinstance(trials, list):
+        for trial in trials[:8]:
+            if not isinstance(trial, dict):
+                continue
+            task_id = trial.get("task_id")
+            if isinstance(task_id, str) and task_id and task_id not in task_ids:
+                task_ids.append(task_id)
+    return task_ids[:4]
+
+
+def _attempt_learning_repair_candidates(run: dict[str, Any]) -> list[str]:
+    labels = set(_claim_review_failure_labels(run))
+    first_blocker = run.get("first_blocker")
+    if isinstance(first_blocker, str) and first_blocker:
+        labels.add(first_blocker)
+    candidates: list[str] = []
+    if any(
+        label in labels
+        for label in (
+            "pre_worker_agent_setup_failed",
+            "treatment_pre_worker_agent_setup_failed",
+        )
+    ):
+        candidates.append("adapter_startup_argument_contract")
+    if any(
+        label in labels
+        for label in (
+            "runner_compact_result_missing",
+            "harbor_job_root_missing",
+            "post_launch_job_dir_materialization_missing",
+            "reducer_validation_failed",
+        )
+    ):
+        candidates.append("benchmark_lifecycle_materialization_gate")
+    if _compact_positive_int(run.get("worker_submit_eligible_mismatch_count")):
+        candidates.append("runner_owned_submit_boundary_invariant")
+    if not candidates and labels:
+        candidates.append("compact_failure_attribution_review")
+    return candidates
+
+
+def _attempt_learning_run_countable(run: dict[str, Any]) -> bool:
+    if not run:
+        return False
+    official = (
+        run.get("official_task_score")
+        if isinstance(run.get("official_task_score"), dict)
+        else {}
+    )
+    compact_score = any(
+        isinstance(official.get(field), (bool, int, float))
+        for field in ("value", "passed")
+    )
+    compact_blocker = bool(run.get("first_blocker")) or bool(
+        _claim_review_failure_labels(run)
+    )
+    return compact_score or compact_blocker
+
+
+def _attempt_learning_ledger_actionable(
+    learning_ledger: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(learning_ledger, dict):
+        return False
+    learning_gate = (
+        learning_ledger.get("learning_quota_gate")
+        if isinstance(learning_ledger.get("learning_quota_gate"), dict)
+        else {}
+    )
+    routing = (
+        learning_ledger.get("routing")
+        if isinstance(learning_ledger.get("routing"), dict)
+        else {}
+    )
+    return (
+        learning_gate.get("spend_allowed") is True
+        and isinstance(routing.get("next_allowed_action"), str)
+        and bool(str(routing.get("next_allowed_action")).strip())
+    )
+
+
+def build_benchmark_attempt_learning_gate(
+    benchmark_run: dict[str, Any],
+    *,
+    benchmark_learning_ledger: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Gate benchmark budget counting on durable compact learning evidence."""
+
+    countable_attempt = _attempt_learning_run_countable(benchmark_run)
+    repair_candidates = _attempt_learning_repair_candidates(benchmark_run)
+    ledger_present = (
+        isinstance(benchmark_learning_ledger, dict)
+        and benchmark_learning_ledger.get("schema_version")
+        == BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION
+    )
+    ledger_actionable = _attempt_learning_ledger_actionable(
+        benchmark_learning_ledger
+    )
+
+    if not countable_attempt:
+        classification = "benchmark_attempt_not_countable"
+        next_required_action = "record_compact_score_or_blocker_before_budget_count"
+    elif not ledger_present:
+        classification = "benchmark_attempt_learning_row_missing"
+        next_required_action = "build_compact_benchmark_learning_ledger_before_repeat_or_new_candidate"
+    elif not ledger_actionable:
+        classification = "benchmark_attempt_learning_row_nonactionable"
+        next_required_action = (
+            "stop_without_spend_or_add_named_repair_caveat_before_repeat"
+        )
+    else:
+        classification = "benchmark_attempt_learning_ready"
+        routing = (
+            benchmark_learning_ledger.get("routing")
+            if isinstance(benchmark_learning_ledger, dict)
+            and isinstance(benchmark_learning_ledger.get("routing"), dict)
+            else {}
+        )
+        next_required_action = str(
+            routing.get("next_allowed_action")
+            or "record_learning_row_and_continue"
+        )
+
+    return {
+        "schema_version": BENCHMARK_ATTEMPT_LEARNING_GATE_SCHEMA_VERSION,
+        "benchmark_id": benchmark_run.get("benchmark_id"),
+        "mode": benchmark_run.get("mode"),
+        "task_ids": _attempt_learning_task_ids(benchmark_run),
+        "classification": classification,
+        "countable_attempt": countable_attempt,
+        "learning_row_present": ledger_present,
+        "learning_row_actionable": ledger_actionable,
+        "budget_count_allowed": countable_attempt and ledger_actionable,
+        "repeat_allowed": bool(
+            benchmark_learning_ledger
+            and isinstance(benchmark_learning_ledger.get("routing"), dict)
+            and benchmark_learning_ledger["routing"].get("repeat_allowed") is True
+            and ledger_actionable
+        ),
+        "new_candidate_allowed": bool(
+            benchmark_learning_ledger
+            and isinstance(benchmark_learning_ledger.get("routing"), dict)
+            and benchmark_learning_ledger["routing"].get("new_candidate_allowed")
+            is True
+            and ledger_actionable
+        ),
+        "repair_candidates": repair_candidates,
+        "next_required_action": next_required_action,
+        "claim_boundary": {
+            "requires_learning_row_before_budget_count": True,
+            "requires_learning_row_before_repeat_or_new_candidate": True,
+            "raw_trace_excluded": True,
+            "leaderboard_claim_allowed": False,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+def agent_kwargs_from_invocation(invocation: Iterable[Any]) -> dict[str, str]:
+    """Extract --agent-kwarg key/value pairs without interpreting values."""
+
+    argv = [str(item) for item in invocation if isinstance(item, (str, int, float))]
+    kwargs: dict[str, str] = {}
+    for index, value in enumerate(argv):
+        if value != "--agent-kwarg" or index + 1 >= len(argv):
+            continue
+        raw = argv[index + 1]
+        key, separator, val = raw.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            continue
+        kwargs[key] = val
+    return kwargs
+
+
+def _public_safe_kwarg_key_list(values: Iterable[Any]) -> list[str]:
+    keys: list[str] = []
+    for value in values:
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            continue
+        key = str(value).strip()
+        if not key:
+            continue
+        if "=" in key:
+            key = key.split("=", 1)[0].strip()
+        if key.startswith("goal_harness_") and key not in keys:
+            keys.append(key)
+    return sorted(keys)[:80]
+
+
+def build_benchmark_adapter_kwarg_absorption_review(
+    *,
+    adapter_label: str,
+    agent_kwargs: dict[str, Any],
+    accepted_goal_harness_kwargs: Iterable[Any],
+    allowed_base_passthrough: Iterable[Any] = (),
+) -> dict[str, Any]:
+    """Review whether generated goal_harness_* kwargs are adapter-absorbed."""
+
+    generated_keys = _public_safe_kwarg_key_list(agent_kwargs.keys())
+    accepted_keys = set(_public_safe_kwarg_key_list(accepted_goal_harness_kwargs))
+    passthrough_keys = set(_public_safe_kwarg_key_list(allowed_base_passthrough))
+    absorbed_keys = sorted(
+        key for key in generated_keys if key in accepted_keys or key in passthrough_keys
+    )
+    leaked_keys = sorted(
+        key
+        for key in generated_keys
+        if key not in accepted_keys and key not in passthrough_keys
+    )
+
+    if leaked_keys:
+        classification = "adapter_kwarg_leak_risk"
+        next_required_action = (
+            "consume_or_reject_generated_goal_harness_kwargs_before_worker_start"
+        )
+    elif generated_keys:
+        classification = "adapter_kwargs_absorbed"
+        next_required_action = "adapter_kwarg_absorption_guard_passed"
+    else:
+        classification = "adapter_goal_harness_kwargs_missing"
+        next_required_action = "record_generated_goal_harness_kwargs_before_run"
+
+    return {
+        "schema_version": BENCHMARK_ADAPTER_KWARG_ABSORPTION_REVIEW_SCHEMA_VERSION,
+        "adapter_label": adapter_label,
+        "classification": classification,
+        "clean": bool(generated_keys) and not leaked_keys,
+        "generated_goal_harness_kwarg_count": len(generated_keys),
+        "absorbed_goal_harness_kwarg_count": len(absorbed_keys),
+        "leaked_goal_harness_kwarg_count": len(leaked_keys),
+        "generated_goal_harness_kwarg_keys": generated_keys,
+        "absorbed_goal_harness_kwarg_keys": absorbed_keys,
+        "leaked_goal_harness_kwarg_keys": leaked_keys,
+        "accepted_goal_harness_kwarg_keys": sorted(accepted_keys)[:80],
+        "allowed_base_passthrough_keys": sorted(passthrough_keys)[:40],
+        "next_required_action": next_required_action,
+        "claim_boundary": {
+            "kwarg_values_recorded": False,
+            "local_paths_recorded": False,
+            "adapter_absorption_required_before_worker_start": True,
+            "base_constructor_may_receive_generated_goal_harness_kwargs": False,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+
+
 def _compact_positive_int(value: Any) -> int:
     if isinstance(value, bool):
         return 0
@@ -2343,6 +4001,187 @@ def _verifier_attribution_run_review(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _benchmark_lifecycle_schema(value: dict[str, Any] | None) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("schema_version") or "")
+
+
+def _benchmark_lifecycle_ready_preflight(value: dict[str, Any] | None) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    if value.get("ready") is True:
+        return True
+    if value.get("ok") is True and str(value.get("first_blocker") or "").startswith("ready"):
+        return True
+    return str(value.get("first_blocker") or "") in {
+        "ready_for_private_managed_no_upload_pilot_review",
+        "ready_for_operator_triggered_no_upload_ale_dry_run",
+    }
+
+
+def _benchmark_lifecycle_launched(value: dict[str, Any] | None) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    for field in ("process_started", "launched", "started", "pid"):
+        if value.get(field):
+            return True
+    return False
+
+
+def _benchmark_lifecycle_budget_count_allowed(
+    learning_ledger: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(learning_ledger, dict):
+        return False
+    lifecycle_gate = (
+        learning_ledger.get("lifecycle_gate")
+        if isinstance(learning_ledger.get("lifecycle_gate"), dict)
+        else {}
+    )
+    return lifecycle_gate.get("budget_count_allowed") is True
+
+
+def build_benchmark_lifecycle_state(
+    *,
+    preflight: dict[str, Any] | None = None,
+    launch: dict[str, Any] | None = None,
+    post_launch_materialization: dict[str, Any] | None = None,
+    benchmark_run: dict[str, Any] | None = None,
+    benchmark_comparison: dict[str, Any] | None = None,
+    claim_review: dict[str, Any] | None = None,
+    learning_ledger: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Reduce compact benchmark evidence into an explicit lifecycle state."""
+
+    preflight_ready = _benchmark_lifecycle_ready_preflight(preflight)
+    process_launched = _benchmark_lifecycle_launched(launch)
+    materialized = (
+        isinstance(post_launch_materialization, dict)
+        and post_launch_materialization.get("ready_for_launch_state") is True
+    )
+    compact_ready = (
+        isinstance(post_launch_materialization, dict)
+        and post_launch_materialization.get("ready_for_compact_result_ingest") is True
+    ) or _benchmark_lifecycle_schema(benchmark_run) == "benchmark_run_v0"
+    result_ingested = _benchmark_lifecycle_schema(benchmark_run) == "benchmark_run_v0"
+    paired_compared = (
+        _benchmark_lifecycle_schema(benchmark_comparison)
+        == "benchmark_comparison_v0"
+    )
+    claim_reviewed = (
+        _benchmark_lifecycle_schema(claim_review)
+        == BENCHMARK_CLAIM_REVIEW_SCHEMA_VERSION
+    )
+    learning_ledgered = (
+        _benchmark_lifecycle_schema(learning_ledger)
+        == BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION
+    )
+    budget_count_allowed = _benchmark_lifecycle_budget_count_allowed(learning_ledger)
+
+    transitions = [
+        ("preflight_ready", preflight_ready),
+        ("launched_process", process_launched),
+        ("post_launch_materialized", materialized),
+        ("compact_result_ready", compact_ready),
+        ("result_ingested", result_ingested),
+        ("paired_compared", paired_compared),
+        ("claim_reviewed", claim_reviewed),
+        ("learning_ledgered", learning_ledgered),
+        ("budget_counted", budget_count_allowed),
+    ]
+    achieved = [name for name, ready in transitions if ready]
+    current_phase = achieved[-1] if achieved else "not_started"
+
+    first_blocker = "ready_for_budget_count" if budget_count_allowed else ""
+    if not preflight_ready:
+        first_blocker = "preflight_not_ready"
+    elif process_launched and not materialized:
+        first_blocker = "post_launch_materialization_missing"
+    elif materialized and not compact_ready:
+        first_blocker = "compact_result_not_ready"
+    elif compact_ready and not result_ingested:
+        first_blocker = "compact_result_not_ingested"
+    elif result_ingested and not paired_compared:
+        first_blocker = "paired_comparison_missing"
+    elif paired_compared and not claim_reviewed:
+        first_blocker = "claim_review_missing"
+    elif claim_reviewed and not learning_ledgered:
+        first_blocker = "benchmark_learning_ledger_missing"
+    elif learning_ledgered and not budget_count_allowed:
+        first_blocker = "budget_count_blocked_by_learning_ledger"
+
+    next_required_transition = ""
+    for name, ready in transitions:
+        if not ready:
+            next_required_transition = name
+            break
+
+    routing = (
+        learning_ledger.get("routing")
+        if isinstance(learning_ledger, dict)
+        and isinstance(learning_ledger.get("routing"), dict)
+        else {}
+    )
+    learning_gate = (
+        learning_ledger.get("learning_quota_gate")
+        if isinstance(learning_ledger, dict)
+        and isinstance(learning_ledger.get("learning_quota_gate"), dict)
+        else {}
+    )
+    post_launch_blocker = (
+        str(post_launch_materialization.get("first_blocker") or "")
+        if isinstance(post_launch_materialization, dict)
+        else ""
+    )
+    return {
+        "schema_version": BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION,
+        "current_phase": current_phase,
+        "achieved_transitions": achieved,
+        "next_required_transition": next_required_transition,
+        "first_blocker": first_blocker,
+        "transition_ready": {name: ready for name, ready in transitions},
+        "gates": {
+            "launch_state_countable": materialized,
+            "compact_result_ingest_allowed": compact_ready,
+            "budget_count_allowed": budget_count_allowed,
+            "new_candidate_allowed": routing.get("new_candidate_allowed")
+            if isinstance(routing.get("new_candidate_allowed"), bool)
+            else False,
+            "repeat_allowed": routing.get("repeat_allowed")
+            if isinstance(routing.get("repeat_allowed"), bool)
+            else False,
+            "learning_spend_allowed": learning_gate.get("spend_allowed")
+            if isinstance(learning_gate.get("spend_allowed"), bool)
+            else False,
+        },
+        "inputs": {
+            "preflight_schema": _benchmark_lifecycle_schema(preflight),
+            "launch_present": isinstance(launch, dict) and bool(launch),
+            "post_launch_schema": _benchmark_lifecycle_schema(
+                post_launch_materialization
+            ),
+            "post_launch_first_blocker": post_launch_blocker,
+            "benchmark_run_schema": _benchmark_lifecycle_schema(benchmark_run),
+            "benchmark_comparison_schema": _benchmark_lifecycle_schema(
+                benchmark_comparison
+            ),
+            "claim_review_schema": _benchmark_lifecycle_schema(claim_review),
+            "learning_ledger_schema": _benchmark_lifecycle_schema(learning_ledger),
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+
+
 def build_benchmark_verifier_attribution_review(
     *,
     benchmark_runs: Iterable[dict[str, Any]],
@@ -2414,6 +4253,151 @@ def build_benchmark_verifier_attribution_review(
             "blockers": blockers,
             "next_action": next_action,
         },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+DEFAULT_BENCHMARK_RUNNER_OWNED_FLAG_INVARIANTS = {
+    "submit_eligible": WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS[
+        "submit_eligible"
+    ],
+    "leaderboard_evidence": WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS[
+        "leaderboard_evidence"
+    ],
+}
+DEFAULT_BENCHMARK_RUNNER_OWNED_READ_BOUNDARY_INVARIANTS = {
+    "compact_only": True,
+    "raw_artifacts_read": False,
+    "task_text_read": False,
+    "local_paths_recorded": False,
+}
+
+
+def _runner_invariant_compare_bool(
+    *,
+    source: dict[str, Any],
+    field: str,
+    expected: bool,
+    namespace: str,
+    observed: dict[str, bool],
+    mismatches: list[dict[str, Any]],
+    missing_fields: list[str],
+) -> None:
+    actual = source.get(field)
+    qualified_field = f"{namespace}.{field}" if namespace else field
+    if isinstance(actual, bool):
+        observed[qualified_field] = actual
+        if actual != expected:
+            mismatches.append(
+                {
+                    "field": qualified_field,
+                    "expected": expected,
+                    "actual": actual,
+                    "owner": "runner",
+                    "reason": "worker_writeback_conflicts_with_runner_owned_boundary",
+                }
+            )
+        return
+    missing_fields.append(qualified_field)
+
+
+def build_benchmark_runner_invariant_review(
+    benchmark_run: dict[str, Any],
+    *,
+    expected_flags: dict[str, bool] | None = None,
+    expected_read_boundary: dict[str, bool] | None = None,
+    runner_label: str | None = None,
+) -> dict[str, Any]:
+    """Compare compact worker writeback against runner-owned boundary facts."""
+
+    flags = expected_flags or DEFAULT_BENCHMARK_RUNNER_OWNED_FLAG_INVARIANTS
+    read_boundary_expectations = (
+        expected_read_boundary
+        or DEFAULT_BENCHMARK_RUNNER_OWNED_READ_BOUNDARY_INVARIANTS
+    )
+    read_boundary = (
+        benchmark_run.get("read_boundary")
+        if isinstance(benchmark_run.get("read_boundary"), dict)
+        else {}
+    )
+    observed: dict[str, bool] = {}
+    mismatches: list[dict[str, Any]] = []
+    missing_fields: list[str] = []
+
+    for field, expected in flags.items():
+        _runner_invariant_compare_bool(
+            source=benchmark_run,
+            field=field,
+            expected=bool(expected),
+            namespace="",
+            observed=observed,
+            mismatches=mismatches,
+            missing_fields=missing_fields,
+        )
+    for field, expected in read_boundary_expectations.items():
+        _runner_invariant_compare_bool(
+            source=read_boundary,
+            field=field,
+            expected=bool(expected),
+            namespace="read_boundary",
+            observed=observed,
+            mismatches=mismatches,
+            missing_fields=missing_fields,
+        )
+
+    if mismatches:
+        classification = "runner_owned_boundary_mismatch"
+        repair_recommendation = (
+            "treat worker writeback as boundary-mismatch evidence; preserve "
+            "runner-owned launch/preflight facts and do not widen no-upload, "
+            "no-submit, leaderboard, or raw-read claims"
+        )
+    elif missing_fields:
+        classification = "runner_owned_boundary_incomplete"
+        repair_recommendation = (
+            "require compact runner-owned boundary fields before trusting the "
+            "worker writeback for public claim review"
+        )
+    else:
+        classification = "runner_owned_boundary_ok"
+        repair_recommendation = (
+            "accept compact boundary echo for review while keeping runner-owned "
+            "fields authoritative"
+        )
+
+    return {
+        "schema_version": BENCHMARK_RUNNER_INVARIANT_REVIEW_SCHEMA_VERSION,
+        "benchmark_id": benchmark_run.get("benchmark_id"),
+        "job_name_present": bool(benchmark_run.get("job_name")),
+        "mode": benchmark_run.get("mode"),
+        "runner_label": runner_label or benchmark_run.get("source_runner"),
+        "classification": classification,
+        "clean": not mismatches and not missing_fields,
+        "mismatch_count": len(mismatches),
+        "missing_field_count": len(missing_fields),
+        "mismatches": mismatches,
+        "missing_fields": missing_fields[:12],
+        "observed_runner_owned_fields": observed,
+        "expected_runner_owned_fields": {
+            **{field: bool(value) for field, value in flags.items()},
+            **{
+                f"read_boundary.{field}": bool(value)
+                for field, value in read_boundary_expectations.items()
+            },
+        },
+        "claim_boundary": {
+            "runner_owned_fields_authoritative": True,
+            "worker_may_override_runner_owned_fields": False,
+            "submit_eligible": flags.get("submit_eligible") is True,
+            "leaderboard_evidence": flags.get("leaderboard_evidence") is True,
+            "raw_trace_excluded": True,
+        },
+        "repair_recommendation": repair_recommendation,
         "read_boundary": {
             "compact_only": True,
             "raw_artifacts_read": False,
@@ -2668,6 +4652,2031 @@ def _trajectory_codex_runtime_goal_tool_calls(path: Path) -> dict[str, int]:
 
     return calls
 
+
+def _agents_last_exam_codex_cli_probe(
+    codex_binary: str | None,
+    *,
+    binary_available: bool | None = None,
+    version_text: str | None = None,
+) -> dict[str, Any]:
+    """Probe host Codex CLI readiness without recording paths or argv."""
+
+    runner_probe = _agents_last_exam_runner_binary_probe(codex_binary)
+    unsafe_binary_blockers = {
+        "runner_binary_must_be_name_not_path",
+        "runner_binary_not_public_safe",
+    }
+    if (
+        binary_available is not None
+        and runner_probe.get("declared") is True
+        and runner_probe.get("first_blocker") not in unsafe_binary_blockers
+    ):
+        runner_probe = {
+            **runner_probe,
+            "available": bool(binary_available),
+            "first_blocker": None
+            if binary_available
+            else (runner_probe.get("first_blocker") or "codex_binary_not_available"),
+        }
+
+    version_label = _agents_last_exam_public_id(version_text, limit=120)
+    version_probe_available = bool(version_label)
+    if (
+        version_text is None
+        and runner_probe.get("available") is True
+        and isinstance(codex_binary, str)
+        and codex_binary
+        and "/" not in codex_binary
+        and "\\" not in codex_binary
+    ):
+        try:
+            result = subprocess.run(
+                [codex_binary, "--version"],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+        except Exception:
+            result = None
+        if result is not None and result.returncode == 0:
+            version_label = _agents_last_exam_public_id(
+                result.stdout.strip() or result.stderr.strip(),
+                limit=120,
+            )
+            version_probe_available = bool(version_label)
+
+    first_blocker = _agents_last_exam_public_id(
+        runner_probe.get("first_blocker"),
+        limit=80,
+    )
+    if runner_probe.get("available") is True and not version_probe_available:
+        first_blocker = "codex_version_probe_failed"
+
+    return {
+        "binary": runner_probe.get("binary"),
+        "binary_declared": runner_probe.get("declared") is True,
+        "binary_available": runner_probe.get("available") is True,
+        "version": version_label,
+        "version_probe_available": version_probe_available,
+        "binary_path_recorded": False,
+        "command_argv_recorded": False,
+        "first_blocker": first_blocker,
+    }
+
+def _agents_last_exam_cua_mcp_assets_probe(
+    assets_root: str | None,
+) -> dict[str, Any]:
+    """Check local CUA MCP server assets without recording host paths."""
+
+    if not assets_root:
+        return {
+            "declared": False,
+            "available": False,
+            "package_json_present": False,
+            "server_entry_present": False,
+            "package_lock_present": False,
+            "path_recorded": False,
+            "first_blocker": "cua_mcp_assets_root_missing",
+        }
+    try:
+        root = Path(assets_root).expanduser()
+    except (OSError, RuntimeError):
+        root = None
+    available = bool(root and root.is_dir())
+    package_json_present = bool(root and (root / "package.json").is_file())
+    package_lock_present = bool(root and (root / "package-lock.json").is_file())
+    server_entry_present = bool(root and (root / "src" / "index.js").is_file())
+    if not available:
+        first_blocker = "cua_mcp_assets_root_not_available"
+    elif not package_json_present:
+        first_blocker = "cua_mcp_package_json_missing"
+    elif not server_entry_present:
+        first_blocker = "cua_mcp_server_entry_missing"
+    else:
+        first_blocker = None
+    return {
+        "declared": True,
+        "available": available,
+        "package_json_present": package_json_present,
+        "server_entry_present": server_entry_present,
+        "package_lock_present": package_lock_present,
+        "path_recorded": False,
+        "first_blocker": first_blocker,
+    }
+
+def build_agents_last_exam_host_codex_cli_route(
+    *,
+    codex_binary: str | None = "codex",
+    codex_binary_available: bool | None = None,
+    codex_version_text: str | None = None,
+    host_auth_cache_present: bool | None = None,
+    host_config_present: bool | None = None,
+    require_host_config: bool = False,
+    cua_mcp_assets_root: str | None = None,
+    ale_sandbox_cua_smoke_ready: bool = False,
+    operator_authorized_host_codex_auth: bool = False,
+) -> dict[str, Any]:
+    """Gate the ALE host-Codex route before any task-level execution.
+
+    The contract intentionally checks only host-side existence/probe facts. It
+    must not read, print, copy, or persist Codex auth material or task content.
+    """
+
+    codex_probe = _agents_last_exam_codex_cli_probe(
+        codex_binary,
+        binary_available=codex_binary_available,
+        version_text=codex_version_text,
+    )
+    auth_present = (
+        Path.home().joinpath(".codex", "auth.json").is_file()
+        if host_auth_cache_present is None
+        else bool(host_auth_cache_present)
+    )
+    config_present = (
+        Path.home().joinpath(".codex", "config.toml").is_file()
+        if host_config_present is None
+        else bool(host_config_present)
+    )
+    assets_probe = _agents_last_exam_cua_mcp_assets_probe(cua_mcp_assets_root)
+
+    blockers: list[str] = []
+    if operator_authorized_host_codex_auth is not True:
+        blockers.append("operator_authorization_missing")
+    if codex_probe.get("binary_available") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(codex_probe.get("first_blocker"), limit=80)
+            or "host_codex_binary_not_available"
+        )
+    if codex_probe.get("version_probe_available") is not True:
+        blockers.append("host_codex_version_probe_missing")
+    if auth_present is not True:
+        blockers.append("host_codex_auth_cache_missing")
+    if require_host_config and config_present is not True:
+        blockers.append("host_codex_config_missing")
+    if assets_probe.get("first_blocker"):
+        blockers.append(
+            _agents_last_exam_public_id(assets_probe.get("first_blocker"), limit=80)
+            or "cua_mcp_assets_not_ready"
+        )
+    if ale_sandbox_cua_smoke_ready is not True:
+        blockers.append("ale_sandbox_cua_smoke_not_ready")
+
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_HOST_CODEX_CLI_ROUTE_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_no_task_host_codex_cua_smoke",
+        "blockers": blockers,
+        "route": {
+            "mode": "host_codex_cli_local_executor",
+            "uses_host_codex_cli": True,
+            "uses_existing_host_codex_auth": True,
+            "runs_codex_inside_ale_sandbox": False,
+            "drives_ale_sandbox_via_cua_mcp": True,
+            "upstream_sandbox_codex_agent_bypassed": True,
+            "upstream_provider_key_path_required": False,
+            "next_smoke": "no_task_host_codex_cli_cua_mcp_smoke",
+        },
+        "host_codex_cli": codex_probe,
+        "host_auth": {
+            "auth_cache_present": auth_present,
+            "config_present": config_present,
+            "config_required": require_host_config,
+            "auth_values_read": False,
+            "config_content_read": False,
+            "credential_values_recorded": False,
+            "auth_material_copied_to_sandbox": False,
+            "whole_codex_dir_copied": False,
+            "paths_recorded": False,
+        },
+        "cua_mcp_assets": assets_probe,
+        "ale_sandbox": {
+            "cua_smoke_ready": ale_sandbox_cua_smoke_ready is True,
+            "container_started_by_this_check": False,
+            "sandbox_auth_material_present": False,
+            "sandbox_auth_values_read": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "run_no_task_host_codex_cli_cua_smoke"
+            if ready
+            else "repair_host_codex_cli_route_blocker",
+            "minimum_next_evidence": (
+                "A no-task host Codex CLI smoke using a project-local temporary "
+                "Codex config and the ALE CUA MCP bridge, with no task prompt, "
+                "no credential values, no upload, no submit, and compact result "
+                "only."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "auth_values_read": False,
+            "config_content_read": False,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+def _agents_last_exam_codex_exec_surface_probe(
+    codex_binary: str | None,
+) -> dict[str, Any]:
+    codex_probe = _agents_last_exam_codex_cli_probe(codex_binary)
+    if codex_probe.get("binary_available") is not True:
+        return {
+            "available": False,
+            "exit_code": None,
+            "stdout_recorded": False,
+            "stderr_recorded": False,
+            "command_argv_recorded": False,
+            "model_invoked": False,
+            "first_blocker": codex_probe.get("first_blocker")
+            or "host_codex_binary_not_available",
+        }
+    if not isinstance(codex_binary, str) or "/" in codex_binary or "\\" in codex_binary:
+        return {
+            "available": False,
+            "exit_code": None,
+            "stdout_recorded": False,
+            "stderr_recorded": False,
+            "command_argv_recorded": False,
+            "model_invoked": False,
+            "first_blocker": "host_codex_binary_not_public_safe",
+        }
+    try:
+        result = subprocess.run(
+            [codex_binary, "exec", "--help"],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+    except Exception:
+        return {
+            "available": False,
+            "exit_code": None,
+            "stdout_recorded": False,
+            "stderr_recorded": False,
+            "command_argv_recorded": False,
+            "model_invoked": False,
+            "first_blocker": "codex_exec_help_probe_failed",
+        }
+    ok = result.returncode == 0
+    return {
+        "available": ok,
+        "exit_code": result.returncode,
+        "stdout_recorded": False,
+        "stderr_recorded": False,
+        "command_argv_recorded": False,
+        "model_invoked": False,
+        "first_blocker": None if ok else "codex_exec_help_nonzero",
+    }
+
+def _agents_last_exam_codex_mcp_config_probe(
+    codex_binary: str | None,
+    *,
+    cua_mcp_assets_root: str | None,
+    cua_server_url: str,
+) -> dict[str, Any]:
+    codex_probe = _agents_last_exam_codex_cli_probe(codex_binary)
+    assets_probe = _agents_last_exam_cua_mcp_assets_probe(cua_mcp_assets_root)
+    if codex_probe.get("binary_available") is not True:
+        return {
+            "available": False,
+            "server_detected": False,
+            "server_enabled": False,
+            "transport": None,
+            "raw_output_recorded": False,
+            "config_path_recorded": False,
+            "mcp_server_path_recorded": False,
+            "command_argv_recorded": False,
+            "auth_values_read": False,
+            "first_blocker": codex_probe.get("first_blocker")
+            or "host_codex_binary_not_available",
+        }
+    if assets_probe.get("first_blocker"):
+        return {
+            "available": False,
+            "server_detected": False,
+            "server_enabled": False,
+            "transport": None,
+            "raw_output_recorded": False,
+            "config_path_recorded": False,
+            "mcp_server_path_recorded": False,
+            "command_argv_recorded": False,
+            "auth_values_read": False,
+            "first_blocker": assets_probe.get("first_blocker")
+            or "cua_mcp_assets_not_ready",
+        }
+    if not isinstance(codex_binary, str) or "/" in codex_binary or "\\" in codex_binary:
+        return {
+            "available": False,
+            "server_detected": False,
+            "server_enabled": False,
+            "transport": None,
+            "raw_output_recorded": False,
+            "config_path_recorded": False,
+            "mcp_server_path_recorded": False,
+            "command_argv_recorded": False,
+            "auth_values_read": False,
+            "first_blocker": "host_codex_binary_not_public_safe",
+        }
+
+    try:
+        assets_root = Path(str(cua_mcp_assets_root)).expanduser().resolve()
+        with tempfile.TemporaryDirectory(prefix="goal-harness-codex-home-") as tmp:
+            codex_home = Path(tmp)
+            mcp_entry = assets_root / "src" / "index.js"
+            config_text = "\n".join(
+                [
+                    "[mcp_servers.cua]",
+                    'command = "node"',
+                    f'args = ["{mcp_entry}"]',
+                    f'env = {{ CUA_SERVER_URL = "{cua_server_url}" }}',
+                    "",
+                ]
+            )
+            (codex_home / "config.toml").write_text(config_text, encoding="utf-8")
+            env = os.environ.copy()
+            env["CODEX_HOME"] = str(codex_home)
+            result = subprocess.run(
+                [codex_binary, "mcp", "list", "--json"],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=20,
+                env=env,
+            )
+    except Exception:
+        return {
+            "available": False,
+            "server_detected": False,
+            "server_enabled": False,
+            "transport": None,
+            "raw_output_recorded": False,
+            "config_path_recorded": False,
+            "mcp_server_path_recorded": False,
+            "command_argv_recorded": False,
+            "auth_values_read": False,
+            "first_blocker": "codex_mcp_config_probe_failed",
+        }
+
+    server_detected = False
+    server_enabled = False
+    transport_type: str | None = None
+    if result.returncode == 0:
+        try:
+            rows = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            rows = []
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict) or row.get("name") != "cua":
+                    continue
+                server_detected = True
+                server_enabled = row.get("enabled") is True
+                transport = row.get("transport")
+                if isinstance(transport, dict):
+                    transport_type = _agents_last_exam_public_id(
+                        transport.get("type"),
+                        limit=40,
+                    )
+                break
+    if result.returncode != 0:
+        first_blocker = "codex_mcp_list_nonzero"
+    elif not server_detected:
+        first_blocker = "codex_mcp_cua_server_not_detected"
+    elif not server_enabled:
+        first_blocker = "codex_mcp_cua_server_not_enabled"
+    elif transport_type != "stdio":
+        first_blocker = "codex_mcp_cua_transport_not_stdio"
+    else:
+        first_blocker = None
+    return {
+        "available": first_blocker is None,
+        "server_detected": server_detected,
+        "server_enabled": server_enabled,
+        "transport": transport_type,
+        "raw_output_recorded": False,
+        "config_path_recorded": False,
+        "mcp_server_path_recorded": False,
+        "command_argv_recorded": False,
+        "auth_values_read": False,
+        "first_blocker": first_blocker,
+    }
+
+def _agents_last_exam_fake_cua_server():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("content-length") or "0")
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                request = json.loads(body.decode("utf-8"))
+            except json.JSONDecodeError:
+                request = {}
+            command = request.get("command")
+            if command == "get_screen_size":
+                payload = {"success": True, "size": {"width": 1024, "height": 768}}
+            elif command == "screenshot":
+                payload = {"success": True, "image_data": "iVBORw0KGgo="}
+            elif command == "get_cursor_position":
+                payload = {"success": True, "position": {"x": 512, "y": 384}}
+            else:
+                payload = {"success": True}
+            data = f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *_args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+def _agents_last_exam_cua_mcp_test_probe(
+    *,
+    cua_mcp_assets_root: str | None,
+    install_node_deps: bool = False,
+) -> dict[str, Any]:
+    assets_probe = _agents_last_exam_cua_mcp_assets_probe(cua_mcp_assets_root)
+    if assets_probe.get("first_blocker"):
+        return {
+            "available": False,
+            "node_available": shutil.which("node") is not None,
+            "npm_install_attempted": False,
+            "fake_cua_server_used": False,
+            "raw_output_recorded": False,
+            "command_argv_recorded": False,
+            "local_paths_recorded": False,
+            "first_blocker": assets_probe.get("first_blocker")
+            or "cua_mcp_assets_not_ready",
+        }
+    if not shutil.which("node"):
+        return {
+            "available": False,
+            "node_available": False,
+            "npm_install_attempted": False,
+            "fake_cua_server_used": False,
+            "raw_output_recorded": False,
+            "command_argv_recorded": False,
+            "local_paths_recorded": False,
+            "first_blocker": "node_cli_missing",
+        }
+
+    server = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-cua-mcp-") as tmp:
+            work_root = Path(tmp) / "cua_mcp_server"
+            shutil.copytree(str(cua_mcp_assets_root), work_root)
+            node_modules = work_root / "node_modules"
+            npm_install_attempted = False
+            if not node_modules.is_dir():
+                if not install_node_deps:
+                    return {
+                        "available": False,
+                        "node_available": True,
+                        "npm_install_attempted": False,
+                        "fake_cua_server_used": False,
+                        "raw_output_recorded": False,
+                        "command_argv_recorded": False,
+                        "local_paths_recorded": False,
+                        "first_blocker": "cua_mcp_node_modules_missing",
+                    }
+                if not shutil.which("npm"):
+                    return {
+                        "available": False,
+                        "node_available": True,
+                        "npm_install_attempted": False,
+                        "fake_cua_server_used": False,
+                        "raw_output_recorded": False,
+                        "command_argv_recorded": False,
+                        "local_paths_recorded": False,
+                        "first_blocker": "npm_cli_missing",
+                    }
+                npm_install_attempted = True
+                npm_result = subprocess.run(
+                    ["npm", "install", "--production", "--silent"],
+                    cwd=work_root,
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+                if npm_result.returncode != 0:
+                    return {
+                        "available": False,
+                        "node_available": True,
+                        "npm_install_attempted": True,
+                        "fake_cua_server_used": False,
+                        "raw_output_recorded": False,
+                        "command_argv_recorded": False,
+                        "local_paths_recorded": False,
+                        "first_blocker": "cua_mcp_npm_install_failed",
+                    }
+            server = _agents_last_exam_fake_cua_server()
+            port = server.server_address[1]
+            env = os.environ.copy()
+            env["CUA_SERVER_URL"] = f"http://127.0.0.1:{port}"
+            test_result = subprocess.run(
+                ["node", "src/index.js", "--test"],
+                cwd=work_root,
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=60,
+                env=env,
+            )
+    except Exception:
+        return {
+            "available": False,
+            "node_available": shutil.which("node") is not None,
+            "npm_install_attempted": install_node_deps,
+            "fake_cua_server_used": server is not None,
+            "raw_output_recorded": False,
+            "command_argv_recorded": False,
+            "local_paths_recorded": False,
+            "first_blocker": "cua_mcp_test_probe_failed",
+        }
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+
+    ok = test_result.returncode == 0
+    return {
+        "available": ok,
+        "node_available": True,
+        "npm_install_attempted": npm_install_attempted,
+        "fake_cua_server_used": True,
+        "raw_output_recorded": False,
+        "command_argv_recorded": False,
+        "local_paths_recorded": False,
+        "first_blocker": None if ok else "cua_mcp_test_nonzero",
+    }
+
+def build_agents_last_exam_host_codex_cua_no_task_smoke(
+    *,
+    route_gate: dict[str, Any],
+    codex_exec_probe: dict[str, Any],
+    mcp_config_probe: dict[str, Any],
+    cua_mcp_test_probe: dict[str, Any],
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    if route_gate.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(route_gate.get("first_blocker"), limit=80)
+            or "host_codex_route_gate_not_ready"
+        )
+    for probe_name, probe in (
+        ("codex_exec_surface", codex_exec_probe),
+        ("codex_mcp_config", mcp_config_probe),
+        ("cua_mcp_bridge", cua_mcp_test_probe),
+    ):
+        if probe.get("available") is not True:
+            blockers.append(
+                _agents_last_exam_public_id(probe.get("first_blocker"), limit=80)
+                or f"{probe_name}_not_ready"
+            )
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_HOST_CODEX_CUA_NO_TASK_SMOKE_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_task_level_ale_codex_dry_run_gate",
+        "blockers": blockers,
+        "route_gate_ready": route_gate.get("ready") is True,
+        "route_gate": route_gate,
+        "codex_exec_surface": codex_exec_probe,
+        "codex_mcp_config": mcp_config_probe,
+        "cua_mcp_bridge": cua_mcp_test_probe,
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "codex_prompt_sent": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "raw_output_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "prepare_operator_authorized_task_level_ale_codex_dry_run"
+            if ready
+            else "repair_no_task_host_codex_cua_smoke_blocker",
+            "minimum_next_evidence": (
+                "An operator-authorized task-level ALE dry-run may proceed only "
+                "after compact route, Codex exec surface, Codex MCP config, and "
+                "CUA MCP bridge probes are ready."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "auth_values_read": False,
+            "config_content_read": False,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+def build_agents_last_exam_host_codex_cua_no_task_smoke_from_environment(
+    *,
+    codex_binary: str | None = "codex",
+    codex_binary_available: bool | None = None,
+    codex_version_text: str | None = None,
+    host_auth_cache_present: bool | None = None,
+    host_config_present: bool | None = None,
+    require_host_config: bool = False,
+    cua_mcp_assets_root: str | None = None,
+    cua_server_url: str = "http://127.0.0.1:8000",
+    install_node_deps: bool = False,
+    ale_sandbox_cua_smoke_ready: bool = False,
+    operator_authorized_host_codex_auth: bool = False,
+) -> dict[str, Any]:
+    """Build compact no-task host Codex/CUA readiness evidence.
+
+    This is deliberately a pre-task probe: it checks CLI/help, Codex MCP config
+    loading, and the local CUA MCP bridge without sending a Codex prompt,
+    reading task material, or recording auth/path/raw-output details.
+    """
+
+    route_gate = build_agents_last_exam_host_codex_cli_route(
+        codex_binary=codex_binary,
+        codex_binary_available=codex_binary_available,
+        codex_version_text=codex_version_text,
+        host_auth_cache_present=host_auth_cache_present,
+        host_config_present=host_config_present,
+        require_host_config=require_host_config,
+        cua_mcp_assets_root=cua_mcp_assets_root,
+        ale_sandbox_cua_smoke_ready=ale_sandbox_cua_smoke_ready,
+        operator_authorized_host_codex_auth=operator_authorized_host_codex_auth,
+    )
+    codex_exec_probe = _agents_last_exam_codex_exec_surface_probe(codex_binary)
+    mcp_config_probe = _agents_last_exam_codex_mcp_config_probe(
+        codex_binary,
+        cua_mcp_assets_root=cua_mcp_assets_root,
+        cua_server_url=cua_server_url,
+    )
+    cua_mcp_test_probe = _agents_last_exam_cua_mcp_test_probe(
+        cua_mcp_assets_root=cua_mcp_assets_root,
+        install_node_deps=install_node_deps,
+    )
+    return build_agents_last_exam_host_codex_cua_no_task_smoke(
+        route_gate=route_gate,
+        codex_exec_probe=codex_exec_probe,
+        mcp_config_probe=mcp_config_probe,
+        cua_mcp_test_probe=cua_mcp_test_probe,
+    )
+
+def _agents_last_exam_boundary_flag(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    default: bool = False,
+) -> bool:
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    return bool(boundary.get(key, default))
+
+def _agents_last_exam_ready_input(
+    payload: dict[str, Any],
+    *,
+    schema_version: str,
+    blocker_prefix: str,
+) -> tuple[bool, str | None]:
+    if not isinstance(payload, dict):
+        return False, f"{blocker_prefix}_missing"
+    if payload.get("schema_version") != schema_version:
+        return False, f"{blocker_prefix}_schema_mismatch"
+    if payload.get("ready") is not True:
+        first_blocker = _agents_last_exam_public_id(
+            payload.get("first_blocker"),
+            limit=80,
+        )
+        return False, first_blocker or f"{blocker_prefix}_not_ready"
+    return True, None
+
+def _agents_last_exam_bool_requirement(value: bool | str | None) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "required", "requires_task_data"}:
+        return True
+    if normalized in {"0", "false", "no", "not_required", "none"}:
+        return False
+    return None
+
+def _agents_last_exam_source_freshness_input(
+    launch_packet: dict[str, Any] | None,
+    *,
+    required: bool,
+) -> tuple[bool | None, str | None]:
+    if not required:
+        return None, None
+    if not isinstance(launch_packet, dict):
+        return False, "fresh_source_launch_packet_missing"
+    source_lock = launch_packet.get("source_lock")
+    if not isinstance(source_lock, dict):
+        return False, "ale_source_freshness_not_verified"
+    if source_lock.get("fetch_origin_attempted") is not True:
+        return False, "ale_source_fetch_origin_not_attempted"
+    if source_lock.get("fetch_origin_ok") is not True:
+        return False, "ale_source_fetch_origin_failed"
+    if source_lock.get("require_upstream_current") is not True:
+        return False, "ale_source_upstream_current_not_required"
+    if source_lock.get("upstream_declared") is not True:
+        return False, "ale_source_upstream_missing"
+    if source_lock.get("head_matches_upstream") is not True:
+        return False, "ale_source_not_at_upstream_head"
+    if source_lock.get("upstream_ahead_count") != 0:
+        return False, "ale_source_upstream_ahead_count_nonzero"
+    if source_lock.get("upstream_behind_count") != 0:
+        return False, "ale_source_upstream_behind_count_nonzero"
+    return True, None
+
+def _agents_last_exam_task_data_source_readiness(
+    *,
+    requires_task_data: bool | str | None,
+    task_data_source: str | None,
+    baked_task_input_present: bool | None,
+    baked_task_input_readiness: dict[str, Any] | None,
+    gcs_sa_key: str | None,
+    gcs_sa_key_present: bool | None,
+    enforce_task_data_source: bool,
+) -> dict[str, Any]:
+    requirement = _agents_last_exam_bool_requirement(requires_task_data)
+    raw_source = task_data_source.strip() if isinstance(task_data_source, str) else ""
+    source = _agents_last_exam_public_id(raw_source, limit=120)
+    official_gcs_source = raw_source.startswith("gs://ale-data-public")
+    gcs_key_declared = bool(gcs_sa_key)
+    gcs_key_file_present = False
+    if gcs_sa_key:
+        try:
+            gcs_key_file_present = Path(gcs_sa_key).expanduser().is_file()
+        except (OSError, RuntimeError):
+            gcs_key_file_present = False
+    effective_gcs_key_present = (
+        bool(gcs_sa_key_present)
+        if gcs_sa_key_present is not None
+        else gcs_key_file_present
+    )
+    baked_probe_declared = isinstance(baked_task_input_readiness, dict)
+    baked_probe_ready = (
+        baked_task_input_readiness.get("schema_version")
+        == AGENTS_LAST_EXAM_BAKED_TASK_INPUT_READINESS_SCHEMA_VERSION
+        and baked_task_input_readiness.get("ready") is True
+        if baked_probe_declared
+        else False
+    )
+    effective_baked_input_present = (
+        bool(baked_task_input_present)
+        if baked_task_input_present is not None
+        else baked_probe_ready
+    )
+    checked = enforce_task_data_source or requirement is not None or bool(source)
+    blockers: list[str] = []
+    if checked and requirement is None:
+        blockers.append("task_data_requirement_unknown")
+    if requirement is True:
+        if not source:
+            blockers.append("task_data_source_missing_for_required_task")
+        elif raw_source == "baked_in_sandbox":
+            if baked_probe_declared and baked_probe_ready is not True:
+                blockers.append(
+                    _agents_last_exam_public_id(
+                        baked_task_input_readiness.get("first_blocker"),
+                        limit=80,
+                    )
+                    or "baked_task_input_not_verified"
+                )
+            elif effective_baked_input_present is not True:
+                blockers.append("baked_task_input_not_verified")
+        elif official_gcs_source:
+            if effective_gcs_key_present is not True:
+                blockers.append("gcs_sa_key_presence_not_verified")
+        elif raw_source in {"none", "local"}:
+            blockers.append("task_data_source_not_sufficient_for_required_task")
+        else:
+            blockers.append("task_data_source_unsupported_for_required_task")
+    ready = checked and not blockers
+    if requirement is False:
+        ready = True
+    return {
+        "checked": checked,
+        "ready": ready,
+        "first_blocker": blockers[0] if blockers else None,
+        "blockers": blockers,
+        "requires_task_data": requirement,
+        "requires_task_data_declared": requirement is not None,
+        "task_data_source": source,
+        "task_data_source_declared": bool(source),
+        "official_gcs_source": official_gcs_source,
+        "baked_input_present": effective_baked_input_present is True,
+        "baked_input_presence_declared": baked_task_input_present is not None
+        or baked_probe_declared,
+        "baked_input_probe_declared": baked_probe_declared,
+        "baked_input_probe_ready": baked_probe_ready,
+        "gcs_sa_key_declared": gcs_key_declared or gcs_sa_key_present is not None,
+        "gcs_sa_key_present": effective_gcs_key_present,
+        "gcs_sa_key_path_recorded": False,
+        "credential_values_read": False,
+        "credential_values_recorded": False,
+        "local_paths_recorded": False,
+    }
+
+def build_agents_last_exam_validation_run_gate(
+    *,
+    selected_task_id: str | None,
+    validation_hypothesis: str | None,
+    task_material_readiness: dict[str, Any],
+    host_codex_no_task_e2e: dict[str, Any],
+    exact_dry_run_result: dict[str, Any],
+    launch_packet: dict[str, Any] | None = None,
+    result_reducer_ready: bool = False,
+    no_upload: bool = True,
+    submit_enabled: bool = False,
+    leaderboard_enabled: bool = False,
+    formal_score_candidate: bool = False,
+    require_fresh_source: bool = False,
+    expected_formal_agent: str = "host_codex_gpt55_xhigh",
+) -> dict[str, Any]:
+    """Combine compact ALE readiness into a pre-run decision gate."""
+
+    task_label = _agents_last_exam_public_id(selected_task_id, limit=180)
+    hypothesis_label = _agents_last_exam_public_id(validation_hypothesis, limit=240)
+    fresh_source_required = bool(formal_score_candidate or require_fresh_source)
+    blockers: list[str] = []
+    for payload, schema_version, prefix in (
+        (
+            task_material_readiness,
+            AGENTS_LAST_EXAM_TASK_MATERIAL_READINESS_SCHEMA_VERSION,
+            "task_material_readiness",
+        ),
+        (
+            host_codex_no_task_e2e,
+            AGENTS_LAST_EXAM_HOST_CODEX_CUA_NO_TASK_SMOKE_SCHEMA_VERSION,
+            "host_codex_no_task_e2e",
+        ),
+        (
+            exact_dry_run_result,
+            AGENTS_LAST_EXAM_LOCAL_EXACT_DRY_RUN_RESULT_SCHEMA_VERSION,
+            "exact_dry_run_result",
+        ),
+    ):
+        ready, blocker = _agents_last_exam_ready_input(
+            payload,
+            schema_version=schema_version,
+            blocker_prefix=prefix,
+        )
+        if not ready and blocker:
+            blockers.append(blocker)
+
+    launch_packet_ready = None
+    if launch_packet is not None:
+        ready, blocker = _agents_last_exam_ready_input(
+            launch_packet,
+            schema_version=AGENTS_LAST_EXAM_LOCAL_LAUNCH_PACKET_SCHEMA_VERSION,
+            blocker_prefix="launch_packet",
+        )
+        launch_packet_ready = ready
+        if not ready and blocker:
+            blockers.append(blocker)
+
+    fresh_source_ready, fresh_source_blocker = _agents_last_exam_source_freshness_input(
+        launch_packet,
+        required=fresh_source_required,
+    )
+    if fresh_source_blocker:
+        blockers.append(fresh_source_blocker)
+
+    if not hypothesis_label:
+        blockers.append("validation_hypothesis_missing")
+    if result_reducer_ready is not True:
+        blockers.append("compact_result_reducer_not_ready")
+    if no_upload is not True:
+        blockers.append("no_upload_boundary_not_enabled")
+    if submit_enabled:
+        blockers.append("submit_must_remain_disabled")
+    if leaderboard_enabled:
+        blockers.append("leaderboard_must_remain_disabled")
+
+    boundary_payloads = [
+        ("task_material_readiness", task_material_readiness),
+        ("host_codex_no_task_e2e", host_codex_no_task_e2e),
+        ("exact_dry_run_result", exact_dry_run_result),
+    ]
+    if launch_packet is not None:
+        boundary_payloads.append(("launch_packet", launch_packet))
+    for name, payload in boundary_payloads:
+        if _agents_last_exam_boundary_flag(payload, "credential_values_recorded"):
+            blockers.append(f"{name}_credential_values_recorded")
+        if _agents_last_exam_boundary_flag(payload, "local_paths_recorded"):
+            blockers.append(f"{name}_local_paths_recorded")
+        if _agents_last_exam_boundary_flag(payload, "raw_trajectory_read"):
+            blockers.append(f"{name}_raw_trajectory_read")
+        if _agents_last_exam_boundary_flag(payload, "task_body_read"):
+            blockers.append(f"{name}_task_body_read")
+        if _agents_last_exam_boundary_flag(payload, "screenshot_captured"):
+            blockers.append(f"{name}_screenshot_captured")
+        if _agents_last_exam_boundary_flag(payload, "hidden_references_allowed"):
+            blockers.append(f"{name}_hidden_refs_allowed")
+        if _agents_last_exam_boundary_flag(payload, "production_actions_allowed"):
+            blockers.append(f"{name}_production_actions_allowed")
+
+    expected = (
+        exact_dry_run_result.get("expected")
+        if isinstance(exact_dry_run_result.get("expected"), dict)
+        else {}
+    )
+    expected_task = expected.get("task") if isinstance(expected, dict) else None
+    if task_label and expected_task and task_label != expected_task:
+        blockers.append("selected_task_mismatch_exact_dry_run")
+
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_VALIDATION_RUN_GATE_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_operator_authorized_local_no_upload_ale_validation_run",
+        "blockers": blockers,
+        "selected_task": {
+            "task_id": task_label,
+            "source": "compact_readiness_artifacts",
+        },
+        "validation_hypothesis": hypothesis_label,
+        "readiness_inputs": {
+            "task_material_ready": task_material_readiness.get("ready") is True,
+            "host_codex_no_task_e2e_ready": host_codex_no_task_e2e.get("ready") is True,
+            "exact_dry_run_ready": exact_dry_run_result.get("ready") is True,
+            "launch_packet_ready": launch_packet_ready,
+            "fresh_source_required": fresh_source_required,
+            "fresh_source_ready": fresh_source_ready,
+            "compact_result_reducer_ready": result_reducer_ready is True,
+        },
+        "model_policy": {
+            "connectivity_e2e_model": "gpt-5.3-codex-spark",
+            "formal_score_agent": expected_formal_agent,
+            "formal_score_candidate": bool(formal_score_candidate),
+        },
+        "run_boundary": {
+            "local_only": True,
+            "no_upload": no_upload is True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "operator_authorization_required_before_task_run": True,
+            "task_run_started_by_this_gate": False,
+            "container_started_by_this_gate": False,
+            "model_api_invoked_by_this_gate": False,
+            "codex_prompt_sent_by_this_gate": False,
+            "raw_trajectory_read": False,
+            "task_body_read_by_goal_harness": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "raw_output_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "operator_authorized_local_no_upload_ale_validation_run"
+            if ready
+            else "repair_ale_validation_run_gate_blocker",
+            "minimum_next_evidence": (
+                "A task-level ALE run may proceed only as local/no-upload/no-submit "
+                "work with compact result reduction through the ALE reducer, and "
+                "with a concrete Goal Harness validation hypothesis recorded."
+            ),
+            "must_not_claim": [
+                "ALE task success before compact result ingest",
+                "ALE score uplift before paired evidence",
+                "Goal Harness treatment advantage before paired evidence",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+            "model_api_invoked": False,
+            "codex_prompt_sent": False,
+        },
+    }
+
+def _agents_last_exam_public_task_parts(task_id: str | None) -> tuple[list[str], str | None]:
+    label = _agents_last_exam_public_id(task_id, limit=180)
+    if not isinstance(task_id, str) or not task_id.strip():
+        return [], label
+    text = task_id.strip().replace("\\", "/")
+    parts = [part for part in text.split("/") if part]
+    safe = (
+        not text.startswith("/")
+        and not text.startswith("~")
+        and len(parts) == 2
+        and all(part not in {".", ".."} for part in parts)
+        and all(_agents_last_exam_public_id(part, limit=120) == part for part in parts)
+    )
+    return (parts if safe else []), label
+
+def _agents_last_exam_public_task_list_membership(
+    source_root: str | None,
+    task_id: str | None,
+    selected_task_lists: Iterable[str],
+) -> dict[str, Any]:
+    safe_task_id = str(task_id or "").strip().replace("\\", "/")
+    memberships: dict[str, bool] = {}
+    checked = 0
+    present = 0
+    if not source_root:
+        return {
+            "checked": False,
+            "selected_task_lists": [],
+            "membership": memberships,
+            "present_count": present,
+            "path_recorded": False,
+        }
+    try:
+        root = Path(source_root).expanduser()
+        selected_root = root / "selected_tasks"
+        resolved_root = root.resolve()
+    except (OSError, RuntimeError):
+        return {
+            "checked": False,
+            "selected_task_lists": [],
+            "membership": memberships,
+            "present_count": present,
+            "path_recorded": False,
+        }
+    safe_lists: list[str] = []
+    for raw_name in selected_task_lists:
+        label = _agents_last_exam_public_id(raw_name, limit=120)
+        if not label:
+            continue
+        parts = [part for part in str(raw_name).replace("\\", "/").split("/") if part]
+        if not parts or any(part in {".", ".."} for part in parts):
+            continue
+        candidate = selected_root.joinpath(*parts)
+        try:
+            resolved_candidate = candidate.resolve()
+            inside_root = resolved_candidate == resolved_root or (
+                resolved_root in resolved_candidate.parents
+            )
+        except OSError:
+            inside_root = False
+        safe_lists.append(label)
+        if not inside_root or not candidate.is_file():
+            memberships[label] = False
+            continue
+        checked += 1
+        try:
+            lines = candidate.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            memberships[label] = False
+            continue
+        matched = any(line.strip().replace("\\", "/") == safe_task_id for line in lines)
+        memberships[label] = matched
+        if matched:
+            present += 1
+    return {
+        "checked": checked > 0,
+        "selected_task_lists": safe_lists,
+        "membership": memberships,
+        "present_count": present,
+        "path_recorded": False,
+    }
+
+_AGENTS_LAST_EXAM_REQUIRES_TASK_DATA_RE = re.compile(
+    r"^\s*(?:self\.)?REQUIRES_TASK_DATA\s*(?::[^=]+)?=\s*(True|False)\b"
+)
+
+
+def _agents_last_exam_requires_task_data_line_scan(
+    *,
+    source_root: str | None,
+    task_id: str,
+    max_lines: int = 1200,
+) -> dict[str, Any]:
+    parts, task_label = _agents_last_exam_public_task_parts(task_id)
+    if not parts:
+        return {
+            "task_id": task_label,
+            "checked": False,
+            "requires_task_data": None,
+            "requires_task_data_declared": False,
+            "assignment_found": False,
+            "assignment_kind": None,
+            "line_count_scanned": 0,
+            "first_blocker": "selected_task_id_not_public_safe",
+            "task_source_path_recorded": False,
+            "task_source_content_recorded": False,
+        }
+    try:
+        root = Path(source_root).expanduser() if source_root else None
+    except (OSError, RuntimeError):
+        root = None
+    if root is None or not root.is_dir():
+        return {
+            "task_id": task_label,
+            "checked": False,
+            "requires_task_data": None,
+            "requires_task_data_declared": False,
+            "assignment_found": False,
+            "assignment_kind": None,
+            "line_count_scanned": 0,
+            "first_blocker": "source_root_not_available",
+            "task_source_path_recorded": False,
+            "task_source_content_recorded": False,
+        }
+    source_file = root / "tasks" / parts[0] / parts[1] / "main.py"
+    try:
+        resolved_root = root.resolve()
+        resolved_source_file = source_file.resolve()
+        inside_root = resolved_source_file == resolved_root or (
+            resolved_root in resolved_source_file.parents
+        )
+    except OSError:
+        inside_root = False
+    if not inside_root or not source_file.is_file():
+        return {
+            "task_id": task_label,
+            "checked": False,
+            "requires_task_data": None,
+            "requires_task_data_declared": False,
+            "assignment_found": False,
+            "assignment_kind": None,
+            "line_count_scanned": 0,
+            "first_blocker": "task_config_main_py_missing",
+            "task_source_path_recorded": False,
+            "task_source_content_recorded": False,
+        }
+    scanned = 0
+    try:
+        with source_file.open(encoding="utf-8") as handle:
+            for raw_line in handle:
+                scanned += 1
+                match = _AGENTS_LAST_EXAM_REQUIRES_TASK_DATA_RE.match(raw_line)
+                if match:
+                    requires_task_data = match.group(1) == "True"
+                    return {
+                        "task_id": task_label,
+                        "checked": True,
+                        "requires_task_data": requires_task_data,
+                        "requires_task_data_declared": True,
+                        "assignment_found": True,
+                        "assignment_kind": "requires_task_data_bool_assignment",
+                        "line_count_scanned": scanned,
+                        "first_blocker": None,
+                        "task_source_path_recorded": False,
+                        "task_source_content_recorded": False,
+                    }
+                if scanned >= max_lines:
+                    break
+    except OSError:
+        return {
+            "task_id": task_label,
+            "checked": False,
+            "requires_task_data": None,
+            "requires_task_data_declared": False,
+            "assignment_found": False,
+            "assignment_kind": None,
+            "line_count_scanned": scanned,
+            "first_blocker": "task_config_main_py_unreadable",
+            "task_source_path_recorded": False,
+            "task_source_content_recorded": False,
+        }
+    return {
+        "task_id": task_label,
+        "checked": True,
+        "requires_task_data": True,
+        "requires_task_data_declared": False,
+        "assignment_found": False,
+        "assignment_kind": "default_true_when_assignment_missing",
+        "line_count_scanned": scanned,
+        "first_blocker": None,
+        "task_source_path_recorded": False,
+        "task_source_content_recorded": False,
+    }
+
+def _agents_last_exam_public_selected_task_scan(
+    source_root: str | None,
+    selected_task_lists: Iterable[str],
+) -> dict[str, Any]:
+    labels: list[str] = []
+    task_ids: set[str] = set()
+    missing_lists = 0
+    checked_lists = 0
+    unsafe_lists = 0
+    if not source_root:
+        return {
+            "checked": False,
+            "selected_task_lists": labels,
+            "selected_task_count": 0,
+            "checked_list_count": 0,
+            "missing_list_count": 0,
+            "unsafe_list_count": 0,
+            "path_recorded": False,
+            "task_ids": [],
+        }
+    try:
+        root = Path(source_root).expanduser()
+        selected_root = root / "selected_tasks"
+        resolved_root = root.resolve()
+    except (OSError, RuntimeError):
+        return {
+            "checked": False,
+            "selected_task_lists": labels,
+            "selected_task_count": 0,
+            "checked_list_count": 0,
+            "missing_list_count": 0,
+            "unsafe_list_count": 0,
+            "path_recorded": False,
+            "task_ids": [],
+        }
+    for raw_name in selected_task_lists:
+        label = _agents_last_exam_public_id(raw_name, limit=120)
+        if not label:
+            unsafe_lists += 1
+            continue
+        parts = [part for part in str(raw_name).replace("\\", "/").split("/") if part]
+        if not parts or any(part in {".", ".."} for part in parts):
+            labels.append(label)
+            unsafe_lists += 1
+            continue
+        candidate = selected_root.joinpath(*parts)
+        try:
+            resolved_candidate = candidate.resolve()
+            inside_root = resolved_candidate == resolved_root or (
+                resolved_root in resolved_candidate.parents
+            )
+        except OSError:
+            inside_root = False
+        labels.append(label)
+        if not inside_root or not candidate.is_file():
+            missing_lists += 1
+            continue
+        checked_lists += 1
+        try:
+            lines = candidate.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            missing_lists += 1
+            continue
+        for line in lines:
+            raw_task_id = line.strip().replace("\\", "/")
+            if not raw_task_id or raw_task_id.startswith("#"):
+                continue
+            parts, safe_label = _agents_last_exam_public_task_parts(raw_task_id)
+            if parts and safe_label:
+                task_ids.add("/".join(parts))
+    return {
+        "checked": checked_lists > 0,
+        "selected_task_lists": labels,
+        "selected_task_count": len(task_ids),
+        "checked_list_count": checked_lists,
+        "missing_list_count": missing_lists,
+        "unsafe_list_count": unsafe_lists,
+        "path_recorded": False,
+        "task_ids": sorted(task_ids),
+    }
+
+def build_agents_last_exam_candidate_task_data_scan(
+    *,
+    source_root: str | None,
+    selected_task_lists: Iterable[str] = (
+        "linux_only.txt",
+        "unlicensed/near-term.txt",
+    ),
+    allow_demo_candidate: bool = False,
+) -> dict[str, Any]:
+    """Scan selected ALE task configs for local no-task-data candidates.
+
+    This is a bounded config-line scan: it extracts only a
+    ``REQUIRES_TASK_DATA`` boolean assignment signal from task ``main.py`` and
+    never records source paths or source text.
+    """
+
+    selected = _agents_last_exam_public_selected_task_scan(
+        source_root,
+        selected_task_lists,
+    )
+    blockers: list[str] = []
+    if selected.get("checked") is not True:
+        blockers.append("selected_task_lists_not_checked")
+    task_ids = [
+        task_id
+        for task_id in selected.get("task_ids", [])
+        if isinstance(task_id, str)
+    ]
+    if selected.get("checked") is True and not task_ids:
+        blockers.append("selected_task_lists_empty")
+
+    scan_results = [
+        _agents_last_exam_requires_task_data_line_scan(
+            source_root=source_root,
+            task_id=task_id,
+        )
+        for task_id in task_ids
+    ]
+    checked_results = [item for item in scan_results if item.get("checked") is True]
+    no_data_candidates = [
+        str(item.get("task_id"))
+        for item in checked_results
+        if item.get("requires_task_data") is False and item.get("task_id")
+    ]
+    demo_no_data_candidates = [
+        task_id for task_id in no_data_candidates if task_id.startswith("demo__")
+    ]
+    formal_no_data_candidates = [
+        task_id for task_id in no_data_candidates if not task_id.startswith("demo__")
+    ]
+    eligible_candidates = (
+        no_data_candidates if allow_demo_candidate else formal_no_data_candidates
+    )
+    if task_ids and not no_data_candidates:
+        blockers.append("no_no_task_data_candidate_found")
+    elif task_ids and not eligible_candidates:
+        blockers.append("no_formal_no_task_data_candidate_found")
+    ready = not blockers
+    explicit_false_count = sum(
+        1
+        for item in checked_results
+        if item.get("requires_task_data") is False
+        and item.get("requires_task_data_declared") is True
+    )
+    explicit_true_count = sum(
+        1
+        for item in checked_results
+        if item.get("requires_task_data") is True
+        and item.get("requires_task_data_declared") is True
+    )
+    default_true_count = sum(
+        1
+        for item in checked_results
+        if item.get("requires_task_data") is True
+        and item.get("requires_task_data_declared") is False
+    )
+    missing_config_count = sum(
+        1 for item in scan_results if item.get("checked") is not True
+    )
+    return {
+        "schema_version": AGENTS_LAST_EXAM_CANDIDATE_TASK_DATA_SCAN_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_local_no_task_data_ale_candidate_gate",
+        "blockers": blockers,
+        "selected_task_lists": {
+            key: value
+            for key, value in selected.items()
+            if key != "task_ids"
+        },
+        "scan_summary": {
+            "selected_task_count": len(task_ids),
+            "task_config_checked_count": len(checked_results),
+            "task_config_missing_or_unreadable_count": missing_config_count,
+            "explicit_requires_task_data_false_count": explicit_false_count,
+            "explicit_requires_task_data_true_count": explicit_true_count,
+            "default_requires_task_data_true_count": default_true_count,
+            "no_task_data_candidate_count": len(no_data_candidates),
+            "formal_no_task_data_candidate_count": len(formal_no_data_candidates),
+            "demo_no_task_data_candidate_count": len(demo_no_data_candidates),
+            "allow_demo_candidate": bool(allow_demo_candidate),
+        },
+        "candidate_tasks": {
+            "eligible_no_task_data_candidates": eligible_candidates[:25],
+            "formal_no_task_data_candidates": formal_no_data_candidates[:25],
+            "demo_no_task_data_candidates": demo_no_data_candidates[:25],
+            "candidate_count_truncated": len(eligible_candidates) > 25,
+            "task_ids_public_only": True,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "selected_task_list_content_recorded": False,
+            "task_config_line_scan": True,
+            "task_config_source_content_recorded": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "task_instruction_file_read": False,
+            "raw_output_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "prepare_no_task_data_formal_ale_validation_gate"
+            if ready
+            else "do_not_launch_formal_ale_until_task_data_substrate_is_ready",
+            "minimum_next_evidence": (
+                "A formal local/no-upload ALE candidate should either be listed "
+                "as not requiring task data or carry a separately verified "
+                "task-data source readiness signal before any model task run."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_config_line_scan": True,
+            "task_config_source_content_recorded": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "task_instruction_file_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+def build_agents_last_exam_baked_task_input_readiness(
+    *,
+    selected_task_id: str | None,
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    image_metadata: dict[str, Any] | None = None,
+    docker_binary: str = "docker",
+    timeout_seconds: int = 60,
+) -> dict[str, Any]:
+    """Probe whether an ALE Docker image contains a task baked input dir.
+
+    This starts a tiny shell in the image to test directory existence/readability.
+    It does not run the task, list files, read task data, or record the checked path.
+    """
+
+    parts, task_label = _agents_last_exam_public_task_parts(selected_task_id)
+    blockers: list[str] = []
+    if not parts:
+        blockers.append("selected_task_id_not_public_safe")
+    docker_label = _agents_last_exam_public_id(docker_binary, limit=80)
+    docker_binary_safe = bool(
+        docker_label
+        and docker_binary == docker_label
+        and "/" not in docker_binary
+        and "\\" not in docker_binary
+    )
+    if not docker_binary_safe:
+        blockers.append("docker_binary_must_be_name_not_path")
+    docker_available = bool(docker_binary_safe and shutil.which(docker_binary))
+    if docker_binary_safe and not docker_available:
+        blockers.append("docker_cli_missing")
+
+    raw_image_metadata = (
+        image_metadata
+        if isinstance(image_metadata, dict)
+        else _agents_last_exam_docker_image_metadata(image_ref)
+    )
+    image = _agents_last_exam_public_image_metadata(
+        raw_image_metadata,
+        fallback_image_ref=image_ref,
+    )
+    if image.get("present") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(image.get("first_blocker"), limit=80)
+            or "docker_image_missing"
+        )
+
+    attempted = False
+    container_started = False
+    baked_input_present = False
+    baked_input_readable = False
+    probe_return_code: int | None = None
+    probe_error: str | None = None
+    if not blockers and parts and docker_binary_safe:
+        baked_input_path = (
+            f"/media/user/data/agenthle/{parts[0]}/{parts[1]}/base/input"
+        )
+        attempted = True
+        try:
+            result = subprocess.run(
+                [
+                    docker_binary,
+                    "run",
+                    "--rm",
+                    "--entrypoint",
+                    "/bin/sh",
+                    image_ref,
+                    "-c",
+                    'test -d "$1" && test -r "$1"',
+                    "sh",
+                    baked_input_path,
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=max(1, int(timeout_seconds)),
+            )
+        except subprocess.TimeoutExpired:
+            probe_error = "baked_task_input_probe_timeout"
+        except Exception:
+            probe_error = "baked_task_input_probe_failed"
+        else:
+            container_started = True
+            probe_return_code = result.returncode
+            if result.returncode == 0:
+                baked_input_present = True
+                baked_input_readable = True
+            else:
+                probe_error = "baked_task_input_missing"
+    if probe_error:
+        blockers.append(probe_error)
+
+    ready = not blockers and baked_input_present and baked_input_readable
+    return {
+        "schema_version": AGENTS_LAST_EXAM_BAKED_TASK_INPUT_READINESS_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_baked_sandbox_task_data_source",
+        "blockers": blockers,
+        "task": {
+            "task_id": task_label,
+            "category": parts[0] if parts else None,
+            "name": parts[1] if parts else None,
+        },
+        "image": image,
+        "probe": {
+            "kind": "docker_shell_test_directory_only",
+            "attempted": attempted,
+            "container_started": container_started,
+            "baked_input_present": baked_input_present,
+            "baked_input_readable": baked_input_readable,
+            "return_code_zero": probe_return_code == 0
+            if probe_return_code is not None
+            else None,
+            "expected_path_template": "ale_task_base_input",
+            "expected_path_recorded": False,
+            "stdout_recorded": False,
+            "stderr_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": container_started,
+            "task_run_started": False,
+            "task_body_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "task_data_content_read": False,
+            "directory_listed": False,
+            "model_api_invoked": False,
+            "codex_prompt_sent": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "path_existence_only": True,
+            "task_text_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "task_data_content_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+def build_agents_last_exam_baked_task_input_scan(
+    *,
+    source_root: str | None,
+    selected_task_lists: Iterable[str] = (
+        "linux_only.txt",
+        "unlicensed/near-term.txt",
+    ),
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    image_metadata: dict[str, Any] | None = None,
+    docker_binary: str = "docker",
+    max_tasks: int = 120,
+    timeout_seconds: int = 180,
+    probe_results: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    """Scan selected public ALE tasks for baked input dirs without reading them."""
+
+    selected = _agents_last_exam_public_selected_task_scan(
+        source_root,
+        selected_task_lists,
+    )
+    task_ids = [
+        task_id
+        for task_id in selected.get("task_ids", [])
+        if _agents_last_exam_public_task_parts(task_id)[0]
+    ]
+    max_count = max(0, int(max_tasks))
+    if max_count:
+        task_ids = task_ids[:max_count]
+    else:
+        task_ids = []
+    blockers: list[str] = []
+    if selected.get("checked") is not True:
+        blockers.append("selected_task_lists_not_checked")
+    if not task_ids:
+        blockers.append("no_selected_tasks_to_probe")
+
+    docker_label = _agents_last_exam_public_id(docker_binary, limit=80)
+    docker_binary_safe = bool(
+        docker_label
+        and docker_binary == docker_label
+        and "/" not in docker_binary
+        and "\\" not in docker_binary
+    )
+    if not docker_binary_safe:
+        blockers.append("docker_binary_must_be_name_not_path")
+    docker_available = bool(docker_binary_safe and shutil.which(docker_binary))
+    raw_image_metadata = (
+        image_metadata
+        if isinstance(image_metadata, dict)
+        else _agents_last_exam_docker_image_metadata(image_ref)
+    )
+    image = _agents_last_exam_public_image_metadata(
+        raw_image_metadata,
+        fallback_image_ref=image_ref,
+    )
+
+    fixture_probe_used = isinstance(probe_results, dict)
+    if not fixture_probe_used:
+        if docker_binary_safe and not docker_available:
+            blockers.append("docker_cli_missing")
+        if image.get("present") is not True:
+            blockers.append(
+                _agents_last_exam_public_id(image.get("first_blocker"), limit=80)
+                or "docker_image_missing"
+            )
+
+    attempted = False
+    container_started = False
+    candidates: list[str] = []
+    probe_error: str | None = None
+    if not blockers and task_ids:
+        attempted = True
+        if fixture_probe_used:
+            for task_id in task_ids:
+                if probe_results.get(task_id) is True:
+                    candidates.append(task_id)
+        else:
+            script = (
+                'while IFS= read -r task; do '
+                'category="${task%%/*}"; name="${task#*/}"; '
+                'path="/media/user/data/agenthle/${category}/${name}/base/input"; '
+                'if test -d "$path" && test -r "$path"; then '
+                'printf "%s\\t1\\n" "$task"; else printf "%s\\t0\\n" "$task"; fi; '
+                "done"
+            )
+            try:
+                result = subprocess.run(
+                    [
+                        docker_binary,
+                        "run",
+                        "--rm",
+                        "--entrypoint",
+                        "/bin/sh",
+                        image_ref,
+                        "-c",
+                        script,
+                    ],
+                    input="\n".join(task_ids) + "\n",
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                    timeout=max(1, int(timeout_seconds)),
+                )
+            except subprocess.TimeoutExpired:
+                probe_error = "baked_task_input_scan_timeout"
+            except Exception:
+                probe_error = "baked_task_input_scan_failed"
+            else:
+                container_started = True
+                if result.returncode != 0:
+                    probe_error = "baked_task_input_scan_nonzero"
+                else:
+                    safe_task_set = set(task_ids)
+                    for line in result.stdout.splitlines():
+                        raw_task_id, _, flag = line.partition("\t")
+                        if flag != "1" or raw_task_id not in safe_task_set:
+                            continue
+                        parts, safe_label = _agents_last_exam_public_task_parts(
+                            raw_task_id
+                        )
+                        if parts and safe_label:
+                            candidates.append(raw_task_id)
+    if probe_error:
+        blockers.append(probe_error)
+    if attempted and not candidates and not blockers:
+        blockers.append("no_baked_input_candidate_found")
+
+    ready = bool(candidates) and not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_BAKED_TASK_INPUT_SCAN_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_baked_input_formal_candidate_selection",
+        "blockers": blockers,
+        "selected_tasks": {
+            "checked": selected.get("checked") is True,
+            "selected_task_lists": selected.get("selected_task_lists") or [],
+            "selected_task_count": selected.get("selected_task_count"),
+            "probed_task_count": len(task_ids),
+            "max_tasks": max_count,
+            "path_recorded": False,
+        },
+        "image": image,
+        "probe": {
+            "kind": "docker_shell_batch_test_directory_only",
+            "attempted": attempted,
+            "container_started": container_started,
+            "fixture_probe_used": fixture_probe_used,
+            "baked_input_candidate_count": len(candidates),
+            "expected_path_template": "ale_task_base_input",
+            "expected_path_recorded": False,
+            "stdout_recorded": False,
+            "stderr_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "candidates": {
+            "eligible_baked_input_candidates": candidates[:25],
+            "candidate_count": len(candidates),
+            "task_ids_public": True,
+            "task_paths_recorded": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": container_started,
+            "task_run_started": False,
+            "task_body_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "task_data_content_read": False,
+            "directory_listed": False,
+            "model_api_invoked": False,
+            "codex_prompt_sent": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "raw_output_recorded": False,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "path_existence_only": True,
+            "selected_task_lists_read": True,
+            "task_text_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "task_data_content_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+def build_agents_last_exam_task_material_readiness(
+    *,
+    source_root: str | None,
+    selected_task_id: str | None,
+    selected_task_lists: Iterable[str] = (
+        "linux_only.txt",
+        "unlicensed/near-term.txt",
+    ),
+    requires_task_data: bool | str | None = None,
+    task_data_source: str | None = None,
+    baked_task_input_present: bool | None = None,
+    baked_task_input_readiness: dict[str, Any] | None = None,
+    gcs_sa_key: str | None = None,
+    gcs_sa_key_present: bool | None = None,
+    enforce_task_data_source: bool = False,
+) -> dict[str, Any]:
+    """Check local ALE task material existence without reading task bodies."""
+
+    parts, task_label = _agents_last_exam_public_task_parts(selected_task_id)
+    blockers: list[str] = []
+    if not parts:
+        blockers.append("selected_task_id_not_public_safe")
+    try:
+        root = Path(source_root).expanduser() if source_root else None
+    except (OSError, RuntimeError):
+        root = None
+    source_root_available = bool(root and root.is_dir())
+    if not source_root_available or root is None:
+        blockers.append("source_root_not_available")
+
+    task_dir_available = False
+    task_card_present = False
+    scripts_dir_present = False
+    scorer_script_count = 0
+    task_dir_entry_count = 0
+    if root is not None and source_root_available and parts:
+        task_dir = root / "tasks" / parts[0] / parts[1]
+        try:
+            resolved_root = root.resolve()
+            resolved_task_dir = task_dir.resolve()
+            inside_root = resolved_task_dir == resolved_root or (
+                resolved_root in resolved_task_dir.parents
+            )
+        except OSError:
+            inside_root = False
+        task_dir_available = bool(inside_root and task_dir.is_dir())
+        if task_dir_available:
+            task_card_present = (task_dir / "task_card.json").is_file()
+            scripts_dir = task_dir / "scripts"
+            scripts_dir_present = scripts_dir.is_dir()
+            try:
+                task_dir_entry_count = sum(1 for _ in task_dir.iterdir())
+            except OSError:
+                task_dir_entry_count = 0
+            if scripts_dir_present:
+                try:
+                    scorer_script_count = sum(
+                        1
+                        for path in scripts_dir.iterdir()
+                        if path.is_file()
+                        and path.suffix == ".py"
+                        and "score" in path.name.lower()
+                    )
+                except OSError:
+                    scorer_script_count = 0
+    if not task_dir_available:
+        blockers.append("task_directory_missing")
+    if not task_card_present:
+        blockers.append("task_card_json_missing")
+    if not scripts_dir_present:
+        blockers.append("task_scripts_directory_missing")
+    if scorer_script_count < 1:
+        blockers.append("task_scorer_script_missing")
+
+    membership = _agents_last_exam_public_task_list_membership(
+        source_root,
+        selected_task_id,
+        selected_task_lists,
+    )
+    if membership.get("checked") is not True:
+        blockers.append("selected_task_list_membership_not_checked")
+    elif int(membership.get("present_count") or 0) < 1:
+        blockers.append("selected_task_not_in_public_task_lists")
+    task_data = _agents_last_exam_task_data_source_readiness(
+        requires_task_data=requires_task_data,
+        task_data_source=task_data_source,
+        baked_task_input_present=baked_task_input_present,
+        baked_task_input_readiness=baked_task_input_readiness,
+        gcs_sa_key=gcs_sa_key,
+        gcs_sa_key_present=gcs_sa_key_present,
+        enforce_task_data_source=enforce_task_data_source,
+    )
+    if enforce_task_data_source and task_data.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(task_data.get("first_blocker"), limit=80)
+            or "task_data_source_not_ready"
+        )
+
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_TASK_MATERIAL_READINESS_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_local_no_upload_ale_task_gate",
+        "blockers": blockers,
+        "task": {
+            "task_id": task_label,
+            "category": parts[0] if parts else None,
+            "name": parts[1] if parts else None,
+            "task_dir_available": task_dir_available,
+            "task_card_json_present": task_card_present,
+            "scripts_dir_present": scripts_dir_present,
+            "scorer_script_count": scorer_script_count,
+            "task_dir_entry_count": task_dir_entry_count,
+            "task_dir_path_recorded": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+        },
+        "task_data": task_data,
+        "public_task_lists": membership,
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "raw_output_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "prepare_local_no_upload_ale_validation_run_gate"
+            if ready
+            else "repair_ale_task_material_readiness_blocker",
+            "minimum_next_evidence": (
+                "A local/no-upload ALE task gate should combine this material "
+                "readiness signal with host Codex no-task E2E readiness and the "
+                "compact result reducer boundary before any task-level run."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "task_card_content_read": False,
+            "script_content_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
 
 def _terminal_bench_verifier_failure_attribution(trial_dir: Path) -> dict[str, Any] | None:
     """Classify verifier-side infrastructure failures without recording raw logs."""
@@ -2959,6 +6968,171 @@ def _agents_last_exam_first_public_id(*values: Any, default: str) -> str:
     return default
 
 
+def _agents_last_exam_parse_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def build_agents_last_exam_local_exact_dry_run_result(
+    *,
+    stdout_text: str | None,
+    exit_code: int | str | None,
+    expected_task_id: str | None = None,
+    expected_agent_id: str | None = None,
+) -> dict[str, Any]:
+    """Reduce ALE ``--dry-run`` stdout to a compact public-safe artifact.
+
+    The raw stdout is intentionally not returned. The reducer keeps only
+    public labels and matrix counts, so callers can persist the result without
+    copying paths, task text, trajectories, screenshots, credentials, or command
+    argv into Goal Harness state.
+    """
+
+    parsed_exit_code = _agents_last_exam_parse_int(exit_code)
+    text = stdout_text if isinstance(stdout_text, str) else ""
+    lines = [line.rstrip() for line in text.splitlines()]
+    experiment_label: str | None = None
+    environment_label: str | None = None
+    environment_route_label: str | None = None
+    concurrency: int | None = None
+    declared_unit_count: int | None = None
+    units: list[dict[str, Any]] = []
+    in_units = False
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("experiment:"):
+            experiment_label = _agents_last_exam_public_id(
+                line.split(":", 1)[1],
+                limit=160,
+            )
+            in_units = False
+            continue
+        if line.startswith("environment:"):
+            value = line.split(":", 1)[1].strip()
+            before_route, _, route = value.partition("(")
+            environment_label = _agents_last_exam_public_id(
+                before_route.strip(),
+                limit=80,
+            )
+            environment_route_label = _agents_last_exam_public_id(
+                route.rstrip(")").replace("->", "-to-") if route else value,
+                limit=160,
+            )
+            in_units = False
+            continue
+        if line.startswith("concurrency:"):
+            concurrency = _agents_last_exam_parse_int(line.split(":", 1)[1])
+            in_units = False
+            continue
+        if line.startswith("units (") and line.endswith("):"):
+            count_text = line[len("units (") : -len("):")]
+            declared_unit_count = _agents_last_exam_parse_int(count_text)
+            in_units = True
+            continue
+        if in_units:
+            parts = line.split()
+            if len(parts) >= 3:
+                agent_label = _agents_last_exam_public_id(parts[0], limit=80)
+                task_label = _agents_last_exam_public_id(parts[1], limit=180)
+                variant_label = _agents_last_exam_public_id(parts[2], limit=40)
+                units.append(
+                    {
+                        "agent": agent_label,
+                        "task": task_label,
+                        "variant": variant_label,
+                    }
+                )
+
+    expected_task_label = _agents_last_exam_public_id(expected_task_id, limit=180)
+    expected_agent_label = _agents_last_exam_public_id(expected_agent_id, limit=80)
+    blockers: list[str] = []
+    if parsed_exit_code != 0:
+        blockers.append("ale_dry_run_exit_nonzero")
+    if declared_unit_count is None:
+        blockers.append("ale_dry_run_unit_count_missing")
+    elif declared_unit_count != len(units):
+        blockers.append("ale_dry_run_unit_count_mismatch")
+    if expected_task_label and expected_task_label not in {
+        str(unit.get("task") or "") for unit in units
+    }:
+        blockers.append("expected_task_not_in_dry_run_matrix")
+    if expected_agent_label and expected_agent_label not in {
+        str(unit.get("agent") or "") for unit in units
+    }:
+        blockers.append("expected_agent_not_in_dry_run_matrix")
+
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_EXACT_DRY_RUN_RESULT_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_compact_ale_dry_run_result_ingest",
+        "blockers": blockers,
+        "exit_code": parsed_exit_code,
+        "experiment": experiment_label,
+        "environment": {
+            "kind": environment_label,
+            "route": environment_route_label,
+        },
+        "concurrency": concurrency,
+        "unit_count_declared": declared_unit_count,
+        "unit_count_parsed": len(units),
+        "units": units[:50],
+        "unit_list_truncated": len(units) > 50,
+        "expected": {
+            "agent": expected_agent_label,
+            "task": expected_task_label,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "raw_stdout_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "use_compact_ale_dry_run_result_for_run_gate"
+            if ready
+            else "repair_ale_dry_run_result_before_run_gate",
+            "minimum_next_evidence": (
+                "A compact ALE dry-run matrix with exit_code=0, matching expected "
+                "agent/task labels, and no raw stdout/path/task-body leakage."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_stdout_recorded": False,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+
 def _agents_last_exam_event_type_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -2982,6 +7156,1212 @@ def _agents_last_exam_nested(source: dict[str, Any], field: str) -> Any:
         return value
     meta = source.get("meta") if isinstance(source.get("meta"), dict) else {}
     return meta.get(field)
+
+
+def _agents_last_exam_docker_image_metadata(image_ref: str) -> dict[str, Any]:
+    """Inspect local Docker image metadata without starting a container."""
+
+    if not shutil.which("docker"):
+        return {
+            "image_ref": image_ref,
+            "present": False,
+            "probe_available": False,
+            "first_blocker": "docker_cli_missing",
+        }
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", image_ref, "--format", "{{json .}}"],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+    except Exception:
+        return {
+            "image_ref": image_ref,
+            "present": False,
+            "probe_available": False,
+            "first_blocker": "docker_image_inspect_failed",
+        }
+    if result.returncode != 0 or not result.stdout.strip():
+        return {
+            "image_ref": image_ref,
+            "present": False,
+            "probe_available": True,
+            "first_blocker": "docker_image_missing",
+        }
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {
+            "image_ref": image_ref,
+            "present": False,
+            "probe_available": True,
+            "first_blocker": "docker_image_inspect_not_json",
+        }
+    repo_digests = raw.get("RepoDigests") if isinstance(raw.get("RepoDigests"), list) else []
+    metadata = raw.get("Metadata") if isinstance(raw.get("Metadata"), dict) else {}
+    return {
+        "image_ref": image_ref,
+        "present": True,
+        "probe_available": True,
+        "id": _agents_last_exam_public_id(raw.get("Id"), limit=160),
+        "digest": _agents_last_exam_public_id(
+            next((item for item in repo_digests if isinstance(item, str)), None),
+            limit=180,
+        ),
+        "architecture": _agents_last_exam_public_id(raw.get("Architecture"), limit=40),
+        "os": _agents_last_exam_public_id(raw.get("Os"), limit=40),
+        "size_bytes": int(raw.get("Size"))
+        if isinstance(raw.get("Size"), int) and not isinstance(raw.get("Size"), bool)
+        else None,
+        "created": _agents_last_exam_public_id(raw.get("Created"), limit=80),
+        "last_tag_time": _agents_last_exam_public_id(
+            metadata.get("LastTagTime"),
+            limit=80,
+        ),
+        "first_blocker": None,
+    }
+
+
+def _agents_last_exam_public_image_metadata(
+    metadata: dict[str, Any],
+    *,
+    fallback_image_ref: str,
+) -> dict[str, Any]:
+    """Reduce Docker image metadata to compact public-safe fields."""
+
+    image_ref = metadata.get("image_ref") or fallback_image_ref
+    reduced: dict[str, Any] = {
+        "image_ref": _agents_last_exam_public_id(image_ref, limit=180)
+        or "image_ref_unavailable",
+        "present": metadata.get("present") is True,
+        "probe_available": metadata.get("probe_available") is True,
+        "first_blocker": _agents_last_exam_public_id(
+            metadata.get("first_blocker"),
+            limit=80,
+        ),
+    }
+    for field, limit in (
+        ("id", 160),
+        ("digest", 180),
+        ("architecture", 40),
+        ("os", 40),
+        ("created", 80),
+        ("last_tag_time", 80),
+    ):
+        value = _agents_last_exam_public_id(metadata.get(field), limit=limit)
+        if value:
+            reduced[field] = value
+    size_bytes = metadata.get("size_bytes")
+    if isinstance(size_bytes, int) and not isinstance(size_bytes, bool):
+        reduced["size_bytes"] = size_bytes
+    return reduced
+
+
+def _agents_last_exam_disk_headroom() -> dict[str, Any]:
+    usage = shutil.disk_usage(Path.cwd())
+    free_gib = usage.free / (1024**3)
+    total_gib = usage.total / (1024**3)
+    used_pct = (usage.used / usage.total * 100.0) if usage.total else 0.0
+    return {
+        "free_gib": round(free_gib, 2),
+        "total_gib": round(total_gib, 2),
+        "used_percent": round(used_pct, 2),
+        "path_recorded": False,
+    }
+
+
+def build_agents_last_exam_local_preflight(
+    *,
+    selected_task_id: str | None = None,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a local ALE adapter preflight without task/body/run execution."""
+
+    task_label = (
+        _agents_last_exam_public_id(selected_task_id, limit=160)
+        or "metadata_only_candidate"
+    )
+    primary_raw = (
+        image_metadata
+        if isinstance(image_metadata, dict)
+        else _agents_last_exam_docker_image_metadata(image_ref)
+    )
+    alternate_raw = (
+        alternate_image_metadata
+        if isinstance(alternate_image_metadata, dict)
+        else _agents_last_exam_docker_image_metadata(alternate_image_ref)
+    )
+    primary = _agents_last_exam_public_image_metadata(
+        primary_raw,
+        fallback_image_ref=image_ref,
+    )
+    alternate = _agents_last_exam_public_image_metadata(
+        alternate_raw,
+        fallback_image_ref=alternate_image_ref,
+    )
+    disk = (
+        disk_headroom
+        if isinstance(disk_headroom, dict)
+        else _agents_last_exam_disk_headroom()
+    )
+    no_cloud = provider_kind == "docker"
+    no_upload = True
+    required_image_present = primary.get("present") is True
+    ready = bool(no_cloud and no_upload and required_image_present)
+    if not no_cloud:
+        first_blocker = "provider_is_not_local_docker"
+    elif not primary.get("probe_available", True):
+        first_blocker = primary.get("first_blocker") or "docker_probe_unavailable"
+    elif not required_image_present:
+        first_blocker = primary.get("first_blocker") or "required_docker_image_missing"
+    else:
+        first_blocker = "ready_for_local_no_upload_preflight"
+
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_PREFLIGHT_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": task_label,
+        "snapshot": _agents_last_exam_public_id(snapshot, limit=80)
+        or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "provider": {
+            "kind": provider_kind,
+            "no_cloud": no_cloud,
+            "required_image": primary,
+            "alternate_image": alternate,
+        },
+        "disk_headroom": disk,
+        "ready": ready,
+        "first_blocker": first_blocker,
+        "boundary": {
+            "local_only": True,
+            "no_cloud": no_cloud,
+            "no_upload": no_upload,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "local_paths_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "run_no_upload_adapter_dry_run"
+            if ready
+            else "repair_preflight_blocker_before_ale_run",
+            "minimum_next_evidence": (
+                "A no-cloud/no-upload ALE adapter dry-run that confirms local "
+                "Docker provider selection and compact ingest boundaries."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "leaderboard evidence",
+                "Goal Harness treatment advantage",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+        },
+    }
+
+
+def build_agents_last_exam_local_dry_run_plan(
+    *,
+    selected_task_id: str | None = None,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+    preflight: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Plan an ALE local adapter dry-run without running the adapter."""
+
+    preflight_payload = (
+        preflight
+        if isinstance(preflight, dict)
+        else build_agents_last_exam_local_preflight(
+            selected_task_id=selected_task_id,
+            snapshot=snapshot,
+            provider_kind=provider_kind,
+            image_ref=image_ref,
+            alternate_image_ref=alternate_image_ref,
+            image_metadata=image_metadata,
+            alternate_image_metadata=alternate_image_metadata,
+            disk_headroom=disk_headroom,
+        )
+    )
+    boundary = (
+        preflight_payload.get("boundary")
+        if isinstance(preflight_payload.get("boundary"), dict)
+        else {}
+    )
+    read_boundary = (
+        preflight_payload.get("read_boundary")
+        if isinstance(preflight_payload.get("read_boundary"), dict)
+        else {}
+    )
+    forbidden_side_effects = {
+        "container_started": False,
+        "task_body_read": False,
+        "model_api_invoked": False,
+        "raw_trajectory_read": False,
+        "screenshot_captured": False,
+        "credential_values_recorded": False,
+        "local_paths_recorded": False,
+        "submit_eligible": False,
+        "leaderboard_evidence": False,
+    }
+    boundary_preserved = (
+        boundary.get("local_only") is True
+        and boundary.get("no_cloud") is True
+        and boundary.get("no_upload") is True
+        and all(
+            boundary.get(field) is expected
+            for field, expected in forbidden_side_effects.items()
+        )
+        and read_boundary.get("compact_only") is True
+        and read_boundary.get("task_text_read") is False
+        and read_boundary.get("raw_artifacts_read") is False
+        and read_boundary.get("local_paths_recorded") is False
+    )
+    preflight_ready = preflight_payload.get("ready") is True
+    blockers: list[str] = []
+    if not preflight_ready:
+        blockers.append(
+            _agents_last_exam_public_id(
+                preflight_payload.get("first_blocker"),
+                limit=80,
+            )
+            or "ale_local_preflight_not_ready"
+        )
+    if not boundary_preserved:
+        blockers.append("ale_local_boundary_not_preserved")
+    ready = preflight_ready and boundary_preserved
+
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_DRY_RUN_PLAN_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": preflight_payload.get("task_id") or "metadata_only_candidate",
+        "snapshot": preflight_payload.get("snapshot")
+        or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "preflight": preflight_payload,
+        "ready": ready,
+        "first_blocker": blockers[0] if blockers else "ready_for_contract_only_dry_run_plan",
+        "blockers": blockers,
+        "adapter_plan": {
+            "mode": "contract_only_no_execution",
+            "provider": "local_docker",
+            "will_start_container": False,
+            "will_read_task_body": False,
+            "will_invoke_model_api": False,
+            "will_upload": False,
+            "will_submit": False,
+            "will_capture_screenshot": False,
+            "will_record_credentials": False,
+            "will_record_local_paths": False,
+            "allowed_probes": [
+                "local_docker_image_inspect",
+                "disk_headroom_summary",
+                "public_task_id_label",
+                "compact_boundary_flags",
+            ],
+            "required_before_real_dry_run": [
+                "selected_public_task_id_label",
+                "local_docker_provider_confirmed",
+                "submit_eligible_false",
+                "compact_result_writer_boundary_declared",
+                "stop_before_task_body_or_raw_outputs",
+            ],
+        },
+        "paired_run_requirements": {
+            "same_task": True,
+            "same_model": True,
+            "same_sandbox_provider": True,
+            "same_timeout": True,
+            "same_attempt_count": True,
+            "same_grading_path": True,
+            "baseline_arm": "hardened-codex",
+            "treatment_arm": "codex-goal-harness",
+        },
+        "claim_boundary": {
+            "may_claim": [
+                "ALE local adapter dry-run prerequisites are represented as a compact gate",
+                "The gate did not start containers, read task bodies, invoke model APIs, upload, or submit",
+                "A future real dry-run must preserve the same no-cloud/no-upload boundary",
+            ],
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+                "raw trajectory or screenshot evidence",
+            ],
+        },
+        "decision": {
+            "next_allowed_action": "run_operator_authorized_no_upload_ale_adapter_dry_run"
+            if ready
+            else "repair_ale_local_dry_run_plan_blocker",
+            "minimum_next_evidence": (
+                "A real no-cloud/no-upload adapter dry-run may only proceed if "
+                "it preserves the same boundary flags and produces compact "
+                "run/eval/events metadata without raw task or trajectory content."
+            ),
+            "stop_condition": (
+                "Stop before task body, hidden references, raw trajectory, "
+                "screenshots, credential values, local absolute paths, model "
+                "APIs, uploads, submissions, leaderboard claims, paid compute, "
+                "or production actions."
+            ),
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+
+def _agents_last_exam_runner_binary_probe(runner_binary: str | None) -> dict[str, Any]:
+    binary = _agents_last_exam_public_id(runner_binary, limit=80)
+    if not runner_binary:
+        return {
+            "binary": None,
+            "declared": False,
+            "available": False,
+            "first_blocker": "runner_binary_missing",
+            "path_recorded": False,
+        }
+    if not binary:
+        return {
+            "binary": None,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_binary_not_public_safe",
+            "path_recorded": False,
+        }
+    if "/" in runner_binary or "\\" in runner_binary:
+        return {
+            "binary": binary,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_binary_must_be_name_not_path",
+            "path_recorded": False,
+        }
+    available = shutil.which(runner_binary) is not None
+    return {
+        "binary": binary,
+        "declared": True,
+        "available": available,
+        "first_blocker": None if available else "runner_binary_not_found",
+        "path_recorded": False,
+    }
+
+
+def _agents_last_exam_python_module_probe(
+    module_name: str | None,
+    *,
+    source_root: str | None = None,
+) -> dict[str, Any]:
+    module = _agents_last_exam_public_id(module_name, limit=100)
+    source_root_declared = bool(source_root)
+    source_root_available = False
+    source_root_path: Path | None = None
+    if source_root:
+        try:
+            source_root_path = Path(source_root).expanduser()
+        except (OSError, RuntimeError):
+            source_root_path = None
+        source_root_available = bool(source_root_path and source_root_path.is_dir())
+    if not module_name:
+        return {
+            "module": None,
+            "declared": False,
+            "available": False,
+            "first_blocker": "runner_python_module_missing",
+            "source_root_declared": source_root_declared,
+            "source_root_available": source_root_available,
+            "source_root_path_recorded": False,
+            "path_recorded": False,
+        }
+    if source_root_declared and not source_root_available:
+        return {
+            "module": module,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_source_root_missing",
+            "source_root_declared": True,
+            "source_root_available": False,
+            "source_root_path_recorded": False,
+            "path_recorded": False,
+        }
+    if not module or "/" in module_name or "\\" in module_name:
+        return {
+            "module": None,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_python_module_not_public_safe",
+            "source_root_declared": source_root_declared,
+            "source_root_available": source_root_available,
+            "source_root_path_recorded": False,
+            "path_recorded": False,
+        }
+    parts = module_name.split(".")
+    if not parts or any(not part.isidentifier() for part in parts):
+        return {
+            "module": module,
+            "declared": True,
+            "available": False,
+            "first_blocker": "runner_python_module_not_public_safe",
+            "source_root_declared": source_root_declared,
+            "source_root_available": source_root_available,
+            "source_root_path_recorded": False,
+            "path_recorded": False,
+        }
+    if source_root_path is not None:
+        source_root_text = str(source_root_path)
+        sys.path.insert(0, source_root_text)
+        importlib.invalidate_caches()
+        try:
+            available = importlib.util.find_spec(module_name) is not None
+        finally:
+            try:
+                sys.path.remove(source_root_text)
+            except ValueError:
+                pass
+            importlib.invalidate_caches()
+    else:
+        available = importlib.util.find_spec(module_name) is not None
+    return {
+        "module": module,
+        "declared": True,
+        "available": available,
+        "first_blocker": None if available else "runner_python_module_not_found",
+        "source_root_declared": source_root_declared,
+        "source_root_available": source_root_available,
+        "source_root_path_recorded": False,
+        "path_recorded": False,
+    }
+
+
+def _agents_last_exam_runner_binary_requires_python_module(
+    runner_binary: str | None,
+) -> bool:
+    if not isinstance(runner_binary, str):
+        return False
+    binary = Path(runner_binary).name.lower()
+    return binary == "python" or binary.startswith("python3")
+
+
+def _agents_last_exam_normalized_repo_label(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.endswith(".git"):
+        text = text[:-4]
+    text = text.replace("git@github.com:", "https://github.com/")
+    text = text.replace("http://github.com/", "https://github.com/")
+    return _agents_last_exam_public_id(text, limit=180)
+
+
+def _agents_last_exam_source_git_metadata(
+    source_root: str | None,
+    *,
+    expected_repo_url: str = AGENTS_LAST_EXAM_DEFAULT_REPO_URL,
+    fetch_origin: bool = False,
+) -> dict[str, Any]:
+    expected = _agents_last_exam_normalized_repo_label(expected_repo_url)
+    source_root_declared = bool(source_root)
+    source_root_path: Path | None = None
+    if source_root:
+        try:
+            source_root_path = Path(source_root).expanduser()
+        except (OSError, RuntimeError):
+            source_root_path = None
+    source_root_available = bool(source_root_path and source_root_path.is_dir())
+    base = {
+        "source_root_declared": source_root_declared,
+        "source_root_available": source_root_available,
+        "source_root_path_recorded": False,
+        "expected_repo": expected,
+        "remote": None,
+        "remote_matches_expected": False,
+        "head": None,
+        "upstream_ref": None,
+        "upstream_head": None,
+        "upstream_declared": False,
+        "head_matches_upstream": False,
+        "upstream_ahead_count": None,
+        "upstream_behind_count": None,
+        "fetch_origin_attempted": False,
+        "fetch_origin_ok": False,
+        "git_probe_available": shutil.which("git") is not None,
+        "is_git_checkout": False,
+    }
+    if not source_root_declared:
+        return {**base, "first_blocker": "source_root_missing"}
+    if not source_root_available or source_root_path is None:
+        return {**base, "first_blocker": "source_root_not_available"}
+    if not shutil.which("git"):
+        return {**base, "first_blocker": "git_cli_missing"}
+
+    def git_output(*args: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(source_root_path), *args],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+
+    def git_run(*args: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(source_root_path), *args],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=30,
+            )
+        except Exception:
+            return False
+        return result.returncode == 0
+
+    fetch_origin_attempted = bool(fetch_origin)
+    fetch_origin_ok = git_run("fetch", "--prune", "origin") if fetch_origin else False
+
+    top_level = git_output("rev-parse", "--show-toplevel")
+    is_git_checkout = bool(top_level)
+    remote = _agents_last_exam_normalized_repo_label(
+        git_output("remote", "get-url", "origin")
+    )
+    head = _agents_last_exam_public_id(git_output("rev-parse", "HEAD"), limit=80)
+    upstream_ref = _agents_last_exam_public_id(
+        git_output("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"),
+        limit=120,
+    )
+    upstream_head = _agents_last_exam_public_id(
+        git_output("rev-parse", "@{upstream}"),
+        limit=80,
+    )
+    upstream_ahead_count: int | None = None
+    upstream_behind_count: int | None = None
+    rev_counts = git_output("rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+    if rev_counts:
+        parts = rev_counts.split()
+        if len(parts) >= 2:
+            try:
+                upstream_ahead_count = int(parts[0])
+                upstream_behind_count = int(parts[1])
+            except ValueError:
+                upstream_ahead_count = None
+                upstream_behind_count = None
+    metadata = {
+        **base,
+        "remote": remote,
+        "remote_matches_expected": bool(remote and expected and remote == expected),
+        "head": head,
+        "upstream_ref": upstream_ref,
+        "upstream_head": upstream_head,
+        "upstream_declared": bool(upstream_ref),
+        "head_matches_upstream": bool(head and upstream_head and head == upstream_head),
+        "upstream_ahead_count": upstream_ahead_count,
+        "upstream_behind_count": upstream_behind_count,
+        "fetch_origin_attempted": fetch_origin_attempted,
+        "fetch_origin_ok": fetch_origin_ok,
+        "is_git_checkout": is_git_checkout,
+    }
+    if not is_git_checkout:
+        return {**metadata, "first_blocker": "source_root_not_git_checkout"}
+    if not remote:
+        return {**metadata, "first_blocker": "source_root_origin_missing"}
+    if expected and remote != expected:
+        return {**metadata, "first_blocker": "source_root_origin_mismatch"}
+    if fetch_origin and not fetch_origin_ok:
+        return {**metadata, "first_blocker": "source_root_fetch_origin_failed"}
+    if not head:
+        return {**metadata, "first_blocker": "source_root_head_missing"}
+    return {**metadata, "first_blocker": None}
+
+
+def build_agents_last_exam_local_source_readiness(
+    *,
+    source_root: str | None,
+    expected_repo_url: str = AGENTS_LAST_EXAM_DEFAULT_REPO_URL,
+    runner_python_module: str = "ale_run",
+    fetch_origin: bool = False,
+    require_upstream_current: bool = False,
+) -> dict[str, Any]:
+    """Verify a redacted public ALE source checkout contract without running ALE."""
+
+    git_metadata = _agents_last_exam_source_git_metadata(
+        source_root,
+        expected_repo_url=expected_repo_url,
+        fetch_origin=fetch_origin,
+    )
+    module_probe = _agents_last_exam_python_module_probe(
+        runner_python_module,
+        source_root=source_root,
+    )
+    blockers: list[str] = []
+    if git_metadata.get("first_blocker"):
+        blockers.append(str(git_metadata["first_blocker"]))
+    if require_upstream_current:
+        if git_metadata.get("upstream_declared") is not True:
+            blockers.append("source_root_upstream_missing")
+        elif git_metadata.get("head_matches_upstream") is not True:
+            behind = git_metadata.get("upstream_behind_count")
+            ahead = git_metadata.get("upstream_ahead_count")
+            if isinstance(behind, int) and behind > 0:
+                blockers.append("source_root_behind_upstream")
+            elif isinstance(ahead, int) and ahead > 0:
+                blockers.append("source_root_ahead_of_upstream")
+            else:
+                blockers.append("source_root_not_at_upstream_head")
+    if module_probe.get("available") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(module_probe.get("first_blocker"), limit=80)
+            or "runner_python_module_not_available"
+        )
+    ready = not blockers
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_SOURCE_READINESS_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_redacted_ale_source_lock",
+        "blockers": blockers,
+        "source": {
+            "kind": "git_source_root",
+            "expected_repo": git_metadata.get("expected_repo"),
+            "remote": git_metadata.get("remote"),
+            "remote_matches_expected": git_metadata.get("remote_matches_expected")
+            is True,
+            "head": git_metadata.get("head"),
+            "upstream_ref": git_metadata.get("upstream_ref"),
+            "upstream_head": git_metadata.get("upstream_head"),
+            "upstream_declared": git_metadata.get("upstream_declared") is True,
+            "head_matches_upstream": git_metadata.get("head_matches_upstream")
+            is True,
+            "upstream_ahead_count": git_metadata.get("upstream_ahead_count"),
+            "upstream_behind_count": git_metadata.get("upstream_behind_count"),
+            "fetch_origin_attempted": git_metadata.get("fetch_origin_attempted")
+            is True,
+            "fetch_origin_ok": git_metadata.get("fetch_origin_ok") is True,
+            "require_upstream_current": bool(require_upstream_current),
+            "git_probe_available": git_metadata.get("git_probe_available") is True,
+            "is_git_checkout": git_metadata.get("is_git_checkout") is True,
+            "source_root_declared": git_metadata.get("source_root_declared") is True,
+            "source_root_available": git_metadata.get("source_root_available") is True,
+            "source_root_path_recorded": False,
+        },
+        "runner_probe": {
+            "python_module": module_probe.get("module"),
+            "python_module_declared": module_probe.get("declared") is True,
+            "python_module_available": module_probe.get("available") is True,
+            "python_module_path_recorded": False,
+            "source_root_path_recorded": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "use_redacted_source_lock_for_runner_readiness"
+            if ready
+            else "repair_public_ale_source_lock_before_runner_execution",
+            "minimum_next_evidence": (
+                "A durable public ALE checkout with matching origin, commit, and "
+                "importable runner module, followed by no-upload runner readiness."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+
+def _agents_last_exam_relative_file_probe(
+    source_root: str | None,
+    relative_path: str | None,
+) -> dict[str, Any]:
+    label = _agents_last_exam_public_id(relative_path, limit=160)
+    if not relative_path:
+        return {
+            "relative_path": None,
+            "declared": False,
+            "exists": False,
+            "first_blocker": "experiment_spec_missing",
+            "source_root_path_recorded": False,
+        }
+    text = relative_path.replace("\\", "/").strip()
+    parts = [part for part in text.split("/") if part]
+    if text.startswith("/") or text.startswith("~") or any(
+        part in {".", ".."} for part in parts
+    ):
+        return {
+            "relative_path": label,
+            "declared": True,
+            "exists": False,
+            "first_blocker": "experiment_spec_relative_path_not_public_safe",
+            "source_root_path_recorded": False,
+        }
+    if not source_root:
+        return {
+            "relative_path": label,
+            "declared": True,
+            "exists": False,
+            "first_blocker": "source_root_missing",
+            "source_root_path_recorded": False,
+        }
+    try:
+        source_path = Path(source_root).expanduser()
+    except (OSError, RuntimeError):
+        source_path = None
+    if source_path is None or not source_path.is_dir():
+        return {
+            "relative_path": label,
+            "declared": True,
+            "exists": False,
+            "first_blocker": "source_root_not_available",
+            "source_root_path_recorded": False,
+        }
+    candidate = source_path.joinpath(*parts)
+    try:
+        resolved_source = source_path.resolve()
+        resolved_candidate = candidate.resolve()
+        inside_root = resolved_candidate == resolved_source or (
+            resolved_source in resolved_candidate.parents
+        )
+    except OSError:
+        inside_root = False
+    exists = bool(inside_root and candidate.is_file())
+    return {
+        "relative_path": label,
+        "declared": True,
+        "exists": exists,
+        "first_blocker": None if exists else "experiment_spec_file_missing",
+        "source_root_path_recorded": False,
+    }
+
+
+def build_agents_last_exam_local_launch_packet(
+    *,
+    source_root: str | None,
+    experiment_spec_relative_path: str | None,
+    selected_task_id: str | None = None,
+    expected_repo_url: str = AGENTS_LAST_EXAM_DEFAULT_REPO_URL,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    runner_binary: str | None = "python3",
+    runner_python_module: str | None = "ale_run",
+    runner_command_label: str | None = "python-m-ale-run",
+    operator_authorized: bool = False,
+    allow_public_task_material: bool = False,
+    fetch_origin: bool = False,
+    require_upstream_current: bool = False,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a redacted no-execution packet for a future ALE dry-run."""
+
+    source_readiness = build_agents_last_exam_local_source_readiness(
+        source_root=source_root,
+        expected_repo_url=expected_repo_url,
+        runner_python_module=runner_python_module or "ale_run",
+        fetch_origin=fetch_origin,
+        require_upstream_current=require_upstream_current,
+    )
+    runner_readiness = build_agents_last_exam_local_runner_readiness(
+        selected_task_id=selected_task_id,
+        snapshot=snapshot,
+        provider_kind=provider_kind,
+        image_ref=image_ref,
+        alternate_image_ref=alternate_image_ref,
+        runner_binary=runner_binary,
+        runner_python_module=runner_python_module,
+        runner_source_root=source_root,
+        runner_command_label=runner_command_label,
+        operator_authorized=operator_authorized,
+        allow_public_task_material=allow_public_task_material,
+        image_metadata=image_metadata,
+        alternate_image_metadata=alternate_image_metadata,
+        disk_headroom=disk_headroom,
+    )
+    spec_probe = _agents_last_exam_relative_file_probe(
+        source_root,
+        experiment_spec_relative_path,
+    )
+    blockers: list[str] = []
+    if source_readiness.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(source_readiness.get("first_blocker"), limit=80)
+            or "ale_source_not_ready"
+        )
+    if runner_readiness.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(runner_readiness.get("first_blocker"), limit=80)
+            or "ale_runner_not_ready"
+        )
+    if spec_probe.get("exists") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(spec_probe.get("first_blocker"), limit=80)
+            or "experiment_spec_not_ready"
+        )
+    ready = not blockers
+    source = (
+        source_readiness.get("source")
+        if isinstance(source_readiness.get("source"), dict)
+        else {}
+    )
+    runner_probe = (
+        runner_readiness.get("runner_probe")
+        if isinstance(runner_readiness.get("runner_probe"), dict)
+        else {}
+    )
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_LAUNCH_PACKET_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": _agents_last_exam_public_id(selected_task_id, limit=160)
+        or "metadata_only_candidate",
+        "snapshot": _agents_last_exam_public_id(snapshot, limit=80)
+        or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_operator_triggered_no_upload_ale_dry_run",
+        "blockers": blockers,
+        "source_lock": {
+            "expected_repo": source.get("expected_repo"),
+            "remote": source.get("remote"),
+            "remote_matches_expected": source.get("remote_matches_expected") is True,
+            "head": source.get("head"),
+            "upstream_ref": source.get("upstream_ref"),
+            "upstream_head": source.get("upstream_head"),
+            "upstream_declared": source.get("upstream_declared") is True,
+            "head_matches_upstream": source.get("head_matches_upstream") is True,
+            "upstream_ahead_count": source.get("upstream_ahead_count"),
+            "upstream_behind_count": source.get("upstream_behind_count"),
+            "fetch_origin_attempted": source.get("fetch_origin_attempted") is True,
+            "fetch_origin_ok": source.get("fetch_origin_ok") is True,
+            "require_upstream_current": source.get("require_upstream_current") is True,
+            "source_root_path_recorded": False,
+        },
+        "runner": {
+            "command_label": runner_probe.get("command_label"),
+            "binary": runner_probe.get("binary"),
+            "python_module": runner_probe.get("python_module"),
+            "binary_available": runner_probe.get("binary_available") is True,
+            "python_module_available": runner_probe.get("python_module_available")
+            is True,
+            "source_root_path_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "experiment_spec": {
+            "relative_path": spec_probe.get("relative_path"),
+            "declared": spec_probe.get("declared") is True,
+            "exists": spec_probe.get("exists") is True,
+            "content_read": False,
+            "source_root_path_recorded": False,
+        },
+        "launch_packet": {
+            "mode": "no_execution_launch_packet",
+            "command_shape": "python-m-ale-run-dry-run",
+            "will_execute": False,
+            "will_start_container": False,
+            "will_read_task_body": False,
+            "will_invoke_model_api": False,
+            "will_upload": False,
+            "will_submit": False,
+            "will_capture_screenshot": False,
+            "will_record_credentials": False,
+            "will_record_local_paths": False,
+        },
+        "boundary": {
+            "local_only": True,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "operator_trigger_exact_no_upload_ale_dry_run"
+            if ready
+            else "repair_ale_launch_packet_blocker_before_execution",
+            "minimum_next_evidence": (
+                "A human/operator-triggered ALE dry-run using the redacted source "
+                "lock, runner label, and experiment spec, followed by compact "
+                "run/eval/events ingest only."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "experiment_spec_content_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
+
+
+def build_agents_last_exam_local_runner_readiness(
+    *,
+    selected_task_id: str | None = None,
+    snapshot: str = AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+    provider_kind: str = "docker",
+    image_ref: str = AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    alternate_image_ref: str = AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    runner_binary: str | None = None,
+    runner_python_module: str | None = None,
+    runner_source_root: str | None = None,
+    runner_command_label: str | None = None,
+    operator_authorized: bool = False,
+    allow_public_task_material: bool = False,
+    fetch_origin: bool = False,
+    require_upstream_current: bool = False,
+    image_metadata: dict[str, Any] | None = None,
+    alternate_image_metadata: dict[str, Any] | None = None,
+    disk_headroom: dict[str, Any] | None = None,
+    preflight: dict[str, Any] | None = None,
+    dry_run_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Check whether a real local ALE dry-run runner is configured.
+
+    This is still a no-execution gate: it may inspect Docker image metadata and
+    the local PATH for a runner binary, but it does not start containers, read
+    task bodies, invoke model APIs, upload, submit, or record command argv.
+    """
+
+    preflight_payload = (
+        preflight
+        if isinstance(preflight, dict)
+        else build_agents_last_exam_local_preflight(
+            selected_task_id=selected_task_id,
+            snapshot=snapshot,
+            provider_kind=provider_kind,
+            image_ref=image_ref,
+            alternate_image_ref=alternate_image_ref,
+            image_metadata=image_metadata,
+            alternate_image_metadata=alternate_image_metadata,
+            disk_headroom=disk_headroom,
+        )
+    )
+    plan_payload = (
+        dry_run_plan
+        if isinstance(dry_run_plan, dict)
+        else build_agents_last_exam_local_dry_run_plan(
+            selected_task_id=selected_task_id,
+            snapshot=snapshot,
+            provider_kind=provider_kind,
+            image_ref=image_ref,
+            alternate_image_ref=alternate_image_ref,
+            image_metadata=image_metadata,
+            alternate_image_metadata=alternate_image_metadata,
+            disk_headroom=disk_headroom,
+            preflight=preflight_payload,
+        )
+    )
+    runner_probe = _agents_last_exam_runner_binary_probe(runner_binary)
+    module_probe = _agents_last_exam_python_module_probe(
+        runner_python_module,
+        source_root=runner_source_root,
+    )
+    source_lock = None
+    if fetch_origin or require_upstream_current:
+        source_lock = build_agents_last_exam_local_source_readiness(
+            source_root=runner_source_root,
+            runner_python_module=runner_python_module or "ale_run",
+            fetch_origin=fetch_origin,
+            require_upstream_current=require_upstream_current,
+        )
+    command_label = _agents_last_exam_public_id(
+        runner_command_label
+        or (
+            f"{runner_probe.get('binary')}-m-{module_probe.get('module')}"
+            if runner_probe.get("binary") and module_probe.get("module")
+            else runner_probe.get("binary")
+        ),
+        limit=120,
+    )
+    module_required = _agents_last_exam_runner_binary_requires_python_module(
+        runner_binary
+    )
+    blockers: list[str] = []
+    if operator_authorized is not True:
+        blockers.append("operator_authorization_missing")
+    if allow_public_task_material is not True:
+        blockers.append("public_task_material_authorization_missing")
+    if plan_payload.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(plan_payload.get("first_blocker"), limit=80)
+            or "ale_local_dry_run_plan_not_ready"
+        )
+    if not command_label:
+        blockers.append("runner_command_missing")
+    if runner_probe.get("available") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(runner_probe.get("first_blocker"), limit=80)
+            or "runner_binary_not_available"
+        )
+    if module_required and module_probe.get("declared") is not True:
+        blockers.append("runner_python_module_missing")
+    if module_probe.get("declared") is True and module_probe.get("available") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(module_probe.get("first_blocker"), limit=80)
+            or "runner_python_module_not_available"
+        )
+    if source_lock is not None and source_lock.get("ready") is not True:
+        blockers.append(
+            _agents_last_exam_public_id(source_lock.get("first_blocker"), limit=80)
+            or "ale_source_lock_not_ready"
+        )
+    ready = not blockers
+
+    return {
+        "schema_version": AGENTS_LAST_EXAM_LOCAL_RUNNER_READINESS_SCHEMA_VERSION,
+        "benchmark_id": AGENTS_LAST_EXAM_BENCHMARK_ID,
+        "task_id": plan_payload.get("task_id") or "metadata_only_candidate",
+        "snapshot": plan_payload.get("snapshot") or AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        "preflight_ready": preflight_payload.get("ready") is True,
+        "dry_run_plan_ready": plan_payload.get("ready") is True,
+        "runner_ready": ready,
+        "ready": ready,
+        "first_blocker": blockers[0]
+        if blockers
+        else "ready_for_local_ale_dry_run_runner",
+        "blockers": blockers,
+        "runner_probe": {
+            "command_label": command_label,
+            "binary": runner_probe.get("binary"),
+            "binary_declared": runner_probe.get("declared") is True,
+            "binary_available": runner_probe.get("available") is True,
+            "python_module": module_probe.get("module"),
+            "python_module_declared": module_probe.get("declared") is True,
+            "python_module_available": module_probe.get("available") is True,
+            "source_root_declared": module_probe.get("source_root_declared") is True,
+            "source_root_available": module_probe.get("source_root_available") is True,
+            "source_root_path_recorded": False,
+            "python_module_path_recorded": False,
+            "binary_path_recorded": False,
+            "command_argv_recorded": False,
+            "first_blocker": _agents_last_exam_public_id(
+                runner_probe.get("first_blocker"),
+                limit=80,
+            ),
+        },
+        "source_lock": source_lock,
+        "boundary": {
+            "local_only": True,
+            "no_cloud": provider_kind == "docker",
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "operator_authorized_local_container_start": operator_authorized is True,
+            "operator_authorized_public_task_material": (
+                allow_public_task_material is True
+            ),
+            "container_started": False,
+            "task_body_read": False,
+            "model_api_invoked": False,
+            "model_api_allowed": False,
+            "upload_allowed": False,
+            "submit_allowed": False,
+            "raw_trajectory_read": False,
+            "screenshot_captured": False,
+            "credential_values_recorded": False,
+            "hidden_references_allowed": False,
+            "production_actions_allowed": False,
+            "local_paths_recorded": False,
+        },
+        "decision": {
+            "next_allowed_action": "run_configured_no_upload_ale_local_dry_run"
+            if ready
+            else "configure_verified_ale_local_runner_before_execution",
+            "minimum_next_evidence": (
+                "A configured local runner command label and PATH-visible runner "
+                "binary, followed by one no-upload dry-run that produces compact "
+                "run/eval/events metadata only."
+            ),
+            "must_not_claim": [
+                "ALE task success",
+                "ALE score uplift",
+                "Goal Harness treatment advantage",
+                "leaderboard evidence",
+            ],
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "task_text_read": False,
+            "raw_artifacts_read": False,
+            "local_paths_recorded": False,
+            "container_started": False,
+        },
+    }
 
 
 def build_agents_last_exam_result_benchmark_report(

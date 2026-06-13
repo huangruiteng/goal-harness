@@ -19,9 +19,14 @@ from .bootstrap import (
     render_bootstrap_markdown,
 )
 from .benchmark import (
+    AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+    AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+    AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
     AGENTISSUE_BENCHMARK_ID,
     AGENTISSUE_CODEX_CLI_RUNNER_EXECUTION_GATE_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION,
+    AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_SCHEMA_VERSION,
+    AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_SYNTHETIC_STAGING_SCHEMA_VERSION,
     AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION,
@@ -31,6 +36,8 @@ from .benchmark import (
     build_agentissue_codex_cli_runner_wrapper,
     materialize_agentissue_codex_cli_runner_execution_gate,
     materialize_agentissue_codex_cli_runner_first_run_handoff,
+    materialize_agentissue_codex_cli_runner_private_script,
+    materialize_agentissue_codex_cli_runner_real_result,
     materialize_agentissue_codex_cli_runner_run_gate,
     materialize_agentissue_codex_cli_runner_synthetic_staging,
     materialize_agentissue_codex_cli_runner_target_handoff,
@@ -41,7 +48,27 @@ from .benchmark import (
     TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE,
     TERMINAL_BENCH_MODES,
     build_agents_last_exam_result_benchmark_report,
+    TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS,
+    agent_kwargs_from_invocation,
+    build_agents_last_exam_local_dry_run_plan,
+    build_agents_last_exam_local_exact_dry_run_result,
+    build_agents_last_exam_host_codex_cua_no_task_smoke_from_environment,
+    build_agents_last_exam_host_codex_cli_route,
+    build_agents_last_exam_local_preflight,
+    build_agents_last_exam_local_runner_readiness,
+    build_agents_last_exam_local_source_readiness,
+    build_agents_last_exam_baked_task_input_readiness,
+    build_agents_last_exam_baked_task_input_scan,
+    build_agents_last_exam_candidate_task_data_scan,
+    build_agents_last_exam_task_material_readiness,
+    build_agents_last_exam_validation_run_gate,
+    build_agents_last_exam_local_launch_packet,
     build_benchmark_claim_review,
+    build_benchmark_attempt_learning_gate,
+    build_benchmark_adapter_kwarg_absorption_review,
+    build_benchmark_learning_ledger,
+    build_benchmark_lifecycle_state,
+    build_benchmark_runner_invariant_review,
     build_benchmark_verifier_attribution_review,
     build_terminal_bench_benchmark_run,
     build_terminal_bench_harbor_result_benchmark_run,
@@ -71,6 +98,7 @@ from .history import (
     append_active_user_assisted_pilot,
     append_benchmark_comparison,
     append_benchmark_experiment_report,
+    append_benchmark_learning_ledger,
     append_benchmark_result,
     append_benchmark_run,
     collect_history,
@@ -80,6 +108,7 @@ from .history import (
     render_active_user_assisted_pilot_append_markdown,
     render_benchmark_comparison_append_markdown,
     render_benchmark_experiment_report_append_markdown,
+    render_benchmark_learning_ledger_append_markdown,
     render_benchmark_result_append_markdown,
     render_benchmark_run_append_markdown,
     render_history_markdown,
@@ -108,7 +137,9 @@ from .promotion_gate import build_promotion_gate, render_promotion_gate_markdown
 from .quota import (
     build_quota_plan,
     build_quota_should_run,
+    record_quota_monitor_poll,
     render_quota_markdown,
+    render_quota_monitor_poll_markdown,
     render_quota_should_run_markdown,
     render_quota_slot_preview_markdown,
     spend_quota_slot,
@@ -130,6 +161,7 @@ from .status import (
     compact_active_user_assisted_pilot,
     compact_benchmark_comparison,
     compact_benchmark_experiment_report,
+    compact_benchmark_learning_ledger,
     compact_benchmark_result,
     compact_benchmark_run,
     render_status_markdown,
@@ -140,7 +172,7 @@ from .status_server import (
     DEFAULT_STATUS_PORT,
     serve_status,
 )
-from .todos import add_goal_todo, render_todo_markdown
+from .todos import archive_completed_todos, add_goal_todo, render_todo_markdown
 from .upgrade import build_upgrade_plan, render_upgrade_plan_markdown
 from .worker_bridge import (
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
@@ -183,10 +215,16 @@ def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> No
 
 
 def render_benchmark_artifact_path_filter_markdown(payload: dict[str, object]) -> str:
+    artifact_policy = (
+        payload.get("artifact_policy")
+        if isinstance(payload.get("artifact_policy"), dict)
+        else {}
+    )
     lines = [
         "# Benchmark Artifact Path Filter",
         "",
         f"- Schema: `{payload.get('schema_version')}`",
+        f"- Adapter policy: `{artifact_policy.get('adapter_kind')}`",
         f"- Allowed to read: `{payload.get('allowed_to_read_count')}`",
         f"- Blocked: `{payload.get('blocked_count')}`",
         f"- Full paths recorded: `{payload.get('path_recorded')}`",
@@ -198,6 +236,509 @@ def render_benchmark_artifact_path_filter_markdown(payload: dict[str, object]) -
     if isinstance(blocked, dict) and blocked:
         reasons = ", ".join(f"`{key}`={value}" for key, value in blocked.items())
         lines.append("- Blocked reasons: " + reasons)
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_preflight_markdown(payload: dict[str, object]) -> str:
+    provider = (
+        payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
+    )
+    required_image = (
+        provider.get("required_image")
+        if isinstance(provider.get("required_image"), dict)
+        else {}
+    )
+    boundary = (
+        payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    )
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Preflight",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Task: `{payload.get('task_id')}`",
+        f"- Snapshot: `{payload.get('snapshot')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Provider: `{provider.get('kind')}`",
+        f"- No cloud: `{provider.get('no_cloud')}`",
+        f"- Required image present: `{required_image.get('present')}`",
+        f"- Required image arch/os: `{required_image.get('architecture')}`/`{required_image.get('os')}`",
+        f"- Container started: `{boundary.get('container_started')}`",
+        f"- Task body read: `{boundary.get('task_body_read')}`",
+        f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_dry_run_plan_markdown(payload: dict[str, object]) -> str:
+    adapter_plan = (
+        payload.get("adapter_plan")
+        if isinstance(payload.get("adapter_plan"), dict)
+        else {}
+    )
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Dry-Run Plan",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Task: `{payload.get('task_id')}`",
+        f"- Snapshot: `{payload.get('snapshot')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Mode: `{adapter_plan.get('mode')}`",
+        f"- Provider: `{adapter_plan.get('provider')}`",
+        f"- Will start container: `{adapter_plan.get('will_start_container')}`",
+        f"- Will read task body: `{adapter_plan.get('will_read_task_body')}`",
+        f"- Will upload/submit: `{adapter_plan.get('will_upload')}`/`{adapter_plan.get('will_submit')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_runner_readiness_markdown(
+    payload: dict[str, object],
+) -> str:
+    runner_probe = (
+        payload.get("runner_probe")
+        if isinstance(payload.get("runner_probe"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Runner Readiness",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Task: `{payload.get('task_id')}`",
+        f"- Snapshot: `{payload.get('snapshot')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Preflight ready: `{payload.get('preflight_ready')}`",
+        f"- Dry-run plan ready: `{payload.get('dry_run_plan_ready')}`",
+        f"- Runner binary: `{runner_probe.get('binary')}`",
+        f"- Runner binary available: `{runner_probe.get('binary_available')}`",
+        f"- Runner Python module: `{runner_probe.get('python_module')}`",
+        f"- Runner Python module available: `{runner_probe.get('python_module_available')}`",
+        f"- Runner source root declared/available: `{runner_probe.get('source_root_declared')}`/`{runner_probe.get('source_root_available')}`",
+        f"- Container started: `{boundary.get('container_started')}`",
+        f"- Public task material authorized: `{boundary.get('operator_authorized_public_task_material')}`",
+        f"- Upload/submit allowed: `{boundary.get('upload_allowed')}`/`{boundary.get('submit_allowed')}`",
+        f"- Model API allowed/invoked: `{boundary.get('model_api_allowed')}`/`{boundary.get('model_api_invoked')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_source_readiness_markdown(
+    payload: dict[str, object],
+) -> str:
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    runner_probe = (
+        payload.get("runner_probe")
+        if isinstance(payload.get("runner_probe"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Source Readiness",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Expected repo: `{source.get('expected_repo')}`",
+        f"- Remote matches expected: `{source.get('remote_matches_expected')}`",
+        f"- Source head: `{source.get('head')}`",
+        f"- Upstream current: `{source.get('head_matches_upstream')}`",
+        f"- Upstream ahead/behind: `{source.get('upstream_ahead_count')}`/`{source.get('upstream_behind_count')}`",
+        f"- Fetch origin attempted/ok: `{source.get('fetch_origin_attempted')}`/`{source.get('fetch_origin_ok')}`",
+        f"- Source root path recorded: `{source.get('source_root_path_recorded')}`",
+        f"- Runner Python module: `{runner_probe.get('python_module')}`",
+        f"- Runner Python module available: `{runner_probe.get('python_module_available')}`",
+        f"- Container started: `{boundary.get('container_started')}`",
+        f"- Task body read: `{boundary.get('task_body_read')}`",
+        f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_task_material_readiness_markdown(
+    payload: dict[str, object],
+) -> str:
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    public_lists = (
+        payload.get("public_task_lists")
+        if isinstance(payload.get("public_task_lists"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Task Material Readiness",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Task: `{task.get('task_id')}`",
+        f"- Task dir/card/scripts: `{task.get('task_dir_available')}`/`{task.get('task_card_json_present')}`/`{task.get('scripts_dir_present')}`",
+        f"- Scorer script count: `{task.get('scorer_script_count')}`",
+        f"- Task data checked/ready/source: `{(payload.get('task_data') if isinstance(payload.get('task_data'), dict) else {}).get('checked')}`/`{(payload.get('task_data') if isinstance(payload.get('task_data'), dict) else {}).get('ready')}`/`{(payload.get('task_data') if isinstance(payload.get('task_data'), dict) else {}).get('task_data_source')}`",
+        f"- Public list membership checked/present: `{public_lists.get('checked')}`/`{public_lists.get('present_count')}`",
+        f"- Task body/card/script content read: `{boundary.get('task_body_read')}`/`{boundary.get('task_card_content_read')}`/`{boundary.get('script_content_read')}`",
+        f"- Local paths/raw output recorded: `{boundary.get('local_paths_recorded')}`/`{boundary.get('raw_output_recorded')}`",
+        f"- Container/model/upload/submit: `{boundary.get('container_started')}`/`{boundary.get('model_api_invoked')}`/`{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_baked_task_input_readiness_markdown(
+    payload: dict[str, object],
+) -> str:
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
+    probe = payload.get("probe") if isinstance(payload.get("probe"), dict) else {}
+    boundary = (
+        payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Baked Task Input Readiness",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Selected task: `{task.get('task_id')}`",
+        f"- Image present: `{image.get('present')}`",
+        f"- Probe attempted/container started: `{probe.get('attempted')}`/`{probe.get('container_started')}`",
+        f"- Baked input present/readable: `{probe.get('baked_input_present')}`/`{probe.get('baked_input_readable')}`",
+        f"- Expected path recorded: `{probe.get('expected_path_recorded')}`",
+        f"- Task run/model/upload/submit: `{boundary.get('task_run_started')}`/`{boundary.get('model_api_invoked')}`/`{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Task data content read: `{boundary.get('task_data_content_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_baked_task_input_scan_markdown(
+    payload: dict[str, object],
+) -> str:
+    selected = (
+        payload.get("selected_tasks")
+        if isinstance(payload.get("selected_tasks"), dict)
+        else {}
+    )
+    probe = payload.get("probe") if isinstance(payload.get("probe"), dict) else {}
+    candidates = (
+        payload.get("candidates")
+        if isinstance(payload.get("candidates"), dict)
+        else {}
+    )
+    boundary = (
+        payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Baked Task Input Scan",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Selected/probed tasks: `{selected.get('selected_task_count')}`/`{selected.get('probed_task_count')}`",
+        f"- Probe attempted/container started: `{probe.get('attempted')}`/`{probe.get('container_started')}`",
+        f"- Baked input candidate count: `{probe.get('baked_input_candidate_count')}`",
+        f"- Candidate ids: `{candidates.get('eligible_baked_input_candidates')}`",
+        f"- Expected paths/argv/stdout recorded: `{probe.get('expected_path_recorded')}`/`{probe.get('command_argv_recorded')}`/`{probe.get('stdout_recorded')}`",
+        f"- Task run/model/upload/submit: `{boundary.get('task_run_started')}`/`{boundary.get('model_api_invoked')}`/`{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Task data content read/listed: `{boundary.get('task_data_content_read')}`/`{boundary.get('directory_listed')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_candidate_task_data_scan_markdown(
+    payload: dict[str, object],
+) -> str:
+    selected = (
+        payload.get("selected_task_lists")
+        if isinstance(payload.get("selected_task_lists"), dict)
+        else {}
+    )
+    summary = (
+        payload.get("scan_summary")
+        if isinstance(payload.get("scan_summary"), dict)
+        else {}
+    )
+    candidates = (
+        payload.get("candidate_tasks")
+        if isinstance(payload.get("candidate_tasks"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Candidate Task-Data Scan",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Selected tasks/lists: `{selected.get('selected_task_count')}`/`{selected.get('checked_list_count')}`",
+        f"- Configs checked/missing: `{summary.get('task_config_checked_count')}`/`{summary.get('task_config_missing_or_unreadable_count')}`",
+        f"- No-task-data formal/demo candidates: `{summary.get('formal_no_task_data_candidate_count')}`/`{summary.get('demo_no_task_data_candidate_count')}`",
+        f"- Eligible candidates: `{candidates.get('eligible_no_task_data_candidates')}`",
+        f"- Config line scan/source recorded: `{boundary.get('task_config_line_scan')}`/`{boundary.get('task_config_source_content_recorded')}`",
+        f"- Task card/script/instruction read: `{boundary.get('task_card_content_read')}`/`{boundary.get('script_content_read')}`/`{boundary.get('task_instruction_file_read')}`",
+        f"- Local paths/raw output recorded: `{boundary.get('local_paths_recorded')}`/`{boundary.get('raw_output_recorded')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_launch_packet_markdown(
+    payload: dict[str, object],
+) -> str:
+    source_lock = (
+        payload.get("source_lock")
+        if isinstance(payload.get("source_lock"), dict)
+        else {}
+    )
+    runner = payload.get("runner") if isinstance(payload.get("runner"), dict) else {}
+    experiment_spec = (
+        payload.get("experiment_spec")
+        if isinstance(payload.get("experiment_spec"), dict)
+        else {}
+    )
+    launch_packet = (
+        payload.get("launch_packet")
+        if isinstance(payload.get("launch_packet"), dict)
+        else {}
+    )
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Launch Packet",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Source head: `{source_lock.get('head')}`",
+        f"- Upstream current: `{source_lock.get('head_matches_upstream')}`",
+        f"- Fetch origin attempted/ok: `{source_lock.get('fetch_origin_attempted')}`/`{source_lock.get('fetch_origin_ok')}`",
+        f"- Source root path recorded: `{source_lock.get('source_root_path_recorded')}`",
+        f"- Runner command label: `{runner.get('command_label')}`",
+        f"- Runner module available: `{runner.get('python_module_available')}`",
+        f"- Experiment spec: `{experiment_spec.get('relative_path')}`",
+        f"- Experiment spec exists/content read: `{experiment_spec.get('exists')}`/`{experiment_spec.get('content_read')}`",
+        f"- Mode: `{launch_packet.get('mode')}`",
+        f"- Will execute/start container: `{launch_packet.get('will_execute')}`/`{launch_packet.get('will_start_container')}`",
+        f"- Will upload/submit: `{launch_packet.get('will_upload')}`/`{launch_packet.get('will_submit')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_local_exact_dry_run_result_markdown(
+    payload: dict[str, object],
+) -> str:
+    environment = (
+        payload.get("environment")
+        if isinstance(payload.get("environment"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Local Exact Dry-Run Result",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Exit code: `{payload.get('exit_code')}`",
+        f"- Experiment: `{payload.get('experiment')}`",
+        f"- Environment: `{environment.get('kind')}` / `{environment.get('route')}`",
+        f"- Concurrency: `{payload.get('concurrency')}`",
+        f"- Unit count declared/parsed: `{payload.get('unit_count_declared')}`/`{payload.get('unit_count_parsed')}`",
+        f"- Raw stdout recorded: `{boundary.get('raw_stdout_recorded')}`",
+        f"- Container started: `{boundary.get('container_started')}`",
+        f"- Task body read: `{boundary.get('task_body_read')}`",
+        f"- Model API invoked: `{boundary.get('model_api_invoked')}`",
+        f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_host_codex_cli_route_markdown(
+    payload: dict[str, object],
+) -> str:
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+    codex_cli = (
+        payload.get("host_codex_cli")
+        if isinstance(payload.get("host_codex_cli"), dict)
+        else {}
+    )
+    host_auth = (
+        payload.get("host_auth") if isinstance(payload.get("host_auth"), dict) else {}
+    )
+    cua_assets = (
+        payload.get("cua_mcp_assets")
+        if isinstance(payload.get("cua_mcp_assets"), dict)
+        else {}
+    )
+    ale_sandbox = (
+        payload.get("ale_sandbox")
+        if isinstance(payload.get("ale_sandbox"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Host Codex CLI Route",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Route mode: `{route.get('mode')}`",
+        f"- Host Codex binary/version: `{codex_cli.get('binary')}` / `{codex_cli.get('version')}`",
+        f"- Host Codex available: `{codex_cli.get('binary_available')}`",
+        f"- Host auth/config present: `{host_auth.get('auth_cache_present')}`/`{host_auth.get('config_present')}`",
+        f"- Credential values recorded: `{host_auth.get('credential_values_recorded')}`",
+        f"- Auth copied to sandbox: `{host_auth.get('auth_material_copied_to_sandbox')}`",
+        f"- CUA MCP assets ready: `{cua_assets.get('available')}`",
+        f"- ALE CUA smoke ready: `{ale_sandbox.get('cua_smoke_ready')}`",
+        f"- Runs Codex in sandbox: `{route.get('runs_codex_inside_ale_sandbox')}`",
+        f"- Container started/task read: `{boundary.get('container_started')}`/`{boundary.get('task_body_read')}`",
+        f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_host_codex_cua_no_task_smoke_markdown(
+    payload: dict[str, object],
+) -> str:
+    codex_exec = (
+        payload.get("codex_exec_surface")
+        if isinstance(payload.get("codex_exec_surface"), dict)
+        else {}
+    )
+    mcp_config = (
+        payload.get("codex_mcp_config")
+        if isinstance(payload.get("codex_mcp_config"), dict)
+        else {}
+    )
+    cua_bridge = (
+        payload.get("cua_mcp_bridge")
+        if isinstance(payload.get("cua_mcp_bridge"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Host Codex CUA No-Task E2E",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Route gate ready: `{payload.get('route_gate_ready')}`",
+        f"- Codex exec surface ready: `{codex_exec.get('available')}`",
+        f"- Codex MCP config ready: `{mcp_config.get('available')}`",
+        f"- CUA MCP bridge ready: `{cua_bridge.get('available')}`",
+        f"- Codex prompt sent: `{boundary.get('codex_prompt_sent')}`",
+        f"- Model API invoked: `{boundary.get('model_api_invoked')}`",
+        f"- Raw output recorded: `{boundary.get('raw_output_recorded')}`",
+        f"- Container started/task read: `{boundary.get('container_started')}`/`{boundary.get('task_body_read')}`",
+        f"- Upload/submit eligible: `{boundary.get('no_upload')}`/`{boundary.get('submit_eligible')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_agents_last_exam_validation_run_gate_markdown(
+    payload: dict[str, object],
+) -> str:
+    selected_task = (
+        payload.get("selected_task")
+        if isinstance(payload.get("selected_task"), dict)
+        else {}
+    )
+    readiness = (
+        payload.get("readiness_inputs")
+        if isinstance(payload.get("readiness_inputs"), dict)
+        else {}
+    )
+    model_policy = (
+        payload.get("model_policy")
+        if isinstance(payload.get("model_policy"), dict)
+        else {}
+    )
+    run_boundary = (
+        payload.get("run_boundary")
+        if isinstance(payload.get("run_boundary"), dict)
+        else {}
+    )
+    decision = (
+        payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    )
+    lines = [
+        "# Agents Last Exam Validation Run Gate",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Ready: `{payload.get('ready')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Selected task: `{selected_task.get('task_id')}`",
+        f"- Task material ready: `{readiness.get('task_material_ready')}`",
+        f"- Host Codex no-task E2E ready: `{readiness.get('host_codex_no_task_e2e_ready')}`",
+        f"- Exact dry-run ready: `{readiness.get('exact_dry_run_ready')}`",
+        f"- Launch packet ready: `{readiness.get('launch_packet_ready')}`",
+        f"- Fresh source required/ready: `{readiness.get('fresh_source_required')}`/`{readiness.get('fresh_source_ready')}`",
+        f"- Compact reducer ready: `{readiness.get('compact_result_reducer_ready')}`",
+        f"- Connectivity model: `{model_policy.get('connectivity_e2e_model')}`",
+        f"- Formal score agent/candidate: `{model_policy.get('formal_score_agent')}`/`{model_policy.get('formal_score_candidate')}`",
+        f"- Task run started by gate: `{run_boundary.get('task_run_started_by_this_gate')}`",
+        f"- Upload/submit eligible: `{run_boundary.get('no_upload')}`/`{run_boundary.get('submit_eligible')}`",
+        f"- Raw trajectory/task body read: `{run_boundary.get('raw_trajectory_read')}`/`{run_boundary.get('task_body_read_by_goal_harness')}`",
+        f"- Next action: {decision.get('next_allowed_action')}",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -233,6 +774,131 @@ def render_benchmark_claim_review_markdown(payload: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_benchmark_learning_ledger_markdown(payload: dict[str, object]) -> str:
+    lifecycle_gate = (
+        payload.get("lifecycle_gate")
+        if isinstance(payload.get("lifecycle_gate"), dict)
+        else {}
+    )
+    learning_quota_gate = (
+        payload.get("learning_quota_gate")
+        if isinstance(payload.get("learning_quota_gate"), dict)
+        else {}
+    )
+    routing = (
+        payload.get("routing") if isinstance(payload.get("routing"), dict) else {}
+    )
+    overhead = (
+        payload.get("overhead") if isinstance(payload.get("overhead"), dict) else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Learning Ledger",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Task: `{payload.get('task_id')}`",
+        f"- Comparison: `{payload.get('comparison_id')}`",
+        f"- Official delta: `{payload.get('official_task_score_delta')}`",
+        f"- Learning status: `{payload.get('learning_status')}`",
+        f"- Claim strength: `{payload.get('claim_strength')}`",
+        f"- Repair candidates: `{payload.get('repair_candidates')}`",
+        f"- Claim blockers: `{payload.get('claim_blockers')}`",
+        f"- Budget count allowed: `{lifecycle_gate.get('budget_count_allowed')}`",
+        f"- Learning spend allowed: `{learning_quota_gate.get('spend_allowed')}`",
+        f"- Actionable reasons: `{learning_quota_gate.get('actionable_reasons')}`",
+        f"- Overhead label: `{overhead.get('label')}`",
+        f"- Repeat allowed: `{routing.get('repeat_allowed')}`",
+        f"- New candidate allowed: `{routing.get('new_candidate_allowed')}`",
+        f"- Next action: {routing.get('next_allowed_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_attempt_learning_gate_markdown(
+    payload: dict[str, object],
+) -> str:
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Attempt Learning Gate",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Benchmark: `{payload.get('benchmark_id')}`",
+        f"- Mode: `{payload.get('mode')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Countable attempt: `{payload.get('countable_attempt')}`",
+        f"- Learning row present: `{payload.get('learning_row_present')}`",
+        f"- Learning row actionable: `{payload.get('learning_row_actionable')}`",
+        f"- Budget count allowed: `{payload.get('budget_count_allowed')}`",
+        f"- Repair candidates: `{payload.get('repair_candidates')}`",
+        f"- Next action: {payload.get('next_required_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_adapter_kwarg_absorption_review_markdown(
+    payload: dict[str, object],
+) -> str:
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Adapter Kwarg Absorption Review",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Adapter: `{payload.get('adapter_label')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Clean: `{payload.get('clean')}`",
+        f"- Generated GH kwargs: `{payload.get('generated_goal_harness_kwarg_count')}`",
+        f"- Absorbed GH kwargs: `{payload.get('absorbed_goal_harness_kwarg_count')}`",
+        f"- Leaked GH kwargs: `{payload.get('leaked_goal_harness_kwarg_count')}`",
+        f"- Leaked keys: `{payload.get('leaked_goal_harness_kwarg_keys')}`",
+        f"- Next action: {payload.get('next_required_action')}",
+        f"- Kwarg values recorded: `{(payload.get('claim_boundary') or {}).get('kwarg_values_recorded') if isinstance(payload.get('claim_boundary'), dict) else None}`",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_lifecycle_state_markdown(payload: dict[str, object]) -> str:
+    gates = payload.get("gates") if isinstance(payload.get("gates"), dict) else {}
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    return "\n".join(
+        [
+            "# Benchmark Lifecycle State",
+            "",
+            f"- Schema: `{payload.get('schema_version')}`",
+            f"- Current phase: `{payload.get('current_phase')}`",
+            f"- First blocker: `{payload.get('first_blocker')}`",
+            f"- Next transition: `{payload.get('next_required_transition')}`",
+            f"- Launch state countable: `{gates.get('launch_state_countable')}`",
+            f"- Compact ingest allowed: `{gates.get('compact_result_ingest_allowed')}`",
+            f"- Budget count allowed: `{gates.get('budget_count_allowed')}`",
+            f"- New candidate allowed: `{gates.get('new_candidate_allowed')}`",
+            f"- Compact only: `{read_boundary.get('compact_only')}`",
+            f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+        ]
+    ) + "\n"
+
+
 def render_benchmark_verifier_attribution_review_markdown(
     payload: dict[str, object],
 ) -> str:
@@ -255,6 +921,32 @@ def render_benchmark_verifier_attribution_review_markdown(
         f"- Clean model attribution: `{decision.get('clean_model_failure_attribution')}`",
         f"- Blockers: `{decision.get('blockers')}`",
         f"- Next action: {decision.get('next_action')}",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_runner_invariant_review_markdown(
+    payload: dict[str, object],
+) -> str:
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Runner Invariant Review",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Benchmark: `{payload.get('benchmark_id')}`",
+        f"- Mode: `{payload.get('mode')}`",
+        f"- Runner label: `{payload.get('runner_label')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Clean: `{payload.get('clean')}`",
+        f"- Mismatches: `{payload.get('mismatch_count')}`",
+        f"- Missing fields: `{payload.get('missing_field_count')}`",
+        f"- Repair: {payload.get('repair_recommendation')}",
         f"- Compact only: `{read_boundary.get('compact_only')}`",
         f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
@@ -1063,6 +1755,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Clear allowed child-agent domains.",
     )
     configure_goal_parser.add_argument(
+        "--waiting-on",
+        choices=["codex", "user_or_controller", "controller", "external_evidence"],
+        help="Override registry waiting owner for status/quota routing.",
+    )
+    configure_goal_parser.add_argument(
+        "--clear-waiting-on",
+        action="store_true",
+        help="Remove the registry waiting_on override.",
+    )
+    configure_goal_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the registry. Without this flag, configure-goal is a dry-run preview.",
@@ -1076,6 +1778,7 @@ def main(argv: list[str] | None = None) -> int:
             "append-benchmark-run",
             "append-benchmark-result",
             "append-benchmark-comparison",
+            "append-benchmark-learning-ledger",
             "append-benchmark-report",
             "append-agents-last-exam-result-report",
             "append-active-user-assisted-pilot",
@@ -1084,7 +1787,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
         help=(
             "Append a compact benchmark_run_v0, benchmark_result_v0, benchmark_comparison_v0, "
-            "benchmark_experiment_report_v0, ALE compact result report, or "
+            "benchmark_learning_ledger_v0, benchmark_experiment_report_v0, ALE compact result report, or "
             "active_user_assisted_pilot_v0 event; inspect duplicate run-index identities; "
             "or repair safe duplicate index rows."
         ),
@@ -1102,6 +1805,10 @@ def main(argv: list[str] | None = None) -> int:
     history_parser.add_argument(
         "--benchmark-comparison-json",
         help="Path to a benchmark_comparison_v0 JSON object. Use '-' to read stdin.",
+    )
+    history_parser.add_argument(
+        "--benchmark-learning-ledger-json",
+        help="Path to a benchmark_learning_ledger_v0 JSON object. Use '-' to read stdin.",
     )
     history_parser.add_argument(
         "--benchmark-report-json",
@@ -1364,6 +2071,24 @@ def main(argv: list[str] | None = None) -> int:
             "model APIs, upload, submit, ranking paths, or real task material."
         ),
     )
+    agentissue_runner_flow_parser.add_argument(
+        "--real-result-root",
+        help=(
+            "Reduce an already completed private real run from "
+            "benchmark_run.compact.json and benchmark_result.compact.json at "
+            "PATH. Reads compact files only; no Codex, Docker, model API, raw "
+            "artifact, upload, submit, or public ranking path is invoked."
+        ),
+    )
+    agentissue_runner_flow_parser.add_argument(
+        "--private-runner-root",
+        help=(
+            "Materialize a private runnable lagent_239 script plus public "
+            "manifest at PATH. The generator itself invokes no Codex, Docker, "
+            "model API, upload, submit, or public ranking path; the script is "
+            "for a later trusted local execution."
+        ),
+    )
     agentissue_runner_flow_parser.add_argument("--classification")
     agentissue_runner_flow_parser.add_argument("--recommended-action")
     agentissue_runner_flow_parser.add_argument(
@@ -1384,7 +2109,7 @@ def main(argv: list[str] | None = None) -> int:
     agentissue_runner_flow_parser.add_argument(
         "--execute",
         action="store_true",
-        help="Append the compact no-run wrapper readiness event.",
+        help="Append the selected compact runner-flow event.",
     )
     agentissue_runner_flow_parser.add_argument(
         "--no-global-sync",
@@ -1405,6 +2130,814 @@ def main(argv: list[str] | None = None) -> int:
         "artifact_paths",
         nargs="+",
         help="Candidate benchmark artifact paths to classify without reading.",
+    )
+    benchmark_artifact_filter_parser.add_argument(
+        "--adapter-kind",
+        default="default",
+        help=(
+            "Benchmark adapter artifact policy key. Unknown values fall back to "
+            "default without recording paths."
+        ),
+    )
+    benchmark_artifact_filter_parser.add_argument(
+        "--allow-public-filename",
+        action="append",
+        default=[],
+        help=(
+            "Additional public compact basename to allow for this classification "
+            "run. Only the basename is used and values are filtered."
+        ),
+    )
+
+    ale_local_preflight_parser = benchmark_sub.add_parser(
+        "ale-local-preflight",
+        help=(
+            "Check Agents' Last Exam local no-cloud/no-upload adapter readiness. "
+            "This may inspect local Docker image metadata, but it does not start "
+            "containers, read task bodies, call model APIs, upload, or claim "
+            "leaderboard evidence."
+        ),
+    )
+    add_subcommand_format(ale_local_preflight_parser)
+    ale_local_preflight_parser.add_argument(
+        "--selected-task-id",
+        help="Optional public task id label for the metadata-only candidate.",
+    )
+    ale_local_preflight_parser.add_argument(
+        "--snapshot",
+        default=AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        help="ALE snapshot label to check. Defaults to cpu-free-ubuntu.",
+    )
+    ale_local_preflight_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Primary local Docker image ref to inspect.",
+    )
+    ale_local_preflight_parser.add_argument(
+        "--alternate-image",
+        default=AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+        help="Optional alternate local Docker image ref to inspect.",
+    )
+    ale_local_preflight_parser.add_argument(
+        "--provider-kind",
+        choices=["docker"],
+        default="docker",
+        help="Provider kind. Only local docker is preflight-ready.",
+    )
+    ale_local_preflight_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the local no-cloud/no-upload preflight is ready.",
+    )
+    ale_local_preflight_parser.add_argument(
+        "--no-docker-probe",
+        action="store_true",
+        help=(
+            "Do not call Docker; emit a fixture-like blocked preflight. "
+            "Used by dependency-free smokes."
+        ),
+    )
+
+    ale_local_dry_run_plan_parser = benchmark_sub.add_parser(
+        "ale-local-dry-run-plan",
+        help=(
+            "Build an Agents' Last Exam local adapter dry-run plan without "
+            "running the adapter. This contract-only gate may inspect local "
+            "Docker image metadata, but it does not start containers, read task "
+            "bodies, invoke model APIs, upload, or claim score evidence."
+        ),
+    )
+    add_subcommand_format(ale_local_dry_run_plan_parser)
+    ale_local_dry_run_plan_parser.add_argument(
+        "--selected-task-id",
+        help="Optional public task id label for the metadata-only candidate.",
+    )
+    ale_local_dry_run_plan_parser.add_argument(
+        "--snapshot",
+        default=AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        help="ALE snapshot label to check. Defaults to cpu-free-ubuntu.",
+    )
+    ale_local_dry_run_plan_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Primary local Docker image ref to inspect.",
+    )
+    ale_local_dry_run_plan_parser.add_argument(
+        "--alternate-image",
+        default=AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+        help="Optional alternate local Docker image ref to inspect.",
+    )
+    ale_local_dry_run_plan_parser.add_argument(
+        "--provider-kind",
+        choices=["docker"],
+        default="docker",
+        help="Provider kind. Only local docker is dry-run-plan-ready.",
+    )
+    ale_local_dry_run_plan_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the contract-only dry-run plan is ready.",
+    )
+    ale_local_dry_run_plan_parser.add_argument(
+        "--no-docker-probe",
+        action="store_true",
+        help=(
+            "Do not call Docker; emit a fixture-like blocked plan. "
+            "Used by dependency-free smokes."
+        ),
+    )
+
+    ale_local_runner_readiness_parser = benchmark_sub.add_parser(
+        "ale-local-runner-readiness",
+        help=(
+            "Check whether a real Agents' Last Exam local dry-run runner is "
+            "explicitly configured. This may inspect local Docker image metadata "
+            "and PATH availability for a runner binary, but it does not start "
+            "containers, read task bodies, invoke model APIs, upload, or submit."
+        ),
+    )
+    add_subcommand_format(ale_local_runner_readiness_parser)
+    ale_local_runner_readiness_parser.add_argument(
+        "--selected-task-id",
+        help="Optional public task id label for the metadata-only candidate.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--snapshot",
+        default=AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        help="ALE snapshot label to check. Defaults to cpu-free-ubuntu.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Primary local Docker image ref to inspect.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--alternate-image",
+        default=AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+        help="Optional alternate local Docker image ref to inspect.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--provider-kind",
+        choices=["docker"],
+        default="docker",
+        help="Provider kind. Only local docker is runner-ready.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--runner-binary",
+        help=(
+            "PATH-visible runner binary name to probe. Absolute or relative paths "
+            "are rejected so local paths are not recorded."
+        ),
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--runner-python-module",
+        help=(
+            "Optional Python module to probe when the runner command is "
+            "`python -m <module>`. The module path is never recorded."
+        ),
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--runner-source-root",
+        help=(
+            "Optional local source checkout root to add only for module probing. "
+            "The local path is never recorded in output."
+        ),
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--runner-command-label",
+        help=(
+            "Public-safe label for the configured runner command. The command "
+            "argv itself is never recorded."
+        ),
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--operator-authorized",
+        action="store_true",
+        help="Mark that the operator authorized local container start for dry-run.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--allow-public-task-material",
+        action="store_true",
+        help="Mark that public ALE task material may be touched by a later dry-run.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the local runner readiness gate is ready.",
+    )
+    ale_local_runner_readiness_parser.add_argument(
+        "--no-docker-probe",
+        action="store_true",
+        help=(
+            "Do not call Docker; emit a fixture-like blocked readiness payload. "
+            "Used by dependency-free smokes."
+        ),
+    )
+
+    ale_local_source_readiness_parser = benchmark_sub.add_parser(
+        "ale-local-source-readiness",
+        help=(
+            "Check whether a local Agents' Last Exam source checkout can be used "
+            "as a redacted public runner source lock. This reads git metadata and "
+            "module availability only; it does not start containers, read task "
+            "bodies, invoke model APIs, upload, or submit."
+        ),
+    )
+    add_subcommand_format(ale_local_source_readiness_parser)
+    ale_local_source_readiness_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to probe. The path is never recorded.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--expected-repo-url",
+        default="https://github.com/rdi-berkeley/agents-last-exam.git",
+        help="Expected public ALE repository URL.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--runner-python-module",
+        default="ale_run",
+        help="Python module expected to provide the ALE runner CLI.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--fetch-origin",
+        action="store_true",
+        help=(
+            "Run git fetch --prune origin before checking freshness. The command "
+            "argv, local path, and raw git output are never recorded."
+        ),
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--require-upstream-current",
+        action="store_true",
+        help="Require HEAD to match the configured upstream ref before returning ready.",
+    )
+    ale_local_source_readiness_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the source readiness gate is ready.",
+    )
+
+    ale_task_material_readiness_parser = benchmark_sub.add_parser(
+        "ale-task-material-readiness",
+        help=(
+            "Check whether a selected public ALE task has local material signals "
+            "needed for a future local/no-upload run. This checks directory, "
+            "task_card.json, scripts, scorer scripts, and public selected-task "
+            "list membership only; it does not read task card content, task "
+            "bodies, scripts, trajectories, screenshots, credentials, upload, or submit."
+        ),
+    )
+    add_subcommand_format(ale_task_material_readiness_parser)
+    ale_task_material_readiness_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to probe. The path is never recorded.",
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--selected-task-id",
+        required=True,
+        help="Public ALE task id in category/name form.",
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--selected-task-list",
+        action="append",
+        default=[],
+        help=(
+            "Public selected_tasks list to check, relative to selected_tasks/. "
+            "May be repeated. Defaults to linux_only.txt and unlicensed/near-term.txt."
+        ),
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--requires-task-data",
+        choices=("true", "false", "unknown"),
+        help=(
+            "Optional compact task-data requirement signal. Use unknown with "
+            "--enforce-task-data-source to fail closed before a formal task run."
+        ),
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--task-data-source",
+        help=(
+            "Compact task_data_source label such as baked_in_sandbox or "
+            "gs://ale-data-public. Credential values and paths are never recorded."
+        ),
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--baked-task-input-present",
+        action="store_true",
+        help="Mark that the selected task's baked sandbox input directory was verified present.",
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--baked-task-input-readiness-json",
+        help=(
+            "Compact ale-baked-task-input-readiness JSON artifact to consume "
+            "instead of relying on a manual baked-input boolean."
+        ),
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--gcs-sa-key",
+        help="Service-account key path to check for existence only; the path/value is never recorded.",
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--gcs-sa-key-present",
+        action="store_true",
+        help="Fixture/operator assertion that the service-account key file presence was verified.",
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--enforce-task-data-source",
+        action="store_true",
+        help="Require task-data source readiness before returning ready.",
+    )
+    ale_task_material_readiness_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the task material readiness gate is ready.",
+    )
+
+    ale_baked_task_input_readiness_parser = benchmark_sub.add_parser(
+        "ale-baked-task-input-readiness",
+        help=(
+            "Probe whether a local ALE Docker image contains a selected task's "
+            "baked input directory. This may start a tiny shell in Docker, but "
+            "it does not run the task, list files, read task data, invoke models, "
+            "upload, submit, or record local/container paths."
+        ),
+    )
+    add_subcommand_format(ale_baked_task_input_readiness_parser)
+    ale_baked_task_input_readiness_parser.add_argument(
+        "--selected-task-id",
+        required=True,
+        help="Public ALE task id in category/name form.",
+    )
+    ale_baked_task_input_readiness_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Local ALE Docker image ref to probe.",
+    )
+    ale_baked_task_input_readiness_parser.add_argument(
+        "--docker-binary",
+        default="docker",
+        help="PATH-visible Docker binary name to use.",
+    )
+    ale_baked_task_input_readiness_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=60,
+        help="Timeout for the tiny Docker path-existence probe.",
+    )
+    ale_baked_task_input_readiness_parser.add_argument(
+        "--no-docker-run",
+        action="store_true",
+        help="Do not start Docker; emit a fixture-like blocked readiness payload.",
+    )
+    ale_baked_task_input_readiness_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the baked task input readiness gate is ready.",
+    )
+
+    ale_baked_task_input_scan_parser = benchmark_sub.add_parser(
+        "ale-baked-task-input-scan",
+        help=(
+            "Batch-scan public ALE selected tasks for baked input directories in "
+            "a local Docker image. This may start one tiny shell in Docker, but "
+            "does not run tasks, list files, read task data, invoke models, "
+            "upload, submit, or record local/container paths."
+        ),
+    )
+    add_subcommand_format(ale_baked_task_input_scan_parser)
+    ale_baked_task_input_scan_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to read selected-task lists from. The path is never recorded.",
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--selected-task-list",
+        action="append",
+        default=[],
+        help=(
+            "Public selected_tasks list to scan, relative to selected_tasks/. "
+            "May be repeated. Defaults to linux_only.txt and unlicensed/near-term.txt."
+        ),
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Local ALE Docker image ref to probe.",
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--docker-binary",
+        default="docker",
+        help="PATH-visible Docker binary name to use.",
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--max-tasks",
+        type=int,
+        default=120,
+        help="Maximum selected public task ids to probe.",
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=180,
+        help="Timeout for the batch Docker path-existence probe.",
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--no-docker-run",
+        action="store_true",
+        help="Do not start Docker; emit a fixture-like blocked scan payload.",
+    )
+    ale_baked_task_input_scan_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless at least one baked-input candidate is found.",
+    )
+
+    ale_candidate_task_data_scan_parser = benchmark_sub.add_parser(
+        "ale-candidate-task-data-scan",
+        help=(
+            "Scan public ALE selected-task lists for tasks with an explicit "
+            "REQUIRES_TASK_DATA=False config signal. The scan records only "
+            "counts and public task ids; it does not record task source text, "
+            "task cards, instructions, scripts, trajectories, screenshots, "
+            "credentials, uploads, or submits."
+        ),
+    )
+    add_subcommand_format(ale_candidate_task_data_scan_parser)
+    ale_candidate_task_data_scan_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to probe. The path is never recorded.",
+    )
+    ale_candidate_task_data_scan_parser.add_argument(
+        "--selected-task-list",
+        action="append",
+        default=[],
+        help=(
+            "Public selected_tasks list to scan, relative to selected_tasks/. "
+            "May be repeated. Defaults to linux_only.txt and unlicensed/near-term.txt."
+        ),
+    )
+    ale_candidate_task_data_scan_parser.add_argument(
+        "--allow-demo-candidate",
+        action="store_true",
+        help="Allow demo/* no-task-data tasks to satisfy readiness.",
+    )
+    ale_candidate_task_data_scan_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless at least one eligible no-task-data candidate is found.",
+    )
+
+    ale_local_launch_packet_parser = benchmark_sub.add_parser(
+        "ale-local-launch-packet",
+        help=(
+            "Build a no-execution Agents' Last Exam local dry-run launch packet. "
+            "This combines source, runner, Docker preflight, and experiment-spec "
+            "existence gates without starting containers, reading task bodies, "
+            "invoking model APIs, uploading, or submitting."
+        ),
+    )
+    add_subcommand_format(ale_local_launch_packet_parser)
+    ale_local_launch_packet_parser.add_argument(
+        "--source-root",
+        required=True,
+        help="Local ALE source checkout root to probe. The path is never recorded.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--experiment-spec",
+        required=True,
+        help="Public relative path to the ALE experiment spec under source root.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--selected-task-id",
+        help="Optional public task id label for the metadata-only candidate.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--expected-repo-url",
+        default="https://github.com/rdi-berkeley/agents-last-exam.git",
+        help="Expected public ALE repository URL.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--runner-binary",
+        default="python3",
+        help="PATH-visible runner binary name to probe.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--runner-python-module",
+        default="ale_run",
+        help="Python module expected to provide the ALE runner CLI.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--runner-command-label",
+        default="python-m-ale-run",
+        help="Public-safe label for the configured runner command.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--snapshot",
+        default=AGENTS_LAST_EXAM_DEFAULT_SNAPSHOT,
+        help="ALE snapshot label to check. Defaults to cpu-free-ubuntu.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--image",
+        default=AGENTS_LAST_EXAM_DEFAULT_DOCKER_IMAGE,
+        help="Primary local Docker image ref to inspect.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--alternate-image",
+        default=AGENTS_LAST_EXAM_DEFAULT_ALT_DOCKER_IMAGE,
+        help="Optional alternate local Docker image ref to inspect.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--operator-authorized",
+        action="store_true",
+        help="Mark that the operator authorized local container start for dry-run.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--allow-public-task-material",
+        action="store_true",
+        help="Mark that public ALE task material may be touched by a later dry-run.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--fetch-origin",
+        action="store_true",
+        help=(
+            "Run git fetch --prune origin before launch-packet source freshness "
+            "checks. No raw git output, command argv, or local paths are recorded."
+        ),
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--require-upstream-current",
+        action="store_true",
+        help="Require the ALE checkout HEAD to match upstream before the launch packet is ready.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the launch packet is ready.",
+    )
+    ale_local_launch_packet_parser.add_argument(
+        "--no-docker-probe",
+        action="store_true",
+        help="Do not call Docker; emit a fixture-like blocked launch packet.",
+    )
+
+    ale_local_exact_dry_run_result_parser = benchmark_sub.add_parser(
+        "ale-local-exact-dry-run-result",
+        help=(
+            "Reduce ALE `run --dry-run` stdout into a compact public-safe result. "
+            "This reads only the provided dry-run stdout file and records labels "
+            "and counts, never raw stdout, task text, paths, trajectories, "
+            "screenshots, credentials, uploads, or command argv."
+        ),
+    )
+    add_subcommand_format(ale_local_exact_dry_run_result_parser)
+    ale_local_exact_dry_run_result_parser.add_argument(
+        "--stdout-file",
+        required=True,
+        help=(
+            "File containing ALE dry-run stdout to reduce. The path and raw text "
+            "are not recorded."
+        ),
+    )
+    ale_local_exact_dry_run_result_parser.add_argument(
+        "--exit-code",
+        required=True,
+        help="Exit code from the ALE dry-run command.",
+    )
+    ale_local_exact_dry_run_result_parser.add_argument(
+        "--expected-task-id",
+        help="Optional public task id expected in the dry-run matrix.",
+    )
+    ale_local_exact_dry_run_result_parser.add_argument(
+        "--expected-agent-id",
+        help="Optional public agent id expected in the dry-run matrix.",
+    )
+    ale_local_exact_dry_run_result_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the compact dry-run result is ready.",
+    )
+
+    ale_host_codex_cli_route_parser = benchmark_sub.add_parser(
+        "ale-host-codex-cli-route",
+        help=(
+            "Check the host Codex CLI auth route for a future Agents' Last Exam "
+            "run. This verifies only compact host-side readiness signals and "
+            "does not read credential values, copy auth into the sandbox, start "
+            "containers, read task bodies, upload, or submit."
+        ),
+    )
+    add_subcommand_format(ale_host_codex_cli_route_parser)
+    ale_host_codex_cli_route_parser.add_argument(
+        "--codex-binary",
+        default="codex",
+        help="PATH-visible host Codex CLI binary name to probe. Paths are not recorded.",
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--assume-codex-binary-available",
+        action="store_true",
+        help="Fixture flag for dependency-free smokes; records no binary path.",
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--codex-version-text",
+        help=(
+            "Optional pre-probed Codex version text. If omitted, the command "
+            "runs `<codex-binary> --version` without recording argv or paths."
+        ),
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--host-auth-cache-present",
+        action="store_true",
+        help=(
+            "Mark that host Codex auth cache existence was verified. The value "
+            "is not read or recorded."
+        ),
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--host-config-present",
+        action="store_true",
+        help=(
+            "Mark that host Codex config existence was verified. The content is "
+            "not read or recorded."
+        ),
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--require-host-config",
+        action="store_true",
+        help="Require host config existence in addition to host auth cache.",
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--cua-mcp-assets-root",
+        help="Local CUA MCP server asset root to probe. The path is never recorded.",
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--ale-sandbox-cua-smoke-ready",
+        action="store_true",
+        help="Mark that the ALE DockerProvider CUA smoke is already ready.",
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--operator-authorized-host-codex-auth",
+        action="store_true",
+        help="Mark that the owner authorized using host Codex auth for this route.",
+    )
+    ale_host_codex_cli_route_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the host Codex CLI route gate is ready.",
+    )
+
+    ale_host_codex_cua_no_task_e2e_parser = benchmark_sub.add_parser(
+        "ale-host-codex-cua-no-task-e2e",
+        help=(
+            "Build compact no-task evidence that host Codex CLI help, Codex MCP "
+            "config loading, and the CUA MCP bridge are ready. This does not "
+            "send a Codex prompt, invoke a model API, read task bodies, record "
+            "raw output, upload, or submit."
+        ),
+    )
+    add_subcommand_format(ale_host_codex_cua_no_task_e2e_parser)
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--codex-binary",
+        default="codex",
+        help="PATH-visible host Codex CLI binary name to probe. Paths are not recorded.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--assume-codex-binary-available",
+        action="store_true",
+        help="Fixture flag for dependency-free route-gate smokes; records no binary path.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--codex-version-text",
+        help=(
+            "Optional pre-probed Codex version text for the route gate. If "
+            "omitted, the command runs `<codex-binary> --version` without "
+            "recording argv or paths."
+        ),
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--host-auth-cache-present",
+        action="store_true",
+        help="Mark that host Codex auth cache existence was verified without reading it.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--host-config-present",
+        action="store_true",
+        help="Mark that host Codex config existence was verified without reading it.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--require-host-config",
+        action="store_true",
+        help="Require host config existence in addition to host auth cache.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--cua-mcp-assets-root",
+        required=True,
+        help="Local CUA MCP server asset root to probe. The path is never recorded.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--cua-server-url",
+        default="http://127.0.0.1:8000",
+        help="Local CUA server URL used only inside a temporary Codex MCP config.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--install-node-deps",
+        action="store_true",
+        help="Allow npm install in a temporary copy of the CUA MCP assets if node_modules is absent.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--ale-sandbox-cua-smoke-ready",
+        action="store_true",
+        help="Mark that the ALE DockerProvider CUA smoke/e2e prerequisite is already ready.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--operator-authorized-host-codex-auth",
+        action="store_true",
+        help="Mark that the owner authorized using host Codex auth for this route.",
+    )
+    ale_host_codex_cua_no_task_e2e_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the no-task host Codex CUA E2E gate is ready.",
+    )
+
+    ale_validation_run_gate_parser = benchmark_sub.add_parser(
+        "ale-validation-run-gate",
+        help=(
+            "Combine compact ALE readiness artifacts into a pre-run decision "
+            "for one local/no-upload validation run. This reads only compact "
+            "JSON gates and does not start containers, send Codex prompts, "
+            "read raw trajectories, upload, submit, or record local paths."
+        ),
+    )
+    add_subcommand_format(ale_validation_run_gate_parser)
+    ale_validation_run_gate_parser.add_argument(
+        "--selected-task-id",
+        required=True,
+        help="Public ALE task id in category/name form.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--validation-hypothesis",
+        required=True,
+        help="Public-safe hypothesis for why this run can improve Goal Harness validation.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--task-material-readiness-json",
+        required=True,
+        help="Compact ale-task-material-readiness JSON artifact.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--host-codex-no-task-e2e-json",
+        required=True,
+        help="Compact ale-host-codex-cua-no-task-e2e JSON artifact.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--exact-dry-run-json",
+        required=True,
+        help="Compact ale-local-exact-dry-run-result JSON artifact.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--launch-packet-json",
+        help="Optional compact ale-local-launch-packet JSON artifact.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--result-reducer-ready",
+        action="store_true",
+        help="Mark that the compact ALE result reducer is ready for post-run ingest.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--formal-score-candidate",
+        action="store_true",
+        help="Mark that the next run is intended as a formal score candidate.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--require-fresh-source",
+        action="store_true",
+        help=(
+            "Require the launch packet to prove fetch-origin and upstream-current "
+            "source freshness. Formal score candidates imply this requirement."
+        ),
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--expected-formal-agent",
+        default="host_codex_gpt55_xhigh",
+        help="Public-safe expected formal scoring agent id.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--submit-enabled",
+        action="store_true",
+        help="Fixture flag proving the gate blocks submit-enabled runs.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--leaderboard-enabled",
+        action="store_true",
+        help="Fixture flag proving the gate blocks leaderboard-enabled runs.",
+    )
+    ale_validation_run_gate_parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Return non-zero unless the validation-run gate is ready.",
     )
 
     benchmark_post_launch_parser = benchmark_sub.add_parser(
@@ -1467,6 +3000,166 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    benchmark_learning_ledger_parser = benchmark_sub.add_parser(
+        "learning-ledger",
+        help=(
+            "Build a compact benchmark learning ledger row from comparison/run "
+            "JSON. This turns paired outcomes into repair-vs-repeat guidance "
+            "without opening raw task text, logs, traces, Harbor job directories, "
+            "Docker, model APIs, or uploads."
+        ),
+    )
+    add_subcommand_format(benchmark_learning_ledger_parser)
+    benchmark_learning_ledger_parser.add_argument(
+        "--benchmark-comparison-json",
+        required=True,
+        help="Path to a compact benchmark_comparison_v0 JSON object.",
+    )
+    benchmark_learning_ledger_parser.add_argument(
+        "--benchmark-run-json",
+        action="append",
+        default=[],
+        help=(
+            "Path to a compact benchmark_run_v0 JSON object. Repeat for baseline "
+            "and treatment compact run files."
+        ),
+    )
+    benchmark_learning_ledger_parser.add_argument(
+        "--require-actionable-learning",
+        action="store_true",
+        help=(
+            "Return non-zero unless the compact ledger contains an actionable "
+            "Goal Harness learning signal, such as a repair candidate or clean "
+            "score-recovery evidence."
+        ),
+    )
+
+    benchmark_attempt_learning_gate_parser = benchmark_sub.add_parser(
+        "attempt-learning-gate",
+        help=(
+            "Gate benchmark budget counting and follow-up routing on a durable "
+            "compact learning ledger row. This reads only compact JSON, not raw "
+            "task text, logs, traces, Harbor job directories, Docker, model APIs, "
+            "uploads, screenshots, or credentials."
+        ),
+    )
+    add_subcommand_format(benchmark_attempt_learning_gate_parser)
+    benchmark_attempt_learning_gate_parser.add_argument(
+        "--benchmark-run-json",
+        required=True,
+        help="Path to a compact benchmark_run_v0 JSON object.",
+    )
+    benchmark_attempt_learning_gate_parser.add_argument(
+        "--benchmark-learning-ledger-json",
+        help="Optional path to a compact benchmark_learning_ledger_v0 JSON object.",
+    )
+    benchmark_attempt_learning_gate_parser.add_argument(
+        "--require-budget-count-allowed",
+        action="store_true",
+        help=(
+            "Return non-zero unless the compact attempt has an actionable "
+            "learning row and may be counted."
+        ),
+    )
+
+    benchmark_adapter_kwarg_review_parser = benchmark_sub.add_parser(
+        "review-adapter-kwargs",
+        help=(
+            "Review generated benchmark adapter kwargs and flag goal_harness_* "
+            "keys that are not absorbed by the adapter contract. Values are not "
+            "recorded. This does not start workers, Docker, model APIs, uploads, "
+            "or read task material."
+        ),
+    )
+    add_subcommand_format(benchmark_adapter_kwarg_review_parser)
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--adapter-label",
+        default="benchmark-adapter",
+        help="Public-safe adapter label.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--agent-kwarg",
+        action="append",
+        default=[],
+        help="Generated agent kwarg in KEY=VALUE form. Repeat as needed.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--command-json",
+        help=(
+            "Optional JSON file containing a command argv list from which "
+            "--agent-kwarg entries will be extracted. The path is not recorded."
+        ),
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--accepted-goal-harness-kwarg",
+        action="append",
+        default=[],
+        help=(
+            "Goal Harness kwarg key explicitly consumed by the adapter. Repeat "
+            "as needed unless --terminal-bench-managed-codex is used."
+        ),
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--allowed-base-passthrough",
+        action="append",
+        default=[],
+        help="Optional goal_harness_* kwarg key allowed to pass to the base constructor.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--terminal-bench-managed-codex",
+        action="store_true",
+        help="Use the built-in GoalHarnessManagedCodex accepted kwarg contract.",
+    )
+    benchmark_adapter_kwarg_review_parser.add_argument(
+        "--require-clean",
+        action="store_true",
+        help="Return non-zero unless all generated goal_harness_* kwargs are absorbed.",
+    )
+
+    benchmark_lifecycle_state_parser = benchmark_sub.add_parser(
+        "lifecycle-state",
+        help=(
+            "Reduce compact benchmark preflight/launch/materialization/result/"
+            "comparison/ledger JSON into an explicit lifecycle state without "
+            "opening raw task text, logs, traces, job directories, Docker, model "
+            "APIs, or uploads."
+        ),
+    )
+    add_subcommand_format(benchmark_lifecycle_state_parser)
+    benchmark_lifecycle_state_parser.add_argument(
+        "--preflight-json",
+        help="Path to compact benchmark preflight JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--launch-json",
+        help="Path to compact launch summary JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--post-launch-json",
+        help="Path to compact post-launch materialization JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--benchmark-run-json",
+        help="Path to compact benchmark_run_v0 JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--benchmark-comparison-json",
+        help="Path to compact benchmark_comparison_v0 JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--claim-review-json",
+        help="Path to compact benchmark_claim_review_v0 JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--benchmark-learning-ledger-json",
+        help="Path to compact benchmark_learning_ledger_v0 JSON.",
+    )
+    benchmark_lifecycle_state_parser.add_argument(
+        "--require-budget-count-allowed",
+        action="store_true",
+        help="Return non-zero unless the lifecycle state allows budget counting.",
+    )
+
     benchmark_verifier_attribution_parser = benchmark_sub.add_parser(
         "review-verifier-attribution",
         help=(
@@ -1484,6 +3177,67 @@ def main(argv: list[str] | None = None) -> int:
             "Path to a compact benchmark_run_v0 JSON object. Repeat for baseline "
             "and treatment compact run files."
         ),
+    )
+
+    benchmark_runner_invariant_parser = benchmark_sub.add_parser(
+        "review-runner-invariants",
+        help=(
+            "Review compact benchmark_run_v0 runner-owned boundary invariants "
+            "before trusting worker writeback. This reads only compact JSON, not "
+            "raw task text, logs, traces, Harbor job directories, Docker, model "
+            "APIs, uploads, or screenshots."
+        ),
+    )
+    add_subcommand_format(benchmark_runner_invariant_parser)
+    benchmark_runner_invariant_parser.add_argument(
+        "--benchmark-run-json",
+        required=True,
+        help="Path to a compact benchmark_run_v0 JSON object.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--runner-label",
+        help="Public-safe runner label to include in the review payload.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-submit-eligible",
+        choices=["true", "false"],
+        default="false",
+        help="Expected runner-owned submit_eligible value. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-leaderboard-evidence",
+        choices=["true", "false"],
+        default="false",
+        help="Expected runner-owned leaderboard_evidence value. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-compact-only",
+        choices=["true", "false"],
+        default="true",
+        help="Expected compact read boundary. Defaults to true.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-raw-artifacts-read",
+        choices=["true", "false"],
+        default="false",
+        help="Expected raw artifact read boundary. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-task-text-read",
+        choices=["true", "false"],
+        default="false",
+        help="Expected task text read boundary. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--expect-local-paths-recorded",
+        choices=["true", "false"],
+        default="false",
+        help="Expected local path recording boundary. Defaults to false.",
+    )
+    benchmark_runner_invariant_parser.add_argument(
+        "--require-clean",
+        action="store_true",
+        help="Return non-zero unless all runner-owned invariant fields match.",
     )
 
     archive_runtime_parser = sub.add_parser(
@@ -1819,16 +3573,26 @@ def main(argv: list[str] | None = None) -> int:
     todo_parser.add_argument(
         "todo_command",
         nargs="?",
-        choices=["add"],
+        choices=["add", "archive-completed"],
         default="add",
-        help="Use add to append a checkbox todo to the active state.",
+        help=(
+            "Use add to append a checkbox todo, or archive-completed to move "
+            "older completed todos into Completed Work Archive."
+        ),
     )
     todo_parser.add_argument("--goal-id", required=True, help="Goal id whose active state should receive the todo.")
-    todo_parser.add_argument("--role", required=True, choices=["user", "agent"], help="Todo owner.")
-    todo_parser.add_argument("--text", required=True, help="Todo text. Keep it short and public-safe enough for local status.")
+    todo_parser.add_argument("--role", choices=["user", "agent"], help="Todo owner. Defaults to agent for archive-completed.")
+    todo_parser.add_argument("--text", help="Todo text. Required for add; keep it short and public-safe enough for local status.")
+    todo_parser.add_argument(
+        "--max-active-done",
+        type=int,
+        default=12,
+        help="For archive-completed, keep this many completed todos in the active section.",
+    )
     todo_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
     todo_parser.add_argument("--state-file", help="Active goal state path. Defaults to the registry goal state_file.")
     todo_parser.add_argument("--dry-run", action="store_true", help="Preview the active-state edit without writing.")
+    todo_parser.add_argument("--execute", action="store_true", help="For archive-completed, write the active-state edit.")
 
     quota_parser = sub.add_parser(
         "quota",
@@ -1837,11 +3601,11 @@ def main(argv: list[str] | None = None) -> int:
     quota_parser.add_argument(
         "quota_command",
         nargs="?",
-        choices=["status", "plan", "should-run", "spend-slot", "void-slot"],
+        choices=["status", "plan", "should-run", "monitor-poll", "spend-slot", "void-slot"],
         default="status",
-        help="Use status for all groups, plan for next-turn groups, should-run for one goal, spend-slot for accounting, or void-slot for a non-destructive accounting correction.",
+        help="Use status for all groups, plan for next-turn groups, should-run for one goal, monitor-poll for no-spend quiet poll evidence, spend-slot for accounting, or void-slot for a non-destructive accounting correction.",
     )
-    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run`, `quota spend-slot`, and `quota void-slot`.")
+    quota_parser.add_argument("--goal-id", help="Goal id to check. Required for `quota should-run`, `quota monitor-poll`, `quota spend-slot`, and `quota void-slot`.")
     quota_parser.add_argument("--slots", type=int, default=1, help="Slots to account for `quota spend-slot`.")
     quota_parser.add_argument("--source", choices=["heartbeat", "controller", "adapter"], default="heartbeat", help="Source label for `quota spend-slot`.")
     quota_parser.add_argument("--void-generated-at", help="generated_at timestamp of the quota_slot_spent run to void.")
@@ -2302,6 +4066,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_children=args.max_children,
                 allowed_domains=args.allowed_domain,
                 clear_allowed_domains=bool(args.clear_allowed_domains),
+                waiting_on=args.waiting_on,
+                clear_waiting_on=bool(args.clear_waiting_on),
                 execute=bool(args.execute),
             )
         except Exception as exc:
@@ -2323,24 +4089,32 @@ def main(argv: list[str] | None = None) -> int:
             classification = (
                 args.classification
                 or (
-                    AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION
-                    if args.target_runner_handoff_root
+                    AGENTISSUE_CODEX_CLI_RUNNER_PRIVATE_SCRIPT_SCHEMA_VERSION
+                    if args.private_runner_root
                     else (
-                        AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION
-                        if args.workflow_check_root
+                        AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_SCHEMA_VERSION
+                        if args.real_result_root
                         else (
-                            AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION
-                            if args.run_gate_root
+                            AGENTISSUE_CODEX_CLI_RUNNER_TARGET_HANDOFF_SCHEMA_VERSION
+                            if args.target_runner_handoff_root
                             else (
-                                AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION
-                                if args.first_run_handoff_root
+                                AGENTISSUE_CODEX_CLI_RUNNER_RUN_GATE_SCHEMA_VERSION
+                                if args.run_gate_root
                                 else (
-                                    AGENTISSUE_CODEX_CLI_RUNNER_EXECUTION_GATE_SCHEMA_VERSION
-                                    if args.execution_gate_root
+                                    AGENTISSUE_CODEX_CLI_RUNNER_WORKFLOW_CHECK_SCHEMA_VERSION
+                                    if args.workflow_check_root
                                     else (
-                                        AGENTISSUE_CODEX_CLI_RUNNER_SYNTHETIC_STAGING_SCHEMA_VERSION
-                                        if args.synthetic_staging_root
-                                        else AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION
+                                        AGENTISSUE_CODEX_CLI_RUNNER_FIRST_RUN_HANDOFF_SCHEMA_VERSION
+                                        if args.first_run_handoff_root
+                                        else (
+                                            AGENTISSUE_CODEX_CLI_RUNNER_EXECUTION_GATE_SCHEMA_VERSION
+                                            if args.execution_gate_root
+                                            else (
+                                                AGENTISSUE_CODEX_CLI_RUNNER_SYNTHETIC_STAGING_SCHEMA_VERSION
+                                                if args.synthetic_staging_root
+                                                else AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION
+                                            )
+                                        )
                                     )
                                 )
                             )
@@ -2362,12 +4136,14 @@ def main(argv: list[str] | None = None) -> int:
                         args.workflow_check_root,
                         args.run_gate_root,
                         args.target_runner_handoff_root,
+                        args.real_result_root,
+                        args.private_runner_root,
                     )
                     if value
                 ]
                 if len(selected_roots) > 1:
                     raise ValueError(
-                        "agentissue-codex-runner-flow accepts at most one root option, not both: --synthetic-staging-root, --execution-gate-root, --first-run-handoff-root, --workflow-check-root, --run-gate-root, or --target-runner-handoff-root"
+                        "agentissue-codex-runner-flow accepts at most one root option, not both: --synthetic-staging-root, --execution-gate-root, --first-run-handoff-root, --workflow-check-root, --run-gate-root, --target-runner-handoff-root, --real-result-root, or --private-runner-root"
                     )
                 wrapper = build_agentissue_codex_cli_runner_wrapper(
                     selected_tag=args.tag,
@@ -2380,8 +4156,26 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_check = None
                 run_gate = None
                 target_handoff = None
+                real_result = None
+                private_runner_script = None
                 benchmark_run_source = wrapper["benchmark_run"]
-                if args.target_runner_handoff_root:
+                if args.private_runner_root:
+                    private_runner_script = (
+                        materialize_agentissue_codex_cli_runner_private_script(
+                            args.private_runner_root,
+                            selected_tag=args.tag,
+                            codex_binary=args.codex_binary,
+                            docker_binary=args.docker_binary,
+                        )
+                    )
+                    benchmark_run_source = private_runner_script["benchmark_run"]
+                elif args.real_result_root:
+                    real_result = materialize_agentissue_codex_cli_runner_real_result(
+                        args.real_result_root,
+                        selected_tag=args.tag,
+                    )
+                    benchmark_run_source = real_result["benchmark_run"]
+                elif args.target_runner_handoff_root:
                     target_handoff = materialize_agentissue_codex_cli_runner_target_handoff(
                         args.target_runner_handoff_root,
                         selected_tag=args.tag,
@@ -2447,24 +4241,34 @@ def main(argv: list[str] | None = None) -> int:
                     classification=classification,
                     recommended_action=args.recommended_action
                     or (
-                        target_handoff["recommended_next_action"]
-                        if target_handoff
+                        private_runner_script["recommended_next_action"]
+                        if private_runner_script
                         else (
-                            run_gate["recommended_next_action"]
-                            if run_gate
+                            real_result["recommended_next_action"]
+                            if real_result
                             else (
-                                workflow_check["recommended_next_action"]
-                                if workflow_check
+                                target_handoff["recommended_next_action"]
+                                if target_handoff
                                 else (
-                                    first_run_handoff["recommended_next_action"]
-                                    if first_run_handoff
+                                    run_gate["recommended_next_action"]
+                                    if run_gate
                                     else (
-                                        execution_gate["recommended_next_action"]
-                                        if execution_gate
+                                        workflow_check["recommended_next_action"]
+                                        if workflow_check
                                         else (
-                                            synthetic_staging["recommended_next_action"]
-                                            if synthetic_staging
-                                            else wrapper["recommended_next_action"]
+                                            first_run_handoff["recommended_next_action"]
+                                            if first_run_handoff
+                                            else (
+                                                execution_gate["recommended_next_action"]
+                                                if execution_gate
+                                                else (
+                                                    synthetic_staging[
+                                                        "recommended_next_action"
+                                                    ]
+                                                    if synthetic_staging
+                                                    else wrapper["recommended_next_action"]
+                                                )
+                                            )
                                         )
                                     )
                                 )
@@ -2499,6 +4303,12 @@ def main(argv: list[str] | None = None) -> int:
                     "run_gate_root_path_recorded": False,
                     "target_handoff_materialized": bool(target_handoff),
                     "target_handoff_root_path_recorded": False,
+                    "real_result_materialized": bool(real_result),
+                    "real_result_root_path_recorded": False,
+                    "real_result_read_boundary": "compact_only" if real_result else None,
+                    "private_runner_script_materialized": bool(private_runner_script),
+                    "private_runner_root_path_recorded": False,
+                    "private_runner_script_content_public": False,
                 }
                 payload["agentissue_runner_flow"] = wrapper
                 if synthetic_staging:
@@ -2513,6 +4323,11 @@ def main(argv: list[str] | None = None) -> int:
                     payload["agentissue_run_gate"] = run_gate
                 if target_handoff:
                     payload["agentissue_target_handoff"] = target_handoff
+                if real_result:
+                    payload["agentissue_real_result"] = real_result
+                    payload["benchmark_result"] = real_result["benchmark_result"]
+                if private_runner_script:
+                    payload["agentissue_private_runner_script"] = private_runner_script
                 if args.no_global_sync:
                     payload["global_sync"] = {
                         "ok": True,
@@ -2541,13 +4356,699 @@ def main(argv: list[str] | None = None) -> int:
             print_payload(payload, args.format, render_benchmark_run_append_markdown)
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "classify-artifacts":
-            payload = filter_public_benchmark_artifact_paths(args.artifact_paths)
+            payload = filter_public_benchmark_artifact_paths(
+                args.artifact_paths,
+                adapter_kind=args.adapter_kind,
+                extra_public_filenames=args.allow_public_filename,
+            )
             print_payload(
                 payload,
                 output_format(args),
                 render_benchmark_artifact_path_filter_markdown,
             )
             return 0
+        if args.benchmark_command == "ale-local-preflight":
+            try:
+                image_metadata = None
+                alternate_image_metadata = None
+                if args.no_docker_probe:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                    alternate_image_metadata = {
+                        "image_ref": args.alternate_image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                payload = build_agents_last_exam_local_preflight(
+                    selected_task_id=args.selected_task_id,
+                    snapshot=args.snapshot,
+                    provider_kind=args.provider_kind,
+                    image_ref=args.image,
+                    alternate_image_ref=args.alternate_image,
+                    image_metadata=image_metadata,
+                    alternate_image_metadata=alternate_image_metadata,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_preflight_v0",
+                    "error": "ale_local_preflight_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_preflight_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_preflight_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-dry-run-plan":
+            try:
+                image_metadata = None
+                alternate_image_metadata = None
+                if args.no_docker_probe:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                    alternate_image_metadata = {
+                        "image_ref": args.alternate_image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                payload = build_agents_last_exam_local_dry_run_plan(
+                    selected_task_id=args.selected_task_id,
+                    snapshot=args.snapshot,
+                    provider_kind=args.provider_kind,
+                    image_ref=args.image,
+                    alternate_image_ref=args.alternate_image,
+                    image_metadata=image_metadata,
+                    alternate_image_metadata=alternate_image_metadata,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_dry_run_plan_v0",
+                    "error": "ale_local_dry_run_plan_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_dry_run_plan_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_dry_run_plan_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-runner-readiness":
+            try:
+                image_metadata = None
+                alternate_image_metadata = None
+                if args.no_docker_probe:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                    alternate_image_metadata = {
+                        "image_ref": args.alternate_image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                payload = build_agents_last_exam_local_runner_readiness(
+                    selected_task_id=args.selected_task_id,
+                    snapshot=args.snapshot,
+                    provider_kind=args.provider_kind,
+                    image_ref=args.image,
+                    alternate_image_ref=args.alternate_image,
+                    runner_binary=args.runner_binary,
+                    runner_python_module=args.runner_python_module,
+                    runner_source_root=args.runner_source_root,
+                    runner_command_label=args.runner_command_label,
+                    operator_authorized=bool(args.operator_authorized),
+                    allow_public_task_material=bool(args.allow_public_task_material),
+                    fetch_origin=bool(getattr(args, "fetch_origin", False)),
+                    require_upstream_current=bool(
+                        getattr(args, "require_upstream_current", False)
+                    ),
+                    image_metadata=image_metadata,
+                    alternate_image_metadata=alternate_image_metadata,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_runner_readiness_v0",
+                    "error": "ale_local_runner_readiness_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_runner_readiness_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_runner_readiness_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-source-readiness":
+            try:
+                payload = build_agents_last_exam_local_source_readiness(
+                    source_root=args.source_root,
+                    expected_repo_url=args.expected_repo_url,
+                    runner_python_module=args.runner_python_module,
+                    fetch_origin=bool(args.fetch_origin),
+                    require_upstream_current=bool(args.require_upstream_current),
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_source_readiness_v0",
+                    "error": "ale_local_source_readiness_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_source_readiness_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_source_readiness_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-task-material-readiness":
+            try:
+                selected_task_lists = (
+                    args.selected_task_list
+                    if args.selected_task_list
+                    else ["linux_only.txt", "unlicensed/near-term.txt"]
+                )
+                baked_task_input_readiness = None
+                if args.baked_task_input_readiness_json:
+                    baked_task_input_readiness = json.loads(
+                        Path(args.baked_task_input_readiness_json)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
+                payload = build_agents_last_exam_task_material_readiness(
+                    source_root=args.source_root,
+                    selected_task_id=args.selected_task_id,
+                    selected_task_lists=selected_task_lists,
+                    requires_task_data=None
+                    if args.requires_task_data in {None, "unknown"}
+                    else args.requires_task_data,
+                    task_data_source=args.task_data_source,
+                    baked_task_input_present=True
+                    if args.baked_task_input_present
+                    else None,
+                    baked_task_input_readiness=baked_task_input_readiness,
+                    gcs_sa_key=args.gcs_sa_key,
+                    gcs_sa_key_present=True if args.gcs_sa_key_present else None,
+                    enforce_task_data_source=bool(args.enforce_task_data_source),
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_task_material_readiness_v0",
+                    "error": "ale_task_material_readiness_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "task_card_content_read": False,
+                        "script_content_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_task_material_readiness_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_task_material_readiness_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-baked-task-input-readiness":
+            try:
+                image_metadata = None
+                if args.no_docker_run:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_run_probe_disabled",
+                    }
+                payload = build_agents_last_exam_baked_task_input_readiness(
+                    selected_task_id=args.selected_task_id,
+                    image_ref=args.image,
+                    image_metadata=image_metadata,
+                    docker_binary=args.docker_binary,
+                    timeout_seconds=args.timeout_seconds,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_baked_task_input_readiness_v0",
+                    "error": "ale_baked_task_input_readiness_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "path_existence_only": True,
+                        "task_text_read": False,
+                        "task_card_content_read": False,
+                        "script_content_read": False,
+                        "task_data_content_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_baked_task_input_readiness_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_baked_task_input_readiness_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-baked-task-input-scan":
+            try:
+                selected_task_lists = (
+                    args.selected_task_list
+                    if args.selected_task_list
+                    else ["linux_only.txt", "unlicensed/near-term.txt"]
+                )
+                image_metadata = None
+                if args.no_docker_run:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_run_probe_disabled",
+                    }
+                payload = build_agents_last_exam_baked_task_input_scan(
+                    source_root=args.source_root,
+                    selected_task_lists=selected_task_lists,
+                    image_ref=args.image,
+                    image_metadata=image_metadata,
+                    docker_binary=args.docker_binary,
+                    max_tasks=args.max_tasks,
+                    timeout_seconds=args.timeout_seconds,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_baked_task_input_scan_v0",
+                    "error": "ale_baked_task_input_scan_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "path_existence_only": True,
+                        "selected_task_lists_read": True,
+                        "task_text_read": False,
+                        "task_card_content_read": False,
+                        "script_content_read": False,
+                        "task_data_content_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_baked_task_input_scan_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_baked_task_input_scan_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-candidate-task-data-scan":
+            try:
+                selected_task_lists = (
+                    args.selected_task_list
+                    if args.selected_task_list
+                    else ["linux_only.txt", "unlicensed/near-term.txt"]
+                )
+                payload = build_agents_last_exam_candidate_task_data_scan(
+                    source_root=args.source_root,
+                    selected_task_lists=selected_task_lists,
+                    allow_demo_candidate=bool(args.allow_demo_candidate),
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_candidate_task_data_scan_v0",
+                    "error": "ale_candidate_task_data_scan_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_config_source_content_recorded": False,
+                        "task_card_content_read": False,
+                        "script_content_read": False,
+                        "task_instruction_file_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_candidate_task_data_scan_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_candidate_task_data_scan_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-launch-packet":
+            try:
+                image_metadata = None
+                alternate_image_metadata = None
+                if args.no_docker_probe:
+                    image_metadata = {
+                        "image_ref": args.image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                    alternate_image_metadata = {
+                        "image_ref": args.alternate_image,
+                        "present": False,
+                        "probe_available": False,
+                        "first_blocker": "docker_probe_disabled",
+                    }
+                payload = build_agents_last_exam_local_launch_packet(
+                    source_root=args.source_root,
+                    experiment_spec_relative_path=args.experiment_spec,
+                    selected_task_id=args.selected_task_id,
+                    expected_repo_url=args.expected_repo_url,
+                    snapshot=args.snapshot,
+                    image_ref=args.image,
+                    alternate_image_ref=args.alternate_image,
+                    runner_binary=args.runner_binary,
+                    runner_python_module=args.runner_python_module,
+                    runner_command_label=args.runner_command_label,
+                    operator_authorized=bool(args.operator_authorized),
+                    allow_public_task_material=bool(args.allow_public_task_material),
+                    fetch_origin=bool(args.fetch_origin),
+                    require_upstream_current=bool(args.require_upstream_current),
+                    image_metadata=image_metadata,
+                    alternate_image_metadata=alternate_image_metadata,
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_launch_packet_v0",
+                    "error": "ale_local_launch_packet_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "experiment_spec_content_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_launch_packet_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_launch_packet_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-local-exact-dry-run-result":
+            try:
+                stdout_text = Path(args.stdout_file).expanduser().read_text(
+                    encoding="utf-8"
+                )
+                payload = build_agents_last_exam_local_exact_dry_run_result(
+                    stdout_text=stdout_text,
+                    exit_code=args.exit_code,
+                    expected_task_id=args.expected_task_id,
+                    expected_agent_id=args.expected_agent_id,
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_local_exact_dry_run_result_v0",
+                    "error": "ale_local_exact_dry_run_result_failed",
+                    "error_type": type(exc).__name__,
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_stdout_recorded": False,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_local_exact_dry_run_result_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_local_exact_dry_run_result_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-host-codex-cli-route":
+            try:
+                payload = build_agents_last_exam_host_codex_cli_route(
+                    codex_binary=args.codex_binary,
+                    codex_binary_available=True
+                    if args.assume_codex_binary_available
+                    else None,
+                    codex_version_text=args.codex_version_text,
+                    host_auth_cache_present=True
+                    if args.host_auth_cache_present
+                    else None,
+                    host_config_present=True if args.host_config_present else None,
+                    require_host_config=bool(args.require_host_config),
+                    cua_mcp_assets_root=args.cua_mcp_assets_root,
+                    ale_sandbox_cua_smoke_ready=bool(
+                        args.ale_sandbox_cua_smoke_ready
+                    ),
+                    operator_authorized_host_codex_auth=bool(
+                        args.operator_authorized_host_codex_auth
+                    ),
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_host_codex_cli_route_v0",
+                    "error": "ale_host_codex_cli_route_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "auth_values_read": False,
+                        "config_content_read": False,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_host_codex_cli_route_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_host_codex_cli_route_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-host-codex-cua-no-task-e2e":
+            try:
+                payload = build_agents_last_exam_host_codex_cua_no_task_smoke_from_environment(
+                    codex_binary=args.codex_binary,
+                    codex_binary_available=True
+                    if args.assume_codex_binary_available
+                    else None,
+                    codex_version_text=args.codex_version_text,
+                    host_auth_cache_present=True
+                    if args.host_auth_cache_present
+                    else None,
+                    host_config_present=True if args.host_config_present else None,
+                    require_host_config=bool(args.require_host_config),
+                    cua_mcp_assets_root=args.cua_mcp_assets_root,
+                    cua_server_url=args.cua_server_url,
+                    install_node_deps=bool(args.install_node_deps),
+                    ale_sandbox_cua_smoke_ready=bool(
+                        args.ale_sandbox_cua_smoke_ready
+                    ),
+                    operator_authorized_host_codex_auth=bool(
+                        args.operator_authorized_host_codex_auth
+                    ),
+                )
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_host_codex_cua_no_task_smoke_v0",
+                    "error": "ale_host_codex_cua_no_task_e2e_failed",
+                    "read_boundary": {
+                        "compact_only": True,
+                        "auth_values_read": False,
+                        "config_content_read": False,
+                        "task_text_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_host_codex_cua_no_task_e2e_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_host_codex_cua_no_task_smoke_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "ale-validation-run-gate":
+            try:
+                task_material_readiness = json.loads(
+                    Path(args.task_material_readiness_json)
+                    .expanduser()
+                    .read_text(encoding="utf-8")
+                )
+                host_codex_no_task_e2e = json.loads(
+                    Path(args.host_codex_no_task_e2e_json)
+                    .expanduser()
+                    .read_text(encoding="utf-8")
+                )
+                exact_dry_run_result = json.loads(
+                    Path(args.exact_dry_run_json)
+                    .expanduser()
+                    .read_text(encoding="utf-8")
+                )
+                launch_packet = None
+                if args.launch_packet_json:
+                    launch_packet = json.loads(
+                        Path(args.launch_packet_json)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
+                payload = build_agents_last_exam_validation_run_gate(
+                    selected_task_id=args.selected_task_id,
+                    validation_hypothesis=args.validation_hypothesis,
+                    task_material_readiness=task_material_readiness,
+                    host_codex_no_task_e2e=host_codex_no_task_e2e,
+                    exact_dry_run_result=exact_dry_run_result,
+                    launch_packet=launch_packet,
+                    result_reducer_ready=bool(args.result_reducer_ready),
+                    submit_enabled=bool(args.submit_enabled),
+                    leaderboard_enabled=bool(args.leaderboard_enabled),
+                    formal_score_candidate=bool(args.formal_score_candidate),
+                    require_fresh_source=bool(args.require_fresh_source),
+                    expected_formal_agent=args.expected_formal_agent,
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "agents_last_exam_validation_run_gate_v0",
+                    "error": "ale_validation_run_gate_failed",
+                    "error_type": type(exc).__name__,
+                    "read_boundary": {
+                        "compact_only": True,
+                        "task_text_read": False,
+                        "task_card_content_read": False,
+                        "script_content_read": False,
+                        "raw_artifacts_read": False,
+                        "local_paths_recorded": False,
+                        "container_started": False,
+                        "model_api_invoked": False,
+                        "codex_prompt_sent": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                if args.require_ready and payload.get("ready") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "ale_validation_run_gate_not_ready"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_agents_last_exam_validation_run_gate_markdown,
+            )
+            return 0 if payload.get("ok") else 1
         if args.benchmark_command == "review-claim":
             try:
                 comparison_input = json.loads(
@@ -2597,6 +5098,281 @@ def main(argv: list[str] | None = None) -> int:
                 render_benchmark_claim_review_markdown,
             )
             return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "learning-ledger":
+            try:
+                comparison_input = json.loads(
+                    Path(args.benchmark_comparison_json).expanduser().read_text(encoding="utf-8")
+                )
+                if not isinstance(comparison_input, dict):
+                    raise ValueError("--benchmark-comparison-json must contain a JSON object")
+                comparison = compact_benchmark_comparison(comparison_input)
+                if not comparison:
+                    raise ValueError(
+                        "--benchmark-comparison-json did not contain a compactable benchmark_comparison_v0 object"
+                    )
+                runs = []
+                for run_json in args.benchmark_run_json:
+                    run_input = json.loads(
+                        Path(run_json).expanduser().read_text(encoding="utf-8")
+                    )
+                    if not isinstance(run_input, dict):
+                        raise ValueError("--benchmark-run-json must contain JSON objects")
+                    run = compact_benchmark_run(run_input)
+                    if not run:
+                        raise ValueError(
+                            "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                        )
+                    runs.append(run)
+                payload = build_benchmark_learning_ledger(
+                    comparison,
+                    benchmark_runs=runs,
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_learning_ledger_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            else:
+                payload["ok"] = True
+                learning_gate = (
+                    payload.get("learning_quota_gate")
+                    if isinstance(payload.get("learning_quota_gate"), dict)
+                    else {}
+                )
+                if (
+                    args.require_actionable_learning
+                    and learning_gate.get("spend_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        learning_gate.get("blocked_reason")
+                        or "missing_actionable_goal_harness_learning_signal"
+                    )
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_learning_ledger_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "attempt-learning-gate":
+            try:
+                run_input = json.loads(
+                    Path(args.benchmark_run_json).expanduser().read_text(encoding="utf-8")
+                )
+                if not isinstance(run_input, dict):
+                    raise ValueError("--benchmark-run-json must contain a JSON object")
+                run = compact_benchmark_run(run_input)
+                if not run:
+                    raise ValueError(
+                        "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                    )
+
+                learning_ledger = None
+                if args.benchmark_learning_ledger_json:
+                    ledger_input = json.loads(
+                        Path(args.benchmark_learning_ledger_json)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
+                    if not isinstance(ledger_input, dict):
+                        raise ValueError(
+                            "--benchmark-learning-ledger-json must contain a JSON object"
+                        )
+                    learning_ledger = compact_benchmark_learning_ledger(ledger_input)
+                    if not learning_ledger:
+                        raise ValueError(
+                            "--benchmark-learning-ledger-json did not contain a compactable benchmark_learning_ledger_v0 object"
+                        )
+
+                payload = build_benchmark_attempt_learning_gate(
+                    run,
+                    benchmark_learning_ledger=learning_ledger,
+                )
+                payload["ok"] = True
+                if (
+                    args.require_budget_count_allowed
+                    and payload.get("budget_count_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("classification")
+                        or "benchmark_attempt_learning_gate_not_ready"
+                    )
+                payload["require_budget_count_allowed"] = bool(
+                    args.require_budget_count_allowed
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_attempt_learning_gate_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_attempt_learning_gate_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "review-adapter-kwargs":
+            try:
+                agent_kwargs: dict[str, Any] = {}
+                if args.command_json:
+                    command_input = json.loads(
+                        Path(args.command_json).expanduser().read_text(encoding="utf-8")
+                    )
+                    if not isinstance(command_input, list):
+                        raise ValueError("--command-json must contain a JSON argv list")
+                    agent_kwargs.update(agent_kwargs_from_invocation(command_input))
+                for raw_kwarg in args.agent_kwarg:
+                    key, separator, value = str(raw_kwarg).partition("=")
+                    key = key.strip()
+                    if not separator or not key:
+                        raise ValueError("--agent-kwarg values must use KEY=VALUE form")
+                    agent_kwargs[key] = value
+                accepted = list(args.accepted_goal_harness_kwarg)
+                if args.terminal_bench_managed_codex:
+                    accepted.extend(TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS)
+                payload = build_benchmark_adapter_kwarg_absorption_review(
+                    adapter_label=args.adapter_label,
+                    agent_kwargs=agent_kwargs,
+                    accepted_goal_harness_kwargs=accepted,
+                    allowed_base_passthrough=args.allowed_base_passthrough,
+                )
+                payload["ok"] = True
+                if args.require_clean and payload.get("clean") is not True:
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("classification")
+                        or "benchmark_adapter_kwarg_absorption_not_clean"
+                    )
+                payload["require_clean"] = bool(args.require_clean)
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_adapter_kwarg_absorption_review_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_adapter_kwarg_absorption_review_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "lifecycle-state":
+            def read_optional_json(path_text: str | None) -> dict[str, object] | None:
+                if not path_text:
+                    return None
+                payload = json.loads(Path(path_text).expanduser().read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("lifecycle input JSON must contain an object")
+                return payload
+
+            try:
+                preflight = read_optional_json(args.preflight_json)
+                launch = read_optional_json(args.launch_json)
+                post_launch = read_optional_json(args.post_launch_json)
+
+                benchmark_run = None
+                run_input = read_optional_json(args.benchmark_run_json)
+                if run_input is not None:
+                    benchmark_run = compact_benchmark_run(run_input)
+                    if not benchmark_run:
+                        raise ValueError(
+                            "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                        )
+
+                benchmark_comparison = None
+                comparison_input = read_optional_json(args.benchmark_comparison_json)
+                if comparison_input is not None:
+                    benchmark_comparison = compact_benchmark_comparison(comparison_input)
+                    if not benchmark_comparison:
+                        raise ValueError(
+                            "--benchmark-comparison-json did not contain a compactable benchmark_comparison_v0 object"
+                        )
+
+                claim_review = read_optional_json(args.claim_review_json)
+                if (
+                    claim_review is not None
+                    and claim_review.get("schema_version") != "benchmark_claim_review_v0"
+                ):
+                    raise ValueError("--claim-review-json must contain benchmark_claim_review_v0")
+
+                learning_ledger = None
+                ledger_input = read_optional_json(args.benchmark_learning_ledger_json)
+                if ledger_input is not None:
+                    learning_ledger = compact_benchmark_learning_ledger(ledger_input)
+                    if not learning_ledger:
+                        raise ValueError(
+                            "--benchmark-learning-ledger-json did not contain a compactable benchmark_learning_ledger_v0 object"
+                        )
+
+                payload = build_benchmark_lifecycle_state(
+                    preflight=preflight,
+                    launch=launch,
+                    post_launch_materialization=post_launch,
+                    benchmark_run=benchmark_run,
+                    benchmark_comparison=benchmark_comparison,
+                    claim_review=claim_review,
+                    learning_ledger=learning_ledger,
+                )
+                payload["ok"] = True
+                gates = payload.get("gates") if isinstance(payload.get("gates"), dict) else {}
+                if (
+                    args.require_budget_count_allowed
+                    and gates.get("budget_count_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "benchmark_lifecycle_budget_count_not_allowed"
+                    )
+                payload["require_budget_count_allowed"] = bool(
+                    args.require_budget_count_allowed
+                )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_lifecycle_state_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_lifecycle_state_markdown,
+            )
+            return 0 if payload.get("ok") else 1
         if args.benchmark_command == "review-verifier-attribution":
             try:
                 runs = []
@@ -2631,6 +5407,60 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 output_format(args),
                 render_benchmark_verifier_attribution_review_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "review-runner-invariants":
+            try:
+                run_input = json.loads(
+                    Path(args.benchmark_run_json).expanduser().read_text(encoding="utf-8")
+                )
+                if not isinstance(run_input, dict):
+                    raise ValueError("--benchmark-run-json must contain a JSON object")
+                run = compact_benchmark_run(run_input)
+                if not run:
+                    raise ValueError(
+                        "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                    )
+                payload = build_benchmark_runner_invariant_review(
+                    run,
+                    expected_flags={
+                        "submit_eligible": args.expect_submit_eligible == "true",
+                        "leaderboard_evidence": args.expect_leaderboard_evidence
+                        == "true",
+                    },
+                    expected_read_boundary={
+                        "compact_only": args.expect_compact_only == "true",
+                        "raw_artifacts_read": args.expect_raw_artifacts_read
+                        == "true",
+                        "task_text_read": args.expect_task_text_read == "true",
+                        "local_paths_recorded": args.expect_local_paths_recorded
+                        == "true",
+                    },
+                    runner_label=args.runner_label,
+                )
+                payload["ok"] = True
+                if args.require_clean and payload.get("clean") is not True:
+                    payload["ok"] = False
+                    payload["error"] = payload.get("classification") or (
+                        "benchmark_runner_invariant_review_not_clean"
+                    )
+                payload["require_clean"] = bool(args.require_clean)
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "benchmark_runner_invariant_review_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "task_text_read": False,
+                        "local_paths_recorded": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_runner_invariant_review_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "summarize-post-launch":
@@ -3144,6 +5974,73 @@ def main(argv: list[str] | None = None) -> int:
                     "error": str(exc),
                 }
             print_payload(payload, args.format, render_benchmark_comparison_append_markdown)
+            return 0 if payload.get("ok") else 1
+
+        if args.history_action == "append-benchmark-learning-ledger":
+            try:
+                if args.dry_run and args.execute:
+                    raise ValueError(
+                        "history append-benchmark-learning-ledger accepts either --dry-run or --execute, not both"
+                    )
+                if not args.goal_id:
+                    raise ValueError("history append-benchmark-learning-ledger requires --goal-id")
+                if not args.benchmark_learning_ledger_json:
+                    raise ValueError(
+                        "history append-benchmark-learning-ledger requires --benchmark-learning-ledger-json"
+                    )
+
+                if args.benchmark_learning_ledger_json == "-":
+                    ledger_input = json.loads(sys.stdin.read())
+                else:
+                    ledger_input = json.loads(
+                        Path(args.benchmark_learning_ledger_json).expanduser().read_text(encoding="utf-8")
+                    )
+                if not isinstance(ledger_input, dict):
+                    raise ValueError("--benchmark-learning-ledger-json must contain a JSON object")
+                benchmark_learning_ledger = compact_benchmark_learning_ledger(ledger_input)
+                if not benchmark_learning_ledger:
+                    raise ValueError(
+                        "--benchmark-learning-ledger-json did not contain a compactable benchmark_learning_ledger_v0 object"
+                    )
+
+                dry_run = not bool(args.execute)
+                payload = append_benchmark_learning_ledger(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    benchmark_learning_ledger=benchmark_learning_ledger,
+                    classification=args.classification or "benchmark_learning_ledger_v0",
+                    recommended_action=args.recommended_action,
+                    delivery_batch_scale=args.delivery_batch_scale,
+                    delivery_outcome=args.delivery_outcome,
+                    dry_run=dry_run,
+                )
+                if args.no_global_sync:
+                    payload["global_sync"] = {
+                        "ok": True,
+                        "dry_run": dry_run,
+                        "skipped": True,
+                        "reason": "disabled by --no-global-sync",
+                    }
+                else:
+                    payload["global_sync"] = sync_project_registry_to_global(
+                        registry_path=registry_path,
+                        runtime_root_override=args.runtime_root,
+                        goal_id=args.goal_id,
+                        dry_run=dry_run,
+                    )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "dry_run": not bool(args.execute),
+                    "appended": False,
+                    "registry": str(registry_path),
+                    "runtime_root": args.runtime_root,
+                    "goal_id": args.goal_id,
+                    "classification": args.classification or "benchmark_learning_ledger_v0",
+                    "error": str(exc),
+                }
+            print_payload(payload, args.format, render_benchmark_learning_ledger_append_markdown)
             return 0 if payload.get("ok") else 1
 
         if args.history_action == "append-benchmark-report":
@@ -3715,26 +6612,43 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "todo":
         try:
-            if args.todo_command != "add":
-                raise ValueError("only `goal-harness todo add` is supported")
-            payload = add_goal_todo(
-                registry_path=registry_path,
-                goal_id=args.goal_id,
-                role=args.role,
-                text=args.text,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
-                dry_run=bool(args.dry_run),
-            )
+            if args.todo_command == "add":
+                if not args.role:
+                    raise ValueError("todo add requires --role")
+                if not args.text:
+                    raise ValueError("todo add requires --text")
+                payload = add_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    role=args.role,
+                    text=args.text,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=bool(args.dry_run),
+                )
+            elif args.todo_command == "archive-completed":
+                payload = archive_completed_todos(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    role=args.role or "agent",
+                    max_active_done=args.max_active_done,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=not bool(args.execute),
+                )
+            else:
+                raise ValueError("unsupported todo command")
         except Exception as exc:
             payload = {
                 "ok": False,
-                "dry_run": bool(args.dry_run),
+                "dry_run": not bool(args.execute)
+                if args.todo_command == "archive-completed"
+                else bool(args.dry_run),
                 "added": False,
                 "already_exists": False,
                 "goal_id": args.goal_id,
                 "role": args.role,
-                "todo": args.text,
+                "todo": args.text or "",
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_todo_markdown)
@@ -3755,6 +6669,17 @@ def main(argv: list[str] | None = None) -> int:
                 if not args.goal_id:
                     raise ValueError("`goal-harness quota should-run` requires --goal-id")
                 payload = build_quota_should_run(status_payload, goal_id=args.goal_id)
+            elif args.quota_command == "monitor-poll":
+                if not args.goal_id:
+                    raise ValueError("`goal-harness quota monitor-poll` requires --goal-id")
+                if args.dry_run and args.execute:
+                    raise ValueError("`goal-harness quota monitor-poll` accepts only one of --dry-run or --execute")
+                payload = record_quota_monitor_poll(
+                    status_payload,
+                    goal_id=args.goal_id,
+                    execute=bool(args.execute),
+                    source=args.source,
+                )
             elif args.quota_command == "spend-slot":
                 if not args.goal_id:
                     raise ValueError("`goal-harness quota spend-slot` requires --goal-id")
@@ -3785,7 +6710,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 payload = build_quota_plan(status_payload, mode=args.quota_command)
         except Exception as exc:
-            if args.quota_command in {"should-run", "spend-slot", "void-slot"}:
+            if args.quota_command in {"should-run", "monitor-poll", "spend-slot", "void-slot"}:
                 payload = {
                     "ok": False,
                     "mode": args.quota_command,
@@ -3827,6 +6752,8 @@ def main(argv: list[str] | None = None) -> int:
         renderer = (
             render_quota_should_run_markdown
             if args.quota_command == "should-run"
+            else render_quota_monitor_poll_markdown
+            if args.quota_command == "monitor-poll"
             else render_quota_slot_preview_markdown
             if args.quota_command in {"spend-slot", "void-slot"}
             else render_quota_markdown

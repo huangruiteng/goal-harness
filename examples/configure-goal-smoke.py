@@ -104,10 +104,14 @@ def main() -> int:
             "docs",
             "--allowed-domain",
             "validation",
+            "--waiting-on",
+            "user_or_controller",
         ))
         assert dry["ok"] is True, dry
         assert dry["dry_run"] is True, dry
         assert dry["changed"] is True, dry
+        assert "waiting_on" in dry["changed_fields"], dry
+        assert dry["after"]["waiting_on"] == "user_or_controller", dry
         assert dry["written"] is False, dry
         assert registry_path.read_text(encoding="utf-8") == original
 
@@ -128,6 +132,8 @@ def main() -> int:
             "2",
             "--allowed-domain",
             "docs,validation",
+            "--waiting-on",
+            "user_or_controller",
             "--execute",
         ))
         assert applied["ok"] is True, applied
@@ -142,6 +148,7 @@ def main() -> int:
         assert goal["spawn_policy"]["allowed"] is True, goal
         assert goal["spawn_policy"]["max_children"] == 2, goal
         assert goal["spawn_policy"]["allowed_domains"] == ["docs", "validation"], goal
+        assert goal["waiting_on"] == "user_or_controller", goal
 
         no_change = payload(run_cli(
             registry_path,
@@ -153,6 +160,19 @@ def main() -> int:
         ))
         assert no_change["ok"] is True, no_change
         assert no_change["changed"] is False, no_change
+
+        cleared = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--clear-waiting-on",
+            "--execute",
+        ))
+        assert cleared["ok"] is True, cleared
+        assert cleared["changed"] is True, cleared
+        assert "waiting_on" in cleared["changed_fields"], cleared
+        assert "waiting_on" not in goal_from_registry(registry_path), cleared
 
         invalid = payload(run_cli(
             registry_path,

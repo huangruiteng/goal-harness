@@ -28,7 +28,7 @@ from .operator_gate import DEFAULT_OPERATOR_GATE, default_operator_question, nor
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .paths import global_registry_path, resolve_runtime_root
 from .promotion_gate import build_promotion_gate
-from .quota import quota_status, quota_with_handoff_outcome_floor
+from .quota import QUOTA_MONITOR_POLL_CLASSIFICATION, quota_status, quota_with_handoff_outcome_floor
 from .registry import registry_goals
 
 
@@ -44,9 +44,11 @@ CODEX_READY_CLASSIFICATIONS = {
     "run_validation",
     "state_refreshed",
     "operator_gate_approved",
+    "monitor_todo_repeat_dedupe_deployed",
 }
 STATUS_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
+    QUOTA_MONITOR_POLL_CLASSIFICATION,
     *PROMOTION_READINESS_CLASSIFICATIONS,
 }
 HANDOFF_READY_CLASSIFICATIONS = {
@@ -68,7 +70,7 @@ REGISTRY_WAITING_ON_OVERRIDES = {
     "codex",
     "external_evidence",
 }
-WATCH_CLASSIFICATION_PREFIXES = ("await_", "monitor_")
+WATCH_CLASSIFICATION_PREFIXES = ("await_", "monitor_", "external_evidence_observation_")
 BLOCKING_CLASSIFICATIONS = {
     "blocked_by_safety",
 }
@@ -84,6 +86,7 @@ BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
 BENCHMARK_RESULT_SCHEMA_VERSION = "benchmark_result_v0"
 BENCHMARK_COMPARISON_SCHEMA_VERSION = "benchmark_comparison_v0"
 BENCHMARK_COMPARISON_DECISION_SCHEMA_VERSION = "benchmark_comparison_decision_note_v0"
+BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION = "benchmark_learning_ledger_v0"
 WORKER_BRIDGE_INGEST_HEALTH_SCHEMA_VERSION = "worker_bridge_ingest_health_note_v0"
 BENCHMARK_EXPERIMENT_REPORT_SCHEMA_VERSION = "benchmark_experiment_report_v0"
 BENCHMARK_EXPERIMENT_REPORT_READINESS_SCHEMA_VERSION = "benchmark_experiment_report_readiness_note_v0"
@@ -293,6 +296,7 @@ MAX_SUBAGENT_ACTIVITY_ITEMS = 5
 MAX_SUBAGENT_SCOPE_ITEMS = 4
 MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS = 3
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
+AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
 AUTONOMOUS_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4][^\]]*)\]\s*(.+)$", re.IGNORECASE)
 BACKLOG_HYGIENE_SECTION_HEADINGS = ("Next Action", "Operating Lessons")
 BACKLOG_HYGIENE_BULLET_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$")
@@ -334,6 +338,20 @@ AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = (
         re.compile(r"(?i)(?:autonomous replan|replan obligation|planning[- ]?trigger|重新规划|重规划|规划触发)"),
     ),
 )
+AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES = {
+    "outcome_progress",
+    "primary_goal_outcome",
+}
+AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS = {
+    "quota_slot_spent",
+    "quota_slot_voided",
+}
+AUTONOMOUS_RUN_HISTORY_REPLAN_ACK_CLASSIFICATION = re.compile(
+    r"(?i)(?:autonomous_replan.*recorded|delivery_completion_spend_accounted)"
+)
+AUTONOMOUS_RUN_HISTORY_STALL_PATTERN = re.compile(
+    r"(?i)(?:monitor|observe|observation|poll|watch|quiet|no[-_ ]?op|no[-_ ]?progress|stalled?|unchanged|dependency|停转|无进展|重复|反复|观察|轮询)"
+)
 TODO_ARCHIVE_HEADER_MARKERS = (
     "todo archive",
     "work archive",
@@ -346,6 +364,28 @@ TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
 TODO_TASK_CLASS_VALUES = {TODO_TASK_CLASS_ADVANCEMENT, TODO_TASK_CLASS_MONITOR}
+TODO_ADVANCEMENT_OVERRIDE_PATTERNS = (
+    re.compile(r"(?i)\bbenchmark[- ]candidate readiness scanning\b"),
+    re.compile(r"(?i)\bbenchmark readiness scans?\b"),
+    re.compile(
+        r"(?i)\bsetup-readiness scan\b.*\b(?:proves?|produce|write|document|dossier|candidate|learning run)\b"
+    ),
+    re.compile(r"(?i)\b(?:sparse|no[- ]?task)\b.*\bsource preflight\b"),
+    re.compile(r"(?i)\bsource preflight\b.*\b(?:runner wrapper|harness code|public harness|public docs)\b"),
+    re.compile(r"(?i)\bAgentIssue-Bench\b.*\bPerfBench\b.*\bSWE-Bench Pro\b"),
+    re.compile(r"(?i)\bbehavior regression suite lane\b"),
+    re.compile(r"(?i)\breal Codex CLI interaction regressions\b"),
+    re.compile(r"(?i)\bregression/.*\b(?:maintain|add|focused cases|fixture|regressions?)\b"),
+)
+TODO_BLOCKED_MONITOR_PATTERNS = (
+    re.compile(r"(?i)\bdo not\b.*\b(?:launch|run|execute|start)\b.*\buntil\b"),
+    re.compile(r"(?i)\b(?:blocked|gated|waiting)\b.*\b(?:owner|user|credential|substrate|proof|prerequisite|evidence)\b"),
+    re.compile(r"(?i)\b(?:credential|gcp|gcs|gcp_project|gcp_sa_key|gs://)\b.*\b(?:missing|required|provide|proof|prerequisite|gate|gated)\b"),
+    re.compile(r"(?i)\b(?:readiness|proof)\b.*\bbefore any formal\b.*\brun\b"),
+    re.compile(r"(?i)\bremaining formal\b.*\bpath\b"),
+    re.compile(r"(?i)\b(?:route|input)\b.*\babsent\b"),
+    re.compile(r"(?i)\b0\b.*\b(?:candidate|candidates)\b"),
+)
 TODO_MONITOR_PATTERNS = (
     re.compile(r"(?i)\bdependency monitor\b"),
     re.compile(r"(?i)\bobservation lane\b"),
@@ -353,6 +393,7 @@ TODO_MONITOR_PATTERNS = (
     re.compile(r"(?i)(?:^|[:：]\s*)poll\b"),
     re.compile(r"(?i)(?:^|[:：]\s*)watch\b"),
     re.compile(r"(?i)\bmonitor-only\b"),
+    *TODO_BLOCKED_MONITOR_PATTERNS,
 )
 TODO_ADVANCEMENT_PATTERNS = (
     re.compile(r"(?i)(?:^|[:：]\s*)(?:implement|add|make|fix|build|wire|define|compare|run|repair|archive|publish|merge|write|attribute)\b"),
@@ -1315,6 +1356,50 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
             "no_model_backed_simulator_invoked",
             "no_oracle_audit_required",
             "assisted_score_kept_separate_from_official",
+            "real_result_reducer_materialized",
+            "compact_run_read",
+            "compact_result_read",
+            "selected_tag_checked",
+            "selected_image_only",
+            "single_tag_only",
+            "buggy_source_extracted",
+            "fixed_source_not_extracted_to_host",
+            "host_codex_cli_invoked",
+            "patch_exported_from_buggy_source_git_diff",
+            "patch_applied_in_container",
+            "patch_hash_recorded",
+            "patched_eval_exit_zero",
+            "patched_eval_success_marker",
+            "private_runner_script_materialized",
+            "private_runner_manifest_materialized",
+            "script_executable_bit_set",
+            "script_content_not_public",
+            "script_path_relative_only",
+            "phase_order_rendered",
+            "script_renders_source_extraction",
+            "script_renders_git_baseline",
+            "script_renders_host_codex",
+            "script_renders_patch_export",
+            "script_renders_selected_tag_eval",
+            "script_renders_compact_evidence",
+            "script_renders_real_result_reducer",
+            "no_generator_codex_execution",
+            "no_generator_docker_execution",
+            "no_generator_model_api_invoked",
+            "no_generator_upload",
+            "no_generator_submit",
+            "no_generator_public_ranking_path",
+            "no_auth_material_sync",
+            "no_upload",
+            "no_submit",
+            "no_public_ranking_path",
+            "no_raw_logs_public",
+            "no_patch_content_public",
+            "no_absolute_paths_public",
+            "no_codex_auth_sync",
+            "no_credential_values_recorded",
+            "no_reducer_codex_execution",
+            "no_reducer_docker_execution",
         ):
             if isinstance(validation.get(field), bool):
                 compact_validation[field] = validation[field]
@@ -1684,6 +1769,109 @@ def compact_benchmark_comparison(run: dict[str, Any]) -> dict[str, Any] | None:
                 break
     if result_refs:
         compact["result_refs"] = result_refs
+
+    if set(compact.keys()) == {"schema_version"}:
+        return None
+    return compact
+
+
+def _benchmark_learning_ledger_source(run: dict[str, Any]) -> dict[str, Any] | None:
+    nested = run.get("benchmark_learning_ledger")
+    if isinstance(nested, dict) and nested.get("schema_version") == BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION:
+        return nested
+    if run.get("schema_version") == BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION:
+        return run
+    return None
+
+
+def compact_benchmark_learning_ledger(run: dict[str, Any]) -> dict[str, Any] | None:
+    source = _benchmark_learning_ledger_source(run)
+    if not source:
+        return None
+
+    compact: dict[str, Any] = {"schema_version": BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION}
+    for field in ("task_id", "comparison_id", "learning_status", "claim_strength"):
+        value = public_safe_compact_text(source.get(field), limit=180)
+        if value:
+            compact[field] = value
+
+    for field in ("official_task_score_delta", "control_plane_score_delta"):
+        delta = _compact_comparison_delta(source.get(field))
+        if delta is not None:
+            compact[field] = delta
+
+    for field in ("repair_candidates", "claim_blockers"):
+        values = public_safe_compact_list(source.get(field), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
+        if values:
+            compact[field] = values
+
+    lifecycle_gate = source.get("lifecycle_gate")
+    if isinstance(lifecycle_gate, dict):
+        compact_gate: dict[str, Any] = {}
+        for field in ("budget_count_allowed", "blocked_reason"):
+            value = lifecycle_gate.get(field)
+            if isinstance(value, bool):
+                compact_gate[field] = value
+            elif field == "blocked_reason":
+                text = public_safe_compact_text(value, limit=160)
+                if text:
+                    compact_gate[field] = text
+        if compact_gate:
+            compact["lifecycle_gate"] = compact_gate
+
+    learning_gate = source.get("learning_quota_gate")
+    if isinstance(learning_gate, dict):
+        compact_learning_gate: dict[str, Any] = {}
+        for field in ("actionable_learning_present", "spend_allowed", "blocked_reason"):
+            value = learning_gate.get(field)
+            if isinstance(value, bool):
+                compact_learning_gate[field] = value
+            elif field == "blocked_reason":
+                text = public_safe_compact_text(value, limit=160)
+                if text:
+                    compact_learning_gate[field] = text
+        reasons = public_safe_compact_list(
+            learning_gate.get("actionable_reasons"),
+            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+        )
+        if reasons:
+            compact_learning_gate["actionable_reasons"] = reasons
+        if compact_learning_gate:
+            compact["learning_quota_gate"] = compact_learning_gate
+
+    overhead = source.get("overhead")
+    if isinstance(overhead, dict):
+        compact_overhead: dict[str, Any] = {}
+        for field in ("cost_delta_usd", "wall_time_delta_seconds_or_ms"):
+            delta = _compact_comparison_delta(overhead.get(field))
+            if delta is not None:
+                compact_overhead[field] = delta
+        label = public_safe_compact_text(overhead.get("label"), limit=120)
+        if label:
+            compact_overhead["label"] = label
+        if compact_overhead:
+            compact["overhead"] = compact_overhead
+
+    routing = source.get("routing")
+    if isinstance(routing, dict):
+        compact_routing: dict[str, Any] = {}
+        for field in ("repeat_allowed", "new_candidate_allowed"):
+            if isinstance(routing.get(field), bool):
+                compact_routing[field] = routing[field]
+        next_action = public_safe_compact_text(routing.get("next_allowed_action"), limit=180)
+        if next_action:
+            compact_routing["next_allowed_action"] = next_action
+        if compact_routing:
+            compact["routing"] = compact_routing
+
+    read_boundary = source.get("read_boundary")
+    if isinstance(read_boundary, dict):
+        compact_boundary: dict[str, bool] = {}
+        for field in ("compact_only", "raw_artifacts_read", "task_text_read", "local_paths_recorded"):
+            if isinstance(read_boundary.get(field), bool):
+                compact_boundary[field] = read_boundary[field]
+        if compact_boundary:
+            compact["read_boundary"] = compact_boundary
 
     if set(compact.keys()) == {"schema_version"}:
         return None
@@ -2345,6 +2533,12 @@ def todo_priority_parts(text: str) -> tuple[str | None, str]:
 
 def todo_task_class_for_text(text: str) -> str:
     compact = normalize_todo_text(text)
+    for pattern in TODO_ADVANCEMENT_OVERRIDE_PATTERNS:
+        if pattern.search(compact):
+            return TODO_TASK_CLASS_ADVANCEMENT
+    for pattern in TODO_BLOCKED_MONITOR_PATTERNS:
+        if pattern.search(compact):
+            return TODO_TASK_CLASS_MONITOR
     for pattern in TODO_MONITOR_PATTERNS:
         if pattern.search(compact):
             return TODO_TASK_CLASS_MONITOR
@@ -2614,6 +2808,14 @@ def autonomous_replan_obligation(
         if len(evidence) >= MAX_AUTONOMOUS_REPLAN_TRIGGERS:
             break
 
+    return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
+
+
+def build_autonomous_replan_obligation(
+    evidence: list[dict[str, Any]],
+    *,
+    agent_todos: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if not evidence:
         return None
 
@@ -2658,6 +2860,7 @@ def autonomous_replan_obligation(
     return {
         "schema_version": AUTONOMOUS_REPLAN_SCHEMA_VERSION,
         "required": True,
+        "stall_threshold": AUTONOMOUS_REPLAN_STALL_THRESHOLD,
         "trigger_count": len(evidence),
         "triggers": evidence,
         "todo_actions": todo_actions[:3],
@@ -2667,9 +2870,117 @@ def autonomous_replan_obligation(
             "production actions, or owner-only decisions"
         ),
         "recommended_action": (
-            "run an autonomous replan before another monitor-only or repeated action consumes the eligible turn"
+            "run an autonomous replan after two consecutive stalled turns before another "
+            "monitor-only or repeated action consumes the eligible turn"
         ),
     }
+
+
+def _normalized_run_history_stall_signature(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _run_history_stall_signal(run: dict[str, Any]) -> dict[str, Any] | None:
+    classification = str(run.get("classification") or "").strip()
+    if not classification or classification in AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS:
+        return None
+    delivery_outcome = str(run.get("delivery_outcome") or "").strip()
+    if delivery_outcome in AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES:
+        return None
+    recommended_action = public_safe_compact_text(run.get("recommended_action"), limit=140)
+    health_check = public_safe_compact_text(run.get("health_check"), limit=140)
+    combined = " ".join(
+        value
+        for value in (classification, recommended_action, health_check, delivery_outcome)
+        if value
+    )
+    if not combined or not AUTONOMOUS_RUN_HISTORY_STALL_PATTERN.search(combined):
+        return None
+    action_or_classification = recommended_action or classification
+    return {
+        "classification": classification,
+        "generated_at": str(run.get("generated_at") or ""),
+        "recommended_action": recommended_action,
+        "delivery_outcome": delivery_outcome or None,
+        "signature": _normalized_run_history_stall_signature(action_or_classification),
+    }
+
+
+def run_history_monitor_wait_already_acknowledged(
+    latest_runs: list[dict[str, Any]] | None,
+    *,
+    signal_count: int,
+) -> bool:
+    """Return true when newer monitor-poll stalls already have a compact ack run behind them."""
+
+    for run in (latest_runs or [])[signal_count:]:
+        if not isinstance(run, dict):
+            continue
+        classification = str(run.get("classification") or "").strip()
+        if not classification:
+            continue
+        if classification in AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS:
+            continue
+        if classification == "quota_monitor_poll":
+            continue
+        return bool(AUTONOMOUS_RUN_HISTORY_REPLAN_ACK_CLASSIFICATION.search(classification))
+    return False
+
+
+def autonomous_replan_obligation_from_runs(
+    latest_runs: list[dict[str, Any]] | None,
+    *,
+    agent_todos: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    signals: list[dict[str, Any]] = []
+    for run in latest_runs or []:
+        if not isinstance(run, dict):
+            continue
+        classification = str(run.get("classification") or "").strip()
+        if classification in AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS:
+            continue
+        signal = _run_history_stall_signal(run)
+        if not signal:
+            break
+        signals.append(signal)
+        if len(signals) >= AUTONOMOUS_REPLAN_STALL_THRESHOLD:
+            break
+
+    if len(signals) < AUTONOMOUS_REPLAN_STALL_THRESHOLD:
+        return None
+
+    signatures = {str(signal.get("signature") or "") for signal in signals if signal.get("signature")}
+    classifications = {
+        str(signal.get("classification") or "")
+        for signal in signals
+        if signal.get("classification")
+    }
+    if len(signatures) > 1 and len(classifications) > 1:
+        return None
+    if classifications == {"quota_monitor_poll"} and run_history_monitor_wait_already_acknowledged(
+        latest_runs,
+        signal_count=len(signals),
+    ):
+        return None
+
+    action = public_safe_compact_text(
+        signals[0].get("recommended_action") or signals[0].get("classification"),
+        limit=120,
+    )
+    evidence_text = (
+        f"latest {AUTONOMOUS_REPLAN_STALL_THRESHOLD} public run records repeated "
+        f"{action or 'the same monitor/no-progress action'}"
+    )
+    evidence: list[dict[str, Any]] = [
+        {
+            "kind": "run_history_no_progress_repeat",
+            "section": "run_history",
+            "text": evidence_text,
+            "run_count": len(signals),
+            "latest_generated_at": signals[0].get("generated_at"),
+        }
+    ]
+    return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
 
 
 def completed_todo_archive_warning(agent_todos: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -3343,6 +3654,9 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
         decision_note = benchmark_comparison_decision_note(benchmark_comparison)
         if decision_note:
             compact["benchmark_comparison_decision_note"] = decision_note
+    benchmark_learning_ledger = compact_benchmark_learning_ledger(run)
+    if benchmark_learning_ledger:
+        compact["benchmark_learning_ledger_summary"] = benchmark_learning_ledger
     benchmark_report = compact_benchmark_experiment_report(run)
     if benchmark_report:
         compact["benchmark_experiment_report_summary"] = benchmark_report
@@ -4340,6 +4654,15 @@ def build_attention_queue(
                     if isinstance(item.get("autonomous_replan_obligation"), dict)
                     else None
                 )
+                if not replan_obligation:
+                    replan_obligation = autonomous_replan_obligation_from_runs(
+                        goal_latest_runs,
+                        agent_todos=item.get("agent_todos")
+                        if isinstance(item.get("agent_todos"), dict)
+                        else None,
+                    )
+                    if replan_obligation:
+                        item["autonomous_replan_obligation"] = replan_obligation
                 if replan_obligation and isinstance(item.get("project_asset"), dict):
                     item["project_asset"]["autonomous_replan_obligation"] = replan_obligation
                 item["quota"] = quota_status(
@@ -4614,6 +4937,9 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
         decision_note = benchmark_comparison_decision_note(benchmark_comparison)
         if decision_note:
             compact["benchmark_comparison_decision_note"] = decision_note
+    benchmark_learning_ledger = compact_benchmark_learning_ledger(run)
+    if benchmark_learning_ledger:
+        compact["benchmark_learning_ledger_summary"] = benchmark_learning_ledger
     benchmark_report = compact_benchmark_experiment_report(run)
     if benchmark_report:
         compact["benchmark_experiment_report_summary"] = benchmark_report
@@ -4752,6 +5078,7 @@ def event_ledger_event_class(run: dict[str, Any]) -> str:
         compact_benchmark_run(run)
         or compact_benchmark_result(run)
         or compact_benchmark_comparison(run)
+        or compact_benchmark_learning_ledger(run)
         or compact_benchmark_experiment_report(run)
         or compact_active_user_assisted_pilot(run)
     ):

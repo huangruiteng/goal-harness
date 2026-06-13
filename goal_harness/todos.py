@@ -6,13 +6,19 @@ from typing import Any
 
 from .history import load_registry
 from .state_refresh import now_local, resolve_goal_state
-from .status import TODO_TASK_PATTERN, normalize_todo_text, todo_role_for_heading
+from .status import (
+    MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
+    TODO_TASK_PATTERN,
+    normalize_todo_text,
+    todo_role_for_heading,
+)
 
 
 TODO_SECTION_HEADINGS = {
     "user": "User Todo / Owner Review Reading Queue",
     "agent": "Agent Todo",
 }
+COMPLETED_WORK_ARCHIVE_HEADING = "Completed Work Archive"
 
 
 def normalize_new_todo(text: str) -> str:
@@ -87,6 +93,75 @@ def insert_new_section(lines: list[str], role: str, todo_line: str) -> None:
     if anchor > 0 and lines[anchor - 1].strip():
         section.insert(0, "")
     lines[anchor:anchor] = section
+
+
+def archive_section_bounds(lines: list[str]) -> tuple[int, int] | None:
+    start = heading_index(lines, COMPLETED_WORK_ARCHIVE_HEADING)
+    if start is None:
+        return None
+    end = len(lines)
+    for next_index in range(start + 1, len(lines)):
+        if lines[next_index].startswith("## "):
+            end = next_index
+            break
+    return start, end
+
+
+def ensure_archive_section(lines: list[str]) -> tuple[int, int]:
+    bounds = archive_section_bounds(lines)
+    if bounds:
+        return bounds
+    if lines and lines[-1].strip():
+        lines.append("")
+    start = len(lines)
+    lines.extend([f"## {COMPLETED_WORK_ARCHIVE_HEADING}", ""])
+    return start, len(lines)
+
+
+def todo_blocks(lines: list[str], start: int, end: int) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for index in range(start + 1, end):
+        match = TODO_TASK_PATTERN.match(lines[index])
+        if match:
+            if current is not None:
+                current["end"] = index
+                blocks.append(current)
+            marker, text = match.groups()
+            current = {
+                "start": index,
+                "end": end,
+                "done": marker.lower() == "x",
+                "text": normalize_todo_text(text),
+            }
+            continue
+        if current is not None and lines[index].startswith((" ", "\t")):
+            continuation = lines[index].strip()
+            if continuation:
+                current["text"] = normalize_todo_text(
+                    f"{current.get('text', '')} {continuation}"
+                )
+    if current is not None:
+        current["end"] = end
+        blocks.append(current)
+    return blocks
+
+
+def insert_archive_blocks(lines: list[str], blocks: list[list[str]]) -> None:
+    if not blocks:
+        return
+    bounds = ensure_archive_section(lines)
+    insert_at = bounds[1]
+    while insert_at > bounds[0] + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    new_lines: list[str] = []
+    if insert_at == bounds[0] + 1:
+        new_lines.append("")
+    for block in blocks:
+        new_lines.extend(block)
+    if insert_at < len(lines) and lines[insert_at].startswith("## "):
+        new_lines.append("")
+    lines[insert_at:insert_at] = new_lines
 
 
 def replace_updated_at(text: str, updated_at: str) -> str:
@@ -165,21 +240,132 @@ def add_goal_todo(
     }
 
 
+def archive_completed_todos(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    role: str = "agent",
+    max_active_done: int = MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
+    project: Path | None = None,
+    state_file: Path | None = None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    if role not in TODO_SECTION_HEADINGS:
+        raise ValueError("todo role must be one of: user, agent")
+    if max_active_done < 0:
+        raise ValueError("max_active_done must be non-negative")
+    registry = load_registry(registry_path)
+    goal, resolved_project, resolved_state_file = resolve_goal_state(
+        registry=registry,
+        goal_id=goal_id,
+        project_override=project,
+        state_file_override=state_file,
+    )
+    if goal is None:
+        raise ValueError(f"goal {goal_id!r} is not present in the registry")
+    if not resolved_state_file.exists():
+        raise ValueError(f"active state file does not exist: {resolved_state_file}")
+
+    original = resolved_state_file.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    bounds = section_bounds(lines, role)
+    section = bounds[2] if bounds else TODO_SECTION_HEADINGS[role]
+    moved_blocks: list[list[str]] = []
+    active_done_count = 0
+    moved_count = 0
+    kept_done_count = 0
+
+    if bounds:
+        blocks = todo_blocks(lines, bounds[0], bounds[1])
+        done_blocks = [block for block in blocks if block.get("done") is True]
+        active_done_count = len(done_blocks)
+        move_count = max(0, active_done_count - max_active_done)
+        move_starts = {int(block["start"]) for block in done_blocks[:move_count]}
+        kept_done_count = active_done_count - move_count
+        for block in done_blocks[:move_count]:
+            moved_blocks.append(lines[int(block["start"]) : int(block["end"])])
+        if move_starts:
+            new_lines: list[str] = []
+            index = 0
+            while index < len(lines):
+                if index in move_starts:
+                    matching = next(
+                        block
+                        for block in done_blocks[:move_count]
+                        if int(block["start"]) == index
+                    )
+                    index = int(matching["end"])
+                    while (
+                        new_lines
+                        and not new_lines[-1].strip()
+                        and index < len(lines)
+                        and not lines[index].strip()
+                    ):
+                        index += 1
+                    continue
+                new_lines.append(lines[index])
+                index += 1
+            lines = new_lines
+            insert_archive_blocks(lines, moved_blocks)
+            moved_count = move_count
+
+    updated_at = now_local()
+    changed = moved_count > 0
+    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+    if changed:
+        new_text = replace_updated_at(new_text, updated_at)
+    if changed and not dry_run:
+        resolved_state_file.write_text(new_text, encoding="utf-8")
+
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "changed": changed,
+        "goal_id": goal_id,
+        "role": role,
+        "section": section,
+        "archive_section": COMPLETED_WORK_ARCHIVE_HEADING,
+        "active_done_before": active_done_count,
+        "active_done_after": kept_done_count,
+        "max_active_done": max_active_done,
+        "moved_count": moved_count,
+        "state_file": str(resolved_state_file),
+        "project": str(resolved_project) if resolved_project else None,
+        "updated_at": updated_at if changed else None,
+    }
+
+
 def render_todo_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Goal Harness Todo",
         "",
         f"- ok: `{payload.get('ok')}`",
         f"- dry_run: `{payload.get('dry_run')}`",
-        f"- added: `{payload.get('added')}`",
-        f"- already_exists: `{payload.get('already_exists')}`",
         f"- goal_id: `{payload.get('goal_id')}`",
         f"- role: `{payload.get('role')}`",
         f"- section: `{payload.get('section')}`",
         f"- state_file: `{payload.get('state_file')}`",
     ]
+    if "moved_count" in payload:
+        lines.extend(
+            [
+                f"- changed: `{payload.get('changed')}`",
+                f"- archive_section: `{payload.get('archive_section')}`",
+                f"- active_done_before: `{payload.get('active_done_before')}`",
+                f"- active_done_after: `{payload.get('active_done_after')}`",
+                f"- max_active_done: `{payload.get('max_active_done')}`",
+                f"- moved_count: `{payload.get('moved_count')}`",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"- added: `{payload.get('added')}`",
+                f"- already_exists: `{payload.get('already_exists')}`",
+            ]
+        )
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
-    else:
+    elif "todo" in payload:
         lines.extend(["", "## Todo", "", f"- [ ] {payload.get('todo')}"])
     return "\n".join(lines)
