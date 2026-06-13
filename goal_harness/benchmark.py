@@ -108,6 +108,7 @@ TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE = (
     "hardened_codex_baseline_preflight_guard"
 )
 TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODE = "hardened_codex_baseline"
+TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE = "codex_goal_mode_baseline"
 TERMINAL_BENCH_HARDENED_CODEX_LEGACY_CALIBRATION_MODE = (
     "hardened_codex_calibration"
 )
@@ -117,6 +118,9 @@ TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODES = (
 )
 TERMINAL_BENCH_HARDENED_CODEX_BASELINE_SURFACE = (
     "hardened_codex_baseline_no_goal_harness_state"
+)
+TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE = (
+    "codex_goal_mode_slash_command_no_goal_harness_state"
 )
 # Backward-compatible aliases for older compact run files and running jobs.
 TERMINAL_BENCH_HARDENED_CODEX_CALIBRATION_MODE = (
@@ -11690,6 +11694,24 @@ def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[st
             goal_harness_cli_bridge_enabled=False,
             **resolved_command_kwargs,
         )
+    elif mode == "codex-goal-mode":
+        resolved_command_kwargs.pop("goal_harness_mode", None)
+        resolved_command_kwargs.pop("goal_harness_ablation_mode", None)
+        resolved_command_kwargs.pop("goal_harness_access_packet_mode", None)
+        resolved_command_kwargs.pop("goal_harness_cli_bridge_enabled", None)
+        resolved_command_kwargs.pop("goal_harness_active_user_intervention_enabled", None)
+        resolved_command_kwargs.setdefault(
+            "job_name",
+            "terminal_bench_codex_goal_mode_baseline",
+        )
+        argv = build_terminal_bench_managed_harbor_command(
+            resolve_cli_paths=True,
+            goal_harness_mode=TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE,
+            goal_harness_ablation_mode="codex_goal_mode_baseline",
+            goal_harness_access_packet_mode=TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE,
+            goal_harness_cli_bridge_enabled=False,
+            **resolved_command_kwargs,
+        )
     elif mode in ("", "codex-goal-harness", "goal-harness-managed-codex"):
         if mode == "codex-goal-harness":
             resolved_command_kwargs.setdefault("goal_harness_mode", "codex_goal_harness")
@@ -11890,6 +11912,24 @@ def summarize_terminal_bench_private_runner_launch(
         "agent_name": agent_name,
         "agent_import_path_present": bool(agent_import_path),
         "goal_harness_agent_kwargs_present": goal_harness_agent_kwargs_present,
+        "codex_goal_mode_baseline_requested": (
+            "goal_harness_mode=" + TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE
+        )
+        in argv,
+        "codex_goal_mode_invocation_surface": (
+            "slash_command"
+            if (
+                "goal_harness_mode="
+                + TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE
+            )
+            in argv
+            else ""
+        ),
+        "goal_harness_access_packet_absent": (
+            "goal_harness_access_packet_mode="
+            + TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+        )
+        in argv,
         "goal_harness_worker_bridge_requested": "goal_harness_cli_bridge_enabled=true"
         in argv,
         "active_user_writable_mount_requested": bool(active_user_mounts),
@@ -13515,6 +13555,10 @@ def build_terminal_bench_benchmark_run(
             validation["access_packet_prompt_injection_checked"] = True
             validation["trace_counter_extraction_contract_checked"] = True
             validation["goal_harness_mode_kwarg_checked"] = True
+        if mode == "codex-goal-mode":
+            validation["codex_goal_mode_invocation_surface_checked"] = True
+            validation["goal_harness_access_packet_absent"] = True
+            validation["goal_harness_cli_bridge_absent"] = True
     else:
         validation["no_docker_or_cloud_invoked"] = True
 
@@ -13651,29 +13695,36 @@ def build_terminal_bench_benchmark_run(
         f"{dataset.replace('@', '_').replace('.', '_')}_"
         f"{str(task_id).replace('-', '_')}_{contract['event_mode']}"
     )
+    runner_goal_harness_mode = (
+        "codex_goal_harness"
+        if mode == "codex-goal-harness"
+        else TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE
+        if mode == "codex-goal-mode"
+        else TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODE
+        if mode == "hardened-codex"
+        else "goal_harness_managed_codex"
+    )
+    runner_goal_harness_ablation_mode = (
+        "codex_goal_mode_baseline"
+        if mode == "codex-goal-mode"
+        else "hardened_codex_baseline"
+        if mode == "hardened-codex"
+        else "goal_harness_managed"
+    )
+    runner_access_packet_mode = (
+        TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+        if mode in ("codex-goal-mode", "hardened-codex")
+        else TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_FULL
+    )
     managed_runner_command_preview = (
         build_terminal_bench_managed_harbor_command(
             dataset=dataset,
             task_id=task_id,
             model=model,
             job_name=runner_job_name,
-            goal_harness_mode=(
-                "codex_goal_harness"
-                if mode == "codex-goal-harness"
-                else TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODE
-                if mode == "hardened-codex"
-                else "goal_harness_managed_codex"
-            ),
-            goal_harness_ablation_mode=(
-                "hardened_codex_baseline"
-                if mode == "hardened-codex"
-                else "goal_harness_managed"
-            ),
-            goal_harness_access_packet_mode=(
-                TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
-                if mode == "hardened-codex"
-                else TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_FULL
-            ),
+            goal_harness_mode=runner_goal_harness_mode,
+            goal_harness_ablation_mode=runner_goal_harness_ablation_mode,
+            goal_harness_access_packet_mode=runner_access_packet_mode,
             goal_harness_cli_bridge_enabled=(
                 mode == "codex-goal-harness"
                 and (worker_cli_bridge_fixture or active_cli_bridge_preflight)
@@ -13691,6 +13742,7 @@ def build_terminal_bench_benchmark_run(
             "codex-goal-harness",
             "goal-harness-managed-codex",
             "hardened-codex",
+            "codex-goal-mode",
         )
         else []
     )
@@ -13699,6 +13751,7 @@ def build_terminal_bench_benchmark_run(
         "codex-goal-harness",
         "goal-harness-managed-codex",
         "hardened-codex",
+        "codex-goal-mode",
     ) and preflight_guard:
         private_runner_launch_summary = summarize_terminal_bench_private_runner_launch(
             build_terminal_bench_private_runner_launch(
@@ -13753,6 +13806,7 @@ def build_terminal_bench_benchmark_run(
                     "codex-goal-harness",
                     "goal-harness-managed-codex",
                     "hardened-codex",
+                    "codex-goal-mode",
                 )
                 else None
             ),
@@ -14356,6 +14410,17 @@ def build_terminal_bench_benchmark_run(
                         "assisted_score_kept_separate_from_official": True,
                     }
                 )
+        if mode == "codex-goal-mode":
+            benchmark_run["preflight_guard"].update(
+                {
+                    "codex_goal_mode_invocation_surface_checked": True,
+                    "codex_goal_mode_invocation_surface": "slash_command",
+                    "goal_harness_access_packet_absent": True,
+                    "goal_harness_cli_bridge_absent": True,
+                    "real_interface_use_observed": False,
+                    "uplift_claim_allowed": False,
+                }
+            )
         if active_cli_bridge_preflight:
             benchmark_run["goal_harness_cli_bridge_surface"] = (
                 TERMINAL_BENCH_CODEX_WORKER_CLI_BRIDGE_SURFACE

@@ -125,7 +125,9 @@ Run a private no-upload official paired pilot on
 `terminal-bench@2.0` / `fix-code-vulnerability`:
 
 1. launch `codex-goal-mode` after verifying the local Codex goal-mode
-   invocation surface;
+   invocation surface and its private no-upload launch summary
+   (`codex_goal_mode_invocation_surface=slash_command`,
+   `goal_harness_access_packet_mode=none`, no worker bridge);
 2. launch `codex-goal-harness` with the active worker bridge in parallel;
 3. ingest compact Harbor results for both arms;
 4. write one paired comparison event with reward, wall time, usage, worker

@@ -295,6 +295,53 @@ def assert_hardened_control_preflight(registry_path: Path, runtime: Path, env: d
     assert_public_safe(payload)
 
 
+def assert_codex_goal_mode_baseline_preflight(
+    registry_path: Path, runtime: Path, env: dict[str, str]
+) -> None:
+    args = common_args(registry_path, runtime)
+    mode_index = args.index("--mode") + 1
+    args[mode_index] = "codex-goal-mode"
+    payload = run_cli_json(args, env=env)
+    assert payload["ok"] is True, payload
+    assert payload["classification"] == "terminal_bench_codex_goal_mode_baseline_preflight_guard_v0", payload
+    assert payload["benchmark_cli"]["mode"] == "codex-goal-mode", payload
+    event = payload["benchmark_run"]
+    assert event["mode"] == "codex_goal_mode_baseline_preflight_guard", event
+    assert event["worker_mode"] == "codex_goal_mode_baseline", event
+    assert event["goal_harness_inside_case"] is False, event
+    assert event["case_semantics_changed_by_harness"] is False, event
+    assert event["preflight_guard"]["schema_version"] == (
+        "terminal_bench_codex_goal_mode_baseline_preflight_guard_v0"
+    ), event
+    assert event["preflight_guard"]["codex_goal_mode_invocation_surface"] == "slash_command", event
+    assert event["preflight_guard"]["goal_harness_access_packet_absent"] is True, event
+    assert event["preflight_guard"]["goal_harness_cli_bridge_absent"] is True, event
+    launch_summary = event["private_runner_launch_summary"]
+    assert launch_summary["schema_version"] == "terminal_bench_private_runner_launch_summary_v0", launch_summary
+    assert launch_summary["codex_goal_mode_baseline_requested"] is True, launch_summary
+    assert launch_summary["codex_goal_mode_invocation_surface"] == "slash_command", launch_summary
+    assert launch_summary["goal_harness_access_packet_absent"] is True, launch_summary
+    assert launch_summary["goal_harness_worker_bridge_requested"] is False, launch_summary
+    assert launch_summary["no_upload_boundary"] is True, launch_summary
+    assert_public_safe(payload)
+
+    execute_payload = run_cli_json(args + ["--execute"], env=env)
+    assert execute_payload["ok"] is True, execute_payload
+    status = collect_status(
+        registry_path=registry_path,
+        runtime_root_override=str(runtime),
+        scan_roots=[],
+        limit=5,
+    )
+    latest = status["run_history"]["goals"][0]["latest_runs"][0]
+    compact_launch = latest["benchmark_run_summary"]["private_runner_launch_summary"]
+    assert compact_launch["codex_goal_mode_baseline_requested"] is True, compact_launch
+    assert compact_launch["codex_goal_mode_invocation_surface"] == "slash_command", compact_launch
+    assert compact_launch["goal_harness_access_packet_absent"] is True, compact_launch
+    assert compact_launch["goal_harness_worker_bridge_requested"] is False, compact_launch
+    assert_public_safe(compact_launch)
+
+
 def assert_guard_rejects_fake_worker(registry_path: Path, runtime: Path, env: dict[str, str]) -> None:
     result = run_cli(common_args(registry_path, runtime) + ["--fake-worker"], env=env, check=False)
     assert result.returncode == 1, result.stdout
@@ -331,6 +378,7 @@ def main() -> None:
         assert_payload(execute_payload, appended=True)
         assert_status_projection(registry_path, runtime)
         assert_hardened_control_preflight(registry_path, runtime, env)
+        assert_codex_goal_mode_baseline_preflight(registry_path, runtime, env)
         assert_guard_rejects_fake_worker(registry_path, runtime, env)
 
     print(

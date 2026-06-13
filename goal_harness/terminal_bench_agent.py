@@ -12,6 +12,8 @@ from harbor.models.agent.context import AgentContext
 
 from goal_harness.benchmark import (
     TERMINAL_BENCH_CODEX_WORKER_CLI_BRIDGE_SURFACE,
+    TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE,
+    TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_AVAILABLE,
     TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_FULL,
     TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE,
@@ -50,6 +52,7 @@ from goal_harness.worker_bridge import (
 )
 
 CODEX_GOAL_HARNESS_MODE = "codex_goal_harness"
+CODEX_GOAL_MODE_BASELINE_MODE = TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE
 GOAL_HARNESS_MANAGED_CODEX_MODE = "goal_harness_managed_codex"
 GOAL_HARNESS_MANAGED_CODEX_POLICY_VERSION = "goal_harness_terminal_bench_policy_v0"
 GOAL_HARNESS_MANAGED_CODEX_BEHAVIOR_SPEC_ID = (
@@ -136,6 +139,16 @@ def build_private_active_user_observe_instruction(
     )
 
 
+def build_codex_goal_mode_baseline_instruction(task_instruction: str) -> str:
+    """Invoke native Codex goal mode without adding Goal Harness state."""
+
+    return (
+        "/goal Complete the following Terminal-Bench task. Keep working until "
+        "the task is done, validated, or blocked by the benchmark environment.\n\n"
+        f"{task_instruction}"
+    )
+
+
 def build_managed_terminal_bench_instruction(
     task_instruction: str,
     *,
@@ -170,6 +183,12 @@ def build_managed_terminal_bench_instruction(
         == TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
     ):
         return task_instruction
+    if (
+        goal_harness_mode == CODEX_GOAL_MODE_BASELINE_MODE
+        and goal_harness_access_packet_mode
+        == TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+    ):
+        return build_codex_goal_mode_baseline_instruction(task_instruction)
 
     access_packet = ""
     access_packet_enabled = (
@@ -645,6 +664,13 @@ class GoalHarnessManagedCodex(Codex):
             == TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
         )
 
+    def _codex_goal_mode_baseline(self) -> bool:
+        return (
+            self.goal_harness_mode == CODEX_GOAL_MODE_BASELINE_MODE
+            and self.goal_harness_access_packet_mode
+            == TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+        )
+
     def _load_goal_harness_trace_rows(self) -> list[dict[str, Any]]:
         return (
             load_goal_harness_counter_trace_file(self.goal_harness_counter_trace_json)
@@ -665,9 +691,10 @@ class GoalHarnessManagedCodex(Codex):
             and not self.goal_harness_counter_trace
         )
         hardened_baseline = self._hardened_codex_baseline()
+        goal_mode_baseline = self._codex_goal_mode_baseline()
         return extract_goal_harness_interaction_counters_from_trace(
             trace_rows,
-            prompt_policy_injected=not hardened_baseline,
+            prompt_policy_injected=not (hardened_baseline or goal_mode_baseline),
             harness_skill_or_packet_injected=bool(
                 self._goal_harness_context_metadata.get(
                     "goal_harness_access_packet_injected"
@@ -676,6 +703,8 @@ class GoalHarnessManagedCodex(Codex):
             case_result_writeback=(
                 no_trace_case_result_writeback
                 if active_cli_bridge and not trace_rows
+                else "codex_goal_mode_baseline_runner_only"
+                if goal_mode_baseline
                 else "hardened_codex_baseline_runner_only"
                 if hardened_baseline
                 else "not_observed_prompt_only_no_cli_bridge"
@@ -685,6 +714,8 @@ class GoalHarnessManagedCodex(Codex):
             no_trace_counter_trust_level=(
                 no_trace_counter_trust_level
                 if active_cli_bridge and not trace_rows
+                else "codex_goal_mode_baseline_no_goal_harness_state"
+                if goal_mode_baseline
                 else "hardened_codex_baseline_no_goal_harness_state"
                 if hardened_baseline
                 else "runtime_metadata_prompt_only_no_cli_bridge"
@@ -788,6 +819,8 @@ class GoalHarnessManagedCodex(Codex):
         context: AgentContext,
     ) -> None:
         hardened_baseline = self._hardened_codex_baseline()
+        goal_mode_baseline = self._codex_goal_mode_baseline()
+        baseline_without_goal_harness = hardened_baseline or goal_mode_baseline
         managed_instruction = build_managed_terminal_bench_instruction(
             instruction,
             policy_version=self.goal_harness_policy_version,
@@ -827,6 +860,8 @@ class GoalHarnessManagedCodex(Codex):
         interface_surface = (
             TERMINAL_BENCH_HARDENED_CODEX_BASELINE_SURFACE
             if hardened_baseline
+            else TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE
+            if goal_mode_baseline
             else
             TERMINAL_BENCH_CODEX_WORKER_CLI_BRIDGE_SURFACE
             if access_packet_injected and self.goal_harness_cli_bridge_enabled
@@ -951,16 +986,20 @@ class GoalHarnessManagedCodex(Codex):
                 ),
                 runner_side_guaranteed_writeback=True,
             ),
-            "case_semantics_changed_by_harness": not hardened_baseline,
-            "goal_harness_inside_case": not hardened_baseline,
+            "case_semantics_changed_by_harness": not baseline_without_goal_harness,
+            "goal_harness_inside_case": not baseline_without_goal_harness,
             "official_score_comparable_to_native_codex": False,
-            "official_score_comparable_to_goal_harness_treatment": hardened_baseline,
-            "model_plus_harness_pair": not hardened_baseline,
-            "control_plane_score_applicable": not hardened_baseline,
+            "official_score_comparable_to_goal_harness_treatment": baseline_without_goal_harness,
+            "model_plus_harness_pair": not baseline_without_goal_harness,
+            "control_plane_score_applicable": not baseline_without_goal_harness,
             "startup_surface_calibration": False,
             "hardened_install_surface": hardened_baseline,
             "hardened_install_baseline": hardened_baseline,
-            "task_prompt_changed_by_goal_harness_policy": not hardened_baseline,
+            "codex_goal_mode_baseline": goal_mode_baseline,
+            "codex_goal_mode_invocation_surface": (
+                "slash_command" if goal_mode_baseline else None
+            ),
+            "task_prompt_changed_by_goal_harness_policy": not baseline_without_goal_harness,
             "raw_task_instruction_recorded": False,
             "raw_managed_prompt_recorded": False,
             "raw_interaction_trace_recorded": False,

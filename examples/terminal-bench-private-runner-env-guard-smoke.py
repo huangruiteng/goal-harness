@@ -346,6 +346,29 @@ def main() -> None:
     assert baseline_summary["goal_harness_agent_kwargs_present"] is True, baseline_summary
     assert baseline_summary["goal_harness_worker_bridge_requested"] is False, baseline_summary
 
+    goal_mode_launch = build_terminal_bench_private_runner_launch(
+        mode="codex-goal-mode",
+        jobs_dir="<private-jobs-dir>",
+        job_name="terminal_bench_codex_goal_mode_baseline_env_guard_smoke",
+        agent_timeout_multiplier=4,
+    )
+    assert goal_mode_launch["argv"][0] == resolve_terminal_bench_runner_binary("uvx"), goal_mode_launch["argv"]
+    assert "--agent-import-path" in goal_mode_launch["argv"], goal_mode_launch["argv"]
+    assert "goal_harness_mode=codex_goal_mode_baseline" in goal_mode_launch["argv"], goal_mode_launch["argv"]
+    assert "goal_harness_ablation_mode=codex_goal_mode_baseline" in goal_mode_launch["argv"], goal_mode_launch["argv"]
+    assert "goal_harness_access_packet_mode=none" in goal_mode_launch["argv"], goal_mode_launch["argv"]
+    assert "goal_harness_cli_bridge_enabled=true" not in goal_mode_launch["argv"], goal_mode_launch["argv"]
+    assert "--mounts" not in goal_mode_launch["argv"], goal_mode_launch["argv"]
+    goal_mode_summary = summarize_terminal_bench_private_runner_launch(goal_mode_launch)
+    assert goal_mode_summary["ready"] == goal_mode_launch["ready"], goal_mode_summary
+    assert goal_mode_summary["first_blocker"] == goal_mode_launch["first_blocker"], goal_mode_summary
+    assert goal_mode_summary["codex_goal_mode_baseline_requested"] is True, goal_mode_summary
+    assert goal_mode_summary["codex_goal_mode_invocation_surface"] == "slash_command", goal_mode_summary
+    assert goal_mode_summary["goal_harness_access_packet_absent"] is True, goal_mode_summary
+    assert goal_mode_summary["goal_harness_worker_bridge_requested"] is False, goal_mode_summary
+    assert goal_mode_summary["no_upload_boundary"] is True, goal_mode_summary
+    assert goal_mode_summary["submit_eligible"] is False, goal_mode_summary
+
     expect_raises(
         lambda: build_terminal_bench_managed_harbor_command(
             goal_harness_mode="goal_harness_managed_codex",

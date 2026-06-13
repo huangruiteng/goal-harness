@@ -529,7 +529,9 @@ work still belongs in the existing code, examples, and contract documents:
   `codex-goal-mode` and `codex-goal-harness`. The contract treats Codex CLI
   goal mode as the true paired baseline for this experiment and
   `codex-goal-harness` as the core `goal-mode model + harness` pair; hardened
-  or bare Codex evidence is calibration only.
+  or bare Codex evidence is calibration only. The current no-upload launch
+  summary records the baseline as `/goal` slash-command surface with
+  `access_packet=none` and no worker bridge.
 - `terminal-bench-official-hard-case-selection-v0.md`: no-run selection
   contract that moves the next evidence target from `terminal-bench-sample@2.0`
   to official `terminal-bench@2.0`, selects a three-case hard/long-horizon

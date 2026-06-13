@@ -48,6 +48,14 @@ the installed CLI exposes goal mode through config, interactive startup, or a
 future flag rather than a literal `--goal` option, record that invocation in the
 run preflight instead of inventing a command.
 
+Current no-upload launch contract materializes the baseline through the Harbor
+custom-agent import path with `goal_harness_mode=codex_goal_mode_baseline`,
+`goal_harness_access_packet_mode=none`, no worker bridge, and
+`codex_goal_mode_invocation_surface=slash_command`. The worker instruction starts
+with Codex CLI `/goal`, then the original benchmark task instruction follows.
+This is still a baseline arm: it must not read Goal Harness state or expose a
+Goal Harness access packet inside the case.
+
 `codex-goal-harness` is intentionally a different agent mode. It may
 still use the benchmark's official verifier, but it must be reported as
 `worker_mode=codex_goal_harness_cli` or equivalent. Its result is not a native
@@ -110,7 +118,8 @@ Compact benchmark events should include these mode fields:
 
 ## Recommended Implementation Order
 
-1. Implement the Codex goal-mode baseline no-run fixture and command envelope.
+1. Implement the Codex goal-mode baseline no-run fixture, command envelope, and
+   private no-upload launch summary.
 2. Implement the `codex-goal-harness` worker bridge fixture and command
    envelope.
 3. Implement the private no-upload runner wrapper with the two primary modes.
