@@ -29,3 +29,23 @@ writeback, not a quiet no-op or benchmark execution.
 The real path defaults to `--codex-model gpt-5.4-mini` so it does not depend on
 the user's Codex CLI default model. Override with `--codex-model <model>` when a
 release lane needs a specific model surface.
+
+```bash
+python3 regression/agentissue-lagent239-real-codex-runner.py
+```
+
+Runs the AgentIssue-Bench `lagent_239` runner contract-only path. It
+materializes the private runner wrapper and checks the no-generator-execution,
+selected-image, source-extraction, entrypoint eval, compact reducer, and
+credential-boundary contracts without invoking Codex or Docker.
+
+```bash
+python3 regression/agentissue-lagent239-real-codex-runner.py \
+  --real-codex \
+  --prompt-path <private-agentissue-prompt.md>
+```
+
+Additionally invokes the host `codex exec` plus the selected
+`alfin06/agentissue-bench:lagent_239` Docker image. It writes raw prompt,
+stdout/stderr, and patch artifacts only under the temporary private regression
+root, then prints a compact public-safe score and boundary summary.

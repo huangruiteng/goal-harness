@@ -2747,6 +2747,8 @@ AGENTISSUE_REAL_RESULT_REQUIRED_PHASE_CHECKS = (
     "fixed_source_not_extracted_to_host",
     "host_codex_cli_invoked",
     "patch_exported_from_buggy_source_git_diff",
+)
+AGENTISSUE_REAL_RESULT_RESULT_PHASE_CHECKS = (
     "patch_applied_in_container",
 )
 
@@ -2833,6 +2835,10 @@ def _agentissue_required_phase_checks(validation: dict[str, Any]) -> dict[str, b
         checks[key] = validation.get(key) is True
         if not checks[key]:
             missing.append(key)
+    for key in AGENTISSUE_REAL_RESULT_RESULT_PHASE_CHECKS:
+        if not isinstance(validation.get(key), bool):
+            missing.append(key)
+        checks[key] = validation.get(key) is True
     if missing:
         raise ValueError(
             "real-result compact inputs are missing required runner phase proof(s): "
@@ -2907,6 +2913,16 @@ def materialize_agentissue_codex_cli_runner_real_result(
         validation.get("patched_eval_success_marker")
         if isinstance(validation.get("patched_eval_success_marker"), bool)
         else resolved
+    )
+    patch_applied = phase_checks.get("patch_applied_in_container") is True
+    failure_label = (
+        "resolved_single_tag_eval"
+        if resolved
+        else (
+            "unresolved_patch_apply_failed_compact_result"
+            if not patch_applied
+            else "unresolved_single_tag_eval_compact_result"
+        )
     )
     no_upload = _agentissue_public_bool(run_input.get("no_upload")) or _agentissue_public_bool(
         validation.get("no_upload")
@@ -2991,11 +3007,7 @@ def materialize_agentissue_codex_cli_runner_real_result(
         "mode": AGENTISSUE_CODEX_CLI_RUNNER_REAL_RESULT_MODE,
         "worker_mode": "trusted_host_codex_cli_real_result_reducer",
         "trace_publicness": "compact_public_no_issue_text_no_patch_no_logs",
-        "score_failure_attribution": (
-            "resolved_single_tag_eval"
-            if resolved
-            else "unresolved_single_tag_eval_compact_result"
-        ),
+        "score_failure_attribution": failure_label,
         "real_run": True,
         "submit_eligible": False,
         "leaderboard_evidence": False,
@@ -3043,17 +3055,13 @@ def materialize_agentissue_codex_cli_runner_real_result(
                 "task_id": tag,
                 "trial_name": tag,
                 "source": "selected_public_tag",
-                "exception_type": "" if resolved else "unresolved_single_tag_eval",
+                "exception_type": "" if resolved else failure_label,
                 "trajectory_present": False,
                 "artifact_manifest_present": False,
                 "trial_result_present": True,
             }
         ],
-        "failure_attribution_labels": (
-            ["resolved_single_tag_eval"]
-            if resolved
-            else ["unresolved_single_tag_eval_compact_result"]
-        ),
+        "failure_attribution_labels": [failure_label],
         "evidence_files": [
             "real-result.public.json",
             "benchmark_run.compact.json",

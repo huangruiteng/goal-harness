@@ -52,7 +52,6 @@ buggy_source_extracted=true
 fixed_source_not_extracted_to_host=true
 host_codex_cli_invoked=true
 patch_exported_from_buggy_source_git_diff=true
-patch_applied_in_container=true
 no_upload=true
 no_submit=true
 no_public_ranking_path=true
@@ -67,10 +66,11 @@ fields, and exposes the selected single-tag official container score as
 compact control-plane evidence. It is not a public leaderboard submission and
 does not make an official native Codex CLI comparison claim.
 
-`patched_eval_exit_zero` and `patched_eval_success_marker` remain result
-fields, not prerequisites for reading the packet: they distinguish a complete
-unresolved attempt from a resolved attempt. Missing phase proof is a reducer
-error; an official unresolved score is evidence with failure attribution.
+`patch_applied_in_container`, `patched_eval_exit_zero`, and
+`patched_eval_success_marker` remain result fields, not prerequisites for
+reading the packet: they distinguish malformed-patch, complete-unresolved, and
+resolved attempts. Missing phase proof is a reducer error; a false eval-result
+field is an official unresolved score with failure attribution.
 
 Passing `--execute` appends the derived compact `benchmark_run_v0` event to
 Goal Harness run history. The payload also includes a compact
@@ -102,14 +102,18 @@ Codex or Docker execution.
 
 ```bash
 python3 examples/agentissue-bench-codex-cli-runner-real-result-smoke.py
+python3 regression/agentissue-lagent239-real-codex-runner.py
 python3 -m py_compile \
   goal_harness/benchmark.py \
   goal_harness/cli.py \
-  examples/agentissue-bench-codex-cli-runner-real-result-smoke.py
+  examples/agentissue-bench-codex-cli-runner-real-result-smoke.py \
+  regression/agentissue-lagent239-real-codex-runner.py
 goal-harness check \
   --scan-path goal_harness/benchmark.py \
   --scan-path goal_harness/cli.py \
   --scan-path examples/agentissue-bench-codex-cli-runner-real-result-smoke.py \
+  --scan-path regression/agentissue-lagent239-real-codex-runner.py \
+  --scan-path regression/README.md \
   --scan-path docs/research/long-horizon-agent-benchmarks/agentissue-bench-codex-cli-runner-real-result-reducer-v0.md \
   --scan-path docs/research/long-horizon-agent-benchmarks/README.md
 ```

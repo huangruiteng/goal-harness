@@ -163,6 +163,70 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     return registry_path, runtime, real_result_root
 
 
+def write_patch_apply_failure_fixture(real_result_root: Path) -> None:
+    write_json(
+        real_result_root / "benchmark_run.compact.json",
+        {
+            "schema_version": "benchmark_run_v0",
+            "source_runner": "goal_harness_agentissue_codex_cli_runner",
+            "benchmark_id": BENCHMARK_ID,
+            "selected_tag": SELECTED_TAG,
+            "selected_image": "alfin06/agentissue-bench:lagent_239",
+            "real_run": True,
+            "no_upload": True,
+            "no_submit": True,
+            "no_public_ranking_path": True,
+            "patch_sha256": "def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+            "patch_bytes": 2356,
+            "changed_file_count": 1,
+            "hunk_count": 4,
+            "patched_exit_code": 1,
+            "official_task_score": {
+                "kind": "agentissue_bench_single_tag_container_eval",
+                "resolved": False,
+                "value": 0,
+            },
+            "validation": {
+                "selected_image_only": True,
+                "single_tag_only": True,
+                "buggy_source_extracted": True,
+                "fixed_source_not_extracted_to_host": True,
+                "host_codex_cli_invoked": True,
+                "patch_exported_from_buggy_source_git_diff": True,
+                "patch_applied_in_container": False,
+                "patched_eval_exit_zero": False,
+                "patched_eval_success_marker": False,
+                "no_upload": True,
+                "no_submit": True,
+                "no_public_ranking_path": True,
+                "raw_logs_public": False,
+                "patch_content_public": False,
+                "credential_values_recorded": False,
+                "codex_auth_synced_to_container_or_remote": False,
+            },
+        },
+    )
+    write_json(
+        real_result_root / "benchmark_result.compact.json",
+        {
+            "schema_version": "benchmark_result_v0",
+            "benchmark_id": BENCHMARK_ID,
+            "selected_tag": SELECTED_TAG,
+            "no_upload": True,
+            "no_submit": True,
+            "no_public_ranking_path": True,
+            "patch_sha256": "def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+            "patch_bytes": 2356,
+            "changed_file_count": 1,
+            "official_task_score": {
+                "kind": "agentissue_bench_single_tag_container_eval",
+                "resolved": False,
+                "value": 0,
+            },
+        },
+    )
+
+
 def run_cli(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "goal_harness.cli", *args],
@@ -218,7 +282,12 @@ def assert_doc_contract() -> None:
     assert not leaked, leaked
 
 
-def assert_real_result_file(real_result_root: Path) -> None:
+def assert_real_result_file(
+    real_result_root: Path,
+    *,
+    expected_passed: bool = True,
+    patch_applied: bool = True,
+) -> None:
     path = real_result_root / "real-result.public.json"
     assert path.exists(), path
     packet = json.loads(path.read_text(encoding="utf-8"))
@@ -228,13 +297,13 @@ def assert_real_result_file(real_result_root: Path) -> None:
     assert packet["real_runner_invoked_by_reducer"] is False, packet
     assert packet["real_codex_invoked_by_reducer"] is False, packet
     assert packet["real_docker_invoked_by_reducer"] is False, packet
-    assert packet["result_summary"]["official_task_score"]["passed"] is True, packet
-    assert packet["result_summary"]["official_task_score"]["value"] == 1, packet
+    assert packet["result_summary"]["official_task_score"]["passed"] is expected_passed, packet
+    assert packet["result_summary"]["official_task_score"]["value"] == (1 if expected_passed else 0), packet
     assert packet["phase_checks"]["buggy_source_extracted"] is True, packet
     assert packet["phase_checks"]["host_codex_cli_invoked"] is True, packet
     assert packet["phase_checks"]["patch_exported_from_buggy_source_git_diff"] is True, packet
-    assert packet["phase_checks"]["patch_applied_in_container"] is True, packet
-    assert packet["phase_checks"]["patched_eval_exit_zero"] is True, packet
+    assert packet["phase_checks"]["patch_applied_in_container"] is patch_applied, packet
+    assert packet["phase_checks"]["patched_eval_exit_zero"] is expected_passed, packet
     assert packet["boundary"]["no_upload"] is True, packet
     assert packet["boundary"]["no_submit"] is True, packet
     assert packet["boundary"]["no_public_ranking_path"] is True, packet
@@ -244,7 +313,13 @@ def assert_real_result_file(real_result_root: Path) -> None:
     assert_no_forbidden_text(packet)
 
 
-def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
+def assert_payload(
+    payload: dict[str, Any],
+    *,
+    appended: bool,
+    expected_passed: bool = True,
+    patch_applied: bool = True,
+) -> None:
     assert payload["ok"] is True, payload
     assert payload["appended"] is appended, payload
     assert payload["dry_run"] is (not appended), payload
@@ -267,12 +342,12 @@ def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
     assert real_result["ready"] is True, real_result
     assert real_result["materialized"] is True, real_result
     assert real_result["path_recorded"] is False, real_result
-    assert real_result["result_checks"]["resolved"] is True, real_result
+    assert real_result["result_checks"]["resolved"] is expected_passed, real_result
     assert real_result["result_checks"]["buggy_source_extracted"] is True, real_result
     assert real_result["result_checks"]["host_codex_cli_invoked"] is True, real_result
     assert real_result["result_checks"]["patch_exported_from_buggy_source_git_diff"] is True, real_result
-    assert real_result["result_checks"]["patch_applied_in_container"] is True, real_result
-    assert real_result["result_checks"]["patched_eval_exit_zero"] is True, real_result
+    assert real_result["result_checks"]["patch_applied_in_container"] is patch_applied, real_result
+    assert real_result["result_checks"]["patched_eval_exit_zero"] is expected_passed, real_result
     assert real_result["result_checks"]["no_upload"] is True, real_result
     assert real_result["result_checks"]["raw_logs_public"] is False, real_result
     assert real_result["execution_boundary"]["codex_cli_invoked_by_reducer"] is False, real_result
@@ -286,23 +361,28 @@ def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
     assert event["submit_eligible"] is False, event
     assert event["leaderboard_evidence"] is False, event
     assert event["official_score_claim_allowed"] is False, event
-    assert event["official_task_score"]["passed"] is True, event
-    assert event["official_task_score"]["value"] == 1, event
-    assert event["validation"]["all_passed"] is True, event
+    assert event["official_task_score"]["passed"] is expected_passed, event
+    assert event["official_task_score"]["value"] == (1 if expected_passed else 0), event
+    assert event["validation"]["all_passed"] is expected_passed, event
     assert event["validation"]["buggy_source_extracted"] is True, event
     assert event["validation"]["host_codex_cli_invoked"] is True, event
     assert event["validation"]["patch_exported_from_buggy_source_git_diff"] is True, event
-    assert event["validation"]["patch_applied_in_container"] is True, event
-    assert event["validation"]["patched_eval_exit_zero"] is True, event
+    assert event["validation"]["patch_applied_in_container"] is patch_applied, event
+    assert event["validation"]["patched_eval_exit_zero"] is expected_passed, event
+    if not expected_passed:
+        assert "unresolved_patch_apply_failed_compact_result" in event[
+            "failure_attribution_labels"
+        ], event
     assert event["read_boundary"]["compact_only"] is True, event
     assert event["read_boundary"]["raw_artifacts_read"] is False, event
 
     result = payload["benchmark_result"]
     assert result["schema_version"] == "benchmark_result_v0", result
-    assert result["terminal_state"] == "resolved", result
-    assert result["official_task_score"]["passed"] is True, result
+    assert result["terminal_state"] == ("resolved" if expected_passed else "evaluated_unresolved"), result
+    assert result["official_task_score"]["passed"] is expected_passed, result
     assert result["phase_checks"]["buggy_source_extracted"] is True, result
     assert result["phase_checks"]["host_codex_cli_invoked"] is True, result
+    assert result["phase_checks"]["patch_applied_in_container"] is patch_applied, result
 
     assert_no_forbidden_text(cli)
     assert_no_forbidden_text(real_result)
@@ -310,7 +390,13 @@ def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
     assert_no_forbidden_text(result)
 
 
-def assert_status_projection(registry_path: Path, runtime: Path) -> None:
+def assert_status_projection(
+    registry_path: Path,
+    runtime: Path,
+    *,
+    expected_passed: bool = True,
+    patch_applied: bool = True,
+) -> None:
     status = collect_status(
         registry_path=registry_path,
         runtime_root_override=str(runtime),
@@ -323,13 +409,13 @@ def assert_status_projection(registry_path: Path, runtime: Path) -> None:
     assert summary["mode"] == RUN_MODE, summary
     assert summary["benchmark_id"] == BENCHMARK_ID, summary
     assert summary["real_run"] is True, summary
-    assert summary["official_task_score"]["passed"] is True, summary
-    assert summary["validation"]["all_passed"] is True, summary
+    assert summary["official_task_score"]["passed"] is expected_passed, summary
+    assert summary["validation"]["all_passed"] is expected_passed, summary
     assert summary["validation"]["buggy_source_extracted"] is True, summary
     assert summary["validation"]["host_codex_cli_invoked"] is True, summary
     assert summary["validation"]["patch_exported_from_buggy_source_git_diff"] is True, summary
-    assert summary["validation"]["patch_applied_in_container"] is True, summary
-    assert summary["validation"]["patched_eval_exit_zero"] is True, summary
+    assert summary["validation"]["patch_applied_in_container"] is patch_applied, summary
+    assert summary["validation"]["patched_eval_exit_zero"] is expected_passed, summary
     assert summary["read_boundary"]["compact_only"] is True, summary
     assert_no_forbidden_text(summary)
 
@@ -353,7 +439,7 @@ def assert_roots_are_mutually_exclusive(
 
 def main() -> None:
     assert_doc_contract()
-    with tempfile.TemporaryDirectory(prefix="agentissue-runner-real-result-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="agentissue-runner-real-result-resolved-") as tmp:
         registry_path, runtime, real_result_root = write_fixture(Path(tmp))
         dry_payload = run_cli_json(common_args(registry_path, runtime, real_result_root))
         assert_payload(dry_payload, appended=False)
@@ -374,9 +460,53 @@ def main() -> None:
         assert_status_projection(registry_path, runtime)
         assert_roots_are_mutually_exclusive(registry_path, runtime, real_result_root)
 
+    with tempfile.TemporaryDirectory(prefix="agentissue-runner-real-result-score0-") as tmp:
+        registry_path, runtime, real_result_root = write_fixture(Path(tmp))
+        write_patch_apply_failure_fixture(real_result_root)
+        dry_payload = run_cli_json(common_args(registry_path, runtime, real_result_root))
+        assert_payload(
+            dry_payload,
+            appended=False,
+            expected_passed=False,
+            patch_applied=False,
+        )
+        assert_real_result_file(
+            real_result_root,
+            expected_passed=False,
+            patch_applied=False,
+        )
+
+        execute_payload = run_cli_json(
+            common_args(registry_path, runtime, real_result_root)
+            + [
+                "--delivery-batch-scale",
+                "multi_surface",
+                "--delivery-outcome",
+                "primary_goal_outcome",
+                "--execute",
+            ]
+        )
+        assert_payload(
+            execute_payload,
+            appended=True,
+            expected_passed=False,
+            patch_applied=False,
+        )
+        assert_real_result_file(
+            real_result_root,
+            expected_passed=False,
+            patch_applied=False,
+        )
+        assert_status_projection(
+            registry_path,
+            runtime,
+            expected_passed=False,
+            patch_applied=False,
+        )
+
     print(
         "agentissue-bench-codex-cli-runner-real-result-smoke ok "
-        f"mode={RUN_MODE} appended=True real_run=True"
+        f"mode={RUN_MODE} appended=True real_run=True score0_patch_apply_failure=True"
     )
 
 
