@@ -114,6 +114,11 @@ def main() -> int:
 
         agent_payload = run_cli(registry_path, "todo", "add", "--goal-id", GOAL_ID, "--role", "agent", "--text", AGENT_TODO)
         assert agent_payload["added"] is True, agent_payload
+        wrapped_agent_todo = "- [ ] Summarize the read-only evidence after the user\n  checklist is done."
+        state_file.write_text(
+            state_file.read_text(encoding="utf-8").replace(f"- [ ] {AGENT_TODO}", wrapped_agent_todo),
+            encoding="utf-8",
+        )
         metadata_payload = run_cli(
             registry_path,
             "todo",
@@ -135,7 +140,8 @@ def main() -> int:
         assert metadata_payload["task_class"] == "advancement_task", metadata_payload
         assert metadata_payload["action_kind"] == "run_eval", metadata_payload
         after_metadata = state_file.read_text(encoding="utf-8")
-        assert after_metadata.count(AGENT_TODO) == 1, after_metadata
+        assert after_metadata.count("- [ ] Summarize the read-only evidence after the user") == 1, after_metadata
+        assert after_metadata.index("checklist is done.") < after_metadata.index("<!-- goal-harness:todo"), after_metadata
         assert "<!-- goal-harness:todo task_class=advancement_task action_kind=run_eval -->" in after_metadata
         fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
         assert fields["user_todos"]["items"][0]["text"] == USER_TODO, fields

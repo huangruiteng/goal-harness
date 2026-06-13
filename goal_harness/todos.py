@@ -52,17 +52,6 @@ def heading_index(lines: list[str], heading: str) -> int | None:
     return None
 
 
-def section_has_todo(lines: list[str], start: int, end: int, text: str) -> bool:
-    expected = normalize_todo_text(text)
-    for line in lines[start + 1 : end]:
-        match = TODO_TASK_PATTERN.match(line)
-        if not match:
-            continue
-        if normalize_todo_text(match.group(2)) == expected:
-            return True
-    return False
-
-
 def insert_into_existing_section(lines: list[str], start: int, end: int, todo_line: str) -> None:
     insert_at = end
     while insert_at > start + 1 and not lines[insert_at - 1].strip():
@@ -202,7 +191,10 @@ def upsert_todo_metadata(lines: list[str], block: dict[str, Any], metadata_line:
                 return False
             lines[index] = metadata_line
             return True
-    lines.insert(start + 1, metadata_line)
+    insert_at = end
+    while insert_at > start + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    lines.insert(insert_at, metadata_line)
     return True
 
 
@@ -243,8 +235,9 @@ def add_goal_todo(
     if metadata_line:
         todo_lines.append(metadata_line)
     todo_line = "\n".join(todo_lines)
-    already_exists = bool(bounds and section_has_todo(lines, bounds[0], bounds[1], todo_text))
-    added = not already_exists
+    block = matching_todo_block(lines, bounds[0], bounds[1], todo_text) if bounds else None
+    added = block is None
+    already_exists = not added
     metadata_updated = False
 
     if added:
@@ -252,10 +245,8 @@ def add_goal_todo(
             insert_into_existing_section(lines, bounds[0], bounds[1], todo_line)
         else:
             insert_new_section(lines, role, todo_line)
-    elif bounds and metadata_line:
-        block = matching_todo_block(lines, bounds[0], bounds[1], todo_text)
-        if block:
-            metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
+    elif block and metadata_line:
+        metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
 
     updated_at = now_local()
     new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
