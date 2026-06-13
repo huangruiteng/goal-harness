@@ -2370,6 +2370,7 @@ evaluate_selected_tag_container() {{
 }}
 
 write_compact_public_evidence() {{
+  export TAG IMAGE BUGGY_SOURCE PATCH_PATH MARKER_DIR
   python3 - "$BENCHMARK_RUN_JSON" "$BENCHMARK_RESULT_JSON" <<'PY'
 import hashlib
 import json

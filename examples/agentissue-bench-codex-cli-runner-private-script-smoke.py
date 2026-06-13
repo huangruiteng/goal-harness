@@ -62,6 +62,7 @@ REQUIRED_SCRIPT_SNIPPETS = [
     "write_attempt_patch_from_buggy_source_git_diff",
     "evaluate_selected_tag_container",
     "write_compact_public_evidence",
+    "export TAG IMAGE BUGGY_SOURCE PATCH_PATH MARKER_DIR",
     "reduce_compact_public_evidence",
     "APPEND_HISTORY",
     "ALLOW_DOCKER_PULL",
