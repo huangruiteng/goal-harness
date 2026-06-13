@@ -571,6 +571,13 @@ work still belongs in the existing code, examples, and contract documents:
   repeat or treatment claims, selects `build-cython-ext` as the next
   material-ready setup-heavy case, and preserves the no-upload paired protocol
   for Codex goal-mode versus `codex-goal-harness`.
+- `terminal-bench-next-candidate-after-build-cython-ext-20260614.md`:
+  public-safe P0 routing packet after the `build-cython-ext` paired compact
+  review. It records the both-pass/no-uplift outcome, excludes recently
+  consumed material-ready candidates and old paired/blocker evidence, selects
+  `pytorch-model-recovery` as a current-protocol calibration case with old
+  bare-Codex failure signal, and preserves the no-upload paired protocol for
+  Codex goal-mode versus `codex-goal-harness`.
 - `agents-last-exam-triage-v0.md`: source-backed triage note adding Agents'
   Last Exam to the benchmark backlog. It records the Xiaohongshu discovery
   signal, verifies the arXiv and public GitHub surfaces, and keeps ALE behind
