@@ -2693,6 +2693,25 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def todo_priority_rank(priority: Any) -> int:
+    if not isinstance(priority, str):
+        return 50
+    match = re.match(r"P([0-4])", priority.strip().upper())
+    if not match:
+        return 50
+    return int(match.group(1))
+
+
+def todo_projection_sort_key(item: dict[str, Any]) -> tuple[int, int]:
+    priority = item.get("priority")
+    if not isinstance(priority, str):
+        priority, _ = todo_priority_parts(str(item.get("text") or ""))
+    return (
+        todo_priority_rank(priority),
+        int(item.get("index") or 999999),
+    )
+
+
 def compact_todo_group(
     items: list[dict[str, Any]],
     *,
@@ -2710,13 +2729,16 @@ def compact_todo_group(
     open_items = [item for item in items if not item.get("done")]
     done_items = [item for item in items if item.get("done")]
     budgeted_items = [*open_items, *done_items]
+    projected_open_items = sorted(open_items, key=todo_projection_sort_key)
     return {
         "schema_version": "todo_summary_v0",
         "source_section": source_section,
         "total_count": len(items),
         "open_count": len(open_items),
         "done_count": len(done_items),
-        "first_open_items": [compact_todo_item(item) for item in open_items[:3]],
+        "first_open_items": [
+            compact_todo_item(item) for item in projected_open_items[:3]
+        ],
         "items": budgeted_items[:MAX_STATUS_TODOS_PER_ROLE],
     }
 
@@ -3218,8 +3240,8 @@ def open_todo_items(
             compact["text"] = text
             result.append(compact)
             if len(result) >= limit:
-                return result
-    return result
+                return sorted(result, key=todo_projection_sort_key)
+    return sorted(result, key=todo_projection_sort_key)
 
 
 def first_open_todo_text(todos: dict[str, Any] | None) -> str | None:
@@ -3305,7 +3327,7 @@ def open_todo_items(todos: dict[str, Any] | None) -> list[dict[str, Any]]:
         return []
     items: list[dict[str, Any]] = []
     seen: set[tuple[Any, str]] = set()
-    for source_items in (todos.get("items"), todos.get("first_open_items")):
+    for source_items in (todos.get("first_open_items"), todos.get("items")):
         if not isinstance(source_items, list):
             continue
         for todo in source_items:
@@ -3319,7 +3341,7 @@ def open_todo_items(todos: dict[str, Any] | None) -> list[dict[str, Any]]:
                 continue
             seen.add(key)
             items.append(todo)
-    return items
+    return sorted(items, key=todo_projection_sort_key)
 
 
 def first_open_todo_item(todos: dict[str, Any] | None) -> dict[str, Any] | None:

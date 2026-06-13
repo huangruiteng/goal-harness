@@ -160,7 +160,7 @@ def write_monitor_fixture(root: Path) -> tuple[Path, Path, Path]:
         "## Next Action\n\n"
         "- Wait for the owner gate before any real benchmark execution.\n\n"
         "## User Todo / Owner Review Reading Queue\n\n"
-        "- [ ] [P1] Approve the private one-instance execution boundary before any real run.\n\n"
+        "- [x] [P1] Approve the private one-instance execution boundary before any real run.\n\n"
         "## Agent Todo\n\n"
         "- [ ] [P2] Meta canary/readiness observation lane: keep status observable and repair only material transitions.\n",
         encoding="utf-8",
