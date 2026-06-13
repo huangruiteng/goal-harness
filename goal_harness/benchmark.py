@@ -2248,6 +2248,7 @@ GOAL_HARNESS_BIN="${{GOAL_HARNESS_BIN:-goal-harness}}"
 GOAL_ID="${{GOAL_ID:-goal-harness-meta}}"
 ALLOW_DOCKER_PULL="${{ALLOW_DOCKER_PULL:-0}}"
 APPEND_HISTORY="${{APPEND_HISTORY:-0}}"
+PRECHECK_ONLY="${{PRECHECK_ONLY:-0}}"
 PATCH_APPLY_SH="${{PATCH_APPLY_SH:-{eval_apply}}}"
 PATCH_TEST_SH="${{PATCH_TEST_SH:-{eval_test}}}"
 CONTAINER_BUGGY_SOURCE="${{CONTAINER_BUGGY_SOURCE:-{container_buggy_source}}}"
@@ -2289,14 +2290,29 @@ prepare_private_job_root() {{
   fi
 }}
 
+precheck_private_runner_environment() {{
+  require_selected_lagent239
+  command -v "$CODEX_BIN" >/dev/null 2>&1 || fail "Codex binary is not on PATH"
+  command -v "$DOCKER_BIN" >/dev/null 2>&1 || fail "Docker binary is not on PATH"
+  if ! "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1; then
+    [ "$ALLOW_DOCKER_PULL" = "1" ] || fail "selected image is missing; set ALLOW_DOCKER_PULL=1 to pull it"
+    "$DOCKER_BIN" pull "$IMAGE"
+  fi
+  "$DOCKER_BIN" run --platform linux/amd64 --rm --entrypoint bash \\
+    -e CONTAINER_BUGGY_SOURCE="$CONTAINER_BUGGY_SOURCE" \\
+    "$IMAGE" -lc \\
+    '[ -d "$CONTAINER_BUGGY_SOURCE" ] && grep -q "apply_patch)" /usr/local/bin/run_test_entrypoint.sh && grep -q "test_patched)" /usr/local/bin/run_test_entrypoint.sh'
+}}
+
 extract_buggy_source_from_selected_container() {{
   if [ -d "$BUGGY_SOURCE/.git" ]; then
     return 0
   fi
-  if [ -e "$BUGGY_SOURCE" ] && [ "$(find "$BUGGY_SOURCE" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" != "0" ]; then
+  if [ -e "$BUGGY_SOURCE" ] && [ "$(find "$BUGGY_SOURCE" -mindepth 1 -maxdepth 1 ! -name .gitkeep | wc -l | tr -d ' ')" != "0" ]; then
     fail "buggy-source is non-empty but has no git baseline; move it aside or set up baseline first"
   fi
   mkdir -p "$BUGGY_SOURCE"
+  rm -f "$BUGGY_SOURCE/.gitkeep"
   if ! "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1; then
     [ "$ALLOW_DOCKER_PULL" = "1" ] || fail "selected image is missing; set ALLOW_DOCKER_PULL=1 to pull it"
     "$DOCKER_BIN" pull "$IMAGE"
@@ -2453,6 +2469,10 @@ reduce_compact_public_evidence() {{
 }}
 
 main() {{
+  if [ "$PRECHECK_ONLY" = "1" ]; then
+    precheck_private_runner_environment
+    return 0
+  fi
   prepare_private_job_root
   extract_buggy_source_from_selected_container
   initialize_git_baseline_in_buggy_source
@@ -2535,9 +2555,11 @@ def materialize_agentissue_codex_cli_runner_private_script(
         ],
         "script_checks": {
             "strict_mode": True,
+            "precheck_only_mode": True,
             "selected_tag_guard": True,
             "selected_image_guard": True,
             "observed_image_source_path_default": True,
+            "gitkeep_placeholder_safe": True,
             "buggy_source_extraction_phase": True,
             "git_baseline_phase": True,
             "host_codex_phase": True,
@@ -2609,6 +2631,8 @@ def materialize_agentissue_codex_cli_runner_private_script(
             "phase_order_rendered": True,
             "script_renders_source_extraction": True,
             "script_renders_observed_image_source_path": True,
+            "script_renders_precheck_only": True,
+            "script_handles_gitkeep_placeholder": True,
             "script_renders_git_baseline": True,
             "script_renders_host_codex": True,
             "script_renders_patch_export": True,

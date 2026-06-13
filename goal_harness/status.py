@@ -1378,6 +1378,8 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
             "phase_order_rendered",
             "script_renders_source_extraction",
             "script_renders_observed_image_source_path",
+            "script_renders_precheck_only",
+            "script_handles_gitkeep_placeholder",
             "script_renders_git_baseline",
             "script_renders_host_codex",
             "script_renders_patch_export",

@@ -59,6 +59,13 @@ script can pull the selected image only when `ALLOW_DOCKER_PULL=1`; otherwise a
 missing local image is a blocker. The source path is still configurable with
 `CONTAINER_BUGGY_SOURCE`, but the generated default is pinned to the observed
 `lagent_239` image layout rather than the generic `/workspace` placeholder.
+Operators can run `PRECHECK_ONLY=1 ./run-lagent239.private.sh` before the real
+run; this checks the Codex and Docker binaries, selected image availability,
+the observed source path, and the image entrypoint commands without requiring
+or reading `context/prompt.md`, invoking Codex, generating a patch, uploading,
+submitting, or appending history. The extraction phase also treats the
+generated `.gitkeep` placeholder as empty so the materialized root can be used
+directly for the real run.
 
 ## Public Manifest
 
@@ -97,7 +104,8 @@ control_plane_score_applicable=true
 
 Validation fields assert that the private script and public manifest were
 materialized, the script executable bit is set, phase order and all runner
-phases are rendered, script content is not public, the script path is relative
+phases are rendered, `PRECHECK_ONLY=1` and generated `.gitkeep` placeholder
+handling are present, script content is not public, the script path is relative
 only, and the generator performed no Codex execution, Docker execution, model
 API call, upload, submit, public ranking path, auth material sync, raw-log
 publication, patch-content publication, or absolute private path publication.

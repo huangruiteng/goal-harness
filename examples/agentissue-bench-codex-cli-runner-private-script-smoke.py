@@ -65,6 +65,8 @@ REQUIRED_SCRIPT_SNIPPETS = [
     "reduce_compact_public_evidence",
     "APPEND_HISTORY",
     "ALLOW_DOCKER_PULL",
+    "PRECHECK_ONLY",
+    "precheck_private_runner_environment",
     "CONTAINER_BUGGY_SOURCE",
     "/app/source_code_buggy",
     "/usr/local/bin/run_test_entrypoint.sh apply_patch /patches/attempt.patch",
@@ -187,6 +189,8 @@ def assert_materialized_files(runner_root: Path) -> None:
     script_text = script.read_text(encoding="utf-8")
     missing = [snippet for snippet in REQUIRED_SCRIPT_SNIPPETS if snippet not in script_text]
     assert not missing, missing
+    assert 'find "$BUGGY_SOURCE" -mindepth 1 -maxdepth 1 ! -name .gitkeep' in script_text
+    assert 'rm -f "$BUGGY_SOURCE/.gitkeep"' in script_text
     assert 'cp "$TMP_CONTAINER:$CONTAINER_BUGGY_SOURCE/." "$BUGGY_SOURCE"' in script_text
     assert "--entrypoint bash" in script_text
     assert "CODEX" + "_ACCESS_TOKEN" not in script_text
@@ -198,7 +202,9 @@ def assert_materialized_files(runner_root: Path) -> None:
     assert manifest["root_path_recorded"] is False, manifest
     assert manifest["private_script_relative_path"] == "run-lagent239.private.sh", manifest
     assert manifest["script_content_public"] is False, manifest
+    assert manifest["script_checks"]["precheck_only_mode"] is True, manifest
     assert manifest["script_checks"]["observed_image_source_path_default"] is True, manifest
+    assert manifest["script_checks"]["gitkeep_placeholder_safe"] is True, manifest
     assert manifest["script_checks"]["host_codex_phase"] is True, manifest
     assert manifest["script_checks"]["selected_container_eval_phase"] is True, manifest
     assert manifest["script_checks"]["entrypoint_eval_commands"] is True, manifest
@@ -236,7 +242,9 @@ def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
     assert runner["path_recorded"] is False, runner
     assert runner["script_root_path_recorded"] is False, runner
     assert runner["script_relative_path"] == "run-lagent239.private.sh", runner
+    assert runner["script_checks"]["precheck_only_mode"] is True, runner
     assert runner["script_checks"]["observed_image_source_path_default"] is True, runner
+    assert runner["script_checks"]["gitkeep_placeholder_safe"] is True, runner
     assert runner["script_checks"]["host_codex_phase"] is True, runner
     assert runner["script_checks"]["entrypoint_eval_commands"] is True, runner
     assert runner["script_checks"]["compact_reducer_phase"] is True, runner
@@ -257,6 +265,8 @@ def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
     assert event["validation"]["private_runner_script_materialized"] is True, event
     assert event["validation"]["script_renders_host_codex"] is True, event
     assert event["validation"]["script_renders_observed_image_source_path"] is True, event
+    assert event["validation"]["script_renders_precheck_only"] is True, event
+    assert event["validation"]["script_handles_gitkeep_placeholder"] is True, event
     assert event["validation"]["script_renders_selected_tag_eval"] is True, event
     assert event["validation"]["script_renders_entrypoint_eval_commands"] is True, event
     assert event["validation"]["script_renders_real_result_reducer"] is True, event
@@ -285,6 +295,8 @@ def assert_status_projection(registry_path: Path, runtime: Path) -> None:
     assert summary["validation"]["private_runner_script_materialized"] is True, summary
     assert summary["validation"]["script_renders_host_codex"] is True, summary
     assert summary["validation"]["script_renders_observed_image_source_path"] is True, summary
+    assert summary["validation"]["script_renders_precheck_only"] is True, summary
+    assert summary["validation"]["script_handles_gitkeep_placeholder"] is True, summary
     assert summary["validation"]["script_renders_selected_tag_eval"] is True, summary
     assert summary["validation"]["script_renders_entrypoint_eval_commands"] is True, summary
     assert summary["validation"]["script_renders_real_result_reducer"] is True, summary
