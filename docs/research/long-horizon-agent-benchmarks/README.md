@@ -540,6 +540,11 @@ work still belongs in the existing code, examples, and contract documents:
   paired-run invariants for `codex-goal-mode` versus `codex-goal-harness`,
   claim boundaries, metrics, goal-mode invocation preflight, and stop
   conditions before any full 89-task run or leaderboard path.
+- `terminal-bench-next-candidate-selection-20260614.md`: no-run P0 routing
+  packet after the scheduler verifier-attribution blocker. It excludes
+  treatment/same-task repeat for the blocked task, strict-preflights unused
+  cached official task ids with the Codex goal-mode baseline shape, and selects
+  `compile-compcert` as the next private no-upload paired pilot.
 - `agents-last-exam-triage-v0.md`: source-backed triage note adding Agents'
   Last Exam to the benchmark backlog. It records the Xiaohongshu discovery
   signal, verifies the arXiv and public GitHub surfaces, and keeps ALE behind
