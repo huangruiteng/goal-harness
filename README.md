@@ -135,6 +135,16 @@ goal-harness quota should-run --goal-id demo-goal
 goal-harness history --goal-id demo-goal
 ```
 
+## Contributing
+
+External contributors should start with
+[CONTRIBUTOR_TASKS.md](CONTRIBUTOR_TASKS.md) for public, claimable work and
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, and boundary rules.
+
+Goal Harness keeps local active goal state separate from the public repository:
+do not commit `.goal-harness/`, `.codex/goals/`, live
+`ACTIVE_GOAL_STATE.md`, raw benchmark traces, or private operator artifacts.
+
 ## Connect A Project
 
 From a project repository:

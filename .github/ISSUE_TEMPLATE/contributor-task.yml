@@ -1,0 +1,74 @@
+name: Contributor task
+description: Publish, claim, or discuss a public contributor task.
+title: "[Task]: "
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for public, repository-safe work. Do not paste private benchmark traces, verifier output, raw agent sessions, credentials, internal document links, or local runtime state.
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID or area
+      description: Use the board ID if one exists, such as GH-C01, or a short area name.
+      placeholder: "GH-C01 or area: docs"
+  - type: dropdown
+    id: intent
+    attributes:
+      label: Intent
+      options:
+        - I want to claim an existing task
+        - I am proposing a new task
+        - I need design feedback before implementation
+        - I found a bug
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should change, and why is it useful?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: List the smallest useful slice and any known non-goals.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Relevant files or commands
+      description: Link likely files, docs, examples, or CLI commands.
+      placeholder: |
+        - README.md
+        - examples/demo-cli-smoke.py
+        - goal-harness check --scan-root .
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: What command or review will prove the task is done?
+      placeholder: |
+        - python3 -m py_compile goal_harness/*.py
+        - goal-harness check --scan-root .
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Public/private boundary
+      options:
+        - label: This issue does not include private benchmark traces, verifier output, credentials, internal document links, raw agent sessions, or local runtime state.
+          required: true
+        - label: I will not run or duplicate maintainer-owned benchmark cases unless a maintainer explicitly splits out a public task.
+          required: true
