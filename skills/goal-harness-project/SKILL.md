@@ -92,10 +92,16 @@ interaction, not a silent skip. Read `gate_prompt`, `operator_question`,
 `recommended_action`, `next_handoff_condition`, `missing_gates`, and
 `user_todo_summary` and `agent_todo_summary` when present, then ask the concrete gate in Chinese unless
 the same unresolved question was already surfaced in the recent visible thread.
-If `user_todo_summary.open_count > 0`, list those existing open user todos in
-the notification even when there are no newly discovered user actions; do not
-summarize the turn as "no new user action". Do not run `agent_command`,
-adapter work, write-control, production actions, or the gated path while asking.
+Only when `interaction_contract.user_channel.action_required=true` or
+`user_todo_summary.open_count > 0`, the notification must name concrete payload
+todo(s)/questions, never only "owner gate"; if those required user-facing items
+are not projected, say "具体 user todo 未投影，需修复 Goal Harness 状态投影"; never
+say "no new user action" for this case. When
+`interaction_contract.user_channel.action_required=false` and
+`user_todo_summary.open_count=0`, allow "无用户待办/无需通知" or a quiet
+no-notification result; do not imply a state projection bug. Do not run
+`agent_command`, adapter work,
+write-control, production actions, or the gated path while asking.
 
 Prefer the guard's `interaction_contract` when present. It is the current
 machine-readable protocol for the user / agent / Goal Harness CLI split:

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -47,6 +48,21 @@ TERMINAL_BENCH_MODES = (
 TERMINAL_BENCH_DEFAULT_DATASET = "terminal-bench@2.0"
 TERMINAL_BENCH_DEFAULT_TASK = "build-cython-ext"
 TERMINAL_BENCH_DEFAULT_MODEL = "gpt-5.5"
+SKILLSBENCH_DEFAULT_DATASET = "skillsbench@1.1"
+SKILLSBENCH_DEFAULT_TASK = "citation-check"
+SKILLSBENCH_DEFAULT_MODEL = "gpt-5.5"
+SKILLSBENCH_ROUTES = (
+    "codex-acp-blind-loop-baseline",
+    "goal-harness-blind-loop-treatment",
+    "codex-goal-mode-baseline",
+    "automation-loop-treatment",
+    "curated-skills-baseline",
+    "raw-codex-autonomous-max5",
+    "goal-harness-product-mode",
+)
+SKILLSBENCH_DEFAULT_ROUTE = "goal-harness-blind-loop-treatment"
+BENCHMARK_MODEL_CONTROL_SCHEMA_VERSION = "benchmark_model_control_v0"
+CODEX_ACP_SET_MODEL_UNSUPPORTED_LABEL = "codex_acp_set_model_unsupported"
 BENCHMARK_CLAIM_REVIEW_SCHEMA_VERSION = "benchmark_claim_review_v0"
 BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION = "benchmark_learning_ledger_v0"
 BENCHMARK_ATTEMPT_LEARNING_GATE_SCHEMA_VERSION = (
@@ -97,7 +113,74 @@ TERMINAL_BENCH_POST_LAUNCH_MATERIALIZATION_SCHEMA = (
 TERMINAL_BENCH_COMPACT_FAILURE_MARKER_SCHEMA = (
     "terminal_bench_compact_failure_marker_v0"
 )
+TERMINAL_BENCH_RESULT_FINALIZATION_GATE_SCHEMA = (
+    "terminal_bench_result_finalization_gate_v0"
+)
+TERMINAL_BENCH_RUN_LEDGER_CLOSEOUT_SCHEMA = (
+    "terminal_bench_run_ledger_closeout_v0"
+)
+TERMINAL_BENCH_ENVIRONMENT_SETUP_READINESS_SCHEMA = (
+    "terminal_bench_environment_setup_readiness_preflight_v0"
+)
+TERMINAL_BENCH_ENVIRONMENT_SETUP_PROBE_GATE_SCHEMA = (
+    "terminal_bench_environment_setup_probe_gate_v0"
+)
+TERMINAL_BENCH_ENVIRONMENT_SETUP_PROBE_LAUNCH_SCHEMA = (
+    "terminal_bench_environment_setup_probe_launch_v0"
+)
+TERMINAL_BENCH_CASE_RUN_LAUNCH_SCHEMA = (
+    "terminal_bench_case_run_launch_v0"
+)
+TERMINAL_BENCH_LAUNCH_MATERIALIZATION_OBSERVATION_SCHEMA = (
+    "terminal_bench_launch_materialization_observation_v0"
+)
+TERMINAL_BENCH_AGENT_SETUP_READINESS_SCHEMA = (
+    "terminal_bench_agent_setup_readiness_v0"
+)
+TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA = (
+    "terminal_bench_worker_setup_diagnostic_v0"
+)
+TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_PROFILE_SCHEMA = (
+    "terminal_bench_setup_timeout_repair_profile_v0"
+)
+TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING = (
+    "runtime_install_if_missing"
+)
+TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING = "require_existing_codex"
+TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES = (
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING,
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING,
+)
+TERMINAL_BENCH_CODEX_RUNTIME_INSTALL_ALLOW_ENVIRONMENT_HOSTS = (
+    "registry.npmjs.org",
+    "raw.githubusercontent.com",
+    "github.com",
+    "nodejs.org",
+    "deb.debian.org",
+    "security.debian.org",
+    "archive.ubuntu.com",
+    "dl-cdn.alpinelinux.org",
+    "download.fedoraproject.org",
+    "mirror.stream.centos.org",
+)
+TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_WORKER_PATH = (
+    "worker_path_preprovisioned"
+)
+TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_RUNTIME_EXTENDED = (
+    "runtime_install_extended_setup"
+)
+TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES = (
+    TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_WORKER_PATH,
+    TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_RUNTIME_EXTENDED,
+)
+TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_AGENT_TIMEOUT_MULTIPLIER = 8.0
+TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_AGENT_SETUP_TIMEOUT_MULTIPLIER = 8.0
+TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_CODEX_PREFLIGHT_TIMEOUT_SEC = 45
+TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE = (
+    "goal-harness-worker-setup-diagnostic.json"
+)
 TERMINAL_BENCH_DETACHED_PROCESS_STATES = {"unknown", "running", "ended"}
+TERMINAL_BENCH_ACTIVE_JOB_STALE_SECONDS = 10 * 60
 TERMINAL_BENCH_ACTIVE_USER_SIMULATOR_SETTING = "codex_cli_user_simulator"
 TERMINAL_BENCH_ACTIVE_USER_SIMULATOR_INJECTION_FIRST_BLOCKER = (
     "missing_simulator_to_worker_injection_channel"
@@ -161,6 +244,7 @@ TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS = (
     "goal_harness_counter_trace_json",
     "goal_harness_classification",
     "goal_harness_append_execute_enabled",
+    "goal_harness_worker_materialization_probe_only",
     "goal_harness_active_user_intervention_enabled",
     "goal_harness_active_user_feed_jsonl",
     "goal_harness_active_user_observation_json",
@@ -603,6 +687,184 @@ def filter_public_benchmark_artifact_paths(
             "trajectory_or_origin_log_read": False,
             "intended_use": "preflight benchmark artifact reads before compact ingest",
         },
+    }
+
+
+BENCHMARK_CANDIDATE_SOURCE_BOUNDARY_SCHEMA_VERSION = (
+    "benchmark_candidate_source_boundary_v0"
+)
+BENCHMARK_CANDIDATE_SOURCE_PUBLIC_DOC_PREFIXES = (
+    "docs/",
+    "examples/",
+    "goals/",
+    "regression/",
+)
+BENCHMARK_CANDIDATE_SOURCE_ACTIVE_STATE_MARKERS = (
+    "/active_goal_state.md",
+    ".codex/goals/",
+    ".local/goals/",
+)
+BENCHMARK_CANDIDATE_SOURCE_PRIVATE_RUN_MARKERS = (
+    ".local/private-benchmark-jobs",
+    "/private-benchmark-jobs/",
+)
+BENCHMARK_CANDIDATE_SOURCE_RAW_MARKERS = (
+    "/agent/",
+    "/origin_log",
+    "/output/",
+    "/outputs/",
+    "/screenshots/",
+    "/tasks/",
+    "codex.txt",
+    "trajectory.json",
+    "instruction.md",
+    "task.md",
+    "lock.json",
+    "config.json",
+    "result.json",
+)
+
+
+def _candidate_source_public_doc_kind(normalized: str) -> str:
+    lower = normalized.lower().lstrip("./")
+    if lower.endswith(".md") and lower.startswith(BENCHMARK_CANDIDATE_SOURCE_PUBLIC_DOC_PREFIXES):
+        return "public_doc"
+    if lower.endswith(".py") and lower.startswith("examples/"):
+        return "public_regression"
+    return ""
+
+
+def classify_benchmark_candidate_source_path(
+    path: str | Path,
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
+) -> dict[str, Any]:
+    """Classify a candidate-selection source without reading or echoing paths."""
+
+    normalized = str(path).replace("\\", "/").rstrip("/")
+    lower = normalized.lower()
+    basename = normalized.rsplit("/", 1)[-1] if normalized else ""
+    artifact = classify_benchmark_artifact_path(
+        path,
+        adapter_kind=adapter_kind,
+        extra_public_filenames=extra_public_filenames,
+    )
+    public_doc_kind = _candidate_source_public_doc_kind(normalized)
+    active_state_source = any(marker in lower for marker in BENCHMARK_CANDIDATE_SOURCE_ACTIVE_STATE_MARKERS)
+    private_run_root = any(marker in lower for marker in BENCHMARK_CANDIDATE_SOURCE_PRIVATE_RUN_MARKERS)
+    raw_marker = next(
+        (marker for marker in BENCHMARK_CANDIDATE_SOURCE_RAW_MARKERS if marker in lower),
+        "",
+    )
+
+    if artifact.get("allowed_to_read") is True:
+        allowed = True
+        first_blocker = ""
+        source_kind = "compact_public_artifact"
+        recommended_action = "use only reduced fields from the compact/public artifact"
+    elif public_doc_kind:
+        allowed = True
+        first_blocker = ""
+        source_kind = public_doc_kind
+        recommended_action = "use public docs or regression fixtures for candidate routing"
+    elif active_state_source and not raw_marker:
+        allowed = True
+        first_blocker = ""
+        source_kind = "active_state_summary"
+        recommended_action = "use active-state summaries; do not follow private artifact paths from them"
+    elif private_run_root and not artifact.get("allowed_to_read"):
+        allowed = False
+        first_blocker = "private_runner_artifact_root_or_raw_child"
+        source_kind = "blocked_private_runner_surface"
+        recommended_action = "do not recurse private runner roots; pass explicit compact/public artifacts instead"
+    elif raw_marker:
+        allowed = False
+        first_blocker = "raw_benchmark_artifact_surface"
+        source_kind = "blocked_raw_artifact"
+        recommended_action = "do not read raw transcripts, task bodies, trajectories, logs, configs, or result files for selection"
+    else:
+        allowed = False
+        first_blocker = "unregistered_candidate_source"
+        source_kind = "blocked_unregistered_source"
+        recommended_action = "route candidate selection through docs, active state summaries, or compact/public JSON artifacts"
+
+    return {
+        "schema_version": "benchmark_candidate_source_classification_v0",
+        "path_recorded": False,
+        "basename": basename,
+        "source_kind": source_kind,
+        "allowed_for_candidate_selection": allowed,
+        "first_blocker": first_blocker,
+        "recommended_action": recommended_action,
+        "artifact_allowed_to_read": bool(artifact.get("allowed_to_read")),
+    }
+
+
+def build_benchmark_candidate_source_boundary(
+    paths: Iterable[str | Path],
+    *,
+    adapter_kind: str | None = None,
+    extra_public_filenames: Iterable[Any] = (),
+) -> dict[str, Any]:
+    """Build a no-read boundary packet for benchmark candidate selection."""
+
+    classifications = [
+        classify_benchmark_candidate_source_path(
+            path,
+            adapter_kind=adapter_kind,
+            extra_public_filenames=extra_public_filenames,
+        )
+        for path in paths
+    ]
+    allowed = [
+        item for item in classifications if item["allowed_for_candidate_selection"]
+    ]
+    blocked = [
+        item for item in classifications if not item["allowed_for_candidate_selection"]
+    ]
+    blocked_reasons: dict[str, int] = {}
+    for item in blocked:
+        reason = str(item.get("first_blocker") or "unknown")
+        blocked_reasons[reason] = blocked_reasons.get(reason, 0) + 1
+
+    return {
+        "schema_version": BENCHMARK_CANDIDATE_SOURCE_BOUNDARY_SCHEMA_VERSION,
+        "path_recorded": False,
+        "allowed_source_count": len(allowed),
+        "blocked_source_count": len(blocked),
+        "clean": not blocked,
+        "allowed_source_basenames": [item["basename"] for item in allowed],
+        "blocked_source_basenames": [item["basename"] for item in blocked],
+        "blocked_reasons": blocked_reasons,
+        "classifications": classifications,
+        "candidate_selection_policy": {
+            "allowed_source_kinds": [
+                "public_doc",
+                "public_regression",
+                "active_state_summary",
+                "compact_public_artifact",
+            ],
+            "disallowed_source_kinds": [
+                "private_runner_artifact_root_or_raw_child",
+                "raw_benchmark_artifact_surface",
+                "unregistered_candidate_source",
+            ],
+            "safe_private_artifact_glob": "*.public.json or *.compact.json only",
+        },
+        "read_boundary": {
+            "files_opened": False,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "codex_transcript_read": False,
+            "local_paths_recorded": False,
+        },
+        "next_action": (
+            "run candidate selection using only allowed compact sources"
+            if not blocked
+            else "remove blocked raw/private sources before selecting or launching a benchmark candidate"
+        ),
     }
 
 
@@ -3208,6 +3470,30 @@ def _claim_review_worker_evidence(run: dict[str, Any]) -> dict[str, Any]:
         worker_cli_total = calls.get("total", 0)
     if not isinstance(worker_cli_total, int) or isinstance(worker_cli_total, bool):
         worker_cli_total = 0
+    controller_action_decisions = interaction.get("controller_action_decisions")
+    if not isinstance(controller_action_decisions, int) or isinstance(
+        controller_action_decisions, bool
+    ):
+        controller_action_decisions = 0
+    heartbeat_count = interaction.get("heartbeat_count")
+    if not isinstance(heartbeat_count, int) or isinstance(heartbeat_count, bool):
+        heartbeat_count = 0
+    state_reads = interaction.get("goal_harness_state_reads")
+    if not isinstance(state_reads, int) or isinstance(state_reads, bool):
+        state_reads = 0
+    state_writes = interaction.get("goal_harness_state_writes")
+    if not isinstance(state_writes, int) or isinstance(state_writes, bool):
+        state_writes = 0
+    outer_controller_present = bool(
+        interaction.get("goal_harness_automation_loop") is True
+        and (
+            interaction.get("controller_trace_present") is True
+            or controller_action_decisions > 0
+            or heartbeat_count > 0
+            or state_reads > 0
+            or state_writes > 0
+        )
+    )
     observation = run.get("active_user_observation") if isinstance(run.get("active_user_observation"), dict) else {}
     worker_file_count = run.get("worker_benchmark_run_schema_ok_count")
     if not isinstance(worker_file_count, int) or isinstance(worker_file_count, bool):
@@ -3215,12 +3501,18 @@ def _claim_review_worker_evidence(run: dict[str, Any]) -> dict[str, Any]:
     present = bool(
         worker_cli_total > 0
         or worker_file_count > 0
+        or outer_controller_present
         or observation.get("observed_after_worker_start")
         or observation.get("worker_observation_proof")
     )
     return {
         "worker_goal_harness_cli_call_total": worker_cli_total,
         "worker_benchmark_run_schema_ok_count": worker_file_count,
+        "outer_goal_harness_controller_present": outer_controller_present,
+        "outer_goal_harness_controller_action_decisions": controller_action_decisions,
+        "outer_goal_harness_heartbeat_count": heartbeat_count,
+        "goal_harness_state_reads": state_reads,
+        "goal_harness_state_writes": state_writes,
         "active_user_observed_after_worker_start": bool(
             observation.get("observed_after_worker_start")
             or observation.get("worker_observation_proof")
@@ -3229,20 +3521,168 @@ def _claim_review_worker_evidence(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_exception_kind(exception_type: Any) -> str:
+    """Classify public-safe compact exception type strings."""
+
+    if not isinstance(exception_type, str) or not exception_type.strip():
+        return ""
+    lowered = exception_type.strip().lower()
+    if "setup" in lowered and "timeout" in lowered:
+        return "agent_setup_timeout"
+    if "timeout" in lowered:
+        return "agent_timeout"
+    if "agent" in lowered and "setup" in lowered:
+        return "agent_setup_failure"
+    if lowered not in {"none", "null", "no_exception"}:
+        return "agent_exception"
+    return ""
+
+
+def _terminal_bench_agent_failure_attribution_labels(
+    *,
+    trial: dict[str, Any],
+    exception_type: Any,
+) -> set[str]:
+    """Classify agent-launch failures without recording raw stderr/traceback."""
+
+    if exception_type in (None, "", "none", "AgentTimeoutError"):
+        return set()
+    labels: set[str] = set()
+    exception_info = (
+        trial.get("exception_info")
+        if isinstance(trial.get("exception_info"), dict)
+        else {}
+    )
+    text = " ".join(
+        str(value)
+        for value in (
+            exception_info.get("exception_message"),
+            exception_info.get("exception_traceback"),
+        )
+        if isinstance(value, str)
+    ).lower()
+    if exception_type == "NonZeroAgentExitCodeError":
+        labels.add("agent_process_nonzero_exit_before_solution_attempt")
+    if "codex exec" in text and "turn.failed" in text:
+        labels.add("codex_cli_turn_failed_before_solution_attempt")
+    if "invalid_request_error" in text and "model" in text:
+        labels.add("codex_model_access_failure_before_solution_attempt")
+    if "model is not supported" in text and "chatgpt account" in text:
+        labels.add("codex_model_access_unsupported_for_account")
+    return labels
+
+
+def _compact_worker_start_status_kind(worker_start_status: Any) -> str:
+    """Classify compact worker-start state emitted by runner reducers."""
+
+    if not isinstance(worker_start_status, str) or not worker_start_status.strip():
+        return ""
+    status = worker_start_status.strip()
+    if status == "pre_worker_agent_setup_failed":
+        return "agent_setup_failure"
+    if status == "environment_setup_failed_before_worker":
+        return "environment_setup_failure"
+    return ""
+
+
+def _claim_review_exception_kind_count(run: dict[str, Any], kind: str) -> int:
+    trials = run.get("trials")
+    if not isinstance(trials, list):
+        return 0
+    return sum(
+        1
+        for trial in trials
+        if isinstance(trial, dict)
+        and _compact_exception_kind(trial.get("exception_type")) == kind
+    )
+
+
+def _claim_review_worker_start_status_kind_count(
+    run: dict[str, Any],
+    kind: str,
+) -> int:
+    trials = run.get("trials")
+    count = 0
+    if isinstance(run.get("worker_start_status"), str):
+        count += int(_compact_worker_start_status_kind(run.get("worker_start_status")) == kind)
+    if not isinstance(trials, list):
+        return count
+    return count + sum(
+        1
+        for trial in trials
+        if isinstance(trial, dict)
+        and _compact_worker_start_status_kind(trial.get("worker_start_status")) == kind
+    )
+
+
+def _claim_review_worker_startup_blocker_observed(run: dict[str, Any]) -> bool:
+    if _compact_positive_int(run.get("worker_startup_blocker_count")):
+        return True
+    for field in (
+        "worker_bridge_materialization_status",
+        "worker_bridge_materialization_blocker",
+        "pre_worker_startup_blocker",
+        "first_blocker",
+        "repeat_blocked_by",
+    ):
+        value = run.get(field)
+        if isinstance(value, str) and value.strip():
+            text = value.strip()
+            if text == "pre_worker_startup_blocker_recorded":
+                return True
+            if field == "pre_worker_startup_blocker" and text != "none":
+                return True
+    outcome = run.get("worker_bridge_outcome")
+    if isinstance(outcome, dict):
+        return _claim_review_worker_startup_blocker_observed(outcome)
+    return False
+
+
 def _claim_review_failure_labels(run: dict[str, Any]) -> list[str]:
     labels = run.get("failure_attribution_labels")
-    if not isinstance(labels, list):
-        return []
-    return [
+    compact_labels = [
         str(label)
-        for label in labels
+        for label in labels or []
         if isinstance(label, (str, int, float)) and not isinstance(label, bool)
-    ][:8]
+    ] if isinstance(labels, list) else []
+    if _claim_review_exception_kind_count(run, "agent_setup_timeout"):
+        compact_labels.append("agent_setup_timeout_before_worker_start")
+    if _claim_review_exception_kind_count(run, "agent_setup_failure"):
+        compact_labels.append("agent_setup_failed_before_worker_start")
+    if _claim_review_agent_timeout_count(run):
+        compact_labels.append("agent_timeout_before_solution_completion")
+    if _claim_review_worker_start_status_kind_count(run, "agent_setup_failure"):
+        compact_labels.append("agent_setup_failed_before_worker_start")
+    if _claim_review_worker_start_status_kind_count(run, "environment_setup_failure"):
+        compact_labels.append("environment_setup_failed_before_worker")
+    if _claim_review_worker_startup_blocker_observed(run):
+        compact_labels.append("pre_worker_startup_blocker_recorded")
+    return list(dict.fromkeys(compact_labels))[:8]
+
+
+def _claim_review_agent_timeout_count(run: dict[str, Any]) -> int:
+    return _claim_review_exception_kind_count(run, "agent_timeout")
 
 
 def _claim_review_score_failure_attribution(run: dict[str, Any]) -> str:
     value = run.get("score_failure_attribution")
-    return str(value).strip() if isinstance(value, str) and value.strip() else "none"
+    text = str(value).strip() if isinstance(value, str) and value.strip() else "none"
+    if text == "none" and _claim_review_exception_kind_count(run, "agent_setup_timeout"):
+        return "agent_setup_timeout_score_failure"
+    if text == "none" and _claim_review_exception_kind_count(run, "agent_setup_failure"):
+        return "agent_setup_score_failure"
+    if text == "none" and (
+        _claim_review_worker_start_status_kind_count(run, "agent_setup_failure")
+        or _claim_review_worker_start_status_kind_count(
+            run,
+            "environment_setup_failure",
+        )
+        or _claim_review_worker_startup_blocker_observed(run)
+    ):
+        return "agent_setup_score_failure"
+    if text == "none" and _claim_review_agent_timeout_count(run):
+        return "agent_timeout_score_failure"
+    return text
 
 
 def _claim_review_pick_runs(
@@ -3422,11 +3862,19 @@ def _learning_ledger_repair_candidates(
     )
     candidates: list[str] = []
 
-    if any(
+    environment_setup_failed = "environment_setup_failed_before_worker" in labels
+    if environment_setup_failed:
+        candidates.append("benchmark_environment_setup_contract")
+    if not environment_setup_failed and any(
         label in labels
         for label in (
             "pre_worker_agent_setup_failed",
             "treatment_pre_worker_agent_setup_failed",
+            "agent_setup_timeout_before_worker_start",
+            "agent_setup_failed_before_worker_start",
+            "pre_worker_startup_blocker_recorded",
+            "agent_setup_timeout_score_failure",
+            "agent_setup_score_failure",
         )
     ):
         candidates.append("adapter_startup_argument_contract")
@@ -3472,6 +3920,12 @@ def _learning_ledger_overhead_label(
     if cost_delta is not None and cost_delta < 0:
         return "treatment_cheaper"
     return "overhead_not_material_or_unknown"
+
+
+def _learning_ledger_only_claim_cost_overhead_guard(
+    repair_candidates: list[str],
+) -> bool:
+    return repair_candidates == ["claim_cost_overhead_guard"]
 
 
 def _learning_ledger_lifecycle_gate(
@@ -3560,8 +4014,13 @@ def build_benchmark_learning_ledger(
     )
     clean = bool(decision.get("clean_validation_enhancement"))
     validation_candidate = bool(decision.get("validation_enhancement_candidate"))
+    overhead_guard_only = _learning_ledger_only_claim_cost_overhead_guard(
+        repair_candidates
+    )
     if clean:
         learning_status = "clean_score_recovery_evidence"
+    elif overhead_guard_only:
+        learning_status = "loop_validation_cost_overhead_guard"
     elif repair_candidates:
         learning_status = "generic_goal_harness_repair_or_attribution_required"
     elif validation_candidate:
@@ -3581,7 +4040,12 @@ def build_benchmark_learning_ledger(
         validation_candidate=validation_candidate,
     )
 
-    if repair_candidates:
+    if overhead_guard_only:
+        next_allowed_action = (
+            "select_next_candidate_or_add_named_cost_control_hypothesis_before_repeat"
+        )
+        repeat_allowed = False
+    elif repair_candidates:
         next_allowed_action = f"repair_or_validate_{repair_candidates[0]}"
         repeat_allowed = False
     elif not lifecycle_gate["budget_count_allowed"]:
@@ -3629,7 +4093,9 @@ def build_benchmark_learning_ledger(
         },
         "routing": {
             "repeat_allowed": repeat_allowed,
-            "new_candidate_allowed": not repair_candidates
+            "new_candidate_allowed": (
+                not repair_candidates or overhead_guard_only
+            )
             and bool(learning_quota_gate["spend_allowed"]),
             "next_allowed_action": next_allowed_action,
         },
@@ -3661,7 +4127,9 @@ def _attempt_learning_repair_candidates(run: dict[str, Any]) -> list[str]:
     if isinstance(first_blocker, str) and first_blocker:
         labels.add(first_blocker)
     candidates: list[str] = []
-    if any(
+    if "environment_setup_failed_before_worker" in labels:
+        candidates.append("benchmark_environment_setup_contract")
+    elif any(
         label in labels
         for label in (
             "pre_worker_agent_setup_failed",
@@ -3825,6 +4293,31 @@ def agent_kwargs_from_invocation(invocation: Iterable[Any]) -> dict[str, str]:
     return kwargs
 
 
+def _compact_truthy_flag(value: Any) -> bool:
+    return value is True or str(value).strip().lower() == "true"
+
+
+def _terminal_bench_lock_first_agent_kwargs(lock: dict[str, Any]) -> dict[str, Any]:
+    trials = lock.get("trials") if isinstance(lock.get("trials"), list) else []
+    for trial in trials:
+        if not isinstance(trial, dict):
+            continue
+        agent = trial.get("agent") if isinstance(trial.get("agent"), dict) else {}
+        kwargs = agent.get("kwargs") if isinstance(agent.get("kwargs"), dict) else {}
+        if kwargs:
+            return kwargs
+    return {}
+
+
+def _terminal_bench_lock_worker_materialization_probe_only(
+    lock: dict[str, Any],
+) -> bool:
+    kwargs = _terminal_bench_lock_first_agent_kwargs(lock)
+    return _compact_truthy_flag(
+        kwargs.get("goal_harness_worker_materialization_probe_only")
+    )
+
+
 def _public_safe_kwarg_key_list(values: Iterable[Any]) -> list[str]:
     keys: list[str] = []
     for value in values:
@@ -3934,7 +4427,155 @@ def _verifier_attribution_labels(run: dict[str, Any]) -> list[str]:
             attribution = trial.get("verifier_failure_attribution")
             if isinstance(attribution, str) and attribution.strip():
                 labels.add(attribution.strip())
+            exception_kind = _compact_exception_kind(trial.get("exception_type"))
+            if exception_kind == "agent_setup_timeout":
+                labels.add("agent_setup_timeout_before_worker_start")
+            elif exception_kind == "agent_setup_failure":
+                labels.add("agent_setup_failed_before_worker_start")
+            elif exception_kind == "agent_timeout":
+                labels.add("agent_timeout_before_solution_completion")
+            elif exception_kind == "agent_exception":
+                labels.add("agent_exception_before_solution_completion")
+            worker_start_kind = _compact_worker_start_status_kind(
+                trial.get("worker_start_status")
+            )
+            if worker_start_kind == "agent_setup_failure":
+                labels.add("agent_setup_failed_before_worker_start")
+            elif worker_start_kind == "environment_setup_failure":
+                labels.add("environment_setup_failed_before_worker")
     return sorted(labels)[:12]
+
+
+def _compact_trial_exception_summary(run: dict[str, Any]) -> dict[str, Any]:
+    trials = run.get("trials")
+    if not isinstance(trials, list):
+        return {
+            "schema_version": "compact_trial_exception_summary_v0",
+            "trial_count": 0,
+            "agent_timeout_count": 0,
+            "agent_setup_timeout_count": 0,
+            "agent_setup_failure_count": 0,
+            "agent_exception_count": 0,
+            "exception_types": [],
+        }
+    exception_types: list[str] = []
+    agent_timeout_count = 0
+    agent_setup_timeout_count = 0
+    agent_setup_failure_count = 0
+    agent_exception_count = 0
+    for trial in trials[:8]:
+        if not isinstance(trial, dict):
+            continue
+        exception_type = trial.get("exception_type")
+        exception_kind = ""
+        if isinstance(exception_type, str) and exception_type.strip():
+            exception_type = exception_type.strip()
+            if exception_type not in exception_types:
+                exception_types.append(exception_type)
+            exception_kind = _compact_exception_kind(exception_type)
+        if exception_kind == "agent_timeout":
+            agent_timeout_count += 1
+        elif exception_kind == "agent_setup_timeout":
+            agent_setup_timeout_count += 1
+        elif exception_kind == "agent_setup_failure":
+            agent_setup_failure_count += 1
+        elif exception_kind == "agent_exception":
+            agent_exception_count += 1
+        worker_start_kind = _compact_worker_start_status_kind(
+            trial.get("worker_start_status")
+        )
+        if worker_start_kind in {"agent_setup_failure", "environment_setup_failure"}:
+            agent_setup_failure_count += 1
+    return {
+        "schema_version": "compact_trial_exception_summary_v0",
+        "trial_count": len([trial for trial in trials if isinstance(trial, dict)]),
+        "agent_timeout_count": agent_timeout_count,
+        "agent_setup_timeout_count": agent_setup_timeout_count,
+        "agent_setup_failure_count": agent_setup_failure_count,
+        "agent_exception_count": agent_exception_count,
+        "exception_types": exception_types[:8],
+    }
+
+
+def _compact_runner_completed_score_zero_signal(
+    *,
+    run: dict[str, Any],
+    score: float | None,
+    labels: list[str],
+    verifier_failure_count: int,
+    verifier_dependency_failure_count: int,
+    agent_timeout_count: int,
+    agent_setup_timeout_count: int,
+    agent_setup_failure_count: int,
+    agent_exception_count: int,
+) -> dict[str, Any]:
+    """Detect clean runner completion with an official zero score and no compact cause."""
+
+    progress = run.get("progress")
+    if not isinstance(progress, dict):
+        progress = {}
+    trials = run.get("trials")
+    trial_dicts = [trial for trial in trials if isinstance(trial, dict)] if isinstance(trials, list) else []
+    exception_types = [
+        str(trial.get("exception_type")).strip()
+        for trial in trial_dicts[:8]
+        if isinstance(trial.get("exception_type"), str)
+        and str(trial.get("exception_type")).strip()
+    ]
+    non_empty_exceptions = [
+        exception_type
+        for exception_type in exception_types
+        if exception_type.lower() not in {"none", "null", "no_exception"}
+    ]
+    completed_trials = _compact_positive_int(progress.get("n_completed_trials"))
+    errored_trials = _compact_positive_int(progress.get("n_errored_trials"))
+    running_trials = _compact_positive_int(progress.get("n_running_trials"))
+    pending_trials = _compact_positive_int(progress.get("n_pending_trials"))
+    verifier_reward_present_count = sum(
+        1
+        for trial in trial_dicts[:8]
+        if trial.get("verifier_reward_present") is True
+        or isinstance(trial.get("reward"), dict)
+    )
+    explicit_compact_cause_present = any(
+        [
+            labels,
+            verifier_failure_count,
+            verifier_dependency_failure_count,
+            agent_timeout_count,
+            agent_setup_timeout_count,
+            agent_setup_failure_count,
+            agent_exception_count,
+            non_empty_exceptions,
+        ]
+    )
+    runner_completed = str(run.get("runner_return_status") or "").strip() == "completed"
+    official_score_completed = (
+        str(run.get("official_score_status") or "").strip() == "completed"
+    )
+    completed_cleanly = (
+        score == 0
+        and runner_completed
+        and official_score_completed
+        and completed_trials > 0
+        and errored_trials == 0
+        and running_trials == 0
+        and pending_trials == 0
+        and verifier_reward_present_count > 0
+        and not explicit_compact_cause_present
+    )
+    return {
+        "schema_version": "runner_completed_score_zero_signal_v0",
+        "detected": completed_cleanly,
+        "runner_return_status": run.get("runner_return_status"),
+        "official_score_status": run.get("official_score_status"),
+        "completed_trials": completed_trials,
+        "errored_trials": errored_trials,
+        "running_trials": running_trials,
+        "pending_trials": pending_trials,
+        "verifier_reward_present_count": verifier_reward_present_count,
+        "non_empty_exception_types": non_empty_exceptions[:8],
+    }
 
 
 def _verifier_attribution_class(
@@ -3944,6 +4585,10 @@ def _verifier_attribution_class(
     labels: list[str],
     verifier_failure_count: int,
     verifier_dependency_failure_count: int,
+    agent_timeout_count: int,
+    agent_setup_timeout_count: int,
+    agent_setup_failure_count: int,
+    agent_exception_count: int,
 ) -> str:
     if score is not None and score > 0:
         return "no_score_failure"
@@ -3963,14 +4608,51 @@ def _verifier_attribution_class(
         verifier_failure_count > 0
     ):
         return "verifier_infrastructure_failure"
+    if (
+        score_attribution == "worker_self_validation_official_score_mismatch"
+        or "worker_self_validation_official_score_mismatch" in labels
+    ):
+        return "worker_self_validation_official_score_mismatch"
+    if (
+        score_attribution == "worker_validation_scope_ambiguous_official_score_failure"
+        or "worker_validation_scope_ambiguous_official_score_failure" in labels
+    ):
+        return "worker_validation_scope_ambiguous_official_score_failure"
+    if (
+        score_attribution == "worker_bridge_connected_official_score_failure"
+        or "worker_bridge_connected_official_score_failure" in labels
+    ):
+        return "model_or_solution_failure"
     if score_attribution in {
         "model_solution_failure",
         "agent_solution_failure",
+        "agent_timeout_before_solution_completion",
         "task_solution_failure",
         "solution_incorrect",
         "official_verifier_solution_failure",
     }:
         return "model_or_solution_failure"
+    if (
+        score_attribution == "agent_setup_timeout_score_failure"
+        or agent_setup_timeout_count > 0
+        or "agent_setup_timeout_before_worker_start" in labels
+    ):
+        return "agent_setup_timeout_score_failure"
+    if (
+        score_attribution == "agent_setup_score_failure"
+        or agent_setup_failure_count > 0
+        or "agent_setup_failed_before_worker_start" in labels
+        or "environment_setup_failed_before_worker" in labels
+        or "pre_worker_startup_blocker_recorded" in labels
+    ):
+        return "agent_setup_score_failure"
+    if agent_timeout_count > 0 or "agent_timeout_before_solution_completion" in labels:
+        return "agent_timeout_score_failure"
+    if (
+        agent_exception_count > 0
+        or "agent_exception_before_solution_completion" in labels
+    ):
+        return "agent_exception_score_failure"
     if score is not None and score == 0:
         return "unattributed_score_failure"
     return "missing_official_score"
@@ -4000,25 +4682,82 @@ def _verifier_attribution_run_review(run: dict[str, Any]) -> dict[str, Any]:
     verifier_dependency_failure_count = _compact_positive_int(
         run.get("verifier_dependency_failure_count")
     )
+    exception_summary = _compact_trial_exception_summary(run)
+    agent_timeout_count = _compact_positive_int(
+        exception_summary.get("agent_timeout_count")
+    )
+    agent_setup_timeout_count = _compact_positive_int(
+        exception_summary.get("agent_setup_timeout_count")
+    )
+    agent_setup_failure_count = _compact_positive_int(
+        exception_summary.get("agent_setup_failure_count")
+    )
+    agent_exception_count = _compact_positive_int(
+        exception_summary.get("agent_exception_count")
+    )
     attribution_class = _verifier_attribution_class(
         score=score,
         score_attribution=score_attribution,
         labels=labels,
         verifier_failure_count=verifier_failure_count,
         verifier_dependency_failure_count=verifier_dependency_failure_count,
+        agent_timeout_count=agent_timeout_count,
+        agent_setup_timeout_count=agent_setup_timeout_count,
+        agent_setup_failure_count=agent_setup_failure_count,
+        agent_exception_count=agent_exception_count,
     )
+    runner_completed_score_zero_signal = _compact_runner_completed_score_zero_signal(
+        run=run,
+        score=score,
+        labels=labels,
+        verifier_failure_count=verifier_failure_count,
+        verifier_dependency_failure_count=verifier_dependency_failure_count,
+        agent_timeout_count=agent_timeout_count,
+        agent_setup_timeout_count=agent_setup_timeout_count,
+        agent_setup_failure_count=agent_setup_failure_count,
+        agent_exception_count=agent_exception_count,
+    )
+    if (
+        attribution_class == "unattributed_score_failure"
+        and runner_completed_score_zero_signal["detected"]
+    ):
+        attribution_class = "runner_completed_official_score_zero_unattributed"
     verifier_caveat = attribution_class in {
         "verifier_dependency_install_failure",
         "verifier_platform_probe_failure",
         "verifier_infrastructure_failure",
+        "worker_self_validation_official_score_mismatch",
+        "worker_validation_scope_ambiguous_official_score_failure",
+        "runner_completed_official_score_zero_unattributed",
         "unattributed_score_failure",
         "missing_official_score",
     }
-    caveat_resolved = attribution_class == "model_or_solution_failure"
+    caveat_resolved = attribution_class in {
+        "model_or_solution_failure",
+        "agent_setup_timeout_score_failure",
+        "agent_setup_score_failure",
+        "agent_timeout_score_failure",
+        "agent_exception_score_failure",
+    }
     if attribution_class.startswith("verifier_"):
         next_action = (
             "keep attribution caveat; require same-protocol repeat or finer "
             "compact verifier evidence"
+        )
+    elif attribution_class == "worker_self_validation_official_score_mismatch":
+        next_action = (
+            "keep attribution caveat; align worker self-validation with official "
+            "verifier or collect finer compact verifier-facing evidence"
+        )
+    elif attribution_class == "worker_validation_scope_ambiguous_official_score_failure":
+        next_action = (
+            "keep attribution caveat; add explicit worker validation_scope and "
+            "claim_boundary before same-task repeat"
+        )
+    elif attribution_class == "runner_completed_official_score_zero_unattributed":
+        next_action = (
+            "keep attribution caveat; runner and official verifier completed, "
+            "but compact score-zero cause still needs finer attribution"
         )
     elif attribution_class == "unattributed_score_failure":
         next_action = (
@@ -4026,6 +4765,26 @@ def _verifier_attribution_run_review(run: dict[str, Any]) -> dict[str, Any]:
         )
     elif attribution_class == "missing_official_score":
         next_action = "wait for compact official score before attribution review"
+    elif attribution_class == "agent_timeout_score_failure":
+        next_action = (
+            "claim caveat resolved by compact agent-timeout attribution; "
+            "treat as non-verifier score failure"
+        )
+    elif attribution_class == "agent_exception_score_failure":
+        next_action = (
+            "claim caveat resolved by compact agent-exception attribution; "
+            "inspect case-level exception context before same-task repeat"
+        )
+    elif attribution_class == "agent_setup_timeout_score_failure":
+        next_action = (
+            "claim caveat resolved by compact agent-setup-timeout attribution; "
+            "repair startup/setup before same-task repeat"
+        )
+    elif attribution_class == "agent_setup_score_failure":
+        next_action = (
+            "claim caveat resolved by compact agent-setup attribution; repair "
+            "startup/setup before same-task repeat"
+        )
     elif caveat_resolved:
         next_action = "claim caveat resolved by compact non-verifier failure attribution"
     else:
@@ -4049,11 +4808,30 @@ def _verifier_attribution_run_review(run: dict[str, Any]) -> dict[str, Any]:
         else None,
         "score_failure_attribution": score_attribution,
         "failure_attribution_labels": labels,
+        "compact_trial_exception_summary": exception_summary,
+        "agent_timeout_count": agent_timeout_count,
+        "agent_setup_timeout_count": agent_setup_timeout_count,
+        "agent_setup_failure_count": agent_setup_failure_count,
+        "agent_exception_count": agent_exception_count,
         "verifier_failure_attribution_count": verifier_failure_count,
         "verifier_dependency_failure_count": verifier_dependency_failure_count,
         "validation_failed_checks": _compact_validation_failed_checks(run),
+        "runner_completed_score_zero_signal": runner_completed_score_zero_signal,
         "worker_submit_eligible_mismatch_count": _compact_positive_int(
             run.get("worker_submit_eligible_mismatch_count")
+        ),
+        "worker_self_validation_official_score_mismatch_count": _compact_positive_int(
+            run.get("worker_self_validation_official_score_mismatch_count")
+        ),
+        "worker_validation_scope_ambiguous_official_score_failure_count": (
+            _compact_positive_int(
+                run.get(
+                    "worker_validation_scope_ambiguous_official_score_failure_count"
+                )
+            )
+        ),
+        "worker_bridge_connected_official_score_failure_count": _compact_positive_int(
+            run.get("worker_bridge_connected_official_score_failure_count")
         ),
         "attribution_class": attribution_class,
         "verifier_caveat": verifier_caveat,
@@ -4076,6 +4854,12 @@ def _verifier_attribution_review_routing(
         else ""
     )
     verifier_blocked = "baseline_verifier_attribution_caveat" in blockers
+    worker_verifier_alignment_blocked = (
+        "baseline_worker_verifier_alignment_caveat" in blockers
+    )
+    worker_validation_scope_blocked = (
+        "baseline_worker_validation_scope_ambiguous_caveat" in blockers
+    )
     missing_baseline = "missing_compact_baseline_run" in blockers
     missing_score = "baseline_official_score_missing" in blockers
     unattributed = "baseline_score_failure_unattributed" in blockers
@@ -4086,10 +4870,26 @@ def _verifier_attribution_review_routing(
         "verifier_platform_probe_failure",
         "verifier_infrastructure_failure",
     }
+    requires_agent_setup_repair = attribution_class in {
+        "agent_setup_timeout_score_failure",
+        "agent_setup_score_failure",
+    }
+    requires_case_exception_research = (
+        attribution_class == "agent_exception_score_failure"
+    )
 
-    treatment_eligible = baseline_caveat_resolved
+    treatment_eligible = (
+        baseline_caveat_resolved
+        and not requires_agent_setup_repair
+        and not requires_case_exception_research
+    )
     repeat_allowed = baseline_caveat_resolved
-    new_candidate_allowed = baseline_caveat_resolved or verifier_blocked
+    new_candidate_allowed = (
+        baseline_caveat_resolved
+        or verifier_blocked
+        or worker_verifier_alignment_blocked
+        or worker_validation_scope_blocked
+    )
 
     if missing_baseline:
         next_allowed_action = "provide_compact_baseline_run"
@@ -4102,6 +4902,22 @@ def _verifier_attribution_review_routing(
             "repair_verifier_preflight_or_select_new_material_ready_case"
         )
         repeat_allowed = False
+    elif attribution_class == "worker_self_validation_official_score_mismatch":
+        next_allowed_action = "align_worker_self_validation_with_official_verifier"
+        repeat_allowed = False
+        new_candidate_allowed = False
+    elif attribution_class == "worker_validation_scope_ambiguous_official_score_failure":
+        next_allowed_action = "add_worker_validation_scope_and_claim_boundary"
+        repeat_allowed = False
+        new_candidate_allowed = False
+    elif requires_agent_setup_repair:
+        next_allowed_action = "repair_agent_setup_timeout_or_select_new_material_ready_case"
+        repeat_allowed = False
+        new_candidate_allowed = True
+    elif requires_case_exception_research:
+        next_allowed_action = "inspect_compact_agent_exception_before_same_task_repeat"
+        repeat_allowed = False
+        new_candidate_allowed = True
     elif unattributed:
         next_allowed_action = "collect_finer_compact_failure_attribution"
         repeat_allowed = False
@@ -4123,13 +4939,31 @@ def _verifier_attribution_review_routing(
         "repeat_allowed": repeat_allowed,
         "new_candidate_allowed": new_candidate_allowed,
         "requires_verifier_preflight_repair": requires_preflight_repair,
+        "requires_agent_setup_repair": requires_agent_setup_repair,
+        "requires_case_exception_research": requires_case_exception_research,
         "requires_compact_official_score": missing_score,
         "requires_compact_baseline_run": missing_baseline,
         "requires_finer_compact_attribution": unattributed,
+        "requires_worker_verifier_alignment": (
+            attribution_class == "worker_self_validation_official_score_mismatch"
+        ),
+        "requires_worker_validation_scope": (
+            attribution_class
+            == "worker_validation_scope_ambiguous_official_score_failure"
+        ),
         "next_allowed_action": next_allowed_action,
         "blocked_action_scope": (
             "treatment_and_same_task_repeat"
             if requires_preflight_repair
+            else "same_task_repeat_until_worker_verifier_alignment"
+            if attribution_class == "worker_self_validation_official_score_mismatch"
+            else "same_task_repeat_until_worker_validation_scope"
+            if attribution_class
+            == "worker_validation_scope_ambiguous_official_score_failure"
+            else "same_task_repeat_until_setup_repair"
+            if requires_agent_setup_repair
+            else "same_task_repeat_until_exception_hypothesis"
+            if requires_case_exception_research
             else "same_task_claim"
             if no_score_failure
             else "treatment"
@@ -4148,6 +4982,15 @@ def _benchmark_lifecycle_schema(value: dict[str, Any] | None) -> str:
 def _benchmark_lifecycle_ready_preflight(value: dict[str, Any] | None) -> bool:
     if not isinstance(value, dict) or not value:
         return False
+    nested_run = value.get("benchmark_run")
+    if isinstance(nested_run, dict) and _benchmark_lifecycle_ready_preflight(nested_run):
+        return True
+    nested_guard = value.get("preflight_guard")
+    if isinstance(nested_guard, dict) and _benchmark_lifecycle_ready_preflight(nested_guard):
+        return True
+    launch_summary = value.get("private_runner_launch_summary")
+    if isinstance(launch_summary, dict) and launch_summary.get("ready") is True:
+        return True
     if value.get("ready") is True:
         return True
     if value.get("ok") is True and str(value.get("first_blocker") or "").startswith("ready"):
@@ -4180,6 +5023,1931 @@ def _benchmark_lifecycle_budget_count_allowed(
     return lifecycle_gate.get("budget_count_allowed") is True
 
 
+def _benchmark_run_environment_setup_failure_context(
+    benchmark_run: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(benchmark_run, dict):
+        return {}
+
+    candidates: list[Any] = [
+        benchmark_run.get("environment_setup_failure_context"),
+    ]
+    worker_bridge = (
+        benchmark_run.get("worker_bridge_outcome")
+        if isinstance(benchmark_run.get("worker_bridge_outcome"), dict)
+        else {}
+    )
+    candidates.append(worker_bridge.get("environment_setup_failure_context"))
+    for trial in benchmark_run.get("trials") or []:
+        if isinstance(trial, dict):
+            candidates.append(trial.get("environment_setup_failure_context"))
+
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        schema = _public_safe_benchmark_label(item.get("schema_version"))
+        if not schema:
+            continue
+        compact: dict[str, Any] = {"schema_version": schema}
+        for field in (
+            "surface",
+            "failure_kind",
+            "diagnostic_granularity",
+            "exception_type",
+            "timeout_signal",
+            "resource_signal",
+            "environment_setup_duration_tier",
+            "next_probe",
+        ):
+            text = _public_safe_benchmark_label(item.get(field), limit=140)
+            if text:
+                compact[field] = text
+        for field in (
+            "environment_setup_present",
+            "environment_setup_started",
+            "environment_setup_finished",
+            "agent_setup_started",
+            "agent_execution_started",
+            "worker_trace_present",
+            "worker_benchmark_run_present",
+        ):
+            if isinstance(item.get(field), bool):
+                compact[field] = item[field]
+        seconds = item.get("environment_setup_duration_seconds")
+        if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+            compact["environment_setup_duration_seconds"] = seconds
+        return compact
+
+    count = benchmark_run.get("environment_setup_failure_before_worker_count")
+    repeat_blocked = str(benchmark_run.get("repeat_blocked_by") or "")
+    first_blocker = str(benchmark_run.get("first_blocker") or "")
+    worker_status = str(benchmark_run.get("worker_bridge_materialization_status") or "")
+    if (
+        (isinstance(count, int) and not isinstance(count, bool) and count > 0)
+        or repeat_blocked == "environment_setup_failed_before_worker"
+        or first_blocker == "environment_setup_failed_before_worker"
+        or worker_status == "environment_setup_failed_before_worker"
+    ):
+        return {
+            "schema_version": TERMINAL_BENCH_ENVIRONMENT_SETUP_READINESS_SCHEMA,
+            "surface": "harbor_environment_setup",
+            "failure_kind": "environment_setup_failed_before_worker",
+            "diagnostic_granularity": "compact_counts_only_no_raw_logs",
+            "next_probe": "environment_setup_readiness_preflight_before_repeat",
+        }
+    return {}
+
+
+def _benchmark_lifecycle_environment_setup_readiness(
+    *,
+    benchmark_run: dict[str, Any] | None,
+    preflight: dict[str, Any] | None,
+) -> dict[str, Any]:
+    context = _benchmark_run_environment_setup_failure_context(benchmark_run)
+    if not context:
+        return {}
+
+    preflight_ready = _benchmark_lifecycle_ready_preflight(preflight)
+    task_id = "unknown_task"
+    if isinstance(benchmark_run, dict):
+        for trial in benchmark_run.get("trials") or []:
+            if not isinstance(trial, dict):
+                continue
+            task_label = _public_safe_benchmark_label(trial.get("task_id"))
+            if task_label:
+                task_id = task_label
+                break
+    no_run_preflight_status = "ready" if preflight_ready else "not_ready_or_absent"
+    first_blocker = "environment_setup_failed_before_worker"
+    if not preflight_ready:
+        next_allowed_action = "repair_no_run_preflight_before_environment_setup_probe"
+    else:
+        next_allowed_action = (
+            "run_setup_only_environment_preflight_or_select_new_material_ready_case"
+        )
+
+    return {
+        "schema_version": TERMINAL_BENCH_ENVIRONMENT_SETUP_READINESS_SCHEMA,
+        "benchmark_id": (
+            _public_safe_benchmark_label(
+                benchmark_run.get("benchmark_id") if isinstance(benchmark_run, dict) else None
+            )
+            or "benchmark"
+        ),
+        "task_id": task_id,
+        "previous_failure_observed": True,
+        "previous_failure_context": context,
+        "no_run_preflight_ready": preflight_ready,
+        "no_run_preflight_status": no_run_preflight_status,
+        "same_task_repeat_allowed": False,
+        "repeat_blocked_by": first_blocker,
+        "first_blocker": first_blocker,
+        "diagnostic_limit": "cannot_prove_reproducible_or_cleared_from_no_run_preflight",
+        "next_allowed_action": next_allowed_action,
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "docker_logs_read": False,
+            "credential_values_recorded": False,
+            "local_paths_recorded": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+            "submit_invoked": False,
+        },
+    }
+
+
+def _benchmark_lifecycle_environment_setup_probe_result(
+    benchmark_run: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact lifecycle facts for a no-upload environment setup probe."""
+
+    if not isinstance(benchmark_run, dict):
+        return {}
+    trials = [
+        trial
+        for trial in benchmark_run.get("trials") or []
+        if isinstance(trial, dict)
+    ]
+    materialized_trials: list[dict[str, Any]] = []
+    for trial in trials:
+        if trial.get("worker_start_status") != "environment_setup_probe_materialized":
+            continue
+        materialized_trials.append(trial)
+    if not materialized_trials:
+        return {}
+
+    first_trial = materialized_trials[0]
+    task_id = _public_safe_benchmark_label(first_trial.get("task_id")) or "unknown_task"
+    exception_type = (
+        _public_safe_benchmark_label(first_trial.get("exception_type"), limit=120)
+        or "none"
+    )
+    exception_present = exception_type not in {"", "none", "not_applicable"}
+    if exception_present:
+        probe_outcome = "materialized_with_exception"
+        repeat_blocked_by = "environment_setup_probe_exception_requires_interpretation"
+        next_allowed_action = (
+            "classify_environment_setup_probe_exception_before_same_task_repeat"
+        )
+    else:
+        probe_outcome = "materialized_without_exception"
+        repeat_blocked_by = "environment_setup_probe_result_requires_review"
+        next_allowed_action = (
+            "review_environment_setup_probe_result_before_same_task_repeat"
+        )
+    return {
+        "schema_version": "terminal_bench_environment_setup_probe_result_v0",
+        "benchmark_id": (
+            _public_safe_benchmark_label(benchmark_run.get("benchmark_id"))
+            or "benchmark"
+        ),
+        "task_id": task_id,
+        "worker_mode": (
+            _public_safe_benchmark_label(benchmark_run.get("worker_mode"))
+            or "unknown"
+        ),
+        "probe_materialized": True,
+        "materialized_trial_count": len(materialized_trials),
+        "trial_result_present_count": sum(
+            1 for trial in trials if trial.get("trial_result_present") is True
+        ),
+        "artifact_manifest_present_count": sum(
+            1 for trial in trials if trial.get("artifact_manifest_present") is True
+        ),
+        "exception_type": exception_type,
+        "exception_present": exception_present,
+        "probe_outcome": probe_outcome,
+        "repeat_blocked_by": repeat_blocked_by,
+        "case_attempt_countable": False,
+        "benchmark_budget_countable": False,
+        "same_task_repeat_allowed": False,
+        "next_allowed_action": next_allowed_action,
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "docker_logs_read": False,
+            "credential_values_recorded": False,
+            "local_paths_recorded": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+            "submit_invoked": False,
+        },
+    }
+
+
+def _terminal_bench_harbor_run_help_capability(
+    help_text: str | None,
+    *,
+    probe_runner_help: bool = False,
+    timeout_seconds: float = 20.0,
+) -> dict[str, Any]:
+    """Return compact Harbor run capability facts without storing raw help."""
+
+    command_exit_code: int | None = None
+    command_timed_out = False
+    probe_error = ""
+    text = help_text or ""
+    if help_text is None and probe_runner_help:
+        try:
+            result = subprocess.run(
+                [
+                    resolve_terminal_bench_runner_binary("uvx"),
+                    "--from",
+                    TERMINAL_BENCH_HARBOR_REF,
+                    "harbor",
+                    "run",
+                    "--help",
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=timeout_seconds,
+                env=_probe_env(),
+            )
+            command_exit_code = result.returncode
+            if result.returncode == 0:
+                text = "\n".join([result.stdout or "", result.stderr or ""])
+            else:
+                probe_error = "harbor_run_help_nonzero"
+        except subprocess.TimeoutExpired:
+            command_timed_out = True
+            probe_error = "harbor_run_help_timeout"
+        except OSError:
+            probe_error = "harbor_run_help_probe_failed"
+
+    lowered = text.lower()
+    setup_only_markers = (
+        "--setup-only",
+        "--environment-only",
+        "--build-environment-only",
+        "--prepare-only",
+        "--no-agent",
+        "--skip-agent",
+    )
+    setup_only_options = [marker for marker in setup_only_markers if marker in lowered]
+    help_available = bool(text)
+    first_blocker = ""
+    if probe_error:
+        first_blocker = probe_error
+    elif not help_available:
+        first_blocker = "harbor_run_help_not_probed"
+
+    return {
+        "schema_version": "terminal_bench_harbor_run_help_capability_v0",
+        "probed": bool(help_text is not None or probe_runner_help),
+        "probe_runner_help": bool(probe_runner_help),
+        "probe_ok": bool(help_available and not probe_error),
+        "first_blocker": first_blocker,
+        "command_exit_code": command_exit_code,
+        "command_timed_out": command_timed_out,
+        "runner_binary_name": "uvx",
+        "raw_help_recorded": False,
+        "command_argv_recorded": False,
+        "setup_only_option_present": bool(setup_only_options),
+        "setup_only_option_markers": setup_only_options,
+        "nop_agent_option_present": "nop" in lowered,
+        "disable_verification_option_present": "--disable-verifica" in lowered,
+        "upload_option_present": "--upload" in lowered,
+        "docker_invoked": False,
+        "terminal_bench_invoked": False,
+        "codex_invoked": False,
+        "model_api_invoked": False,
+        "upload_invoked": False,
+    }
+
+
+def _terminal_bench_environment_setup_probe_command_template(
+    *,
+    dataset: str,
+    task_id: str,
+    job_name: str,
+) -> list[str]:
+    return [
+        "uvx",
+        "--from",
+        TERMINAL_BENCH_HARBOR_REF,
+        "harbor",
+        "run",
+        *_terminal_bench_dataset_args(dataset),
+        "--include-task-name",
+        task_id,
+        "--agent",
+        "nop",
+        "--env",
+        "docker",
+        "--n-attempts",
+        "1",
+        "--n-concurrent",
+        "1",
+        "--disable-verification",
+        "--jobs-dir",
+        "<private-jobs-dir>",
+        "--job-name",
+        job_name,
+    ]
+
+
+def build_terminal_bench_environment_setup_probe_gate(
+    *,
+    dataset: str = TERMINAL_BENCH_DEFAULT_DATASET,
+    task_id: str = TERMINAL_BENCH_DEFAULT_TASK,
+    preflight: dict[str, Any] | None = None,
+    previous_benchmark_run: dict[str, Any] | None = None,
+    harbor_run_help_text: str | None = None,
+    probe_runner_help: bool = False,
+) -> dict[str, Any]:
+    """Gate a same-task Terminal-Bench environment setup probe."""
+
+    previous = previous_benchmark_run if isinstance(previous_benchmark_run, dict) else {}
+    previous_context = _benchmark_run_environment_setup_failure_context(previous)
+    preflight_ready = _benchmark_lifecycle_ready_preflight(preflight)
+    help_capability = _terminal_bench_harbor_run_help_capability(
+        harbor_run_help_text,
+        probe_runner_help=probe_runner_help,
+    )
+    direct_setup_only_allowed = bool(
+        preflight_ready
+        and previous_context
+        and help_capability.get("setup_only_option_present") is True
+    )
+    nop_disable_verification_allowed = bool(
+        preflight_ready
+        and previous_context
+        and help_capability.get("nop_agent_option_present") is True
+        and help_capability.get("disable_verification_option_present") is True
+        and help_capability.get("upload_option_present") is True
+    )
+    environment_setup_probe_allowed = bool(
+        direct_setup_only_allowed or nop_disable_verification_allowed
+    )
+
+    blockers: list[str] = []
+    if not previous_context:
+        blockers.append("previous_environment_setup_failure_context_missing")
+    if not preflight_ready:
+        blockers.append("no_run_preflight_not_ready")
+    if help_capability.get("probe_ok") is not True:
+        blockers.append(
+            str(help_capability.get("first_blocker") or "harbor_run_help_not_ready")
+        )
+    if (
+        preflight_ready
+        and previous_context
+        and help_capability.get("probe_ok") is True
+        and not environment_setup_probe_allowed
+    ):
+        blockers.append("safe_environment_setup_probe_route_missing")
+
+    if environment_setup_probe_allowed:
+        next_action = "run_nop_disable_verification_environment_setup_probe"
+    elif previous_context:
+        next_action = "select_next_material_ready_candidate"
+    else:
+        next_action = "provide_compact_previous_environment_setup_failure"
+
+    task_label = str(task_id or TERMINAL_BENCH_DEFAULT_TASK)
+    job_task = task_label.replace("-", "_")
+    command_template = _terminal_bench_environment_setup_probe_command_template(
+        dataset=str(dataset or TERMINAL_BENCH_DEFAULT_DATASET),
+        task_id=task_label,
+        job_name=f"terminal_bench_{job_task}_environment_setup_probe",
+    )
+    return {
+        "schema_version": TERMINAL_BENCH_ENVIRONMENT_SETUP_PROBE_GATE_SCHEMA,
+        "benchmark_id": str(dataset or TERMINAL_BENCH_DEFAULT_DATASET),
+        "task_id": task_label,
+        "preflight_ready": preflight_ready,
+        "previous_environment_setup_failure_present": bool(previous_context),
+        "previous_environment_setup_failure_context": previous_context,
+        "harbor_run_help_capability": help_capability,
+        "direct_setup_only_route_allowed": direct_setup_only_allowed,
+        "nop_disable_verification_probe_allowed": nop_disable_verification_allowed,
+        "environment_setup_probe_allowed": environment_setup_probe_allowed,
+        "same_task_repeat_allowed": False,
+        "repeat_blocked_by": "environment_setup_failed_before_worker"
+        if previous_context
+        else "previous_environment_setup_failure_context_missing",
+        "first_blocker": blockers[0] if blockers else "ready_for_environment_setup_probe",
+        "blockers": blockers,
+        "next_allowed_action": next_action,
+        "probe_command_template": command_template,
+        "probe_contract": {
+            "agent": "nop",
+            "codex_invoked": False,
+            "verifier_disabled": True,
+            "docker_task_may_start": environment_setup_probe_allowed,
+            "no_upload": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_help_recorded": False,
+            "raw_artifacts_read": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "credential_values_recorded": False,
+            "codex_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+
+
+def launch_terminal_bench_environment_setup_probe(
+    *,
+    gate: dict[str, Any],
+    jobs_dir: str | Path,
+    run_root: str | Path,
+    wait_seconds: int = 20,
+    execute: bool = False,
+    command_override: list[str] | None = None,
+) -> dict[str, Any]:
+    """Launch a gated Terminal-Bench setup probe with compact-only reporting."""
+
+    if not isinstance(gate, dict):
+        raise ValueError("gate must be a terminal_bench_environment_setup_probe_gate_v0 object")
+    if gate.get("environment_setup_probe_allowed") is not True:
+        raise ValueError("environment setup probe gate is not allowed")
+    contract = gate.get("probe_contract") if isinstance(gate.get("probe_contract"), dict) else {}
+    if contract.get("agent") != "nop":
+        raise ValueError("environment setup probe launcher requires probe_contract.agent=nop")
+    if contract.get("no_upload") is not True or contract.get("submit_eligible") is not False:
+        raise ValueError("environment setup probe launcher requires no-upload/no-submit boundary")
+    if contract.get("codex_invoked") is not False:
+        raise ValueError("environment setup probe launcher must not invoke Codex")
+    if contract.get("verifier_disabled") is not True:
+        raise ValueError("environment setup probe launcher requires verifier_disabled=true")
+
+    template = gate.get("probe_command_template")
+    if not isinstance(template, list) or not all(isinstance(part, str) for part in template):
+        raise ValueError("gate probe_command_template must be a string argv list")
+    argv = [str(jobs_dir) if part == "<private-jobs-dir>" else part for part in template]
+    if command_override is not None:
+        argv = list(command_override)
+    if "--upload" in argv:
+        raise ValueError("environment setup probe command must not include --upload")
+    if command_override is None and "--disable-verification" not in argv:
+        raise ValueError("environment setup probe command must disable verification")
+
+    job_name = ""
+    if "--job-name" in argv:
+        index = argv.index("--job-name")
+        if index + 1 < len(argv):
+            job_name = Path(argv[index + 1]).name
+    if not job_name:
+        job_name = Path(str(gate.get("task_id") or TERMINAL_BENCH_DEFAULT_TASK)).name
+
+    parsed_wait_seconds = max(0, int(wait_seconds))
+    run_root_path = Path(run_root).expanduser()
+    jobs_dir_path = Path(jobs_dir).expanduser()
+    run_basename = run_root_path.name
+    output_log = run_root_path / "probe_stdout_stderr.private.log"
+    command_file = run_root_path / "probe_command.private.sh"
+    pid_file = run_root_path / "probe.pid.private"
+
+    payload: dict[str, Any] = {
+        "schema_version": TERMINAL_BENCH_ENVIRONMENT_SETUP_PROBE_LAUNCH_SCHEMA,
+        "ok": True,
+        "dry_run": not execute,
+        "run_basename": run_basename,
+        "job_name": job_name,
+        "process_started": False,
+        "process_state": "not_started",
+        "detached_process_group": False,
+        "pid": None,
+        "returncode": None,
+        "wait_seconds": parsed_wait_seconds,
+        "process_timed_out": False,
+        "command_ref": argv[2] if len(argv) > 2 and argv[:2] == ["uvx", "--from"] else "override",
+        "command_shape": {
+            "argv_count": len(argv),
+            "uses_uvx": bool(argv and argv[0] == "uvx"),
+            "uses_harbor_run": "harbor" in argv and "run" in argv,
+            "agent_nop": "--agent" in argv and "nop" in argv,
+            "disable_verification": "--disable-verification" in argv,
+            "upload_flag_present": "--upload" in argv,
+            "jobs_dir_placeholder_present": "<private-jobs-dir>" in argv,
+        },
+        "contract": dict(contract),
+        "boundary": {
+            "no_upload": True,
+            "submit_eligible": False,
+            "codex_invoked": False,
+            "model_api_invoked": False,
+            "verifier_disabled": True,
+            "docker_task_may_start": contract.get("docker_task_may_start") is True,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+        },
+        "private_outputs": {
+            "stdout_stderr_log_private": True,
+            "pid_file_private": True,
+            "command_file_private": True,
+        },
+    }
+
+    if not execute:
+        return payload
+
+    run_root_path.mkdir(parents=True, exist_ok=True)
+    jobs_dir_path.mkdir(parents=True, exist_ok=True)
+    command_file.write_text(" ".join(shlex.quote(part) for part in argv) + "\n", encoding="utf-8")
+    with output_log.open("ab") as stream:
+        process = subprocess.Popen(
+            argv,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path.cwd()),
+            close_fds=True,
+            start_new_session=True,
+        )
+    pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
+    payload.update(
+        {
+            "process_started": True,
+            "process_state": "running",
+            "detached_process_group": True,
+            "pid": process.pid,
+        }
+    )
+    try:
+        returncode = process.wait(timeout=parsed_wait_seconds)
+        payload.update(
+            {
+                "process_state": "ended",
+                "returncode": returncode,
+                "process_timed_out": False,
+            }
+        )
+    except subprocess.TimeoutExpired:
+        payload["process_timed_out"] = True
+        payload["process_state"] = "running"
+
+    post_launch = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir_path,
+        job_name=job_name,
+        detached_process_state=payload["process_state"],
+    )
+    payload["post_launch_materialization"] = post_launch
+    payload["ready_for_launch_state"] = post_launch.get("ready_for_launch_state") is True
+    payload["ready_for_compact_result_ingest"] = (
+        post_launch.get("ready_for_compact_result_ingest") is True
+    )
+    payload["ready_for_compact_failure_marker"] = (
+        post_launch.get("ready_for_compact_failure_marker") is True
+    )
+    payload["compact_failure_class"] = post_launch.get("compact_failure_class")
+    payload["first_blocker"] = post_launch.get("first_blocker")
+    if payload["process_state"] == "ended" and payload["returncode"] not in (0, None):
+        payload["exit_code_attribution"] = "probe_process_nonzero_exit"
+    elif payload["process_state"] == "ended":
+        payload["exit_code_attribution"] = "probe_process_zero_exit"
+    else:
+        payload["exit_code_attribution"] = "probe_process_still_running"
+
+    public_path = run_root_path / "launch_summary.public.json"
+    public_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (run_root_path / "post_launch_summary.public.json").write_text(
+        json.dumps(post_launch, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def launch_terminal_bench_worker_materialization_probe(
+    *,
+    jobs_dir: str | Path,
+    run_root: str | Path,
+    dataset: str = TERMINAL_BENCH_DEFAULT_DATASET,
+    task_id: str = TERMINAL_BENCH_DEFAULT_TASK,
+    model: str = TERMINAL_BENCH_DEFAULT_MODEL,
+    mode: str = "codex-goal-mode",
+    job_name: str | None = None,
+    worker_codex_materialization_strategy: str = (
+        TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_WORKER_PATH
+    ),
+    wait_seconds: int = 20,
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Launch a no-upload worker materialization probe without task solving."""
+
+    if mode not in ("codex-goal-mode", "hardened-codex"):
+        raise ValueError(
+            "worker materialization probe supports codex-goal-mode or hardened-codex only"
+        )
+    if (
+        worker_codex_materialization_strategy
+        not in TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES
+    ):
+        raise ValueError(
+            "worker_codex_materialization_strategy must be one of: "
+            + ", ".join(TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES)
+        )
+    run_root_path = Path(run_root).expanduser()
+    jobs_dir_path = Path(jobs_dir).expanduser()
+    run_basename = run_root_path.name
+    task_label = str(task_id or "all").replace("-", "_")
+    public_job_name = (
+        Path(job_name).name
+        if job_name
+        else f"terminal_bench_{task_label}_{mode.replace('-', '_')}_worker_materialization_probe"
+    )
+    launch = build_terminal_bench_private_runner_launch(
+        mode=mode,
+        dataset=dataset,
+        task_id=task_id,
+        model=model,
+        jobs_dir=str(jobs_dir_path),
+        job_name=public_job_name,
+        setup_timeout_repair_profile=True,
+        worker_codex_materialization_strategy=worker_codex_materialization_strategy,
+        worker_materialization_probe_only=True,
+    )
+    argv = launch["argv"] if isinstance(launch.get("argv"), list) else []
+    if "--upload" in argv:
+        raise ValueError("worker materialization probe command must not upload")
+    if "goal_harness_worker_materialization_probe_only=true" not in argv:
+        raise ValueError("worker materialization probe kwarg missing from command")
+    summary = summarize_terminal_bench_private_runner_launch(launch)
+    if summary.get("no_upload_boundary") is not True or summary.get("submit_eligible"):
+        raise ValueError(
+            "worker materialization probe requires no-upload/no-submit boundary"
+        )
+    if summary.get("worker_materialization_probe_only") is not True:
+        raise ValueError("worker materialization probe summary missing probe-only flag")
+
+    parsed_wait_seconds = max(0, int(wait_seconds))
+    output_log = run_root_path / "worker_materialization_probe_stdout_stderr.private.log"
+    command_file = run_root_path / "worker_materialization_probe_command.private.sh"
+    pid_file = run_root_path / "worker_materialization_probe.pid.private"
+    payload: dict[str, Any] = {
+        "schema_version": "terminal_bench_worker_materialization_probe_launch_v0",
+        "ok": True,
+        "dry_run": not execute,
+        "run_basename": run_basename,
+        "job_name": public_job_name,
+        "process_started": False,
+        "process_state": "not_started",
+        "detached_process_group": False,
+        "pid": None,
+        "returncode": None,
+        "wait_seconds": parsed_wait_seconds,
+        "process_timed_out": False,
+        "launch_summary": summary,
+        "command_ref": (
+            argv[2]
+            if len(argv) > 2 and argv[:2] == ["uvx", "--from"]
+            else "private_runner_launch"
+        ),
+        "command_shape": {
+            "argv_count": len(argv),
+            "uses_uvx": bool(argv and Path(str(argv[0])).name == "uvx"),
+            "uses_harbor_run": "harbor" in argv and "run" in argv,
+            "agent_import_path_present": "--agent-import-path" in argv,
+            "worker_materialization_probe_only": (
+                "goal_harness_worker_materialization_probe_only=true" in argv
+            ),
+            "upload_flag_present": "--upload" in argv,
+            "jobs_dir_placeholder_present": "<private-jobs-dir>" in argv,
+        },
+        "boundary": {
+            "no_upload": True,
+            "submit_eligible": False,
+            "worker_materialization_probe_only": True,
+            "task_solver_invoked_by_probe": False,
+            "model_api_expected": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "upload_invoked": False,
+        },
+        "private_outputs": {
+            "stdout_stderr_log_private": True,
+            "pid_file_private": True,
+            "command_file_private": True,
+        },
+    }
+    if not execute:
+        return payload
+
+    run_root_path.mkdir(parents=True, exist_ok=True)
+    jobs_dir_path.mkdir(parents=True, exist_ok=True)
+    command_file.write_text(
+        " ".join(shlex.quote(str(part)) for part in argv) + "\n",
+        encoding="utf-8",
+    )
+    launch_env = os.environ.copy()
+    if isinstance(launch.get("env"), dict):
+        launch_env.update(
+            {
+                str(key): str(value)
+                for key, value in launch["env"].items()
+                if isinstance(key, str)
+            }
+        )
+    with output_log.open("ab") as stream:
+        process = subprocess.Popen(
+            [str(part) for part in argv],
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path.cwd()),
+            env=launch_env,
+            close_fds=True,
+            start_new_session=True,
+        )
+    pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
+    payload.update(
+        {
+            "process_started": True,
+            "process_state": "running",
+            "detached_process_group": True,
+            "pid": process.pid,
+        }
+    )
+    try:
+        returncode = process.wait(timeout=parsed_wait_seconds)
+        payload.update(
+            {
+                "process_state": "ended",
+                "returncode": returncode,
+                "process_timed_out": False,
+            }
+        )
+    except subprocess.TimeoutExpired:
+        payload["process_timed_out"] = True
+        payload["process_state"] = "running"
+
+    post_launch = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir_path,
+        job_name=public_job_name,
+        detached_process_state=payload["process_state"],
+    )
+    payload["post_launch_materialization"] = post_launch
+    payload["ready_for_launch_state"] = post_launch.get("ready_for_launch_state") is True
+    payload["ready_for_compact_result_ingest"] = (
+        post_launch.get("ready_for_compact_result_ingest") is True
+    )
+    payload["ready_for_compact_failure_marker"] = (
+        post_launch.get("ready_for_compact_failure_marker") is True
+    )
+    payload["compact_failure_class"] = post_launch.get("compact_failure_class")
+    payload["first_blocker"] = post_launch.get("first_blocker")
+    if payload["process_state"] == "ended" and payload["returncode"] not in (0, None):
+        payload["exit_code_attribution"] = (
+            "worker_materialization_probe_process_nonzero_exit"
+        )
+    elif payload["process_state"] == "ended":
+        payload["exit_code_attribution"] = "worker_materialization_probe_process_zero_exit"
+    else:
+        payload["exit_code_attribution"] = "worker_materialization_probe_still_running"
+
+    public_path = run_root_path / "worker_materialization_probe_launch.public.json"
+    public_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_root_path / "post_launch_summary.public.json").write_text(
+        json.dumps(post_launch, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _detached_process_state_from_pid_file(pid_file: Path) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "pid_file_present": pid_file.is_file(),
+        "pid_parse_ok": False,
+        "pid": None,
+        "process_state": "unknown",
+        "first_blocker": "",
+        "raw_pid_file_path_recorded": False,
+        "command_line_read": False,
+    }
+    if not pid_file.is_file():
+        payload["first_blocker"] = "pid_file_missing"
+        return payload
+    text = pid_file.read_text(encoding="utf-8").strip()
+    try:
+        pid = int(text)
+    except ValueError:
+        payload["first_blocker"] = "pid_file_unparseable"
+        return payload
+    if pid <= 0:
+        payload["first_blocker"] = "pid_file_invalid"
+        return payload
+    payload["pid"] = pid
+    payload["pid_parse_ok"] = True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        payload["process_state"] = "ended"
+    except PermissionError:
+        payload["process_state"] = "unknown"
+        payload["first_blocker"] = "pid_permission_denied"
+    else:
+        payload["process_state"] = "running"
+    return payload
+
+
+def _process_state_from_poll(process: subprocess.Popen[Any]) -> tuple[str, int | None]:
+    returncode = process.poll()
+    if returncode is None:
+        return "running", None
+    return "ended", int(returncode)
+
+
+def wait_for_terminal_bench_launch_materialization(
+    *,
+    process: subprocess.Popen[Any],
+    jobs_dir: str | Path,
+    job_name: str | None,
+    wait_seconds: int,
+) -> dict[str, Any]:
+    """Wait for compact job materialization without reading private artifacts."""
+
+    deadline = time.monotonic() + max(0, int(wait_seconds))
+    observations = 0
+    process_state, returncode = _process_state_from_poll(process)
+    post_launch = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir,
+        job_name=job_name,
+        detached_process_state=process_state,
+    )
+    observations += 1
+    while (
+        time.monotonic() < deadline
+        and post_launch.get("ready_for_launch_state") is not True
+        and post_launch.get("ready_for_compact_failure_marker") is not True
+        and process_state != "ended"
+    ):
+        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+        process_state, returncode = _process_state_from_poll(process)
+        post_launch = summarize_terminal_bench_post_launch_materialization(
+            jobs_dir,
+            job_name=job_name,
+            detached_process_state=process_state,
+        )
+        observations += 1
+
+    materialized = post_launch.get("ready_for_launch_state") is True
+    terminal_failure = post_launch.get("ready_for_compact_failure_marker") is True
+    return {
+        "schema_version": TERMINAL_BENCH_LAUNCH_MATERIALIZATION_OBSERVATION_SCHEMA,
+        "wait_seconds": max(0, int(wait_seconds)),
+        "observation_count": observations,
+        "process_state": process_state,
+        "returncode": returncode,
+        "materialized": materialized,
+        "terminal_compact_failure": terminal_failure,
+        "first_blocker": post_launch.get("first_blocker"),
+        "compact_failure_class": post_launch.get("compact_failure_class"),
+        "post_launch_materialization": post_launch,
+        "read_boundary": {
+            "raw_paths_recorded": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "command_line_read": False,
+            "raw_external_handle_payload_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+
+
+def observe_terminal_bench_post_materialization_closeout(
+    *,
+    process: subprocess.Popen[Any],
+    jobs_dir: str | Path,
+    job_name: str | None,
+    wait_seconds: int,
+) -> dict[str, Any]:
+    """Catch immediate no-trial closeout after a job becomes pollable."""
+
+    deadline = time.monotonic() + max(0, int(wait_seconds))
+    observations = 0
+    process_state, returncode = _process_state_from_poll(process)
+    post_launch = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir,
+        job_name=job_name,
+        detached_process_state=process_state,
+        reconcile_stale_active=(process_state == "ended"),
+    )
+    observations += 1
+    while (
+        time.monotonic() < deadline
+        and process_state == "running"
+        and post_launch.get("ready_for_compact_result_ingest") is not True
+        and post_launch.get("ready_for_compact_failure_marker") is not True
+    ):
+        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+        process_state, returncode = _process_state_from_poll(process)
+        post_launch = summarize_terminal_bench_post_launch_materialization(
+            jobs_dir,
+            job_name=job_name,
+            detached_process_state=process_state,
+            reconcile_stale_active=(process_state == "ended"),
+        )
+        observations += 1
+
+    return {
+        "schema_version": "terminal_bench_post_materialization_closeout_observation_v0",
+        "wait_seconds": max(0, int(wait_seconds)),
+        "observation_count": observations,
+        "process_state": process_state,
+        "returncode": returncode,
+        "ready_for_compact_result_ingest": (
+            post_launch.get("ready_for_compact_result_ingest") is True
+        ),
+        "terminal_compact_failure": (
+            post_launch.get("ready_for_compact_failure_marker") is True
+        ),
+        "first_blocker": post_launch.get("first_blocker"),
+        "compact_failure_class": post_launch.get("compact_failure_class"),
+        "post_launch_materialization": post_launch,
+        "read_boundary": {
+            "raw_paths_recorded": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "command_line_read": False,
+            "raw_external_handle_payload_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+
+
+def build_terminal_bench_harbor_resume_command(
+    *,
+    job_path: str | Path,
+    resolve_cli_paths: bool = True,
+) -> list[str]:
+    """Build a private no-upload Harbor resume command for a materialized job."""
+
+    return [
+        (
+            resolve_terminal_bench_runner_binary("uvx")
+            if resolve_cli_paths
+            else "uvx"
+        ),
+        "--from",
+        TERMINAL_BENCH_HARBOR_REF,
+        "harbor",
+        "job",
+        "resume",
+        "--job-path",
+        str(Path(job_path).expanduser()),
+    ]
+
+
+def _terminal_bench_resume_recommended(
+    post_launch: dict[str, Any],
+) -> bool:
+    """Return true when Harbor materialized a job that needs a no-upload resume."""
+
+    return bool(
+        post_launch.get("ready_for_launch_state") is True
+        and post_launch.get("ready_for_compact_result_ingest") is not True
+        and post_launch.get("job_active_without_trial_result") is True
+        and int(post_launch.get("trial_result_present_count") or 0) <= 0
+        and post_launch.get("external_handle_terminal") is True
+        and (
+            int(post_launch.get("job_pending_trial_count") or 0) > 0
+            or int(post_launch.get("job_running_trial_count") or 0) > 0
+        )
+    )
+
+
+def _terminal_bench_active_job_resume_contract(
+    *,
+    process_state: str,
+    job_stale_active_without_trial_result: bool,
+    running_trial_count: int,
+    pending_trial_count: int,
+    trial_result_count: int,
+    result_present: bool,
+    job_finished: bool,
+) -> dict[str, Any]:
+    """Describe whether a compact active/no-result job should be resumed."""
+
+    resume_recommended = bool(
+        process_state == "ended"
+        and result_present
+        and not job_finished
+        and trial_result_count <= 0
+        and (running_trial_count > 0 or pending_trial_count > 0)
+        and not job_stale_active_without_trial_result
+    )
+    if resume_recommended:
+        next_action = (
+            "run_no_upload_harbor_job_resume_before_terminal_failure_marker"
+        )
+    elif job_stale_active_without_trial_result:
+        next_action = "emit_stale_active_compact_failure_marker"
+    else:
+        next_action = "continue_compact_polling"
+    return {
+        "schema_version": "terminal_bench_active_job_resume_contract_v0",
+        "resume_recommended": resume_recommended,
+        "next_action": next_action,
+        "requires_upload": False,
+        "raw_logs_required": False,
+        "raw_task_text_required": False,
+        "trajectory_required": False,
+    }
+
+
+def resume_terminal_bench_materialized_job(
+    *,
+    jobs_dir: str | Path,
+    run_root: str | Path,
+    job_name: str,
+    wait_seconds: int = 20,
+    execute: bool = False,
+    env: dict[str, str] | None = None,
+    command_override: list[str] | None = None,
+) -> dict[str, Any]:
+    """Resume a materialized Harbor job and emit compact process evidence only."""
+
+    jobs_dir_path = Path(jobs_dir).expanduser()
+    run_root_path = Path(run_root).expanduser()
+    public_job_name = Path(job_name).name
+    job_path = jobs_dir_path / public_job_name
+    parsed_wait_seconds = max(0, int(wait_seconds))
+    argv = (
+        list(command_override)
+        if command_override is not None
+        else build_terminal_bench_harbor_resume_command(job_path=job_path)
+    )
+    if "--upload" in argv:
+        raise ValueError("Terminal-Bench Harbor resume command must not upload")
+
+    output_log = run_root_path / "terminal_bench_resume_stdout_stderr.private.log"
+    command_file = run_root_path / "terminal_bench_resume_command.private.sh"
+    pid_file = run_root_path / "terminal_bench_resume.pid.private"
+    payload: dict[str, Any] = {
+        "schema_version": "terminal_bench_harbor_resume_observation_v0",
+        "ok": True,
+        "dry_run": not execute,
+        "run_basename": run_root_path.name,
+        "job_name": public_job_name,
+        "resume_requested": True,
+        "process_started": False,
+        "process_state": "not_started",
+        "detached_process_group": False,
+        "pid": None,
+        "returncode": None,
+        "wait_seconds": parsed_wait_seconds,
+        "process_timed_out": False,
+        "job_root_present": job_path.is_dir(),
+        "job_config_present": (job_path / "config.json").is_file(),
+        "command_shape": {
+            "argv_count": len(argv),
+            "uses_uvx": bool(argv and Path(str(argv[0])).name == "uvx"),
+            "uses_harbor_job_resume": (
+                "harbor" in argv and "job" in argv and "resume" in argv
+            ),
+            "job_path_arg_present": "--job-path" in argv or "-p" in argv,
+            "upload_flag_present": "--upload" in argv,
+            "job_path_recorded": False,
+        },
+        "boundary": {
+            "no_upload": True,
+            "submit_eligible": False,
+            "resume_invoked": execute,
+            "task_solver_may_run": execute,
+            "model_api_expected": execute,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "upload_invoked": False,
+        },
+        "private_outputs": {
+            "stdout_stderr_log_private": True,
+            "pid_file_private": True,
+            "command_file_private": True,
+        },
+    }
+    if not payload["job_root_present"]:
+        post_launch = summarize_terminal_bench_post_launch_materialization(
+            jobs_dir_path,
+            job_name=public_job_name,
+            detached_process_state="ended",
+            reconcile_stale_active=True,
+        )
+        payload.update(
+            {
+                "process_state": "prelaunch_blocked",
+                "first_blocker": "resume_job_root_missing",
+                "compact_failure_class": "resume_job_root_missing",
+                "ready_for_compact_failure_marker": True,
+                "post_launch_materialization": post_launch,
+            }
+        )
+        return payload
+    if not payload["job_config_present"]:
+        post_launch = summarize_terminal_bench_post_launch_materialization(
+            jobs_dir_path,
+            job_name=public_job_name,
+            detached_process_state="ended",
+            reconcile_stale_active=True,
+        )
+        payload.update(
+            {
+                "process_state": "prelaunch_blocked",
+                "first_blocker": "resume_job_config_missing",
+                "compact_failure_class": "resume_job_config_missing",
+                "ready_for_compact_failure_marker": True,
+                "post_launch_materialization": post_launch,
+            }
+        )
+        return payload
+    if not execute:
+        return payload
+
+    run_root_path.mkdir(parents=True, exist_ok=True)
+    command_file.write_text(
+        " ".join(shlex.quote(str(part)) for part in argv) + "\n",
+        encoding="utf-8",
+    )
+    launch_env = os.environ.copy()
+    if env:
+        launch_env.update({str(key): str(value) for key, value in env.items()})
+    with output_log.open("ab") as stream:
+        process = subprocess.Popen(
+            [str(part) for part in argv],
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path.cwd()),
+            env=launch_env,
+            close_fds=True,
+            start_new_session=True,
+        )
+    pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
+    payload.update(
+        {
+            "process_started": True,
+            "process_state": "running",
+            "detached_process_group": True,
+            "pid": process.pid,
+        }
+    )
+    try:
+        returncode = process.wait(timeout=parsed_wait_seconds)
+        payload.update(
+            {
+                "process_state": "ended",
+                "returncode": returncode,
+                "process_timed_out": False,
+            }
+        )
+    except subprocess.TimeoutExpired:
+        payload["process_timed_out"] = True
+        payload["process_state"] = "running"
+
+    post_launch = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir_path,
+        job_name=public_job_name,
+        detached_process_state=str(payload["process_state"]),
+        reconcile_stale_active=payload["process_state"] == "ended",
+    )
+    payload["post_launch_materialization"] = post_launch
+    payload["ready_for_launch_state"] = post_launch.get("ready_for_launch_state") is True
+    payload["ready_for_compact_result_ingest"] = (
+        post_launch.get("ready_for_compact_result_ingest") is True
+    )
+    payload["ready_for_compact_failure_marker"] = (
+        post_launch.get("ready_for_compact_failure_marker") is True
+    )
+    payload["compact_failure_class"] = post_launch.get("compact_failure_class")
+    payload["first_blocker"] = post_launch.get("first_blocker")
+    public_path = run_root_path / "terminal_bench_resume.public.json"
+    public_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def summarize_terminal_bench_prelaunch_job_root_guard(
+    jobs_dir: str | Path,
+    *,
+    job_name: str | None,
+) -> dict[str, Any]:
+    """Block launches that would reuse an existing Harbor job root.
+
+    Harbor materialization is keyed by job basename. Reusing a basename can make
+    a fresh launcher observe an old active/no-result job as if the new case had
+    materialized, so this guard checks only compact job-root facts before the
+    subprocess starts.
+    """
+
+    public_job_name = Path(str(job_name)).name if job_name else ""
+    current_summary = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir,
+        job_name=public_job_name or None,
+        detached_process_state="unknown",
+    )
+    checked = current_summary.get("checked") is True
+    existing_job_root_present = current_summary.get("job_root_present") is True
+    if not checked or not existing_job_root_present:
+        return {
+            "schema_version": "terminal_bench_prelaunch_job_root_guard_v0",
+            "checked": checked,
+            "allowed": True,
+            "job_name": public_job_name,
+            "existing_job_root_present": existing_job_root_present,
+            "first_blocker": current_summary.get("first_blocker") or "",
+            "compact_failure_class": "",
+            "existing_compact_failure_class": "",
+            "next_allowed_action": "",
+            "post_launch_materialization": current_summary,
+            "read_boundary": {
+                "raw_paths_recorded": False,
+                "raw_logs_read": False,
+                "task_text_read": False,
+                "trajectory_read": False,
+                "docker_invoked": False,
+                "model_api_invoked": False,
+                "upload_invoked": False,
+            },
+        }
+
+    reconciled_summary = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir,
+        job_name=public_job_name or None,
+        detached_process_state="ended",
+        reconcile_stale_active=True,
+    )
+    existing_failure_class = str(
+        reconciled_summary.get("compact_failure_class") or ""
+    )
+    existing_result_ready = (
+        reconciled_summary.get("ready_for_compact_result_ingest") is True
+    )
+    if existing_failure_class:
+        first_blocker = f"prelaunch_existing_{existing_failure_class}"
+        next_allowed_action = str(
+            (
+                reconciled_summary.get("compact_failure_marker")
+                if isinstance(reconciled_summary.get("compact_failure_marker"), dict)
+                else {}
+            ).get("next_allowed_action")
+            or "repair_existing_job_root_before_rerun"
+        )
+    elif existing_result_ready:
+        first_blocker = "prelaunch_existing_result_requires_ingest"
+        next_allowed_action = "ingest_existing_trial_result_before_any_rerun"
+    else:
+        first_blocker = "prelaunch_existing_job_root_before_launch"
+        next_allowed_action = "choose_unique_job_name_or_clear_existing_job_root_after_ingest"
+
+    return {
+        "schema_version": "terminal_bench_prelaunch_job_root_guard_v0",
+        "checked": True,
+        "allowed": False,
+        "job_name": public_job_name,
+        "existing_job_root_present": True,
+        "first_blocker": first_blocker,
+        "compact_failure_class": "terminal_bench_prelaunch_existing_job_root_blocked",
+        "existing_compact_failure_class": existing_failure_class,
+        "existing_ready_for_compact_result_ingest": existing_result_ready,
+        "existing_ready_for_compact_failure_marker": (
+            reconciled_summary.get("ready_for_compact_failure_marker") is True
+        ),
+        "existing_trial_result_present_count": _compact_positive_int(
+            reconciled_summary.get("trial_result_present_count")
+        ),
+        "existing_job_active_without_trial_result": (
+            reconciled_summary.get("job_active_without_trial_result") is True
+        ),
+        "existing_job_stale_active_without_trial_result": (
+            reconciled_summary.get("job_stale_active_without_trial_result") is True
+        ),
+        "next_allowed_action": next_allowed_action,
+        "post_launch_materialization": reconciled_summary,
+        "read_boundary": {
+            "raw_paths_recorded": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+
+
+def launch_terminal_bench_case_run(
+    *,
+    jobs_dir: str | Path,
+    run_root: str | Path,
+    dataset: str = TERMINAL_BENCH_DEFAULT_DATASET,
+    task_id: str = TERMINAL_BENCH_DEFAULT_TASK,
+    model: str = TERMINAL_BENCH_DEFAULT_MODEL,
+    mode: str = "codex-goal-mode",
+    job_name: str | None = None,
+    wait_seconds: int = 20,
+    materialization_wait_seconds: int = 0,
+    execute: bool = False,
+    timeout_multiplier: float | None = None,
+    agent_timeout_multiplier: float | None = None,
+    verifier_timeout_multiplier: float | None = None,
+    agent_setup_timeout_multiplier: float | None = None,
+    environment_build_timeout_multiplier: float | None = None,
+    codex_install_strategy: str = (
+        TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    ),
+    codex_preflight_timeout_sec: int | None = None,
+    worker_codex_materialization_strategy: str | None = None,
+    setup_timeout_repair_profile: bool = False,
+    resume_after_materialization: bool = False,
+    command_override: list[str] | None = None,
+    resume_command_override: list[str] | None = None,
+) -> dict[str, Any]:
+    """Launch one no-upload Terminal-Bench case run with compact reporting."""
+
+    if mode not in ("codex-goal-mode", "hardened-codex", "codex-goal-harness"):
+        raise ValueError(
+            "case run launcher supports codex-goal-mode, hardened-codex, "
+            "or codex-goal-harness"
+        )
+    run_root_path = Path(run_root).expanduser()
+    jobs_dir_path = Path(jobs_dir).expanduser()
+    run_basename = run_root_path.name
+    task_label = str(task_id or "all").replace("-", "_")
+    public_job_name = (
+        Path(job_name).name
+        if job_name
+        else f"terminal_bench_{task_label}_{mode.replace('-', '_')}_case_run"
+    )
+    launch = build_terminal_bench_private_runner_launch(
+        mode=mode,
+        dataset=dataset,
+        task_id=task_id,
+        model=model,
+        jobs_dir=str(jobs_dir_path),
+        job_name=public_job_name,
+        timeout_multiplier=timeout_multiplier,
+        agent_timeout_multiplier=agent_timeout_multiplier,
+        verifier_timeout_multiplier=verifier_timeout_multiplier,
+        agent_setup_timeout_multiplier=agent_setup_timeout_multiplier,
+        environment_build_timeout_multiplier=environment_build_timeout_multiplier,
+        codex_install_strategy=codex_install_strategy,
+        codex_preflight_timeout_sec=codex_preflight_timeout_sec,
+        worker_codex_materialization_strategy=worker_codex_materialization_strategy,
+        setup_timeout_repair_profile=setup_timeout_repair_profile,
+    )
+    argv = launch["argv"] if isinstance(launch.get("argv"), list) else []
+    if command_override is not None:
+        argv = list(command_override)
+    if "--upload" in argv:
+        raise ValueError("Terminal-Bench case run command must not upload")
+    if "goal_harness_worker_materialization_probe_only=true" in argv:
+        raise ValueError("Terminal-Bench case run must not be probe-only")
+    summary = summarize_terminal_bench_private_runner_launch(launch)
+    if summary.get("no_upload_boundary") is not True or summary.get("submit_eligible"):
+        raise ValueError("Terminal-Bench case run requires no-upload/no-submit boundary")
+    if summary.get("worker_materialization_probe_only") is True:
+        raise ValueError("Terminal-Bench case run summary unexpectedly probe-only")
+
+    parsed_wait_seconds = max(0, int(wait_seconds))
+    parsed_materialization_wait_seconds = max(0, int(materialization_wait_seconds))
+    output_log = run_root_path / "terminal_bench_run_stdout_stderr.private.log"
+    command_file = run_root_path / "terminal_bench_run_command.private.sh"
+    pid_file = run_root_path / "terminal_bench_run.pid.private"
+    payload: dict[str, Any] = {
+        "schema_version": TERMINAL_BENCH_CASE_RUN_LAUNCH_SCHEMA,
+        "ok": True,
+        "dry_run": not execute,
+        "run_basename": run_basename,
+        "job_name": public_job_name,
+        "process_started": False,
+        "process_state": "not_started",
+        "detached_process_group": False,
+        "pid": None,
+        "returncode": None,
+        "wait_seconds": parsed_wait_seconds,
+        "process_timed_out": False,
+        "materialization_wait_seconds": parsed_materialization_wait_seconds,
+        "materialization_wait_timed_out": False,
+        "resume_after_materialization": bool(resume_after_materialization),
+        "resume_after_materialization_attempted": False,
+        "launch_summary": summary,
+        "command_ref": (
+            argv[2]
+            if len(argv) > 2 and argv[:2] == ["uvx", "--from"]
+            else "private_runner_launch"
+        ),
+        "command_shape": {
+            "argv_count": len(argv),
+            "uses_uvx": bool(argv and Path(str(argv[0])).name == "uvx"),
+            "uses_harbor_run": "harbor" in argv and "run" in argv,
+            "resume_after_materialization": bool(resume_after_materialization),
+            "agent_import_path_present": "--agent-import-path" in argv,
+            "worker_materialization_probe_only": False,
+            "upload_flag_present": "--upload" in argv,
+            "jobs_dir_placeholder_present": "<private-jobs-dir>" in argv,
+        },
+        "boundary": {
+            "no_upload": True,
+            "submit_eligible": False,
+            "worker_materialization_probe_only": False,
+            "task_solver_invoked": execute,
+            "model_api_expected": execute,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "resume_invoked": False,
+            "upload_invoked": False,
+        },
+        "private_outputs": {
+            "stdout_stderr_log_private": True,
+            "pid_file_private": True,
+            "command_file_private": True,
+        },
+    }
+    prelaunch_ready = summary.get("ready") is True
+    prelaunch_blocker = str(summary.get("first_blocker") or "")
+    payload["execution_ready"] = prelaunch_ready
+    prelaunch_job_root_guard = summarize_terminal_bench_prelaunch_job_root_guard(
+        jobs_dir_path,
+        job_name=public_job_name,
+    )
+    payload["prelaunch_job_root_guard"] = prelaunch_job_root_guard
+    if not prelaunch_ready:
+        payload.update(
+            {
+                "process_state": "prelaunch_blocked",
+                "first_blocker": prelaunch_blocker
+                or "terminal_bench_runner_launch_not_ready",
+                "compact_failure_class": (
+                    "terminal_bench_prelaunch_readiness_blocked"
+                ),
+                "ready_for_launch_state": False,
+                "ready_for_compact_result_ingest": False,
+                "ready_for_compact_failure_marker": True,
+                "launch_preflight_blocker": prelaunch_blocker,
+                "launch_preflight_blocked": True,
+                "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                    failure_class="terminal_bench_prelaunch_readiness_blocked",
+                    evidence_kind="compact_launch_readiness_summary",
+                    external_handle_state="unknown",
+                    launch_state_countable=False,
+                    job_result_present=False,
+                    trial_result_present_count=0,
+                ),
+            }
+        )
+        payload["boundary"].update(
+            {
+                "task_solver_invoked": False,
+                "model_api_expected": False,
+            }
+        )
+    if execute and not prelaunch_ready:
+        run_root_path.mkdir(parents=True, exist_ok=True)
+        public_path = run_root_path / "terminal_bench_run_launch.public.json"
+        public_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (run_root_path / "post_launch_summary.public.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": TERMINAL_BENCH_POST_LAUNCH_MATERIALIZATION_SCHEMA,
+                    "checked": False,
+                    "ready_for_launch_state": False,
+                    "ready_for_compact_result_ingest": False,
+                    "ready_for_compact_failure_marker": True,
+                    "first_blocker": payload["first_blocker"],
+                    "job_name": public_job_name,
+                    "jobs_dir_present": False,
+                    "job_root_present": False,
+                    "job_lock_present": False,
+                    "job_result_present": False,
+                    "trial_result_present_count": 0,
+                    "raw_paths_recorded": False,
+                    "raw_logs_read": False,
+                    "raw_task_text_read": False,
+                    "trajectory_read": False,
+                    "compact_failure_class": payload["compact_failure_class"],
+                    "compact_failure_marker": payload["compact_failure_marker"],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return payload
+    if execute and prelaunch_job_root_guard.get("allowed") is not True:
+        post_launch = (
+            prelaunch_job_root_guard.get("post_launch_materialization")
+            if isinstance(
+                prelaunch_job_root_guard.get("post_launch_materialization"), dict
+            )
+            else {}
+        )
+        marker_trial_count = _compact_positive_int(
+            post_launch.get("trial_result_present_count")
+        )
+        payload.update(
+            {
+                "process_state": "prelaunch_blocked",
+                "first_blocker": prelaunch_job_root_guard.get("first_blocker")
+                or "prelaunch_existing_job_root_before_launch",
+                "compact_failure_class": prelaunch_job_root_guard.get(
+                    "compact_failure_class"
+                )
+                or "terminal_bench_prelaunch_existing_job_root_blocked",
+                "ready_for_launch_state": False,
+                "ready_for_compact_result_ingest": False,
+                "ready_for_compact_failure_marker": True,
+                "launch_preflight_blocker": prelaunch_job_root_guard.get(
+                    "first_blocker"
+                )
+                or "prelaunch_existing_job_root_before_launch",
+                "launch_preflight_blocked": True,
+                "prelaunch_job_root_guard_triggered": True,
+                "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                    failure_class="terminal_bench_prelaunch_existing_job_root_blocked",
+                    evidence_kind="compact_prelaunch_existing_job_root_guard",
+                    external_handle_state=str(
+                        post_launch.get("external_handle_state") or "unknown"
+                    ),
+                    launch_state_countable=False,
+                    job_result_present=post_launch.get("job_result_present") is True,
+                    trial_result_present_count=marker_trial_count,
+                    job_result_finished=(
+                        post_launch.get("job_result_finished")
+                        if isinstance(post_launch.get("job_result_finished"), bool)
+                        else None
+                    ),
+                    job_running_trial_count=_compact_positive_int(
+                        post_launch.get("job_running_trial_count")
+                    ),
+                    job_pending_trial_count=_compact_positive_int(
+                        post_launch.get("job_pending_trial_count")
+                    ),
+                    job_result_updated_at_present=(
+                        post_launch.get("job_result_updated_at_present")
+                        if isinstance(
+                            post_launch.get("job_result_updated_at_present"), bool
+                        )
+                        else None
+                    ),
+                    job_updated_age_seconds=(
+                        post_launch.get("job_updated_age_seconds")
+                        if isinstance(
+                            post_launch.get("job_updated_age_seconds"),
+                            (int, float),
+                        )
+                        and not isinstance(
+                            post_launch.get("job_updated_age_seconds"), bool
+                        )
+                        else None
+                    ),
+                    job_active_stale_seconds_threshold=(
+                        int(post_launch.get("job_active_stale_seconds_threshold"))
+                        if isinstance(
+                            post_launch.get("job_active_stale_seconds_threshold"),
+                            int,
+                        )
+                        and not isinstance(
+                            post_launch.get("job_active_stale_seconds_threshold"),
+                            bool,
+                        )
+                        else None
+                    ),
+                ),
+            }
+        )
+        payload["boundary"].update(
+            {
+                "task_solver_invoked": False,
+                "model_api_expected": False,
+            }
+        )
+        run_root_path.mkdir(parents=True, exist_ok=True)
+        public_path = run_root_path / "terminal_bench_run_launch.public.json"
+        public_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (run_root_path / "post_launch_summary.public.json").write_text(
+            json.dumps(post_launch, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return payload
+    if not execute:
+        return payload
+
+    run_root_path.mkdir(parents=True, exist_ok=True)
+    jobs_dir_path.mkdir(parents=True, exist_ok=True)
+    command_file.write_text(
+        " ".join(shlex.quote(str(part)) for part in argv) + "\n",
+        encoding="utf-8",
+    )
+    launch_env = os.environ.copy()
+    if isinstance(launch.get("env"), dict):
+        launch_env.update(
+            {
+                str(key): str(value)
+                for key, value in launch["env"].items()
+                if isinstance(key, str)
+            }
+        )
+    with output_log.open("ab") as stream:
+        process = subprocess.Popen(
+            [str(part) for part in argv],
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path.cwd()),
+            env=launch_env,
+            close_fds=True,
+            start_new_session=True,
+        )
+    pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
+    payload.update(
+        {
+            "process_started": True,
+            "process_state": "running",
+            "detached_process_group": True,
+            "pid": process.pid,
+        }
+    )
+    launch_materialization_observation: dict[str, Any] | None = None
+    if parsed_materialization_wait_seconds > 0:
+        launch_materialization_observation = (
+            wait_for_terminal_bench_launch_materialization(
+                process=process,
+                jobs_dir=jobs_dir_path,
+                job_name=public_job_name,
+                wait_seconds=parsed_materialization_wait_seconds,
+            )
+        )
+        payload.update(
+            {
+                "process_state": launch_materialization_observation.get(
+                    "process_state",
+                    "unknown",
+                ),
+                "returncode": launch_materialization_observation.get("returncode"),
+                "materialization_wait_timed_out": (
+                    launch_materialization_observation.get("materialized") is not True
+                    and launch_materialization_observation.get(
+                        "terminal_compact_failure"
+                    )
+                    is not True
+                    and launch_materialization_observation.get("process_state")
+                    == "running"
+                ),
+            }
+        )
+        post_launch = (
+            launch_materialization_observation.get("post_launch_materialization")
+            if isinstance(
+                launch_materialization_observation.get(
+                    "post_launch_materialization"
+                ),
+                dict,
+            )
+            else {}
+        )
+        payload["launch_materialization_observation"] = (
+            launch_materialization_observation
+        )
+        if (
+            launch_materialization_observation.get("materialized") is True
+            and launch_materialization_observation.get("terminal_compact_failure")
+            is not True
+            and parsed_wait_seconds > 0
+        ):
+            post_materialization_closeout = (
+                observe_terminal_bench_post_materialization_closeout(
+                    process=process,
+                    jobs_dir=jobs_dir_path,
+                    job_name=public_job_name,
+                    wait_seconds=parsed_wait_seconds,
+                )
+            )
+            payload["post_materialization_closeout_observation"] = (
+                post_materialization_closeout
+            )
+            payload.update(
+                {
+                    "process_state": post_materialization_closeout.get(
+                        "process_state", payload["process_state"]
+                    ),
+                    "returncode": post_materialization_closeout.get(
+                        "returncode", payload.get("returncode")
+                    ),
+                }
+            )
+            post_launch = (
+                post_materialization_closeout.get("post_launch_materialization")
+                if isinstance(
+                    post_materialization_closeout.get(
+                        "post_launch_materialization"
+                    ),
+                    dict,
+                )
+                else post_launch
+            )
+            if (
+                resume_after_materialization
+                and _terminal_bench_resume_recommended(post_launch)
+            ):
+                resume_observation = resume_terminal_bench_materialized_job(
+                    jobs_dir=jobs_dir_path,
+                    run_root=run_root_path,
+                    job_name=public_job_name,
+                    wait_seconds=parsed_wait_seconds,
+                    execute=True,
+                    env=launch.get("env") if isinstance(launch.get("env"), dict) else None,
+                    command_override=resume_command_override,
+                )
+                payload["post_materialization_resume_observation"] = (
+                    resume_observation
+                )
+                payload["resume_after_materialization_attempted"] = True
+                payload["boundary"]["resume_invoked"] = True
+                payload.update(
+                    {
+                        "process_state": resume_observation.get(
+                            "process_state", payload["process_state"]
+                        ),
+                        "returncode": resume_observation.get(
+                            "returncode", payload.get("returncode")
+                        ),
+                    }
+                )
+                if isinstance(
+                    resume_observation.get("post_launch_materialization"), dict
+                ):
+                    post_launch = resume_observation[
+                        "post_launch_materialization"
+                    ]
+    else:
+        try:
+            returncode = process.wait(timeout=parsed_wait_seconds)
+            payload.update(
+                {
+                    "process_state": "ended",
+                    "returncode": returncode,
+                    "process_timed_out": False,
+                }
+            )
+        except subprocess.TimeoutExpired:
+            payload["process_timed_out"] = True
+            payload["process_state"] = "running"
+
+        post_launch = summarize_terminal_bench_post_launch_materialization(
+            jobs_dir_path,
+            job_name=public_job_name,
+            detached_process_state=payload["process_state"],
+        )
+    payload["post_launch_materialization"] = post_launch
+    payload["ready_for_launch_state"] = post_launch.get("ready_for_launch_state") is True
+    payload["ready_for_compact_result_ingest"] = (
+        post_launch.get("ready_for_compact_result_ingest") is True
+    )
+    payload["ready_for_compact_failure_marker"] = (
+        post_launch.get("ready_for_compact_failure_marker") is True
+    )
+    payload["compact_failure_class"] = post_launch.get("compact_failure_class")
+    payload["first_blocker"] = post_launch.get("first_blocker")
+    if payload["compact_failure_class"] == "detached_worker_ended_without_job_root":
+        payload["exit_code_attribution"] = (
+            "terminal_bench_run_process_ended_before_job_root"
+        )
+    elif payload["compact_failure_class"] == "detached_worker_ended_without_jobs_dir":
+        payload["exit_code_attribution"] = (
+            "terminal_bench_run_process_ended_before_jobs_dir"
+        )
+    elif payload["process_state"] == "ended" and payload["returncode"] not in (0, None):
+        payload["exit_code_attribution"] = "terminal_bench_run_process_nonzero_exit"
+    elif payload["process_state"] == "ended":
+        payload["exit_code_attribution"] = "terminal_bench_run_process_zero_exit"
+    else:
+        payload["exit_code_attribution"] = "terminal_bench_run_process_still_running"
+    if payload.get("resume_after_materialization_attempted"):
+        if payload.get("compact_failure_class"):
+            payload["exit_code_attribution"] = (
+                "terminal_bench_resume_terminal_compact_failure"
+            )
+        elif payload["process_state"] == "ended" and payload["returncode"] not in (
+            0,
+            None,
+        ):
+            payload["exit_code_attribution"] = (
+                "terminal_bench_resume_process_nonzero_exit"
+            )
+        elif payload["process_state"] == "ended":
+            payload["exit_code_attribution"] = "terminal_bench_resume_process_zero_exit"
+        else:
+            payload["exit_code_attribution"] = (
+                "terminal_bench_resume_process_still_running"
+            )
+
+    public_path = run_root_path / "terminal_bench_run_launch.public.json"
+    public_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_root_path / "post_launch_summary.public.json").write_text(
+        json.dumps(post_launch, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def poll_terminal_bench_worker_materialization_probe(
+    *,
+    jobs_dir: str | Path,
+    run_root: str | Path,
+    job_name: str | None = None,
+) -> dict[str, Any]:
+    """Poll a no-upload worker materialization probe using compact signals only."""
+
+    run_root_path = Path(run_root).expanduser()
+    jobs_dir_path = Path(jobs_dir).expanduser()
+    public_job_name = Path(job_name).name if job_name else ""
+    pid_state = _detached_process_state_from_pid_file(
+        run_root_path / "worker_materialization_probe.pid.private"
+    )
+    process_state = str(pid_state.get("process_state") or "unknown")
+    post_launch = summarize_terminal_bench_post_launch_materialization(
+        jobs_dir_path,
+        job_name=public_job_name or None,
+        detached_process_state=process_state,
+    )
+    payload: dict[str, Any] = {
+        "schema_version": "terminal_bench_worker_materialization_probe_poll_v0",
+        "ok": True,
+        "run_basename": run_root_path.name,
+        "job_name": public_job_name,
+        "pid_state": pid_state,
+        "process_state": process_state,
+        "post_launch_materialization": post_launch,
+        "ready_for_launch_state": post_launch.get("ready_for_launch_state") is True,
+        "ready_for_compact_result_ingest": (
+            post_launch.get("ready_for_compact_result_ingest") is True
+        ),
+        "ready_for_compact_failure_marker": (
+            post_launch.get("ready_for_compact_failure_marker") is True
+        ),
+        "compact_failure_class": post_launch.get("compact_failure_class"),
+        "first_blocker": post_launch.get("first_blocker")
+        or pid_state.get("first_blocker"),
+        "boundary": {
+            "no_upload": True,
+            "submit_eligible": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "local_paths_recorded": False,
+            "command_argv_recorded": False,
+            "command_line_read": False,
+            "raw_external_handle_payload_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+        "public_poll_written": False,
+    }
+    if run_root_path.is_dir():
+        payload["public_poll_written"] = True
+        (run_root_path / "worker_materialization_probe_poll.public.json").write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return payload
+
+
 def build_benchmark_lifecycle_state(
     *,
     preflight: dict[str, Any] | None = None,
@@ -4202,7 +6970,15 @@ def build_benchmark_lifecycle_state(
         isinstance(post_launch_materialization, dict)
         and post_launch_materialization.get("ready_for_compact_result_ingest") is True
     ) or _benchmark_lifecycle_schema(benchmark_run) == "benchmark_run_v0"
+    compact_failure_marker_ready = (
+        isinstance(post_launch_materialization, dict)
+        and post_launch_materialization.get("ready_for_compact_failure_marker") is True
+    )
     result_ingested = _benchmark_lifecycle_schema(benchmark_run) == "benchmark_run_v0"
+    if result_ingested:
+        process_launched = True
+        materialized = True
+        compact_ready = True
     paired_compared = (
         _benchmark_lifecycle_schema(benchmark_comparison)
         == "benchmark_comparison_v0"
@@ -4216,6 +6992,20 @@ def build_benchmark_lifecycle_state(
         == BENCHMARK_LEARNING_LEDGER_SCHEMA_VERSION
     )
     budget_count_allowed = _benchmark_lifecycle_budget_count_allowed(learning_ledger)
+    environment_setup_readiness = _benchmark_lifecycle_environment_setup_readiness(
+        benchmark_run=benchmark_run,
+        preflight=preflight,
+    )
+    environment_setup_probe_result = (
+        _benchmark_lifecycle_environment_setup_probe_result(benchmark_run)
+    )
+    environment_setup_repeat_cleared = (
+        not environment_setup_readiness
+        or environment_setup_readiness.get("same_task_repeat_allowed") is True
+    )
+    environment_setup_probe_completed = (
+        environment_setup_probe_result.get("probe_materialized") is True
+    )
 
     transitions = [
         ("preflight_ready", preflight_ready),
@@ -4223,11 +7013,29 @@ def build_benchmark_lifecycle_state(
         ("post_launch_materialized", materialized),
         ("compact_result_ready", compact_ready),
         ("result_ingested", result_ingested),
-        ("paired_compared", paired_compared),
-        ("claim_reviewed", claim_reviewed),
-        ("learning_ledgered", learning_ledgered),
-        ("budget_counted", budget_count_allowed),
     ]
+    if environment_setup_readiness:
+        transitions.append(
+            (
+                "environment_setup_repeat_cleared",
+                environment_setup_repeat_cleared,
+            )
+        )
+    if environment_setup_probe_result:
+        transitions.append(
+            (
+                "environment_setup_probe_completed",
+                environment_setup_probe_completed,
+            )
+        )
+    transitions.extend(
+        [
+            ("paired_compared", paired_compared),
+            ("claim_reviewed", claim_reviewed),
+            ("learning_ledgered", learning_ledgered),
+            ("budget_counted", budget_count_allowed),
+        ]
+    )
     achieved = [name for name, ready in transitions if ready]
     current_phase = achieved[-1] if achieved else "not_started"
 
@@ -4240,6 +7048,13 @@ def build_benchmark_lifecycle_state(
         first_blocker = "compact_result_not_ready"
     elif compact_ready and not result_ingested:
         first_blocker = "compact_result_not_ingested"
+    elif result_ingested and not environment_setup_repeat_cleared:
+        first_blocker = "environment_setup_readiness_preflight_required"
+    elif result_ingested and environment_setup_probe_completed:
+        first_blocker = str(
+            environment_setup_probe_result.get("repeat_blocked_by")
+            or "inspect_environment_setup_probe_result_before_same_task_repeat"
+        )
     elif result_ingested and not paired_compared:
         first_blocker = "paired_comparison_missing"
     elif paired_compared and not claim_reviewed:
@@ -4254,6 +7069,19 @@ def build_benchmark_lifecycle_state(
         if not ready:
             next_required_transition = name
             break
+    if (
+        materialized
+        and compact_failure_marker_ready
+        and not result_ingested
+    ):
+        if "compact_failure_marker_ready" not in achieved:
+            achieved.append("compact_failure_marker_ready")
+        current_phase = "compact_failure_marker_ready"
+        first_blocker = "compact_failure_marker_ledger_ingest_required"
+        next_required_transition = "compact_failure_marker_ledger_ingest"
+    if result_ingested and environment_setup_probe_completed:
+        current_phase = "environment_setup_probe_completed"
+        next_required_transition = "case_repeat_decision"
 
     routing = (
         learning_ledger.get("routing")
@@ -4267,11 +7095,27 @@ def build_benchmark_lifecycle_state(
         and isinstance(learning_ledger.get("learning_quota_gate"), dict)
         else {}
     )
+    ledger_repeat_allowed = (
+        routing.get("repeat_allowed")
+        if isinstance(routing.get("repeat_allowed"), bool)
+        else False
+    )
     post_launch_blocker = (
         str(post_launch_materialization.get("first_blocker") or "")
         if isinstance(post_launch_materialization, dict)
         else ""
     )
+    compact_failure_marker = (
+        post_launch_materialization.get("compact_failure_marker")
+        if isinstance(post_launch_materialization, dict)
+        and isinstance(post_launch_materialization.get("compact_failure_marker"), dict)
+        else {}
+    )
+    case_attempt_countable = compact_failure_marker.get("case_attempt_countable") is True
+    benchmark_budget_countable = (
+        compact_failure_marker.get("benchmark_budget_countable") is True
+    )
+    terminal_closeout = compact_failure_marker.get("terminal_closeout") is True
     return {
         "schema_version": BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION,
         "current_phase": current_phase,
@@ -4282,17 +7126,36 @@ def build_benchmark_lifecycle_state(
         "gates": {
             "launch_state_countable": materialized,
             "compact_result_ingest_allowed": compact_ready,
+            "compact_failure_marker_ready": compact_failure_marker_ready,
+            "terminal_closeout": terminal_closeout,
+            "case_attempt_countable": case_attempt_countable,
+            "benchmark_budget_countable": bool(
+                benchmark_budget_countable or budget_count_allowed
+            ),
             "budget_count_allowed": budget_count_allowed,
             "new_candidate_allowed": routing.get("new_candidate_allowed")
             if isinstance(routing.get("new_candidate_allowed"), bool)
             else False,
-            "repeat_allowed": routing.get("repeat_allowed")
-            if isinstance(routing.get("repeat_allowed"), bool)
-            else False,
+            "repeat_allowed": bool(
+                ledger_repeat_allowed and environment_setup_repeat_cleared
+            ),
+            "environment_setup_repeat_allowed": (
+                environment_setup_readiness.get("same_task_repeat_allowed")
+                if environment_setup_readiness
+                else None
+            ),
+            "environment_setup_probe_completed": environment_setup_probe_completed,
+            "environment_setup_probe_case_attempt_countable": (
+                environment_setup_probe_result.get("case_attempt_countable")
+                if environment_setup_probe_result
+                else None
+            ),
             "learning_spend_allowed": learning_gate.get("spend_allowed")
             if isinstance(learning_gate.get("spend_allowed"), bool)
             else False,
         },
+        "environment_setup_readiness_preflight": environment_setup_readiness,
+        "environment_setup_probe_result": environment_setup_probe_result,
         "inputs": {
             "preflight_schema": _benchmark_lifecycle_schema(preflight),
             "launch_present": isinstance(launch, dict) and bool(launch),
@@ -4320,6 +7183,260 @@ def build_benchmark_lifecycle_state(
     }
 
 
+def build_terminal_bench_result_finalization_gate(
+    post_launch_materialization: dict[str, Any] | None,
+    *,
+    max_repaired_baseline_reruns: int = 1,
+) -> dict[str, Any]:
+    """Reduce compact Terminal-Bench post-launch evidence into a rerun gate.
+
+    The gate is intentionally downstream of post-launch summarization and
+    ledger ingestion: it consumes only compact phase fields, never raw logs,
+    task text, trajectories, local paths, Docker state, or model APIs.
+    """
+
+    payload = (
+        post_launch_materialization
+        if isinstance(post_launch_materialization, dict)
+        else {}
+    )
+    schema_ok = (
+        payload.get("schema_version")
+        == TERMINAL_BENCH_POST_LAUNCH_MATERIALIZATION_SCHEMA
+    )
+    compact_failure_marker = (
+        payload.get("compact_failure_marker")
+        if isinstance(payload.get("compact_failure_marker"), dict)
+        else {}
+    )
+    failure_class = str(
+        payload.get("compact_failure_class")
+        or compact_failure_marker.get("failure_class")
+        or ""
+    )
+    ready_for_result_ingest = (
+        payload.get("ready_for_compact_result_ingest") is True
+    )
+    ready_for_failure_marker = (
+        payload.get("ready_for_compact_failure_marker") is True
+    )
+    launch_state_countable = (
+        payload.get("ready_for_launch_state") is True
+        or compact_failure_marker.get("launch_state_countable") is True
+    )
+    trial_result_present_count = _compact_positive_int(
+        payload.get("trial_result_present_count")
+        if payload.get("trial_result_present_count") is not None
+        else compact_failure_marker.get("trial_result_present_count")
+    )
+    no_trial_result = trial_result_present_count <= 0
+    external_handle_terminal = (
+        payload.get("external_handle_terminal") is True
+        or payload.get("external_handle_state") == "ended"
+        or compact_failure_marker.get("external_handle_state") == "ended"
+    )
+    job_stale_active = (
+        payload.get("job_stale_active_without_trial_result") is True
+        or failure_class == "stale_active_job_without_trial_result"
+    )
+    job_active_without_trial_result = (
+        payload.get("job_active_without_trial_result") is True
+        or job_stale_active
+    )
+    terminal_closeout = compact_failure_marker.get("terminal_closeout") is True
+    marker_next_allowed_action = str(
+        compact_failure_marker.get("next_allowed_action") or ""
+    )
+    ledger_attempt_kind = str(
+        compact_failure_marker.get("ledger_attempt_kind") or ""
+    )
+    case_attempt_countable = (
+        compact_failure_marker.get("case_attempt_countable") is True
+    )
+    benchmark_budget_countable = (
+        compact_failure_marker.get("benchmark_budget_countable") is True
+    )
+    raw_boundary_flags = {
+        "raw_paths_recorded": payload.get("raw_paths_recorded")
+        or compact_failure_marker.get("raw_paths_recorded"),
+        "raw_logs_read": payload.get("raw_logs_read")
+        or compact_failure_marker.get("raw_logs_read"),
+        "raw_task_text_read": payload.get("raw_task_text_read")
+        or payload.get("task_text_read")
+        or compact_failure_marker.get("raw_task_text_read"),
+        "trajectory_read": payload.get("trajectory_read")
+        or payload.get("raw_trajectory_read")
+        or compact_failure_marker.get("trajectory_read"),
+        "raw_external_handle_payload_recorded": payload.get(
+            "raw_external_handle_payload_recorded"
+        )
+        or compact_failure_marker.get("raw_external_handle_payload_recorded"),
+    }
+    boundary_public_safe = all(value is not True for value in raw_boundary_flags.values())
+    max_repaired_baseline_reruns = max(0, int(max_repaired_baseline_reruns))
+
+    finalization_failure_classes = {
+        "stale_active_job_without_trial_result",
+        "detached_worker_ended_active_without_trial_result",
+        "detached_worker_ended_without_trial_result",
+    }
+    launch_materialization_failure_classes = {
+        "detached_worker_ended_without_jobs_dir",
+        "detached_worker_ended_without_job_root",
+    }
+    finalization_repair_required = (
+        schema_ok
+        and boundary_public_safe
+        and ready_for_failure_marker
+        and failure_class in finalization_failure_classes
+    )
+    launch_materialization_repair_required = (
+        schema_ok
+        and boundary_public_safe
+        and ready_for_failure_marker
+        and failure_class in launch_materialization_failure_classes
+    )
+    # A compact terminal closeout marker is evidence that the runner/result
+    # finalization path needs repair, not evidence that another rerun is safe.
+    # A future repaired-rerun authorization must come from a separate validated
+    # repair artifact instead of this failure marker alone.
+    repaired_baseline_rerun_allowed = False
+    if failure_class == "stale_active_job_without_trial_result":
+        finalization_root_cause = (
+            "harbor_job_left_active_after_detached_worker_ended_without_trial_result"
+        )
+    elif failure_class == "detached_worker_ended_active_without_trial_result":
+        finalization_root_cause = (
+            "detached_worker_ended_while_harbor_job_remained_active_without_trial_result"
+        )
+    elif failure_class == "detached_worker_ended_without_trial_result":
+        finalization_root_cause = (
+            "detached_worker_ended_before_trial_result_materialized"
+        )
+    else:
+        finalization_root_cause = "result_finalization_evidence_incomplete"
+
+    if not schema_ok:
+        first_blocker = "post_launch_materialization_required"
+        decision = "blocked_missing_compact_post_launch_materialization"
+        next_allowed_action = "produce_compact_post_launch_materialization"
+        root_cause = "unknown_without_compact_post_launch_materialization"
+    elif not boundary_public_safe:
+        first_blocker = "post_launch_boundary_not_public_safe"
+        decision = "blocked_by_raw_boundary"
+        next_allowed_action = "rebuild_post_launch_materialization_from_compact_fields_only"
+        root_cause = "raw_boundary_violation_in_post_launch_evidence"
+    elif ready_for_result_ingest:
+        first_blocker = "compact_result_ingest_required"
+        decision = "ingest_compact_result_before_rerun"
+        next_allowed_action = "ingest_existing_trial_result_before_any_rerun"
+        root_cause = "trial_result_materialized_not_yet_ingested"
+    elif finalization_repair_required:
+        first_blocker = "result_finalization_repair_required_before_rerun"
+        decision = "repair_result_finalization_before_rerun"
+        next_allowed_action = (
+            marker_next_allowed_action
+            or "repair_result_finalization_closeout_contract_before_rerun"
+        )
+        root_cause = finalization_root_cause
+    elif launch_materialization_repair_required:
+        first_blocker = "launch_materialization_repair_required_before_rerun"
+        decision = "repair_launch_materialization_before_rerun"
+        next_allowed_action = (
+            marker_next_allowed_action
+            or "repair_job_materialization_before_baseline_rerun"
+        )
+        root_cause = "detached_worker_ended_before_countable_job_materialized"
+    elif (
+        payload.get("resume_recommended") is True
+        or payload.get("first_blocker")
+        == "resume_materialized_active_job_without_trial_result"
+    ):
+        first_blocker = "resume_materialized_active_job_without_trial_result"
+        decision = "resume_materialized_job_before_failure_marker"
+        next_allowed_action = (
+            "run_no_upload_harbor_job_resume_before_terminal_failure_marker"
+        )
+        root_cause = (
+            "harbor_job_active_without_trial_result_after_driver_exit"
+        )
+    elif payload.get("first_blocker") == "ready_for_compact_polling":
+        first_blocker = "continue_compact_polling"
+        decision = "polling_not_terminal"
+        next_allowed_action = "continue_compact_polling_without_spend_claim"
+        root_cause = "worker_or_harbor_state_not_terminal_from_compact_fields"
+    else:
+        first_blocker = "compact_failure_marker_required"
+        decision = "compact_failure_marker_required_before_rerun"
+        next_allowed_action = "emit_or_ingest_compact_failure_marker_before_rerun"
+        root_cause = "post_launch_failure_not_yet_classified"
+
+    return {
+        "schema_version": TERMINAL_BENCH_RESULT_FINALIZATION_GATE_SCHEMA,
+        "ok": True,
+        "benchmark_id": "terminal-bench@2.0",
+        "post_launch_schema_ok": schema_ok,
+        "failure_class": failure_class,
+        "root_cause": root_cause,
+        "decision": decision,
+        "first_blocker": first_blocker,
+        "repair_class": "runner_result_finalization"
+        if finalization_repair_required
+        else "runner_launch_materialization"
+        if launch_materialization_repair_required
+        else "none",
+        "result_finalization_repair_required": finalization_repair_required,
+        "launch_materialization_repair_required": (
+            launch_materialization_repair_required
+        ),
+        "repaired_baseline_rerun_allowed": repaired_baseline_rerun_allowed,
+        "max_repaired_baseline_reruns": max_repaired_baseline_reruns,
+        "next_allowed_action": next_allowed_action,
+        "gate_conditions": {
+            "boundary_public_safe": boundary_public_safe,
+            "ready_for_compact_result_ingest": ready_for_result_ingest,
+            "ready_for_compact_failure_marker": ready_for_failure_marker,
+            "launch_state_countable": launch_state_countable,
+            "external_handle_terminal": external_handle_terminal,
+            "job_active_without_trial_result": job_active_without_trial_result,
+            "job_stale_active_without_trial_result": job_stale_active,
+            "resume_recommended": payload.get("resume_recommended") is True,
+            "no_trial_result": no_trial_result,
+            "terminal_closeout": terminal_closeout,
+            "case_attempt_countable": case_attempt_countable,
+            "benchmark_budget_countable": benchmark_budget_countable,
+        },
+        "closeout_contract": {
+            "terminal_closeout": terminal_closeout,
+            "ledger_attempt_kind": ledger_attempt_kind,
+            "case_attempt_countable": case_attempt_countable,
+            "benchmark_budget_countable": benchmark_budget_countable,
+            "next_allowed_action": marker_next_allowed_action,
+        },
+        "rerun_constraints": {
+            "baseline_only": True,
+            "max_reruns": max_repaired_baseline_reruns,
+            "require_no_upload": True,
+            "require_no_leaderboard_claim": True,
+            "require_no_treatment_or_uplift_claim": True,
+            "require_compact_post_launch_observer": True,
+            "require_compact_result_or_failure_marker_ingest": True,
+        },
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "raw_paths_recorded": False,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+            "raw_external_handle_payload_recorded": False,
+        },
+    }
+
+
 def build_benchmark_verifier_attribution_review(
     *,
     benchmark_runs: Iterable[dict[str, Any]],
@@ -4342,7 +7459,20 @@ def build_benchmark_verifier_attribution_review(
         blockers.append("missing_compact_baseline_run")
     elif baseline_review["attribution_class"].startswith("verifier_"):
         blockers.append("baseline_verifier_attribution_caveat")
-    elif baseline_review["attribution_class"] == "unattributed_score_failure":
+    elif (
+        baseline_review["attribution_class"]
+        == "worker_self_validation_official_score_mismatch"
+    ):
+        blockers.append("baseline_worker_verifier_alignment_caveat")
+    elif (
+        baseline_review["attribution_class"]
+        == "worker_validation_scope_ambiguous_official_score_failure"
+    ):
+        blockers.append("baseline_worker_validation_scope_ambiguous_caveat")
+    elif baseline_review["attribution_class"] in {
+        "runner_completed_official_score_zero_unattributed",
+        "unattributed_score_failure",
+    }:
         blockers.append("baseline_score_failure_unattributed")
     elif baseline_review["attribution_class"] == "missing_official_score":
         blockers.append("baseline_official_score_missing")
@@ -4356,7 +7486,16 @@ def build_benchmark_verifier_attribution_review(
         and baseline_review.get("claim_caveat_resolved")
         and not blockers
     )
-    if baseline_caveat_resolved:
+    if (
+        baseline_caveat_resolved
+        and baseline_review
+        and baseline_review.get("attribution_class") == "agent_exception_score_failure"
+    ):
+        next_action = (
+            "baseline compact verifier caveat resolved as agent exception; "
+            "inspect case-level exception hypothesis before same-task repeat"
+        )
+    elif baseline_caveat_resolved:
         next_action = (
             "baseline compact verifier caveat resolved; rerun claim review "
             "before upgrading proof strength"
@@ -4365,6 +7504,16 @@ def build_benchmark_verifier_attribution_review(
         next_action = (
             "do not upgrade claim; run same-protocol repeat or collect finer "
             "compact verifier-side attribution"
+        )
+    elif "baseline_worker_verifier_alignment_caveat" in blockers:
+        next_action = (
+            "do not upgrade claim; align worker self-validation with official "
+            "verifier evidence before same-task repeat"
+        )
+    elif "baseline_worker_validation_scope_ambiguous_caveat" in blockers:
+        next_action = (
+            "do not repeat same task; add explicit worker validation_scope and "
+            "claim_boundary so bridge connectivity cannot be confused with case success"
         )
     elif "baseline_score_failure_unattributed" in blockers:
         next_action = (
@@ -4702,7 +7851,8 @@ TERMINAL_BENCH_DEFAULT_AGENT_TIMEOUT_SECONDS = 900.0
 TERMINAL_BENCH_TRUE_LONG_TASK_BAR_SECONDS = 1800.0
 TERMINAL_BENCH_PREFERRED_HOURS_SCALE_BAR_SECONDS = 3600.0
 TERMINAL_BENCH_OFFICIAL_TIMEOUT_MULTIPLIER = 1.0
-TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_TIMEOUT_MULTIPLIER = 4.0
+TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_TIMEOUT_MULTIPLIER = 8.0
+TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_SETUP_TIMEOUT_MULTIPLIER = 8.0
 TERMINAL_BENCH_EPISODE_POLICY_VERSION = (
     "terminal_bench_single_agent_resumable_episode_policy_v0"
 )
@@ -6897,17 +10047,123 @@ def _terminal_bench_score_failure_attribution(
     official_score: Any,
     verifier_dependency_failure_count: int,
     failure_attribution_labels: set[str],
+    agent_timeout_observed: bool = False,
+    agent_setup_timeout_observed: bool = False,
 ) -> str:
     """Summarize score-failure cause without collapsing verifier probes to none."""
 
     if official_score != 0:
         return "none"
+    if (
+        agent_setup_timeout_observed
+        or "agent_setup_timeout_before_worker_start" in failure_attribution_labels
+    ):
+        return "agent_setup_timeout_score_failure"
+    if "codex_model_access_unsupported_for_account" in failure_attribution_labels:
+        return "codex_model_access_unsupported_score_failure"
+    if "codex_model_access_failure_before_solution_attempt" in failure_attribution_labels:
+        return "codex_model_access_score_failure"
+    if "agent_setup_failed_before_worker_start" in failure_attribution_labels:
+        return "agent_setup_score_failure"
+    if "environment_setup_failed_before_worker" in failure_attribution_labels:
+        return "agent_setup_score_failure"
+    if "pre_worker_startup_blocker_recorded" in failure_attribution_labels:
+        return "agent_setup_score_failure"
+    if "agent_process_nonzero_exit_before_solution_attempt" in failure_attribution_labels:
+        return "agent_process_nonzero_exit_score_failure"
     if verifier_dependency_failure_count:
         return "verifier_dependency_install_failure"
     if "verifier_platform_probe_failure" in failure_attribution_labels:
         return "verifier_platform_probe_failure"
     if any(label.startswith("verifier_") for label in failure_attribution_labels):
         return "verifier_infrastructure_failure"
+    if "worker_self_validation_official_score_mismatch" in failure_attribution_labels:
+        return "worker_self_validation_official_score_mismatch"
+    if "worker_validation_scope_ambiguous_official_score_failure" in failure_attribution_labels:
+        return "worker_validation_scope_ambiguous_official_score_failure"
+    if "worker_bridge_connected_official_score_failure" in failure_attribution_labels:
+        return "worker_bridge_connected_official_score_failure"
+    if "official_verifier_solution_failure" in failure_attribution_labels:
+        return "official_verifier_solution_failure"
+    if agent_timeout_observed:
+        return "agent_timeout_before_solution_completion"
+    return "none"
+
+
+TERMINAL_BENCH_WORKER_CASE_SUCCESS_VALIDATION_SCOPES = {
+    "official_verifier_result",
+    "case_success",
+    "task_success",
+    "worker_case_success",
+    "worker_task_success",
+    "solution_success",
+}
+
+TERMINAL_BENCH_WORKER_CONNECTIVITY_VALIDATION_SCOPES = {
+    "worker_bridge_connectivity",
+    "bridge_connectivity",
+    "environment_connectivity",
+    "environment_ready",
+    "control_plane_connectivity",
+}
+
+
+def _terminal_bench_worker_validation_claim_kind(
+    worker_benchmark_run: dict[str, Any],
+) -> str:
+    """Classify the worker-side compact validation claim.
+
+    This uses only the worker's compact benchmark_run_v0 writeback. It does not
+    inspect raw logs, task text, trajectories, or local paths.
+    """
+
+    validation = worker_benchmark_run.get("validation")
+    validation_scope = str(worker_benchmark_run.get("validation_scope") or "").strip().lower()
+    case_success_claimed = worker_benchmark_run.get("case_success_claimed") is True
+    if isinstance(validation, dict):
+        validation_scope = str(
+            validation.get("validation_scope") or validation_scope
+        ).strip().lower()
+        case_success_claimed = (
+            case_success_claimed or validation.get("case_success_claimed") is True
+        )
+        if validation.get("bridge_connected") is True and (
+            validation_scope in TERMINAL_BENCH_WORKER_CONNECTIVITY_VALIDATION_SCOPES
+        ):
+            return "bridge_connectivity_only"
+        if validation_scope in TERMINAL_BENCH_WORKER_CONNECTIVITY_VALIDATION_SCOPES:
+            return "bridge_connectivity_only"
+        if case_success_claimed or (
+            validation_scope in TERMINAL_BENCH_WORKER_CASE_SUCCESS_VALIDATION_SCOPES
+        ):
+            return "worker_claimed_case_success"
+        status = str(validation.get("status") or "").strip().lower()
+        if status in {"passed", "pass", "ok", "success", "succeeded"}:
+            return "legacy_ambiguous_validation_scope"
+        checks = validation.get("checks")
+        if isinstance(checks, list) and checks:
+            failed_checks = validation.get("failed_checks")
+            if not isinstance(failed_checks, list) or not failed_checks:
+                return "legacy_ambiguous_validation_scope"
+
+    progress = worker_benchmark_run.get("progress")
+    if isinstance(progress, dict) and progress.get("completed") is True:
+        if validation_scope in TERMINAL_BENCH_WORKER_CONNECTIVITY_VALIDATION_SCOPES:
+            return "bridge_connectivity_only"
+        if case_success_claimed or (
+            validation_scope in TERMINAL_BENCH_WORKER_CASE_SUCCESS_VALIDATION_SCOPES
+        ):
+            return "worker_claimed_case_success"
+        return "legacy_ambiguous_validation_scope"
+
+    official_task_score = worker_benchmark_run.get("official_task_score")
+    if isinstance(official_task_score, dict):
+        value = official_task_score.get("value")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 1:
+            return "official_case_success"
+        if official_task_score.get("passed") is True:
+            return "official_case_success"
+
     return "none"
 
 
@@ -6921,17 +10177,112 @@ def _is_pre_worker_agent_setup_failure(
 ) -> bool:
     """Detect failures that happen before the custom worker agent starts."""
 
-    if exception_type != "NonZeroAgentExitCodeError":
-        return False
-    if trial_agent_result:
-        return False
     agent_dir = trial_dir / "agent"
-    return (
-        (agent_dir / "setup").exists()
-        and not (agent_dir / "trajectory.json").exists()
+    no_worker_artifacts = (
+        not (agent_dir / "trajectory.json").exists()
         and not trace_path.exists()
         and not worker_benchmark_run_path.exists()
     )
+    if trial_agent_result or not no_worker_artifacts:
+        return False
+
+    exception_kind = _compact_exception_kind(exception_type)
+    if exception_kind in {"agent_setup_timeout", "agent_setup_failure"}:
+        return True
+
+    return exception_type == "NonZeroAgentExitCodeError" and (agent_dir / "setup").exists()
+
+
+def _is_environment_setup_failure_before_worker(
+    *,
+    trial: dict[str, Any],
+    exception_type: Any,
+    trial_agent_result: dict[str, Any],
+) -> bool:
+    """Detect Harbor environment/setup failures before the custom agent starts."""
+
+    if exception_type in (None, "", "none", "AgentTimeoutError"):
+        return False
+    if trial_agent_result:
+        return False
+    environment_setup = trial.get("environment_setup")
+    agent_setup = trial.get("agent_setup")
+    agent_execution = trial.get("agent_execution")
+    return (
+        isinstance(environment_setup, dict)
+        and not isinstance(agent_setup, dict)
+        and not isinstance(agent_execution, dict)
+    )
+
+
+def _terminal_bench_duration_tier(seconds: Any) -> str:
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        return "unknown"
+    if seconds >= 600:
+        return "over_10_minutes"
+    if seconds >= 180:
+        return "three_to_ten_minutes"
+    if seconds >= 60:
+        return "one_to_three_minutes"
+    return "under_one_minute"
+
+
+def _terminal_bench_environment_setup_failure_context(
+    *,
+    trial: dict[str, Any],
+    exception_type: Any,
+    trace_path: Path,
+    worker_benchmark_run_path: Path,
+) -> dict[str, Any]:
+    """Return a compact phase-only diagnosis for environment setup failures."""
+
+    environment_setup = (
+        trial.get("environment_setup")
+        if isinstance(trial.get("environment_setup"), dict)
+        else {}
+    )
+    duration_seconds = _iso_duration_seconds(
+        environment_setup.get("started_at"),
+        environment_setup.get("finished_at") or environment_setup.get("updated_at"),
+    )
+    exception_text = str(exception_type or "none")
+    timeout_signal = (
+        "exception_type_timeout"
+        if "timeout" in exception_text.lower()
+        else "no_timeout_exception_type"
+    )
+    if timeout_signal == "exception_type_timeout":
+        failure_kind = "environment_setup_timeout_before_worker"
+    elif environment_setup.get("finished_at"):
+        failure_kind = "environment_setup_runtime_error_before_worker"
+    else:
+        failure_kind = "environment_setup_interrupted_before_worker"
+
+    context: dict[str, Any] = {
+        "schema_version": "terminal_bench_environment_setup_failure_context_v0",
+        "surface": "harbor_environment_setup",
+        "failure_kind": failure_kind,
+        "diagnostic_granularity": "phase_fields_only_no_raw_logs",
+        "exception_type": exception_text,
+        "timeout_signal": timeout_signal,
+        "resource_signal": "not_observable_from_phase_fields",
+        "environment_setup_present": bool(environment_setup),
+        "environment_setup_started": bool(environment_setup.get("started_at")),
+        "environment_setup_finished": bool(environment_setup.get("finished_at")),
+        "agent_setup_started": isinstance(trial.get("agent_setup"), dict),
+        "agent_execution_started": isinstance(trial.get("agent_execution"), dict),
+        "worker_trace_present": trace_path.exists(),
+        "worker_benchmark_run_present": worker_benchmark_run_path.exists(),
+        "next_probe": "environment_setup_readiness_preflight_before_repeat",
+    }
+    if isinstance(duration_seconds, (int, float)) and not isinstance(
+        duration_seconds, bool
+    ):
+        context["environment_setup_duration_seconds"] = duration_seconds
+        context["environment_setup_duration_tier"] = _terminal_bench_duration_tier(
+            duration_seconds
+        )
+    return context
 
 
 def _is_compactable_benchmark_run_v0(payload: dict[str, Any]) -> bool:
@@ -6944,6 +10295,124 @@ def _is_compactable_benchmark_run_v0(payload: dict[str, Any]) -> bool:
         isinstance(nested, dict)
         and nested.get("schema_version") == "benchmark_run_v0"
     )
+
+
+def _compactable_benchmark_run_v0_payload(
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    if payload.get("schema_version") == "benchmark_run_v0":
+        return payload
+    nested = payload.get("benchmark_run")
+    if isinstance(nested, dict) and nested.get("schema_version") == "benchmark_run_v0":
+        return nested
+    return None
+
+
+TERMINAL_BENCH_NON_BLOCKING_WORKER_SETUP_LABELS = {
+    "none",
+    "ok",
+    "success",
+    "succeeded",
+    "passed",
+    "codex_runtime_install_or_preflight_ok",
+    "codex_require_existing_preflight_ok",
+    "worker_codex_materialization_verified",
+}
+
+
+def _terminal_bench_non_blocking_setup_label(value: Any) -> bool:
+    label = _public_safe_benchmark_label(value)
+    return bool(label and label in TERMINAL_BENCH_NON_BLOCKING_WORKER_SETUP_LABELS)
+
+
+def _terminal_bench_worker_materialization_probe_contract(
+    worker_benchmark_run: dict[str, Any],
+) -> bool:
+    """Detect compact worker probe contracts even when Harbor wrote a trial result."""
+
+    compact = _compactable_benchmark_run_v0_payload(worker_benchmark_run)
+    if compact is None:
+        return False
+    outcome = compact.get("worker_bridge_outcome")
+    if not isinstance(outcome, dict):
+        outcome = {}
+    official_task_score = compact.get("official_task_score")
+    if not isinstance(official_task_score, dict):
+        official_task_score = {}
+    mode = str(compact.get("mode") or "")
+    return (
+        compact.get("worker_materialization_real_probe") is True
+        or compact.get("worker_materialization_probe_only") is True
+        or compact.get("source_runner") == "terminal_bench_worker_materialization_probe"
+        or mode.endswith("_worker_materialization_probe")
+        or outcome.get("runner_return_status") == "worker_materialization_probe_completed"
+        or official_task_score.get("kind") == "not_run_worker_materialization_probe"
+    )
+
+
+def _terminal_bench_worker_startup_blocker(
+    worker_benchmark_run: dict[str, Any],
+) -> str | None:
+    """Extract a public-safe startup blocker from a compact worker benchmark_run."""
+
+    checkpoint = worker_benchmark_run.get("worker_bridge_checkpoint")
+    if not isinstance(checkpoint, dict):
+        checkpoint = {}
+    outcome = worker_benchmark_run.get("worker_bridge_outcome")
+    if not isinstance(outcome, dict):
+        outcome = {}
+    validation = worker_benchmark_run.get("validation")
+    if not isinstance(validation, dict):
+        validation = {}
+    if _terminal_bench_worker_materialization_probe_contract(worker_benchmark_run):
+        outcome_blocker = _public_safe_benchmark_label(
+            outcome.get("worker_bridge_materialization_blocker")
+            or worker_benchmark_run.get("worker_bridge_materialization_blocker")
+        )
+        outcome_status = _public_safe_benchmark_label(
+            outcome.get("worker_bridge_materialization_status")
+            or worker_benchmark_run.get("worker_bridge_materialization_status")
+        )
+        if (
+            outcome_blocker in {None, "", "none"}
+            or _terminal_bench_non_blocking_setup_label(outcome_blocker)
+        ) and outcome_status in {
+            "worker_codex_materialization_verified",
+            "probe_contract_verified",
+        }:
+            return None
+
+    outcome_startup_label = _public_safe_benchmark_label(
+        outcome.get("pre_worker_startup_blocker")
+    )
+    startup_recorded = (
+        checkpoint.get("checkpoint_kind") == "pre_worker_startup_blocker"
+        or validation.get("worker_startup_blocker_recorded") is True
+        or bool(
+            outcome_startup_label
+            and not _terminal_bench_non_blocking_setup_label(outcome_startup_label)
+        )
+    )
+    if not startup_recorded:
+        return None
+
+    saw_non_blocking_setup_label = False
+    for value in (
+        checkpoint.get("pre_worker_startup_blocker"),
+        worker_benchmark_run.get("pre_worker_startup_blocker"),
+        outcome.get("pre_worker_startup_blocker"),
+        worker_benchmark_run.get("first_blocker"),
+        worker_benchmark_run.get("repeat_blocked_by"),
+    ):
+        label = _public_safe_benchmark_label(value)
+        if label and label != "none":
+            if _terminal_bench_non_blocking_setup_label(label):
+                saw_non_blocking_setup_label = True
+                continue
+            return label
+    if saw_non_blocking_setup_label:
+        return None
+    return "pre_worker_startup_blocker_recorded"
 
 
 def _invocation_arg_value(invocation: list[Any], flag: str) -> str | None:
@@ -7001,6 +10470,51 @@ def _first_numeric_reward(trials: list[dict[str, Any]]) -> float | int | None:
     return None
 
 
+def _terminal_bench_finished_phase(trial: dict[str, Any], key: str) -> bool:
+    phase = trial.get(key)
+    if not isinstance(phase, dict):
+        return False
+    return bool(phase.get("started_at") and phase.get("finished_at"))
+
+
+def _terminal_bench_official_zero_observation(
+    *,
+    trial: dict[str, Any],
+    reward_value: float | int | None,
+    exception_type: Any,
+) -> dict[str, Any]:
+    """Summarize a clean official-zero result from structured runner fields only."""
+
+    phase_status = {
+        "environment_setup_completed": _terminal_bench_finished_phase(
+            trial, "environment_setup"
+        ),
+        "agent_setup_completed": _terminal_bench_finished_phase(trial, "agent_setup"),
+        "agent_execution_completed": _terminal_bench_finished_phase(
+            trial, "agent_execution"
+        ),
+        "verifier_completed": _terminal_bench_finished_phase(trial, "verifier"),
+    }
+    exception_present = exception_type not in (None, "", "none")
+    detected = (
+        reward_value == 0
+        and not exception_present
+        and phase_status["agent_setup_completed"]
+        and phase_status["agent_execution_completed"]
+        and phase_status["verifier_completed"]
+    )
+    return {
+        "schema_version": "terminal_bench_official_zero_observation_v0",
+        "detected": detected,
+        "reward_value": reward_value,
+        "exception_present": exception_present,
+        **phase_status,
+        "raw_logs_read": False,
+        "raw_trace_recorded": False,
+        "task_text_read": False,
+    }
+
+
 def _official_score_from_harbor_stats(stats: dict[str, Any]) -> float | int | None:
     evals = stats.get("evals") if isinstance(stats.get("evals"), dict) else {}
     for eval_result in evals.values():
@@ -7054,6 +10568,29 @@ def _optional_float(value: Any) -> float | None:
             return float(value)
         except ValueError:
             return None
+    return None
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed_float = float(text)
+        except ValueError:
+            return None
+        if not parsed_float.is_integer():
+            return None
+        parsed = int(parsed_float)
+        return parsed if parsed > 0 else None
     return None
 
 
@@ -11006,8 +14543,17 @@ def _terminal_bench_overhead_attribution_counters(
     worker_counter_trace_trial_count: int,
     worker_benchmark_run_file_count: int,
     worker_benchmark_run_schema_ok_count: int,
+    worker_self_validation_official_score_mismatch_count: int,
+    worker_validation_scope_ambiguous_official_score_failure_count: int,
+    worker_bridge_connected_official_score_failure_count: int,
+    worker_startup_blocker_count: int,
+    worker_startup_blockers: list[str],
+    worker_setup_diagnostic_file_count: int,
+    worker_setup_diagnostic_schema_ok_count: int,
+    worker_setup_diagnostic_blockers: list[str],
     worker_submit_eligible_mismatch_count: int,
     worker_bridge_writeback_loss_count: int,
+    environment_setup_failure_before_worker_count: int,
     pre_worker_agent_setup_failure_count: int,
     codex_runtime_goal_tool_trial_count: int,
     trace_publicness: str,
@@ -11082,6 +14628,22 @@ def _terminal_bench_overhead_attribution_counters(
         "worker_counter_trace_trial_count": worker_counter_trace_trial_count,
         "worker_benchmark_run_file_count": worker_benchmark_run_file_count,
         "worker_benchmark_run_schema_ok_count": worker_benchmark_run_schema_ok_count,
+        "worker_self_validation_official_score_mismatch_count": (
+            worker_self_validation_official_score_mismatch_count
+        ),
+        "worker_validation_scope_ambiguous_official_score_failure_count": (
+            worker_validation_scope_ambiguous_official_score_failure_count
+        ),
+        "worker_bridge_connected_official_score_failure_count": (
+            worker_bridge_connected_official_score_failure_count
+        ),
+        "worker_startup_blocker_count": worker_startup_blocker_count,
+        "worker_startup_blockers": worker_startup_blockers,
+        "worker_setup_diagnostic_file_count": worker_setup_diagnostic_file_count,
+        "worker_setup_diagnostic_schema_ok_count": (
+            worker_setup_diagnostic_schema_ok_count
+        ),
+        "worker_setup_diagnostic_blockers": worker_setup_diagnostic_blockers,
         "worker_submit_eligible_mismatch_count": worker_submit_eligible_mismatch_count,
         "worker_submit_eligible_mismatch_reason": (
             "worker_file_submit_eligible_true_under_runner_no_upload_boundary"
@@ -11089,6 +14651,9 @@ def _terminal_bench_overhead_attribution_counters(
             else "none"
         ),
         "worker_bridge_writeback_loss_count": worker_bridge_writeback_loss_count,
+        "environment_setup_failure_before_worker_count": (
+            environment_setup_failure_before_worker_count
+        ),
         "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,
         "codex_runtime_goal_tool_trial_count": codex_runtime_goal_tool_trial_count,
         "goal_harness_cli_call_total": cli_call_total,
@@ -11119,6 +14684,8 @@ def build_terminal_bench_harbor_result_benchmark_run(
     *,
     mode: str | None = None,
     trace_publicness: str = "compact_counts_only_no_raw_trace",
+    include_codex_trajectory_counts: bool = False,
+    include_verifier_log_attribution: bool = False,
 ) -> dict[str, Any]:
     """Build a runner-side benchmark_run_v0 from Harbor job artifacts.
 
@@ -11134,11 +14701,20 @@ def build_terminal_bench_harbor_result_benchmark_run(
     stats = job_result.get("stats") if isinstance(job_result.get("stats"), dict) else {}
     invocation = lock.get("invocation") if isinstance(lock.get("invocation"), list) else []
     no_upload_requested = "--upload" not in invocation and "upload" not in invocation
+    job_name = str(config.get("job_name") or job_path.name)
+    environment_setup_probe_run = (
+        "environment_setup_probe" in job_name
+        and _invocation_arg_value(invocation, "--agent") == "nop"
+        and "--disable-verification" in invocation
+    )
     lock_trials = lock.get("trials") if isinstance(lock.get("trials"), list) else []
     first_lock_trial = lock_trials[0] if lock_trials and isinstance(lock_trials[0], dict) else {}
     task_config = first_lock_trial.get("task") if isinstance(first_lock_trial.get("task"), dict) else {}
     agent_config = first_lock_trial.get("agent") if isinstance(first_lock_trial.get("agent"), dict) else {}
     agent_kwargs = agent_config.get("kwargs") if isinstance(agent_config.get("kwargs"), dict) else {}
+    worker_materialization_probe_only = (
+        _terminal_bench_lock_worker_materialization_probe_only(lock)
+    )
     benchmark_id = _invocation_arg_value(invocation, "--dataset") or task_config.get("source") or "terminal-bench"
     agent_name = str(agent_config.get("name") or "")
     goal_harness_mode = str(agent_kwargs.get("goal_harness_mode") or "")
@@ -11197,44 +14773,188 @@ def build_terminal_bench_harbor_result_benchmark_run(
     worker_counter_trace_trial_count = 0
     worker_benchmark_run_file_count = 0
     worker_benchmark_run_schema_ok_count = 0
+    worker_materialization_probe_contract_count = 0
+    worker_materialization_probe_contract_payload: dict[str, Any] | None = None
+    worker_self_validation_official_score_mismatch_count = 0
+    worker_validation_scope_ambiguous_official_score_failure_count = 0
+    worker_bridge_connected_official_score_failure_count = 0
+    worker_startup_blocker_count = 0
+    worker_startup_blockers: list[str] = []
+    worker_setup_diagnostic_file_count = 0
+    worker_setup_diagnostic_schema_ok_count = 0
+    worker_setup_diagnostic_blockers: list[str] = []
     worker_submit_eligible_mismatch_count = 0
     pre_worker_agent_setup_failure_count = 0
+    environment_setup_failure_before_worker_count = 0
+    environment_setup_failure_contexts: list[dict[str, Any]] = []
+    worker_runtime_exception_before_checkpoint_count = 0
     verifier_failure_attribution_count = 0
     verifier_dependency_failure_count = 0
+    official_zero_observation_count = 0
     failure_attribution_labels: set[str] = set()
     agent_timeout_observed = False
+    agent_setup_timeout_observed = False
     for trial_dir in sorted(path for path in job_path.iterdir() if path.is_dir()):
         trial_result_path = trial_dir / "result.json"
         if not trial_result_path.exists():
             continue
         trial = _load_json_object(trial_result_path)
         rewards = _reward_from_trial_result(trial, trial_dir)
+        trial_reward_value = _numeric_reward_value(rewards)
         trial_config = trial.get("config") if isinstance(trial.get("config"), dict) else {}
         if trial_config:
             timeout_sources.append(trial_config)
         exception_info = trial.get("exception_info") if isinstance(trial.get("exception_info"), dict) else {}
         exception_type = exception_info.get("exception_type")
-        if exception_type == "AgentTimeoutError":
-            agent_timeout_observed = True
-        trial_agent_result = trial.get("agent_result") if isinstance(trial.get("agent_result"), dict) else {}
         agent_dir = trial_dir / "agent"
         trace_path = agent_dir / TERMINAL_BENCH_COUNTER_TRACE_FILE
         trajectory_path = agent_dir / "trajectory.json"
-        worker_benchmark_run_path = trial_dir / "agent" / TERMINAL_BENCH_WORKER_BENCHMARK_RUN_FILE
-        pre_worker_agent_setup_failure = _is_pre_worker_agent_setup_failure(
-            trial_dir=trial_dir,
-            exception_type=exception_type,
-            trial_agent_result=trial_agent_result,
-            trace_path=trace_path,
-            worker_benchmark_run_path=worker_benchmark_run_path,
+        worker_benchmark_run_path = (
+            trial_dir / "agent" / TERMINAL_BENCH_WORKER_BENCHMARK_RUN_FILE
         )
+        worker_setup_diagnostic_path = (
+            trial_dir / "agent" / TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+        )
+        worker_benchmark_run: dict[str, Any] = {}
+        worker_benchmark_run_compact: dict[str, Any] | None = None
+        trial_worker_materialization_probe_contract = False
+        if worker_benchmark_run_path.exists():
+            worker_benchmark_run = _load_json_object(worker_benchmark_run_path)
+            worker_benchmark_run_compact = _compactable_benchmark_run_v0_payload(
+                worker_benchmark_run
+            )
+            trial_worker_materialization_probe_contract = (
+                _terminal_bench_worker_materialization_probe_contract(
+                    worker_benchmark_run
+                )
+            )
+            if trial_worker_materialization_probe_contract:
+                worker_materialization_probe_contract_count += 1
+                if worker_materialization_probe_contract_payload is None:
+                    worker_materialization_probe_contract_payload = (
+                        worker_benchmark_run_compact or worker_benchmark_run
+                    )
+        official_zero_observation = {"detected": False}
+        if (
+            not environment_setup_probe_run
+            and not trial_worker_materialization_probe_contract
+        ):
+            official_zero_observation = _terminal_bench_official_zero_observation(
+                trial=trial,
+                reward_value=trial_reward_value,
+                exception_type=exception_type,
+            )
+            if official_zero_observation["detected"]:
+                official_zero_observation_count += 1
+                failure_attribution_labels.add("official_verifier_solution_failure")
+        if exception_type == "AgentTimeoutError" and not environment_setup_probe_run:
+            agent_timeout_observed = True
+        agent_failure_labels = (
+            set()
+            if environment_setup_probe_run
+            else _terminal_bench_agent_failure_attribution_labels(
+                trial=trial,
+                exception_type=exception_type,
+            )
+        )
+        failure_attribution_labels.update(agent_failure_labels)
+        exception_kind = _compact_exception_kind(exception_type)
+        if exception_kind == "agent_setup_timeout" and not environment_setup_probe_run:
+            agent_setup_timeout_observed = True
+            failure_attribution_labels.add("agent_setup_timeout_before_worker_start")
+        elif exception_kind == "agent_setup_failure" and not environment_setup_probe_run:
+            failure_attribution_labels.add("agent_setup_failed_before_worker_start")
+        trial_agent_result = trial.get("agent_result") if isinstance(trial.get("agent_result"), dict) else {}
+        environment_setup_failure_before_worker = (
+            False
+            if environment_setup_probe_run
+            else _is_environment_setup_failure_before_worker(
+                trial=trial,
+                exception_type=exception_type,
+                trial_agent_result=trial_agent_result,
+            )
+        )
+        worker_setup_diagnostic_blocker = ""
+        if worker_setup_diagnostic_path.exists():
+            worker_setup_diagnostic_file_count += 1
+            worker_setup_diagnostic = _load_json_object(worker_setup_diagnostic_path)
+            if (
+                worker_setup_diagnostic.get("schema_version")
+                == TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA
+            ):
+                worker_setup_diagnostic_schema_ok_count += 1
+                raw_blocker = (
+                    worker_setup_diagnostic.get("pre_worker_startup_blocker")
+                    or worker_setup_diagnostic.get("first_blocker")
+                )
+                worker_setup_diagnostic_blocker = str(raw_blocker or "").strip()
+                if worker_setup_diagnostic_blocker in {"", "none"}:
+                    worker_setup_diagnostic_blocker = ""
+                if _terminal_bench_non_blocking_setup_label(
+                    worker_setup_diagnostic_blocker
+                ):
+                    worker_setup_diagnostic_blocker = ""
+                if worker_setup_diagnostic_blocker:
+                    failure_attribution_labels.add(
+                        "pre_worker_startup_blocker_recorded"
+                    )
+                    failure_attribution_labels.add(worker_setup_diagnostic_blocker)
+                    if (
+                        worker_setup_diagnostic_blocker
+                        not in worker_setup_diagnostic_blockers
+                    ):
+                        worker_setup_diagnostic_blockers.append(
+                            worker_setup_diagnostic_blocker
+                        )
+        pre_worker_agent_setup_failure = (
+            _is_pre_worker_agent_setup_failure(
+                trial_dir=trial_dir,
+                exception_type=exception_type,
+                trial_agent_result=trial_agent_result,
+                trace_path=trace_path,
+                worker_benchmark_run_path=worker_benchmark_run_path,
+            )
+            if not environment_setup_probe_run
+            else False
+        )
+        if environment_setup_failure_before_worker:
+            environment_setup_failure_before_worker_count += 1
+            failure_attribution_labels.add("environment_setup_failed_before_worker")
+            environment_setup_failure_contexts.append(
+                _terminal_bench_environment_setup_failure_context(
+                    trial=trial,
+                    exception_type=exception_type,
+                    trace_path=trace_path,
+                    worker_benchmark_run_path=worker_benchmark_run_path,
+                )
+            )
         if pre_worker_agent_setup_failure:
             pre_worker_agent_setup_failure_count += 1
+            failure_attribution_labels.add("agent_setup_failed_before_worker_start")
+            if (
+                worker_setup_diagnostic_blocker
+                and not worker_benchmark_run_path.exists()
+                and not worker_bridge_required
+            ):
+                worker_startup_blocker_count += 1
+                if worker_setup_diagnostic_blocker not in worker_startup_blockers:
+                    worker_startup_blockers.append(worker_setup_diagnostic_blocker)
+        if (
+            worker_bridge_required
+            and exception_type not in (None, "", "none", "AgentTimeoutError")
+            and not environment_setup_failure_before_worker
+            and not pre_worker_agent_setup_failure
+            and not trace_path.exists()
+            and not worker_benchmark_run_path.exists()
+        ):
+            worker_runtime_exception_before_checkpoint_count += 1
         if trace_path.exists():
             worker_counter_trace_trial_count += 1
             trace_rows.extend(_load_jsonl_objects(trace_path))
-        trajectory_goal_calls = _trajectory_codex_runtime_goal_tool_calls(
-            trajectory_path
+        trajectory_goal_calls = (
+            _trajectory_codex_runtime_goal_tool_calls(trajectory_path)
+            if include_codex_trajectory_counts
+            else _empty_codex_runtime_goal_tool_calls()
         )
         if any(trajectory_goal_calls.values()):
             codex_runtime_goal_tool_trial_count += 1
@@ -11245,18 +14965,65 @@ def build_terminal_bench_harbor_result_benchmark_run(
         if worker_benchmark_run_path.exists():
             worker_benchmark_run_written = True
             worker_benchmark_run_file_count += 1
-            worker_benchmark_run = _load_json_object(worker_benchmark_run_path)
-            if _is_compactable_benchmark_run_v0(worker_benchmark_run):
+            if worker_benchmark_run_compact is not None:
                 worker_benchmark_run_schema_ok_count += 1
+                worker_validation_claim_kind = (
+                    _terminal_bench_worker_validation_claim_kind(
+                        worker_benchmark_run_compact
+                    )
+                )
+                if (
+                    not trial_worker_materialization_probe_contract
+                    and
+                    worker_validation_claim_kind
+                    in {"official_case_success", "worker_claimed_case_success"}
+                    and trial_reward_value is not None
+                    and trial_reward_value == 0
+                ):
+                    worker_self_validation_official_score_mismatch_count += 1
+                    failure_attribution_labels.add(
+                        "worker_self_validation_official_score_mismatch"
+                    )
+                elif (
+                    not trial_worker_materialization_probe_contract
+                    and
+                    worker_validation_claim_kind == "legacy_ambiguous_validation_scope"
+                    and trial_reward_value is not None
+                    and trial_reward_value == 0
+                ):
+                    worker_validation_scope_ambiguous_official_score_failure_count += 1
+                    failure_attribution_labels.add(
+                        "worker_validation_scope_ambiguous_official_score_failure"
+                    )
+                elif (
+                    not trial_worker_materialization_probe_contract
+                    and
+                    worker_validation_claim_kind == "bridge_connectivity_only"
+                    and trial_reward_value is not None
+                    and trial_reward_value == 0
+                ):
+                    worker_bridge_connected_official_score_failure_count += 1
+                    failure_attribution_labels.add(
+                        "worker_bridge_connected_official_score_failure"
+                    )
+                worker_startup_blocker = _terminal_bench_worker_startup_blocker(
+                    worker_benchmark_run_compact
+                )
+                if worker_startup_blocker:
+                    worker_startup_blocker_count += 1
+                    failure_attribution_labels.add("pre_worker_startup_blocker_recorded")
+                    failure_attribution_labels.add(worker_startup_blocker)
+                    if worker_startup_blocker not in worker_startup_blockers:
+                        worker_startup_blockers.append(worker_startup_blocker)
                 if (
                     no_upload_requested
-                    and worker_benchmark_run.get("submit_eligible") is True
+                    and worker_benchmark_run_compact.get("submit_eligible") is True
                 ):
                     worker_submit_eligible_mismatch_count += 1
-        trial_reward_value = _numeric_reward_value(rewards)
         verifier_attribution = (
             _terminal_bench_verifier_failure_attribution(trial_dir)
-            if trial_reward_value is None or trial_reward_value == 0
+            if include_verifier_log_attribution
+            and (trial_reward_value is None or trial_reward_value == 0)
             else None
         )
         if verifier_attribution:
@@ -11273,6 +15040,11 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "reward": rewards,
             "exception_type": exception_type or "none",
             "worker_start_status": (
+                "environment_setup_probe_materialized"
+                if environment_setup_probe_run
+                else "environment_setup_failed_before_worker"
+                if environment_setup_failure_before_worker
+                else
                 "pre_worker_agent_setup_failed"
                 if pre_worker_agent_setup_failure
                 else "worker_started_or_not_applicable"
@@ -11292,7 +15064,40 @@ def build_terminal_bench_harbor_result_benchmark_run(
             trial_payload["verifier_failure_attribution_labels"] = (
                 verifier_attribution["labels"]
             )
+        if agent_failure_labels:
+            trial_payload["agent_failure_attribution_labels"] = sorted(
+                agent_failure_labels
+            )
+        if worker_setup_diagnostic_blocker:
+            trial_payload["worker_setup_diagnostic_blocker"] = (
+                worker_setup_diagnostic_blocker
+            )
+        if environment_setup_failure_before_worker and environment_setup_failure_contexts:
+            trial_payload["environment_setup_failure_context"] = (
+                environment_setup_failure_contexts[-1]
+            )
+        if official_zero_observation["detected"] or trial_reward_value == 0:
+            trial_payload["official_zero_observation"] = official_zero_observation
         trials.append(trial_payload)
+
+    worker_materialization_probe_no_trial_result = (
+        worker_materialization_probe_only
+        and not trials
+        and (job_path / "lock.json").exists()
+        and (job_path / "result.json").exists()
+    )
+    worker_materialization_probe_contract_present = (
+        worker_materialization_probe_no_trial_result
+        or worker_materialization_probe_contract_count > 0
+    )
+    worker_materialization_probe_status = (
+        "not_applicable_worker_materialization_probe_no_trial_result"
+        if worker_materialization_probe_no_trial_result
+        else "not_run_worker_materialization_probe"
+    )
+    if worker_materialization_probe_no_trial_result:
+        failure_attribution_labels.add("worker_materialization_probe_no_trial_result")
+        failure_attribution_labels.add("detached_worker_ended_without_trial_result")
 
     interaction_counters = _counter_trace_interaction_counters(
         trace_rows,
@@ -11317,11 +15122,32 @@ def build_terminal_bench_harbor_result_benchmark_run(
         interaction_counters["worker_benchmark_run_schema_ok_count"] = (
             worker_benchmark_run_schema_ok_count
         )
+        interaction_counters[
+            "worker_self_validation_official_score_mismatch_count"
+        ] = worker_self_validation_official_score_mismatch_count
+        interaction_counters[
+            "worker_validation_scope_ambiguous_official_score_failure_count"
+        ] = worker_validation_scope_ambiguous_official_score_failure_count
+        interaction_counters[
+            "worker_bridge_connected_official_score_failure_count"
+        ] = worker_bridge_connected_official_score_failure_count
+        interaction_counters["worker_startup_blocker_count"] = (
+            worker_startup_blocker_count
+        )
+        interaction_counters["worker_setup_diagnostic_file_count"] = (
+            worker_setup_diagnostic_file_count
+        )
+        interaction_counters["worker_setup_diagnostic_schema_ok_count"] = (
+            worker_setup_diagnostic_schema_ok_count
+        )
         interaction_counters["worker_submit_eligible_mismatch_count"] = (
             worker_submit_eligible_mismatch_count
         )
         interaction_counters["pre_worker_agent_setup_failure_count"] = (
             pre_worker_agent_setup_failure_count
+        )
+        interaction_counters["environment_setup_failure_before_worker_count"] = (
+            environment_setup_failure_before_worker_count
         )
         interaction_counters["codex_runtime_goal_tool_trial_count"] = (
             codex_runtime_goal_tool_trial_count
@@ -11335,19 +15161,38 @@ def build_terminal_bench_harbor_result_benchmark_run(
     if official_score is None:
         official_score = _first_numeric_reward(trials)
         official_score_source = "trial_reward_fallback"
+    if worker_materialization_probe_contract_present:
+        official_score = None
+        official_score_source = "worker_materialization_probe_contract"
+    if official_score == 0 and agent_timeout_observed:
+        failure_attribution_labels.add("agent_timeout_before_solution_completion")
     score_failure_attribution = _terminal_bench_score_failure_attribution(
         official_score=official_score,
         verifier_dependency_failure_count=verifier_dependency_failure_count,
         failure_attribution_labels=failure_attribution_labels,
+        agent_timeout_observed=agent_timeout_observed,
+        agent_setup_timeout_observed=agent_setup_timeout_observed,
     )
+    if environment_setup_probe_run:
+        score_failure_attribution = "not_applicable_environment_setup_probe"
+    elif worker_materialization_probe_contract_present:
+        score_failure_attribution = "not_applicable_worker_materialization_probe"
     runner_return_status = (
         "completed_with_agent_timeout"
         if agent_timeout_observed
+        else "completed_with_agent_setup_timeout"
+        if agent_setup_timeout_observed
         else "completed"
         if job_result.get("finished_at")
         else "pending"
     )
-    official_score_status = "completed" if official_score is not None else "missing"
+    official_score_status = (
+        worker_materialization_probe_status
+        if worker_materialization_probe_contract_present
+        else "completed"
+        if official_score is not None
+        else "missing"
+    )
     worker_bridge_writeback_loss_count = (
         max(0, worker_counter_trace_trial_count - worker_benchmark_run_file_count)
         if worker_bridge_required
@@ -11378,6 +15223,136 @@ def build_terminal_bench_harbor_result_benchmark_run(
         interaction_counters["worker_submit_eligible_mismatch_reason"] = (
             worker_submit_eligible_mismatch_reason
         )
+    worker_bridge_verified = bool(
+        trace_rows and worker_cli_total >= required_worker_cli_call_min
+    )
+    worker_bridge_failure_attribution = "none"
+    if not worker_bridge_required:
+        worker_bridge_materialization_status = "not_required"
+        worker_bridge_materialization_blocker = "none"
+    elif not trace_rows and worker_benchmark_run_file_count == 0:
+        if environment_setup_failure_before_worker_count:
+            worker_bridge_materialization_status = (
+                "environment_setup_failed_before_worker"
+            )
+            worker_bridge_materialization_blocker = (
+                "environment_setup_failed_before_worker"
+            )
+        elif pre_worker_agent_setup_failure_count:
+            worker_bridge_materialization_status = "pre_worker_setup_failed"
+            worker_bridge_materialization_blocker = (
+                "pre_worker_agent_setup_failed_before_bridge_checkpoint"
+            )
+        elif worker_runtime_exception_before_checkpoint_count:
+            worker_bridge_materialization_status = "runtime_exception_before_checkpoint"
+            worker_bridge_materialization_blocker = (
+                "worker_runtime_exception_before_bridge_checkpoint"
+            )
+        elif agent_timeout_observed:
+            worker_bridge_materialization_status = "agent_timeout_before_checkpoint"
+            worker_bridge_materialization_blocker = (
+                "agent_timeout_before_bridge_checkpoint"
+            )
+        else:
+            worker_bridge_materialization_status = "not_materialized"
+            worker_bridge_materialization_blocker = "worker_bridge_not_materialized"
+        worker_bridge_failure_attribution = worker_bridge_materialization_blocker
+    elif trace_rows and worker_benchmark_run_file_count == 0:
+        worker_bridge_materialization_status = "trace_without_writeback"
+        worker_bridge_materialization_blocker = "worker_bridge_writeback_missing"
+        worker_bridge_failure_attribution = worker_bridge_writeback_loss_reason
+    elif worker_benchmark_run_file_count != worker_benchmark_run_schema_ok_count:
+        worker_bridge_materialization_status = "writeback_schema_invalid"
+        worker_bridge_materialization_blocker = "worker_bridge_writeback_schema_invalid"
+        worker_bridge_failure_attribution = worker_bridge_materialization_blocker
+    elif worker_startup_blocker_count:
+        worker_bridge_materialization_status = "pre_worker_startup_blocker_recorded"
+        worker_bridge_materialization_blocker = (
+            worker_startup_blockers[0]
+            if worker_startup_blockers
+            else "pre_worker_startup_blocker_recorded"
+        )
+        worker_bridge_failure_attribution = worker_bridge_materialization_blocker
+    elif worker_cli_total < required_worker_cli_call_min:
+        worker_bridge_materialization_status = "insufficient_cli_calls"
+        worker_bridge_materialization_blocker = "worker_bridge_cli_call_minimum_not_met"
+        worker_bridge_failure_attribution = worker_bridge_materialization_blocker
+    elif worker_bridge_verified:
+        worker_bridge_materialization_status = "verified"
+        worker_bridge_materialization_blocker = "none"
+    else:
+        worker_bridge_materialization_status = "incomplete"
+        worker_bridge_materialization_blocker = "worker_bridge_incomplete"
+        worker_bridge_failure_attribution = worker_bridge_materialization_blocker
+    if worker_materialization_probe_no_trial_result:
+        worker_bridge_materialization_status = "probe_contract_no_trial_result"
+        worker_bridge_materialization_blocker = (
+            "detached_worker_ended_without_trial_result"
+        )
+        worker_bridge_failure_attribution = (
+            "worker_materialization_probe_no_trial_result"
+        )
+    elif worker_materialization_probe_contract_present:
+        probe_outcome = (
+            worker_materialization_probe_contract_payload.get("worker_bridge_outcome")
+            if isinstance(worker_materialization_probe_contract_payload, dict)
+            else None
+        )
+        if not isinstance(probe_outcome, dict):
+            probe_outcome = {}
+        probe_status = (
+            probe_outcome.get("worker_bridge_materialization_status")
+            or (
+                worker_materialization_probe_contract_payload.get(
+                    "worker_bridge_materialization_status"
+                )
+                if isinstance(worker_materialization_probe_contract_payload, dict)
+                else None
+            )
+            or "probe_contract_verified"
+        )
+        probe_blocker = (
+            probe_outcome.get("worker_bridge_materialization_blocker")
+            or (
+                worker_materialization_probe_contract_payload.get(
+                    "worker_bridge_materialization_blocker"
+                )
+                if isinstance(worker_materialization_probe_contract_payload, dict)
+                else None
+            )
+            or "none"
+        )
+        if _terminal_bench_non_blocking_setup_label(probe_blocker):
+            probe_blocker = "none"
+        worker_bridge_materialization_status = _public_safe_benchmark_label(
+            probe_status
+        ) or "probe_contract_verified"
+        worker_bridge_materialization_blocker = (
+            _public_safe_benchmark_label(probe_blocker) or "none"
+        )
+        worker_bridge_failure_attribution = (
+            "none"
+            if worker_bridge_materialization_blocker == "none"
+            else worker_bridge_materialization_blocker
+        )
+    repeat_blocked_by = (
+        worker_bridge_materialization_blocker
+        if (
+            worker_bridge_required or worker_materialization_probe_contract_present
+        )
+        and worker_bridge_materialization_blocker != "none"
+        else "none"
+    )
+    worker_bridge_materialized = worker_bridge_materialization_status in {
+        "trace_without_writeback",
+        "writeback_schema_invalid",
+        "pre_worker_startup_blocker_recorded",
+        "insufficient_cli_calls",
+        "verified",
+        "incomplete",
+        "worker_codex_materialization_verified",
+        "probe_contract_verified",
+    }
     wall_time_seconds = _iso_duration_seconds(
         job_result.get("started_at"),
         job_result.get("finished_at") or job_result.get("updated_at"),
@@ -11398,18 +15373,50 @@ def build_terminal_bench_harbor_result_benchmark_run(
         worker_counter_trace_trial_count=worker_counter_trace_trial_count,
         worker_benchmark_run_file_count=worker_benchmark_run_file_count,
         worker_benchmark_run_schema_ok_count=worker_benchmark_run_schema_ok_count,
+        worker_startup_blocker_count=worker_startup_blocker_count,
+        worker_startup_blockers=worker_startup_blockers,
+        worker_setup_diagnostic_file_count=worker_setup_diagnostic_file_count,
+        worker_setup_diagnostic_schema_ok_count=(
+            worker_setup_diagnostic_schema_ok_count
+        ),
+        worker_setup_diagnostic_blockers=worker_setup_diagnostic_blockers,
         worker_submit_eligible_mismatch_count=worker_submit_eligible_mismatch_count,
         worker_bridge_writeback_loss_count=worker_bridge_writeback_loss_count,
+        worker_self_validation_official_score_mismatch_count=(
+            worker_self_validation_official_score_mismatch_count
+        ),
+        worker_validation_scope_ambiguous_official_score_failure_count=(
+            worker_validation_scope_ambiguous_official_score_failure_count
+        ),
+        worker_bridge_connected_official_score_failure_count=(
+            worker_bridge_connected_official_score_failure_count
+        ),
+        environment_setup_failure_before_worker_count=(
+            environment_setup_failure_before_worker_count
+        ),
         pre_worker_agent_setup_failure_count=pre_worker_agent_setup_failure_count,
         codex_runtime_goal_tool_trial_count=codex_runtime_goal_tool_trial_count,
         trace_publicness=trace_publicness,
+    )
+    environment_setup_failure_context = (
+        environment_setup_failure_contexts[0]
+        if environment_setup_failure_contexts
+        else None
     )
     validation = {
         "job_lock_present": (job_path / "lock.json").exists(),
         "job_result_present": (job_path / "result.json").exists(),
         "trial_results_present": bool(trials)
         and len(trials) == (job_result.get("n_total_trials") or len(trials)),
-        "verifier_reward_present": official_score is not None,
+        "probe_contract_result_present": worker_materialization_probe_contract_present,
+        "case_solution_attempted_or_not_required": True,
+        "case_solution_not_required_for_probe": (
+            worker_materialization_probe_contract_present
+        ),
+        "verifier_reward_present": (
+            worker_materialization_probe_contract_present
+            or official_score is not None
+        ),
         "runner_completed_or_exception_recorded": bool(job_result.get("finished_at"))
         or bool(agent_timeout_observed),
         "worker_counter_trace_loaded": (not worker_bridge_required) or bool(trace_rows),
@@ -11423,13 +15430,20 @@ def build_terminal_bench_harbor_result_benchmark_run(
                 and worker_benchmark_run_schema_ok_count == worker_benchmark_run_file_count
             )
         ),
+        "worker_startup_blockers_classified": True,
         "worker_benchmark_run_present_for_traced_trials": (
             worker_benchmark_run_file_count >= worker_counter_trace_trial_count
         ),
+        "worker_bridge_materialized_when_required": (
+            (not worker_bridge_required)
+            or worker_bridge_materialized
+        ),
+        "worker_bridge_repeat_ready": repeat_blocked_by == "none",
         "worker_submit_eligible_matches_runner_boundary": (
             worker_submit_eligible_mismatch_count == 0
         ),
         "pre_worker_agent_setup_failures_classified": True,
+        "environment_setup_failures_before_worker_classified": True,
         "verifier_failure_attribution_public_safe": True,
         "verifier_dependency_failures_classified": True,
         "worker_checkpoint_not_expected_before_agent_setup": True,
@@ -11438,59 +15452,66 @@ def build_terminal_bench_harbor_result_benchmark_run(
         "no_leaderboard_upload_requested": no_upload_requested,
         "paths_redacted": True,
         "raw_trace_excluded": True,
+        "raw_trajectory_excluded": not bool(include_codex_trajectory_counts),
+        "verifier_logs_excluded": not bool(include_verifier_log_attribution),
         "credential_values_not_recorded": True,
     }
-    return {
-        "schema_version": "benchmark_run_v0",
-        "source_runner": "harbor",
-        "benchmark_id": benchmark_id,
-        "job_name": config.get("job_name") or job_path.name,
-        "mode": event_mode,
-        "worker_mode": TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODE
-        if hardened_codex_baseline
-        else TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE
-        if codex_goal_mode_baseline
-        else "goal_harness_managed_codex"
-        if agent_config.get("import_path") == TERMINAL_BENCH_MANAGED_AGENT_IMPORT_PATH
-        else agent_config.get("name")
-        or "codex",
-        "trace_publicness": trace_publicness,
-        "real_run": True,
-        "submit_eligible": False,
-        "case_semantics_changed_by_harness": not baseline_without_goal_harness,
-        "goal_harness_inside_case": not baseline_without_goal_harness,
-        "official_score_comparable_to_native_codex": (
-            not bool(goal_harness_mode) and not hardened_codex_baseline
-        ),
-        "official_score_comparable_to_goal_harness_treatment": (
-            hardened_codex_baseline or codex_goal_mode_baseline
-        ),
-        "model_plus_harness_pair": not baseline_without_goal_harness,
-        "control_plane_score_applicable": not baseline_without_goal_harness,
-        "codex_goal_mode_baseline": codex_goal_mode_baseline,
-        "startup_surface_calibration": False,
-        "hardened_install_surface": hardened_codex_baseline,
-        "hardened_install_baseline": hardened_codex_baseline,
-        "leaderboard_evidence": False,
-        "goal_harness_worker_cli_bridge_available": bool(
-            worker_bridge_required
-        ),
-        "goal_harness_worker_cli_bridge_trace_observed": bool(trace_rows),
-        "worker_goal_harness_cli_call_total": worker_cli_total,
-        "worker_counter_trace_trial_count": worker_counter_trace_trial_count,
-        "worker_benchmark_run_file_count": worker_benchmark_run_file_count,
-        "worker_benchmark_run_schema_ok_count": worker_benchmark_run_schema_ok_count,
-        "worker_submit_eligible_mismatch_count": worker_submit_eligible_mismatch_count,
-        "worker_submit_eligible_mismatch_reason": worker_submit_eligible_mismatch_reason,
-        "worker_bridge_writeback_loss_count": worker_bridge_writeback_loss_count,
-        "worker_bridge_writeback_loss_reason": worker_bridge_writeback_loss_reason,
-        "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,
-        "verifier_failure_attribution_count": verifier_failure_attribution_count,
-        "verifier_dependency_failure_count": verifier_dependency_failure_count,
-        "failure_attribution_labels": sorted(failure_attribution_labels),
-        "score_failure_attribution": score_failure_attribution,
-        "required_worker_goal_harness_cli_call_total_min": required_worker_cli_call_min,
-        "official_task_score": {
+    environment_setup_probe_status = "not_applicable"
+    environment_setup_probe_cleared = False
+    if environment_setup_probe_run:
+        environment_setup_probe_cleared = (
+            (job_path / "lock.json").exists()
+            and (job_path / "result.json").exists()
+            and bool(trials)
+            and bool(job_result.get("finished_at"))
+        )
+        environment_setup_probe_status = (
+            "materialized" if environment_setup_probe_cleared else "not_materialized"
+        )
+    evidence_files = [
+        "job:lock.json",
+        "job:result.json",
+        "trial:result.json",
+        "trial:agent/goal-harness-counter-trace.jsonl",
+        "trial:agent/goal-harness-worker-benchmark-run.json",
+        "trial:agent/goal-harness-worker-setup-diagnostic.json",
+        "trial:verifier/reward.txt",
+        "trial:artifacts/manifest.json",
+    ]
+    if include_codex_trajectory_counts:
+        evidence_files.insert(3, "trial:agent/trajectory.json")
+    raw_artifacts_read = bool(
+        include_codex_trajectory_counts or include_verifier_log_attribution
+    )
+    probe_payload = (
+        worker_materialization_probe_contract_payload
+        if isinstance(worker_materialization_probe_contract_payload, dict)
+        else {}
+    )
+    payload_source_runner = (
+        "terminal_bench_worker_materialization_probe"
+        if worker_materialization_probe_contract_present
+        else "harbor"
+    )
+    payload_benchmark_id = (
+        str(probe_payload.get("benchmark_id") or benchmark_id)
+        if worker_materialization_probe_contract_present
+        else benchmark_id
+    )
+    payload_mode = (
+        str(probe_payload.get("mode") or f"{event_mode}_worker_materialization_probe")
+        if worker_materialization_probe_contract_present
+        else event_mode
+    )
+    official_task_score_payload = (
+        {
+            "kind": worker_materialization_probe_status,
+            "value": None,
+            "passed": False,
+            "source": "worker_materialization_probe_contract",
+        }
+        if worker_materialization_probe_contract_present
+        else {
             "kind": "harbor_verifier_reward",
             "value": official_score,
             "passed": bool(
@@ -11501,7 +15522,132 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "source": official_score_source,
         }
         if official_score is not None
-        else {"kind": "harbor_verifier_reward_missing"},
+        else {"kind": "harbor_verifier_reward_missing"}
+    )
+    payload = {
+        "schema_version": "benchmark_run_v0",
+        "source_runner": payload_source_runner,
+        "benchmark_id": payload_benchmark_id,
+        "job_name": config.get("job_name") or job_path.name,
+        "mode": payload_mode,
+        "environment_setup_probe_run": environment_setup_probe_run,
+        "environment_setup_probe_status": environment_setup_probe_status,
+        "environment_setup_probe_cleared": environment_setup_probe_cleared,
+        "worker_materialization_probe_only": worker_materialization_probe_only,
+        "worker_materialization_probe_contract_present": (
+            worker_materialization_probe_contract_present
+        ),
+        "worker_materialization_probe_contract_count": (
+            worker_materialization_probe_contract_count
+        ),
+        "worker_materialization_probe_no_trial_result": (
+            worker_materialization_probe_no_trial_result
+        ),
+        "case_solution_attempted": not worker_materialization_probe_contract_present,
+        "worker_mode": TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODE
+        if hardened_codex_baseline
+        else TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE
+        if codex_goal_mode_baseline
+        else "goal_harness_managed_codex"
+        if agent_config.get("import_path") == TERMINAL_BENCH_MANAGED_AGENT_IMPORT_PATH
+        else agent_config.get("name")
+        or "codex",
+        "trace_publicness": trace_publicness,
+        "real_run": not worker_materialization_probe_contract_present,
+        "submit_eligible": False,
+        "case_semantics_changed_by_harness": not baseline_without_goal_harness,
+        "goal_harness_inside_case": not baseline_without_goal_harness,
+        "official_score_comparable_to_native_codex": (
+            not worker_materialization_probe_contract_present
+            and not bool(goal_harness_mode)
+            and not hardened_codex_baseline
+        ),
+        "official_score_comparable_to_goal_harness_treatment": (
+            not worker_materialization_probe_contract_present
+            and (hardened_codex_baseline or codex_goal_mode_baseline)
+        ),
+        "model_plus_harness_pair": not baseline_without_goal_harness,
+        "control_plane_score_applicable": (
+            not worker_materialization_probe_contract_present
+            and not baseline_without_goal_harness
+        ),
+        "codex_goal_mode_baseline": codex_goal_mode_baseline,
+        "startup_surface_calibration": worker_materialization_probe_contract_present,
+        "hardened_install_surface": hardened_codex_baseline,
+        "hardened_install_baseline": hardened_codex_baseline,
+        "leaderboard_evidence": False,
+        "read_boundary": {
+            "compact_only": not raw_artifacts_read,
+            "raw_artifacts_read": raw_artifacts_read,
+            "task_text_read": False,
+            "trajectory_read": bool(include_codex_trajectory_counts),
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+        "goal_harness_worker_cli_bridge_available": bool(
+            worker_bridge_required
+        ),
+        "goal_harness_worker_cli_bridge_trace_observed": bool(trace_rows),
+        "worker_goal_harness_cli_call_total": worker_cli_total,
+        "worker_counter_trace_trial_count": worker_counter_trace_trial_count,
+        "worker_benchmark_run_file_count": worker_benchmark_run_file_count,
+        "worker_benchmark_run_schema_ok_count": worker_benchmark_run_schema_ok_count,
+        "worker_materialization_probe_contract_file_count": (
+            worker_materialization_probe_contract_count
+        ),
+        "worker_self_validation_official_score_mismatch_count": (
+            worker_self_validation_official_score_mismatch_count
+        ),
+        "worker_validation_scope_ambiguous_official_score_failure_count": (
+            worker_validation_scope_ambiguous_official_score_failure_count
+        ),
+        "worker_bridge_connected_official_score_failure_count": (
+            worker_bridge_connected_official_score_failure_count
+        ),
+        "worker_startup_blocker_count": worker_startup_blocker_count,
+        "worker_startup_blockers": worker_startup_blockers,
+        "worker_setup_diagnostic_file_count": worker_setup_diagnostic_file_count,
+        "worker_setup_diagnostic_schema_ok_count": (
+            worker_setup_diagnostic_schema_ok_count
+        ),
+        "worker_setup_diagnostic_blockers": worker_setup_diagnostic_blockers,
+        "worker_submit_eligible_mismatch_count": worker_submit_eligible_mismatch_count,
+        "worker_submit_eligible_mismatch_reason": worker_submit_eligible_mismatch_reason,
+        "worker_bridge_writeback_loss_count": worker_bridge_writeback_loss_count,
+        "worker_bridge_writeback_loss_reason": worker_bridge_writeback_loss_reason,
+        "worker_bridge_materialization_status": worker_bridge_materialization_status,
+        "worker_bridge_materialization_blocker": worker_bridge_materialization_blocker,
+        "worker_bridge_failure_attribution": worker_bridge_failure_attribution,
+        "first_blocker": worker_bridge_materialization_blocker
+        if worker_bridge_materialization_blocker != "none"
+        else None,
+        "repeat_blocked_by": repeat_blocked_by,
+        "pre_worker_startup_blocker": (
+            worker_bridge_materialization_blocker
+            if worker_bridge_materialization_status
+            == "pre_worker_startup_blocker_recorded"
+            else None
+        ),
+        "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,
+        "environment_setup_failure_before_worker_count": (
+            environment_setup_failure_before_worker_count
+        ),
+        "worker_runtime_exception_before_checkpoint_count": (
+            worker_runtime_exception_before_checkpoint_count
+        ),
+        "verifier_failure_attribution_count": verifier_failure_attribution_count,
+        "verifier_dependency_failure_count": verifier_dependency_failure_count,
+        "official_zero_observation_count": official_zero_observation_count,
+        "failure_attribution_labels": sorted(failure_attribution_labels),
+        "score_failure_attribution": score_failure_attribution,
+        "runner_return_status": runner_return_status,
+        "official_score": official_score,
+        "official_score_source": official_score_source,
+        "official_score_status": official_score_status,
+        "required_worker_goal_harness_cli_call_total_min": required_worker_cli_call_min,
+        "official_task_score": official_task_score_payload,
         "agent": _redacted_agent_kwargs(agent_config),
         "progress": {
             "n_total_trials": job_result.get("n_total_trials"),
@@ -11511,6 +15657,12 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "n_pending_trials": stats.get("n_pending_trials"),
             "n_cancelled_trials": stats.get("n_cancelled_trials"),
             "n_retries": stats.get("n_retries"),
+            "probe_contract_result_present": (
+                worker_materialization_probe_contract_present
+            ),
+            "case_solution_attempted": (
+                not worker_materialization_probe_contract_present
+            ),
         },
         "metrics": metrics,
         "interaction_counters": interaction_counters,
@@ -11536,15 +15688,62 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "official_score_status": official_score_status,
             "trace_publicness": trace_publicness,
             "next_action": (
-                "prefer runner-side guaranteed append; optimize worker graceful closure before repeat"
+                "run the paired baseline or treatment slice"
+                if worker_materialization_probe_contract_present
+                and not worker_materialization_probe_no_trial_result
+                else "ingest compact worker materialization probe contract, then repair runner materialization before case baseline/test"
+                if worker_materialization_probe_no_trial_result
+                else
+                "diagnose benchmark environment setup before worker startup"
+                if worker_bridge_required
+                and worker_bridge_materialization_status
+                == "environment_setup_failed_before_worker"
+                else "repair Codex agent setup/launcher before another same-task repeat"
+                if worker_bridge_required
+                and worker_bridge_materialization_status == "pre_worker_setup_failed"
+                else "repair recorded worker startup blocker before another same-task repeat"
+                if worker_bridge_required
+                and worker_bridge_materialization_status
+                == "pre_worker_startup_blocker_recorded"
+                else "diagnose compact worker runtime failure before another repeat"
+                if worker_bridge_required
+                and worker_bridge_materialization_status
+                == "runtime_exception_before_checkpoint"
+                else "repair launcher or worker startup bridge materialization before repeat"
+                if worker_bridge_required
+                and worker_bridge_materialization_status == "not_materialized"
+                else "repair worker bridge compact evidence before repeat"
+                if worker_bridge_required
+                and worker_bridge_materialization_status != "verified"
+                else "prefer runner-side guaranteed append; optimize worker graceful closure before repeat"
                 if worker_bridge_required
                 else "compare hardened Codex baseline against Goal Harness treatment under the same no-upload boundary"
                 if hardened_codex_baseline
                 else "compare observed runner result against Goal Harness treatment under the same no-upload boundary"
             ),
-            "worker_bridge_verified": bool(
-                trace_rows
-                and worker_cli_total >= required_worker_cli_call_min
+            "worker_bridge_verified": worker_bridge_verified,
+            "worker_materialization_probe_only": worker_materialization_probe_only,
+            "worker_materialization_probe_contract_present": (
+                worker_materialization_probe_contract_present
+            ),
+            "worker_materialization_probe_contract_count": (
+                worker_materialization_probe_contract_count
+            ),
+            "worker_materialization_probe_no_trial_result": (
+                worker_materialization_probe_no_trial_result
+            ),
+            "case_solution_attempted": (
+                not worker_materialization_probe_contract_present
+            ),
+            "worker_bridge_materialization_status": worker_bridge_materialization_status,
+            "worker_bridge_materialization_blocker": worker_bridge_materialization_blocker,
+            "worker_bridge_failure_attribution": worker_bridge_failure_attribution,
+            "repeat_blocked_by": repeat_blocked_by,
+            "pre_worker_startup_blocker": (
+                worker_bridge_materialization_blocker
+                if worker_bridge_materialization_status
+                == "pre_worker_startup_blocker_recorded"
+                else None
             ),
             "counter_trace_present": bool(trace_rows),
             "runner_return_completed": bool(job_result.get("finished_at")),
@@ -11566,9 +15765,31 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "worker_bridge_writeback_loss_reason": worker_bridge_writeback_loss_reason,
             "worker_goal_harness_cli_call_total": worker_cli_total,
             "required_worker_goal_harness_cli_call_total_min": required_worker_cli_call_min,
+            "worker_startup_blocker_count": worker_startup_blocker_count,
+            "worker_setup_diagnostic_file_count": worker_setup_diagnostic_file_count,
+            "worker_setup_diagnostic_schema_ok_count": (
+                worker_setup_diagnostic_schema_ok_count
+            ),
+            "worker_setup_diagnostic_blockers": worker_setup_diagnostic_blockers,
+            "worker_self_validation_official_score_mismatch_count": (
+                worker_self_validation_official_score_mismatch_count
+            ),
+            "worker_validation_scope_ambiguous_official_score_failure_count": (
+                worker_validation_scope_ambiguous_official_score_failure_count
+            ),
+            "worker_bridge_connected_official_score_failure_count": (
+                worker_bridge_connected_official_score_failure_count
+            ),
             "pre_worker_agent_setup_failure_count": pre_worker_agent_setup_failure_count,
+            "environment_setup_failure_before_worker_count": (
+                environment_setup_failure_before_worker_count
+            ),
+            "worker_runtime_exception_before_checkpoint_count": (
+                worker_runtime_exception_before_checkpoint_count
+            ),
             "verifier_failure_attribution_count": verifier_failure_attribution_count,
             "verifier_dependency_failure_count": verifier_dependency_failure_count,
+            "official_zero_observation_count": official_zero_observation_count,
             "failure_attribution_labels": sorted(failure_attribution_labels),
             "score_failure_attribution": score_failure_attribution,
             "official_score_value": official_score,
@@ -11576,16 +15797,7 @@ def build_terminal_bench_harbor_result_benchmark_run(
         },
         "validation": validation,
         "trials": trials,
-        "evidence_files": [
-            "job:lock.json",
-            "job:result.json",
-            "trial:result.json",
-            "trial:agent/trajectory.json",
-            "trial:agent/goal-harness-counter-trace.jsonl",
-            "trial:agent/goal-harness-worker-benchmark-run.json",
-            "trial:verifier/reward.txt",
-            "trial:artifacts/manifest.json",
-        ],
+        "evidence_files": evidence_files,
         "resume_or_inspect_commands": [
             "harbor view <jobs-dir>",
             "goal-harness history append-benchmark-run --benchmark-run-json <benchmark-run-v0.json>",
@@ -11596,6 +15808,14 @@ def build_terminal_bench_harbor_result_benchmark_run(
             "do_not_claim_worker_clean_exit_when_runner_records_agent_timeout",
         ],
     }
+    if environment_setup_failure_context:
+        payload["environment_setup_failure_context"] = (
+            environment_setup_failure_context
+        )
+        payload["worker_bridge_outcome"][
+            "environment_setup_failure_context"
+        ] = environment_setup_failure_context
+    return payload
 
 
 def _probe_path() -> str:
@@ -11639,10 +15859,36 @@ def sanitize_terminal_bench_private_runner_env(
     return sanitized
 
 
+def _prepend_env_path_entry(value: str | None, entry: str) -> str:
+    parts = [part for part in str(value or "").split(os.pathsep) if part]
+    deduped = [part for part in parts if part != entry]
+    return os.pathsep.join([entry, *deduped])
+
+
 def build_terminal_bench_private_runner_env() -> dict[str, str]:
     """Build the private local environment for a real Harbor runner launch."""
 
-    return sanitize_terminal_bench_private_runner_env(_probe_env())
+    env = sanitize_terminal_bench_private_runner_env(_probe_env())
+    env["PYTHONPATH"] = _prepend_env_path_entry(
+        env.get("PYTHONPATH"),
+        _private_runner_goal_harness_project_root(),
+    )
+    return env
+
+
+def _apply_terminal_bench_private_default_timeout_policy(
+    command_kwargs: dict[str, Any],
+) -> None:
+    """Default private no-upload Terminal-Bench cases to a two-hour setup/agent budget."""
+
+    if _optional_float(command_kwargs.get("agent_timeout_multiplier")) is None:
+        command_kwargs["agent_timeout_multiplier"] = (
+            TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_TIMEOUT_MULTIPLIER
+        )
+    if _optional_float(command_kwargs.get("agent_setup_timeout_multiplier")) is None:
+        command_kwargs["agent_setup_timeout_multiplier"] = (
+            TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_SETUP_TIMEOUT_MULTIPLIER
+        )
 
 
 def _private_runner_goal_harness_project_root() -> str:
@@ -11655,6 +15901,13 @@ def _private_runner_goal_harness_runtime_root() -> str:
 
 def _private_runner_active_user_host_dir() -> str:
     return str(Path("~/.codex/goal-harness/active-user-feeds").expanduser())
+
+
+def _private_runner_absolute_jobs_dir(value: Any) -> Any:
+    text = str(value or "")
+    if not text or "<" in text or ">" in text:
+        return value
+    return str(Path(text).expanduser().resolve())
 
 
 def _private_runner_command_kwargs(command_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -11767,6 +16020,143 @@ def build_terminal_bench_task_material_readiness(
     }
 
 
+def _terminal_bench_setup_timeout_repair_profile(
+    command_kwargs: dict[str, Any],
+    *,
+    reject_runtime_install: bool = False,
+) -> dict[str, Any]:
+    """Apply the generic repair profile for pre-worker setup timeouts."""
+
+    materialization_strategy = str(
+        command_kwargs.get("worker_codex_materialization_strategy") or ""
+    ).strip()
+    if (
+        materialization_strategy
+        and materialization_strategy
+        not in TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES
+    ):
+        raise ValueError(
+            "setup_timeout_repair_profile requires worker_codex_materialization_strategy "
+            "to be one of: "
+            + ", ".join(TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES)
+        )
+    current_strategy = command_kwargs.get("codex_install_strategy")
+    if (
+        reject_runtime_install
+        and current_strategy
+        == TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    ):
+        raise ValueError(
+            "setup_timeout_repair_profile disallows "
+            "codex_install_strategy=runtime_install_if_missing"
+        )
+    if current_strategy not in (
+        None,
+        "",
+        TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING,
+        TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING,
+    ):
+        raise ValueError(
+            "setup_timeout_repair_profile requires a known codex install strategy"
+        )
+
+    if (
+        materialization_strategy
+        == TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_RUNTIME_EXTENDED
+    ):
+        command_kwargs[
+            "codex_install_strategy"
+        ] = TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+        command_kwargs["worker_codex_materialization_strategy"] = (
+            TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_RUNTIME_EXTENDED
+        )
+    else:
+        command_kwargs[
+            "codex_install_strategy"
+        ] = TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+
+    required_multipliers = {
+        "agent_timeout_multiplier": (
+            TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_AGENT_TIMEOUT_MULTIPLIER
+        ),
+        "agent_setup_timeout_multiplier": (
+            TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_AGENT_SETUP_TIMEOUT_MULTIPLIER
+        ),
+    }
+    applied_multipliers: dict[str, float] = {}
+    for key, required in required_multipliers.items():
+        current = _optional_float(command_kwargs.get(key))
+        if current is None:
+            command_kwargs[key] = required
+            applied_multipliers[key] = required
+            continue
+        if current != required:
+            raise ValueError(
+                f"setup_timeout_repair_profile requires {key}="
+                f"{_format_harbor_multiplier(required)}"
+            )
+        applied_multipliers[key] = current
+
+    fail_fast_materialization = (
+        command_kwargs["codex_install_strategy"]
+        == TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+    )
+    codex_preflight_timeout = _optional_positive_int(
+        command_kwargs.get("codex_preflight_timeout_sec")
+    )
+    if (
+        codex_preflight_timeout is None
+        and command_kwargs.get("codex_preflight_timeout_sec") is not None
+    ):
+        raise ValueError(
+            "setup_timeout_repair_profile requires a positive integer "
+            "codex_preflight_timeout_sec"
+        )
+    if fail_fast_materialization:
+        if codex_preflight_timeout is None:
+            codex_preflight_timeout = (
+                TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_CODEX_PREFLIGHT_TIMEOUT_SEC
+            )
+            command_kwargs["codex_preflight_timeout_sec"] = codex_preflight_timeout
+        elif (
+            codex_preflight_timeout
+            != TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_CODEX_PREFLIGHT_TIMEOUT_SEC
+        ):
+            raise ValueError(
+                "setup_timeout_repair_profile requires codex_preflight_timeout_sec="
+                f"{TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_CODEX_PREFLIGHT_TIMEOUT_SEC}"
+            )
+
+    required_launch_overrides: dict[str, Any] = {
+        "codex_install_strategy": command_kwargs["codex_install_strategy"],
+        **applied_multipliers,
+    }
+    if fail_fast_materialization:
+        required_launch_overrides["codex_preflight_timeout_sec"] = (
+            codex_preflight_timeout
+        )
+    if materialization_strategy:
+        required_launch_overrides["worker_codex_materialization_strategy"] = (
+            materialization_strategy
+        )
+    disallowed_launch_overrides: dict[str, Any] = {}
+    if fail_fast_materialization:
+        disallowed_launch_overrides["codex_install_strategy"] = (
+            TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+        )
+
+    return {
+        "schema_version": TERMINAL_BENCH_SETUP_TIMEOUT_REPAIR_PROFILE_SCHEMA,
+        "enabled": True,
+        "materialization_strategy": materialization_strategy,
+        "required_launch_overrides": required_launch_overrides,
+        "disallowed_launch_overrides": disallowed_launch_overrides,
+        "raw_logs_required": False,
+        "raw_task_text_required": False,
+        "credential_values_recorded": False,
+    }
+
+
 def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[str, Any]:
     """Build the real private Harbor launch argv together with its env.
 
@@ -11778,6 +16168,19 @@ def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[st
 
     env = build_terminal_bench_private_runner_env()
     resolved_command_kwargs = _private_runner_command_kwargs(command_kwargs)
+    _apply_terminal_bench_private_default_timeout_policy(resolved_command_kwargs)
+    setup_timeout_repair_profile = bool(
+        resolved_command_kwargs.pop("setup_timeout_repair_profile", False)
+    )
+    repair_profile: dict[str, Any] | None = None
+    if setup_timeout_repair_profile:
+        repair_profile = _terminal_bench_setup_timeout_repair_profile(
+            resolved_command_kwargs
+        )
+    if "jobs_dir" in resolved_command_kwargs:
+        resolved_command_kwargs["jobs_dir"] = _private_runner_absolute_jobs_dir(
+            resolved_command_kwargs["jobs_dir"]
+        )
     task_material_ready_required = bool(
         resolved_command_kwargs.pop("require_task_material_ready", False)
     )
@@ -11845,6 +16248,24 @@ def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[st
         task_id=resolved_command_kwargs.get("task_id", TERMINAL_BENCH_DEFAULT_TASK),
     )
     first_blocker = _managed_preflight_first_blocker(surface)
+    timeout_policy = _terminal_bench_launch_timeout_multiplier_policy(argv)
+    setup_readiness = _terminal_bench_agent_setup_readiness(
+        argv,
+        timeout_policy,
+        setup_timeout_repair_profile=setup_timeout_repair_profile,
+    )
+    if (
+        first_blocker == "ready_for_private_managed_no_upload_pilot_review"
+        and (
+            setup_timeout_repair_profile
+            or setup_readiness.get("fail_fast_install_strategy") is True
+        )
+        and setup_readiness.get("setup_materialization_blocks_launch") is True
+    ):
+        first_blocker = str(
+            setup_readiness.get("first_blocker")
+            or "codex_worker_materialization_not_ready"
+        )
     if (
         first_blocker == "ready_for_private_managed_no_upload_pilot_review"
         and material_readiness.get("checked") is True
@@ -11868,9 +16289,150 @@ def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[st
         "preflight_surface": surface,
         "task_material_readiness": material_readiness,
         "task_material_ready_required": task_material_ready_required,
+        "setup_timeout_repair_profile": setup_timeout_repair_profile,
+        "repair_profile": repair_profile or {},
         "first_blocker": first_blocker,
         "ready": first_blocker == "ready_for_private_managed_no_upload_pilot_review",
     }
+
+
+def _terminal_bench_run_ledger_closeout_templates() -> dict[str, Any]:
+    """Return public-safe closeout templates for result ingest plus ledger upsert."""
+
+    argv_template = [
+        "python3",
+        "-m",
+        "goal_harness.cli",
+        "--format",
+        "json",
+        "--registry",
+        "<goal-harness-runtime-root>/registry.global.json",
+        "--runtime-root",
+        "<goal-harness-runtime-root>",
+        "benchmark",
+        "run",
+        "terminal-bench",
+        "--goal-id",
+        "<goal-id>",
+        "--harbor-job-dir",
+        "<private-job-dir>",
+        "--update-run-ledger",
+        "--run-group-id",
+        "<run-group-id>",
+        "--run-ledger-note",
+        "<compact-note>",
+        "--execute",
+        "--no-global-sync",
+    ]
+    return {
+        "schema_version": TERMINAL_BENCH_RUN_LEDGER_CLOSEOUT_SCHEMA,
+        "history_append": True,
+        "run_ledger_update": True,
+        "atomic_ledger_upsert": True,
+        "raw_paths_recorded": False,
+        "raw_logs_read": False,
+        "raw_task_text_read": False,
+        "argv_template": argv_template,
+        "display_command": (
+            "PYTHONPATH=<goal-harness-project-root> "
+            + " ".join(argv_template)
+        ),
+        "post_run_rule": (
+            "after each completed no-upload case, ingest the Harbor job directory "
+            "through benchmark run with --update-run-ledger"
+        ),
+    }
+
+
+def _terminal_bench_compact_failure_marker(
+    *,
+    failure_class: str,
+    evidence_kind: str,
+    external_handle_state: str,
+    launch_state_countable: bool,
+    job_result_present: bool,
+    trial_result_present_count: int,
+    job_result_finished: bool | None = None,
+    job_running_trial_count: int | None = None,
+    job_pending_trial_count: int | None = None,
+    job_result_updated_at_present: bool | None = None,
+    job_updated_age_seconds: float | None = None,
+    job_active_stale_seconds_threshold: int | None = None,
+    worker_materialization_probe_only: bool | None = None,
+    probe_contract_result_present: bool | None = None,
+) -> dict[str, Any]:
+    """Build a compact terminal marker without leaking runner artifacts."""
+
+    finalization_failures = {
+        "stale_active_job_without_trial_result",
+        "detached_worker_ended_active_without_trial_result",
+        "detached_worker_ended_without_trial_result",
+    }
+    launch_failures = {
+        "detached_worker_ended_without_jobs_dir",
+        "detached_worker_ended_without_job_root",
+        "terminal_bench_prelaunch_readiness_blocked",
+        "terminal_bench_prelaunch_existing_job_root_blocked",
+    }
+    if failure_class in finalization_failures:
+        lifecycle_stage = "result_finalization"
+        ledger_attempt_kind = "runner_closeout_attempt"
+        next_allowed_action = "repair_result_finalization_closeout_contract_before_rerun"
+    elif failure_class in launch_failures:
+        lifecycle_stage = "job_materialization"
+        ledger_attempt_kind = "launcher_attempt"
+        next_allowed_action = "repair_job_materialization_before_baseline_rerun"
+    else:
+        lifecycle_stage = "runner_startup"
+        ledger_attempt_kind = "runner_attempt"
+        next_allowed_action = "classify_compact_runner_failure_before_rerun"
+
+    marker: dict[str, Any] = {
+        "schema_version": TERMINAL_BENCH_COMPACT_FAILURE_MARKER_SCHEMA,
+        "failure_class": failure_class,
+        "evidence_kind": evidence_kind,
+        "external_handle_kind": "detached_worker_process",
+        "external_handle_state": external_handle_state,
+        "external_handle_terminal": external_handle_state == "ended",
+        "terminal_closeout": True,
+        "terminal_state": "terminal_compact_failure",
+        "lifecycle_stage": lifecycle_stage,
+        "ledger_attempt_kind": ledger_attempt_kind,
+        "runner_attempt_countable": True,
+        "launch_state_countable": launch_state_countable,
+        "case_attempt_countable": False,
+        "benchmark_budget_countable": False,
+        "next_allowed_action": next_allowed_action,
+        "job_result_present": job_result_present,
+        "trial_result_present_count": trial_result_present_count,
+        "raw_paths_recorded": False,
+        "raw_logs_read": False,
+        "raw_task_text_read": False,
+        "trajectory_read": False,
+        "raw_external_handle_payload_recorded": False,
+    }
+    optional_fields: dict[str, Any] = {
+        "job_result_finished": job_result_finished,
+        "job_running_trial_count": job_running_trial_count,
+        "job_pending_trial_count": job_pending_trial_count,
+        "job_result_updated_at_present": job_result_updated_at_present,
+        "job_updated_age_seconds": (
+            round(job_updated_age_seconds, 3)
+            if job_updated_age_seconds is not None
+            else None
+        ),
+        "job_active_stale_seconds_threshold": job_active_stale_seconds_threshold,
+        "worker_materialization_probe_only": worker_materialization_probe_only,
+        "probe_contract_result_present": probe_contract_result_present,
+    }
+    marker.update(
+        {
+            key: value
+            for key, value in optional_fields.items()
+            if value is not None
+        }
+    )
+    return marker
 
 
 def summarize_terminal_bench_post_launch_materialization(
@@ -11878,6 +16440,7 @@ def summarize_terminal_bench_post_launch_materialization(
     *,
     job_name: str | None = None,
     detached_process_state: str | None = None,
+    reconcile_stale_active: bool = False,
 ) -> dict[str, Any]:
     """Summarize whether Harbor produced a pollable job directory after launch.
 
@@ -11919,6 +16482,7 @@ def summarize_terminal_bench_post_launch_materialization(
         "external_handle_observed": external_handle_observed,
         "external_handle_terminal": process_state == "ended",
         "raw_external_handle_payload_recorded": False,
+        "stale_active_reconcile_requested": bool(reconcile_stale_active),
     }
     if placeholder:
         return summary
@@ -11928,6 +16492,24 @@ def summarize_terminal_bench_post_launch_materialization(
     summary["jobs_dir_present"] = jobs_dir_present
     if not jobs_dir_present:
         summary["first_blocker"] = "jobs_dir_missing"
+        if process_state == "ended":
+            summary.update(
+                {
+                    "first_blocker": "detached_worker_ended_without_jobs_dir",
+                    "ready_for_compact_failure_marker": True,
+                    "compact_failure_class": (
+                        "detached_worker_ended_without_jobs_dir"
+                    ),
+                    "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                        failure_class="detached_worker_ended_without_jobs_dir",
+                        evidence_kind="detached_worker_process_state",
+                        external_handle_state=process_state,
+                        launch_state_countable=False,
+                        job_result_present=False,
+                        trial_result_present_count=0,
+                    ),
+                }
+            )
         return summary
 
     if public_job_name:
@@ -11938,30 +16520,199 @@ def summarize_terminal_bench_post_launch_materialization(
     summary["candidate_job_root_count"] = len(existing_candidates)
     if not existing_candidates:
         summary["first_blocker"] = "job_root_missing"
+        if process_state == "ended":
+            summary.update(
+                {
+                    "first_blocker": "detached_worker_ended_without_job_root",
+                    "ready_for_compact_failure_marker": True,
+                    "compact_failure_class": (
+                        "detached_worker_ended_without_job_root"
+                    ),
+                    "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                        failure_class="detached_worker_ended_without_job_root",
+                        evidence_kind="detached_worker_process_state",
+                        external_handle_state=process_state,
+                        launch_state_countable=False,
+                        job_result_present=False,
+                        trial_result_present_count=0,
+                    ),
+                }
+            )
         return summary
 
     job_root = existing_candidates[0]
     lock_present = (job_root / "lock.json").is_file()
     result_present = (job_root / "result.json").is_file()
+    lock_payload = _load_json_object(job_root / "lock.json") if lock_present else {}
+    job_result_payload = (
+        _load_json_object(job_root / "result.json") if result_present else {}
+    )
+    job_result_stats = (
+        job_result_payload.get("stats")
+        if isinstance(job_result_payload.get("stats"), dict)
+        else {}
+    )
+    job_updated_at = job_result_payload.get("updated_at")
+    job_updated_age_seconds = None
+    if isinstance(job_updated_at, str) and job_updated_at.strip():
+        try:
+            job_updated_at_dt = datetime.fromisoformat(
+                job_updated_at.replace("Z", "+00:00")
+            )
+        except ValueError:
+            job_updated_at_dt = None
+        if job_updated_at_dt is not None:
+            job_updated_age_seconds = max(
+                0.0,
+                (
+                    datetime.now(timezone.utc)
+                    - job_updated_at_dt.astimezone(timezone.utc)
+                ).total_seconds(),
+            )
+    running_trial_count = _compact_positive_int(
+        job_result_stats.get("n_running_trials")
+    )
+    pending_trial_count = _compact_positive_int(
+        job_result_stats.get("n_pending_trials")
+    )
+    job_finished = bool(job_result_payload.get("finished_at"))
+    job_active_without_trial_result = (
+        result_present
+        and not job_finished
+        and (running_trial_count > 0 or pending_trial_count > 0)
+    )
+    worker_materialization_probe_only = (
+        _terminal_bench_lock_worker_materialization_probe_only(lock_payload)
+    )
     trial_result_count = sum(
         1
         for child in job_root.iterdir()
         if child.is_dir() and (child / "result.json").is_file()
+    )
+    job_stale_active_without_trial_result = (
+        job_active_without_trial_result
+        and trial_result_count <= 0
+        and process_state == "ended"
+        and job_updated_age_seconds is not None
+        and job_updated_age_seconds >= TERMINAL_BENCH_ACTIVE_JOB_STALE_SECONDS
+    )
+    probe_contract_no_trial_result = (
+        worker_materialization_probe_only
+        and result_present
+        and trial_result_count <= 0
+        and process_state == "ended"
     )
     summary.update(
         {
             "job_root_present": True,
             "job_lock_present": lock_present,
             "job_result_present": result_present,
+            "job_result_finished": job_finished,
+            "job_result_updated_at_present": bool(job_updated_at),
+            "job_updated_age_seconds": (
+                round(job_updated_age_seconds, 3)
+                if job_updated_age_seconds is not None
+                else None
+            ),
+            "job_active_stale_seconds_threshold": (
+                TERMINAL_BENCH_ACTIVE_JOB_STALE_SECONDS
+            ),
+            "job_running_trial_count": running_trial_count,
+            "job_pending_trial_count": pending_trial_count,
+            "job_active_without_trial_result": job_active_without_trial_result,
+            "job_stale_active_without_trial_result": (
+                job_stale_active_without_trial_result
+            ),
             "trial_result_present_count": trial_result_count,
+            "worker_materialization_probe_only": worker_materialization_probe_only,
+            "probe_contract_result_present": probe_contract_no_trial_result,
             "ready_for_launch_state": lock_present,
             "ready_for_compact_result_ingest": (
-                result_present and trial_result_count > 0
+                result_present
+                and (trial_result_count > 0 or probe_contract_no_trial_result)
             ),
         }
     )
     if not lock_present:
         summary["first_blocker"] = "job_lock_missing"
+    elif job_active_without_trial_result and trial_result_count <= 0:
+        summary["first_blocker"] = "ready_for_compact_polling"
+        resume_contract = _terminal_bench_active_job_resume_contract(
+            process_state=process_state,
+            job_stale_active_without_trial_result=(
+                job_stale_active_without_trial_result
+            ),
+            running_trial_count=running_trial_count,
+            pending_trial_count=pending_trial_count,
+            trial_result_count=trial_result_count,
+            result_present=result_present,
+            job_finished=job_finished,
+        )
+        summary["active_job_resume_contract"] = resume_contract
+        summary["resume_recommended"] = resume_contract["resume_recommended"]
+        if resume_contract["resume_recommended"]:
+            summary["first_blocker"] = (
+                "resume_materialized_active_job_without_trial_result"
+            )
+        if process_state == "ended":
+            if job_stale_active_without_trial_result:
+                active_failure_class = "stale_active_job_without_trial_result"
+                active_evidence_kind = "compact_stale_active_job_reconciliation"
+            else:
+                active_failure_class = (
+                    "detached_worker_ended_active_without_trial_result"
+                )
+                active_evidence_kind = (
+                    "detached_worker_active_job_without_trial_result"
+                )
+            summary["compact_monitor_class"] = active_failure_class
+            summary["next_observation_action"] = (
+                resume_contract["next_action"]
+            )
+            if reconcile_stale_active and job_stale_active_without_trial_result:
+                summary.update(
+                    {
+                        "first_blocker": active_failure_class,
+                        "ready_for_compact_failure_marker": True,
+                        "compact_failure_class": active_failure_class,
+                        "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                            failure_class=active_failure_class,
+                            evidence_kind=active_evidence_kind,
+                            external_handle_state=process_state,
+                            launch_state_countable=lock_present,
+                            job_result_present=result_present,
+                            job_result_finished=job_finished,
+                            job_running_trial_count=running_trial_count,
+                            job_pending_trial_count=pending_trial_count,
+                            job_result_updated_at_present=bool(job_updated_at),
+                            job_updated_age_seconds=job_updated_age_seconds,
+                            job_active_stale_seconds_threshold=(
+                                TERMINAL_BENCH_ACTIVE_JOB_STALE_SECONDS
+                            ),
+                            trial_result_present_count=trial_result_count,
+                        ),
+                    }
+                )
+    elif probe_contract_no_trial_result:
+        summary.update(
+            {
+                "first_blocker": "detached_worker_ended_without_trial_result",
+                "ready_for_compact_failure_marker": True,
+                "compact_failure_class": (
+                    "detached_worker_ended_without_trial_result"
+                ),
+                "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                    failure_class="detached_worker_ended_without_trial_result",
+                    evidence_kind="worker_materialization_probe_contract",
+                    external_handle_state=process_state,
+                    launch_state_countable=lock_present,
+                    job_result_present=result_present,
+                    trial_result_present_count=trial_result_count,
+                    worker_materialization_probe_only=True,
+                    probe_contract_result_present=True,
+                ),
+            }
+        )
     elif not result_present or trial_result_count <= 0:
         if process_state == "ended":
             summary.update(
@@ -11971,23 +16722,14 @@ def summarize_terminal_bench_post_launch_materialization(
                     "compact_failure_class": (
                         "detached_worker_ended_without_trial_result"
                     ),
-                    "compact_failure_marker": {
-                        "schema_version": TERMINAL_BENCH_COMPACT_FAILURE_MARKER_SCHEMA,
-                        "failure_class": (
-                            "detached_worker_ended_without_trial_result"
-                        ),
-                        "evidence_kind": "detached_worker_process_state",
-                        "external_handle_kind": "detached_worker_process",
-                        "external_handle_state": process_state,
-                        "launch_state_countable": lock_present,
-                        "job_result_present": result_present,
-                        "trial_result_present_count": trial_result_count,
-                        "raw_paths_recorded": False,
-                        "raw_logs_read": False,
-                        "raw_task_text_read": False,
-                        "trajectory_read": False,
-                        "raw_external_handle_payload_recorded": False,
-                    },
+                    "compact_failure_marker": _terminal_bench_compact_failure_marker(
+                        failure_class="detached_worker_ended_without_trial_result",
+                        evidence_kind="detached_worker_process_state",
+                        external_handle_state=process_state,
+                        launch_state_countable=lock_present,
+                        job_result_present=result_present,
+                        trial_result_present_count=trial_result_count,
+                    ),
                 }
             )
         else:
@@ -11995,6 +16737,212 @@ def summarize_terminal_bench_post_launch_materialization(
     else:
         summary["first_blocker"] = "ready_for_compact_result_ingest"
     return summary
+
+
+def _terminal_bench_launch_timeout_multiplier_policy(
+    argv: list[Any],
+) -> dict[str, Any]:
+    """Return public-safe timeout multiplier facts from a launch argv."""
+
+    fields = {
+        "--timeout-multiplier": "timeout_multiplier",
+        "--agent-timeout-multiplier": "agent_timeout_multiplier",
+        "--verifier-timeout-multiplier": "verifier_timeout_multiplier",
+        "--agent-setup-timeout-multiplier": "agent_setup_timeout_multiplier",
+        "--environment-build-timeout-multiplier": (
+            "environment_build_timeout_multiplier"
+        ),
+    }
+    argv_text = [str(item) for item in argv]
+    multipliers: dict[str, float] = {}
+    for flag, key in fields.items():
+        parsed = _optional_float(_invocation_arg_value(argv_text, flag))
+        if parsed is not None:
+            multipliers[key] = parsed
+
+    non_default = any(
+        not _is_default_timeout_multiplier(value)
+        for value in multipliers.values()
+    )
+    return {
+        "schema_version": "terminal_bench_launch_timeout_multiplier_policy_v0",
+        "any_timeout_multiplier_present": bool(multipliers),
+        "non_default_timeout_multiplier_present": non_default,
+        "agent_setup_timeout_multiplier_present": (
+            "agent_setup_timeout_multiplier" in multipliers
+        ),
+        "changes_official_benchmark_timeout": non_default,
+        "leaderboard_claim_allowed": not non_default,
+        "raw_argv_recorded": False,
+        "multipliers": multipliers,
+    }
+
+
+def _terminal_bench_agent_setup_readiness(
+    argv: list[Any],
+    timeout_policy: dict[str, Any],
+    *,
+    setup_timeout_repair_profile: bool = False,
+) -> dict[str, Any]:
+    """Return compact setup-readiness facts for managed Codex launches.
+
+    This is intentionally launch-contract level only. It records whether the
+    worker setup path may install Codex during Harbor setup, without reading
+    private logs, credential values, task text, or trajectories.
+    """
+
+    kwargs = agent_kwargs_from_invocation(argv)
+    strategy = (
+        kwargs.get("goal_harness_codex_install_strategy")
+        or TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    )
+    if strategy not in TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES:
+        strategy = "unknown"
+    worker_codex_materialization_strategy = str(
+        kwargs.get("goal_harness_worker_codex_materialization_strategy") or ""
+    ).strip()
+    if (
+        worker_codex_materialization_strategy
+        and worker_codex_materialization_strategy
+        not in TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES
+    ):
+        worker_codex_materialization_strategy = "unknown"
+    worker_path_preprovisioned = (
+        worker_codex_materialization_strategy
+        == TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_WORKER_PATH
+    )
+    runtime_install_extended = (
+        worker_codex_materialization_strategy
+        == TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_RUNTIME_EXTENDED
+    )
+
+    multipliers = timeout_policy.get("multipliers")
+    setup_multiplier = None
+    if isinstance(multipliers, dict):
+        raw_multiplier = multipliers.get("agent_setup_timeout_multiplier")
+        if isinstance(raw_multiplier, (int, float)) and not isinstance(
+            raw_multiplier, bool
+        ):
+            setup_multiplier = raw_multiplier
+
+    managed_agent = bool(_invocation_arg_value(argv, "--agent-import-path"))
+    worker_bridge_requested = kwargs.get("goal_harness_cli_bridge_enabled") == "true"
+    worker_materialization_probe_only = (
+        kwargs.get("goal_harness_worker_materialization_probe_only") == "true"
+    )
+    setup_timeout_budget_explicit = setup_multiplier is not None
+    codex_preflight_timeout = _optional_positive_int(
+        kwargs.get("goal_harness_codex_preflight_timeout_sec")
+    )
+    codex_preflight_timeout_explicit = codex_preflight_timeout is not None
+    fail_fast_install_strategy = (
+        strategy == TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+    )
+    runtime_install_strategy = (
+        strategy
+        == TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    )
+    if (
+        setup_timeout_repair_profile
+        and runtime_install_strategy
+        and not runtime_install_extended
+    ):
+        first_blocker = "setup_timeout_repair_profile_runtime_install_disallowed"
+        next_action = (
+            "repair launch profile to use require_existing_codex before "
+            "same-task repeat, or declare runtime_install_extended_setup"
+        )
+    elif not managed_agent:
+        first_blocker = "managed_codex_agent_import_path_missing"
+        next_action = "repair managed Codex agent launch command"
+    elif not setup_timeout_budget_explicit:
+        first_blocker = "agent_setup_timeout_budget_missing"
+        next_action = "declare an explicit agent setup timeout budget before private repeat"
+    elif fail_fast_install_strategy and not codex_preflight_timeout_explicit:
+        first_blocker = "codex_preflight_timeout_missing"
+        next_action = (
+            "declare a bounded Codex CLI preflight timeout before same-task "
+            "repeat after setup timeout"
+        )
+    elif fail_fast_install_strategy and not worker_path_preprovisioned:
+        first_blocker = "codex_worker_materialization_strategy_missing"
+        next_action = (
+            "materialize Codex on the worker PATH, or use a separate extended "
+            "runtime-install materialization profile, before rerunning the same "
+            "Terminal-Bench case"
+        )
+    elif runtime_install_strategy:
+        if runtime_install_extended and setup_timeout_budget_explicit:
+            first_blocker = "ready_for_runtime_codex_materialization_probe"
+            next_action = (
+                "run exactly one compact no-upload baseline with extended setup "
+                "budget and ingest the setup diagnostic before any treatment"
+            )
+        else:
+            first_blocker = "runtime_codex_install_can_exceed_setup_budget"
+            next_action = (
+                "use require_existing_codex with worker-path materialization, or "
+                "declare runtime_install_extended_setup with an explicit setup "
+                "budget before same-task repeat after setup timeout"
+            )
+    elif fail_fast_install_strategy:
+        first_blocker = "ready_for_fail_fast_codex_setup_probe"
+        next_action = (
+            "run private setup readiness probe or same-task repeat with fail-fast "
+            "Codex install strategy"
+        )
+    else:
+        first_blocker = "codex_install_strategy_unknown"
+        next_action = "select a known Codex setup strategy before private repeat"
+
+    return {
+        "schema_version": TERMINAL_BENCH_AGENT_SETUP_READINESS_SCHEMA,
+        "managed_codex_agent": managed_agent,
+        "worker_bridge_requested": worker_bridge_requested,
+        "worker_materialization_probe_only": worker_materialization_probe_only,
+        "setup_timeout_repair_profile": setup_timeout_repair_profile,
+        "codex_install_strategy": strategy,
+        "runtime_codex_install_allowed": runtime_install_strategy,
+        "fail_fast_install_strategy": fail_fast_install_strategy,
+        "setup_timeout_budget_explicit": setup_timeout_budget_explicit,
+        "agent_setup_timeout_multiplier": setup_multiplier,
+        "codex_preflight_timeout_explicit": codex_preflight_timeout_explicit,
+        "codex_preflight_timeout_sec": codex_preflight_timeout,
+        "worker_codex_materialization_strategy": (
+            worker_codex_materialization_strategy
+        ),
+        "worker_codex_materialization_strategy_declared": bool(
+            worker_codex_materialization_strategy
+        ),
+        "worker_path_preprovisioned_declared": worker_path_preprovisioned,
+        "runtime_install_extended_setup_declared": runtime_install_extended,
+        "same_task_repeat_after_setup_timeout_allowed": (
+            (
+                fail_fast_install_strategy
+                and setup_timeout_budget_explicit
+                and codex_preflight_timeout_explicit
+                and worker_path_preprovisioned
+            )
+            or (
+                runtime_install_strategy
+                and setup_timeout_budget_explicit
+                and runtime_install_extended
+            )
+        ),
+        "setup_materialization_blocks_launch": first_blocker not in {
+            "ready_for_fail_fast_codex_setup_probe",
+            "ready_for_runtime_codex_materialization_probe",
+        },
+        "first_blocker": first_blocker,
+        "next_action_after_setup_timeout": next_action,
+        "setup_failure_before_worker_counts_as_case_progress": False,
+        "raw_argv_recorded": False,
+        "raw_env_recorded": False,
+        "raw_logs_read": False,
+        "task_text_read": False,
+        "trajectory_read": False,
+        "credential_values_recorded": False,
+    }
 
 
 def summarize_terminal_bench_private_runner_launch(
@@ -12051,6 +16999,18 @@ def summarize_terminal_bench_private_runner_launch(
     auth_names_present = [
         name for name in TERMINAL_BENCH_CODEX_AUTH_SURFACE_NAMES if name in env
     ]
+    environment_host_allowlist_count = sum(
+        1 for value in argv if value == "--allow-environment-host"
+    )
+    pythonpath_value = env.get("PYTHONPATH") if isinstance(env.get("PYTHONPATH"), str) else ""
+    project_root = _private_runner_goal_harness_project_root()
+    timeout_policy = _terminal_bench_launch_timeout_multiplier_policy(argv)
+    setup_timeout_repair_profile = launch.get("setup_timeout_repair_profile") is True
+    repair_profile = (
+        launch.get("repair_profile")
+        if isinstance(launch.get("repair_profile"), dict)
+        else {}
+    )
     summary = {
         "schema_version": "terminal_bench_private_runner_launch_summary_v0",
         "launch_schema_version": str(launch.get("schema_version") or ""),
@@ -12083,6 +17043,9 @@ def summarize_terminal_bench_private_runner_launch(
         in argv,
         "goal_harness_worker_bridge_requested": "goal_harness_cli_bridge_enabled=true"
         in argv,
+        "worker_materialization_probe_only": (
+            "goal_harness_worker_materialization_probe_only=true" in argv
+        ),
         "active_user_writable_mount_requested": bool(active_user_mounts),
         "active_user_writable_mount_count": len(active_user_mounts),
         "active_user_writable_mount_target_present": bool(active_user_mounts),
@@ -12091,6 +17054,9 @@ def summarize_terminal_bench_private_runner_launch(
         "env_path_present": bool(path_value),
         "env_probe_path_coverage": probe_coverage,
         "env_probe_path_coverage_count": sum(1 for ready in probe_coverage.values() if ready),
+        "env_pythonpath_present": bool(pythonpath_value),
+        "goal_harness_project_root_pythonpath_present": project_root
+        in pythonpath_value.split(os.pathsep),
         "task_material_readiness_status": str(task_material.get("status") or ""),
         "task_material_first_blocker": str(task_material.get("first_blocker") or ""),
         "task_material_readiness_checked": task_material.get("checked") is True,
@@ -12108,6 +17074,19 @@ def summarize_terminal_bench_private_runner_launch(
             task_material.get("task_toml_present_count") or 0
         ),
         "auth_surface_names_present": auth_names_present,
+        "environment_host_allowlist_count": environment_host_allowlist_count,
+        "codex_runtime_install_network_allowlist_present": (
+            environment_host_allowlist_count > 0
+        ),
+        "setup_timeout_repair_profile": setup_timeout_repair_profile,
+        "repair_profile": repair_profile,
+        "timeout_multiplier_policy": timeout_policy,
+        "agent_setup_readiness": _terminal_bench_agent_setup_readiness(
+            argv,
+            timeout_policy,
+            setup_timeout_repair_profile=setup_timeout_repair_profile,
+        ),
+        "closeout_command_templates": _terminal_bench_run_ledger_closeout_templates(),
         "auth_values_recorded": False,
         "raw_env_recorded": False,
         "raw_paths_recorded": False,
@@ -12750,6 +17729,16 @@ def build_terminal_bench_goal_harness_access_packet(
             "do_not_wrap_worker_benchmark_run_json_in_benchmark_run_key: true",
             "worker_benchmark_run_json_minimal_shape: "
             + ",".join(WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_TOP_LEVEL_FIELDS),
+            "worker_benchmark_run_json_validation_scope_required: true",
+            "worker_benchmark_run_json_validation_scope_values: "
+            "worker_bridge_connectivity,environment_ready,worker_case_success,"
+            "official_verifier_result",
+            "worker_benchmark_run_json_bridge_connectivity_is_not_case_success: true",
+            "worker_benchmark_run_json_claim_boundary_required: true",
+            "worker_benchmark_run_json_claim_boundary_required_fields: "
+            "bridge_connectivity_claim_allowed,case_success_claim_allowed,"
+            "official_score_claim_allowed,leaderboard_claim_allowed,"
+            "forbidden_claims",
             "worker_benchmark_run_json_must_omit: "
             + ",".join(WORKER_BRIDGE_BENCHMARK_RUN_FORBIDDEN_PUBLIC_FIELDS),
             "worker_benchmark_run_json_required_fixed_fields: "
@@ -13045,6 +18034,121 @@ def _benchmark_result_failed(result: dict[str, Any]) -> bool:
     return bool(terminal_state)
 
 
+def benchmark_result_from_benchmark_run_for_baseline_gate(
+    benchmark_run: dict[str, Any],
+) -> dict[str, Any]:
+    """Project a compact benchmark_run_v0 into baseline-gate result shape.
+
+    Current benchmark runners increasingly write run-level compact artifacts
+    because they need to preserve protocol, timing, bridge, and ledger context.
+    The baseline-failure gate only needs a result-level public-safe slice:
+    task id, scenario id, terminal state, score, and compact attribution labels.
+    """
+
+    if benchmark_run.get("schema_version") != "benchmark_run_v0":
+        raise ValueError("benchmark_run must be compact benchmark_run_v0")
+
+    safe_mode = _public_safe_benchmark_label(benchmark_run.get("mode")) or "baseline"
+    trials = benchmark_run.get("trials") if isinstance(benchmark_run.get("trials"), list) else []
+    first_trial = trials[0] if trials and isinstance(trials[0], dict) else {}
+    case_ids = benchmark_run.get("case_ids") if isinstance(benchmark_run.get("case_ids"), list) else []
+    task_id = (
+        _public_safe_benchmark_label(first_trial.get("task_id"))
+        or _public_safe_benchmark_label(benchmark_run.get("task_id"))
+        or (_public_safe_benchmark_label(case_ids[0]) if case_ids else None)
+        or _public_safe_benchmark_label(benchmark_run.get("job_name"))
+        or "unknown_task"
+    )
+
+    official = (
+        benchmark_run.get("official_task_score")
+        if isinstance(benchmark_run.get("official_task_score"), dict)
+        else {}
+    )
+    score_value = official.get("value")
+    if not isinstance(score_value, (int, float)) or isinstance(score_value, bool):
+        score_value = benchmark_run.get("official_score")
+    passed = official.get("passed")
+    if not isinstance(passed, bool):
+        passed = None
+    if passed is None and isinstance(score_value, (int, float)) and not isinstance(score_value, bool):
+        passed = score_value > 0
+
+    runner_status = _public_safe_benchmark_label(
+        benchmark_run.get("runner_return_status")
+        or benchmark_run.get("official_score_status")
+        or benchmark_run.get("status")
+    )
+    if passed is True:
+        terminal_state = "passed"
+    elif passed is False:
+        terminal_state = "failed"
+    else:
+        terminal_state = runner_status or "unknown"
+
+    labels: list[str] = []
+    for item in (
+        benchmark_run.get("score_failure_attribution"),
+        benchmark_run.get("failure_class"),
+    ):
+        label = _public_safe_benchmark_label(item)
+        if label and label not in {"none", "unknown", "missing"} and label not in labels:
+            labels.append(label)
+    result_labels = benchmark_run.get("failure_attribution_labels")
+    if isinstance(result_labels, list):
+        for item in result_labels:
+            label = _public_safe_benchmark_label(item)
+            if label and label not in {"none", "unknown", "missing"} and label not in labels:
+                labels.append(label)
+    worker_bridge_outcome = (
+        benchmark_run.get("worker_bridge_outcome")
+        if isinstance(benchmark_run.get("worker_bridge_outcome"), dict)
+        else {}
+    )
+    for item in (
+        worker_bridge_outcome.get("score_failure_attribution"),
+        worker_bridge_outcome.get("worker_bridge_failure_attribution"),
+        worker_bridge_outcome.get("worker_bridge_materialization_blocker"),
+        worker_bridge_outcome.get("pre_worker_startup_blocker"),
+    ):
+        label = _public_safe_benchmark_label(item)
+        if label and label not in {"none", "unknown", "missing"} and label not in labels:
+            labels.append(label)
+
+    official_score: dict[str, Any] = {
+        "kind": (
+            _public_safe_benchmark_label(official.get("kind"))
+            or _public_safe_benchmark_label(benchmark_run.get("official_score_source"))
+            or "benchmark_run_official_score"
+        ),
+    }
+    if isinstance(score_value, (int, float)) and not isinstance(score_value, bool):
+        official_score["value"] = score_value
+    if isinstance(passed, bool):
+        official_score["passed"] = passed
+
+    projected: dict[str, Any] = {
+        "schema_version": "benchmark_result_v0",
+        "task_id": task_id,
+        "scenario_id": safe_mode,
+        "worker_mode": (
+            _public_safe_benchmark_label(benchmark_run.get("worker_mode"))
+            or "benchmark_run_worker"
+        ),
+        "terminal_state": terminal_state,
+        "official_task_score": official_score,
+        "trace_publicness": (
+            _public_safe_benchmark_label(benchmark_run.get("trace_publicness"))
+            or _public_safe_benchmark_label(worker_bridge_outcome.get("trace_publicness"))
+            or "compact_counts_only_no_raw_trace"
+        ),
+        "source_schema_version": "benchmark_run_v0",
+    }
+    if labels:
+        projected["failure_attribution_labels"] = labels[:8]
+    return projected
+
+
 def build_benchmark_baseline_failure_gate_comparison(
     *,
     baseline_result: dict[str, Any],
@@ -13269,6 +18373,12 @@ def build_terminal_bench_managed_harbor_command(
     verifier_timeout_multiplier: float | None = None,
     agent_setup_timeout_multiplier: float | None = None,
     environment_build_timeout_multiplier: float | None = None,
+    codex_install_strategy: str = (
+        TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    ),
+    codex_preflight_timeout_sec: int | None = None,
+    worker_codex_materialization_strategy: str | None = None,
+    worker_materialization_probe_only: bool = False,
     no_upload: bool = True,
     resolve_cli_paths: bool = False,
 ) -> list[str]:
@@ -13288,6 +18398,25 @@ def build_terminal_bench_managed_harbor_command(
             "goal_harness_access_packet_mode must be one of: "
             + ", ".join(TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODES)
         )
+    if codex_install_strategy not in TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES:
+        raise ValueError(
+            "codex_install_strategy must be one of: "
+            + ", ".join(TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES)
+        )
+    if (
+        worker_codex_materialization_strategy is not None
+        and worker_codex_materialization_strategy
+        not in TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES
+    ):
+        raise ValueError(
+            "worker_codex_materialization_strategy must be one of: "
+            + ", ".join(TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES)
+        )
+    parsed_codex_preflight_timeout = _optional_positive_int(
+        codex_preflight_timeout_sec
+    )
+    if codex_preflight_timeout_sec is not None and parsed_codex_preflight_timeout is None:
+        raise ValueError("codex_preflight_timeout_sec must be a positive integer")
     if job_name is None:
         event_mode = (
             "goal_harness_managed_codex_cli_dry_run"
@@ -13337,7 +18466,38 @@ def build_terminal_bench_managed_harbor_command(
         f"goal_harness_goal_id={goal_harness_goal_id}",
         "--agent-kwarg",
         f"goal_harness_ablation_mode={goal_harness_ablation_mode}",
+        "--agent-kwarg",
+        f"goal_harness_codex_install_strategy={codex_install_strategy}",
     ]
+    if (
+        codex_install_strategy
+        == TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    ):
+        for host in TERMINAL_BENCH_CODEX_RUNTIME_INSTALL_ALLOW_ENVIRONMENT_HOSTS:
+            command.extend(["--allow-environment-host", host])
+    if parsed_codex_preflight_timeout is not None:
+        command.extend(
+            [
+                "--agent-kwarg",
+                "goal_harness_codex_preflight_timeout_sec="
+                f"{parsed_codex_preflight_timeout}",
+            ]
+        )
+    if worker_codex_materialization_strategy:
+        command.extend(
+            [
+                "--agent-kwarg",
+                "goal_harness_worker_codex_materialization_strategy="
+                f"{worker_codex_materialization_strategy}",
+            ]
+        )
+    if worker_materialization_probe_only:
+        command.extend(
+            [
+                "--agent-kwarg",
+                "goal_harness_worker_materialization_probe_only=true",
+            ]
+        )
     if task_id:
         command.extend(["--include-task-name", task_id])
     if goal_harness_access_packet_mode != TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_FULL:
@@ -13434,6 +18594,1428 @@ def build_terminal_bench_managed_harbor_command(
         raise ValueError("managed Terminal-Bench pilot command is no-upload only")
     return normalize_terminal_bench_private_runner_invocation(command)
 
+def _skillsbench_route_contract(route: str) -> dict[str, Any]:
+    if route == "codex-acp-blind-loop-baseline":
+        return {
+            "mode": "skillsbench_codex_acp_blind_loop_baseline",
+            "arm_id": "codex_acp_blind_loop_baseline",
+            "source_runner": "goal_harness_skillsbench_codex_acp_blind_loop_baseline_skeleton",
+            "inner_codex_goal_mode": False,
+            "native_goal_mode_requested": False,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": "not_requested",
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "codex_acp_ordinary_agent_blind_loop_no_goal_no_reward_feedback",
+            "curated_skills_visible": False,
+            "goal_harness_automation_loop": False,
+            "goal_harness_inside_case": False,
+            "blind_loop": True,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": True,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "run ordinary Codex ACP/CLI with the same fixed blind loop budget "
+                "as treatment, with no /goal mode and no official reward/pass-fail "
+                "or verifier output returned to the agent"
+            ),
+        }
+    if route == "goal-harness-blind-loop-treatment":
+        return {
+            "mode": "skillsbench_goal_harness_blind_loop_treatment",
+            "arm_id": "goal_harness_blind_loop_treatment",
+            "source_runner": "goal_harness_skillsbench_blind_loop_treatment_skeleton",
+            "inner_codex_goal_mode": False,
+            "native_goal_mode_requested": False,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": "not_requested",
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "codex_acp_ordinary_agent_with_outer_goal_harness_blind_loop_no_reward_feedback",
+            "curated_skills_visible": False,
+            "goal_harness_automation_loop": True,
+            "goal_harness_inside_case": False,
+            "blind_loop": True,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": True,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "run Goal Harness outer automation with a fixed blind loop budget; "
+                "do not return official reward, pass/fail, verifier error, or "
+                "verifier output to the in-case agent during the loop"
+            ),
+        }
+    if route == "raw-codex-autonomous-max5":
+        return {
+            "mode": "skillsbench_raw_codex_autonomous_max5_baseline",
+            "arm_id": "raw_codex_autonomous_max5",
+            "source_runner": "goal_harness_skillsbench_raw_codex_autonomous_max5_skeleton",
+            "inner_codex_goal_mode": False,
+            "native_goal_mode_requested": False,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": "not_requested",
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "raw_codex_autonomous_max5_no_goal_harness_no_reward_feedback",
+            "curated_skills_visible": False,
+            "goal_harness_automation_loop": False,
+            "goal_harness_inside_case": False,
+            "product_mode": True,
+            "blind_loop": False,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": True,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "run raw Codex autonomous max5 with no Goal Harness state/todo/"
+                "replan/CLI surface and no official reward or verifier feedback "
+                "returned during execution"
+            ),
+        }
+    if route == "goal-harness-product-mode":
+        return {
+            "mode": "skillsbench_goal_harness_product_mode_treatment",
+            "arm_id": "goal_harness_product_mode",
+            "source_runner": "goal_harness_skillsbench_product_mode_skeleton",
+            "inner_codex_goal_mode": False,
+            "native_goal_mode_requested": False,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": "not_requested",
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "codex_agent_with_goal_harness_state_todo_replan_cli_no_reward_feedback",
+            "curated_skills_visible": False,
+            "goal_harness_automation_loop": True,
+            "goal_harness_inside_case": True,
+            "product_mode": True,
+            "blind_loop": False,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": True,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": True,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "run Goal Harness product-mode treatment with goal state, todos, "
+                "replan/status writeback, and GH CLI/ledger surfaces; do not "
+                "return official reward or verifier feedback during execution"
+            ),
+        }
+    if route == "codex-goal-mode-baseline":
+        return {
+            "mode": "codex_goal_mode_baseline",
+            "arm_id": "codex_goal_mode_baseline",
+            "source_runner": "goal_harness_skillsbench_codex_goal_mode_baseline_skeleton",
+            "inner_codex_goal_mode": True,
+            "native_goal_mode_requested": True,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": (
+                "unconfirmed_acp_prompt_text_not_interactive_cli_slash_command"
+            ),
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "codex_acp_goal_prompt_request_no_reward_followup_unconfirmed_native_goal_mode",
+            "curated_skills_visible": False,
+            "goal_harness_automation_loop": False,
+            "goal_harness_inside_case": False,
+            "blind_loop": False,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": True,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "run a real no-skill Codex goal-mode SkillsBench baseline, ingest "
+                "only compact benchmark_run_v0, and require attributable failure "
+                "before any automation-loop treatment"
+            ),
+        }
+    if route == "automation-loop-treatment":
+        return {
+            "mode": "skillsbench_goal_harness_automation_loop_treatment",
+            "arm_id": "goal_harness_automation_loop_treatment",
+            "source_runner": "goal_harness_skillsbench_automation_loop_treatment_skeleton",
+            "inner_codex_goal_mode": False,
+            "native_goal_mode_requested": False,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": "not_requested",
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "codex_acp_ordinary_agent_with_outer_reward_feedback_loop",
+            "curated_skills_visible": False,
+            "goal_harness_automation_loop": True,
+            "goal_harness_inside_case": False,
+            "blind_loop": False,
+            "official_feedback_blinded": False,
+            "reward_feedback_forwarded": True,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": True,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "run the automation-loop treatment only after the paired baseline "
+                "failure is compact-attributed and control-plane-addressable; the "
+                "inner case actor must be ordinary Codex CLI, not Codex goal mode"
+            ),
+        }
+    if route == "curated-skills-baseline":
+        return {
+            "mode": "skillsbench_curated_skills_baseline",
+            "arm_id": "curated_skills_baseline",
+            "source_runner": "goal_harness_skillsbench_curated_skills_baseline_skeleton",
+            "inner_codex_goal_mode": False,
+            "native_goal_mode_requested": False,
+            "native_goal_mode_invoked": False,
+            "native_goal_mode_confirmation_status": "not_requested",
+            "codex_acp_protocol_used": True,
+            "skillsbench_route_semantics": "codex_acp_curated_skills_visible_control",
+            "curated_skills_visible": True,
+            "goal_harness_automation_loop": False,
+            "goal_harness_inside_case": False,
+            "blind_loop": False,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_goal_harness_treatment": False,
+            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "next_action": (
+                "use curated-skills baseline only as a SkillsBench-native control "
+                "after the no-skill baseline and treatment routes are ledgered"
+            ),
+        }
+    raise ValueError(f"unsupported SkillsBench route: {route}")
+
+
+def _skillsbench_job_name(dataset: str, task_id: str, route: str) -> str:
+    raw = f"{dataset}_{task_id}_{route}"
+    return re.sub(r"[^A-Za-z0-9]+", "_", raw).strip("_").lower()
+
+
+def _skillsbench_runner_error_attribution(error_text: str) -> tuple[str, str, list[str]]:
+    """Classify public-safe SkillsBench runner/setup failures."""
+
+    text = error_text.lower()
+    if "acp error -32603" in text and "internal error" in text:
+        label = "skillsbench_codex_acp_jsonrpc_internal_error"
+        return label, label, [label, "skillsbench_codex_acp_transport_error"]
+    if "benchflow result.json not found" in text:
+        label = "skillsbench_result_json_missing_after_runner_exit"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if (
+        "could not find the file /app" in text
+        or "main:/app/skills" in text
+        or "/app/skills" in text
+    ):
+        label = "skillsbench_environment_app_mount_missing"
+        return label, label, [label, "skillsbench_environment_setup_error"]
+    if (
+        "no such file or directory: 'docker'" in text
+        or "no such file or directory: docker" in text
+    ):
+        label = "skillsbench_docker_cli_missing"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if "codex-acp" in text and "libssl.so.3" in text:
+        label = "skillsbench_codex_acp_runtime_libssl_missing"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if "codex-acp" in text and "libssl3" in text:
+        label = "skillsbench_codex_acp_runtime_libssl_missing"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if "codex-acp" in text and (
+        "glibc" in text or "libc.so.6" in text or "glibc_2." in text
+    ):
+        label = "skillsbench_codex_acp_glibc_incompatible"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if (
+        "codex-acp" in text
+        and "runtime launch preflight failed" in text
+        and "binary not on path" in text
+    ):
+        label = "skillsbench_codex_acp_binary_missing"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if "codex-acp" in text and "runtime launch preflight failed" in text:
+        label = "skillsbench_codex_acp_launch_preflight_failed"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if "codex-acp" in text and (
+        "rc=127" in text
+        or "not found" in text
+        or "no such file or directory" in text
+    ):
+        label = "skillsbench_codex_acp_launch_failed"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+    if (
+        "range of cpus is from" in text
+        or "only 2 cpus available" in text
+        or "requested_cpus_exceeds_local_docker_daemon_capacity" in text
+    ):
+        label = "skillsbench_docker_host_cpu_limit"
+        return label, label, [label, "skillsbench_environment_setup_error"]
+    if (
+        "apt setup risk preflight blocked" in text
+        or "apt-based docker setup risk detected before full case run" in text
+    ):
+        label = "skillsbench_docker_apt_setup_risk_preflight_blocked"
+        return label, label, [
+            label,
+            "skillsbench_docker_setup_preflight_blocked",
+            "skillsbench_environment_setup_error",
+        ]
+    if "docker compose command failed" in text:
+        if (
+            "cannot connect to the docker daemon" in text
+            or "is the docker daemon running" in text
+            or "docker daemon is not running" in text
+            or "colima is not running" in text
+            or "error during connect" in text
+        ):
+            label = "skillsbench_docker_daemon_unavailable"
+            return label, label, [
+                label,
+                "skillsbench_docker_compose_setup_failure",
+                "skillsbench_environment_setup_error",
+            ]
+        if (
+            "port is already allocated" in text
+            or "address already in use" in text
+            or "ports are not available" in text
+            or ("bind for" in text and "failed" in text)
+        ):
+            label = "skillsbench_docker_compose_port_conflict"
+            return label, label, [
+                label,
+                "skillsbench_docker_compose_setup_failure",
+                "skillsbench_environment_setup_error",
+            ]
+        if (
+            "apt-get" in text
+            or "apt update" in text
+            or "apt " in text
+            or "gpg error" in text
+            or "hash sum mismatch" in text
+            or "failed to fetch" in text
+        ):
+            label = "skillsbench_docker_compose_apt_repository_failure"
+            return label, label, [
+                label,
+                "skillsbench_docker_compose_setup_failure",
+                "skillsbench_environment_setup_error",
+            ]
+        if (
+            "failed to solve" in text
+            or "failed to build" in text
+            or "dockerfile" in text
+            or "pull access denied" in text
+            or "manifest unknown" in text
+        ):
+            label = "skillsbench_docker_compose_image_build_failure"
+            return label, label, [
+                label,
+                "skillsbench_docker_compose_setup_failure",
+                "skillsbench_environment_setup_error",
+            ]
+        label = "skillsbench_docker_compose_setup_failure"
+        return label, label, [
+            label,
+            "skillsbench_docker_compose_unclassified_setup_failure",
+            "skillsbench_environment_setup_error",
+        ]
+    label = "skillsbench_runner_error"
+    return label, label, [label]
+
+
+def _skillsbench_error_len_bucket(text: str) -> str:
+    size = len(text)
+    if size <= 0:
+        return "empty"
+    if size < 200:
+        return "1_199"
+    if size < 500:
+        return "200_499"
+    if size < 1000:
+        return "500_999"
+    if size < 2000:
+        return "1000_1999"
+    return "2000_plus"
+
+
+def _skillsbench_runner_error_fingerprint(error_text: str) -> dict[str, Any]:
+    """Return a public-safe shape summary without copying raw error text."""
+
+    text = error_text or ""
+    lowered = text.lower()
+    patterns = {
+        "docker_compose_command_failed": r"docker compose command failed",
+        "docker_daemon_unavailable": (
+            r"cannot connect to the docker daemon|is the docker daemon running|"
+            r"docker daemon is not running|colima is not running|error during connect"
+        ),
+        "service_unhealthy": r"unhealthy|healthcheck|health check",
+        "container_exited": r"exited with code|container .* exited|exit code",
+        "dependency_failed": r"dependency failed|depends_on|dependency",
+        "network_failure": r"network|connection refused|could not connect",
+        "volume_mount_failure": r"mount|volume|bind source path",
+        "permission_denied": r"permission denied|operation not permitted",
+        "missing_file": r"no such file|not found|does not exist",
+        "image_build": r"failed to solve|failed to build|dockerfile|pull access denied|manifest unknown",
+        "port_conflict": r"port is already allocated|address already in use|ports are not available|bind for",
+        "apt_failure": r"apt-get|apt update|apt |gpg error|hash sum mismatch|failed to fetch",
+        "timeout": r"timeout|timed out|deadline",
+    }
+    matched = [
+        label
+        for label, pattern in patterns.items()
+        if re.search(pattern, lowered)
+    ]
+    return {
+        "schema_version": "skillsbench_runner_failure_fingerprint_v0",
+        "error_present": bool(text),
+        "error_len_bucket": _skillsbench_error_len_bucket(text),
+        "line_count": len(text.splitlines()) if text else 0,
+        "matched_patterns": matched,
+        "has_host_paths": bool(
+            re.search(r"/Users/|/private/|/var/folders/", text)
+        ),
+        "has_urls": bool(re.search(r"https?://", text)),
+        "has_secret_like_tokens": bool(
+            re.search(r"(?i)(api[_-]?key|token|password|secret)", text)
+        ),
+        "raw_error_recorded": False,
+        "fingerprint_confidence": "coarse_public_safe_pattern_match",
+    }
+
+
+def build_skillsbench_benchmark_run(
+    *,
+    route: str = SKILLSBENCH_DEFAULT_ROUTE,
+    dataset: str = SKILLSBENCH_DEFAULT_DATASET,
+    task_id: str = SKILLSBENCH_DEFAULT_TASK,
+    agent: str = "codex",
+    model: str = SKILLSBENCH_DEFAULT_MODEL,
+) -> dict[str, Any]:
+    """Build a compact no-run SkillsBench benchmark_run_v0 skeleton."""
+
+    if agent != "codex":
+        raise ValueError("SkillsBench skeleton currently supports agent=codex only")
+    if route not in SKILLSBENCH_ROUTES:
+        raise ValueError(f"unsupported SkillsBench route: {route}")
+    contract = _skillsbench_route_contract(route)
+    job_name = _skillsbench_job_name(dataset, task_id, route)
+    validation: dict[str, Any] = {
+        "cli_skeleton_present": True,
+        "skillsbench_route_declared": True,
+        "compact_ingest_route_declared": True,
+        "no_real_codex_invoked": True,
+        "no_benchflow_invoked": True,
+        "no_docker_or_cloud_invoked": True,
+        "no_model_api_invoked": True,
+        "no_leaderboard_upload_requested": True,
+        "paths_redacted": True,
+    }
+    benchmark_run: dict[str, Any] = {
+        "schema_version": "benchmark_run_v0",
+        "source_runner": contract["source_runner"],
+        "benchmark_id": dataset,
+        "job_name": job_name,
+        "mode": contract["mode"],
+        "route": route,
+        "agent": {
+            "name": agent,
+            "model": model,
+            "kwargs_keys": (
+                [
+                    "codex_goal_mode_invocation_surface",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "codex-goal-mode-baseline"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "fixed_blind_loop_budget",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "codex-acp-blind-loop-baseline"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "raw_codex_autonomous_max5",
+                    "official_feedback_withheld",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "raw-codex-autonomous-max5"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "goal_harness_product_mode",
+                    "goal_state_todos_replan_cli",
+                    "official_feedback_withheld",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "goal-harness-product-mode"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "goal_harness_blind_loop",
+                    "official_feedback_withheld",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "goal-harness-blind-loop-treatment"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "goal_harness_automation_loop",
+                    "reward_feedback_ablation",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "automation-loop-treatment"
+                else [
+                    "skillsbench_curated_skills_visible",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+            ),
+        },
+        "progress": {
+            "n_total_trials": 0,
+            "n_completed_trials": 0,
+            "n_errored_trials": 0,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+        },
+        "metrics": {
+            "input_tokens": 0,
+            "cache_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0,
+        },
+        "interaction_counters": {
+            "schema_version": "skillsbench_interaction_counters_v0",
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "goal_harness_state_reads": 0,
+            "goal_harness_state_writes": 0,
+            "heartbeat_count": 0,
+            "case_result_writeback": "not_run_adapter_skeleton",
+            "counter_trust_level": "adapter_contract_fixture",
+        },
+        "episode_policy": {
+            "schema_version": "skillsbench_episode_policy_v0",
+            "route": route,
+            "outer_controller": (
+                "goal_harness_blind_automation_loop"
+                if route == "goal-harness-blind-loop-treatment"
+                else "goal_harness_product_mode"
+                if route == "goal-harness-product-mode"
+                else "reward_feedback_automation_loop_ablation"
+                if route == "automation-loop-treatment"
+                else "raw_codex_autonomous_max5"
+                if route == "raw-codex-autonomous-max5"
+                else "fixed_blind_loop_runner"
+                if route == "codex-acp-blind-loop-baseline"
+                else "runner_only"
+            ),
+            "inner_case_actor": (
+                "ordinary_codex_acp_agent"
+                if route
+                in {
+                    "automation-loop-treatment",
+                    "goal-harness-blind-loop-treatment",
+                    "codex-acp-blind-loop-baseline",
+                    "raw-codex-autonomous-max5",
+                    "goal-harness-product-mode",
+                }
+                else "codex_acp_goal_prompt_request_unconfirmed_native_goal_mode"
+                if route == "codex-goal-mode-baseline"
+                else "codex_acp_with_curated_skills"
+            ),
+            "blind_loop": contract["blind_loop"],
+            "product_mode": contract.get("product_mode") is True,
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "verifier_output_tail_forwarded_by_default": False,
+            "raw_trace_recorded": False,
+            "raw_task_text_recorded": False,
+            "does_not_upload_or_submit": True,
+        },
+        "trials": [
+            {
+                "task_id": task_id,
+                "trial_name": f"{task_id}_{route}",
+                "source": dataset,
+                "exception_type": contract["first_blocker"],
+                "reward": {"reward": 0},
+                "metrics": {
+                    "input_tokens": 0,
+                    "cache_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0,
+                },
+                "trajectory_present": False,
+                "verifier_reward_present": False,
+                "artifact_manifest_present": False,
+                "trial_result_present": False,
+            }
+        ],
+        "validation": validation,
+        "authorization": {
+            "real_case_execution_authorized": False,
+            "submit_eligible": False,
+        },
+        "redaction": {
+            "secret_values_recorded": False,
+            "raw_sessions_recorded": False,
+            "host_paths_recorded": False,
+            "raw_prompts_recorded": False,
+            "raw_solutions_recorded": False,
+        },
+        "mode_contract": {
+            "requested_route": route,
+            "arm_id": contract["arm_id"],
+            "case_semantics_changed_by_harness": contract[
+                "case_semantics_changed_by_harness"
+            ],
+            "goal_harness_inside_case": contract["goal_harness_inside_case"],
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "official_score_comparable_to_native_codex": contract[
+                "official_score_comparable_to_native_codex"
+            ],
+            "official_score_comparable_to_goal_harness_treatment": contract[
+                "official_score_comparable_to_goal_harness_treatment"
+            ],
+            "leaderboard_evidence": False,
+        },
+        "evidence_files": [
+            "doc:automation-loop-treatment-case-selection-20260614.md",
+            "doc:benchmark-run-ledger-v0.md",
+            "smoke:skillsbench-benchmark-run-smoke.py",
+        ],
+        "resume_or_inspect_commands": [
+            (
+                "goal-harness benchmark run skillsbench "
+                f"--skillsbench-route {route} --include-task-name {task_id}"
+            ),
+            (
+                "goal-harness benchmark run-ledger-upsert "
+                "--benchmark-run-json <skillsbench-compact-benchmark-run-v0.json>"
+            ),
+        ],
+        "real_run": False,
+        "submit_eligible": False,
+        "official_task_score": {
+            "kind": "not_run",
+            "value": None,
+        },
+        "case_semantics_changed_by_harness": contract[
+            "case_semantics_changed_by_harness"
+        ],
+        "goal_harness_inside_case": contract["goal_harness_inside_case"],
+        "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+        "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+        "native_goal_mode_requested": contract["native_goal_mode_requested"],
+        "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+        "native_goal_mode_confirmation_status": contract[
+            "native_goal_mode_confirmation_status"
+        ],
+        "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+        "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+        "curated_skills_visible": contract["curated_skills_visible"],
+        "product_mode": contract.get("product_mode") is True,
+        "blind_loop": contract["blind_loop"],
+        "official_feedback_blinded": contract["official_feedback_blinded"],
+        "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+        "official_score_comparable_to_native_codex": contract[
+            "official_score_comparable_to_native_codex"
+        ],
+        "official_score_comparable_to_goal_harness_treatment": contract[
+            "official_score_comparable_to_goal_harness_treatment"
+        ],
+        "leaderboard_evidence": False,
+        "trace_publicness": "public_skillsbench_adapter_skeleton",
+        "first_blocker": contract["first_blocker"],
+        "stop_conditions": [
+            "do_not_run_benchflow_from_skeleton",
+            "do_not_invoke_real_codex_from_skeleton",
+            "do_not_start_docker_or_cloud_from_skeleton",
+            "do_not_call_model_api_from_skeleton",
+            "do_not_read_raw_task_prompt_solution_or_trajectory",
+            "do_not_upload_or_submit_leaderboard",
+            "do_not_record_secrets_or_raw_sessions",
+        ],
+    }
+    return benchmark_run
+
+
+def _skillsbench_controller_trace_counters(
+    controller_trace: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(controller_trace, dict):
+        return {}
+    schema_version = str(controller_trace.get("schema_version") or "")
+    if schema_version != "skillsbench_goal_harness_controller_trace_v0":
+        return {}
+
+    def count(key: str) -> int:
+        value = controller_trace.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        return 0
+
+    def positive_int(key: str) -> int | None:
+        value = controller_trace.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return None
+
+    def round_reward_records() -> list[dict[str, Any]]:
+        raw_records = controller_trace.get("round_rewards")
+        if not isinstance(raw_records, list):
+            return []
+        records: list[dict[str, Any]] = []
+        seen_rounds: set[int] = set()
+        for item in raw_records:
+            if not isinstance(item, dict):
+                continue
+            agent_round = item.get("agent_round")
+            if (
+                not isinstance(agent_round, int)
+                or isinstance(agent_round, bool)
+                or agent_round <= 0
+                or agent_round in seen_rounds
+            ):
+                continue
+            seen_rounds.add(agent_round)
+            record: dict[str, Any] = {"agent_round": agent_round}
+            for field in ("reward_present", "passed"):
+                if isinstance(item.get(field), bool):
+                    record[field] = item[field]
+            reward = item.get("reward")
+            if isinstance(reward, (int, float)) and not isinstance(reward, bool):
+                record["reward"] = float(reward)
+            tool_calls = item.get("tool_calls")
+            if (
+                isinstance(tool_calls, int)
+                and not isinstance(tool_calls, bool)
+                and tool_calls >= 0
+            ):
+                record["tool_calls"] = tool_calls
+            records.append(record)
+        return sorted(records, key=lambda record: record["agent_round"])
+
+    reward_records = round_reward_records()
+    first_success_round = positive_int("first_success_round")
+    if first_success_round is None:
+        for record in reward_records:
+            if record.get("passed") is True:
+                first_success_round = int(record["agent_round"])
+                break
+
+    counters: dict[str, Any] = {
+        "controller_trace_present": True,
+        "controller_trace_schema_version": schema_version,
+        "controller_trace_publicness": "public_counts_only_no_task_text_no_verifier_output",
+        "controller_action_decisions": count("controller_action_decisions"),
+        "initial_prompt_count": count("initial_prompt_count"),
+        "followup_prompt_count": count("followup_prompt_count"),
+        "stop_decision_count": count("stop_decision_count"),
+        "reward_observation_count": count("reward_observation_count"),
+        "round_reward_count": len(reward_records),
+        "official_success_observed": controller_trace.get("official_success_observed")
+        is True
+        or first_success_round is not None,
+        "official_success_observation_count": count(
+            "official_success_observation_count"
+        ),
+        "first_success_round": first_success_round,
+        "verifier_feedback_observation_count": count(
+            "verifier_feedback_observation_count"
+        ),
+        "official_feedback_blinded_count": count("official_feedback_blinded_count"),
+        "official_feedback_forwarded": controller_trace.get(
+            "official_feedback_forwarded"
+        )
+        is True,
+        "blind_loop": controller_trace.get("blind_loop") is True,
+        "product_mode": controller_trace.get("product_mode") is True,
+        "agent_declared_done": controller_trace.get("agent_declared_done") is True,
+        "max_rounds_budget": count("max_rounds_budget"),
+        "goal_harness_state_reads": count("goal_harness_state_reads"),
+        "goal_harness_state_writes": count("goal_harness_state_writes"),
+        "heartbeat_count": count("heartbeat_count"),
+        "raw_task_text_recorded": controller_trace.get("raw_task_text_recorded")
+        is True,
+        "raw_verifier_output_recorded": controller_trace.get(
+            "raw_verifier_output_recorded"
+        )
+        is True,
+        "raw_agent_trajectory_recorded": controller_trace.get(
+            "raw_agent_trajectory_recorded"
+        )
+        is True,
+    }
+    last_decision = _public_safe_benchmark_label(
+        controller_trace.get("last_decision") or ""
+    )
+    if last_decision:
+        counters["last_decision"] = last_decision
+    declared_done_round = positive_int("declared_done_round")
+    if declared_done_round is not None:
+        counters["declared_done_round"] = declared_done_round
+    declared_done_score = controller_trace.get("declared_done_score")
+    if (
+        isinstance(declared_done_score, (int, float))
+        and not isinstance(declared_done_score, bool)
+    ):
+        counters["declared_done_score"] = float(declared_done_score)
+    if reward_records:
+        counters["round_rewards"] = reward_records
+    trajectory_summary = (
+        controller_trace.get("acp_trajectory_summary")
+        if isinstance(controller_trace.get("acp_trajectory_summary"), dict)
+        else {}
+    )
+    if trajectory_summary:
+        counters["acp_trajectory_summary"] = {
+            key: trajectory_summary.get(key)
+            for key in (
+                "schema_version",
+                "private_trajectory_present",
+                "raw_text_copied_to_public",
+                "event_count",
+                "round_count",
+                "user_message_count",
+                "agent_message_count",
+                "tool_call_count",
+                "action_category_counts",
+                "round_action_category_counts",
+                "goal_harness_cli_call_count",
+                "goal_harness_cli_calls",
+                "goal_harness_cli_state_usage_counts",
+                "goal_harness_cli_state_read_count",
+                "goal_harness_cli_state_write_count",
+                "protected_path_mention_count",
+                "protected_path_edit_signal_count",
+                "codex_acp_text_present",
+                "codex_acp_text_bytes",
+            )
+            if trajectory_summary.get(key) is not None
+        }
+    return counters
+
+
+def _round_reward_trace_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    numeric_records: list[dict[str, Any]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        agent_round = item.get("agent_round")
+        reward = item.get("reward")
+        if (
+            not isinstance(agent_round, int)
+            or isinstance(agent_round, bool)
+            or agent_round <= 0
+            or not isinstance(reward, (int, float))
+            or isinstance(reward, bool)
+        ):
+            continue
+        numeric_records.append(
+            {
+                "agent_round": agent_round,
+                "reward": float(reward),
+                "passed": item.get("passed") if isinstance(item.get("passed"), bool) else reward >= 1,
+            }
+        )
+    if not numeric_records:
+        return {}
+    by_round = sorted(numeric_records, key=lambda item: item["agent_round"])
+    best = max(by_round, key=lambda item: (item["reward"], -item["agent_round"]))
+    final = by_round[-1]
+    return {
+        "final_round": final["agent_round"],
+        "final_round_reward": final["reward"],
+        "final_round_passed": final["passed"],
+        "best_reward_round": best["agent_round"],
+        "best_round_reward": best["reward"],
+        "best_round_passed": best["passed"],
+        "best_round_is_final": final["reward"] == best["reward"],
+        "loop_score_policy": "best_round_for_offline_controller_analysis",
+        "official_score_policy": "final_workspace_official_result",
+    }
+
+
+def build_skillsbench_benchflow_result_benchmark_run(
+    result_json_path: str | Path,
+    *,
+    route: str = SKILLSBENCH_DEFAULT_ROUTE,
+    dataset: str = SKILLSBENCH_DEFAULT_DATASET,
+    agent: str = "codex",
+    model: str | None = None,
+    runner_warning_labels: Iterable[str] | None = None,
+    controller_trace: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a public-safe benchmark_run_v0 from an official SkillsBench result.
+
+    The official BenchFlow result.json already contains the compact fields we
+    need for ledgering: task name, agent/model, reward, error, tool-call count,
+    and timing. This reducer deliberately reads only result.json and sibling
+    timing.json; it does not read prompts, trajectories, verifier stdout, task
+    text, screenshots, or credential material.
+    """
+
+    result_path = Path(result_json_path).expanduser()
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    if not isinstance(result, dict):
+        raise ValueError("SkillsBench result.json must contain a JSON object")
+
+    task_id = str(result.get("task_name") or "").strip()
+    if not task_id:
+        raise ValueError("SkillsBench result.json is missing task_name")
+
+    contract = _skillsbench_route_contract(route)
+    observed_agent = str(result.get("agent") or result.get("agent_name") or agent)
+    if observed_agent not in {"codex", "codex-acp"}:
+        raise ValueError(
+            "SkillsBench BenchFlow ingest currently supports codex/codex-acp only"
+        )
+    requested_model = str(model or result.get("model") or SKILLSBENCH_DEFAULT_MODEL)
+    observed_model = str(result.get("model") or requested_model)
+    warning_labels = [
+        label
+        for label in (
+            _public_safe_benchmark_label(item)
+            for item in (runner_warning_labels or [])
+        )
+        if label
+    ]
+    model_control_status = "reported_model_from_result_metadata"
+    actual_model_verified = False
+    actual_model_source = "official_skillsbench_result_model_field"
+    if CODEX_ACP_SET_MODEL_UNSUPPORTED_LABEL in warning_labels:
+        model_control_status = "requested_model_not_enforced_by_acp"
+        actual_model_verified = False
+        actual_model_source = "codex_acp_default_or_launch_config"
+    rollout_name = str(result.get("rollout_name") or f"{task_id}_{route}")
+
+    rewards = result.get("rewards") if isinstance(result.get("rewards"), dict) else {}
+    reward_value = rewards.get("reward")
+    if not isinstance(reward_value, (int, float)) or isinstance(reward_value, bool):
+        reward_value = None
+    official_passed = bool(reward_value is not None and reward_value >= 1)
+
+    timing_path = result_path.with_name("timing.json")
+    timing: dict[str, Any] = {}
+    if timing_path.exists():
+        raw_timing = json.loads(timing_path.read_text(encoding="utf-8"))
+        if isinstance(raw_timing, dict):
+            timing = raw_timing
+    timing_summary = {
+        key: value
+        for key, value in timing.items()
+        if key
+        in {
+            "environment_setup",
+            "agent_setup",
+            "agent_execution",
+            "verifier",
+            "total",
+        }
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    }
+
+    error = result.get("error")
+    verifier_error = result.get("verifier_error")
+    error_text = str(error).strip() if error else ""
+    verifier_error_text = str(verifier_error).strip() if verifier_error else ""
+    failure_labels: list[str] = []
+    exception_type = "none"
+    score_failure_attribution = "none"
+    if error_text:
+        exception_type, score_failure_attribution, failure_labels = (
+            _skillsbench_runner_error_attribution(error_text)
+        )
+    if verifier_error_text:
+        exception_type = "skillsbench_verifier_error"
+        failure_labels.append("verifier_infrastructure_failure")
+        score_failure_attribution = "verifier_infrastructure_failure"
+
+    n_tool_calls = result.get("n_tool_calls")
+    tool_calls = n_tool_calls if isinstance(n_tool_calls, int) else 0
+    partial_trajectory = bool(result.get("partial_trajectory") is True)
+    if reward_value == 0 and not failure_labels and not partial_trajectory:
+        failure_labels.append("official_verifier_solution_failure")
+        score_failure_attribution = "official_verifier_solution_failure"
+    elif reward_value == 0 and not failure_labels:
+        failure_labels.append("official_score_zero_case_failure")
+    real_run_completed = not error_text and not verifier_error_text
+    job_name = _skillsbench_job_name(dataset, task_id, route)
+    controller_counters = _skillsbench_controller_trace_counters(controller_trace)
+    controller_trace_present = bool(controller_counters.get("controller_trace_present"))
+    controller_raw_material_recorded = bool(
+        controller_counters.get("raw_task_text_recorded")
+        or controller_counters.get("raw_verifier_output_recorded")
+        or controller_counters.get("raw_agent_trajectory_recorded")
+    )
+    counter_trust_level = "official_benchflow_compact_result"
+    if controller_trace_present:
+        counter_trust_level = (
+            "official_benchflow_compact_result_plus_goal_harness_controller_trace"
+        )
+    evidence_files = [
+        "official_skillsbench:result.json",
+        "official_skillsbench:timing.json" if timing else "official_skillsbench:timing_missing",
+    ]
+    if controller_trace_present:
+        evidence_files.append("goal_harness:controller_trace.public.json")
+    trajectory_summary = (
+        controller_counters.get("acp_trajectory_summary")
+        if isinstance(controller_counters.get("acp_trajectory_summary"), dict)
+        else {}
+    )
+    if trajectory_summary:
+        evidence_files.append("goal_harness:acp_trajectory_summary")
+    runner_failure: dict[str, Any] | None = None
+    if error_text:
+        runner_failure = {
+            "schema_version": "skillsbench_runner_failure_v0",
+            "exception_type": exception_type,
+            "failure_class": score_failure_attribution,
+            "raw_error_recorded": False,
+            "raw_logs_read": False,
+            "raw_task_text_read": False,
+            "raw_trajectory_read": False,
+        }
+        runner_failure_fingerprint = _skillsbench_runner_error_fingerprint(
+            error_text
+        )
+    round_reward_records = controller_counters.get("round_rewards")
+    if not isinstance(round_reward_records, list):
+        round_reward_records = []
+    first_success_round = controller_counters.get("first_success_round")
+    first_success_round_value = (
+        first_success_round
+        if isinstance(first_success_round, int)
+        and not isinstance(first_success_round, bool)
+        and first_success_round > 0
+        else None
+    )
+    round_reward_trace: dict[str, Any] | None = None
+    if controller_trace_present:
+        round_stats = _round_reward_trace_stats(round_reward_records)
+        round_reward_trace = {
+            "schema_version": "benchmark_round_reward_trace_v0",
+            "source": "goal_harness_controller_trace",
+            "round_index_origin": "agent_round_1_is_first_completed_agent_attempt",
+            "records": round_reward_records,
+            "first_success_round": first_success_round_value,
+            "success_observed": controller_counters.get(
+                "official_success_observed",
+                False,
+            ),
+            "max_rounds_budget": controller_counters.get("max_rounds_budget", 0),
+            "official_feedback_returned_to_agent": contract[
+                "reward_feedback_forwarded"
+            ],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "agent_declared_done": controller_counters.get("agent_declared_done")
+            is True,
+        }
+        declared_done_round = controller_counters.get("declared_done_round")
+        if (
+            isinstance(declared_done_round, int)
+            and not isinstance(declared_done_round, bool)
+            and declared_done_round > 0
+        ):
+            round_reward_trace["declared_done_round"] = declared_done_round
+        declared_done_score = controller_counters.get("declared_done_score")
+        if (
+            isinstance(declared_done_score, (int, float))
+            and not isinstance(declared_done_score, bool)
+        ):
+            round_reward_trace["declared_done_score"] = float(declared_done_score)
+        round_reward_trace.update(round_stats)
+
+    benchmark_run: dict[str, Any] = {
+        "schema_version": "benchmark_run_v0",
+        "source_runner": "official_skillsbench_benchflow_result",
+        "benchmark_id": dataset,
+        "job_name": job_name,
+        "mode": contract["mode"],
+        "route": route,
+        "agent": {
+            "name": "codex",
+            "model": observed_model,
+            "kwargs_keys": [
+                "benchflow_agent=codex-acp",
+                "sandbox=docker",
+                "no_upload",
+                "single_task",
+            ],
+        },
+        "model_control": {
+            "schema_version": BENCHMARK_MODEL_CONTROL_SCHEMA_VERSION,
+            "requested_model": requested_model,
+            "reported_model": observed_model,
+            "control_method": "benchflow_acp_session_set_model",
+            "control_status": model_control_status,
+            "actual_model_verified": actual_model_verified,
+            "actual_model_source": actual_model_source,
+            "warning_labels": warning_labels,
+        },
+        "progress": {
+            "n_total_trials": 1,
+            "n_completed_trials": 1 if real_run_completed else 0,
+            "n_errored_trials": 0 if real_run_completed else 1,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+        },
+        "metrics": {
+            "input_tokens": 0,
+            "cache_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0,
+        },
+        "interaction_counters": {
+            "schema_version": "skillsbench_interaction_counters_v0",
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "goal_harness_state_reads": controller_counters.get(
+                "goal_harness_state_reads", 0
+            ),
+            "goal_harness_state_writes": controller_counters.get(
+                "goal_harness_state_writes", 0
+            ),
+            "heartbeat_count": controller_counters.get("heartbeat_count", 0),
+            "controller_trace_present": controller_trace_present,
+            "controller_action_decisions": controller_counters.get(
+                "controller_action_decisions", 0
+            ),
+            "controller_initial_prompt_count": controller_counters.get(
+                "initial_prompt_count", 0
+            ),
+            "controller_followup_prompt_count": controller_counters.get(
+                "followup_prompt_count", 0
+            ),
+            "controller_stop_decision_count": controller_counters.get(
+                "stop_decision_count", 0
+            ),
+            "controller_reward_observation_count": controller_counters.get(
+                "reward_observation_count", 0
+            ),
+            "controller_round_reward_count": controller_counters.get(
+                "round_reward_count", 0
+            ),
+            "controller_official_success_observed": controller_counters.get(
+                "official_success_observed", False
+            ),
+            "controller_official_success_observation_count": controller_counters.get(
+                "official_success_observation_count", 0
+            ),
+            "controller_first_success_round": first_success_round_value or 0,
+            "controller_verifier_feedback_observation_count": controller_counters.get(
+                "verifier_feedback_observation_count", 0
+            ),
+            "controller_official_feedback_blinded_count": controller_counters.get(
+                "official_feedback_blinded_count", 0
+            ),
+            "controller_official_feedback_forwarded": controller_counters.get(
+                "official_feedback_forwarded", False
+            ),
+            "controller_blind_loop": controller_counters.get("blind_loop", False),
+            "product_mode": controller_counters.get("product_mode", False),
+            "agent_declared_done": controller_counters.get(
+                "agent_declared_done", False
+            ),
+            "declared_done_round": controller_counters.get("declared_done_round", 0),
+            "controller_max_rounds_budget": controller_counters.get(
+                "max_rounds_budget", 0
+            ),
+            "controller_trace_schema_version": controller_counters.get(
+                "controller_trace_schema_version", ""
+            ),
+            "controller_trace_publicness": controller_counters.get(
+                "controller_trace_publicness", ""
+            ),
+            "private_trajectory_summary_present": bool(trajectory_summary),
+            "private_trajectory_event_count": trajectory_summary.get("event_count", 0),
+            "private_trajectory_round_count": trajectory_summary.get("round_count", 0),
+            "private_trajectory_tool_call_count": trajectory_summary.get(
+                "tool_call_count", 0
+            ),
+            "goal_harness_cli_call_count": trajectory_summary.get(
+                "goal_harness_cli_call_count", 0
+            ),
+            "goal_harness_cli_calls": trajectory_summary.get(
+                "goal_harness_cli_calls", []
+            ),
+            "trajectory_action_category_counts": trajectory_summary.get(
+                "action_category_counts", {}
+            ),
+            "goal_harness_cli_state_usage_counts": trajectory_summary.get(
+                "goal_harness_cli_state_usage_counts", {}
+            ),
+            "goal_harness_cli_state_read_count": trajectory_summary.get(
+                "goal_harness_cli_state_read_count", 0
+            ),
+            "goal_harness_cli_state_write_count": trajectory_summary.get(
+                "goal_harness_cli_state_write_count", 0
+            ),
+            "protected_path_mention_count": trajectory_summary.get(
+                "protected_path_mention_count", 0
+            ),
+            "protected_path_edit_signal_count": trajectory_summary.get(
+                "protected_path_edit_signal_count", 0
+            ),
+            "codex_acp_text_bytes": trajectory_summary.get("codex_acp_text_bytes", 0),
+            "last_decision": controller_counters.get("last_decision", ""),
+            "case_result_writeback": "official_benchflow_result_json",
+            "counter_trust_level": counter_trust_level,
+        },
+        "episode_policy": {
+            "schema_version": "skillsbench_episode_policy_v0",
+            "route": route,
+            "outer_controller": (
+                "goal_harness_blind_automation_loop"
+                if route == "goal-harness-blind-loop-treatment"
+                else "goal_harness_product_mode"
+                if route == "goal-harness-product-mode"
+                else "reward_feedback_automation_loop_ablation"
+                if route == "automation-loop-treatment"
+                else "raw_codex_autonomous_max5"
+                if route == "raw-codex-autonomous-max5"
+                else "fixed_blind_loop_runner"
+                if route == "codex-acp-blind-loop-baseline"
+                else "runner_only"
+            ),
+            "inner_case_actor": (
+                "ordinary_codex_acp_agent"
+                if route
+                in {
+                    "automation-loop-treatment",
+                    "goal-harness-blind-loop-treatment",
+                    "codex-acp-blind-loop-baseline",
+                    "raw-codex-autonomous-max5",
+                    "goal-harness-product-mode",
+                }
+                else "codex_acp_goal_prompt_request_unconfirmed_native_goal_mode"
+                if route == "codex-goal-mode-baseline"
+                else "codex_acp_with_curated_skills"
+            ),
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "verifier_output_tail_forwarded_by_default": False,
+            "raw_trace_recorded": False,
+            "raw_task_text_recorded": False,
+            "controller_trace_recorded": controller_trace_present,
+            "does_not_upload_or_submit": True,
+        },
+        "trials": [
+            {
+                "task_id": task_id,
+                "trial_name": rollout_name,
+                "source": dataset,
+                "exception_type": exception_type,
+                "reward": {"reward": reward_value if reward_value is not None else 0},
+                "metrics": {
+                    "input_tokens": 0,
+                    "cache_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0,
+                },
+                "trajectory_present": bool(result.get("trajectory_source")),
+                "verifier_reward_present": reward_value is not None,
+                "artifact_manifest_present": True,
+                "trial_result_present": True,
+            }
+        ],
+        "validation": {
+            "official_verifier_validation_present": reward_value is not None,
+            "official_case_success": official_passed,
+            "no_upload": True,
+            "no_submit": True,
+            "no_raw_logs_public": True,
+            "no_credential_values_recorded": True,
+            "validation_scope": "official_benchflow_result_json_only",
+            "official_verifier_status": "completed"
+            if reward_value is not None
+            else "missing",
+            "goal_harness_controller_trace_present": controller_trace_present,
+            "goal_harness_controller_trace_public_safe": not controller_raw_material_recorded,
+        },
+        "authorization": {
+            "real_case_execution_authorized": True,
+            "submit_eligible": False,
+        },
+        "redaction": {
+            "secret_values_recorded": False,
+            "raw_sessions_recorded": False,
+            "host_paths_recorded": False,
+            "raw_prompts_recorded": False,
+            "raw_solutions_recorded": False,
+        },
+        "mode_contract": {
+            "requested_route": route,
+            "arm_id": contract["arm_id"],
+            "case_semantics_changed_by_harness": contract[
+                "case_semantics_changed_by_harness"
+            ],
+            "goal_harness_inside_case": contract["goal_harness_inside_case"],
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "official_score_comparable_to_native_codex": contract[
+                "official_score_comparable_to_native_codex"
+            ],
+            "official_score_comparable_to_goal_harness_treatment": contract[
+                "official_score_comparable_to_goal_harness_treatment"
+            ],
+            "leaderboard_evidence": False,
+        },
+        "evidence_files": evidence_files,
+        "resume_or_inspect_commands": [
+            (
+                "goal-harness benchmark run skillsbench "
+                "--skillsbench-result-json <official-skillsbench-result.json>"
+            ),
+            (
+                "goal-harness benchmark run-ledger-upsert "
+                "--benchmark-run-json <skillsbench-compact-benchmark-run-v0.json>"
+            ),
+        ],
+        "real_run": True,
+        "submit_eligible": False,
+        "official_task_score": {
+            "kind": "skillsbench_verifier_reward",
+            "value": reward_value,
+            "passed": official_passed,
+        },
+        "official_score": reward_value,
+        "official_score_status": "completed" if reward_value is not None else "missing",
+        "official_score_source": "official_skillsbench_benchflow_result_json",
+        "score_failure_attribution": score_failure_attribution,
+        "case_semantics_changed_by_harness": contract[
+            "case_semantics_changed_by_harness"
+        ],
+        "goal_harness_inside_case": contract["goal_harness_inside_case"],
+        "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+        "product_mode": contract.get("product_mode") is True,
+        "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+        "native_goal_mode_requested": contract["native_goal_mode_requested"],
+        "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+        "native_goal_mode_confirmation_status": contract[
+            "native_goal_mode_confirmation_status"
+        ],
+        "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+        "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+        "curated_skills_visible": contract["curated_skills_visible"],
+        "blind_loop": contract["blind_loop"],
+        "official_feedback_blinded": contract["official_feedback_blinded"],
+        "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+        "official_score_comparable_to_native_codex": contract[
+            "official_score_comparable_to_native_codex"
+        ],
+        "official_score_comparable_to_goal_harness_treatment": contract[
+            "official_score_comparable_to_goal_harness_treatment"
+        ],
+        "leaderboard_evidence": False,
+        "trace_publicness": "public_skillsbench_official_compact_result_only",
+        "failure_attribution_labels": failure_labels,
+        "runner_warning_labels": warning_labels,
+        "stop_conditions": [
+            "do_not_read_raw_task_prompt_solution_or_trajectory",
+            "do_not_record_absolute_job_paths_in_public_ledger",
+            "do_not_upload_or_submit_leaderboard",
+            "do_not_record_secrets_or_raw_sessions",
+        ],
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "controller_trace_read": controller_trace_present,
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+    if timing_summary:
+        benchmark_run["timing"] = timing_summary
+    if round_reward_trace is not None:
+        benchmark_run["round_reward_trace"] = round_reward_trace
+    if runner_failure is not None:
+        benchmark_run["runner_failure"] = runner_failure
+        benchmark_run["runner_failure_fingerprint"] = runner_failure_fingerprint
+    if partial_trajectory:
+        benchmark_run["failure_attribution_labels"].append("partial_trajectory")
+    return benchmark_run
+
+
+def skillsbench_recommended_action(*, route: str) -> str:
+    contract = _skillsbench_route_contract(route)
+    return str(contract["next_action"])
+
 
 def build_terminal_bench_benchmark_run(
     *,
@@ -13458,6 +20040,13 @@ def build_terminal_bench_benchmark_run(
     verifier_timeout_multiplier: float | None = None,
     agent_setup_timeout_multiplier: float | None = None,
     environment_build_timeout_multiplier: float | None = None,
+    codex_install_strategy: str = (
+        TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+    ),
+    codex_preflight_timeout_sec: int | None = None,
+    worker_codex_materialization_strategy: str | None = None,
+    worker_materialization_probe_only: bool = False,
+    setup_timeout_repair_profile: bool = False,
 ) -> dict[str, Any]:
     """Build a compact fixture-only benchmark_run_v0 for Terminal-Bench.
 
@@ -13522,9 +20111,65 @@ def build_terminal_bench_benchmark_run(
         raise ValueError(
             "--active-user-observation-fixture requires --active-user-assisted-treatment"
         )
-    if active_cli_bridge_preflight and agent_timeout_multiplier is None:
+    if (
+        preflight_guard
+        and mode
+        in (
+            "codex-goal-harness",
+            "goal-harness-managed-codex",
+            "hardened-codex",
+            "codex-goal-mode",
+        )
+        and agent_timeout_multiplier is None
+    ):
         agent_timeout_multiplier = (
             TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_TIMEOUT_MULTIPLIER
+        )
+    if (
+        preflight_guard
+        and mode
+        in (
+            "codex-goal-harness",
+            "goal-harness-managed-codex",
+            "hardened-codex",
+            "codex-goal-mode",
+        )
+        and agent_setup_timeout_multiplier is None
+    ):
+        agent_setup_timeout_multiplier = (
+            TERMINAL_BENCH_PRIVATE_EXTENDED_AGENT_SETUP_TIMEOUT_MULTIPLIER
+        )
+    setup_repair_profile: dict[str, Any] | None = None
+    if setup_timeout_repair_profile:
+        profile_kwargs: dict[str, Any] = {
+            "codex_install_strategy": codex_install_strategy,
+            "agent_timeout_multiplier": agent_timeout_multiplier,
+            "agent_setup_timeout_multiplier": agent_setup_timeout_multiplier,
+        }
+        if codex_preflight_timeout_sec is not None:
+            profile_kwargs["codex_preflight_timeout_sec"] = (
+                codex_preflight_timeout_sec
+            )
+        if worker_codex_materialization_strategy is not None:
+            profile_kwargs["worker_codex_materialization_strategy"] = (
+                worker_codex_materialization_strategy
+            )
+        setup_repair_profile = _terminal_bench_setup_timeout_repair_profile(
+            profile_kwargs
+        )
+        codex_install_strategy = str(profile_kwargs["codex_install_strategy"])
+        agent_timeout_multiplier = _optional_float(
+            profile_kwargs["agent_timeout_multiplier"]
+        )
+        agent_setup_timeout_multiplier = _optional_float(
+            profile_kwargs["agent_setup_timeout_multiplier"]
+        )
+        codex_preflight_timeout_sec = _optional_positive_int(
+            profile_kwargs.get("codex_preflight_timeout_sec")
+        )
+        worker_codex_materialization_strategy = (
+            str(profile_kwargs.get("worker_codex_materialization_strategy") or "")
+            or None
         )
 
     contract = _mode_contract(mode, fake_worker=fake_worker)
@@ -13888,6 +20533,10 @@ def build_terminal_bench_benchmark_run(
             verifier_timeout_multiplier=verifier_timeout_multiplier,
             agent_setup_timeout_multiplier=agent_setup_timeout_multiplier,
             environment_build_timeout_multiplier=environment_build_timeout_multiplier,
+            codex_install_strategy=codex_install_strategy,
+            codex_preflight_timeout_sec=codex_preflight_timeout_sec,
+            worker_codex_materialization_strategy=worker_codex_materialization_strategy,
+            worker_materialization_probe_only=worker_materialization_probe_only,
         )
         if mode in (
             "codex-goal-harness",
@@ -13923,6 +20572,11 @@ def build_terminal_bench_benchmark_run(
                 verifier_timeout_multiplier=verifier_timeout_multiplier,
                 agent_setup_timeout_multiplier=agent_setup_timeout_multiplier,
                 environment_build_timeout_multiplier=environment_build_timeout_multiplier,
+                codex_install_strategy=codex_install_strategy,
+                codex_preflight_timeout_sec=codex_preflight_timeout_sec,
+                worker_codex_materialization_strategy=worker_codex_materialization_strategy,
+                worker_materialization_probe_only=worker_materialization_probe_only,
+                setup_timeout_repair_profile=setup_timeout_repair_profile,
                 require_task_material_ready=require_task_material_ready,
             )
         )
@@ -14138,6 +20792,8 @@ def build_terminal_bench_benchmark_run(
         ),
         "managed_runner_command_preview": managed_runner_command_preview,
         "private_runner_launch_summary": private_runner_launch_summary,
+        "worker_materialization_probe_only": worker_materialization_probe_only,
+        "setup_timeout_repair_profile": setup_repair_profile or {},
         "real_run": False,
         "submit_eligible": False,
         "official_task_score": {

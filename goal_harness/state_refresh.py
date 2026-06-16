@@ -13,6 +13,7 @@ from .history import load_registry, unique_run_paths
 from .paths import resolve_runtime_root
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
+from .state_projection import state_projection_gap_warning
 
 
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
@@ -188,6 +189,9 @@ def build_state_refresh_record(
             "authority_source_count": len(authority_sources),
         },
     }
+    projection_gap = state_projection_gap_warning(state_text)
+    if projection_gap:
+        record["state_projection_gap"] = projection_gap
     if delivery_batch_scale:
         record["delivery_batch_scale"] = delivery_batch_scale
     if delivery_outcome:
@@ -216,6 +220,22 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
         return "\n".join(lines)
+
+    projection_gap = (
+        payload.get("state_projection_gap")
+        if isinstance(payload.get("state_projection_gap"), dict)
+        else {}
+    )
+    if projection_gap:
+        lines.append(
+            "- state_projection_gap: "
+            f"requires_todo_expansion={projection_gap.get('requires_todo_expansion')} "
+            f"user_open={projection_gap.get('user_open_count')} "
+            f"agent_open={projection_gap.get('agent_open_count')} "
+            f"target_roles={','.join(projection_gap.get('target_roles') or [])}"
+        )
+        if projection_gap.get("recommended_action"):
+            lines.append(f"- state_projection_gap_action: {projection_gap.get('recommended_action')}")
 
     global_sync = payload.get("global_sync") if isinstance(payload.get("global_sync"), dict) else {}
     if global_sync:

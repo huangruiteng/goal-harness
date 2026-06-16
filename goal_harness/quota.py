@@ -19,9 +19,12 @@ from .execution_profile import (
 )
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .todo_contract import (
+    TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
+    TODO_TASK_CLASS_USER_GATE,
     next_action_requires_advancement_text,
+    normalize_todo_status,
     normalize_todo_task_class,
 )
 
@@ -44,6 +47,19 @@ QUOTA_MONITOR_POLL_CLASSIFICATION = "quota_monitor_poll"
 ACCOUNTABLE_DELIVERY_OUTCOMES = {"outcome_progress", "primary_goal_outcome"}
 DEFAULT_SLOT_SPEND_SOURCE = "heartbeat"
 VALID_SLOT_SPEND_SOURCES = {"heartbeat", "controller", "adapter"}
+USER_GATE_ACTION_KIND_HINTS = (
+    "approval",
+    "approve",
+    "boundary",
+    "gate",
+    "blocker",
+    "credential",
+    "private",
+    "production",
+    "leaderboard",
+    "submission",
+    "public_claim",
+)
 FOCUS_WAIT_LIFECYCLE_MARKERS = {
     "continuation_boundary",
     "focus_wait",
@@ -84,6 +100,7 @@ AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS = (
 SELF_REPAIR_SPEND_ACTIONS = {
     "control_plane_health_repair",
     "control_plane_projection_repair",
+    "state_projection_gap_repair",
 }
 STALL_HEALTH_ITEM_COMPACT_FIELDS = (
     "goal_id",
@@ -116,8 +133,19 @@ EXTERNAL_EVIDENCE_OBSERVE_PATTERNS = (
 )
 EXTERNAL_EVIDENCE_LAUNCHED_PATTERNS = (
     re.compile(r"(?i)\b(?:launched|started|spawned|running|alive|materialized)\b.*\b(?:polling|result|marker)\b"),
+    re.compile(r"(?i)(?:launched|started|spawned|running|alive|materialized)[_\s-]+(?:polling|result|marker)"),
     re.compile(r"(?i)\bready_for_compact_polling\b"),
     re.compile(r"(?i)\bcompact\b.*\bresult\b.*\b(?:not\s+ready|ingest\s+not\s+ready)\b"),
+)
+EXTERNAL_EVIDENCE_HANDLE_ABSENT_PATTERNS = (
+    re.compile(
+        r"(?i)\b(?:no|without|absent|missing)\b.*\b"
+        r"(?:observable\s+)?(?:handle|channel|writeback|launch\s+summary|run[-_\s]?id|job)\b"
+    ),
+    re.compile(
+        r"(?i)\b(?:handle|channel|writeback|launch\s+summary|run[-_\s]?id|job)\b.*\b"
+        r"(?:absent|missing|not\s+available|does\s+not\s+exist|exists\s+yet)\b"
+    ),
 )
 
 
@@ -277,7 +305,22 @@ def _external_evidence_poll_signal(
         if str(value or "").strip()
     ]
     todo_texts: list[str] = []
-    launched_texts: list[str] = []
+    launched_texts: list[str] = [
+        str(value or "").strip()
+        for value in (
+            item.get("status"),
+            item.get("latest_run_classification"),
+            item.get("lifecycle_phase"),
+        )
+        if str(value or "").strip()
+    ]
+    lifecycle_flags = item.get("lifecycle_flags")
+    if isinstance(lifecycle_flags, list):
+        launched_texts.extend(
+            str(value or "").strip()
+            for value in lifecycle_flags
+            if str(value or "").strip()
+        )
     if isinstance(agent_todo_summary, dict):
         items = agent_todo_summary.get("first_open_items")
         if isinstance(items, list):
@@ -297,16 +340,34 @@ def _external_evidence_poll_signal(
     if not all_texts:
         return None
 
-    direct_observe = any(
+    direct_observe_action = any(
         pattern.search(text)
         for pattern in EXTERNAL_EVIDENCE_OBSERVE_PATTERNS
-        for text in all_texts
+        for text in action_texts
+    )
+    direct_observe_todo = any(
+        pattern.search(text)
+        for pattern in EXTERNAL_EVIDENCE_OBSERVE_PATTERNS
+        for text in todo_texts
+    )
+    direct_observe_state = any(
+        pattern.search(text)
+        for pattern in EXTERNAL_EVIDENCE_OBSERVE_PATTERNS
+        for text in launched_texts
     )
     launched_wait = bool(action_texts) and any(
         pattern.search(text)
         for pattern in EXTERNAL_EVIDENCE_LAUNCHED_PATTERNS
         for text in launched_texts
     )
+    handle_absent = any(
+        pattern.search(text)
+        for pattern in EXTERNAL_EVIDENCE_HANDLE_ABSENT_PATTERNS
+        for text in action_texts
+    )
+    if handle_absent and not launched_wait and not direct_observe_action and not direct_observe_state:
+        return None
+    direct_observe = direct_observe_action or direct_observe_todo or direct_observe_state
     if not direct_observe and not launched_wait:
         return None
 
@@ -318,7 +379,14 @@ def _external_evidence_poll_signal(
         "source": "active_state_or_latest_run",
         "trigger": "implicit_launched_external_poll",
         "observation_target": observation_target,
-        "matched_signal": "direct_observe" if direct_observe else "launched_wait",
+        "matched_signal": "launched_wait" if launched_wait else "direct_observe",
+        "matched_channel": (
+            "action"
+            if launched_wait or direct_observe_action
+            else "todo"
+            if direct_observe_todo
+            else "state"
+        ),
     }
 
 
@@ -329,21 +397,6 @@ def _work_lane_contract(
 ) -> dict[str, Any] | None:
     progress_scope = _item_progress_scope(item)
     external_poll_signal = _external_evidence_poll_signal(item, agent_todo_summary=agent_todo_summary)
-    if external_poll_signal:
-        return {
-            "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
-            "lane": "continuous_monitor",
-            "monitor_kind": "external_evidence",
-            "next_lane": "continuous_monitor",
-            "obligation": "observe_external_evidence_or_blocker",
-            "must_attempt_work": True,
-            "reason_codes": ["external_evidence_poll_signal"],
-            "monitor_policy": "read_only_observation_then_no_spend_if_unchanged",
-            "action": (
-                "verify the observable external result handle; if it is absent, "
-                "write a compact blocker instead of rerunning launched work"
-            ),
-        }
     todo_counts = _open_todo_task_counts(agent_todo_summary)
     has_agent_todos = todo_counts["open"] > 0
     has_advancement_todos = todo_counts["advancement"] > 0
@@ -351,15 +404,36 @@ def _work_lane_contract(
     monitor_only_todos = has_agent_todos and has_monitor_todos and not has_advancement_todos
     if progress_scope != "dependency_observation":
         if has_advancement_todos:
+            reason_codes = ["open_agent_todo"]
+            if external_poll_signal:
+                reason_codes.append("external_monitor_context")
             return {
                 "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
                 "lane": "advancement_task",
                 "next_lane": "advancement_task",
                 "obligation": "advance_one_bounded_segment",
                 "must_attempt_work": True,
-                "reason_codes": ["open_agent_todo"],
+                "reason_codes": reason_codes,
                 "monitor_policy": "material_transition_only",
-                "action": "advance the first executable agent todo or write a concrete blocker",
+                "action": (
+                    "advance the first executable agent todo or write a concrete blocker; "
+                    "treat monitor todos as auxiliary observation context"
+                ),
+            }
+        if external_poll_signal:
+            return {
+                "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+                "lane": "continuous_monitor",
+                "monitor_kind": "external_evidence",
+                "next_lane": "continuous_monitor",
+                "obligation": "observe_external_evidence_or_blocker",
+                "must_attempt_work": True,
+                "reason_codes": ["external_evidence_poll_signal"],
+                "monitor_policy": "read_only_observation_then_no_spend_if_unchanged",
+                "action": (
+                    "verify the observable external result handle; if it is absent, "
+                    "write a compact blocker instead of rerunning launched work"
+                ),
             }
         if monitor_only_todos:
             if _next_action_requires_advancement(item):
@@ -434,6 +508,12 @@ def _external_evidence_observation_obligation(
     explicit_wait = state == "waiting" and str(item.get("waiting_on") or "") == "external_evidence"
     poll_signal = _external_evidence_poll_signal(item, agent_todo_summary=agent_todo_summary)
     if not explicit_wait and not poll_signal:
+        return None
+    if (
+        not explicit_wait
+        and isinstance(work_lane_contract, dict)
+        and work_lane_contract.get("lane") == "advancement_task"
+    ):
         return None
     next_todo = ""
     if isinstance(agent_todo_summary, dict):
@@ -791,6 +871,15 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
     return compact
 
 
+def _is_user_gate_todo_item(item: dict[str, Any]) -> bool:
+    if _todo_task_class(item) == TODO_TASK_CLASS_USER_GATE:
+        return True
+    action_kind = str(item.get("action_kind") or "").strip().lower()
+    if not action_kind:
+        return False
+    return any(hint in action_kind for hint in USER_GATE_ACTION_KIND_HINTS)
+
+
 def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -821,6 +910,23 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
         if duplicate:
             continue
         open_items.append(_compact_todo_summary_item(item, text=text))
+    executable_items = [
+        item
+        for item in open_items
+        if _todo_item_is_actionable_open(item)
+        if _todo_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+    ]
+    monitor_items = [
+        item
+        for item in open_items
+        if _todo_item_is_actionable_open(item)
+        if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
+    ]
+    gate_items = [
+        item
+        for item in open_items
+        if _is_user_gate_todo_item(item)
+    ]
     return {
         "schema_version": value.get("schema_version"),
         "source_section": value.get("source_section"),
@@ -828,6 +934,9 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
         "open_count": value.get("open_count", len(open_items)),
         "done_count": value.get("done_count"),
         "first_open_items": open_items[:3],
+        "first_executable_items": executable_items[:3],
+        "gate_open_items": gate_items[:3],
+        "monitor_open_items": monitor_items,
     }
 
 
@@ -842,7 +951,7 @@ def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
     ):
         return _summarize_user_todos(value)
 
-    first_open_items: list[dict[str, Any]] = []
+    open_items: list[dict[str, Any]] = []
     items = value.get("items") if isinstance(value.get("items"), list) else []
     for item in items:
         if not isinstance(item, dict) or item.get("done") is True:
@@ -850,21 +959,33 @@ def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
         text = str(item.get("text") or "").strip()
         if not text:
             continue
-        first_open_items.append(_compact_todo_summary_item(item, text=text))
-        if len(first_open_items) >= 3:
-            break
-    if not first_open_items:
+        open_items.append(_compact_todo_summary_item(item, text=text))
+    if not open_items:
         next_text = str(value.get("next") or "").strip()
         next_index = value.get("next_index", 1)
-        first_open_items = [{"index": next_index, "text": next_text}] if next_text else []
-    open_count = value.get("open", value.get("open_count", len(first_open_items)))
+        open_items = [{"index": next_index, "text": next_text}] if next_text else []
+    executable_items = [
+        item
+        for item in open_items
+        if _todo_item_is_actionable_open(item)
+        if _todo_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+    ]
+    monitor_items = [
+        item
+        for item in open_items
+        if _todo_item_is_actionable_open(item)
+        if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
+    ]
+    open_count = value.get("open", value.get("open_count", len(open_items)))
     return {
         "schema_version": value.get("schema_version"),
         "source_section": value.get("source_section") or "project_asset",
         "total_count": value.get("total", value.get("total_count")),
         "open_count": open_count,
         "done_count": value.get("done", value.get("done_count")),
-        "first_open_items": first_open_items,
+        "first_open_items": open_items[:3],
+        "first_executable_items": executable_items[:3],
+        "monitor_open_items": monitor_items,
     }
 
 
@@ -975,15 +1096,22 @@ def _quota_execution_profile_boundary_summary(value: Any) -> dict[str, Any] | No
     return compact or None
 
 
-def _compact_autonomous_candidate_context(value: Any, *, limit: int = 3) -> dict[str, Any] | None:
+def _compact_autonomous_candidate_context(
+    value: Any,
+    *,
+    goal_id: str | None = None,
+    limit: int = 3,
+) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     compact = {field: value[field] for field in AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS if field in value}
     items = compact.get("items")
     if isinstance(items, list):
         compact_items: list[dict[str, Any]] = []
-        for item in items[:limit]:
+        for item in items:
             if not isinstance(item, dict):
+                continue
+            if goal_id and str(item.get("goal_id") or "") != goal_id:
                 continue
             compact_item = {
                 key: item[key]
@@ -992,7 +1120,12 @@ def _compact_autonomous_candidate_context(value: Any, *, limit: int = 3) -> dict
             }
             if compact_item:
                 compact_items.append(compact_item)
+            if len(compact_items) >= limit:
+                break
+        if not compact_items:
+            return None
         compact["items"] = compact_items
+        compact["open_count"] = len(compact_items)
     return compact or None
 
 
@@ -1037,6 +1170,25 @@ def _protocol_todo_actions(summary: Any, *, limit: int = 3) -> list[str]:
 
 
 def _protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
+    goal_id = str(payload.get("goal_id") or "")
+    agent_todos = (
+        payload.get("agent_todo_summary")
+        if isinstance(payload.get("agent_todo_summary"), dict)
+        else {}
+    )
+    for key in ("first_executable_items", "first_open_items"):
+        items = agent_todos.get(key) if isinstance(agent_todos.get(key), list) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if not _todo_item_is_actionable_open(item):
+                continue
+            if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+                continue
+            text = _protocol_action_label(item.get("text"))
+            if text:
+                return text
+
     backlog = (
         payload.get("autonomous_backlog_candidates")
         if isinstance(payload.get("autonomous_backlog_candidates"), dict)
@@ -1046,24 +1198,7 @@ def _protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
     for item in items:
         if not isinstance(item, dict):
             continue
-        text = _protocol_action_label(item.get("text"))
-        if text:
-            return text
-
-    agent_todos = (
-        payload.get("agent_todo_summary")
-        if isinstance(payload.get("agent_todo_summary"), dict)
-        else {}
-    )
-    first_open_items = (
-        agent_todos.get("first_open_items")
-        if isinstance(agent_todos.get("first_open_items"), list)
-        else []
-    )
-    for item in first_open_items:
-        if not isinstance(item, dict):
-            continue
-        if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+        if goal_id and str(item.get("goal_id") or "") != goal_id:
             continue
         text = _protocol_action_label(item.get("text"))
         if text:
@@ -1074,6 +1209,15 @@ def _protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
         if isinstance(payload.get("work_lane_contract"), dict)
         else {}
     )
+    reason_codes = (
+        work_lane.get("reason_codes")
+        if isinstance(work_lane.get("reason_codes"), list)
+        else []
+    )
+    if "next_action_requires_advancement" in reason_codes:
+        text = _protocol_action_text(payload.get("recommended_action"))
+        if text:
+            return text
     for key in ("action", "obligation"):
         text = _protocol_action_text(work_lane.get(key))
         if text:
@@ -1082,6 +1226,7 @@ def _protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
 
 
 def _protocol_monitor_action(payload: dict[str, Any]) -> str | None:
+    goal_id = str(payload.get("goal_id") or "")
     work_lane = (
         payload.get("work_lane_contract")
         if isinstance(payload.get("work_lane_contract"), dict)
@@ -1097,6 +1242,8 @@ def _protocol_monitor_action(payload: dict[str, Any]) -> str | None:
     items = monitors.get("items") if isinstance(monitors.get("items"), list) else []
     for item in items:
         if not isinstance(item, dict):
+            continue
+        if goal_id and str(item.get("goal_id") or "") != goal_id:
             continue
         text = _protocol_action_label(item.get("text"), limit=160)
         if text:
@@ -1229,6 +1376,17 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
         else {}
     )
     if mode == "external_evidence_observation":
+        external_observation = (
+            payload.get("external_evidence_observation")
+            if isinstance(payload.get("external_evidence_observation"), dict)
+            else {}
+        )
+        observation_target = _protocol_action_text(
+            external_observation.get("observation_target"),
+            limit=220,
+        )
+        if observation_target:
+            return observation_target
         return (
             "verify an observable external handle or compact writeback channel; "
             "write a compact blocker when it is absent"
@@ -1237,6 +1395,8 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
         return "run one bounded self-repair or replan segment before another quiet no-op"
     if mode == "monitor_quiet_skip":
         return "record at most one no-spend monitor-poll event, rerun the guard, then stay quiet if unchanged"
+    if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
+        return "wait for user/owner action after surfacing the blocker or gate"
     if mode == "outcome_floor_recovery":
         return "produce the required outcome-floor evidence artifact or write the concrete blocker"
     if mode == "control_plane_self_repair":
@@ -1291,8 +1451,8 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
     )
     mode = _interaction_mode(payload)
     user_required = bool(payload.get("requires_user_action"))
-    must_attempt = bool(execution_obligation.get("must_attempt_work"))
-    delivery_allowed = bool(
+    must_attempt = False if user_required else bool(execution_obligation.get("must_attempt_work"))
+    delivery_allowed = (not user_required) and bool(
         execution_obligation.get(
             "delivery_allowed",
             payload.get("normal_delivery_allowed")
@@ -1599,6 +1759,45 @@ def _open_todo_count(summary: dict[str, Any] | None) -> int:
         return 0
 
 
+def _open_user_gate_todo_items(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(summary, dict):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for key in ("gate_open_items", "first_open_items"):
+        values = summary.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict) or item.get("done") is True:
+                continue
+            if not _is_user_gate_todo_item(item):
+                continue
+            item_key = (item.get("todo_id"), item.get("index"), item.get("text"))
+            if any(
+                (existing.get("todo_id"), existing.get("index"), existing.get("text"))
+                == item_key
+                for existing in candidates
+            ):
+                continue
+            candidates.append(item)
+    return candidates
+
+
+def _has_open_user_gate_todo(summary: dict[str, Any] | None) -> bool:
+    return bool(_open_user_gate_todo_items(summary))
+
+
+def _user_gate_todo_notify_reason(summary: dict[str, Any] | None) -> str:
+    items = _open_user_gate_todo_items(summary)
+    if not items:
+        return "open user todo can resolve the current gate"
+    first = items[0]
+    action_kind = str(first.get("action_kind") or "").strip()
+    if action_kind:
+        return f"open user_gate todo requires owner decision before {action_kind}"
+    return "open user_gate todo requires owner decision before agent execution"
+
+
 def _todo_task_class(item: dict[str, Any]) -> str:
     text = " ".join(
         str(value or "")
@@ -1612,24 +1811,56 @@ def _todo_task_class(item: dict[str, Any]) -> str:
     )
 
 
+def _todo_item_is_actionable_open(item: dict[str, Any]) -> bool:
+    if item.get("done") is True:
+        return False
+    status = normalize_todo_status(item.get("status")) or TODO_STATUS_OPEN
+    return status == TODO_STATUS_OPEN
+
+
 def _open_todo_task_counts(summary: dict[str, Any] | None) -> dict[str, int]:
     open_count = _open_todo_count(summary)
-    first_open_items: list[dict[str, Any]] = []
-    if isinstance(summary, dict) and isinstance(summary.get("first_open_items"), list):
-        first_open_items = [item for item in summary["first_open_items"] if isinstance(item, dict)]
-    visible_open = min(open_count, len(first_open_items))
+    classified_items: list[dict[str, Any]] = []
+    seen: set[tuple[Any, str]] = set()
+    if isinstance(summary, dict):
+        for key in (
+            "first_executable_items",
+            "first_open_items",
+            "monitor_open_items",
+        ):
+            source_items = summary.get(key)
+            if not isinstance(source_items, list):
+                continue
+            for item in source_items:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text") or "").strip()
+                if not text:
+                    continue
+                identity = (item.get("index"), text)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                classified_items.append(item)
+    visible_open = min(open_count, len(classified_items))
     advancement_visible_count = sum(
         1
-        for item in first_open_items[:visible_open]
-        if _todo_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+        for item in classified_items[:visible_open]
+        if _todo_item_is_actionable_open(item)
+        and _todo_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+    )
+    monitor_visible_count = sum(
+        1
+        for item in classified_items[:visible_open]
+        if _todo_item_is_actionable_open(item)
+        and _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
     )
     hidden_count = max(0, open_count - visible_open)
-    monitor_count = visible_open - advancement_visible_count
     advancement_count = advancement_visible_count + hidden_count
     return {
         "open": open_count,
         "advancement": advancement_count,
-        "monitor": monitor_count,
+        "monitor": monitor_visible_count,
         "hidden": hidden_count,
     }
 
@@ -1725,6 +1956,63 @@ def _stall_self_repair_hint(
         }
 
     return None
+
+
+def _state_projection_gap(item: dict[str, Any], project_asset: dict[str, Any]) -> dict[str, Any] | None:
+    gap = (
+        item.get("state_projection_gap")
+        if isinstance(item.get("state_projection_gap"), dict)
+        else project_asset.get("state_projection_gap")
+        if isinstance(project_asset.get("state_projection_gap"), dict)
+        else None
+    )
+    if not isinstance(gap, dict):
+        return None
+    if gap.get("requires_todo_expansion") is not True:
+        return None
+    return gap
+
+
+def _state_projection_gap_repair_hint(
+    gap: dict[str, Any] | None,
+    *,
+    candidate_should_run: bool,
+    user_todo_summary: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None,
+    work_lane_contract: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not gap:
+        return None
+    if _open_todo_count(user_todo_summary) > 0 or _open_todo_count(agent_todo_summary) > 0:
+        return None
+    must_attempt = bool(
+        work_lane_contract
+        and work_lane_contract.get("must_attempt_work") is True
+    )
+    if not candidate_should_run and not must_attempt:
+        return None
+    return {
+        "source": "quota.should-run",
+        "trigger": "state_projection_gap",
+        "recommended_mode": "repair_state_projection_gap",
+        "effective_action": "state_projection_gap_repair",
+        "allowed": True,
+        "notify": "DONT_NOTIFY",
+        "reason": (
+            "active state has actionable Next Action / gate prose but no open "
+            "User Todo or Agent Todo projection"
+        ),
+        "repair_focus": (
+            "run one replan/todo-expansion/blocker-writeback slice: convert executable "
+            "Next Action into concrete Agent Todo, or convert owner/user gates into "
+            "User Todo, then refresh state before normal delivery"
+        ),
+        "spend_policy": (
+            "append exactly one heartbeat spend only after the projection repair is "
+            "validated and written back; do not spend for merely reporting the gap"
+        ),
+        "state_projection_gap": gap,
+    }
 
 
 def _control_plane_post_handoff_observation_hint(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -2131,6 +2419,24 @@ def _execution_obligation(
                 "quiet no-op is not allowed until the replan slice is validated or blocked"
             ),
         }
+    if should_run and recommended_mode == "repair_state_projection_gap":
+        return {
+            "must_attempt_work": True,
+            "kind": "state_projection_gap_repair",
+            "minimum": "one_replan_or_todo_expansion_or_blocker_writeback_segment",
+            "delivery_allowed": False,
+            "notify_is_execution_gate": False,
+            "contract": "state_projection_gap",
+            "contract_obligation": (
+                "repair the active-state projection before normal delivery: expand "
+                "Next Action into open Agent Todo/User Todo or write a compact blocker"
+            ),
+            "spend_policy": heartbeat_recommendation.get("spend_policy"),
+            "reason": (
+                "should_run=true exposed actionable prose but no open todo projection; "
+                "normal bounded delivery is blocked until projection is repaired"
+            ),
+        }
     if should_run and work_lane_contract:
         return {
             "must_attempt_work": bool(work_lane_contract.get("must_attempt_work", should_run)),
@@ -2490,6 +2796,23 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             agent_todo_summary=agent_todo_summary,
         )
         self_repair_allowed = bool(stall_self_repair and stall_self_repair.get("allowed"))
+        work_lane_contract = _work_lane_contract(item, agent_todo_summary=agent_todo_summary)
+        projection_gap = _state_projection_gap(item, project_asset)
+        projection_gap_repair = _state_projection_gap_repair_hint(
+            projection_gap,
+            candidate_should_run=bool(
+                normal_delivery_allowed or recovery_allowed or self_repair_allowed
+            ),
+            user_todo_summary=user_todo_summary,
+            agent_todo_summary=agent_todo_summary,
+            work_lane_contract=work_lane_contract,
+        )
+        if projection_gap_repair:
+            stall_self_repair = projection_gap_repair
+            self_repair_allowed = True
+            normal_delivery_allowed = False
+            recovery_allowed = False
+            reason = str(projection_gap_repair.get("reason") or reason)
         should_run = bool(normal_delivery_allowed or recovery_allowed or self_repair_allowed)
         effective_action = _effective_action(
             normal_delivery_allowed=normal_delivery_allowed,
@@ -2499,7 +2822,6 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             state=state,
             quota=quota,
         )
-        work_lane_contract = _work_lane_contract(item, agent_todo_summary=agent_todo_summary)
         heartbeat_recommendation = _heartbeat_recommendation(
             item,
             goal_id=safe_goal_id,
@@ -2518,7 +2840,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         )
         if external_evidence_observation:
             normal_delivery_allowed = False
-            should_run = bool(recovery_allowed or self_repair_allowed)
+            should_run = True
             heartbeat_recommendation = {
                 **heartbeat_recommendation,
                 "recommended_mode": "external_evidence_observe_or_blocker",
@@ -2558,6 +2880,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             "decision": (
                 "run"
                 if normal_delivery_allowed
+                else "observe"
+                if external_evidence_observation
                 else "safe_bypass_recovery"
                 if recovery_allowed
                 else "self_repair"
@@ -2615,6 +2939,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["control_plane"] = control_plane
         if stall_self_repair:
             payload["stall_self_repair"] = stall_self_repair
+        if projection_gap:
+            payload["state_projection_gap"] = projection_gap
         if item.get("operator_question"):
             payload["operator_question"] = item.get("operator_question")
         if item.get("missing_gates"):
@@ -2624,24 +2950,23 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             repeat_open_todo_notification = (
                 heartbeat_recommendation.get("repeat_notification_required") is True
             )
-            monitor_user_todo_blocks_quiet_skip = (
-                effective_action == "monitor_quiet_skip"
-                and _open_todo_count(user_todo_summary) > 0
-            )
-            if _should_notify_user_on_open_todo(
+            user_gate_todo_open = _has_open_user_gate_todo(user_todo_summary)
+            if user_gate_todo_open:
+                payload["notify_user_on_gate"] = True
+                payload["open_todo_notify_reason"] = _user_gate_todo_notify_reason(
+                    user_todo_summary
+                )
+                payload["open_todo_notification_policy"] = "repeat_until_resolved"
+            elif _should_notify_user_on_open_todo(
                 state=state,
                 waiting_on=str(item.get("waiting_on") or ""),
                 user_todo_summary=user_todo_summary,
-            ) or repeat_open_todo_notification or monitor_user_todo_blocks_quiet_skip:
+            ) or repeat_open_todo_notification:
                 payload["notify_user_on_open_todo"] = True
                 payload["open_todo_notify_reason"] = _open_todo_notify_reason(
                     state=state,
                     waiting_on=str(item.get("waiting_on") or ""),
                 )
-                if monitor_user_todo_blocks_quiet_skip:
-                    payload["open_todo_notify_reason"] = (
-                        "open user todo should be surfaced before a monitor-only quiet skip"
-                    )
                 if repeat_open_todo_notification:
                     payload["open_todo_notify_reason"] = (
                         heartbeat_recommendation.get("reason")
@@ -2649,18 +2974,22 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
                     )
                     payload["open_todo_notification_policy"] = "repeat_until_resolved"
         payload["requires_user_action"] = bool(
-            state == "operator_gate" or payload.get("notify_user_on_open_todo") is True
+            state == "operator_gate"
+            or payload.get("notify_user_on_gate") is True
+            or payload.get("notify_user_on_open_todo") is True
         )
         if agent_todo_summary:
             payload["agent_todo_summary"] = agent_todo_summary
         attention_queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
         backlog_context = _compact_autonomous_candidate_context(
-            attention_queue.get("autonomous_backlog_candidates")
+            attention_queue.get("autonomous_backlog_candidates"),
+            goal_id=safe_goal_id,
         )
         if backlog_context:
             payload["autonomous_backlog_candidates"] = backlog_context
         monitor_context = _compact_autonomous_candidate_context(
-            attention_queue.get("autonomous_monitor_candidates")
+            attention_queue.get("autonomous_monitor_candidates"),
+            goal_id=safe_goal_id,
         )
         if monitor_context:
             payload["autonomous_monitor_candidates"] = monitor_context
@@ -2815,7 +3144,10 @@ def build_quota_slot_preview(
     delivery_completion_spend = (
         delivery_completion_run is not None
         and before.get("ok")
-        and not before.get("should_run")
+        and (
+            not before.get("should_run")
+            or before.get("effective_action") == "external_evidence_observe"
+        )
         and not safe_bypass_spend
         and str(before.get("state") or "") in {"waiting", "focus_wait", "operator_gate", "eligible"}
     )
@@ -2929,40 +3261,95 @@ def _compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _work_lane_reason_codes(work_lane_contract: dict[str, Any]) -> set[str]:
+    reason_codes = work_lane_contract.get("reason_codes")
+    if not isinstance(reason_codes, list):
+        return set()
+    return {str(value) for value in reason_codes if str(value or "").strip()}
+
+
+def _allows_no_spend_external_monitor_poll(decision: dict[str, Any]) -> bool:
+    """Return True when should-run represents observation, not delivery completion."""
+
+    work_lane_contract = (
+        decision.get("work_lane_contract")
+        if isinstance(decision.get("work_lane_contract"), dict)
+        else {}
+    )
+    reason_codes = _work_lane_reason_codes(work_lane_contract)
+    monitor_policy = str(work_lane_contract.get("monitor_policy") or "")
+    if decision.get("requires_user_action") is True:
+        return False
+    if decision.get("should_run") is not True:
+        return False
+    if work_lane_contract.get("must_attempt_work") is not True:
+        return False
+    if monitor_policy not in {
+        "material_transition_only",
+        "read_only_observation_then_no_spend_if_unchanged",
+    }:
+        return False
+    if reason_codes.intersection({"external_monitor_context", "external_evidence_poll_signal"}):
+        return True
+    return bool(decision.get("external_evidence_observation"))
+
+
 def build_quota_monitor_poll_event(
     before: dict[str, Any],
     *,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
     generated_at: str | None = None,
+    reason_summary: str | None = None,
 ) -> dict[str, Any]:
     safe_source = str(source or DEFAULT_SLOT_SPEND_SOURCE).strip()
     if safe_source not in VALID_SLOT_SPEND_SOURCES:
         raise ValueError(f"quota monitor-poll source must be one of: {', '.join(sorted(VALID_SLOT_SPEND_SOURCES))}")
-    if before.get("effective_action") != "monitor_quiet_skip":
-        raise ValueError("quota monitor-poll requires a monitor_quiet_skip should-run decision")
+    external_monitor_poll = _allows_no_spend_external_monitor_poll(before)
+    if before.get("effective_action") != "monitor_quiet_skip" and not external_monitor_poll:
+        raise ValueError(
+            "quota monitor-poll requires a monitor_quiet_skip or external monitor observation decision"
+        )
     recommendation = (
         before.get("heartbeat_recommendation")
         if isinstance(before.get("heartbeat_recommendation"), dict)
         else {}
     )
-    if recommendation.get("recommended_mode") != "monitor_quiet_until_material_transition":
+    if (
+        recommendation.get("recommended_mode") != "monitor_quiet_until_material_transition"
+        and not external_monitor_poll
+    ):
         raise ValueError("quota monitor-poll requires monitor_quiet_until_material_transition mode")
+    monitor_mode = (
+        "external_monitor_observed_without_material_transition"
+        if external_monitor_poll
+        else "monitor_quiet_until_material_transition"
+    )
+    safe_reason_summary = str(reason_summary or "").strip()
+    if not safe_reason_summary:
+        safe_reason_summary = (
+            "external monitor observation produced no material transition"
+            if external_monitor_poll
+            else recommendation.get("reason")
+            or before.get("reason")
+            or "monitor-only poll had no material transition"
+        )
 
     return {
         "generated_at": generated_at or _now_local(),
         "goal_id": before.get("goal_id"),
         "classification": QUOTA_MONITOR_POLL_CLASSIFICATION,
         "recommended_action": before.get("recommended_action") or recommendation.get("reason") or before.get("reason"),
-        "health_check": "monitor-only poll unchanged; no quota spend; no material transition",
+        "health_check": (
+            "external monitor observation unchanged; no quota spend; no material transition"
+            if external_monitor_poll
+            else "monitor-only poll unchanged; no quota spend; no material transition"
+        ),
         "delivery_outcome": "surface_only",
         "monitor_event": {
             "event_type": QUOTA_MONITOR_POLL_CLASSIFICATION,
             "source": safe_source,
-            "reason_summary": (
-                recommendation.get("reason")
-                or before.get("reason")
-                or "monitor-only poll had no material transition"
-            ),
+            "monitor_mode": monitor_mode,
+            "reason_summary": safe_reason_summary,
             "before": _compact_quota_decision(before),
         },
     }
@@ -2997,6 +3384,7 @@ def build_quota_slot_spend_event(
     eligible_spend = (
         before_compact["should_run"] is True
         and before_compact["state"] == "eligible"
+        and before_compact["effective_action"] != "external_evidence_observe"
         and not self_repair_spend
     )
     safe_bypass_spend = (
@@ -3114,10 +3502,11 @@ def record_quota_monitor_poll(
     goal_id: str,
     execute: bool = False,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
+    reason_summary: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
     before = build_quota_should_run(status_payload, goal_id=safe_goal_id)
-    if before.get("effective_action") != "monitor_quiet_skip":
+    if before.get("effective_action") != "monitor_quiet_skip" and not _allows_no_spend_external_monitor_poll(before):
         return {
             "ok": False,
             "mode": "monitor-poll",
@@ -3125,13 +3514,21 @@ def record_quota_monitor_poll(
             "goal_id": safe_goal_id,
             "appended": False,
             "registry_mutated": False,
-            "reason": before.get("reason") or "monitor-poll requires monitor_quiet_skip",
+            "reason": (
+                before.get("reason")
+                or "monitor-poll requires monitor_quiet_skip or external monitor observation"
+            ),
             "before": before,
             "after": None,
         }
 
     generated_at = _now_local()
-    record = build_quota_monitor_poll_event(before, source=source, generated_at=generated_at)
+    record = build_quota_monitor_poll_event(
+        before,
+        source=source,
+        generated_at=generated_at,
+        reason_summary=reason_summary,
+    )
     raw_runtime_root = status_payload.get("runtime_root")
     if not raw_runtime_root:
         raise ValueError("status payload does not include runtime_root")
@@ -3654,6 +4051,21 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if backlog_hygiene_warning.get("recommended_action"):
             lines.append(f"- backlog_hygiene_action: {backlog_hygiene_warning.get('recommended_action')}")
+    projection_gap = (
+        payload.get("state_projection_gap")
+        if isinstance(payload.get("state_projection_gap"), dict)
+        else {}
+    )
+    if projection_gap:
+        lines.append(
+            "- state_projection_gap: "
+            f"requires_todo_expansion={projection_gap.get('requires_todo_expansion')} "
+            f"user_open={projection_gap.get('user_open_count')} "
+            f"agent_open={projection_gap.get('agent_open_count')} "
+            f"target_roles={','.join(projection_gap.get('target_roles') or [])}"
+        )
+        if projection_gap.get("recommended_action"):
+            lines.append(f"- state_projection_gap_action: {projection_gap.get('recommended_action')}")
     completed_todo_archive_warning = (
         payload.get("completed_todo_archive_warning")
         if isinstance(payload.get("completed_todo_archive_warning"), dict)

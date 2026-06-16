@@ -35,6 +35,10 @@ work still belongs in the existing code, examples, and contract documents:
   records the upstream Mainland-China/GCP issue, and ranks SWE-Marathon,
   AgentIssue-Bench, PerfBench, SWE-Bench Pro, MLE-bench, TheAgentCompany, and
   APEX-Agents by Goal Harness leverage before any fresh quota spend.
+- `benchmark-priority-review-20260614.md`: corrected priority review using
+  Codex CLI goal mode as the baseline. It separates direct low Codex baselines,
+  selected hard-subset failures, and adjacent-agent-low benchmarks that still
+  need a clean Codex goal-mode baseline mining pass.
 - `benchmark-execution-route-selection-v0.md`: no-run route-selection packet
   after the SWE-Bench Pro and TheAgentCompany gate packets. It selects the
   SWE-Bench Pro one-instance private pilot as the first real e2e route after a
@@ -482,6 +486,11 @@ work still belongs in the existing code, examples, and contract documents:
   Goal Harness CLI calls, and requires future results to count
   `codex_runtime_goal_tool_calls`, `goal_harness_cli_calls`,
   `goal_harness_state_reads`, and `goal_harness_state_writes` separately.
+- `public-safe-trajectory-summary-v0.md`: cross-benchmark compact trajectory
+  summary contract. It exposes event/tool/action category counts, normalized
+  Goal Harness CLI state-usage buckets, and protected-path edit signals without
+  copying raw task text, prompts, verifier output, tool output, or trajectory
+  bodies.
 - `terminal-bench-goal-harness-access-packet-v0.md`: no-run access-packet and
   interaction-counter fixture for the true `codex_goal_harness` arm. It defines
   the public worker packet, keeps Codex runtime goal tools separate from Goal
@@ -532,6 +541,20 @@ work still belongs in the existing code, examples, and contract documents:
   or bare Codex evidence is calibration only. The current no-upload launch
   summary records the baseline as `/goal` slash-command surface with
   `access_packet=none` and no worker bridge.
+- `benchmark-run-ledger-v0.md`: cross-benchmark run inventory schema. It makes
+  each case attempt visible by benchmark, case, arm, compact score/failure class,
+  and artifact reference, and defines the `--update-run-ledger` closeout path for
+  automatic ledger updates after a case ingest.
+- `benchmark-run-ledger.json` / `benchmark-run-ledger.md`: generated local
+  case-run ledger for current benchmark work. JSON is the machine source;
+  Markdown is the operator view.
+- `benchmark-case-analysis-v0.md`: durable interpretation schema for benchmark
+  case lessons. It sits above the run ledger and records what good, bad, and
+  no-uplift cases teach us about treatment design and routing.
+- `benchmark-case-analysis.json` / `benchmark-case-analysis.md`: current
+  public-safe case-analysis asset. It records `multi-source-data-merger` as the
+  positive-control uplift case and `debug-trl-grpo` as the negative-control
+  regression case.
 - `terminal-bench-official-hard-case-selection-v0.md`: no-run selection
   contract that moves the next evidence target from `terminal-bench-sample@2.0`
   to official `terminal-bench@2.0`, selects a three-case hard/long-horizon
@@ -578,6 +601,28 @@ work still belongs in the existing code, examples, and contract documents:
   `pytorch-model-recovery` as a current-protocol calibration case with old
   bare-Codex failure signal, and preserves the no-upload paired protocol for
   Codex goal-mode versus `codex-goal-harness`.
+- `terminal-bench-next-candidate-after-pytorch-env-setup-20260614.md`:
+  public-safe P0 routing packet after the `pytorch-model-recovery`
+  environment setup gate. It records the repeated pre-worker setup blocker,
+  rejects a stale `db-wal-recovery` open todo because that case already has a
+  current paired compact closeout, strict-preflights `make-doom-for-mips` and
+  `regex-log`, selects `make-doom-for-mips` as the next material-ready
+  system/build candidate, and preserves the no-upload paired protocol for Codex
+  goal mode versus `codex-goal-harness`.
+- `terminal-bench-next-candidate-after-regex-log-20260614.md`: public-safe P0
+  routing packet after the restarted `regex-log` paired compact closeout. It
+  runs the candidate-source-boundary guard before selection, uses a name-only
+  cached task-id scan plus strict no-upload preflights, selects
+  `large-scale-text-editing` as a fresh long-context editing candidate, and
+  preserves the no-upload paired protocol for Codex goal mode versus
+  `codex-goal-harness`.
+- `terminal-bench-next-candidate-after-large-scale-text-editing-20260614.md`:
+  public-safe P0 routing packet after the `large-scale-text-editing` compact
+  paired closeout and follow-up `require_existing_codex` worker-startup
+  blocker. It blocks immediate same-task repeat, reruns strict no-run
+  preflights for the first fallback candidates, selects `git-multibranch` as
+  the next material-ready case, and preserves the no-upload paired protocol
+  for Codex goal mode versus `codex-goal-harness`.
 - `agents-last-exam-triage-v0.md`: source-backed triage note adding Agents'
   Last Exam to the benchmark backlog. It records the Xiaohongshu discovery
   signal, verifies the arXiv and public GitHub surfaces, and keeps ALE behind

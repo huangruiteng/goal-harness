@@ -37,7 +37,11 @@ goal_harness_benchmark_run_writeback_contract: goal_harness_worker_benchmark_run
 worker_benchmark_run_json_schema_version: benchmark_run_v0
 worker_benchmark_run_json_top_level_must_be_schema_version: true
 do_not_wrap_worker_benchmark_run_json_in_benchmark_run_key: true
-worker_benchmark_run_json_minimal_shape: schema_version,source_runner,benchmark_id,job_name,mode,worker_mode,real_run,submit_eligible,leaderboard_evidence,official_task_score,progress,validation,trials
+worker_benchmark_run_json_minimal_shape: schema_version,source_runner,benchmark_id,job_name,mode,worker_mode,real_run,submit_eligible,leaderboard_evidence,official_task_score,validation_scope,progress,validation,claim_boundary,trials
+worker_benchmark_run_json_validation_scope_required: true
+worker_benchmark_run_json_validation_scope_values: worker_bridge_connectivity,environment_ready,worker_case_success,official_verifier_result
+worker_benchmark_run_json_bridge_connectivity_is_not_case_success: true
+worker_benchmark_run_json_claim_boundary_required: true
 worker_benchmark_run_json_must_omit: raw_paths,raw_logs,raw_trace,raw_task_prompt,raw_sessions,credential_values,auth_values
 worker_benchmark_run_json_required_fixed_fields: real_run=true,submit_eligible=false,leaderboard_evidence=false
 worker_benchmark_run_json_real_run_must_be_true: true
@@ -109,10 +113,13 @@ success, official reward, or leaderboard evidence.
 The active worker bridge now carries a minimal `benchmark_run_v0` writeback
 contract in the first instruction. This is meant to reduce schema retries at the
 end of a private repeat: the worker writes compact counts, validation booleans,
-and one compact trial summary, then calls `append_benchmark_run`. If that append
-is schema-rejected, the worker rewrites the payload to the minimal shape and
-retries once. It must not use raw logs, raw paths, raw traces, raw task prompts,
-raw session bodies, credential values, or auth values to satisfy the retry.
+`validation_scope`, `claim_boundary`, and one compact trial summary, then calls
+`append_benchmark_run`. `validation_scope=worker_bridge_connectivity` can prove
+the Goal Harness-enhanced worker bridge is connected, but it must not be treated
+as case success or official verifier success. If that append is schema-rejected,
+the worker rewrites the payload to the minimal shape and retries once. It must
+not use raw logs, raw paths, raw traces, raw task prompts, raw session bodies,
+credential values, or auth values to satisfy the retry.
 
 ## Episode Policy
 

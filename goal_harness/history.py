@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +49,29 @@ def unique_run_paths(runs_dir: Path, generated_at: str) -> tuple[Path, Path]:
         if not json_path.exists() and not markdown_path.exists():
             return json_path, markdown_path
         suffix += 1
+
+
+def reserve_unique_run_paths(runs_dir: Path, generated_at: str) -> tuple[Path, Path]:
+    """Atomically reserve a run JSON path for concurrent append writers."""
+
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    stem = run_file_stem(generated_at)
+    suffix = 1
+    while True:
+        actual_stem = stem if suffix == 1 else f"{stem}-{suffix}"
+        json_path = runs_dir / f"{actual_stem}.json"
+        markdown_path = runs_dir / f"{actual_stem}.md"
+        if markdown_path.exists():
+            suffix += 1
+            continue
+        try:
+            fd = os.open(json_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            suffix += 1
+            continue
+        else:
+            os.close(fd)
+            return json_path, markdown_path
 
 
 def validate_goal_id_path_segment(goal_id: str) -> str:
@@ -186,7 +210,11 @@ def append_benchmark_run(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
+        index_record["json_path"] = str(json_path)
+        index_record["markdown_path"] = str(markdown_path)
+        payload["json_path"] = str(json_path)
+        payload["markdown_path"] = str(markdown_path)
         json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         markdown_path.write_text(render_benchmark_run_append_markdown(payload) + "\n", encoding="utf-8")
         with index_path.open("a", encoding="utf-8") as f:

@@ -1,0 +1,2945 @@
+{
+  "cases": [
+    {
+      "analysis_id": "terminal-bench-2.0__multi-source-data-merger__paired-treatment-improved",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "terminal-bench-msdm-runtime-materialization-baseline-20260615T170847CST",
+          "run_id": "232721f7caf1"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "run_group_id": "terminal-bench-multi-source-data-merger-paired-2h-20260615T081233CST",
+          "run_id": "2986c373a314",
+          "worker_bridge_status": "verified"
+        }
+      },
+      "benchmark_id": "terminal-bench@2.0",
+      "capability_signal": "Goal Harness treatment produced correct artifacts that the official verifier scored 1.0. This is a real end-to-end treatment pass, but not yet stable proof of pure solver superiority because the comparison baseline's official 0.0 came from verifier/runtime failure after the baseline trajectory self-validated its outputs.",
+      "case_id": "multi-source-data-merger",
+      "classification": "positive_uplift_asset",
+      "control_plane_signal": "The useful signal appeared only after runner/materialization hardening separated setup failures from actual case outcomes. The trajectory also exposed a treatment-side bridge status hang after local validation; the verifier still passed because the output artifacts were already written.",
+      "decision": "paired_treatment_improved",
+      "evidence_status": "compact_pair_complete",
+      "optimization_guidance": [
+        "Preserve the worker materialization and compact closeout path before using this case as a treatment-success example.",
+        "Use this case as the positive control when evaluating future automation-loop or goal-harness treatment changes.",
+        "Do not overgeneralize from the uplift; compare against regression assets before claiming route-wide improvement.",
+        "Treat this as a strong end-to-end pass asset and a weaker solver-uplift asset until baseline verifier instability is removed."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "mine additional baseline-failing cases and keep this record as positive-control evidence",
+        "repeat_policy": "do_not_repeat_immediately"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 1,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "end_to_end_treatment_pass": "high",
+        "main_confounds": [
+          "baseline verifier runtime crash before tests",
+          "treatment bridge status hang after validation"
+        ],
+        "pure_solver_uplift_claim": "medium_low",
+        "stabilization_needed": [
+          "rerun or reconcile baseline under the repaired verifier/runtime path",
+          "fix or time-bound the worker bridge status call so successful artifacts are not followed by avoidable worker termination"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "Inspected all source schemas, generated a merge script, regenerated outputs, and ran a local assertion-style validation.",
+          "Self-validation claimed correct users, data types, date formatting, priority selection, and conflict count.",
+          "Official verifier returned 0.0 because the verifier runtime crashed before task tests completed, so the baseline failure is not clean evidence of an incorrect solution."
+        ],
+        "mechanism_hypothesis": "The treatment helped as an end-to-end harness route by getting to valid artifacts and preserving verifier-facing outputs despite bridge overhead. The current evidence is weaker as a pure reasoning uplift because baseline verifier instability confounds the official score delta.",
+        "treatment_observed_behavior": [
+          "Ran the required Goal Harness bridge check before task work and wrote a compact counter trace.",
+          "Inspected schemas, generated reproducible output artifacts, and ran local validation before attempting final bridge/status writeback.",
+          "A bridge status call hung after output validation, but the official verifier still ran and all task tests passed."
+        ]
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2.0__nginx-request-logging__treatment-pass-baseline-runner-blocked",
+      "arms": {
+        "baseline": {
+          "arm_id": "hardened_codex_baseline",
+          "failure_class": "worker_install_failed_agent_codex_install_nvm_node",
+          "failure_scope": "runner_or_setup",
+          "run_group_id": "terminal-bench-nginx-request-logging-hardened-blind-pair-20260616T110017CST",
+          "run_id": "890f0a8487e4",
+          "worker_bridge_status": "not_required"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "goal_harness_inside_case": true,
+          "run_group_id": "terminal-bench-nginx-request-logging-hardened-blind-pair-20260616T110017CST",
+          "run_id": "2a6a46cfb953",
+          "worker_bridge_status": "not_required",
+          "worker_cli_bridge_available": false,
+          "worker_goal_harness_cli_call_total": 0
+        }
+      },
+      "benchmark_id": "terminal-bench@2.0",
+      "capability_signal": "The Goal Harness treatment arm reached official 1.0 on a real Terminal-Bench case, but the paired baseline 0.0 is attributed to Codex CLI materialization in the worker before a comparable solver attempt. This is a treatment-route pass and runner-materialization lesson, not a clean pure-solver uplift claim.",
+      "case_id": "nginx-request-logging",
+      "classification": "runner_materialization_asset",
+      "compact_lifecycle_analysis": {
+        "baseline_case_attempt_countable": false,
+        "baseline_lifecycle_stage": "worker_codex_cli_materialization_failed_before_comparable_solver_attempt",
+        "baseline_repair_probe_case_attempt_countable": false,
+        "baseline_repair_probe_failure": "codex_cli_not_on_path",
+        "baseline_repair_probe_run_id": "51fa05316d18",
+        "claimable_uplift": false,
+        "next_comparable_baseline_requirement": "worker_path_contains_usable_codex_cli_before_solver_start",
+        "treatment_case_attempt_countable": true,
+        "treatment_lifecycle_stage": "official_verifier_passed",
+        "worker_bridge_note": "The treatment had Goal Harness access packet state but no worker CLI bridge call evidence; do not treat this as in-case CLI bridge uplift evidence."
+      },
+      "control_plane_signal": "The useful control-plane signal is separation of official score delta from claim eligibility. The ledger can store the 0.0 -> 1.0 pair, while case analysis keeps the baseline runner/setup blocker from becoming a false treatment-uplift narrative.",
+      "decision": "paired_baseline_runner_or_setup_repair_required",
+      "evidence_status": "compact_pair_complete_baseline_runner_setup_blocked",
+      "optimization_guidance": [
+        "Materialize a usable Codex CLI on the hardened baseline worker PATH before any same-case comparable rerun.",
+        "Keep runtime_install_extended_setup as setup-materialization evidence only; do not count it as solver progress until the pre-worker Codex preflight is ok.",
+        "Keep the treatment pass as a route-canary showing the Goal Harness treatment can complete nginx-request-logging under official scoring.",
+        "Record worker CLI bridge availability separately from access-packet presence; this treatment passed without observed worker-side Goal Harness CLI calls."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false,
+        "verifier_output_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "materialize Codex CLI on the hardened baseline worker PATH or provide an equivalent launcher, then rerun only after a compact fail-fast preflight proves codex --version succeeds before solver start",
+        "repeat_policy": "do_not_repeat_until_codex_cli_on_worker_path_probe_passes"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "claimable_uplift": false,
+        "official_score_delta": 1,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "end_to_end_treatment_pass": "high",
+        "main_confounds": [
+          "baseline worker Codex CLI materialization failed before comparable solver execution",
+          "treatment worker CLI bridge was not observed, so the pass should not be attributed to active in-case Goal Harness CLI use"
+        ],
+        "pure_solver_uplift_claim": "blocked",
+        "stabilization_needed": [
+          "make the hardened baseline worker find or receive a valid Codex CLI without runtime install failure",
+          "rerun only after compact preflight proves baseline worker materialization reached ok"
+        ]
+      },
+      "worker_materialization_probe": {
+        "arm_id": "hardened_codex_worker_materialization_probe",
+        "benchmark_budget_countable": false,
+        "case_solution_attempted": false,
+        "compact_boundary": {
+          "raw_logs_read": false,
+          "raw_task_text_read": false,
+          "trajectory_read": false,
+          "verifier_output_read": false
+        },
+        "failure_class": "codex_cli_not_on_path",
+        "failure_scope": "runner_or_setup",
+        "interpretation": "Fail-fast require_existing_codex probe proved the current hardened baseline worker path does not contain a usable Codex CLI. Do not rerun the same baseline until the worker image or launcher materializes Codex on PATH, or switch to an explicit runtime_install_extended_setup probe and classify it as setup evidence only.",
+        "official_score": 0,
+        "run_group_id": "terminal-bench-nginx-hardened-worker-materialization-probe-20260616T111726CST",
+        "run_id": "51fa05316d18",
+        "score_status": "failed",
+        "setup_blockers": [
+          "codex_cli_not_on_path"
+        ]
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2.0__make-doom-for-mips__timeout-attribution-required",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "agent_timeout_before_solution_completion",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "terminal-bench-make-doom-for-mips-setup8-2h-relaunch-20260615T001118CST",
+          "run_id": "1e0e7327d18a"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "score_failure_unattributed",
+          "failure_scope": "attribution_required",
+          "run_group_id": "terminal-bench-make-doom-for-mips-setup8-2h-relaunch-20260615T001118CST",
+          "run_id": "1caa8b39f0a4",
+          "worker_bridge_status": "not_required"
+        }
+      },
+      "benchmark_id": "terminal-bench@2.0",
+      "capability_signal": "No treatment uplift is established. The useful signal is a durable timeout/attribution asset: default-timeout attempts failed before solution completion, a private 2h relaunch exposed worker setup timeout, and the setup8+2h treatment still produced official 0.0 without enough compact verifier attribution.",
+      "case_id": "make-doom-for-mips",
+      "classification": "timeout_attribution_asset",
+      "control_plane_signal": "This case proves why timeout policy, worker setup readiness, and verifier attribution must be separated. Increasing the case timeout alone was not enough; the next stable step is compact attribution/phase evidence before any further treatment claim.",
+      "decision": "paired_result_requires_attribution",
+      "evidence_status": "compact_pair_complete_attribution_required",
+      "optimization_guidance": [
+        "Do not count this as treatment uplift, treatment regression, or a clean no-uplift solver result.",
+        "Use it as the Terminal-Bench timeout-policy asset when deciding whether a 2h tier is enough.",
+        "Require compact phase attribution before another repeat: setup readiness, worker start, solver completion, result write, and verifier score.",
+        "Prioritize runner/setup readiness and verifier-facing compact evidence over another blind timeout increase."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "collect compact verifier/phase attribution for the setup8+2h pair before launching another make-doom-for-mips repeat",
+        "repeat_policy": "do_not_repeat_until_phase_attribution_available"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "the initial pair failed under default timeout before solution completion",
+          "the first 2h relaunch exposed pre-worker setup timeout rather than a cleaner case outcome",
+          "the setup8+2h treatment official 0.0 still lacks compact verifier-facing attribution"
+        ],
+        "reason": "Multiple compact attempts agree that the case is not yet a clean solver comparison: timeout and setup phases both intervened, and the latest treatment score needs verifier attribution before being interpreted.",
+        "stabilization_needed": [
+          "record compact lifecycle phase for each arm before counting benchmark budget as a case outcome",
+          "distinguish verifier timeout, agent timeout, setup timeout, and official verifier solution failure in the pair closeout",
+          "only rerun after the launcher can prove the worker has materialized and the timeout tier is explicitly recorded"
+        ],
+        "timeout_attribution_claim": "high"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The default-timeout baseline failed before solution completion, so the first 0.0 was not a clean hidden-test failure.",
+          "A later setup8+2h baseline still scored 0.0 and was compactly classified as case/solution scoped with timeout context."
+        ],
+        "mechanism_hypothesis": "The benchmark family is stressing both infrastructure and task duration. Goal Harness can help only after the route records enough compact phase evidence to know whether the next intervention is timeout-tiering, setup materialization, verifier attribution, or solver guidance.",
+        "treatment_observed_behavior": [
+          "The default-timeout treatment also failed before solution completion, so no uplift can be inferred.",
+          "A 2h relaunch uncovered worker setup timeout in both arms, separating setup readiness from case-solving time.",
+          "The setup8+2h treatment reached official 0.0 but remains attribution-required; compact evidence is insufficient to say whether the solver, verifier, or closeout path is the bottleneck."
+        ]
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2.0__mteb-retrieve__environment-setup-probe-completed",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "environment_setup_failed_before_worker",
+          "failure_scope": "runner_or_setup",
+          "run_group_id": "terminal-bench-mteb-retrieve-paired-2h-20260615T072331CST",
+          "run_id": "f51ed0bc44ef"
+        },
+        "setup_probe": {
+          "arm_id": "harbor_observed",
+          "artifact_manifest_present_count": 1,
+          "benchmark_budget_countable": false,
+          "case_attempt_countable": false,
+          "exception_present": true,
+          "exception_type": "RuntimeError",
+          "leaderboard_evidence": false,
+          "probe_outcome": "materialized_with_exception",
+          "repeat_blocked_by": "environment_setup_probe_exception_requires_interpretation",
+          "run_group_id": "terminal-bench-mteb-retrieve-env-probe-20260616T0800CST",
+          "run_id": "b1c43dfaaa19",
+          "submit_eligible": false,
+          "trial_result_present_count": 1,
+          "worker_mode": "nop",
+          "worker_start_status": "environment_setup_probe_materialized"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "environment_setup_failed_before_worker",
+          "failure_scope": "runner_or_setup",
+          "run_group_id": "terminal-bench-mteb-retrieve-paired-2h-20260615T072331CST",
+          "run_id": "4dca7e651fac"
+        }
+      },
+      "benchmark_id": "terminal-bench@2.0",
+      "capability_signal": "The no-upload NOP/disable-verification setup probe reached a materialized Harbor trial result and artifact manifest for mteb-retrieve. This repairs the evidence gap between pre-worker environment setup failure and a pollable compact setup probe, but it is not a solver or official task success signal.",
+      "case_id": "mteb-retrieve",
+      "classification": "setup_probe_asset",
+      "control_plane_signal": "Lifecycle-state now has a dedicated environment_setup_probe_completed phase, so a single-arm setup probe is no longer misrouted as paired_comparison_missing and is explicitly excluded from case-attempt and benchmark-budget counts.",
+      "decision": "environment_setup_probe_materialized_with_exception_repeat_blocked",
+      "evidence_status": "compact_setup_probe_completed",
+      "optimization_guidance": [
+        "Use this as the setup/materialization asset for Terminal-Bench environment failures, not as no-uplift evidence.",
+        "Keep lifecycle accounting explicit: setup probe completed, case attempt not counted, benchmark budget not counted.",
+        "Before repeating mteb-retrieve, interpret the compact RuntimeError at setup-probe boundary without reading raw logs or task text."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact run ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "classify the compact setup-probe RuntimeError before deciding whether a same-task full rerun is justified or whether mteb-retrieve should remain blocked while another material-ready case runs",
+        "repeat_policy": "do_not_repeat_until_probe_exception_classified"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "setup_probe_official_score": 0,
+        "treatment_official_score": 0
+      },
+      "setup_probe_lifecycle": {
+        "benchmark_budget_countable": false,
+        "case_attempt_countable": false,
+        "current_phase": "environment_setup_probe_completed",
+        "environment_setup_probe_completed": true,
+        "first_blocker": "environment_setup_probe_exception_requires_interpretation",
+        "next_required_transition": "case_repeat_decision",
+        "probe_outcome": "materialized_with_exception",
+        "repeat_allowed": false,
+        "schema_version": "benchmark_lifecycle_state_v0"
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "the probe intentionally used NOP agent and disabled verification",
+          "the compact trial still reports RuntimeError, so the setup result needs interpretation before a full same-task rerun",
+          "the prior paired artifacts failed before worker start and should not be treated as solver failures"
+        ],
+        "official_solver_claim": "none",
+        "setup_materialization_claim": "medium_high",
+        "stabilization_needed": [
+          "classify whether the probe RuntimeError is expected from the NOP/disable-verification route or indicates persistent task environment failure",
+          "only launch a full same-task rerun after compact setup-probe interpretation clears the route",
+          "keep setup probes separate from case attempts and benchmark budget accounting"
+        ]
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2.0__pytorch-model-recovery__agent-exception-attribution-required",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "exception_types": [
+            "RuntimeError"
+          ],
+          "failure_class": "agent_exception_before_solution_completion",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "terminal-bench-pytorch-model-recovery-paired-repair-20260614T0659Z",
+          "run_id": "2db3f1047704",
+          "verifier_reward_present": false
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "exception_types": [
+            "RuntimeError"
+          ],
+          "failure_class": "agent_exception_before_solution_completion",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "terminal-bench-pytorch-model-recovery-paired-repair-20260614T0659Z",
+          "run_id": "9ba1b6872167",
+          "verifier_reward_present": false,
+          "worker_bridge_materialization_status": "not_materialized"
+        }
+      },
+      "benchmark_id": "terminal-bench@2.0",
+      "capability_signal": "No solver uplift is established. Both arms ended before verifier reward with compact RuntimeError evidence, so the useful signal is exception attribution and case-level intervention design, not a 0.0/0.0 no-uplift conclusion.",
+      "case_id": "pytorch-model-recovery",
+      "classification": "exception_attribution_asset",
+      "compact_attribution_review": {
+        "baseline_agent_exception_count": 1,
+        "baseline_attribution_class": "agent_exception_score_failure",
+        "blocked_action_scope": "same_task_repeat_until_exception_hypothesis",
+        "new_candidate_allowed": true,
+        "next_allowed_action": "inspect_compact_agent_exception_before_same_task_repeat",
+        "repeat_allowed": false,
+        "requires_case_exception_research": true,
+        "requires_finer_compact_attribution": false,
+        "schema_version": "benchmark_verifier_attribution_review_v0",
+        "treatment_agent_exception_count": 1,
+        "treatment_attribution_class": "agent_exception_score_failure",
+        "treatment_eligible": false
+      },
+      "control_plane_signal": "The verifier-attribution review now recognizes generic agent exceptions before verifier reward as agent_exception_score_failure. It no longer routes this case to generic finer verifier attribution; it blocks same-task repeat until a compact exception hypothesis exists.",
+      "decision": "paired_no_score_uplift_exception_research_required",
+      "evidence_status": "compact_pair_complete_agent_exception_before_verifier_reward",
+      "optimization_guidance": [
+        "Do not count this as clean no-uplift, uplift, or regression evidence.",
+        "Do not repeat the same task until compact exception context or a case-level intervention hypothesis exists.",
+        "Keep the treatment worker-bridge not-materialized marker as an additional treatment-readiness caveat, separate from baseline exception attribution.",
+        "Use this case as a Terminal-Bench exception-attribution guard for verifier-attribution and ledger-routing changes."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids, run groups, and compact attribution classes only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "inspect compact exception context or design a case-level intervention hypothesis before any same-task repeat; otherwise select a new material-ready Terminal-Bench case",
+        "repeat_policy": "do_not_repeat_until_exception_hypothesis_available"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "exception_attribution_claim": "medium_high_for_compact_phase",
+        "main_confounds": [
+          "compact artifacts do not include raw RuntimeError stack or task trajectory by design",
+          "treatment also lacks worker bridge materialization evidence, so treatment quality cannot be separated from treatment readiness",
+          "ledger stores official score as 0.0 while compact artifacts lack verifier reward; interpret as failed compact closeout, not verifier-scored hidden-test failure"
+        ],
+        "reason": "All compact artifacts agree on RuntimeError before verifier reward. The review now resolves this as non-verifier agent exception attribution, but raw exception detail and trajectory remain intentionally unread, so the exact repair hypothesis is still open.",
+        "stabilization_needed": [
+          "add compact exception phase/context fields before same-task repeat",
+          "ensure treatment worker bridge materializes before interpreting treatment outcome",
+          "compare against a new material-ready case if exception context cannot be improved without raw logs"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The compact baseline trial result is present, but verifier reward is absent and exception_type is RuntimeError.",
+          "The public read boundary confirms no raw task text, raw logs, verifier output, or trajectory were copied into analysis."
+        ],
+        "mechanism_hypothesis": "This case currently tests exception attribution and treatment readiness more than solver quality. Goal Harness should first make compact exception context and worker materialization explicit; only then would a same-task repeat be meaningful.",
+        "treatment_observed_behavior": [
+          "The compact treatment trial also ended with RuntimeError before verifier reward.",
+          "A later treatment bridge-materialization blocker records worker_bridge_materialization_status=not_materialized and failed worker bridge repeat readiness checks."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__llm-prefix-cache-replay__paired-treatment-improved",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-llm-prefix-cache-replay-pair-20260615T2200CST",
+          "run_id": "7eb47e9e7f35"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "run_group_id": "skillsbench-llm-prefix-cache-replay-pair-20260615T2200CST",
+          "run_id": "cf8da5bd77a2"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "conclusion": "The legacy uplift remains reward-feedback ablation evidence; the primary blind-loop protocol did not reproduce uplift on this case, and the stricter max-5 rerun also stayed at 0.0 in both arms.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-llm-prefix-cache-replay-blind-pair-protocol-v10",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment"
+      },
+      "capability_signal": "The legacy reward-feedback automation-loop treatment converted a clean SkillsBench Codex ACP baseline failure into an official verifier pass, but the current primary blind-loop protocol does not reproduce that uplift. This case is now a reward-feedback positive control and a blind-loop neutral guard.",
+      "case_id": "llm-prefix-cache-replay",
+      "classification": "reward_feedback_positive_blind_loop_neutral_asset",
+      "control_plane_signal": "The useful legacy difference is visible in compact controller counters: the treatment ran the outer automation loop, sent an initial controller prompt, observed failed reward once, sent one follow-up, and then reached official score 1.0. In blind-loop mode, the treatment ran five scheduled blinded controller decisions without receiving reward/pass/fail/verifier feedback and still remained at official 0.0.",
+      "decision": "reward_feedback_positive_primary_blind_loop_no_uplift",
+      "evidence_status": "compact_pair_complete",
+      "max5_blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0,3:0,4:0,5:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "conclusion": "The stricter max-5 blind-loop rerun did not recover the old uplift: both arms exhausted five blinded rounds at official 0.0, with first_success_round=null and no reward/pass/fail/verifier feedback forwarded.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "max_rounds_budget": 5,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-llm-prefix-cache-replay-blind-loop-max5-20260616T1531CST",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0,3:0,4:0,5:0",
+        "treatment_route": "goal-harness-blind-loop-treatment"
+      },
+      "optimization_guidance": [
+        "Use this as a reward-feedback-ablation positive-control case, not as primary blind-loop uplift evidence.",
+        "Keep the compact controller counters in the ledger because they show the treatment actually exercised the outer loop.",
+        "Do not use this single case to claim route-wide superiority; pair it with debug-trl-grpo and civ6 controls.",
+        "Preserve the Docker-space preflight because runner setup was a live bottleneck immediately before this run.",
+        "Do not use this case as a positive blind-loop uplift asset: protocol v10 and the later max-5 rerun both completed both blind arms at official 0.0 with no reward feedback forwarded."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids, run groups, and public-safe controller counters only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "blind_loop_repeat_policy": "treat protocol v10 and the max-5 rerun as no-uplift guards; repeat only after a concrete blind prompt/round-policy hypothesis",
+        "next_action": "continue alternating Terminal-Bench and SkillsBench, using this as a reward-feedback positive control while mining or validating primary blind-loop positives elsewhere",
+        "repeat_policy": "repeat_only_after_stability_or_policy_hypothesis"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 1,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "blind_loop_uplift_claim": "not_supported_by_protocol_v10",
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "the legacy reward-feedback positive pair has one baseline and one treatment attempt",
+          "we have not inspected raw trajectories, so the precise solution-level difference remains unknown by design"
+        ],
+        "reason": "The legacy reward-feedback pair completed official SkillsBench scoring with score delta +1.0, but both primary blind-loop rechecks completed official scoring with score delta 0. The max-5 rerun recorded baseline rewards 1:0,2:0,3:0,4:0,5:0 and treatment rewards 1:0,2:0,3:0,4:0,5:0 with no reward/pass/fail/verifier feedback returned to the agent.",
+        "stabilization_needed": [
+          "repeat only after a specific stability or treatment-policy hypothesis, not immediately",
+          "compare against regression and no-uplift SkillsBench assets before widening claims",
+          "consider adding compact-safe solution-difference summaries in future runner versions if policy allows"
+        ],
+        "uplift_claim": "reward_feedback_ablation_medium_high; primary_blind_loop_not_supported"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The no-skill Codex goal-mode baseline reached official SkillsBench verifier scoring and received reward 0.0.",
+          "The failure was classified as official_verifier_solution_failure, so it is solver/case scoped rather than setup, runner, or materialization scoped.",
+          "Compact evidence records no Goal Harness automation loop and no controller follow-up in the baseline arm.",
+          "In the max-5 primary blind-loop rerun, Codex ACP baseline completed five blinded agent rounds with official rewards 1:0,2:0,3:0,4:0,5:0."
+        ],
+        "mechanism_hypothesis": "This case supports a reward-feedback-specific hypothesis: a bounded automation-loop follow-up can correct some initial failed SkillsBench attempts when the controller is allowed to observe failed reward semantics. It does not support an interaction-count-only hypothesis, because the max-5 blind-loop rerun gave the treatment five blinded rounds and still stayed at 0.0.",
+        "treatment_observed_behavior": [
+          "The automation-loop treatment completed official verifier scoring with reward 1.0.",
+          "Compact controller trace records two heartbeat/controller decisions: one initial prompt and one follow-up after observing failed reward.",
+          "The treatment used public-safe compact result and controller-trace counters only; no raw logs, task text, or trajectory were copied into the analysis.",
+          "In the max-5 primary blind-loop rerun, Goal Harness treatment completed five blinded agent rounds with official rewards 1:0,2:0,3:0,4:0,5:0 and no reward feedback forwarded."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__dapt-intrusion-detection__paired-treatment-improved",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-dapt-intrusion-detection-pair-20260615T2219CST",
+          "run_id": "da0d9b235bee"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "run_group_id": "skillsbench-dapt-intrusion-detection-pair-20260615T2219CST",
+          "run_id": "8f4799261e11"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "conclusion": "The legacy uplift remains reward-feedback ablation evidence; the primary blind-loop protocol did not reproduce uplift on this second positive-control case.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-dapt-intrusion-detection-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment"
+      },
+      "capability_signal": "The automation-loop treatment converted a second clean SkillsBench Codex goal-mode baseline failure into an official verifier pass. Baseline official score was 0.0 and treatment official score was 1.0 in the same run group, with no setup/materialization failure in either official compact result.",
+      "case_id": "dapt-intrusion-detection",
+      "classification": "positive_uplift_asset",
+      "control_plane_signal": "The treatment compact controller counters show the outer automation loop ran: two heartbeat/controller decisions, one initial prompt, one failed-reward observation, and one follow-up before official score 1.0. This strengthens the SkillsBench positive-control set beyond llm-prefix-cache-replay.",
+      "decision": "paired_treatment_improved",
+      "evidence_status": "compact_pair_complete",
+      "optimization_guidance": [
+        "Keep this alongside llm-prefix-cache-replay as reward-feedback ablation evidence, not as primary blind-loop uplift evidence.",
+        "Use this case to test whether one explicit failed-reward follow-up is the useful minimum loop for some SkillsBench tasks.",
+        "Do not use positive reward-feedback cases alone for claims; keep regression, no-uplift, and blind-loop controls in every policy comparison.",
+        "Keep compact controller counters and round_reward_trace as required evidence for treatment-arm validity.",
+        "Do not count this case as a positive blind-loop uplift asset: the blind-loop v0 pair completed both arms at official 0.0 with no reward feedback forwarded."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids, run groups, and public-safe controller counters only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "blind_loop_repeat_policy": "treat blind-loop v0 as a no-uplift guard; repeat only after a concrete blind prompt/round-policy hypothesis",
+        "next_action": "use this as a reward-feedback ablation positive control while selecting fresh blind-loop cases or testing a specific blind prompt/round-policy change",
+        "repeat_policy": "repeat_only_after_stability_or_policy_hypothesis"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 1,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "blind_loop_uplift_claim": "not_supported_by_protocol_v0",
+        "main_confounds": [
+          "only one baseline and one treatment attempt are currently recorded for this case",
+          "we have not inspected raw trajectories, so the exact solution-level repair remains unknown by design",
+          "the treatment policy is still a generic two-round loop rather than a case-specific learned policy"
+        ],
+        "reason": "The legacy reward-feedback pair still has score delta +1.0, but the primary blind-loop pair completed official scoring for both arms at 0.0 with no reward/pass/fail/verifier feedback returned to the agent. The stable claim is reward-feedback ablation uplift, not blind-loop control-plane uplift.",
+        "stabilization_needed": [
+          "repeat only after a concrete treatment-policy or blind prompt/round-policy hypothesis",
+          "compare with debug-trl-grpo regression and civ6/manufacturing no-uplift controls before widening claims",
+          "keep first_success_round and per-round scalar rewards in every future compact pair"
+        ],
+        "uplift_claim": "reward_feedback_ablation_medium_high; blind_loop_not_supported"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The no-skill Codex goal-mode baseline reached official SkillsBench verifier scoring and received reward 0.0.",
+          "The failure was classified as official_verifier_solution_failure, so it is solver/case scoped rather than setup, runner, or materialization scoped.",
+          "Compact evidence records no Goal Harness automation loop and no controller follow-up in the baseline arm.",
+          "In the primary blind-loop recheck, Codex ACP baseline completed two blinded agent rounds with official rewards 1:0,2:0."
+        ],
+        "mechanism_hypothesis": "This case now supports a sharper mechanism split: the reward-feedback route passed after the controller observed failed reward and sent one explicit follow-up, while the blind-loop route used the same two-round budget without returning reward/pass/fail/verifier information and stayed at 0.0. The useful signal is not interaction count alone; it is the reward-aware follow-up semantics.",
+        "treatment_observed_behavior": [
+          "The automation-loop treatment completed official verifier scoring with reward 1.0.",
+          "Compact controller trace records two heartbeat/controller decisions: one initial prompt and one follow-up after observing failed reward.",
+          "The treatment used public-safe compact result and controller-trace counters only; no raw logs, task text, or trajectory were copied into the analysis.",
+          "In the primary blind-loop recheck, Goal Harness treatment completed two blinded agent rounds with official rewards 1:0,2:0 and no reward feedback forwarded."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__debug-trl-grpo__paired-treatment-regressed",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "none",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-debug-trl-grpo-codex-goal-mode-baseline-cpu-cap-20260615T173601CST",
+          "run_id": "9db0404df80b"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-debug-trl-grpo-automation-loop-treatment-cpu-cap-20260615T173953CST",
+          "run_id": "ef452ac2450b"
+        }
+      },
+      "baseline_safe_prompt_ablation": {
+        "conclusion": "The baseline-safe prompt ablation preserved the same 0.25 partial credit as the blind-loop baseline across both rounds. This points away from interaction count alone and toward the structured treatment prompt/scope framing as the regression source.",
+        "decision": "baseline_safe_prompt_recovered_to_baseline_partial_credit",
+        "first_success_round": null,
+        "hypothesis": "Use the treatment route and scheduled blind loop, but replace the structured treatment first prompt with baseline-compatible ordinary Codex framing to isolate whether the structured prompt wrapper caused the regression.",
+        "official_feedback_blinded": true,
+        "official_score": 0.25,
+        "official_score_delta_vs_baseline": 0,
+        "official_score_delta_vs_structured_treatment": 0.25,
+        "reference_baseline_official_score": 0.25,
+        "reference_baseline_run_id": "69805914c24f",
+        "reference_structured_treatment_official_score": 0,
+        "reference_structured_treatment_run_id": "0a294a6f1c25",
+        "reward_feedback_forwarded": false,
+        "round_rewards": "1:0.25,2:0.25",
+        "route": "goal-harness-blind-loop-treatment",
+        "run_group_id": "skillsbench-debug-trl-grpo-blind-loop-baseline-safe-v0",
+        "schema_version": "skillsbench_blind_loop_prompt_ablation_v0",
+        "treatment_prompt_style": "baseline-safe",
+        "treatment_run_id": "f37b0a3e9654"
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0.25,
+        "baseline_round_rewards": "1:0.25,2:0.25",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "conclusion": "The regression reproduces under the primary blind-loop protocol: baseline preserved 0.25 across both rounds, while treatment matched 0.25 after round 1 but dropped to 0.0 after the scheduled continuation.",
+        "decision": "paired_treatment_regressed",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": -0.25,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-debug-trl-grpo-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0.25,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment"
+      },
+      "capability_signal": "The treatment route regresses relative to an ordinary Codex ACP baseline even under the primary no-reward blind-loop protocol. The max-5 rerun shows extra blind iterations alone do not recover the case; structured continuation can destabilize partial credit.",
+      "case_id": "debug-trl-grpo",
+      "classification": "regression_asset",
+      "control_plane_signal": "The primary blind-loop pair showed structured treatment matching baseline partial credit after round 1 but dropping to 0.0 after scheduled continuation. The max-5 rerun strengthens that signal: baseline stayed at 0.25 for all five blinded rounds, while treatment stayed at 0.25 for two rounds and then fell to 0.0 for rounds 3-5. The baseline-safe prompt ablation kept treatment at 0.25 across both old rounds, isolating the regression to structured prompt/scope framing and continuation policy rather than the mere existence of multiple controller decisions.",
+      "decision": "paired_treatment_regressed",
+      "evidence_status": "compact_pair_complete",
+      "max5_blind_loop_recheck": {
+        "baseline_best_round_score": 0.25,
+        "baseline_official_score": 0.25,
+        "baseline_round_rewards": "1:0.25,2:0.25,3:0.25,4:0.25,5:0.25",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "best_round_score_delta": 0,
+        "conclusion": "The max-5 blind-loop rerun changes the primary score interpretation: by best-round score, treatment ties baseline at 0.25; by final-workspace score, treatment drops to 0.0 while baseline remains 0.25. Extra blind interaction count alone did not recover the case; it exposed continuation/scope-stability risk after treatment had already reached baseline-level partial credit.",
+        "decision": "paired_treatment_regressed",
+        "final_round_score_delta": -0.25,
+        "first_success_round": null,
+        "max_rounds_budget": 5,
+        "official_feedback_blinded": true,
+        "official_score_delta": -0.25,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-debug-trl-grpo-blind-loop-max5-20260616T144124CST",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_best_round_score": 0.25,
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0.25,2:0.25,3:0,4:0,5:0",
+        "treatment_route": "goal-harness-blind-loop-treatment"
+      },
+      "optimization_guidance": [
+        "Keep this case as a mandatory regression guard for every blind-loop prompt, round-budget, and stop-policy change.",
+        "Prefer baseline-safe or stricter scope-preserving treatment framing until a structured prompt can prove it does not damage partial credit.",
+        "Add a stop or stabilization rule that does not keep editing after a nonzero partial-credit round unless local evidence clearly justifies broader changes.",
+        "Preserve protected-file and narrow-scope constraints in the first prompt and every scheduled continuation."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "use the baseline-safe prompt ablation as the next treatment-policy candidate, then validate it against positive, neutral, and success/non-regression guards before claiming improvement",
+        "repeat_policy": "repeat_only_after_blind_prompt_round_or_stop_policy_hypothesis"
+      },
+      "scores": {
+        "baseline_best_round_score": 0.25,
+        "baseline_official_score": 0.25,
+        "best_round_score_delta": 0,
+        "final_round_score_delta": -0.25,
+        "official_score_delta": -0.25,
+        "score_policy_for_loop_analysis": "best_round_score",
+        "treatment_best_round_score": 0.25,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "we have not inspected raw trajectories, so the solution-level edit sequence remains compact-only by design"
+        ],
+        "reason": "The old reward-feedback regression is reproduced under the final-workspace scoring view, but the max-round best-score view is more nuanced: baseline best score was 0.25 and structured treatment best score was also 0.25. The treatment failure is therefore a stability/retention regression, not evidence that the treatment could never reach baseline-quality partial credit. A targeted baseline-safe prompt ablation preserved 0.25 across both treatment rounds with official feedback blinded and reward feedback not forwarded.",
+        "regression_claim": "high_for_final_workspace_stability_current_blind_loop_policy",
+        "stabilization_needed": [
+          "validate baseline-safe prompt framing against at least one positive-control and one neutral-control case before changing defaults",
+          "add continuation policy that preserves partial-credit state unless local evidence warrants risky scope expansion",
+          "consider stopping or freezing risky edits after stable nonzero partial credit when official success is not reached and no reward/verifier signal is forwarded",
+          "keep this guard paired with llm-prefix-cache-replay, dapt-intrusion-detection, neutral controls, and ada-bathroom-plan-repair success guard"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "Focused on the TRL trainer path, found the reward advantage epsilon bug, and added a constructor compatibility alias.",
+          "Left the training script and reward function unchanged.",
+          "Passed verifier checks for source presence, protected training script, protected reward function, advantage epsilon, and non-vanishing advantages; failed selective log-softmax correctness and decode preservation."
+        ],
+        "mechanism_hypothesis": "Compact blind-loop evidence now suggests the harmful factor is structured Goal Harness framing plus scheduled continuation, not interaction count alone. Under max-score loop analysis, structured treatment ties baseline at 0.25; under final-workspace scoring, it falls to 0.0 after rounds 3-5. The regression is therefore retention/stability after reaching partial credit, and the baseline-safe treatment prompt preserved 0.25 across the old two-round blind budget.",
+        "treatment_observed_behavior": [
+          "Used roughly twice as many tool calls and explored beyond the trainer into the reward function.",
+          "Fixed the same advantage epsilon issue but rewrote reward_fn.py, directly triggering a verifier failure.",
+          "Did not fix selective log-softmax correctness or decode preservation, so the extra work added a new failure without resolving the remaining core failures.",
+          "The baseline-safe blind-loop treatment ablation kept the final score at 0.25 with round rewards 1:0.25,2:0.25, no reward feedback, and no official verifier feedback returned to the agent.",
+          "In the max-5 blind-loop treatment, the first two blinded rounds retained 0.25 partial credit, but scheduled continuations then dropped rounds 3-5 to 0.0; no reward/pass/fail/verifier feedback was forwarded to the agent."
+        ]
+      },
+      "trajectory_public_summary": {
+        "attribution_conclusion": "The max-5 treatment regression is not explained by in-case Goal Harness CLI interaction; the public-safe trajectory summary records zero GH CLI calls and protected-path edit signals in rounds 3-4, matching a continuation/scope-drift failure mode.",
+        "continuation_constraint_projection_gap": "Baseline, structured treatment, and baseline-safe ACP user-message comparison showed round 1 contained protected paths plus no-/goal/no-GH-CLI controls, while scheduled continuations preserved only generic narrow-scope language.",
+        "controller_repair": "Blind-loop continuations now re-project the durable round-1 controller contract and protected task paths on every scheduled continuation.",
+        "goal_harness_cli_call_count": 0,
+        "goal_harness_cli_calls": [],
+        "host_path_recorded": false,
+        "private_trajectory_present": true,
+        "protected_path_edit_rounds": {
+          "/app/train_grpo.py": [
+            3,
+            4
+          ]
+        },
+        "protected_path_edit_signal_count": 2,
+        "protected_path_mention_count": 2,
+        "protected_path_mentions": [
+          "/app/reward_fn.py",
+          "/app/train_grpo.py"
+        ],
+        "raw_task_text_copied_to_public": false,
+        "raw_text_copied_to_public": false,
+        "raw_verifier_output_copied_to_public": false,
+        "round_count": 5,
+        "schema_version": "skillsbench_acp_trajectory_summary_v0",
+        "tool_call_count": 112,
+        "treatment_run_group_id": "skillsbench-debug-trl-grpo-blind-loop-max5-20260616T144124CST"
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__civ6-adjacency-optimizer__paired-no-score-uplift",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-civ6-adjacency-optimizer-stagefix-20260615T1826CST",
+          "run_id": "8eccae2d04d6"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-civ6-adjacency-optimizer-stagefix-20260615T1826CST",
+          "run_id": "978868092e84"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "973d9618d7f6",
+        "conclusion": "Clean neutral guard under the primary blind-loop protocol: both arms reached official scoring at 0.0 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-civ6-adjacency-optimizer-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "8d21a5cc42f2"
+      },
+      "capability_signal": "The repaired SkillsBench staging route now has both a legacy no-uplift pair and a primary blind-loop pair for this case. Under blind-loop, baseline and treatment both reached official scoring at 0.0, so the case is a clean neutral guard rather than uplift evidence.",
+      "case_id": "civ6-adjacency-optimizer",
+      "classification": "no_uplift_asset",
+      "control_plane_signal": "The blind-loop treatment exercised the intended outer-control surface with two scheduled controller decisions, official feedback blinded, reward feedback not forwarded, and round rewards recorded only after each completed agent round. The final official score remained 0.0.",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "compact_pair_complete",
+      "optimization_guidance": [
+        "Do not count this as a Goal Harness uplift case.",
+        "Use it as a blind-loop neutral guard when tuning prompt shape, continuation policy, and task-family routing.",
+        "Only repeat after a targeted no-reward policy hypothesis; generic two-round scheduled continuation has already been tested."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "continue alternating Terminal-Bench and SkillsBench blind-loop pairs, while treating civ6 as a neutral guard for no-reward policy changes",
+        "repeat_policy": "repeat_only_after_targeted_blind_loop_prompt_or_termination_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "only one blind-loop baseline and one blind-loop treatment attempt are currently recorded for this case"
+        ],
+        "no_uplift_claim": "high_for_current_protocol_single_seed",
+        "reason": "Both blind-loop arms completed official SkillsBench scoring under the same staged task route, no-upload boundary, two-round budget, and no reward-feedback policy.",
+        "stabilization_needed": [
+          "rerun only if prompt/round policy changes or if a second seed is needed for a publishable claim",
+          "compare against other SkillsBench task families before generalizing the neutral signal"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The legacy staged no-skill baseline reached official verifier scoring with reward 0.0.",
+          "The blind-loop baseline also reached official scoring and recorded round rewards 1:0,2:0 without returning official feedback to the agent."
+        ],
+        "mechanism_hypothesis": "For this task family, neither reward-feedback follow-up nor no-reward scheduled continuation produced useful search direction. The durable value is as a neutral guard: it proves the outer loop can execute correctly while adding no score under the primary protocol.",
+        "treatment_observed_behavior": [
+          "The legacy automation-loop treatment completed two controller decisions after failed feedback and still scored 0.0.",
+          "The primary blind-loop treatment completed the same two-round budget with official feedback blinded, recorded round rewards 1:0,2:0, and still scored 0.0."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__manufacturing-codebook-normalization__paired-no-score-uplift",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-manufacturing-codebook-normalization-pair-20260615T2312CST",
+          "run_id": "c76c8bed6a8a"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-manufacturing-codebook-normalization-pair-20260615T2312CST",
+          "run_id": "e85065a9c230"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "conclusion": "The primary blind-loop protocol also produced no uplift on this neutral-control case: both arms completed official scoring at 0.0 across two recorded rounds.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-manufacturing-codebook-normalization-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment"
+      },
+      "capability_signal": "Both the legacy reward-feedback pair and the primary blind-loop pair completed official SkillsBench scoring at 0.0/0.0. This is now a stable no-uplift control rather than a setup or materialization blocker.",
+      "case_id": "manufacturing-codebook-normalization",
+      "classification": "no_uplift_asset",
+      "control_plane_signal": "The blind-loop treatment surface ran with official feedback blinded, reward feedback not forwarded, two controller decisions, and scalar round rewards 1:0,2:0. The extra Goal Harness framing did not improve the case.",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "compact_pair_complete",
+      "optimization_guidance": [
+        "Do not count this as treatment uplift evidence.",
+        "Use this as a neutral guard for blind-loop prompt, continuation, and stop-policy changes.",
+        "Investigate whether task-family-specific planning or validation summaries are needed before repeating this case.",
+        "Keep requiring compact controller counters and round rewards so neutral results still prove the treatment surface actually ran."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "use as a blind-loop neutral guard when testing a specific prompt, continuation, or task-family policy hypothesis",
+        "repeat_policy": "repeat_only_after_targeted_blind_loop_policy_hypothesis"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "we have not inspected raw trajectories, so the exact solution-level failure remains unknown by design"
+        ],
+        "no_uplift_claim": "high_for_current_blind_loop_policy",
+        "reason": "Legacy reward-feedback and primary blind-loop pairs both completed official SkillsBench scoring at baseline 0.0 and treatment 0.0. In the blind-loop pair, both arms recorded round rewards 1:0,2:0 with official feedback blinded and reward feedback not forwarded.",
+        "stabilization_needed": [
+          "repeat only after a targeted task-family or treatment-policy hypothesis",
+          "use alongside debug-trl-grpo as a non-improvement guard and llm-prefix/dapt as reward-feedback-only positives"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The blind-loop Codex ACP baseline reached official SkillsBench verifier scoring and received reward 0.0 in both recorded rounds.",
+          "The failure was classified as official_verifier_solution_failure, so it is solver/case scoped rather than setup, runner, or materialization scoped."
+        ],
+        "mechanism_hypothesis": "This case strengthens the neutral-control set under the primary protocol: neither an ordinary blind Codex ACP loop nor the Goal Harness blind-loop wrapper found a scoring solution. The current generic two-round blind continuation is not enough for this task family.",
+        "treatment_observed_behavior": [
+          "The blind-loop Goal Harness treatment reached official verifier scoring and also received reward 0.0 in both recorded rounds.",
+          "Compact controller trace records two controller decisions with official feedback blinded and no reward feedback returned to the agent.",
+          "No raw logs, task text, verifier output, or trajectory were copied into the public analysis."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__software-dependency-audit__blind-loop-no-score-uplift",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-software-dependency-audit-baseline-noskill-stagefix-20260615T063621CST",
+          "run_id": "885b7647488b"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-software-dependency-audit-baseline-noskill-stagefix-20260615T063621CST",
+          "run_id": "6cf96cd0b19a"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "42be7dc4459e",
+        "conclusion": "Clean neutral guard under the primary blind-loop protocol: both arms reached official scoring at 0.0 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-software-dependency-audit-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "173a02eb893d"
+      },
+      "capability_signal": "The repaired SkillsBench route now has a primary blind-loop pair for this case. Baseline and treatment both reached official scoring at 0.0, so the case is another clean neutral guard rather than uplift evidence.",
+      "case_id": "software-dependency-audit",
+      "classification": "no_uplift_asset",
+      "control_plane_signal": "The blind-loop treatment exercised the outer-control surface with two scheduled controller decisions, official feedback blinded, reward feedback not forwarded, and round rewards recorded only after completed agent rounds. The final official score remained 0.0.",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "optimization_guidance": [
+        "Do not count this as Goal Harness uplift evidence.",
+        "Use it as a blind-loop neutral guard for dependency-audit task-family changes and continuation policy tuning.",
+        "Repeat only after a targeted no-reward prompt, termination, or task-family hypothesis."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep mining a small number of blind-loop pairs while preserving this neutral guard",
+        "repeat_policy": "repeat_only_after_targeted_blind_loop_prompt_or_termination_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "only one blind-loop baseline and one blind-loop treatment attempt are currently recorded for this case"
+        ],
+        "no_uplift_claim": "high_for_current_protocol_single_seed",
+        "reason": "Both blind-loop arms completed official SkillsBench scoring under the same staged task route, no-upload boundary, two-round budget, and no reward-feedback policy.",
+        "stabilization_needed": [
+          "rerun only if prompt/round policy changes or if a second seed is needed for a publishable claim",
+          "compare against other SkillsBench task families before generalizing the neutral signal"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The legacy staged baseline reached official verifier scoring with reward 0.0.",
+          "The blind-loop baseline also reached official scoring and recorded round rewards 1:0,2:0 without returning official feedback to the agent."
+        ],
+        "mechanism_hypothesis": "For this task family, the outer blind-loop scheduled continuation did not produce useful search direction. The durable value is as a neutral guard that broadens the no-uplift control set beyond civ6 and manufacturing.",
+        "treatment_observed_behavior": [
+          "The legacy automation-loop treatment reached official verifier scoring and still scored 0.0.",
+          "The primary blind-loop treatment completed the two-round budget with official feedback blinded, recorded round rewards 1:0,2:0, and still scored 0.0."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__react-performance-debugging__blind-loop-no-score-uplift",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "legacy-skillsbench-react-performance-debugging-pair",
+          "run_id": "legacy-react-performance-debugging-baseline"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "legacy-skillsbench-react-performance-debugging-pair",
+          "run_id": "legacy-react-performance-debugging-treatment"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "851ca794f780",
+        "conclusion": "Clean neutral guard under the primary blind-loop protocol: both arms reached official scoring at 0.0 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-react-performance-debugging-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "8efed51d81e5"
+      },
+      "capability_signal": "The primary blind-loop pair for this case completed in both arms and produced no score uplift. Baseline and treatment each reached official scoring at 0.0, so this is a clean neutral guard for frontend/performance-debugging task-family changes rather than evidence of Goal Harness improvement.",
+      "case_id": "react-performance-debugging",
+      "classification": "no_uplift_asset",
+      "control_plane_signal": "The treatment exercised the outer-control surface with two scheduled controller decisions, official feedback blinded, reward feedback not forwarded, and round rewards recorded only after completed agent rounds. The final official score remained 0.0, matching baseline.",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "optimization_guidance": [
+        "Do not count this as Goal Harness uplift evidence.",
+        "Use it as a blind-loop neutral guard for frontend/performance-debugging task-family and continuation policy changes.",
+        "Repeat only after a targeted no-reward prompt, termination, or task-family hypothesis."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep mining a small number of blind-loop pairs while preserving this neutral guard",
+        "repeat_policy": "repeat_only_after_targeted_blind_loop_prompt_or_termination_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "only one blind-loop baseline and one blind-loop treatment attempt are currently recorded for this case"
+        ],
+        "no_uplift_claim": "high_for_current_protocol_single_seed",
+        "reason": "Both blind-loop arms completed official SkillsBench scoring under the same staged task route, no-upload boundary, two-round budget, and no reward-feedback policy.",
+        "stabilization_needed": [
+          "rerun only if prompt/round policy changes or if a second seed is needed for a publishable claim",
+          "compare against other SkillsBench task families before generalizing the neutral signal"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The legacy baseline reached official verifier scoring with reward 0.0.",
+          "The blind-loop baseline also reached official scoring and recorded round rewards 1:0,2:0 without returning official feedback to the agent."
+        ],
+        "mechanism_hypothesis": "For this task family, the outer blind-loop scheduled continuation did not produce useful search direction. The durable value is as a neutral guard that broadens the no-uplift control set to a frontend/performance-debugging task.",
+        "treatment_observed_behavior": [
+          "The legacy automation-loop treatment reached official verifier scoring and still scored 0.0.",
+          "The primary blind-loop treatment completed the two-round budget with official feedback blinded, recorded round rewards 1:0,2:0, and still scored 0.0."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__pddl-airport-planning__blind-loop-no-score-uplift",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_goal_mode_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "legacy-skillsbench-pddl-airport-planning-runs",
+          "run_id": "legacy-pddl-airport-planning-baseline"
+        },
+        "treatment": {
+          "arm_id": "goal_harness_automation_loop_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "legacy-skillsbench-pddl-airport-planning-runs",
+          "run_id": "legacy-pddl-airport-planning-treatment"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "adf46f67374c",
+        "conclusion": "Clean neutral guard under the primary blind-loop protocol: both arms reached official scoring at 0.0 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-pddl-airport-planning-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "1564d6cfc2fb"
+      },
+      "capability_signal": "The primary blind-loop pair for this case completed in both arms and produced no score uplift. Baseline and treatment each reached official scoring at 0.0, so this is a clean neutral guard for PDDL/planning task-family changes rather than evidence of Goal Harness improvement.",
+      "case_id": "pddl-airport-planning",
+      "classification": "no_uplift_asset",
+      "control_plane_signal": "The treatment exercised the outer-control surface with two scheduled controller decisions, official feedback blinded, reward feedback not forwarded, and round rewards recorded only after completed agent rounds. The final official score remained 0.0, matching baseline.",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "optimization_guidance": [
+        "Do not count this as Goal Harness uplift evidence.",
+        "Use it as a blind-loop neutral guard for PDDL/planning task-family and continuation policy changes.",
+        "Repeat only after a targeted no-reward prompt, termination, or task-family hypothesis."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "raw_task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep mining a small number of blind-loop pairs while preserving this neutral guard",
+        "repeat_policy": "repeat_only_after_targeted_blind_loop_prompt_or_termination_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "historical pddl-airport-planning attempts include runner/result variability, so this claim is scoped to the new primary blind-loop pair"
+        ],
+        "no_uplift_claim": "high_for_current_protocol_single_seed",
+        "reason": "Both blind-loop arms completed official SkillsBench scoring under the same staged task route, no-upload boundary, two-round budget, and no reward-feedback policy.",
+        "stabilization_needed": [
+          "rerun only if prompt/round policy changes or if a second seed is needed for a publishable claim",
+          "compare against other SkillsBench task families before generalizing the neutral signal"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "Historical baseline attempts were noisy, including official scoring and at least one result-missing runner case.",
+          "The blind-loop baseline reached official scoring and recorded round rewards 1:0,2:0 without returning official feedback to the agent."
+        ],
+        "mechanism_hypothesis": "For this planning task family, the outer blind-loop scheduled continuation did not produce useful search direction. The durable value is as a neutral guard that broadens the no-uplift control set to PDDL/planning tasks.",
+        "treatment_observed_behavior": [
+          "The historical automation-loop treatment reached official scoring and scored 0.0.",
+          "The primary blind-loop treatment completed the two-round budget with official feedback blinded, recorded round rewards 1:0,2:0, and still scored 0.0."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__ada-bathroom-plan-repair__blind-loop-baseline-solved-non-regression",
+      "arms": {
+        "baseline": {
+          "arm_id": "baseline",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-ada-bathroom-plan-repair-blind-loop-v0",
+          "run_id": "7d919631a765"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-ada-bathroom-plan-repair-blind-loop-v0",
+          "run_id": "52a934d39c59"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 1,
+        "baseline_round_rewards": "1:1",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "7d919631a765",
+        "conclusion": "The old setup/preflight blocker is resolved under the primary blind-loop route: both baseline and treatment reached official 1.0 in round 1 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "first_success_round": 1,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-ada-bathroom-plan-repair-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 1,
+        "treatment_round_rewards": "1:1",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "52a934d39c59"
+      },
+      "capability_signal": "This is not uplift evidence because the ordinary blind-loop baseline already solved the task at official 1.0 in round 1. It is a baseline-solved success guard and a treatment non-regression check.",
+      "case_id": "ada-bathroom-plan-repair",
+      "classification": "baseline_solved_non_regression_asset",
+      "control_plane_signal": "The rerun converts the old compact setup blocker into a completed comparable pair. The Goal Harness blind-loop treatment preserved baseline success while keeping official feedback blinded and reward feedback disabled.",
+      "decision": "paired_baseline_solved_treatment_preserved",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "historical_setup_blockers": [
+        {
+          "failure_class": "skillsbench_codex_acp_launch_failed",
+          "run_group_id": "skillsbench-ada-bathroom-plan-repair-pair-20260615T2346CST",
+          "run_id": "2eba92c0552d"
+        },
+        {
+          "failure_class": "skillsbench_codex_acp_binary_missing",
+          "run_group_id": "skillsbench-ada-bathroom-plan-repair-preflight-rerun-20260616T0124CST",
+          "run_id": "87abf4d54cb6"
+        }
+      ],
+      "optimization_guidance": [
+        "Do not use this case as uplift evidence; baseline already passes.",
+        "Use it as a success/non-regression guard when changing treatment prompt, continuation, or stop policy.",
+        "Keep the historical setup blocker rows as runner-readiness evidence, but do not let them override the newer primary blind-loop pair.",
+        "A prompt or round-policy change that makes treatment fail this case should be treated as a regression even if other neutral cases remain unchanged."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep as a baseline-solved non-regression guard; prioritize baseline-failing cases for uplift mining",
+        "repeat_policy": "repeat_only_after_treatment_prompt_or_stop_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 1,
+        "official_score_delta": 0,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "we did not inspect raw trajectories, so the exact solution path remains intentionally unknown",
+          "the case is baseline-solved, so it cannot measure uplift"
+        ],
+        "reason": "Both arms completed official SkillsBench scoring under the same no-upload, no-reward-feedback, no-/goal primary protocol. Baseline and treatment each reached official pass in round 1, so the treatment wrapper did not harm this easy/already-solvable case.",
+        "stabilization_needed": [
+          "rerun only after prompt/round/stop-policy changes or if a second seed is needed for a publishable claim",
+          "pair with baseline-failing positive/regression/neutral controls before generalizing treatment quality"
+        ],
+        "success_preservation_claim": "high_for_current_blind_loop_policy_single_seed"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The primary blind-loop Codex ACP baseline reached official SkillsBench verifier pass at reward 1.0 in the first completed agent round.",
+          "The runner prerequisites passed and compact evidence confirms no raw task text, raw logs, verifier output, or trajectory were copied into public analysis."
+        ],
+        "mechanism_hypothesis": "This case mainly tests non-regression: the task is solvable by the ordinary baseline, and the current Goal Harness wrapper does not disrupt that success. Its value is guarding against overbearing treatment prompts or continuation policies that would damage easy baseline successes.",
+        "treatment_observed_behavior": [
+          "The primary blind-loop Goal Harness treatment also reached official verifier pass at reward 1.0 in the first completed agent round.",
+          "The treatment used the outer Goal Harness blind-loop wrapper, but no official reward/pass/fail/verifier feedback was returned to the agent."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__organize-messy-files__blind-loop-baseline-solved-non-regression",
+      "arms": {
+        "baseline": {
+          "arm_id": "baseline",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-organize-messy-files-blind-loop-v0",
+          "run_id": "f25208ace86a"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-organize-messy-files-blind-loop-v0",
+          "run_id": "60878623ceca",
+          "treatment_prompt_style": "baseline-safe"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 1,
+        "baseline_round_rewards": "1:1",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "f25208ace86a",
+        "conclusion": "The old Docker compose setup blocker is resolved under the primary blind-loop route: both baseline and baseline-safe treatment reached official 1.0 in round 1 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "first_success_round": 1,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-organize-messy-files-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe",
+        "treatment_round_rewards": "1:1",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "60878623ceca"
+      },
+      "capability_signal": "This is not uplift evidence because the ordinary blind-loop baseline already solved the task at official 1.0 in round 1. It is a baseline-solved success guard, a treatment non-regression check, and evidence that the previous Docker compose setup blocker is no longer current for this route.",
+      "case_id": "organize-messy-files",
+      "classification": "baseline_solved_non_regression_asset",
+      "control_plane_signal": "The rerun converts a setup-blocked SkillsBench case into a completed comparable pair. The Goal Harness blind-loop treatment, using baseline-safe prompt framing, preserved baseline success while keeping official feedback blinded and reward feedback disabled.",
+      "decision": "paired_baseline_solved_treatment_preserved",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "historical_setup_blockers": [
+        {
+          "failure_class": "skillsbench_docker_compose_setup_failure",
+          "run_group_id": "skillsbench-organize-messy-files-pair-20260615T2158CST",
+          "run_id": "a1c722810880"
+        }
+      ],
+      "optimization_guidance": [
+        "Do not use this case as uplift evidence; baseline already passes.",
+        "Use it as a success/non-regression guard when changing treatment prompt, continuation, or stop policy.",
+        "Keep the historical Docker compose setup blocker row as runner-readiness evidence, but do not let it override the newer primary blind-loop pair.",
+        "A treatment prompt or stop-policy change that makes this case fail should be treated as a regression because baseline solves it in round 1."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep as a baseline-solved non-regression guard; prioritize baseline-failing cases for uplift mining and use this case to check that baseline-safe treatment framing does not damage easy wins",
+        "repeat_policy": "repeat_only_after_treatment_prompt_or_stop_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 1,
+        "official_score_delta": 0,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "we did not inspect raw trajectories, so the exact solution path remains intentionally unknown",
+          "the case is baseline-solved, so it cannot measure uplift"
+        ],
+        "reason": "Both arms completed official SkillsBench scoring under the same no-upload, no-reward-feedback, no-/goal primary protocol. Baseline and baseline-safe treatment each reached official pass in round 1, so the treatment wrapper did not harm this easy/already-solvable case.",
+        "stabilization_needed": [
+          "rerun only after prompt/round/stop-policy changes or if a second seed is needed for a publishable claim",
+          "pair with baseline-failing positive/regression/neutral controls before generalizing treatment quality"
+        ],
+        "success_preservation_claim": "high_for_current_blind_loop_policy_single_seed"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The primary blind-loop Codex ACP baseline reached official SkillsBench verifier pass at reward 1.0 in the first completed agent round.",
+          "The runner prerequisites passed and compact evidence confirms no raw task text, raw logs, verifier output, or trajectory were copied into public analysis."
+        ],
+        "mechanism_hypothesis": "This case mainly tests non-regression and setup recovery: the task is solvable by the ordinary baseline, the old Docker compose setup blocker is no longer current, and the baseline-safe Goal Harness wrapper does not disrupt that success. Its value is guarding against overbearing treatment prompts or continuation policies that would damage easy baseline successes.",
+        "treatment_observed_behavior": [
+          "The primary blind-loop Goal Harness treatment with baseline-safe prompt framing also reached official verifier pass at reward 1.0 in the first completed agent round.",
+          "The treatment used the outer Goal Harness blind-loop wrapper, but no official reward/pass/fail/verifier feedback was returned to the agent."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__citation-check__blind-loop-baseline-solved-non-regression",
+      "arms": {
+        "baseline": {
+          "arm_id": "baseline",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-citation-check-blind-loop-v0",
+          "run_id": "9b4df14b3ed8"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-citation-check-blind-loop-v0",
+          "run_id": "d553e635f00c",
+          "treatment_prompt_style": "baseline-safe"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 1,
+        "baseline_round_rewards": "1:1",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "9b4df14b3ed8",
+        "conclusion": "The old /app mount setup blocker is resolved under the primary blind-loop route: both baseline and baseline-safe treatment reached official 1.0 in round 1 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "first_success_round": 1,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-citation-check-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe",
+        "treatment_round_rewards": "1:1",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "d553e635f00c"
+      },
+      "capability_signal": "This is not uplift evidence because the ordinary blind-loop baseline already solved the task at official 1.0 in round 1. It is a baseline-solved success guard, a treatment non-regression check, and evidence that the earlier /app mount setup blocker is no longer current for the staged runner route.",
+      "case_id": "citation-check",
+      "classification": "baseline_solved_non_regression_asset",
+      "control_plane_signal": "The rerun converts a setup-blocked SkillsBench case into a completed comparable pair. The Goal Harness blind-loop treatment, using baseline-safe prompt framing, preserved baseline success while keeping official feedback blinded and reward feedback disabled.",
+      "decision": "paired_baseline_solved_treatment_preserved",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "historical_setup_blockers": [
+        {
+          "failure_class": "skillsbench_environment_app_mount_missing",
+          "run_group_id": "skillsbench-citation-check-baseline-20260615T0515CST",
+          "run_id": "cec197c1424a"
+        }
+      ],
+      "optimization_guidance": [
+        "Do not use this case as uplift evidence; baseline already passes.",
+        "Use it as a success/non-regression guard when changing treatment prompt, continuation, or stop policy.",
+        "Keep the historical /app mount setup blocker row as runner-readiness evidence, but do not let it override the newer primary blind-loop pair.",
+        "A treatment prompt or stop-policy change that makes this case fail should be treated as a regression because baseline solves it in round 1."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep as a baseline-solved non-regression guard; prioritize baseline-failing cases for uplift mining and use this case to check that baseline-safe treatment framing does not damage easy citation-checking wins",
+        "repeat_policy": "repeat_only_after_treatment_prompt_or_stop_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 1,
+        "official_score_delta": 0,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "we did not inspect raw trajectories, so the exact solution path remains intentionally unknown",
+          "the case is baseline-solved, so it cannot measure uplift"
+        ],
+        "reason": "Both arms completed official SkillsBench scoring under the same no-upload, no-reward-feedback, no-/goal primary protocol. Baseline and baseline-safe treatment each reached official pass in round 1, so the treatment wrapper did not harm this easy/already-solvable case.",
+        "stabilization_needed": [
+          "rerun only after prompt/round/stop-policy changes or if a second seed is needed for a publishable claim",
+          "pair with baseline-failing positive/regression/neutral controls before generalizing treatment quality"
+        ],
+        "success_preservation_claim": "high_for_current_blind_loop_policy_single_seed"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The primary blind-loop Codex ACP baseline reached official SkillsBench verifier pass at reward 1.0 in the first completed agent round.",
+          "The runner prerequisites passed and compact evidence confirms no raw task text, raw logs, verifier output, or trajectory were copied into public analysis."
+        ],
+        "mechanism_hypothesis": "This case mainly tests non-regression and setup recovery: the task is solvable by the ordinary baseline, the old /app mount setup blocker is no longer current, and the baseline-safe Goal Harness wrapper does not disrupt that success. Its value is guarding against overbearing treatment prompts or continuation policies that would damage easy baseline successes.",
+        "treatment_observed_behavior": [
+          "The primary blind-loop Goal Harness treatment with baseline-safe prompt framing also reached official verifier pass at reward 1.0 in the first completed agent round.",
+          "The treatment used the outer Goal Harness blind-loop wrapper, but no official reward/pass/fail/verifier feedback was returned to the agent."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__3d-scan-calc__blind-loop-baseline-solved-non-regression",
+      "arms": {
+        "baseline": {
+          "arm_id": "baseline",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-3d-scan-calc-blind-loop-v0",
+          "run_id": "9b1d8be29eb4"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "official_score": 1,
+          "run_group_id": "skillsbench-3d-scan-calc-blind-loop-v0",
+          "run_id": "306537fca3ac",
+          "treatment_prompt_style": "baseline-safe"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 1,
+        "baseline_round_rewards": "1:1",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "9b1d8be29eb4",
+        "conclusion": "The primary blind-loop route now has a comparable 3d-scan-calc pair: both baseline and baseline-safe treatment reached official 1.0 in round 1 with no official reward/pass/fail/verifier feedback returned to the agent.",
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "first_success_round": 1,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-3d-scan-calc-blind-loop-v0",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe",
+        "treatment_round_rewards": "1:1",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "306537fca3ac"
+      },
+      "capability_signal": "This is not uplift evidence because the ordinary blind-loop baseline already solved the task at official 1.0 in round 1. It is a baseline-solved success guard and treatment non-regression check for a 3D calculation task family.",
+      "case_id": "3d-scan-calc",
+      "classification": "baseline_solved_non_regression_asset",
+      "control_plane_signal": "The rerun converts a legacy baseline-pass-only record into a completed primary blind-loop pair. The Goal Harness blind-loop treatment, using baseline-safe prompt framing, preserved baseline success while keeping official feedback blinded and reward feedback disabled.",
+      "decision": "paired_baseline_solved_treatment_preserved",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "historical_setup_blockers": [],
+      "optimization_guidance": [
+        "Do not use this case as uplift evidence; baseline already passes.",
+        "Use it as a success/non-regression guard when changing treatment prompt, continuation, or stop policy.",
+        "Keep the older codex_goal_mode_baseline pass as historical context, but use the current blind-loop pair for policy claims.",
+        "A treatment prompt or stop-policy change that makes this case fail should be treated as a regression because baseline solves it in round 1."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "keep as a baseline-solved non-regression guard; prioritize baseline-failing cases for uplift mining and use this case to check that baseline-safe treatment framing does not damage already-solvable 3D calculation tasks",
+        "repeat_policy": "repeat_only_after_treatment_prompt_or_stop_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 1,
+        "official_score_delta": 0,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "actual model route is reported by metadata but not independently verified",
+          "we did not inspect raw trajectories, so the exact solution path remains intentionally unknown",
+          "the case is baseline-solved, so it cannot measure uplift"
+        ],
+        "reason": "Both arms completed official SkillsBench scoring under the same no-upload, no-reward-feedback, no-/goal primary protocol. Baseline and baseline-safe treatment each reached official pass in round 1, so the treatment wrapper did not harm this baseline-solved case.",
+        "stabilization_needed": [
+          "rerun only after prompt/round/stop-policy changes or if a second seed is needed for a publishable claim",
+          "pair with baseline-failing positive/regression/neutral controls before generalizing treatment quality"
+        ],
+        "success_preservation_claim": "high_for_current_blind_loop_policy_single_seed"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The primary blind-loop Codex ACP baseline reached official SkillsBench verifier pass at reward 1.0 in the first completed agent round.",
+          "The runner prerequisites passed and compact evidence confirms no raw task text, raw logs, verifier output, or trajectory were copied into public analysis."
+        ],
+        "mechanism_hypothesis": "This case mainly tests non-regression: the task is solvable by the ordinary baseline, and the baseline-safe Goal Harness wrapper does not disrupt that success. Its value is guarding against overbearing treatment prompts or continuation policies that would damage easy baseline successes.",
+        "treatment_observed_behavior": [
+          "The primary blind-loop Goal Harness treatment with baseline-safe prompt framing also reached official verifier pass at reward 1.0 in the first completed agent round.",
+          "The treatment used the outer Goal Harness blind-loop wrapper, but no official reward/pass/fail/verifier feedback was returned to the agent."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__bike-rebalance__baseline-solved-treatment-preserved",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex-acp-blind-loop-baseline",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "first_success_round": 1,
+          "official_score": 1,
+          "repaired_from": {
+            "failure_class": "skillsbench_runner_error",
+            "run_group_id": "skillsbench-bike-rebalance-blind-loop-20260616T082339CST-popen",
+            "run_id": "a22a96cea1fe"
+          },
+          "round_rewards": "1:1",
+          "run_group_id": "skillsbench-bike-rebalance-baseline-rerun-20260616T0852CST",
+          "run_id": "7ab4d4e3f194"
+        },
+        "treatment": {
+          "arm_id": "goal-harness-blind-loop-treatment-baseline-safe",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "first_success_round": 1,
+          "official_score": 1,
+          "round_rewards": "1:1",
+          "run_group_id": "skillsbench-bike-rebalance-blind-loop-20260616T082339CST-popen",
+          "run_id": "239aecc4f3a3",
+          "treatment_prompt_style": "baseline-safe"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 1,
+        "baseline_round_rewards": "1:1",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_group_id": "skillsbench-bike-rebalance-baseline-rerun-20260616T0852CST",
+        "baseline_run_id": "7ab4d4e3f194",
+        "conclusion": "The repaired baseline-only blind-loop rerun reached official SkillsBench pass in round 1. The previously recorded baseline-safe treatment also reached official 1.0 in round 1 with feedback blinded. This reclassifies bike-rebalance as a baseline-solved non-regression guard, not uplift evidence.",
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "first_success_round": 1,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "repair_note": "Initial comparable baseline attempt ended before rounds with skillsbench_runner_error; rerun after closeout/preflight-state preservation reached official scoring.",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-bike-rebalance-baseline-rerun-20260616T0852CST",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe",
+        "treatment_round_rewards": "1:1",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "239aecc4f3a3"
+      },
+      "capability_signal": "The ordinary codex-acp blind-loop baseline solved bike-rebalance at official 1.0 in round 1 after the baseline runner closeout path was repaired. The Goal Harness baseline-safe treatment also solved it at official 1.0 in round 1, so the useful signal is non-regression rather than uplift.",
+      "case_id": "bike-rebalance",
+      "classification": "baseline_solved_non_regression_asset",
+      "control_plane_signal": "This case demonstrates why runner/setup repair must precede uplift claims: the earlier treatment-only pass looked promising, but a repaired comparable baseline also passed. The compact ledger preserved both the initial runner error and the later baseline success without reading raw logs, task text, trajectory, or verifier output.",
+      "decision": "paired_baseline_solved_treatment_preserved",
+      "evidence_status": "compact_pair_complete_after_baseline_rerun",
+      "optimization_guidance": [
+        "Use bike-rebalance as a success/non-regression guard when changing treatment prompt, continuation, or stop policy.",
+        "Do not count the treatment pass as uplift: the repaired baseline also reached official 1.0 in round 1.",
+        "Keep the initial skillsbench_runner_error as runner-readiness evidence, but keep it separate from case-solving score comparisons.",
+        "Preserve first_success_round=1 and round_rewards=1:1 for both arms as offline metrics; do not return those signals to agents during blind-loop execution."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "treat bike-rebalance as a baseline-solved non-regression guard; select a different unresolved SkillsBench/Terminal-Bench case for further treatment-search work",
+        "repeat_policy": "repeat_only_after_prompt_or_round_policy_change"
+      },
+      "scores": {
+        "baseline_official_score": 1,
+        "official_score_delta": 0,
+        "treatment_official_score": 1
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "baseline success is a repaired rerun rather than the first baseline attempt",
+          "actual model route is reported by metadata but not independently verified",
+          "raw trajectories and verifier output were intentionally not inspected"
+        ],
+        "reason": "The repaired baseline compact has official score 1.0, first_success_round=1, round_rewards=1:1, official_feedback_blinded=true, and reward_feedback_forwarded=false. The earlier treatment compact has the same official score and first-success timing. Score delta is 0.0.",
+        "stabilization_needed": [
+          "repeat only when testing a specific prompt or round-policy change",
+          "keep the case in the success/non-regression control set for future SkillsBench treatment changes",
+          "continue separating runner/setup failures from case-score comparisons"
+        ],
+        "success_preservation_claim": "high_for_current_blind_loop_policy_single_seed",
+        "uplift_claim": "not_supported_baseline_also_solved"
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The initial baseline compact ended before recorded round rewards with skillsbench_runner_error, so it was not comparable for score claims.",
+          "After the runner closeout/preflight-state repair, the baseline-only blind-loop rerun reached official SkillsBench reward 1.0 in round 1.",
+          "No raw logs, task text, verifier output, or trajectory content were read for the baseline arm."
+        ],
+        "mechanism_hypothesis": "This case mainly tests non-regression and runner-readiness discipline. Once the baseline route reaches official scoring, it solves the task as quickly as the treatment route. The optimization lesson is to repair baseline comparability before treating a treatment pass as evidence of Goal Harness advantage.",
+        "treatment_observed_behavior": [
+          "The baseline-safe Goal Harness blind-loop treatment completed official SkillsBench scoring at reward 1.0 in round 1.",
+          "The controller trace records official feedback as blinded and reward feedback as not forwarded; the reward is retained only for offline analysis."
+        ]
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__azure-bgp-oscillation-route-leak__blind-loop-no-score-uplift-after-runtime-setup-repair",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex_acp_blind_loop_baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-azure-bgp-route-leak-blind-loop-20260616T103700CST",
+          "run_id": "ed2c390f39b9"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "run_group_id": "skillsbench-azure-bgp-route-leak-blind-loop-20260616T103700CST",
+          "run_id": "8d9511cee40f"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_max5_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:missing,2:0,3:0,4:0,5:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "d08c5bf09769",
+        "conclusion": "Fresh max5 no-reward pair confirms the two-round neutral signal: both arms exhausted the five-round budget at official 0.0, with no official reward, pass/fail, verifier error, or verifier output returned to either agent.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback_max5",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-azure-bgp-oscillation-route-leak-blind-loop-max5-20260616T1649CST",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:missing,2:0,3:0,4:0,5:0",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "c50ebc418b8e"
+      },
+      "blind_loop_recheck": {
+        "baseline_official_score": 0,
+        "baseline_round_rewards": "1:0,2:0",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "ed2c390f39b9",
+        "conclusion": "Clean no-uplift pair after runner setup repair: both arms reached official scoring at 0.0 under the primary blind-loop protocol, with official feedback blinded and two post-hoc reward records per arm.",
+        "decision": "paired_no_score_uplift",
+        "first_success_round": null,
+        "official_feedback_blinded": true,
+        "official_score_delta": 0,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-azure-bgp-route-leak-blind-loop-20260616T103700CST",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "treatment_official_score": 0,
+        "treatment_round_rewards": "1:0,2:0",
+        "treatment_route": "goal-harness-blind-loop-treatment",
+        "treatment_run_id": "8d9511cee40f"
+      },
+      "capability_signal": "This is not uplift evidence. Its value is that the SkillsBench runner path is now healthy enough for a fresh Docker case to reach real Codex ACP execution and official scoring in both baseline and Goal Harness treatment arms; the stricter max5 rerun stayed neutral at 0.0/0.0.",
+      "case_id": "azure-bgp-oscillation-route-leak",
+      "classification": "no_uplift_asset",
+      "control_plane_signal": "The useful improvement was setup reliability, not solver quality: apt-risk preflight, staged Codex ACP runtime tools, and bounded dangling Docker layer cleanup moved the case from runner/setup failures to official verifier solution failure. Treatment used the Goal Harness blind-loop wrapper but did not improve score.",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "compact_blind_loop_pair_complete",
+      "optimization_guidance": [
+        "Do not count this as Goal Harness uplift evidence.",
+        "Use it as a neutral guard for BGP/network-analysis task-family prompt or termination-policy changes.",
+        "Keep the staged Codex ACP runtime-tools patch and Docker-capacity preflight before broad SkillsBench sampling.",
+        "Next improvement should analyze why both arms fail semantically only if raw trajectory review is explicitly authorized or a compact-safe trajectory summary exists."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids and run groups only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false,
+        "verifier_output_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "continue alternating SkillsBench/Terminal-Bench blind-loop pairs; for SkillsBench prefer remaining non-apt-risk candidates now that runner setup can reach official scoring",
+        "repeat_policy": "repeat only after targeted prompt/round-policy changes or a compact-safe semantic failure summary is available"
+      },
+      "scores": {
+        "baseline_official_score": 0,
+        "official_score_delta": 0,
+        "treatment_official_score": 0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "two completed baseline/treatment pairs for this case, but no compact-safe semantic trajectory summary yet",
+          "semantic failure has not been trajectory-reviewed because raw trajectory, raw logs, and raw task text remained out of public state",
+          "several earlier setup attempts for the same case are preserved in the ledger and should not be counted as case attempts"
+        ],
+        "no_uplift_claim": "stronger_for_current_protocol_after_max5_pair",
+        "reason": "Both arms completed official scoring under the original two-round pair and a later max5 no-reward-feedback pair, with staged runtime-tools setup patch and no raw task/log/trajectory reads.",
+        "stabilization_needed": [
+          "repeat only if prompt or round policy changes",
+          "add compact-safe failure summaries before making task-family claims"
+        ]
+      },
+      "updated_at": "2026-06-16T20:13:04+08:00"
+    },
+    {
+      "analysis_id": "skillsbench-1.1__setup-fuzzing-py__codex-acp-focal-apt-setup-blocker",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex-acp-blind-loop-baseline",
+          "failure_class": "skillsbench_docker_compose_apt_repository_failure",
+          "failure_scope": "score_missing",
+          "run_group_id": "skillsbench-setup-fuzzing-py-blind-baseline-aptrepair-20260616T0941CST",
+          "run_id": "92aaefc0c077",
+          "task_staging": {
+            "app_skills_mount_patch_applied": false,
+            "apt_retry_patch_applied": true,
+            "include_task_skills": false,
+            "original_task_mutated": false,
+            "staged": true,
+            "task_skills_removed": true
+          }
+        },
+        "treatment": null
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "capability_signal": "No solver capability signal yet: the baseline never reached agent tool execution or official verifier scoring.",
+      "case_id": "setup-fuzzing-py",
+      "classification": "setup_blocker_asset",
+      "control_plane_signal": "This case exposed a reusable runner-readiness gap. SkillsBench Focal/oss-fuzz task images can fail before solver execution through multiple setup layers: earlier Codex ACP libssl compatibility, then Docker compose apt repository/GPG/hash-fetch setup. A staged Dockerfile apt retry/no-cache patch did enter the real baseline run, but it did not clear the setup failure.",
+      "decision": "baseline_runner_or_setup_repair_required",
+      "evidence_status": "compact_baseline_setup_blocker",
+      "optimization_guidance": [
+        "Do not count this as a case failure, no-uplift case, regression, or uplift.",
+        "Add runner preflight that distinguishes Codex ACP ABI incompatibility and Docker compose apt repository failures from solver/verifier failures.",
+        "Prefer compatible SkillsBench cases for near-term paired evidence; keep Focal/oss-fuzz tasks as a setup/runner bridge requirement.",
+        "Do not repeat the same setup-fuzzing-py baseline merely with the existing apt retry/no-cache staging patch; the latest compact run already proves that patch was applied and insufficient.",
+        "Use the runner's skillsbench_task_setup_preflight plus --fail-fast-on-apt-risk before any same-route repeat so apt-risk Docker tasks become compact setup-selection blockers instead of full case attempts."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids, run groups, and public-safe dependency probes only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "repair or bypass the deeper Docker compose apt repository setup failure before launching treatment for this case; the current staged apt retry/no-cache patch is applied but insufficient",
+        "repeat_policy": "do_not_repeat_until_setup_route_changes_or_fail_fast_preflight_requested"
+      },
+      "scores": {
+        "baseline_official_score": null,
+        "official_score_delta": null,
+        "treatment_official_score": null
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "the compact artifact records the current Docker compose apt repository setup failure; the earlier libssl blocker was established by a prior compact run",
+          "the latest compact and ledger metadata show apt_retry_patch_applied=true, so the remaining blocker is not merely that the staged setup patch failed to enter the run"
+        ],
+        "reason": "Compact result and runner counters point to pre-solver setup failure. The latest blocker is Docker compose apt repository/GPG/hash-fetch setup, with zero completed agent rounds. The apt retry/no-cache staging repair was applied to the staged task, task skills were removed for the no-skill baseline route, and the run still ended with missing official score.",
+        "setup_blocker_claim": "high",
+        "stabilization_needed": [
+          "choose a non-Focal/compatible SkillsBench case for the next baseline+treatment pair if immediate paired evidence is needed",
+          "or repair/bypass Docker compose apt repository setup before repeating Focal/oss-fuzz tasks",
+          "if this case is kept active, the next setup intervention must be materially different from the existing apt retry/no-cache patch"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The first run exposed a local Docker CPU cap staging gap.",
+          "The stagefix run exposed codex-acp startup failure from missing libssl.so.3.",
+          "The primary blind-loop baseline moved past the libssl class and now fails before agent/tool execution with compact skillsbench_docker_compose_apt_repository_failure.",
+          "The aptrepair baseline applied staged Dockerfile apt retry/no-cache metadata, but still failed before any completed agent round or official score."
+        ],
+        "mechanism_hypothesis": "The blocker is runner/environment setup, not task-solving behavior. Repeating this case with the same Docker compose setup will not produce a meaningful treatment comparison.",
+        "treatment_observed_behavior": []
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__adaptive-cruise-control__codex-acp-apt-setup-blocker",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex-acp-blind-loop-baseline",
+          "failure_class": "skillsbench_docker_compose_apt_repository_failure",
+          "failure_scope": "score_missing",
+          "run_group_id": "skillsbench-adaptive-cruise-control-blind-baseline-probe-20260616T0956CST",
+          "run_id": "235f52dc6a5b",
+          "task_staging": {
+            "app_skills_mount_patch_applied": false,
+            "apt_retry_patch_applied": true,
+            "include_task_skills": false,
+            "original_task_mutated": false,
+            "resource_cap_patch": {
+              "applied": false,
+              "effective_cpus": 1,
+              "host_cpus": 2,
+              "requested_cpus": 1
+            },
+            "staged": true,
+            "task_skills_removed": true
+          }
+        },
+        "treatment": null
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "capability_signal": "No solver capability signal yet: the baseline ended before any controller prompt, agent round, or official verifier score.",
+      "case_id": "adaptive-cruise-control",
+      "classification": "setup_blocker_asset",
+      "control_plane_signal": "A second fresh SkillsBench case reproduced the Docker compose apt repository setup blocker even though staged apt retry/no-cache metadata was applied. This upgrades the issue from a setup-fuzzing-py-specific blocker to a broader SkillsBench Docker apt setup route risk.",
+      "decision": "baseline_runner_or_setup_repair_required",
+      "evidence_status": "compact_baseline_setup_blocker",
+      "optimization_guidance": [
+        "Do not launch treatment for this case: the baseline never reached solver/verifier scoring.",
+        "Treat adaptive-cruise-control plus setup-fuzzing-py as evidence that the current apt retry/no-cache staging repair is not sufficient for every apt-based Docker task.",
+        "Before sampling more SkillsBench cases, either add a non-apt/compatible-task selection filter or implement a materially different Docker apt setup bypass/attribution route.",
+        "The runner now exposes a compact skillsbench_task_setup_preflight and optional --fail-fast-on-apt-risk guard; use it to route apt-risk tasks to setup repair without launching full baseline/treatment attempts."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact ledger ids, run groups, and public-safe staging metadata only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "continue primary blind-loop sampling only through non-apt-risk tasks or through the --fail-fast-on-apt-risk setup-selection guard; block same-route treatment until baseline reaches agent rounds or official scoring",
+        "repeat_policy": "use_fail_fast_preflight_or_material_setup_route_change_before_repeat"
+      },
+      "scores": {
+        "baseline_official_score": null,
+        "official_score_delta": null,
+        "treatment_official_score": null
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "the compact evidence does not expose raw Docker output by design",
+          "the case did not reach an agent round, so it cannot speak to task-solving capability"
+        ],
+        "reason": "The compact baseline probe ended with official score missing, zero completed trials, zero controller decisions, and skillsbench_docker_compose_apt_repository_failure. Public task_staging metadata records apt_retry_patch_applied=true, staged=true, and task_skills_removed=true.",
+        "setup_blocker_claim": "high_for_runner_route",
+        "stabilization_needed": [
+          "use the implemented compact preflight or selection filter that distinguishes apt-based Docker setup risk before spending full case runs",
+          "or change the Docker apt setup route materially and rerun one setup-blocked case"
+        ]
+      },
+      "trajectory_analysis": {
+        "baseline_observed_behavior": [
+          "The real no-upload blind-loop baseline produced compact result and controller-trace artifacts quickly.",
+          "No initial prompt or follow-up was sent because setup failed before controller/agent interaction.",
+          "The staged apt retry/no-cache repair was applied, but official scoring remained missing."
+        ],
+        "mechanism_hypothesis": "The immediate bottleneck is benchmark environment setup, not Goal Harness treatment design. Randomly sampling more apt-based Docker tasks will likely spend time on the same setup class unless selection or setup routing changes.",
+        "treatment_observed_behavior": []
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__travel-planning__blind-loop-baseline-solved-control",
+      "arms": {
+        "baseline": {
+          "arm_id": "codex-acp-blind-loop-baseline",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "first_success_round": 1,
+          "official_score": 1.0,
+          "round_rewards": "1:1",
+          "run_group_id": "skillsbench-travel-planning-blind-loop-20260616T1238CST",
+          "run_id": "084e5289e5ea"
+        },
+        "treatment": null
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "blind_loop_recheck": {
+        "baseline_official_score": 1.0,
+        "baseline_round_rewards": "1:1",
+        "baseline_route": "codex-acp-blind-loop-baseline",
+        "baseline_run_id": "084e5289e5ea",
+        "conclusion": "The ordinary Codex ACP blind-loop baseline solved travel-planning in agent round 1 with official score 1.0 while official feedback remained blinded and reward feedback was not forwarded. This is a baseline-solved control, not an uplift candidate.",
+        "controller_stop_decision": "stop_after_blind_loop_official_success_observed_without_feedback",
+        "decision": "baseline_passed_not_current_treatment_priority",
+        "early_stop_confirmed": true,
+        "first_success_round": 1,
+        "future_default_max_rounds": 5,
+        "official_feedback_blinded": true,
+        "official_score_delta": null,
+        "protocol": "primary_blind_loop_no_reward_feedback",
+        "reward_feedback_forwarded": false,
+        "run_group_id": "skillsbench-travel-planning-blind-loop-20260616T1238CST",
+        "schema_version": "skillsbench_blind_loop_recheck_v0",
+        "this_run_max_rounds_budget": 2,
+        "treatment_official_score": null,
+        "treatment_route": "not_launched_baseline_passed"
+      },
+      "capability_signal": "The baseline solved the task immediately: official 1.0 in round 1 with 18 tool calls. This provides no evidence that Goal Harness treatment is needed for this case.",
+      "case_id": "travel-planning",
+      "classification": "baseline_solved_control_asset",
+      "control_plane_signal": "The compact setup preflight successfully avoided apt-risk tasks and found a runnable SkillsBench case. The result also proves the blind-loop early-stop rule: although this historical run used max_rounds=2, official reward reached 1.0 in round 1 and the controller stopped without forwarding reward. Future blind-loop runs default to max_rounds=5.",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "compact_blind_loop_baseline_complete",
+      "optimization_guidance": [
+        "Do not use this as uplift evidence; baseline already passes.",
+        "Keep it as a baseline-solved control for stop-policy and no-reward-loop sanity checks.",
+        "For near-term evidence, continue candidate selection toward non-apt-risk tasks where the ordinary baseline fails or only partially succeeds.",
+        "If later treatment prompt changes are suspected to regress easy tasks, run the paired treatment as a non-regression check rather than as an uplift search.",
+        "Use the updated blind-loop default of max_rounds=5 for future baseline/treatment arms, but stop an arm immediately once official reward reaches 1.0."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "compact run id, run group, and benchmark_run.compact.json only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false,
+        "verifier_output_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "select another non-apt-risk SkillsBench candidate and prefer tasks where the baseline reaches official scoring below 1.0 before launching treatment",
+        "repeat_policy": "do_not_launch_treatment_for_uplift_mining_unless_non_regression_guard_is_needed"
+      },
+      "scores": {
+        "baseline_official_score": 1.0,
+        "early_stop_confirmed": true,
+        "first_success_round": 1,
+        "future_default_max_rounds": 5,
+        "official_score_delta": null,
+        "this_run_max_rounds_budget": 2,
+        "treatment_official_score": null
+      },
+      "stability_assessment": {
+        "needs_repeat_for_claim": false,
+        "notes": "Stable enough to route away from treatment for current uplift mining; not enough to make broader model capability claims.",
+        "status": "single_clean_baseline_pass"
+      }
+    },
+    {
+      "analysis_id": "skillsbench-1.1__paratransit-routing__paired-treatment-improved-blind-loop",
+      "arms": {
+        "baseline": {
+          "arm_id": "baseline",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "max_rounds_budget": 5,
+          "official_feedback_blinded": true,
+          "reward_feedback_forwarded": false,
+          "round_rewards": "1:0,2:0,3:0,4:0,5:0",
+          "run_group_id": "skillsbench-paratransit-routing-blind-loop-20260616T1304CST",
+          "run_id": "e8f39eb75b5d"
+        },
+        "treatment": {
+          "arm_id": "codex_goal_harness_treatment",
+          "controller_action_decisions": 2,
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "first_success_round": 1,
+          "followup_prompt_count": 0,
+          "heartbeat_count": 2,
+          "last_decision": "stop_after_blind_loop_official_success_observed_without_feedback",
+          "max_rounds_budget": 5,
+          "official_feedback_blinded": true,
+          "reward_feedback_forwarded": false,
+          "round_rewards": "1:1",
+          "run_group_id": "skillsbench-paratransit-routing-blind-loop-20260616T1304CST",
+          "run_id": "79ca6c4a216d"
+        }
+      },
+      "benchmark_id": "skillsbench@1.1",
+      "capability_signal": "Under the primary blind-loop protocol, ordinary Codex ACP baseline exhausted the five-round budget at official 0.0, while the Goal Harness blind-loop treatment reached official 1.0 in round 1. This is a clean no-reward-feedback positive asset rather than a reward-feedback ablation artifact.",
+      "case_id": "paratransit-routing",
+      "classification": "positive_uplift_asset",
+      "control_plane_signal": "The treatment used the same max_rounds=5 budget, did not receive official reward/pass/fail/verifier feedback, and stopped immediately after offline official success was observed. The useful control-plane signal is prompt/round orchestration plus stop-at-1 discipline, not more interactions or reward leakage.",
+      "decision": "paired_treatment_improved",
+      "evidence_status": "compact_pair_complete_primary_blind_loop",
+      "optimization_guidance": [
+        "Use paratransit-routing as the first clean primary blind-loop positive control when judging future prompt and round-policy changes.",
+        "Keep treatment stop-at-1 enabled; extra scheduled rounds would waste budget and risk damaging a successful artifact.",
+        "Compare against debug-trl-grpo before broad claims: paratransit shows treatment can help, while debug shows structured continuation can still regress partial credit.",
+        "Analyze compact/public controller counters before changing interaction count policy; this uplift used no follow-up prompt after failure and succeeded in round 1."
+      ],
+      "public_boundary": {
+        "absolute_paths_recorded": false,
+        "artifact_reference_policy": "refer to compact run ids and run group only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false,
+        "verifier_output_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "continue alternating SkillsBench candidates, but preserve paratransit-routing as a clean blind-loop positive control asset",
+        "repeat_policy": "do_not_repeat_immediately"
+      },
+      "scores": {
+        "baseline_official_score": 0.0,
+        "baseline_round_rewards": "1:0,2:0,3:0,4:0,5:0",
+        "claimable_uplift": true,
+        "first_success_round": 1,
+        "official_score_delta": 1.0,
+        "treatment_official_score": 1.0,
+        "treatment_round_rewards": "1:1"
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "single-case evidence",
+          "model_control_status is reported metadata rather than independently verified"
+        ],
+        "protocol_comparability": "high",
+        "reward_leakage_risk": "low",
+        "stable_conclusion": "Goal Harness blind-loop treatment can produce real no-feedback uplift on at least one SkillsBench case; effect is not explained by interaction count because treatment succeeded in the first agent round."
+      },
+      "trajectory_public_summary": {
+        "attribution_conclusion": "The clean uplift is not explained by in-case Goal Harness CLI interaction or extra rounds: treatment succeeded in round 1, with zero GH CLI calls and no protected-path edit signal in the public-safe trajectory summary.",
+        "goal_harness_cli_call_count": 0,
+        "goal_harness_cli_calls": [],
+        "host_path_recorded": false,
+        "private_trajectory_present": true,
+        "protected_path_edit_signal_count": 0,
+        "protected_path_mention_count": 0,
+        "raw_task_text_copied_to_public": false,
+        "raw_text_copied_to_public": false,
+        "raw_verifier_output_copied_to_public": false,
+        "round_count": 1,
+        "schema_version": "skillsbench_acp_trajectory_summary_v0",
+        "tool_call_count": 16,
+        "treatment_run_group_id": "skillsbench-paratransit-routing-blind-loop-20260616T1304CST"
+      },
+      "product_mode_recheck": {
+        "baseline_run_group_id": "skillsbench-product-mode-paratransit-routing-main-dockerready-20260616T2156CST",
+        "baseline_run_id": "34966c13e416",
+        "baseline_route": "raw-codex-autonomous-max5",
+        "baseline_official_score": 0.0,
+        "baseline_round_rewards": "1:0",
+        "baseline_declared_done_round": 1,
+        "treatment_run_id": "19ad0b495161",
+        "treatment_route": "goal-harness-product-mode",
+        "treatment_official_score": 0.0,
+        "treatment_round_rewards": "1:0",
+        "treatment_declared_done_round": 1,
+        "official_score_delta": 0.0,
+        "best_score_delta": 0.0,
+        "final_score_delta": 0.0,
+        "declared_done_score_delta": 0.0,
+        "decision": "paired_no_score_uplift",
+        "treatment_goal_harness_cli_call_count": 1,
+        "treatment_goal_harness_cli_calls": [
+          "goal-harness which goal"
+        ],
+        "docker_readiness_repaired": true,
+        "host_blocker_superseded": "skillsbench_docker_daemon_unavailable",
+        "product_mode_pair_complete": true,
+        "claim_boundary": "This docker-ready product-mode pair is neutral at 0.0/0.0; do not mix it with the older blind-loop treatment for product-mode main-table claims.",
+        "next_action": "compare public-safe trajectory summaries for the blind-loop positive treatment and the product-mode neutral treatment to identify why product-mode lost the blind-loop positive behavior without reading raw task text, raw logs, verifier output, or raw trajectory bodies."
+      },
+      "product_mode_attribution": {
+        "evidence_boundary": "compact_public_safe_counters_only_no_raw_task_log_verifier_or_trajectory",
+        "mechanism_level_conclusion": "Product-mode loss is not explained by interaction count, reward leakage, protected-path edits, or Docker readiness. The product-mode treatment stopped on agent_declared_done at score 0.0 before substantive Goal Harness state or replan use.",
+        "blind_loop_positive_treatment": {
+          "run_id": "79ca6c4a216d",
+          "official_score": 1.0,
+          "first_success_round": 1,
+          "goal_harness_cli_call_count": 0,
+          "goal_harness_state_reads": 0,
+          "goal_harness_state_writes": 0,
+          "tool_call_count": 16,
+          "last_decision": "stop_after_blind_loop_official_success_observed_without_feedback"
+        },
+        "product_mode_neutral_treatment": {
+          "run_id": "19ad0b495161",
+          "official_score": 0.0,
+          "declared_done_round": 1,
+          "declared_done_score": 0.0,
+          "goal_harness_cli_call_count": 1,
+          "goal_harness_cli_calls": [
+            "goal-harness which goal"
+          ],
+          "goal_harness_state_reads": 0,
+          "goal_harness_state_writes": 0,
+          "tool_call_count": 13,
+          "last_decision": "stop_after_agent_declared_done"
+        },
+        "excluded_causes": [
+          "more_goal_harness_cli_interaction",
+          "reward_or_verifier_feedback_leakage",
+          "protected_path_edit_signal",
+          "docker_readiness_or_runner_setup"
+        ],
+        "next_design_implication": "Do not claim product-mode uplift from this pair. Either preserve the blind-loop successful initial-treatment semantics or add a public-safe replan and remaining-goals check before treating declared_done at 0.0 as a final product-mode stop.",
+        "content_level_limit": "A content-level root cause still requires a stronger redacted trajectory summarizer or an explicit raw-trace owner gate."
+      }
+    }
+  ],
+  "schema_version": "benchmark_case_analysis_v0",
+  "source_ledgers": [
+    "benchmark-run-ledger.json",
+    "benchmark-run-ledger.md"
+  ],
+  "treatment_policy_controls": {
+    "control_set_id": "skillsbench_automation_loop_policy_controls_20260615",
+    "interaction_count_assessment": {
+      "baseline_controller_interactions": 0,
+      "baseline_route": "codex_goal_mode_baseline",
+      "baseline_route_semantics_audit": {
+        "current_recorded_runs_native_goal_mode_confirmed": false,
+        "legacy_arm_name": "codex_goal_mode_baseline",
+        "observed_current_run_semantics": "official SkillsBench BenchFlow codex-acp baseline with no Goal Harness controller user",
+        "required_future_baseline_semantics": "interactive Codex CLI slash-command goal state, confirmed by CLI trace/session evidence, with no reward follow-up",
+        "runner_contract_fix": "future SkillsBench codex-goal-mode-baseline compact evidence must separate native_goal_mode_requested from native_goal_mode_invoked; ACP prompt text alone is not sufficient confirmation"
+      },
+      "blind_loop_recheck_conclusion": "llm-prefix-cache-replay and dapt-intrusion-detection no longer support blind no-reward uplift claims: both primary blind-loop rechecks completed baseline and treatment at official 0.0. debug-trl-grpo reproduces the structured-treatment regression under the same blind protocol and the max-5 rerun strengthens it: baseline stayed 0.25 for five blinded rounds, while structured treatment fell from 0.25 to 0.0 after scheduled continuation. Its baseline-safe prompt ablation recovers to baseline partial credit 0.25. civ6-adjacency-optimizer, manufacturing-codebook-normalization, software-dependency-audit, react-performance-debugging, and pddl-airport-planning confirm clean blind-loop neutral controls at 0.0/0.0. ada-bathroom-plan-repair, organize-messy-files, citation-check, 3d-scan-calc, and bike-rebalance are baseline-solved non-regression guards at 1.0/1.0.",
+      "blind_loop_rechecks": [
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "llm-prefix-cache-replay",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-llm-prefix-cache-replay-blind-pair-protocol-v10",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "dapt-intrusion-detection",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-dapt-intrusion-detection-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 0.25,
+          "baseline_round_rewards": "1:0.25,2:0.25",
+          "case_id": "debug-trl-grpo",
+          "decision": "paired_treatment_regressed",
+          "first_success_round": null,
+          "max5_recheck": {
+            "baseline_official_score": 0.25,
+            "baseline_round_rewards": "1:0.25,2:0.25,3:0.25,4:0.25,5:0.25",
+            "decision": "paired_treatment_regressed",
+            "first_success_round": null,
+            "max_rounds_budget": 5,
+            "official_feedback_blinded": true,
+            "official_score_delta": -0.25,
+            "reward_feedback_forwarded": false,
+            "run_group_id": "skillsbench-debug-trl-grpo-blind-loop-max5-20260616T144124CST",
+            "treatment_official_score": 0,
+            "treatment_round_rewards": "1:0.25,2:0.25,3:0,4:0,5:0"
+          },
+          "official_feedback_blinded": true,
+          "official_score_delta": -0.25,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-debug-trl-grpo-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0.25,2:0"
+        },
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "civ6-adjacency-optimizer",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-civ6-adjacency-optimizer-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "manufacturing-codebook-normalization",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-manufacturing-codebook-normalization-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "software-dependency-audit",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-software-dependency-audit-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "react-performance-debugging",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-react-performance-debugging-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 0,
+          "baseline_round_rewards": "1:0,2:0",
+          "case_id": "pddl-airport-planning",
+          "decision": "paired_no_score_uplift",
+          "first_success_round": null,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-pddl-airport-planning-blind-loop-v0",
+          "treatment_official_score": 0,
+          "treatment_round_rewards": "1:0,2:0"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "case_id": "ada-bathroom-plan-repair",
+          "decision": "paired_baseline_solved_treatment_preserved",
+          "first_success_round": 1,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-ada-bathroom-plan-repair-blind-loop-v0",
+          "treatment_official_score": 1,
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "case_id": "organize-messy-files",
+          "decision": "paired_baseline_solved_treatment_preserved",
+          "first_success_round": 1,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-organize-messy-files-blind-loop-v0",
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "case_id": "citation-check",
+          "decision": "paired_baseline_solved_treatment_preserved",
+          "first_success_round": 1,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-citation-check-blind-loop-v0",
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "case_id": "3d-scan-calc",
+          "decision": "paired_baseline_solved_treatment_preserved",
+          "first_success_round": 1,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-3d-scan-calc-blind-loop-v0",
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "case_id": "bike-rebalance",
+          "decision": "paired_baseline_solved_treatment_preserved",
+          "evidence_status": "baseline_rerun_passed_treatment_preserved",
+          "first_success_round": 1,
+          "official_feedback_blinded": true,
+          "official_score_delta": 0,
+          "reward_feedback_forwarded": false,
+          "run_group_id": "skillsbench-bike-rebalance-baseline-rerun-20260616T0852CST",
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        }
+      ],
+      "conclusion": "existing_uplift_is_reward_feedback_evidence_not_blind_control_plane_evidence",
+      "evidence_boundary": "Compact controller counters and official scores only; no raw logs, raw task text, or raw trajectory copied into this analysis.",
+      "goal_harness_inside_case": false,
+      "mechanism_hypothesis": "The existing reward-feedback positives show that explicit reward-aware follow-up can recover some solver-addressable failures, but blind-loop evidence cuts against a generic no-reward control-plane advantage. Interaction count alone is not the mechanism: debug-trl-grpo recovered from structured-treatment 0.0 to baseline-matching 0.25 when the treatment prompt was changed to baseline-safe, and the max-5 rerun showed extra blinded continuations could degrade treatment from early 0.25 partial credit to final 0.0 while baseline held 0.25 across all five rounds.",
+      "negative_and_neutral_controls": [
+        {
+          "baseline_official_score": 0.25,
+          "baseline_safe_prompt_delta_vs_structured_treatment": 0.25,
+          "baseline_safe_prompt_round_rewards": "1:0.25,2:0.25",
+          "baseline_safe_prompt_treatment_official_score": 0.25,
+          "blind_loop_baseline_official_score": 0.25,
+          "blind_loop_official_score_delta": -0.25,
+          "blind_loop_treatment_official_score": 0,
+          "blind_loop_treatment_round_rewards": "1:0.25,2:0",
+          "case_id": "debug-trl-grpo",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "max5_baseline_official_score": 0.25,
+          "max5_baseline_round_rewards": "1:0.25,2:0.25,3:0.25,4:0.25,5:0.25",
+          "max5_official_score_delta": -0.25,
+          "max5_run_group_id": "skillsbench-debug-trl-grpo-blind-loop-max5-20260616T144124CST",
+          "max5_treatment_official_score": 0,
+          "max5_treatment_round_rewards": "1:0.25,2:0.25,3:0,4:0,5:0",
+          "max_rounds_budget": 5,
+          "treatment_official_score": 0
+        },
+        {
+          "baseline_official_score": 0,
+          "blind_loop_baseline_official_score": 0,
+          "blind_loop_official_score_delta": 0,
+          "blind_loop_round_rewards": "1:0,2:0",
+          "blind_loop_treatment_official_score": 0,
+          "blind_loop_treatment_round_rewards": "1:0,2:0",
+          "case_id": "civ6-adjacency-optimizer",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "treatment_official_score": 0
+        },
+        {
+          "baseline_official_score": 0,
+          "blind_loop_baseline_official_score": 0,
+          "blind_loop_official_score_delta": 0,
+          "blind_loop_round_rewards": "1:0,2:0",
+          "blind_loop_treatment_official_score": 0,
+          "case_id": "manufacturing-codebook-normalization",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "treatment_official_score": 0
+        },
+        {
+          "baseline_official_score": 0,
+          "blind_loop_baseline_official_score": 0,
+          "blind_loop_official_score_delta": 0,
+          "blind_loop_round_rewards": "1:0,2:0",
+          "blind_loop_treatment_official_score": 0,
+          "blind_loop_treatment_round_rewards": "1:0,2:0",
+          "case_id": "software-dependency-audit",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "treatment_official_score": 0
+        },
+        {
+          "baseline_official_score": 0,
+          "blind_loop_baseline_official_score": 0,
+          "blind_loop_official_score_delta": 0,
+          "blind_loop_round_rewards": "1:0,2:0",
+          "blind_loop_treatment_official_score": 0,
+          "blind_loop_treatment_round_rewards": "1:0,2:0",
+          "case_id": "react-performance-debugging",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "treatment_official_score": 0
+        },
+        {
+          "baseline_official_score": 0,
+          "blind_loop_baseline_official_score": 0,
+          "blind_loop_official_score_delta": 0,
+          "blind_loop_round_rewards": "1:0,2:0",
+          "blind_loop_treatment_official_score": 0,
+          "blind_loop_treatment_round_rewards": "1:0,2:0",
+          "case_id": "pddl-airport-planning",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "treatment_official_score": 0
+        }
+      ],
+      "positive_controls": [
+        {
+          "baseline_official_score": 0,
+          "case_id": "llm-prefix-cache-replay",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "treatment_official_score": 1
+        },
+        {
+          "baseline_official_score": 0,
+          "blind_loop_recheck_official_score_delta": 0,
+          "case_id": "dapt-intrusion-detection",
+          "controller_decisions": 2,
+          "followup_prompts": 1,
+          "primary_claim_scope": "reward_feedback_ablation_only",
+          "treatment_official_score": 1
+        }
+      ],
+      "primary_comparison_protocol": {
+        "allowed_agent_signals": [
+          "task instruction",
+          "workspace state",
+          "agent self-generated notes",
+          "local validation output produced inside the workspace"
+        ],
+        "baseline_agent_capabilities": "raw Codex autonomous max5; may keep its own local plan/todos but does not use Goal Harness state, todo, replan, ledger, or CLI",
+        "baseline_route": "raw-codex-autonomous-max5",
+        "case_selection_policy": "Before product-mode main-table runs, run compact setup-shape preflight and prefer no-apt Docker candidates; if apt_setup_risk_detected=true, use --fail-fast-on-apt-risk or route to setup repair instead of spending a full case attempt. As of 2026-06-16, no-apt selection is necessary but not sufficient because raw-Codex-autonomous-max5 still compact-closed before agent rounds on tictoc-unnecessary-abort-detection and paratransit-routing.",
+        "claim_rule": "the main table has exactly one base+test combination; blind-loop prompt variants, reward-aware loops, and prompt ablations are guardrail or ablation evidence only",
+        "controller_stop_policy": "both arms stop when official reward reaches 1.0 or when the agent declares done/no remaining goals; official verifier results are recorded offline and never fed back during execution",
+        "feedback_policy": "do not return official reward, pass/fail status, verifier_error, verifier_output, or private verifier tail to the agent during the loop",
+        "first_success_round_metric": "record the first agent_round whose official reward reaches pass threshold; agent_round=1 means the first completed agent attempt",
+        "forbidden_agent_signals": [
+          "previous_reward",
+          "previous_verifier_error",
+          "private_verifier_output_tail",
+          "official pass/fail judgment",
+          "hidden verifier diagnostics"
+        ],
+        "headline_metrics": [
+          "best_score",
+          "final_score",
+          "first_success_round",
+          "declared_done_score"
+        ],
+        "inner_case_actor": "raw Codex autonomous baseline versus Goal Harness product-mode treatment; no official reward/verifier feedback is exposed to either arm",
+        "loop_budget": "same max_rounds=5 and timeout budget for both arms unless reward==1 or agent-declared completion stops earlier",
+        "round_reward_metric": "record scalar official reward for every completed agent round in compact controller trace and ledger; do not return those rewards to the agent during execution",
+        "schema_version": "skillsbench_product_mode_main_comparison_protocol_v0",
+        "setup_blocker_current_assessment": {
+          "blocked_route": "raw-codex-autonomous-max5",
+          "evidence": [
+            {
+              "case_id": "tictoc-unnecessary-abort-detection",
+              "failure_class": "skillsbench_docker_compose_setup_failure",
+              "raw_logs_read": false,
+              "run_id": "d081caec0332"
+            },
+            {
+              "agent_rounds_started": false,
+              "case_attempt_budget_should_count": false,
+              "case_id": "paratransit-routing",
+              "compose_setup_diagnostic_status": "compose_setup_blocked_before_agent_rounds",
+              "failure_class": "skillsbench_docker_compose_setup_failure",
+              "fixedjobsdir_run_id": "7adaa4fe6f12",
+              "next_diagnostic_action": "classify_sanitized_compose_setup_category_before_product_treatment",
+              "official_score_missing": true,
+              "prior_blind_loop_baseline_run_id": "e8f39eb75b5d",
+              "prior_blind_loop_treatment_run_id": "79ca6c4a216d",
+              "raw_logs_read": false,
+              "run_id": "fade77637cae"
+            }
+          ],
+          "interpretation": "Do not count product-mode main-table cases until the raw route reaches agent rounds or official scoring. The current paratransit fixed-jobs-dir evidence is a non-countable compose setup blocker before agent rounds, so repair/classify the sanitized compose setup category before launching treatment.",
+          "schema_version": "skillsbench_product_mode_setup_blocker_v0"
+        },
+        "setup_readiness_fact": "Local SkillsBench setup-shape scan on 2026-06-16 found 8 no-apt Docker candidates out of 87 tasks; product-mode raw debug-trl-grpo still failed before agent rounds with skillsbench_docker_compose_apt_repository_failure despite apt retry/runtime-tools hardening. Fresh no-apt raw product-mode baselines for tictoc-unnecessary-abort-detection and paratransit-routing also failed before agent rounds with skillsbench_docker_compose_setup_failure; the corrected paratransit fixed-jobs-dir rerun now has skillsbench_compose_setup_diagnostic_v0 status compose_setup_blocked_before_agent_rounds, agent_rounds_started=false, official_score_missing=true, and case_attempt_budget_should_count=false.",
+        "treatment_agent_capabilities": "Goal Harness product-mode; build goal state, todos, known constraints, replan/status writeback, and use GH CLI/ledger as product control-plane state",
+        "treatment_route": "goal-harness-product-mode"
+      },
+      "prompt_ablation_results": [
+        {
+          "case_id": "debug-trl-grpo",
+          "conclusion": "baseline-safe prompt recovered the structured treatment regression to baseline partial credit",
+          "official_feedback_blinded": true,
+          "official_score": 0.25,
+          "official_score_delta_vs_baseline": 0,
+          "official_score_delta_vs_structured_treatment": 0.25,
+          "reference_baseline_official_score": 0.25,
+          "reference_structured_treatment_official_score": 0,
+          "reward_feedback_forwarded": false,
+          "round_rewards": "1:0.25,2:0.25",
+          "run_group_id": "skillsbench-debug-trl-grpo-blind-loop-baseline-safe-v0",
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_run_id": "f37b0a3e9654"
+        }
+      ],
+      "reward_feedback_payload": {
+        "classification_after_protocol_revision": "reward-feedback ablation only; not eligible for primary no-reward-leakage uplift claims",
+        "default_verifier_output_tail_chars_after_fix": 0,
+        "fields_forwarded_after_failed_reward": [
+          "previous_reward",
+          "previous_verifier_error",
+          "previous_tool_calls"
+        ],
+        "leakage_assessment": "Forwarding private verifier output tail can leak verifier/reward diagnostics into the treatment. It is not written to public ledger, but it changes treatment semantics; future default should not forward verifier output tail unless explicitly enabled for a reward-feedback experiment."
+      },
+      "success_controls": [
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "blind_loop_official_score_delta": 0,
+          "case_id": "ada-bathroom-plan-repair",
+          "controller_decisions": 2,
+          "first_success_round": 1,
+          "followup_prompts": 0,
+          "treatment_official_score": 1,
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "blind_loop_official_score_delta": 0,
+          "case_id": "organize-messy-files",
+          "controller_decisions": 2,
+          "first_success_round": 1,
+          "followup_prompts": 0,
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "blind_loop_official_score_delta": 0,
+          "case_id": "citation-check",
+          "controller_decisions": 2,
+          "first_success_round": 1,
+          "followup_prompts": 0,
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "blind_loop_official_score_delta": 0,
+          "case_id": "3d-scan-calc",
+          "controller_decisions": 2,
+          "first_success_round": 1,
+          "followup_prompts": 0,
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        },
+        {
+          "baseline_official_score": 1,
+          "baseline_round_rewards": "1:1",
+          "blind_loop_official_score_delta": 0,
+          "case_id": "bike-rebalance",
+          "controller_decisions": 2,
+          "first_success_round": 1,
+          "followup_prompts": 0,
+          "treatment_official_score": 1,
+          "treatment_prompt_style": "baseline-safe",
+          "treatment_round_rewards": "1:1"
+        }
+      ],
+      "treatment_controller_pattern": "two controller decisions: initial prompt plus one follow-up after failed reward; this is now classified as reward-feedback ablation, not the primary blind-loop comparison",
+      "treatment_route": "goal_harness_automation_loop_treatment_reward_feedback_ablation"
+    },
+    "neutral_controls": [
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_baseline_official_score": 0,
+        "blind_loop_official_score_delta": 0,
+        "blind_loop_round_rewards": "1:0,2:0",
+        "blind_loop_treatment_official_score": 0,
+        "case_id": "civ6-adjacency-optimizer",
+        "primary_claim_scope": "blind_loop_neutral_guard",
+        "stable_neutral_signal": "The automation loop ran and observed failed reward, but generic two-round feedback did not improve the official score.",
+        "treatment_official_score": 0
+      },
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_baseline_official_score": 0,
+        "blind_loop_run_group_id": "skillsbench-manufacturing-codebook-normalization-blind-loop-v0",
+        "blind_loop_treatment_official_score": 0,
+        "case_id": "manufacturing-codebook-normalization",
+        "stable_neutral_signal": "Both legacy reward-feedback and primary blind-loop pairs completed official scoring at 0.0/0.0; the blind-loop pair recorded round rewards 1:0,2:0 in both arms with feedback blinded.",
+        "treatment_official_score": 0
+      },
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_baseline_official_score": 0,
+        "blind_loop_official_score_delta": 0,
+        "blind_loop_round_rewards": "1:0,2:0",
+        "blind_loop_run_group_id": "skillsbench-software-dependency-audit-blind-loop-v0",
+        "blind_loop_treatment_official_score": 0,
+        "case_id": "software-dependency-audit",
+        "primary_claim_scope": "blind_loop_neutral_guard",
+        "stable_neutral_signal": "Both legacy and primary blind-loop pairs completed official scoring at 0.0/0.0; the blind-loop pair recorded round rewards 1:0,2:0 in both arms with feedback blinded.",
+        "treatment_official_score": 0
+      },
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_baseline_official_score": 0,
+        "blind_loop_official_score_delta": 0,
+        "blind_loop_round_rewards": "1:0,2:0",
+        "blind_loop_run_group_id": "skillsbench-react-performance-debugging-blind-loop-v0",
+        "blind_loop_treatment_official_score": 0,
+        "case_id": "react-performance-debugging",
+        "primary_claim_scope": "blind_loop_neutral_guard",
+        "stable_neutral_signal": "Both legacy and primary blind-loop pairs completed official scoring at 0.0/0.0; the blind-loop pair recorded round rewards 1:0,2:0 in both arms with feedback blinded.",
+        "treatment_official_score": 0
+      },
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_baseline_official_score": 0,
+        "blind_loop_official_score_delta": 0,
+        "blind_loop_round_rewards": "1:0,2:0",
+        "blind_loop_run_group_id": "skillsbench-pddl-airport-planning-blind-loop-v0",
+        "blind_loop_treatment_official_score": 0,
+        "case_id": "pddl-airport-planning",
+        "primary_claim_scope": "blind_loop_neutral_guard",
+        "stable_neutral_signal": "The primary blind-loop pair completed official scoring at 0.0/0.0 with round rewards 1:0,2:0 in both arms and feedback blinded.",
+        "treatment_official_score": 0
+      }
+    ],
+    "policy_gate": {
+      "blind_loop_rule": "Blind-loop max5 is a prompt/continuation guard, not the main-table product comparison: codex-acp-blind-loop-baseline versus goal-harness-blind-loop-treatment with reward_feedback_forwarded=false and official_feedback_blinded=true.",
+      "claim_rule": "Do not claim route-wide improvement from positive cases alone; main-table claims should use raw-codex-autonomous-max5 versus goal-harness-product-mode and must preserve the debug-trl-grpo regression guard, the civ6/manufacturing/software-dependency/react-performance/pddl neutral guards, and the ada-bathroom, organize-messy-files, citation-check, 3d-scan-calc, and bike-rebalance baseline-solved non-regression guards.",
+      "prompt_rule": "Future blind-loop treatment prompts should start from baseline-safe scope-preserving framing and explicitly preserve protected files and narrow task scope unless compact verifier-facing evidence requires broader edits.",
+      "round_rule": "Extra rounds need a stop/stabilize rule: debug-trl-grpo shows structured scheduled continuation can reduce score from partial credit 0.25 to final 0.0; the max-5 rerun strengthens this because baseline held 0.25 across five blinded rounds while treatment fell to 0.0 after round 2, while baseline-safe prompt framing preserved 0.25 across the old two-round budget."
+    },
+    "positive_controls": [
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "case_id": "llm-prefix-cache-replay",
+        "stable_help_signal": "One failed-reward observation plus one follow-up converted a clean solver-scoped baseline failure into an official verifier pass.",
+        "treatment_official_score": 1
+      },
+      {
+        "baseline_official_score": 0,
+        "benchmark_id": "skillsbench@1.1",
+        "case_id": "dapt-intrusion-detection",
+        "stable_help_signal": "One failed-reward observation plus one explicit reward-aware follow-up converted a clean solver-scoped baseline failure into an official verifier pass; the blind-loop recheck did not reproduce the uplift.",
+        "treatment_official_score": 1
+      }
+    ],
+    "product_mode_setup_assessment": {
+      "case_id": "paratransit-routing",
+      "conclusion": "Correcting jobs_dir removed the double-nesting artifact; finer public-safe reduction now narrows the remaining pre-agent compose setup blocker to local Docker daemon/Colima readiness, not product-mode agent behavior. Do not count the raw run as a case attempt or launch product-mode treatment until local Docker VM readiness is restored and the raw baseline reaches agent rounds.",
+      "corrected_jobs_dir_result": {
+        "compose_setup_diagnostic": {
+          "agent_rounds_started": false,
+          "case_attempt_budget_should_count": false,
+          "controller_action_decision_count": 0,
+          "docker_daemon_unavailable": true,
+          "failure_class": "skillsbench_docker_daemon_unavailable",
+          "fingerprint_matched_patterns": [
+            "docker_compose_command_failed",
+            "docker_daemon_unavailable"
+          ],
+          "goal_harness_cli_call_count": 0,
+          "heartbeat_count": 0,
+          "next_diagnostic_action": "repair_runner_setup_before_product_treatment",
+          "official_result_json_materialized": true,
+          "official_score_missing": true,
+          "raw_logs_read": false,
+          "raw_task_text_read": false,
+          "raw_trajectory_read": false,
+          "schema_version": "skillsbench_compose_setup_diagnostic_v0",
+          "status": "compose_setup_blocked_before_agent_rounds",
+          "trajectory_round_count": 0,
+          "unclassified_compose_failure": false
+        },
+        "failure_labels": [
+          "skillsbench_docker_daemon_unavailable",
+          "skillsbench_docker_compose_setup_failure",
+          "skillsbench_environment_setup_error"
+        ],
+        "fingerprint_matched_patterns": [
+          "docker_compose_command_failed",
+          "docker_daemon_unavailable"
+        ],
+        "heartbeat_count": 0,
+        "job_root_materialized": true,
+        "last_decision": "not_started",
+        "official_score": null,
+        "raw_logs_read": false,
+        "raw_task_text_read": false,
+        "raw_trajectory_read": false,
+        "run_id": "7adaa4fe6f12",
+        "score_failure_attribution": "skillsbench_docker_daemon_unavailable"
+      },
+      "corrected_jobs_dir_run_id": "7adaa4fe6f12",
+      "docker_readiness_probe": {
+        "checked_at": "2026-06-16T21:39+08:00",
+        "default_colima_status": "stopped_start_failed_vz_disk_attach_in_use",
+        "docker_cli_reachable": false,
+        "goal_harness_bench_colima_status": "stopped_start_failed_vz_disk_attach_in_use",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false
+      },
+      "prior_blind_loop_baseline_run_id": "e8f39eb75b5d",
+      "prior_blind_loop_treatment_run_id": "79ca6c4a216d",
+      "prior_raw_product_run_id": "fade77637cae",
+      "status": "raw_baseline_blocked_by_host_docker_daemon_readiness"
+    },
+    "public_boundary": {
+      "absolute_paths_copied": false,
+      "raw_logs_copied": false,
+      "raw_task_text_copied": false,
+      "trajectory_copied": false
+    },
+    "regression_controls": [
+      {
+        "baseline_official_score": 0.25,
+        "baseline_safe_prompt_run_group_id": "skillsbench-debug-trl-grpo-blind-loop-baseline-safe-v0",
+        "baseline_safe_prompt_treatment_official_score": 0.25,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_baseline_official_score": 0.25,
+        "blind_loop_run_group_id": "skillsbench-debug-trl-grpo-blind-loop-v0",
+        "blind_loop_treatment_official_score": 0,
+        "case_id": "debug-trl-grpo",
+        "max5_baseline_official_score": 0.25,
+        "max5_baseline_round_rewards": "1:0.25,2:0.25,3:0.25,4:0.25,5:0.25",
+        "max5_blind_loop_run_group_id": "skillsbench-debug-trl-grpo-blind-loop-max5-20260616T144124CST",
+        "max5_treatment_official_score": 0,
+        "max5_treatment_round_rewards": "1:0.25,2:0.25,3:0,4:0,5:0",
+        "stable_problem_signal": "The structured treatment regressed from baseline 0.25 to 0.0, and max-5 rerun evidence strengthens the continuation-risk signal: baseline held 0.25 across five blinded rounds while structured treatment fell to 0.0 after round 2. A baseline-safe treatment prompt preserved 0.25 across both old blind-loop rounds. The remaining problem is structured prompt/scope framing plus continuation policy, not interaction count alone.",
+        "treatment_official_score": 0
+      }
+    ],
+    "runner_repair_controls": [],
+    "scope": "Local no-upload SkillsBench automation-loop treatment compared with Codex goal-mode baseline, using compact official scores and public controller counters only.",
+    "status": "active_guardrail_for_treatment_policy_changes",
+    "success_controls": [
+      {
+        "baseline_official_score": 1,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_official_score_delta": 0,
+        "case_id": "ada-bathroom-plan-repair",
+        "first_success_round": 1,
+        "primary_claim_scope": "blind_loop_success_non_regression_guard",
+        "stable_success_signal": "The primary blind-loop pair completed official scoring at 1.0/1.0 in round 1 with feedback blinded; useful as a guard that treatment does not damage baseline-solved cases.",
+        "treatment_official_score": 1
+      },
+      {
+        "baseline_official_score": 1,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_official_score_delta": 0,
+        "case_id": "organize-messy-files",
+        "first_success_round": 1,
+        "primary_claim_scope": "blind_loop_success_non_regression_guard",
+        "stable_success_signal": "The primary blind-loop pair completed official scoring at 1.0/1.0 in round 1 with feedback blinded; useful as a guard that treatment does not damage baseline-solved cases and that the old Docker compose setup blocker is resolved for this route.",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe"
+      },
+      {
+        "baseline_official_score": 1,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_official_score_delta": 0,
+        "case_id": "citation-check",
+        "first_success_round": 1,
+        "primary_claim_scope": "blind_loop_success_non_regression_guard",
+        "stable_success_signal": "The primary blind-loop pair completed official scoring at 1.0/1.0 in round 1 with feedback blinded; useful as a guard that treatment does not damage baseline-solved citation-checking cases and that the old /app mount setup blocker is resolved for the staged route.",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe"
+      },
+      {
+        "baseline_official_score": 1,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_official_score_delta": 0,
+        "case_id": "3d-scan-calc",
+        "first_success_round": 1,
+        "primary_claim_scope": "blind_loop_success_non_regression_guard",
+        "stable_success_signal": "The primary blind-loop pair completed official scoring at 1.0/1.0 in round 1 with feedback blinded; useful as a guard that treatment does not damage baseline-solved 3D calculation tasks.",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe"
+      },
+      {
+        "baseline_official_score": 1,
+        "benchmark_id": "skillsbench@1.1",
+        "blind_loop_official_score_delta": 0,
+        "case_id": "bike-rebalance",
+        "first_success_round": 1,
+        "primary_claim_scope": "blind_loop_success_non_regression_guard",
+        "stable_success_signal": "The repaired baseline-only blind-loop rerun and the baseline-safe treatment both completed official scoring at 1.0 in round 1 with feedback blinded; useful as a guard that treatment does not damage baseline-solved routing tasks and as evidence that runner/setup repair can change claim classification.",
+        "treatment_official_score": 1,
+        "treatment_prompt_style": "baseline-safe"
+      }
+    ]
+  },
+  "update_policy": {
+    "absolute_paths_recorded": false,
+    "raw_logs_recorded": false,
+    "raw_task_text_recorded": false,
+    "source_of_truth": "compact benchmark run ledger plus public-safe case interpretation",
+    "trajectory_recorded": false,
+    "update_rule": "add one case analysis record after compact result ingest and benchmark-run-ledger update"
+  },
+  "updated_at": "2026-06-16T22:52:30+08:00"
+}

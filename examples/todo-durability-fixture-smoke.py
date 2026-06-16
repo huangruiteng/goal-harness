@@ -170,6 +170,39 @@ def main() -> int:
         assert_parseable_agent_todos(guard["agent_todo_summary"])
         assert "completed_todo_archive_warning" not in guard, guard
 
+        first_todo_id = guard["agent_todo_summary"]["first_open_items"][0]["todo_id"]
+        lifecycle_result = run_cli(
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--todo-id",
+            first_todo_id,
+            "--evidence",
+            "fixture completed",
+            "--next-agent-todo",
+            "Continue lifecycle follow-up without an explicit priority prefix.",
+            "--next-task-class",
+            "advancement_task",
+            "--next-action-kind",
+            "fixture_follow_up",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        next_todo = lifecycle_result["next_todos"][0]
+        assert next_todo["todo"].startswith("[P1] Continue lifecycle"), lifecycle_result
+
+        post_lifecycle_status = run_cli("status", registry_path=registry_path, runtime=runtime)
+        post_lifecycle_item = attention_item(post_lifecycle_status)
+        post_agent_todos = post_lifecycle_item["agent_todos"]
+        assert post_agent_todos["open_count"] == 2, post_agent_todos
+        assert post_agent_todos["done_count"] == 2, post_agent_todos
+        assert post_agent_todos["first_open_items"][0]["priority"] == "P1", post_agent_todos
+        assert post_agent_todos["first_open_items"][0]["todo_id"] == next_todo["todo_id"], post_agent_todos
+        assert post_agent_todos["first_open_items"][0]["action_kind"] == "fixture_follow_up", post_agent_todos
+
     print("todo-durability-fixture-smoke ok")
     return 0
 

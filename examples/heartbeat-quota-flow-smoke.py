@@ -84,6 +84,10 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "  intact, keep the public/private boundary context intact, keep the\n"
         "  status-queue routing context intact, keep the review packet context\n"
         "  intact, and finish " + LONG_NEXT_ACTION_TAIL + "\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] [P1] Run one bounded heartbeat marker and validate the compact result.\n"
+        "  <!-- goal-harness:todo todo_id=todo_fixture_heartbeat_marker status=open "
+        "task_class=advancement_task action_kind=validate -->\n\n"
         "## Progress Ledger\n\n"
         "- Initialized fixture.\n",
         encoding="utf-8",
@@ -299,6 +303,90 @@ def write_external_evidence_fixture(
     }
     Path(progress_record["json_path"]).write_text(json.dumps(progress_record) + "\n", encoding="utf-8")
     Path(progress_record["markdown_path"]).write_text("# Fixture External Evidence Wait\n", encoding="utf-8")
+    with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(progress_record) + "\n")
+    return project, runtime, registry_path
+
+
+def write_external_monitor_advancement_fixture(root: Path) -> tuple[Path, Path, Path]:
+    project = root / "external-monitor-advancement-project"
+    runtime = root / "external-monitor-advancement-runtime"
+    state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_path = project / state_file
+    registry_path = project / ".goal-harness" / "registry.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        "---\n"
+        "status: terminal_bench_headless_treatment_running_v0\n"
+        "owner_mode: goal\n"
+        'objective: "Exercise running benchmark observation contracts."\n'
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# External Monitor Advancement Fixture\n\n"
+        "## Next Action\n\n"
+        "- Observe active Terminal-Bench headless-terminal treatment run_group=fixture-headless "
+        "via compact process/result markers; ingest compact result and update the ledger when available.\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] [P0] Observe active Terminal-Bench headless-terminal Goal Harness treatment "
+        "(run_group=fixture-headless; pid=12345): poll process plus compact result markers only, "
+        "avoid raw task/log/trajectory reads, then ingest result, update ledger, and compare against baseline "
+        "without claiming uplift unless official score improves.\n"
+        "  <!-- goal-harness:todo todo_id=todo_fixture_headless status=open "
+        "task_class=advancement_task action_kind=monitor_running_benchmark_case -->\n"
+        "- [ ] [P1] Re-rank follow-on benchmark lanes after the active case produces a compact result.\n"
+        "  <!-- goal-harness:todo todo_id=todo_fixture_followup status=open "
+        "task_class=advancement_task action_kind=planning_refresh -->\n",
+        encoding="utf-8",
+    )
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "heartbeat-flow-fixture",
+                        "status": "terminal_bench_headless_treatment_running_v0",
+                        "repo": str(project),
+                        "state_file": state_file,
+                        "adapter": {
+                            "kind": "harness_self_improvement",
+                            "status": "connected-read-only",
+                        },
+                        "authority_sources": [],
+                        "quota": {
+                            "compute": 1.0,
+                            "window_hours": 24,
+                            "allowed_slots": 5,
+                        },
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runs_dir = runtime / "goals" / GOAL_ID / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    progress_record = {
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        "goal_id": GOAL_ID,
+        "classification": "terminal_bench_headless_treatment_running_v0",
+        "recommended_action": (
+            "Observe active Terminal-Bench headless-terminal treatment via compact process/result markers."
+        ),
+        "health_check": "state_file 1/1; registry_goal 1/1",
+        "delivery_batch_scale": "single_surface",
+        "json_path": str(runs_dir / "2026-01-01T00-00-00+00-00.json"),
+        "markdown_path": str(runs_dir / "2026-01-01T00-00-00+00-00.md"),
+    }
+    Path(progress_record["json_path"]).write_text(json.dumps(progress_record) + "\n", encoding="utf-8")
+    Path(progress_record["markdown_path"]).write_text("# Fixture Running Benchmark Observation\n", encoding="utf-8")
     with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(progress_record) + "\n")
     return project, runtime, registry_path
@@ -561,6 +649,7 @@ def main() -> int:
         assert "quota monitor-poll" in interaction["cli_channel"]["next_cli_actions"][0], interaction
 
         for index in range(2):
+            poll_reason = f"fixture monitor poll no material transition {index}"
             poll = run_cli(
                 root,
                 "quota",
@@ -569,6 +658,8 @@ def main() -> int:
                 GOAL_ID,
                 "--source",
                 "heartbeat",
+                "--reason-summary",
+                poll_reason,
                 "--execute",
                 "--scan-path",
                 str(project),
@@ -580,6 +671,7 @@ def main() -> int:
             assert poll["registry_mutated"] is False, poll
             assert poll["classification"] == "quota_monitor_poll", poll
             assert poll["monitor_event"]["before"]["effective_action"] == "monitor_quiet_skip", poll
+            assert poll["monitor_event"]["reason_summary"] == poll_reason, poll
             assert count_spend_events(runtime) == 0, poll
             assert count_events(runtime, "quota_monitor_poll") == index + 1, poll
 
@@ -749,7 +841,8 @@ def main() -> int:
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert guard["should_run"] is False, guard
+        assert guard["decision"] == "observe", guard
+        assert guard["should_run"] is True, guard
         assert guard["state"] == "waiting", guard
         assert guard["waiting_on"] == "external_evidence", guard
         assert guard["effective_action"] == "external_evidence_observe", guard
@@ -787,6 +880,81 @@ def main() -> int:
             "compact_blocker_writeback",
         ], executor
         assert count_spend_events(runtime) == 0, guard
+        poll = run_cli(
+            root,
+            "quota",
+            "monitor-poll",
+            "--goal-id",
+            GOAL_ID,
+            "--source",
+            "heartbeat",
+            "--execute",
+            "--scan-path",
+            str(project),
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert poll["ok"] is True, poll
+        assert poll["appended"] is True, poll
+        assert poll["classification"] == "quota_monitor_poll", poll
+        assert poll["monitor_event"]["monitor_mode"] == (
+            "external_monitor_observed_without_material_transition"
+        ), poll
+        assert poll["monitor_event"]["before"]["effective_action"] == "external_evidence_observe", poll
+        assert poll["after"]["effective_action"] == "external_evidence_observe", poll
+        assert count_spend_events(runtime) == 0, poll
+        assert count_events(runtime, "quota_monitor_poll") == 1, poll
+
+    with tempfile.TemporaryDirectory(prefix="goal-harness-external-monitor-advancement-") as tmp:
+        root = Path(tmp)
+        project, runtime, registry_path = write_external_monitor_advancement_fixture(root)
+        guard = run_cli(
+            root,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-path",
+            str(project),
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert guard["decision"] == "run", guard
+        assert guard["should_run"] is True, guard
+        assert guard["effective_action"] == "normal_run", guard
+        lane = guard["work_lane_contract"]
+        assert lane["lane"] == "advancement_task", lane
+        assert lane["monitor_policy"] == "material_transition_only", lane
+        assert lane["reason_codes"] == ["open_agent_todo", "external_monitor_context"], lane
+        assert guard["execution_obligation"]["must_attempt_work"] is True, guard
+        poll = run_cli(
+            root,
+            "quota",
+            "monitor-poll",
+            "--goal-id",
+            GOAL_ID,
+            "--source",
+            "heartbeat",
+            "--execute",
+            "--scan-path",
+            str(project),
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert poll["ok"] is True, poll
+        assert poll["appended"] is True, poll
+        assert poll["classification"] == "quota_monitor_poll", poll
+        assert poll["monitor_event"]["monitor_mode"] == (
+            "external_monitor_observed_without_material_transition"
+        ), poll
+        assert poll["monitor_event"]["before"]["effective_action"] == "normal_run", poll
+        assert poll["before"]["work_lane_contract"]["reason_codes"] == [
+            "open_agent_todo",
+            "external_monitor_context",
+        ], poll
+        assert poll["after"]["effective_action"] == "normal_run", poll
+        assert count_spend_events(runtime) == 0, poll
+        assert count_events(runtime, "quota_monitor_poll") == 1, poll
 
     with tempfile.TemporaryDirectory(prefix="goal-harness-external-evidence-projection-") as tmp:
         root = Path(tmp)
@@ -806,7 +974,8 @@ def main() -> int:
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert guard["should_run"] is False, guard
+        assert guard["decision"] == "observe", guard
+        assert guard["should_run"] is True, guard
         assert guard["state"] == "waiting", guard
         assert guard["waiting_on"] == "external_evidence", guard
         assert guard["effective_action"] == "external_evidence_observe", guard

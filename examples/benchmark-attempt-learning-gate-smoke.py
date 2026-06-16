@@ -156,6 +156,19 @@ def test_missing_learning_row_blocks_budget_count() -> None:
     assert_no_private_surface(json.dumps(payload, sort_keys=True))
 
 
+def test_environment_setup_attempt_routes_to_environment_contract() -> None:
+    run = benchmark_run(
+        first_blocker="environment_setup_failed_before_worker",
+        failure_labels=["environment_setup_failed_before_worker"],
+    )
+    payload = build_benchmark_attempt_learning_gate(compact_run(run))
+
+    assert payload["classification"] == "benchmark_attempt_learning_row_missing", payload
+    assert "benchmark_environment_setup_contract" in payload["repair_candidates"], payload
+    assert "adapter_startup_argument_contract" not in payload["repair_candidates"], payload
+    assert_no_private_surface(json.dumps(payload, sort_keys=True))
+
+
 def test_actionable_learning_row_allows_budget_count() -> None:
     payload = build_benchmark_attempt_learning_gate(
         compact_run(benchmark_run()),
@@ -292,6 +305,7 @@ def test_cli_attempt_learning_gate() -> None:
 
 def main() -> int:
     test_missing_learning_row_blocks_budget_count()
+    test_environment_setup_attempt_routes_to_environment_contract()
     test_actionable_learning_row_allows_budget_count()
     test_nonactionable_learning_row_still_blocks_budget_count()
     test_cli_attempt_learning_gate()

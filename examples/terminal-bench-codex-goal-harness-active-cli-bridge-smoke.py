@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import types
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,9 @@ REQUIRED_DOC_SNIPPETS = [
     "worker_benchmark_run_json_top_level_must_be_schema_version: true",
     "do_not_wrap_worker_benchmark_run_json_in_benchmark_run_key: true",
     "worker_benchmark_run_json_minimal_shape",
+    "worker_benchmark_run_json_validation_scope_required: true",
+    "worker_benchmark_run_json_bridge_connectivity_is_not_case_success: true",
+    "worker_benchmark_run_json_claim_boundary_required: true",
     "worker_benchmark_run_json_required_fixed_fields: real_run=true,submit_eligible=false,leaderboard_evidence=false",
     "worker_benchmark_run_json_submit_eligible_must_be_false: true",
     "worker_benchmark_run_json_runner_no_upload_boundary_overrides_worker_guess: true",
@@ -167,6 +171,29 @@ def assert_active_bridge_prompt_and_metadata() -> None:
         in instruction
     ), instruction
     assert "worker_benchmark_run_json_minimal_shape:" in instruction, instruction
+    assert (
+        "worker_benchmark_run_json_validation_scope_required: true"
+        in instruction
+    ), instruction
+    assert (
+        "worker_benchmark_run_json_validation_scope_values: "
+        "worker_bridge_connectivity,environment_ready,worker_case_success,"
+        "official_verifier_result"
+    ) in instruction, instruction
+    assert (
+        "worker_benchmark_run_json_bridge_connectivity_is_not_case_success: true"
+        in instruction
+    ), instruction
+    assert (
+        "worker_benchmark_run_json_claim_boundary_required: true"
+        in instruction
+    ), instruction
+    assert (
+        "worker_benchmark_run_json_claim_boundary_required_fields: "
+        "bridge_connectivity_claim_allowed,case_success_claim_allowed,"
+        "official_score_claim_allowed,leaderboard_claim_allowed,"
+        "forbidden_claims"
+    ) in instruction, instruction
     assert "worker_benchmark_run_json_must_omit:" in instruction, instruction
     assert (
         "worker_benchmark_run_json_required_fixed_fields: "
@@ -508,6 +535,596 @@ def assert_active_bridge_run_finally_checkpoint_on_agent_error() -> None:
         module.Codex.run = original_run
 
 
+def assert_active_bridge_preflight_failure_writes_startup_blocker() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_root = module.Codex.exec_as_root
+
+    async def failing_exec_as_root(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "root",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        if "goal-harness-runtime-preflight-fails" in command:
+            raise RuntimeError("simulated runtime preflight failure")
+        return await original_exec_as_root(self, environment, command, env, cwd, timeout_sec)
+
+    module.Codex.exec_as_root = failing_exec_as_root
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-preflight-blocker-") as tmp:
+            benchmark_run_path = Path(tmp) / "worker-benchmark-run.json"
+            trace_path = Path(tmp) / "counter-trace.jsonl"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=Path("logs"),
+                model_name="gpt-5.5",
+                goal_harness_mode="codex_goal_harness",
+                goal_harness_goal_id="terminal-bench-fixture",
+                goal_harness_cli_bridge_enabled=True,
+                goal_harness_runtime_preflight_command=(
+                    "goal-harness-runtime-preflight-fails"
+                ),
+                goal_harness_benchmark_run_json=str(benchmark_run_path),
+                goal_harness_counter_trace_json=str(trace_path),
+            )
+            context = helper.FakeAgentContext()
+            try:
+                asyncio.run(agent.run("Solve the task.", object(), context))
+            except RuntimeError as exc:
+                assert str(exc) == "simulated runtime preflight failure", exc
+            else:
+                raise AssertionError("failing runtime preflight should raise")
+
+            assert agent.received_instruction is None, agent.received_instruction
+            assert context.is_empty(), context.metadata
+            assert benchmark_run_path.exists(), benchmark_run_path
+            benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+            assert benchmark_run["schema_version"] == "benchmark_run_v0", benchmark_run
+            assert benchmark_run["first_blocker"] == "runtime_preflight_failed", benchmark_run
+            assert benchmark_run["repeat_blocked_by"] == "runtime_preflight_failed", benchmark_run
+            assert (
+                benchmark_run["pre_worker_startup_blocker"]
+                == "runtime_preflight_failed"
+            ), benchmark_run
+            checkpoint = benchmark_run["worker_bridge_checkpoint"]
+            assert checkpoint["checkpoint_kind"] == "pre_worker_startup_blocker", checkpoint
+            assert checkpoint["pre_worker_startup_blocker"] == "runtime_preflight_failed", checkpoint
+            outcome = benchmark_run["worker_bridge_outcome"]
+            assert outcome["worker_bridge_verified"] is False, outcome
+            assert outcome["pre_worker_startup_blocker"] == "runtime_preflight_failed", outcome
+            assert (
+                outcome["wall_time_policy"]["interrupt_reason"]
+                == "runtime_preflight_failed"
+            ), outcome
+            assert (
+                benchmark_run["validation"]["runner_return_completed_or_blocker_recorded"]
+                is True
+            ), benchmark_run
+            assert benchmark_run["validation"]["worker_startup_blocker_recorded"] is True, benchmark_run
+
+            from goal_harness.status import compact_benchmark_run
+
+            compact = compact_benchmark_run(benchmark_run)
+            assert compact is not None, benchmark_run
+            assert compact["first_blocker"] == "runtime_preflight_failed", compact
+            assert compact["repeat_blocked_by"] == "runtime_preflight_failed", compact
+            assert (
+                compact["worker_bridge_outcome"]["pre_worker_startup_blocker"]
+                == "runtime_preflight_failed"
+            ), compact
+            assert_public_safe(benchmark_run)
+            assert_public_safe(compact)
+    finally:
+        module.Codex.exec_as_root = original_exec_as_root
+
+
+def assert_active_bridge_install_failure_writes_startup_blocker() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_root = module.Codex.exec_as_root
+
+    async def failing_exec_as_root(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "root",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        raise RuntimeError("simulated worker install failure")
+
+    module.Codex.exec_as_root = failing_exec_as_root
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-install-blocker-") as tmp:
+            benchmark_run_path = Path(tmp) / "worker-benchmark-run.json"
+            trace_path = Path(tmp) / "counter-trace.jsonl"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=Path("logs"),
+                model_name="gpt-5.5",
+                goal_harness_mode="codex_goal_harness",
+                goal_harness_goal_id="terminal-bench-fixture",
+                goal_harness_cli_bridge_enabled=True,
+                goal_harness_benchmark_run_json=str(benchmark_run_path),
+                goal_harness_counter_trace_json=str(trace_path),
+            )
+            try:
+                asyncio.run(agent.install(object()))
+            except RuntimeError as exc:
+                assert str(exc) == "simulated worker install failure", exc
+            else:
+                raise AssertionError("failing worker install should raise")
+
+            assert agent.received_instruction is None, agent.received_instruction
+            assert benchmark_run_path.exists(), benchmark_run_path
+            benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+            assert benchmark_run["schema_version"] == "benchmark_run_v0", benchmark_run
+            expected_blocker = "worker_install_failed_package_manager_preinstall"
+            assert benchmark_run["first_blocker"] == expected_blocker, benchmark_run
+            assert benchmark_run["repeat_blocked_by"] == expected_blocker, benchmark_run
+            assert benchmark_run["pre_worker_startup_blocker"] == expected_blocker, benchmark_run
+            checkpoint = benchmark_run["worker_bridge_checkpoint"]
+            assert checkpoint["checkpoint_kind"] == "pre_worker_startup_blocker", checkpoint
+            assert checkpoint["interrupted"] is True, checkpoint
+            assert checkpoint["trace_row_count"] == 0, checkpoint
+            assert checkpoint["pre_worker_startup_blocker"] == expected_blocker, checkpoint
+            outcome = benchmark_run["worker_bridge_outcome"]
+            assert outcome["worker_bridge_verified"] is False, outcome
+            assert outcome["pre_worker_startup_blocker"] == expected_blocker, outcome
+            assert (
+                outcome["wall_time_policy"]["interrupt_reason"]
+                == expected_blocker
+            ), outcome
+            assert (
+                benchmark_run["validation"]["runner_return_completed_or_blocker_recorded"]
+                is True
+            ), benchmark_run
+            assert benchmark_run["validation"]["worker_startup_blocker_recorded"] is True, benchmark_run
+
+            from goal_harness.status import compact_benchmark_run
+
+            compact = compact_benchmark_run(benchmark_run)
+            assert compact is not None, benchmark_run
+            assert compact["first_blocker"] == expected_blocker, compact
+            assert compact["repeat_blocked_by"] == expected_blocker, compact
+            assert (
+                compact["worker_bridge_outcome"]["pre_worker_startup_blocker"]
+                == expected_blocker
+            ), compact
+            assert_public_safe(benchmark_run)
+            assert_public_safe(compact)
+    finally:
+        module.Codex.exec_as_root = original_exec_as_root
+
+
+def assert_default_worker_paths_map_to_logs_dir_for_install_blocker() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def failing_exec_as_agent(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        raise RuntimeError("simulated missing existing codex")
+
+    module.Codex.exec_as_agent = failing_exec_as_agent
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-default-log-map-") as tmp:
+            logs_dir = Path(tmp) / "agent"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=logs_dir,
+                model_name="gpt-5.5",
+                goal_harness_mode="codex_goal_harness",
+                goal_harness_goal_id="terminal-bench-fixture",
+                goal_harness_cli_bridge_enabled=True,
+                goal_harness_codex_install_strategy=(
+                    module.TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+                ),
+                goal_harness_codex_preflight_timeout_sec="45",
+            )
+            assert (
+                agent.goal_harness_benchmark_run_json
+                == "/logs/agent/goal-harness-worker-benchmark-run.json"
+            ), agent.goal_harness_benchmark_run_json
+            try:
+                asyncio.run(agent.install(object()))
+            except RuntimeError as exc:
+                assert str(exc) == "simulated missing existing codex", exc
+            else:
+                raise AssertionError("failing require-existing install should raise")
+
+            benchmark_run_path = logs_dir / "goal-harness-worker-benchmark-run.json"
+            assert benchmark_run_path.exists(), benchmark_run_path
+            benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+            assert benchmark_run["schema_version"] == "benchmark_run_v0", benchmark_run
+            assert (
+                benchmark_run["first_blocker"]
+                == "codex_cli_not_on_path"
+            ), benchmark_run
+            assert (
+                benchmark_run["worker_bridge_checkpoint"]["checkpoint_kind"]
+                == "pre_worker_startup_blocker"
+            ), benchmark_run
+            assert (
+                benchmark_run["worker_bridge_checkpoint"]["pre_worker_startup_blocker"]
+                == "codex_cli_not_on_path"
+            ), benchmark_run
+            assert (
+                benchmark_run["validation"]["runner_return_completed_or_blocker_recorded"]
+                is True
+            ), benchmark_run
+            assert_public_safe(benchmark_run)
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
+def assert_baseline_require_existing_writes_setup_diagnostic() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def failing_exec_as_agent(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        raise RuntimeError("simulated missing existing codex")
+
+    module.Codex.exec_as_agent = failing_exec_as_agent
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-baseline-setup-") as tmp:
+            logs_dir = Path(tmp) / "agent"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=logs_dir,
+                model_name="gpt-5.5",
+                goal_harness_mode=module.CODEX_GOAL_MODE_BASELINE_MODE,
+                goal_harness_access_packet_mode=(
+                    module.TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+                ),
+                goal_harness_cli_bridge_enabled=False,
+                goal_harness_codex_install_strategy=(
+                    module.TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+                ),
+            )
+            try:
+                asyncio.run(agent.install(object()))
+            except RuntimeError as exc:
+                assert str(exc) == "simulated missing existing codex", exc
+            else:
+                raise AssertionError("baseline require-existing install should raise")
+
+            diagnostic_path = (
+                logs_dir / module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+            )
+            assert diagnostic_path.exists(), diagnostic_path
+            diagnostic = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+            assert (
+                diagnostic["schema_version"]
+                == module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA
+            ), diagnostic
+            assert diagnostic["first_blocker"] == "codex_cli_not_on_path", diagnostic
+            assert (
+                diagnostic["pre_worker_startup_blocker"]
+                == "codex_cli_not_on_path"
+            ), diagnostic
+            assert diagnostic["goal_harness_mode"] == module.CODEX_GOAL_MODE_BASELINE_MODE
+            assert diagnostic["goal_harness_access_packet_mode"] == "none", diagnostic
+            assert diagnostic["raw_paths_recorded"] is False, diagnostic
+            assert diagnostic["raw_logs_read"] is False, diagnostic
+            assert diagnostic["command_output_recorded"] is False, diagnostic
+            assert not (logs_dir / "goal-harness-worker-benchmark-run.json").exists()
+            assert_public_safe(diagnostic)
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
+def assert_agent_codex_install_split_stage_routes_blocker() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def failing_agent_install(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        if "goal_harness_codex_usable" in command:
+            return types.SimpleNamespace(
+                return_code=0,
+                stdout="goal_harness_codex_missing\n",
+                stderr="",
+            )
+        if "goal_harness_node_npm_ready" in command:
+            return types.SimpleNamespace(
+                return_code=0,
+                stdout="goal_harness_node_npm_ready\n",
+                stderr="",
+            )
+        if "npm install -g" in command:
+            raise RuntimeError("simulated npm install failure")
+        return types.SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    module.Codex.exec_as_agent = failing_agent_install
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-agent-install-") as tmp:
+            benchmark_run_path = Path(tmp) / "worker-benchmark-run.json"
+            logs_dir = Path(tmp) / "logs"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=logs_dir,
+                model_name="gpt-5.5",
+                goal_harness_mode="codex_goal_harness",
+                goal_harness_goal_id="terminal-bench-fixture",
+                goal_harness_cli_bridge_enabled=True,
+                goal_harness_benchmark_run_json=str(benchmark_run_path),
+            )
+            try:
+                asyncio.run(agent.install(object()))
+            except RuntimeError as exc:
+                assert str(exc) == "simulated npm install failure", exc
+            else:
+                raise AssertionError("failing agent install should raise")
+
+            benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+            expected_blocker = "worker_install_failed_agent_codex_install_npm_existing"
+            assert benchmark_run["first_blocker"] == expected_blocker, benchmark_run
+            assert (
+                benchmark_run["pre_worker_startup_blocker"] == expected_blocker
+            ), benchmark_run
+            setup_path = logs_dir / module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+            setup = json.loads(setup_path.read_text(encoding="utf-8"))
+            assert setup["first_blocker"] == expected_blocker, setup
+            assert_public_safe(benchmark_run)
+            assert_public_safe(setup)
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
+def assert_require_existing_codex_version_probe_blocker() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def version_probe_fails(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        if "codex --version >/dev/null" in command:
+            raise RuntimeError("simulated unusable existing codex")
+        return types.SimpleNamespace(return_code=0, stdout="/usr/local/bin/codex\n", stderr="")
+
+    module.Codex.exec_as_agent = version_probe_fails
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-version-probe-") as tmp:
+            logs_dir = Path(tmp) / "agent"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=logs_dir,
+                model_name="gpt-5.5",
+                goal_harness_mode="codex_goal_harness",
+                goal_harness_goal_id="terminal-bench-fixture",
+                goal_harness_cli_bridge_enabled=True,
+                goal_harness_codex_install_strategy=(
+                    module.TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+                ),
+            )
+            try:
+                asyncio.run(agent.install(object()))
+            except RuntimeError as exc:
+                assert str(exc) == "simulated unusable existing codex", exc
+            else:
+                raise AssertionError("failing version probe should raise")
+
+            benchmark_run_path = logs_dir / "goal-harness-worker-benchmark-run.json"
+            benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+            assert (
+                benchmark_run["first_blocker"]
+                == "codex_cli_version_probe_failed"
+            ), benchmark_run
+            assert (
+                benchmark_run["pre_worker_startup_blocker"]
+                == "codex_cli_version_probe_failed"
+            ), benchmark_run
+            assert_public_safe(benchmark_run)
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
+def assert_require_existing_codex_preflight_success_contract() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def existing_codex_ok(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        if "command -v codex" in command:
+            return types.SimpleNamespace(return_code=0, stdout="/opt/codex/bin/codex\n", stderr="")
+        return types.SimpleNamespace(return_code=0, stdout="codex 0.0.0-fixture\n", stderr="")
+
+    module.Codex.exec_as_agent = existing_codex_ok
+    try:
+        agent = module.GoalHarnessManagedCodex(
+            logs_dir=Path("logs"),
+            model_name="gpt-5.5",
+            goal_harness_mode="codex_goal_harness",
+            goal_harness_goal_id="terminal-bench-fixture",
+            goal_harness_cli_bridge_enabled=True,
+            goal_harness_codex_install_strategy=(
+                module.TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+            ),
+        )
+        asyncio.run(agent.install(object()))
+        calls = agent.exec_calls
+        assert [call["user"] for call in calls] == ["agent", "agent", "root"], calls
+        assert calls[0]["command"] == "set -euo pipefail; command -v codex", calls
+        assert calls[0]["timeout_sec"] == 45, calls
+        assert "codex --version >/dev/null 2>&1" in calls[1]["command"], calls
+        assert calls[1]["timeout_sec"] == 45, calls
+        assert "BIN_PATH=/opt/codex/bin/codex" in calls[2]["command"], calls
+        assert "ln -sf" in calls[2]["command"], calls
+        assert calls[2]["timeout_sec"] == 45, calls
+        assert_public_safe(" ".join(call["command"] for call in calls))
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
+def assert_worker_materialization_probe_accepts_require_existing_success() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def existing_codex_ok(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        if "command -v codex" in command:
+            return types.SimpleNamespace(
+                return_code=0, stdout="/opt/codex/bin/codex\n", stderr=""
+            )
+        return types.SimpleNamespace(return_code=0, stdout="codex fixture\n", stderr="")
+
+    module.Codex.exec_as_agent = existing_codex_ok
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-worker-existing-") as tmp:
+            root = Path(tmp)
+            logs_dir = root / "logs"
+            benchmark_run_path = root / "worker-materialization-probe.json"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=logs_dir,
+                model_name="gpt-5.5",
+                goal_harness_mode=module.CODEX_GOAL_MODE_BASELINE_MODE,
+                goal_harness_ablation_mode="codex_goal_mode_baseline",
+                goal_harness_access_packet_mode=(
+                    module.TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+                ),
+                goal_harness_codex_install_strategy=(
+                    module.TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+                ),
+                goal_harness_worker_materialization_probe_only=True,
+                goal_harness_benchmark_run_json=str(benchmark_run_path),
+            )
+            asyncio.run(agent.install(object()))
+            setup_path = logs_dir / module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+            setup = json.loads(setup_path.read_text(encoding="utf-8"))
+            assert setup["first_blocker"] == "codex_require_existing_preflight_ok", setup
+            assert setup["pre_worker_startup_blocker"] == "none", setup
+
+            context = helper.FakeAgentContext()
+            asyncio.run(agent.run("Solve the private task.", object(), context))
+            benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+            assert benchmark_run["first_blocker"] == "none", benchmark_run
+            outcome = benchmark_run["worker_bridge_outcome"]
+            assert outcome["runner_return_status"] == (
+                "worker_materialization_probe_completed"
+            ), outcome
+            assert outcome["worker_bridge_materialization_status"] == (
+                "worker_codex_materialization_verified"
+            ), outcome
+            assert benchmark_run["validation"]["worker_bridge_repeat_ready"] is True, (
+                benchmark_run["validation"]
+            )
+            assert_public_safe(setup)
+            assert_public_safe(benchmark_run)
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
 def assert_managed_codex_install_hardening_contract() -> None:
     helper = helper_module()
     module = helper.load_agent_module()
@@ -515,38 +1132,274 @@ def assert_managed_codex_install_hardening_contract() -> None:
 
     asyncio.run(agent.install(object()))
     calls = agent.exec_calls
-    assert len(calls) == 3, calls
+    assert len(calls) == 10, calls
     root_install = calls[0]
-    agent_install = calls[1]
-    root_symlink = calls[2]
+    agent_codex_probe = calls[1]
+    agent_runtime_probe = calls[2]
+    root_node_path_repair = calls[3]
+    agent_runtime_probe_after_repair = calls[4]
+    nvm_bootstrap = calls[5]
+    nvm_node = calls[6]
+    npm_after_nvm = calls[7]
+    codex_version_probe = calls[8]
+    root_symlink = calls[9]
     assert root_install["user"] == "root", calls
-    assert agent_install["user"] == "agent", calls
+    for call in (
+        agent_codex_probe,
+        agent_runtime_probe,
+        agent_runtime_probe_after_repair,
+        nvm_bootstrap,
+        nvm_node,
+        npm_after_nvm,
+        codex_version_probe,
+    ):
+        assert call["user"] == "agent", calls
+    assert root_node_path_repair["user"] == "root", calls
     assert root_symlink["user"] == "root", calls
 
     root_command = root_install["command"]
-    for package in ("bash", "ca-certificates", "curl", "git", "xz-utils", "tar", "gzip", "ripgrep"):
+    for package in (
+        "bash",
+        "ca-certificates",
+        "curl",
+        "git",
+        "nodejs",
+        "npm",
+        "xz-utils",
+        "tar",
+        "gzip",
+        "ripgrep",
+    ):
         assert package in root_command, root_command
     assert "apk add --no-cache bash curl nodejs npm ripgrep" in root_command, root_command
+    assert "continuing with existing worker tools" in root_command, root_command
     assert root_install["env"] == {"DEBIAN_FRONTEND": "noninteractive"}, root_install
 
-    agent_command = agent_install["command"]
-    assert "command -v codex" in agent_command, agent_command
-    assert "codex_is_usable()" in agent_command, agent_command
-    assert "if codex_is_usable; then" in agent_command, agent_command
-    assert "codex --version >/dev/null 2>&1" in agent_command, agent_command
-    assert "Codex CLI missing or version check failed" in agent_command, agent_command
-    assert "command -v node" in agent_command, agent_command
-    assert "command -v npm" in agent_command, agent_command
-    assert "NVM failed to install" in agent_command, agent_command
-    assert "NVM failed to load" in agent_command, agent_command
-    assert "npm install -g @openai/codex@latest" in agent_command, agent_command
-    assert "codex --version" in agent_command, agent_command
-    assert "hash -r" in agent_command, agent_command
+    agent_codex_probe_command = agent_codex_probe["command"]
+    assert "goal_harness_codex_usable" in agent_codex_probe_command, agent_codex_probe_command
+    assert "goal_harness_codex_missing" in agent_codex_probe_command, agent_codex_probe_command
+    assert "command -v codex" in agent_codex_probe_command, agent_codex_probe_command
+    assert "codex --version >/dev/null 2>&1" in agent_codex_probe_command, agent_codex_probe_command
+
+    agent_runtime_probe_command = agent_runtime_probe["command"]
+    assert "goal_harness_node_npm_ready" in agent_runtime_probe_command, agent_runtime_probe_command
+    assert "goal_harness_node_npm_missing" in agent_runtime_probe_command, agent_runtime_probe_command
+    assert "command -v node" in agent_runtime_probe_command, agent_runtime_probe_command
+    assert "command -v npm" in agent_runtime_probe_command, agent_runtime_probe_command
+
+    node_path_repair_command = root_node_path_repair["command"]
+    assert "goal_harness_worker_node_runtime_path_repair_attempted" in node_path_repair_command, node_path_repair_command
+    assert "mkdir -p /usr/local/bin" in node_path_repair_command, node_path_repair_command
+    assert "/usr/bin/nodejs" in node_path_repair_command, node_path_repair_command
+    assert "/usr/local/bin/$bin" in node_path_repair_command, node_path_repair_command
+    assert "ln -sf" in node_path_repair_command, node_path_repair_command
+
+    agent_runtime_probe_after_repair_command = agent_runtime_probe_after_repair["command"]
+    assert "hash -r" in agent_runtime_probe_after_repair_command, agent_runtime_probe_after_repair_command
+    assert "goal_harness_node_npm_ready" in agent_runtime_probe_after_repair_command, agent_runtime_probe_after_repair_command
+    assert "goal_harness_node_npm_missing" in agent_runtime_probe_after_repair_command, agent_runtime_probe_after_repair_command
+
+    nvm_bootstrap_command = nvm_bootstrap["command"]
+    assert "curl unavailable for NVM bootstrap" in nvm_bootstrap_command, nvm_bootstrap_command
+    assert "raw.githubusercontent.com/nvm-sh/nvm" in nvm_bootstrap_command, nvm_bootstrap_command
+
+    nvm_node_command = nvm_node["command"]
+    assert "NVM failed to install" in nvm_node_command, nvm_node_command
+    assert "NVM failed to load" in nvm_node_command, nvm_node_command
+    assert "nvm install 22" in nvm_node_command, nvm_node_command
+    assert "nvm alias default 22" in nvm_node_command, nvm_node_command
+
+    npm_after_nvm_command = npm_after_nvm["command"]
+    assert "NPM_CONFIG_REGISTRY" in npm_after_nvm_command, npm_after_nvm_command
+    assert "https://registry.npmjs.org" in npm_after_nvm_command, npm_after_nvm_command
+    assert 'NPM_CONFIG_PREFIX="${HOME}/.goal-harness-codex"' in npm_after_nvm_command, npm_after_nvm_command
+    assert 'mkdir -p "$NPM_CONFIG_PREFIX"' in npm_after_nvm_command, npm_after_nvm_command
+    assert (
+        'npm install -g --registry "$NPM_CONFIG_REGISTRY" @openai/codex@latest'
+        in npm_after_nvm_command
+    ), npm_after_nvm_command
+
+    codex_version_probe_command = codex_version_probe["command"]
+    assert "codex --version" in codex_version_probe_command, codex_version_probe_command
+    assert "hash -r" in codex_version_probe_command, codex_version_probe_command
 
     symlink_command = root_symlink["command"]
     assert "for bin in node npm codex" in symlink_command, symlink_command
+    assert "/home/*/.goal-harness-codex/bin" in symlink_command, symlink_command
+    assert "/home/*/.nvm/versions/node/*/bin" in symlink_command, symlink_command
     assert "/usr/local/bin/$bin" in symlink_command, symlink_command
-    assert_public_safe(root_command + agent_command + symlink_command)
+    assert_public_safe(
+        root_command
+        + agent_codex_probe_command
+        + agent_runtime_probe_command
+        + node_path_repair_command
+        + agent_runtime_probe_after_repair_command
+        + nvm_bootstrap_command
+        + nvm_node_command
+        + npm_after_nvm_command
+        + codex_version_probe_command
+        + symlink_command
+    )
+
+
+def assert_agent_node_runtime_path_repair_uses_existing_npm() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+    original_exec_as_agent = module.Codex.exec_as_agent
+
+    async def repair_then_runtime_ready(
+        self: Any,
+        environment: object,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        self.exec_calls.append(
+            {
+                "user": "agent",
+                "command": command,
+                "env": env or {},
+                "cwd": cwd,
+                "timeout_sec": timeout_sec,
+            }
+        )
+        if "goal_harness_codex_usable" in command:
+            return types.SimpleNamespace(
+                return_code=0,
+                stdout="goal_harness_codex_missing\n",
+                stderr="",
+            )
+        if "goal_harness_node_npm_ready" in command:
+            runtime_probe_count = sum(
+                "goal_harness_node_npm_ready" in call["command"]
+                for call in self.exec_calls
+                if call["user"] == "agent"
+            )
+            if runtime_probe_count == 1:
+                return types.SimpleNamespace(
+                    return_code=0,
+                    stdout="goal_harness_node_npm_missing\n",
+                    stderr="",
+                )
+            return types.SimpleNamespace(
+                return_code=0,
+                stdout="goal_harness_node_npm_ready\n",
+                stderr="",
+            )
+        if "npm install -g" in command:
+            return types.SimpleNamespace(return_code=0, stdout="installed\n", stderr="")
+        if "codex --version" in command:
+            return types.SimpleNamespace(return_code=0, stdout="codex fixture\n", stderr="")
+        return types.SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    module.Codex.exec_as_agent = repair_then_runtime_ready
+    try:
+        with tempfile.TemporaryDirectory(prefix="goal-harness-node-path-repair-") as tmp:
+            logs_dir = Path(tmp) / "logs"
+            agent = module.GoalHarnessManagedCodex(
+                logs_dir=logs_dir,
+                model_name="gpt-5.5",
+                goal_harness_mode="codex_goal_harness",
+                goal_harness_goal_id="terminal-bench-fixture",
+                goal_harness_cli_bridge_enabled=True,
+            )
+            asyncio.run(agent.install(object()))
+            commands = [call["command"] for call in agent.exec_calls]
+            assert any(
+                "goal_harness_worker_node_runtime_path_repair_attempted" in command
+                for command in commands
+            ), commands
+            assert any("npm install -g" in command for command in commands), commands
+            assert not any("nvm install 22" in command for command in commands), commands
+            setup_path = logs_dir / module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+            setup = json.loads(setup_path.read_text(encoding="utf-8"))
+            assert setup["interrupted"] is False, setup
+            assert setup["first_blocker"] == "codex_runtime_install_or_preflight_ok", setup
+            assert setup["pre_worker_startup_blocker"] == "none", setup
+            assert_public_safe(" ".join(commands))
+            assert_public_safe(setup)
+    finally:
+        module.Codex.exec_as_agent = original_exec_as_agent
+
+
+def assert_worker_materialization_probe_only_contract() -> None:
+    helper = helper_module()
+    module = helper.load_agent_module()
+
+    with tempfile.TemporaryDirectory(prefix="goal-harness-worker-materialization-") as tmp:
+        root = Path(tmp)
+        logs_dir = root / "logs"
+        benchmark_run_path = root / "worker-materialization-probe.json"
+        agent = module.GoalHarnessManagedCodex(
+            logs_dir=logs_dir,
+            model_name="gpt-5.5",
+            goal_harness_mode=module.CODEX_GOAL_MODE_BASELINE_MODE,
+            goal_harness_ablation_mode="codex_goal_mode_baseline",
+            goal_harness_access_packet_mode=(
+                module.TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+            ),
+            goal_harness_worker_materialization_probe_only=True,
+            goal_harness_benchmark_run_json=str(benchmark_run_path),
+        )
+        asyncio.run(agent.install(object()))
+        setup_path = logs_dir / module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+        assert setup_path.exists(), setup_path
+        setup = json.loads(setup_path.read_text(encoding="utf-8"))
+        assert setup["schema_version"] == (
+            module.TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA
+        ), setup
+        assert setup["interrupted"] is False, setup
+        assert setup["pre_worker_startup_blocker"] == "none", setup
+
+        context = helper.FakeAgentContext()
+        asyncio.run(agent.run("Solve the private task.", object(), context))
+        assert agent.received_instruction is None, agent.received_instruction
+        assert context.is_empty(), context.metadata
+        assert benchmark_run_path.exists(), benchmark_run_path
+        benchmark_run = json.loads(benchmark_run_path.read_text(encoding="utf-8"))
+        assert benchmark_run["schema_version"] == "benchmark_run_v0", benchmark_run
+        assert benchmark_run["source_runner"] == (
+            "terminal_bench_worker_materialization_probe"
+        ), benchmark_run
+        assert benchmark_run["mode"] == (
+            "codex_goal_mode_baseline_worker_materialization_probe"
+        ), benchmark_run
+        assert benchmark_run["real_run"] is False, benchmark_run
+        assert benchmark_run["worker_materialization_real_probe"] is True, benchmark_run
+        assert benchmark_run["submit_eligible"] is False, benchmark_run
+        assert benchmark_run["official_task_score"]["kind"] == (
+            "not_run_worker_materialization_probe"
+        ), benchmark_run
+        assert benchmark_run["first_blocker"] == "none", benchmark_run
+        outcome = benchmark_run["worker_bridge_outcome"]
+        assert outcome["worker_bridge_verified"] is False, outcome
+        assert outcome["runner_return_status"] == (
+            "worker_materialization_probe_completed"
+        ), outcome
+        assert outcome["worker_bridge_materialization_status"] == (
+            "worker_codex_materialization_verified"
+        ), outcome
+        assert outcome["worker_setup_diagnostic_file_count"] == 1, outcome
+        assert outcome["worker_setup_diagnostic_schema_ok_count"] == 1, outcome
+        validation = benchmark_run["validation"]
+        assert validation["validation_scope"] == (
+            "worker_codex_materialization_probe"
+        ), validation
+        assert validation["worker_bridge_materialized_when_required"] is True, validation
+        assert validation["worker_bridge_repeat_ready"] is True, validation
+        assert validation["no_model_task_solution_invoked"] is True, validation
+
+        from goal_harness.status import compact_benchmark_run
+
+        compact = compact_benchmark_run(benchmark_run)
+        assert compact is not None, benchmark_run
+        assert compact["worker_bridge_outcome"][
+            "worker_bridge_materialization_status"
+        ] == "worker_codex_materialization_verified", compact
+        assert compact["validation"]["all_passed"] is True, compact
+        assert_public_safe(benchmark_run)
+        assert_public_safe(compact)
 
 
 def assert_harbor_command_preview() -> None:
@@ -584,6 +1437,12 @@ def assert_harbor_command_preview() -> None:
         goal_harness_mode="codex_goal_harness",
         goal_harness_cli_bridge_enabled=True,
     )
+    materialization_probe_command = build_terminal_bench_managed_harbor_command(
+        goal_harness_mode="codex_goal_mode_baseline",
+        goal_harness_ablation_mode="codex_goal_mode_baseline",
+        goal_harness_access_packet_mode="none",
+        worker_materialization_probe_only=True,
+    )
     joined = " ".join(command)
     private_env = build_terminal_bench_private_runner_env()
     assert command[0] == "uvx", command
@@ -594,6 +1453,10 @@ def assert_harbor_command_preview() -> None:
     assert "--path" in local_dataset_batch_command, local_dataset_batch_command
     assert "--include-task-name" not in local_dataset_batch_command, local_dataset_batch_command
     assert "goal_harness_cli_bridge_enabled=true" in local_dataset_batch_command, local_dataset_batch_command
+    assert (
+        "goal_harness_worker_materialization_probe_only=true"
+        in materialization_probe_command
+    ), materialization_probe_command
     for probe_path in TERMINAL_BENCH_EXTRA_PROBE_PATHS:
         assert str(Path(probe_path).expanduser()) in private_env["PATH"], private_env["PATH"]
     launch = build_terminal_bench_private_runner_launch(
@@ -648,6 +1511,14 @@ def assert_harbor_command_preview() -> None:
     assert launch_summary["auth_values_recorded"] is False, launch_summary
     assert launch_summary["raw_env_recorded"] is False, launch_summary
     assert launch_summary["raw_paths_recorded"] is False, launch_summary
+    closeout = launch_summary["closeout_command_templates"]
+    assert closeout["schema_version"] == "terminal_bench_run_ledger_closeout_v0", closeout
+    assert closeout["history_append"] is True, closeout
+    assert closeout["run_ledger_update"] is True, closeout
+    assert closeout["atomic_ledger_upsert"] is True, closeout
+    assert "--update-run-ledger" in closeout["argv_template"], closeout
+    assert "<private-job-dir>" in closeout["argv_template"], closeout
+    assert_public_safe(json.dumps(closeout, sort_keys=True))
     assert active_user_summary["active_user_writable_mount_requested"] is True, active_user_summary
     assert active_user_summary["active_user_writable_mount_count"] == 1, active_user_summary
     assert active_user_summary["raw_paths_recorded"] is False, active_user_summary
@@ -750,7 +1621,7 @@ def assert_active_bridge_preflight_event() -> None:
     preview_command = event["managed_runner_command_preview"]
     assert "--agent-timeout-multiplier" in preview_command, preview_command
     assert (
-        preview_command[preview_command.index("--agent-timeout-multiplier") + 1] == "4"
+        preview_command[preview_command.index("--agent-timeout-multiplier") + 1] == "8"
     ), preview_command
     launch_summary = event["private_runner_launch_summary"]
     assert launch_summary["schema_version"] == "terminal_bench_private_runner_launch_summary_v0", launch_summary
@@ -759,12 +1630,22 @@ def assert_active_bridge_preflight_event() -> None:
     assert launch_summary["env_probe_path_coverage_count"] == 3, launch_summary
     assert launch_summary["no_upload_boundary"] is True, launch_summary
     assert launch_summary["raw_env_recorded"] is False, launch_summary
+    assert (
+        launch_summary["closeout_command_templates"]["run_ledger_update"] is True
+    ), launch_summary
     assert compact["mode"] == "codex_goal_harness_active_cli_bridge_preflight", compact
     compact_launch = compact["private_runner_launch_summary"]
     assert compact_launch["uses_private_runner_env"] is True, compact_launch
     assert compact_launch["argv_binary_resolved_for_private_launch"] is True, compact_launch
     assert compact_launch["env_probe_path_coverage_count"] == 3, compact_launch
     assert compact_launch["raw_env_recorded"] is False, compact_launch
+    assert (
+        compact_launch["closeout_command_templates"]["run_ledger_update"] is True
+    ), compact_launch
+    assert (
+        "--update-run-ledger"
+        in compact_launch["closeout_command_templates"]["argv_template"]
+    ), compact_launch
     assert compact["goal_harness_cli_bridge_surface"] == "codex_worker_goal_harness_cli_bridge_v0", compact
     assert compact["goal_harness_worker_cli_bridge_available"] is True, compact
     assert compact["goal_harness_worker_cli_bridge_trace_observed"] is False, compact
@@ -821,6 +1702,7 @@ def assert_cli_help_exposes_active_bridge_flag() -> None:
         check=True,
     )
     assert "--active-cli-bridge" in result.stdout, result.stdout
+    assert "--worker-materialization-probe-only" in result.stdout, result.stdout
 
 
 def main() -> None:
@@ -829,7 +1711,17 @@ def main() -> None:
     assert_no_packet_ablation_prompt_and_metadata()
     assert_hardened_baseline_prompt_and_metadata()
     assert_active_bridge_run_finally_checkpoint_on_agent_error()
+    assert_active_bridge_preflight_failure_writes_startup_blocker()
+    assert_active_bridge_install_failure_writes_startup_blocker()
+    assert_default_worker_paths_map_to_logs_dir_for_install_blocker()
+    assert_baseline_require_existing_writes_setup_diagnostic()
+    assert_agent_codex_install_split_stage_routes_blocker()
+    assert_require_existing_codex_version_probe_blocker()
+    assert_require_existing_codex_preflight_success_contract()
+    assert_worker_materialization_probe_accepts_require_existing_success()
     assert_managed_codex_install_hardening_contract()
+    assert_agent_node_runtime_path_repair_uses_existing_npm()
+    assert_worker_materialization_probe_only_contract()
     assert_harbor_command_preview()
     assert_active_bridge_preflight_event()
     assert_cli_help_exposes_active_bridge_flag()

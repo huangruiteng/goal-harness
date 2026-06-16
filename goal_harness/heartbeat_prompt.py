@@ -8,11 +8,17 @@ from .project_prompt import render_cli_preflight, render_quota_guard_command, re
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
+USER_TODO_FINAL_MESSAGE_RULE = (
+    "Only if action_required=true/open_count>0: name concrete payload todo(s)/questions, "
+    'never only "owner gate"; missing -> '
+    '"具体 user todo 未投影，需修复 Goal Harness 状态投影". '
+    "If false/0, allow quiet/no-user-todo."
+)
 INTERFACE_BUDGET_CHARS = {
-    "full": 10_800,
-    "compact": 4_900,
-    "brief": 2_600,
-    "thin": 950,
+    "full": 11_200,
+    "compact": 5_000,
+    "brief": 2_700,
+    "thin": 1_000,
 }
 
 
@@ -178,8 +184,8 @@ If the result says `should_run=false`:
   `agent_todo_summary`. If not surfaced recently, return heartbeat `NOTIFY`
   with one concise Chinese question listing the gate and expected reply format.
   If `user_todo_summary.open_count > 0`, list existing open user todos even
-  when no new user actions were discovered; never summarize this case as "no
-  new user action". Do not execute `agent_command`, adapter work,
+  when nothing new was found; never say "no new user action".
+  {USER_TODO_FINAL_MESSAGE_RULE} Do not execute `agent_command`, adapter work,
   write-control, production actions, or the gated path while asking.
 - If `notify_user_on_open_todo=true`, existing open `user_todo_summary` is a
   blocker-push opportunity, not a silent skip. For focus/wait/evidence lanes,
@@ -361,6 +367,8 @@ If `should_run=false`: no work/spend except explicit
 external/wait monitor -> one read-only status/log/metric/marker poll; new
 evidence -> writeback/spend once.
 Else quiet.
+Action/open todo: list todos/questions; never only "owner gate";
+missing -> "具体 user todo 未投影，需修复 Goal Harness 状态投影"; false/0: 无用户待办/无需通知 or quiet.
 
 If `should_run=true`: fetch compact; read needed state priority slice + guard
 payload. Use `status --limit 3`; `review-packet --handoff-only`.
@@ -422,8 +430,9 @@ the next guard exposes `autonomous_replan_required` / `must_attempt_work=true`;
 no delivery edits/spend; unchanged monitor-only polls are not self-stop
 signals.
 `state=operator_gate` or `notify_user_on_open_todo=true`: blocker-push;
-`open_todo_notification_policy=repeat_until_resolved` means `NOTIFY` until
-done/deferred/replaced; no delivery/spend. `safe_bypass_allowed=true`: one
+`open_todo_notification_policy=repeat_until_resolved`: repeat `NOTIFY`;
+if action/open todo exists, list payload todo(s)/questions, never only
+"owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
 gate-independent safe-bypass, validate/writeback/spend. External/wait monitor:
 one read-only status/log/metric/marker poll; unchanged quiet, new evidence
 writeback/spend. Otherwise quiet `DONT_NOTIFY`.
@@ -513,11 +522,14 @@ Use `goal-harness-project` skill when available. Keep prompt thin: Goal Harness
 CLI is source of truth.
 
 Inspect registry/global quota truth, active state, status/run history, repo
-state. Run `quota should-run`; follow `interaction_contract` first, then
-compat fields. Do one bounded validated batch or quiet no-op. Spend exactly
-once after validated delivery/writeback. After 2 no-progress, self-repair.
+state. Run `quota should-run`; follow `interaction_contract`. If
+action_required=true/open_count>0, list concrete payload todo(s)/questions;
+never only "owner gate"; missing -> "具体 user todo 未投影，需修复 Goal Harness 状态投影".
+If false/0: 无用户待办/无需通知 or quiet.
+Do one bounded validated batch or quiet no-op. Spend once after validated
+writeback. After 2 no-progress, self-repair.
 
-If P0 is blocked but the CLI contract permits safe work, continue verifiable
+If P0 is blocked but CLI contract permits safe work, continue verifiable
 P1/P2; monitor-only quiet skips keep automation active and no-spend.
 
 No project-specific branches here. {material_sentence} Stop for private material,

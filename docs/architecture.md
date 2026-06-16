@@ -39,6 +39,13 @@ as authority registries, current-belief TODOs, managed external-source
 manifests, experiment boards, validation surface maps, and gated handoff
 packets. See [field-derived-patterns.md](field-derived-patterns.md).
 
+Goal Harness should also expose a human-friendly frontstage without moving the
+source of truth into chat. A goal can project as a channel, agents can project
+as workspace members, and task ownership can project as explicit leases; the
+registry, active state, run history, quota, gates, and lease events remain the
+backstage ledger. See
+[frontstage-channel-lease-roadmap.md](frontstage-channel-lease-roadmap.md).
+
 ## State Interaction Model
 
 Goal Harness has four product actors:

@@ -217,8 +217,9 @@ monitor-class blockers rather than executable advancement work; with an open
 user todo they should keep that todo visible in `user_todo_summary` without
 turning an unchanged eligible monitor poll into a blocker-push notification.
 If the selected goal's `next_action`/`recommended_action` explicitly points to
-a planning/self-repair or advancement-class lane, monitor-only todos are not
-allowed to make the goal quiet. The contract instead uses
+an executable chain, such as collecting or aggregating repeats and then
+rebuilding labels, rerunning a scorer, or validating an eval gate,
+monitor-only todos are not allowed to make the goal quiet. The contract instead uses
 `obligation=materialize_advancement_todo_or_blocker` and
 `must_attempt_work=true`, so the worker must either materialize the concrete
 advancement todo or write the blocker that prevents it.

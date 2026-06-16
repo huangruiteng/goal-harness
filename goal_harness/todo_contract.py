@@ -75,7 +75,8 @@ TODO_HARD_MONITOR_PATTERNS = (
 TODO_ADVANCEMENT_OVERRIDE_PATTERNS = (
     re.compile(
         r"(?i)(?:^|[:：]\s*)(?:implement|add|make|fix|build|wire|define|compare|run|"
-        r"execute|test|validate|rebuild|repair|archive|publish|merge|write|attribute)\b"
+        r"execute|test|validate|rebuild|repair|archive|publish|merge|write|attribute|"
+        r"collect|aggregate|generate|produce|materialize|rerun|repeat|eval|evaluate|score)\b"
     ),
     re.compile(
         r"(?i)\b(?:implementation slice|validation-backed patch|smoke fixture|"
@@ -116,7 +117,13 @@ NEXT_ACTION_ADVANCEMENT_HINT_PATTERNS = (
     re.compile(r"(?i)\b(?:local-material-ready|material-ready)\b.*\b(?:task|run|validation)\b"),
     re.compile(r"(?i)\b(?:run|test)\b.*\bvalidation hypothesis\b"),
     re.compile(
-        r"(?i)(?:^|[.;:：]\s*)(?:run|execute|test|validate|rebuild|compare|implement|fix|write|package)\b"
+        r"(?i)\b(?:collect|aggregate|generate|produce|materialize)\b.*\b(?:then|and)\b.*\b"
+        r"(?:run|rerun|repeat|rebuild|score|scorer|gate|eval|evaluate|validate)\b"
+    ),
+    re.compile(
+        r"(?i)(?:^|[.;:：]\s*)(?:run|execute|test|validate|rebuild|compare|implement|fix|"
+        r"write|package|collect|aggregate|generate|produce|materialize|rerun|repeat|"
+        r"eval|evaluate|score)\b"
     ),
 )
 

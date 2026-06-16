@@ -17,10 +17,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from goal_harness.benchmark import (  # noqa: E402
     TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE,
+    TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE,
+    TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE,
+    TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA,
     _iso_duration_seconds,
     build_terminal_bench_harbor_result_benchmark_run,
 )
-from goal_harness.status import compact_benchmark_run  # noqa: E402
+from goal_harness.status import (  # noqa: E402
+    compact_benchmark_run,
+    worker_bridge_ingest_health_note,
+)
 
 GOAL_ID = "terminal-bench-harbor-runner-ingest-fixture"
 
@@ -174,6 +180,508 @@ def write_fixture(root: Path, *, agent_timeout_multiplier: float | None = None) 
     )
     (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
+def write_baseline_setup_diagnostic_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_baseline_setup_diagnostic"
+    trial_dir = job_dir / "build-cython-ext__setupdiag"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_mode_baseline",
+            "goal_harness_access_packet_mode": (
+                TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
+            ),
+            "goal_harness_cli_bridge_enabled": False,
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "build-cython-ext",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "build-cython-ext",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "id": "job-id",
+            "started_at": "2026-06-08T17:28:28Z",
+            "updated_at": "2026-06-08T17:28:49Z",
+            "finished_at": "2026-06-08T17:28:49Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "build-cython-ext",
+            "trial_name": "build-cython-ext__setupdiag",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "agent_result": {},
+            "verifier_result": {"rewards": {"reward": 0.0}},
+            "exception_info": {"exception_type": "NonZeroAgentExitCodeError"},
+        },
+    )
+    (trial_dir / "agent" / "setup").mkdir(parents=True, exist_ok=True)
+    write_json(
+        trial_dir / "agent" / TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE,
+        {
+            "schema_version": TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA,
+            "checkpoint_kind": "pre_worker_setup_probe",
+            "interrupted": True,
+            "first_blocker": "codex_cli_not_on_path",
+            "pre_worker_startup_blocker": "codex_cli_not_on_path",
+            "goal_harness_mode": "codex_goal_mode_baseline",
+            "goal_harness_access_packet_mode": "none",
+            "codex_install_strategy": "require_existing_codex",
+            "raw_paths_recorded": False,
+            "raw_logs_read": False,
+            "raw_task_text_read": False,
+            "trajectory_read": False,
+            "credential_values_recorded": False,
+            "command_output_recorded": False,
+        },
+    )
+    return job_dir
+
+
+def write_worker_bridge_not_materialized_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_worker_bridge_not_materialized"
+    trial_dir = job_dir / "build-cython-ext__bridge_missing"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+            "goal_harness_goal_id": "goal-harness-meta",
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "build-cython-ext",
+                "--agent-import-path",
+                "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "build-cython-ext",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(
+        job_dir / "config.json",
+        {"job_name": job_dir.name},
+    )
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-09T05:00:00Z",
+            "updated_at": "2026-06-09T05:03:10Z",
+            "finished_at": "2026-06-09T05:03:10Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "build-cython-ext",
+            "trial_name": "build-cython-ext__bridge_missing",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "agent_result": {},
+            "verifier_result": {"rewards": {}},
+            "exception_info": {"exception_type": "RuntimeError"},
+        },
+    )
+    (trial_dir / "agent").mkdir(parents=True, exist_ok=True)
+    (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
+def write_agent_setup_timeout_before_worker_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_agent_setup_timeout_before_worker"
+    trial_dir = job_dir / "large-scale-text-editing__setup_timeout"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+            "goal_harness_goal_id": "goal-harness-meta",
+            "goal_harness_benchmark_run_json": (
+                "/logs/agent/goal-harness-worker-benchmark-run.json"
+            ),
+            "goal_harness_counter_trace_json": (
+                "/logs/agent/goal-harness-counter-trace.jsonl"
+            ),
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "large-scale-text-editing",
+                "--agent-import-path",
+                "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "large-scale-text-editing",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-09T05:00:00Z",
+            "updated_at": "2026-06-09T05:24:29Z",
+            "finished_at": "2026-06-09T05:24:29Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "large-scale-text-editing",
+            "trial_name": "large-scale-text-editing__setup_timeout",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "agent_result": {},
+            "verifier_result": {"rewards": {"reward": 0.0}},
+            "exception_info": {"exception_type": "AgentSetupTimeoutError"},
+        },
+    )
+    (trial_dir / "agent").mkdir(parents=True, exist_ok=True)
+    (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
+def write_worker_startup_blocker_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_worker_startup_blocker_recorded"
+    trial_dir = job_dir / "large-scale-text-editing__startup_blocker"
+    startup_blocker = "codex_cli_not_on_path"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+            "goal_harness_goal_id": "goal-harness-meta",
+            "goal_harness_benchmark_run_json": (
+                "/logs/agent/goal-harness-worker-benchmark-run.json"
+            ),
+            "goal_harness_counter_trace_json": (
+                "/logs/agent/goal-harness-counter-trace.jsonl"
+            ),
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "large-scale-text-editing",
+                "--agent-import-path",
+                "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "large-scale-text-editing",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-09T05:00:00Z",
+            "updated_at": "2026-06-09T05:03:10Z",
+            "finished_at": "2026-06-09T05:03:10Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "large-scale-text-editing",
+            "trial_name": "large-scale-text-editing__startup_blocker",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "agent_result": {},
+            "verifier_result": {"rewards": {"reward": 0.0}},
+            "exception_info": {"exception_type": "NonZeroAgentExitCodeError"},
+        },
+    )
+    write_json(
+        trial_dir / "agent" / "goal-harness-worker-benchmark-run.json",
+        {
+            "schema_version": "benchmark_run_v0",
+            "source_runner": "codex_worker",
+            "mode": "codex_goal_harness",
+            "real_run": True,
+            "submit_eligible": False,
+            "pre_worker_startup_blocker": startup_blocker,
+            "first_blocker": startup_blocker,
+            "repeat_blocked_by": startup_blocker,
+            "worker_bridge_checkpoint": {
+                "checkpoint_kind": "pre_worker_startup_blocker",
+                "pre_worker_startup_blocker": startup_blocker,
+            },
+            "worker_bridge_outcome": {
+                "schema_version": "worker_bridge_outcome_v0",
+                "worker_bridge_verified": False,
+                "pre_worker_startup_blocker": startup_blocker,
+            },
+            "validation": {
+                "worker_startup_blocker_recorded": True,
+                "runner_return_completed_or_blocker_recorded": True,
+            },
+        },
+    )
+    (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
+def write_environment_setup_failure_before_worker_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_environment_setup_before_worker"
+    trial_dir = job_dir / "pytorch-model-recovery__env_setup_failed"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+            "goal_harness_goal_id": "goal-harness-meta",
+            "goal_harness_benchmark_run_json": (
+                "/logs/agent/goal-harness-worker-benchmark-run.json"
+            ),
+            "goal_harness_counter_trace_json": (
+                "/logs/agent/goal-harness-counter-trace.jsonl"
+            ),
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "pytorch-model-recovery",
+                "--agent-import-path",
+                "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "pytorch-model-recovery",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-09T05:00:00Z",
+            "updated_at": "2026-06-09T05:03:10Z",
+            "finished_at": "2026-06-09T05:03:10Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "pytorch-model-recovery",
+            "trial_name": "pytorch-model-recovery__env_setup_failed",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "environment_setup": {
+                "started_at": "2026-06-09T05:00:00Z",
+                "finished_at": "2026-06-09T05:03:10Z",
+            },
+            "agent_setup": None,
+            "agent_execution": None,
+            "agent_result": None,
+            "verifier_result": {"rewards": {}},
+            "exception_info": {"exception_type": "RuntimeError"},
+        },
+    )
+    return job_dir
+
+
+def write_environment_setup_probe_materialized_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_mteb_retrieve_environment_setup_probe"
+    trial_dir = job_dir / "mteb-retrieve__environment_setup_probe"
+    agent = {"name": "nop"}
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "mteb-retrieve",
+                "--agent",
+                "nop",
+                "--disable-verification",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "mteb-retrieve",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-09T05:00:00Z",
+            "updated_at": "2026-06-09T05:03:10Z",
+            "finished_at": "2026-06-09T05:03:10Z",
+            "n_total_trials": 1,
+            "stats": {
+                "n_completed_trials": 1,
+                "n_errored_trials": 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "mteb-retrieve",
+            "trial_name": "mteb-retrieve__environment_setup_probe",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "environment_setup": {
+                "started_at": "2026-06-09T05:00:00Z",
+                "finished_at": "2026-06-09T05:03:10Z",
+            },
+            "agent_setup": None,
+            "agent_execution": None,
+            "agent_result": None,
+            "verifier_result": {"rewards": {}},
+            "exception_info": {"exception_type": "RuntimeError"},
+        },
+    )
     return job_dir
 
 
@@ -511,6 +1019,193 @@ def write_worker_trace_timeout_writeback_loss_fixture(root: Path) -> Path:
     return job_dir
 
 
+def write_worker_self_validation_mismatch_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_worker_self_validation_mismatch"
+    trial_dir = job_dir / "install-windows-3.11__mismatch"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "install-windows-3.11",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "install-windows-3.11",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-08T18:00:00Z",
+            "updated_at": "2026-06-08T18:10:00Z",
+            "finished_at": "2026-06-08T18:10:00Z",
+            "n_total_trials": 1,
+            "stats": {"n_completed_trials": 1, "n_errored_trials": 0},
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "install-windows-3.11",
+            "trial_name": "install-windows-3.11__mismatch",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "agent_result": {"n_input_tokens": 1200, "n_output_tokens": 100},
+            "verifier_result": {"rewards": {"reward": 0.0}},
+            "exception_info": {},
+        },
+    )
+    (trial_dir / "agent").mkdir(parents=True, exist_ok=True)
+    write_json(
+        trial_dir / "agent" / "goal-harness-worker-benchmark-run.json",
+        {
+            "schema_version": "benchmark_run_v0",
+            "source_runner": "goal_harness_managed_codex",
+            "benchmark_id": "terminal-bench-sample@2.0",
+            "job_name": "install-windows-3.11__mismatch",
+            "mode": "codex_goal_harness",
+            "worker_mode": "goal_harness_managed",
+            "real_run": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "validation_scope": "worker_case_success",
+            "case_success_claimed": True,
+            "progress": {"completed": True},
+            "validation": {
+                "status": "passed",
+                "validation_scope": "worker_case_success",
+                "case_success_claimed": True,
+                "checks": ["redacted"],
+            },
+            "trials": [{"task_id": "install-windows-3.11"}],
+        },
+    )
+    trace_rows = [
+        {"command": "check", "ok": True},
+        {"command": "append_benchmark_run", "ok": True, "dry_run": True},
+    ]
+    (trial_dir / "agent" / "goal-harness-counter-trace.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in trace_rows),
+        encoding="utf-8",
+    )
+    (trial_dir / "verifier").mkdir(parents=True, exist_ok=True)
+    (trial_dir / "verifier" / "reward.txt").write_text("0.0\n", encoding="utf-8")
+    (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
+def write_worker_validation_scope_ambiguous_fixture(root: Path) -> Path:
+    job_dir = root / "terminal_bench_sample_worker_validation_scope_ambiguous"
+    trial_dir = job_dir / "install-windows-3.11__ambiguous"
+    agent = {
+        "import_path": "goal_harness.terminal_bench_agent:GoalHarnessManagedCodex",
+        "model_name": "gpt-5.5",
+        "kwargs": {
+            "goal_harness_mode": "codex_goal_harness",
+            "goal_harness_cli_bridge_enabled": True,
+        },
+    }
+    write_json(
+        job_dir / "lock.json",
+        {
+            "schema_version": 1,
+            "invocation": [
+                "harbor",
+                "run",
+                "--dataset",
+                "terminal-bench-sample@2.0",
+                "--include-task-name",
+                "install-windows-3.11",
+            ],
+            "trials": [
+                {
+                    "task": {
+                        "name": "install-windows-3.11",
+                        "source": "terminal-bench-sample",
+                    },
+                    "agent": agent,
+                }
+            ],
+        },
+    )
+    write_json(job_dir / "config.json", {"job_name": job_dir.name})
+    write_json(
+        job_dir / "result.json",
+        {
+            "started_at": "2026-06-08T18:00:00Z",
+            "updated_at": "2026-06-08T18:10:00Z",
+            "finished_at": "2026-06-08T18:10:00Z",
+            "n_total_trials": 1,
+            "stats": {"n_completed_trials": 1, "n_errored_trials": 0},
+        },
+    )
+    write_json(
+        trial_dir / "result.json",
+        {
+            "task_name": "install-windows-3.11",
+            "trial_name": "install-windows-3.11__ambiguous",
+            "source": "terminal-bench-sample",
+            "config": {"agent": agent},
+            "agent_result": {"n_input_tokens": 1200, "n_output_tokens": 100},
+            "verifier_result": {"rewards": {"reward": 0.0}},
+            "exception_info": {},
+        },
+    )
+    (trial_dir / "agent").mkdir(parents=True, exist_ok=True)
+    write_json(
+        trial_dir / "agent" / "goal-harness-worker-benchmark-run.json",
+        {
+            "schema_version": "benchmark_run_v0",
+            "source_runner": "goal_harness_managed_codex",
+            "benchmark_id": "terminal-bench-sample@2.0",
+            "job_name": "install-windows-3.11__ambiguous",
+            "mode": "codex_goal_harness",
+            "worker_mode": "goal_harness_managed",
+            "real_run": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "progress": {"completed": True},
+            "validation": {"status": "passed", "checks": ["redacted"]},
+            "trials": [{"task_id": "install-windows-3.11"}],
+        },
+    )
+    trace_rows = [
+        {"command": "check", "ok": True},
+        {"command": "append_benchmark_run", "ok": True, "dry_run": True},
+    ]
+    (trial_dir / "agent" / "goal-harness-counter-trace.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in trace_rows),
+        encoding="utf-8",
+    )
+    (trial_dir / "verifier").mkdir(parents=True, exist_ok=True)
+    (trial_dir / "verifier" / "reward.txt").write_text("0.0\n", encoding="utf-8")
+    (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
+    return job_dir
+
+
 def write_bare_codex_fixture(root: Path) -> Path:
     job_dir = root / "terminal_bench_sample_bare_codex_baseline"
     trial_dir = job_dir / "build-cython-ext__bare"
@@ -582,6 +1277,47 @@ def write_bare_codex_fixture(root: Path) -> Path:
     (trial_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     write_json(trial_dir / "artifacts" / "manifest.json", {"files": ["redacted"]})
     return job_dir
+
+
+def write_clean_official_zero_fixture(root: Path) -> Path:
+    job_dir = write_bare_codex_fixture(root)
+    renamed = root / "terminal_bench_sample_clean_official_zero"
+    job_dir.rename(renamed)
+    trial_dir = renamed / "build-cython-ext__bare"
+
+    job_result_path = renamed / "result.json"
+    job_result = json.loads(job_result_path.read_text(encoding="utf-8"))
+    job_result["stats"]["n_completed_trials"] = 1
+    job_result["stats"]["n_errored_trials"] = 0
+    write_json(job_result_path, job_result)
+
+    trial_path = trial_dir / "result.json"
+    trial = json.loads(trial_path.read_text(encoding="utf-8"))
+    trial["verifier_result"] = {"rewards": {"reward": 0.0}}
+    trial["exception_info"] = None
+    trial.update(
+        {
+            "environment_setup": {
+                "started_at": "2026-06-08T19:00:00Z",
+                "finished_at": "2026-06-08T19:01:00Z",
+            },
+            "agent_setup": {
+                "started_at": "2026-06-08T19:01:00Z",
+                "finished_at": "2026-06-08T19:02:00Z",
+            },
+            "agent_execution": {
+                "started_at": "2026-06-08T19:02:00Z",
+                "finished_at": "2026-06-08T19:08:00Z",
+            },
+            "verifier": {
+                "started_at": "2026-06-08T19:08:00Z",
+                "finished_at": "2026-06-08T19:09:00Z",
+            },
+        }
+    )
+    write_json(trial_path, trial)
+    (trial_dir / "verifier" / "reward.txt").write_text("0.0\n", encoding="utf-8")
+    return renamed
 
 
 def write_no_packet_runtime_goal_fixture(root: Path) -> Path:
@@ -888,7 +1624,12 @@ def main() -> None:
     assert payload["worker_counter_trace_trial_count"] == 1, payload
     assert payload["worker_benchmark_run_file_count"] == 1, payload
     assert payload["worker_benchmark_run_schema_ok_count"] == 1, payload
+    assert payload.get("worker_setup_diagnostic_file_count", 0) == 0, payload
+    assert payload.get("worker_setup_diagnostic_schema_ok_count", 0) == 0, payload
     assert payload["worker_submit_eligible_mismatch_count"] == 0, payload
+    assert payload["worker_bridge_materialization_status"] == "verified", payload
+    assert payload["worker_bridge_materialization_blocker"] == "none", payload
+    assert payload["repeat_blocked_by"] == "none", payload
     assert (
         payload["worker_submit_eligible_mismatch_reason"] == "none"
     ), payload
@@ -899,6 +1640,8 @@ def main() -> None:
     assert payload["interaction_counters"]["worker_counter_trace_trial_count"] == 1, payload
     assert payload["interaction_counters"]["worker_benchmark_run_file_count"] == 1, payload
     assert payload["interaction_counters"]["worker_benchmark_run_schema_ok_count"] == 1, payload
+    assert payload["interaction_counters"].get("worker_setup_diagnostic_file_count", 0) == 0, payload
+    assert payload["interaction_counters"].get("worker_setup_diagnostic_schema_ok_count", 0) == 0, payload
     assert payload["interaction_counters"]["worker_submit_eligible_mismatch_count"] == 0, payload
     assert (
         payload["interaction_counters"]["worker_submit_eligible_mismatch_reason"]
@@ -929,6 +1672,13 @@ def main() -> None:
     assert overhead["worker_submit_eligible_mismatch_count"] == 0, overhead
     assert overhead["worker_submit_eligible_mismatch_reason"] == "none", overhead
     assert payload["official_task_score"]["value"] == 1.0, payload
+    assert payload["official_score"] == 1.0, payload
+    assert (
+        payload["official_score_source"]
+        == payload["official_task_score"]["source"]
+    ), payload
+    assert payload["official_score_status"] == "completed", payload
+    assert payload["runner_return_status"] == "completed_with_agent_timeout", payload
     assert payload["progress"]["n_errored_trials"] == 2, payload
     assert payload["trials"][0]["exception_type"] == "AgentTimeoutError", payload
     passed_trial = next(trial for trial in payload["trials"] if trial["task_id"] == "build-cython-ext")
@@ -938,8 +1688,48 @@ def main() -> None:
         trial for trial in payload["trials"] if trial["task_id"] == "fix-code-vulnerability"
     )
     assert setup_trial["worker_start_status"] == "pre_worker_agent_setup_failed", setup_trial
+    with tempfile.TemporaryDirectory(prefix="goal-harness-baseline-setup-diag-") as tmp:
+        baseline_setup_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_baseline_setup_diagnostic_fixture(Path(tmp))
+        )
+    assert baseline_setup_payload["mode"] == "codex_goal_mode_baseline", baseline_setup_payload
+    assert baseline_setup_payload["worker_setup_diagnostic_file_count"] == 1, baseline_setup_payload
+    assert baseline_setup_payload["worker_setup_diagnostic_schema_ok_count"] == 1, baseline_setup_payload
+    assert baseline_setup_payload["worker_startup_blocker_count"] == 1, baseline_setup_payload
+    assert baseline_setup_payload["worker_startup_blockers"] == [
+        "codex_cli_not_on_path"
+    ], baseline_setup_payload
+    assert baseline_setup_payload["worker_setup_diagnostic_blockers"] == [
+        "codex_cli_not_on_path"
+    ], baseline_setup_payload
+    assert "codex_cli_not_on_path" in baseline_setup_payload[
+        "failure_attribution_labels"
+    ], baseline_setup_payload
+    baseline_setup_trial = baseline_setup_payload["trials"][0]
+    assert (
+        baseline_setup_trial["worker_setup_diagnostic_blocker"]
+        == "codex_cli_not_on_path"
+    ), baseline_setup_trial
+    baseline_setup_compact = compact_benchmark_run(baseline_setup_payload)
+    assert baseline_setup_compact["worker_setup_diagnostic_file_count"] == 1, baseline_setup_compact
+    assert baseline_setup_compact["worker_setup_diagnostic_schema_ok_count"] == 1, baseline_setup_compact
+    assert baseline_setup_compact["worker_startup_blockers"] == [
+        "codex_cli_not_on_path"
+    ], baseline_setup_compact
+    assert baseline_setup_compact["worker_setup_diagnostic_blockers"] == [
+        "codex_cli_not_on_path"
+    ], baseline_setup_compact
+    assert_public_safe(baseline_setup_payload)
+    assert_public_safe(baseline_setup_compact)
     assert payload["worker_bridge_outcome"]["runner_return_status"] == "completed_with_agent_timeout", payload
     assert payload["worker_bridge_outcome"]["pre_worker_agent_setup_failure_count"] == 1, payload
+    assert (
+        payload["worker_bridge_outcome"]["worker_bridge_materialization_status"]
+        == "verified"
+    ), payload
+    assert (
+        payload["worker_bridge_outcome"]["repeat_blocked_by"] == "none"
+    ), payload
     episode_policy = payload["episode_policy"]
     assert (
         episode_policy["mode"] == "single_codex_agent_goal_harness_assisted_checkpoints"
@@ -971,6 +1761,9 @@ def main() -> None:
     assert compact["worker_benchmark_run_file_count"] == 1, compact
     assert compact["worker_benchmark_run_schema_ok_count"] == 1, compact
     assert compact["worker_submit_eligible_mismatch_count"] == 0, compact
+    assert compact["worker_bridge_materialization_status"] == "verified", compact
+    assert compact["worker_bridge_materialization_blocker"] == "none", compact
+    assert compact["repeat_blocked_by"] == "none", compact
     assert compact["worker_submit_eligible_mismatch_reason"] == "none", compact
     assert compact["pre_worker_agent_setup_failure_count"] == 1, compact
     assert compact["interaction_counters"]["append_benchmark_run_success_count"] == 1, compact
@@ -1006,8 +1799,371 @@ def main() -> None:
     assert compact_policy["expected_true_long_task_bar_met"] is False, compact_policy
     assert compact_policy["true_long_task_bar_met"] is False, compact_policy
     assert compact["worker_bridge_outcome"]["runner_side_writeback_guaranteed"] is True, compact
+    assert (
+        compact["worker_bridge_outcome"]["worker_bridge_materialization_status"]
+        == "verified"
+    ), compact
     assert_public_safe(payload)
     assert_public_safe(compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-bridge-not-materialized-") as tmp:
+        bridge_missing_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_worker_bridge_not_materialized_fixture(Path(tmp))
+        )
+    assert (
+        bridge_missing_payload["worker_bridge_materialization_status"]
+        == "runtime_exception_before_checkpoint"
+    ), bridge_missing_payload
+    assert (
+        bridge_missing_payload["worker_bridge_materialization_blocker"]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_payload
+    assert (
+        bridge_missing_payload["worker_bridge_failure_attribution"]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_payload
+    assert (
+        bridge_missing_payload["first_blocker"]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_payload
+    assert (
+        bridge_missing_payload["repeat_blocked_by"]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_payload
+    assert (
+        bridge_missing_payload["worker_runtime_exception_before_checkpoint_count"]
+        == 1
+    ), bridge_missing_payload
+    assert (
+        bridge_missing_payload["validation"]["worker_bridge_materialized_when_required"]
+        is False
+    ), bridge_missing_payload
+    assert bridge_missing_payload["validation"]["worker_bridge_repeat_ready"] is False, bridge_missing_payload
+    assert (
+        bridge_missing_payload["worker_bridge_outcome"]["next_action"]
+        == "diagnose compact worker runtime failure before another repeat"
+    ), bridge_missing_payload
+    bridge_missing_compact = compact_benchmark_run(bridge_missing_payload)
+    bridge_missing_health = worker_bridge_ingest_health_note(bridge_missing_compact)
+    assert (
+        bridge_missing_compact["worker_bridge_materialization_status"]
+        == "runtime_exception_before_checkpoint"
+    ), bridge_missing_compact
+    assert (
+        bridge_missing_compact["worker_bridge_outcome"][
+            "worker_bridge_materialization_blocker"
+        ]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_compact
+    assert (
+        bridge_missing_compact["worker_bridge_failure_attribution"]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_compact
+    assert (
+        bridge_missing_compact["validation"]["worker_bridge_materialized_when_required"]
+        is False
+    ), bridge_missing_compact
+    assert bridge_missing_compact["validation"]["worker_bridge_repeat_ready"] is False, bridge_missing_compact
+    assert (
+        bridge_missing_health["health_state"]
+        == "worker_runtime_exception_before_bridge_checkpoint"
+    ), bridge_missing_health
+    assert (
+        bridge_missing_health["next_action"]
+        == "diagnose compact worker runtime failure before another run"
+    ), bridge_missing_health
+    assert_public_safe(bridge_missing_payload)
+    assert_public_safe(bridge_missing_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-agent-setup-timeout-") as tmp:
+        setup_timeout_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_agent_setup_timeout_before_worker_fixture(Path(tmp))
+        )
+    assert (
+        setup_timeout_payload["worker_bridge_materialization_status"]
+        == "pre_worker_setup_failed"
+    ), setup_timeout_payload
+    assert (
+        setup_timeout_payload["worker_bridge_materialization_blocker"]
+        == "pre_worker_agent_setup_failed_before_bridge_checkpoint"
+    ), setup_timeout_payload
+    assert setup_timeout_payload["pre_worker_agent_setup_failure_count"] == 1, setup_timeout_payload
+    assert (
+        setup_timeout_payload["worker_runtime_exception_before_checkpoint_count"] == 0
+    ), setup_timeout_payload
+    assert setup_timeout_payload["score_failure_attribution"] == (
+        "agent_setup_timeout_score_failure"
+    ), setup_timeout_payload
+    assert "agent_setup_timeout_before_worker_start" in setup_timeout_payload[
+        "failure_attribution_labels"
+    ], setup_timeout_payload
+    setup_timeout_trial = setup_timeout_payload["trials"][0]
+    assert (
+        setup_timeout_trial["worker_start_status"]
+        == "pre_worker_agent_setup_failed"
+    ), setup_timeout_trial
+    assert (
+        setup_timeout_payload["worker_bridge_outcome"]["runner_return_status"]
+        == "completed_with_agent_setup_timeout"
+    ), setup_timeout_payload
+    assert (
+        setup_timeout_payload["worker_bridge_outcome"]["next_action"]
+        == "repair Codex agent setup/launcher before another same-task repeat"
+    ), setup_timeout_payload
+    setup_timeout_compact = compact_benchmark_run(setup_timeout_payload)
+    setup_timeout_health = worker_bridge_ingest_health_note(setup_timeout_compact)
+    assert (
+        setup_timeout_payload["runner_return_status"]
+        == setup_timeout_payload["worker_bridge_outcome"]["runner_return_status"]
+    ), setup_timeout_payload
+    assert setup_timeout_payload["official_score_status"] == "completed", setup_timeout_payload
+    assert setup_timeout_payload["official_score"] == 0.0, setup_timeout_payload
+    assert (
+        setup_timeout_compact["worker_bridge_materialization_status"]
+        == "pre_worker_setup_failed"
+    ), setup_timeout_compact
+    assert setup_timeout_compact["runner_return_status"] == (
+        "completed_with_agent_setup_timeout"
+    ), setup_timeout_compact
+    assert setup_timeout_compact["official_score_status"] == "completed", setup_timeout_compact
+    assert setup_timeout_compact["official_score"] == 0.0, setup_timeout_compact
+    assert (
+        setup_timeout_compact["score_failure_attribution"]
+        == "agent_setup_timeout_score_failure"
+    ), setup_timeout_compact
+    assert (
+        setup_timeout_health["health_state"]
+        == "pre_worker_agent_setup_failed_before_bridge_checkpoint"
+    ), setup_timeout_health
+    assert_public_safe(setup_timeout_payload)
+    assert_public_safe(setup_timeout_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-startup-blocker-") as tmp:
+        startup_blocker_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_worker_startup_blocker_fixture(Path(tmp))
+        )
+    assert (
+        startup_blocker_payload["worker_bridge_materialization_status"]
+        == "pre_worker_startup_blocker_recorded"
+    ), startup_blocker_payload
+    assert (
+        startup_blocker_payload["worker_bridge_materialization_blocker"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_payload
+    assert (
+        startup_blocker_payload["worker_bridge_failure_attribution"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_payload
+    assert startup_blocker_payload["score_failure_attribution"] == (
+        "agent_setup_score_failure"
+    ), startup_blocker_payload
+    assert "pre_worker_startup_blocker_recorded" in startup_blocker_payload[
+        "failure_attribution_labels"
+    ], startup_blocker_payload
+    assert (
+        startup_blocker_payload["first_blocker"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_payload
+    assert (
+        startup_blocker_payload["repeat_blocked_by"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_payload
+    assert startup_blocker_payload["pre_worker_startup_blocker"] == (
+        "codex_cli_not_on_path"
+    ), startup_blocker_payload
+    assert startup_blocker_payload["worker_startup_blocker_count"] == 1, startup_blocker_payload
+    assert startup_blocker_payload["worker_goal_harness_cli_call_total"] == 0, startup_blocker_payload
+    assert startup_blocker_payload["worker_counter_trace_trial_count"] == 0, startup_blocker_payload
+    assert startup_blocker_payload["worker_benchmark_run_file_count"] == 1, startup_blocker_payload
+    assert startup_blocker_payload["worker_benchmark_run_schema_ok_count"] == 1, startup_blocker_payload
+    assert (
+        startup_blocker_payload["validation"]["worker_bridge_materialized_when_required"]
+        is True
+    ), startup_blocker_payload
+    assert startup_blocker_payload["validation"]["worker_bridge_repeat_ready"] is False, startup_blocker_payload
+    assert (
+        startup_blocker_payload["worker_bridge_outcome"]["next_action"]
+        == "repair recorded worker startup blocker before another same-task repeat"
+    ), startup_blocker_payload
+    assert (
+        startup_blocker_payload["worker_bridge_outcome"]["pre_worker_startup_blocker"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_payload
+    startup_blocker_compact = compact_benchmark_run(startup_blocker_payload)
+    startup_blocker_health = worker_bridge_ingest_health_note(startup_blocker_compact)
+    assert startup_blocker_payload["runner_return_status"] == "completed", startup_blocker_payload
+    assert startup_blocker_payload["official_score_status"] == "completed", startup_blocker_payload
+    assert startup_blocker_payload["official_score"] == 0.0, startup_blocker_payload
+    assert (
+        startup_blocker_compact["worker_bridge_materialization_status"]
+        == "pre_worker_startup_blocker_recorded"
+    ), startup_blocker_compact
+    assert startup_blocker_compact["runner_return_status"] == "completed", startup_blocker_compact
+    assert startup_blocker_compact["official_score_status"] == "completed", startup_blocker_compact
+    assert startup_blocker_compact["official_score"] == 0.0, startup_blocker_compact
+    assert startup_blocker_compact["worker_startup_blocker_count"] == 1, startup_blocker_compact
+    assert startup_blocker_compact["score_failure_attribution"] == (
+        "agent_setup_score_failure"
+    ), startup_blocker_compact
+    assert "pre_worker_startup_blocker_recorded" in startup_blocker_compact[
+        "failure_attribution_labels"
+    ], startup_blocker_compact
+    assert startup_blocker_compact["pre_worker_startup_blocker"] == (
+        "codex_cli_not_on_path"
+    ), startup_blocker_compact
+    assert (
+        startup_blocker_compact["worker_bridge_outcome"]["pre_worker_startup_blocker"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_compact
+    assert (
+        startup_blocker_health["health_state"]
+        == "codex_cli_not_on_path"
+    ), startup_blocker_health
+    assert (
+        startup_blocker_health["evidence_layer"] == "compact_startup_blocker"
+    ), startup_blocker_health
+    assert (
+        startup_blocker_health["next_action"]
+        == "repair recorded worker startup blocker before another run"
+    ), startup_blocker_health
+    assert_public_safe(startup_blocker_payload)
+    assert_public_safe(startup_blocker_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-env-setup-failed-") as tmp:
+        env_setup_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_environment_setup_failure_before_worker_fixture(Path(tmp))
+        )
+    assert (
+        env_setup_payload["worker_bridge_materialization_status"]
+        == "environment_setup_failed_before_worker"
+    ), env_setup_payload
+    assert (
+        env_setup_payload["worker_bridge_materialization_blocker"]
+        == "environment_setup_failed_before_worker"
+    ), env_setup_payload
+    assert (
+        env_setup_payload["worker_bridge_failure_attribution"]
+        == "environment_setup_failed_before_worker"
+    ), env_setup_payload
+    assert (
+        env_setup_payload["environment_setup_failure_before_worker_count"] == 1
+    ), env_setup_payload
+    assert (
+        env_setup_payload["worker_runtime_exception_before_checkpoint_count"] == 0
+    ), env_setup_payload
+    assert (
+        env_setup_payload["trials"][0]["worker_start_status"]
+        == "environment_setup_failed_before_worker"
+    ), env_setup_payload
+    assert (
+        env_setup_payload["worker_bridge_outcome"]["next_action"]
+        == "diagnose benchmark environment setup before worker startup"
+    ), env_setup_payload
+    env_context = env_setup_payload["environment_setup_failure_context"]
+    assert env_context["surface"] == "harbor_environment_setup", env_context
+    assert (
+        env_context["failure_kind"]
+        == "environment_setup_runtime_error_before_worker"
+    ), env_context
+    assert (
+        env_context["diagnostic_granularity"] == "phase_fields_only_no_raw_logs"
+    ), env_context
+    assert env_context["exception_type"] == "RuntimeError", env_context
+    assert env_context["timeout_signal"] == "no_timeout_exception_type", env_context
+    assert (
+        env_context["resource_signal"] == "not_observable_from_phase_fields"
+    ), env_context
+    assert env_context["environment_setup_started"] is True, env_context
+    assert env_context["environment_setup_finished"] is True, env_context
+    assert env_context["agent_setup_started"] is False, env_context
+    assert env_context["agent_execution_started"] is False, env_context
+    assert env_context["environment_setup_duration_seconds"] == 190.0, env_context
+    assert (
+        env_context["environment_setup_duration_tier"] == "three_to_ten_minutes"
+    ), env_context
+    assert (
+        env_setup_payload["worker_bridge_outcome"][
+            "environment_setup_failure_context"
+        ]["next_probe"]
+        == "environment_setup_readiness_preflight_before_repeat"
+    ), env_setup_payload
+    assert (
+        env_setup_payload["trials"][0]["environment_setup_failure_context"][
+            "failure_kind"
+        ]
+        == "environment_setup_runtime_error_before_worker"
+    ), env_setup_payload
+    env_setup_compact = compact_benchmark_run(env_setup_payload)
+    env_setup_health = worker_bridge_ingest_health_note(env_setup_compact)
+    assert (
+        env_setup_compact["worker_bridge_materialization_status"]
+        == "environment_setup_failed_before_worker"
+    ), env_setup_compact
+    assert (
+        env_setup_compact["environment_setup_failure_before_worker_count"] == 1
+    ), env_setup_compact
+    assert (
+        env_setup_compact["environment_setup_failure_context"]["failure_kind"]
+        == "environment_setup_runtime_error_before_worker"
+    ), env_setup_compact
+    assert (
+        env_setup_compact["worker_bridge_outcome"][
+            "environment_setup_failure_context"
+        ]["diagnostic_granularity"]
+        == "phase_fields_only_no_raw_logs"
+    ), env_setup_compact
+    assert (
+        env_setup_compact["trials"][0]["environment_setup_failure_context"][
+            "environment_setup_duration_tier"
+        ]
+        == "three_to_ten_minutes"
+    ), env_setup_compact
+    assert (
+        env_setup_health["health_state"] == "environment_setup_failed_before_worker"
+    ), env_setup_health
+    assert (
+        env_setup_health["next_action"]
+        == "diagnose benchmark environment setup before worker startup"
+    ), env_setup_health
+    assert (
+        env_setup_health["environment_setup_failure_context"]["next_probe"]
+        == "environment_setup_readiness_preflight_before_repeat"
+    ), env_setup_health
+    assert_public_safe(env_setup_payload)
+    assert_public_safe(env_setup_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-env-probe-") as tmp:
+        env_probe_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_environment_setup_probe_materialized_fixture(Path(tmp))
+        )
+    assert env_probe_payload["environment_setup_probe_run"] is True, env_probe_payload
+    assert env_probe_payload["environment_setup_probe_status"] == "materialized", (
+        env_probe_payload
+    )
+    assert env_probe_payload["environment_setup_probe_cleared"] is True, (
+        env_probe_payload
+    )
+    assert env_probe_payload["environment_setup_failure_before_worker_count"] == 0, (
+        env_probe_payload
+    )
+    assert (
+        "environment_setup_failed_before_worker"
+        not in env_probe_payload["failure_attribution_labels"]
+    ), env_probe_payload
+    assert (
+        "official_verifier_solution_failure"
+        not in env_probe_payload["failure_attribution_labels"]
+    ), env_probe_payload
+    assert env_probe_payload["score_failure_attribution"] == (
+        "not_applicable_environment_setup_probe"
+    ), env_probe_payload
+    assert env_probe_payload["trials"][0]["worker_start_status"] == (
+        "environment_setup_probe_materialized"
+    ), env_probe_payload
+    env_probe_compact = compact_benchmark_run(env_probe_payload)
+    assert env_probe_compact["environment_setup_probe_cleared"] is True, (
+        env_probe_compact
+    )
+    assert env_probe_compact["environment_setup_failure_before_worker_count"] == 0, (
+        env_probe_compact
+    )
+    assert_public_safe(env_probe_payload)
+    assert_public_safe(env_probe_compact)
     with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-cli-ingest-") as tmp:
         cli_payload = run_cli_harbor_ingest_dry_run(Path(tmp))
     assert cli_payload["ok"] is True, cli_payload
@@ -1056,6 +2212,37 @@ def main() -> None:
     ), bare_compact
     assert_public_safe(bare_payload)
     assert_public_safe(bare_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-clean-zero-") as tmp:
+        clean_zero_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_clean_official_zero_fixture(Path(tmp))
+        )
+    assert clean_zero_payload["official_task_score"]["value"] == 0.0, clean_zero_payload
+    assert (
+        clean_zero_payload["score_failure_attribution"]
+        == "official_verifier_solution_failure"
+    ), clean_zero_payload
+    assert clean_zero_payload["official_zero_observation_count"] == 1, clean_zero_payload
+    zero_observation = clean_zero_payload["trials"][0]["official_zero_observation"]
+    assert zero_observation["detected"] is True, zero_observation
+    assert zero_observation["agent_setup_completed"] is True, zero_observation
+    assert zero_observation["agent_execution_completed"] is True, zero_observation
+    assert zero_observation["verifier_completed"] is True, zero_observation
+    assert zero_observation["raw_logs_read"] is False, zero_observation
+    clean_zero_compact = compact_benchmark_run(clean_zero_payload)
+    assert clean_zero_compact["official_zero_observation_count"] == 1, clean_zero_compact
+    assert (
+        clean_zero_compact["score_failure_attribution"]
+        == "official_verifier_solution_failure"
+    ), clean_zero_compact
+    compact_zero_observation = clean_zero_compact["trials"][0][
+        "official_zero_observation"
+    ]
+    assert compact_zero_observation["detected"] is True, compact_zero_observation
+    assert (
+        compact_zero_observation["task_text_read"] is False
+    ), compact_zero_observation
+    assert_public_safe(clean_zero_payload)
+    assert_public_safe(clean_zero_compact)
     with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-goal-mode-baseline-") as tmp:
         goal_mode_payload = build_terminal_bench_harbor_result_benchmark_run(
             write_codex_goal_mode_baseline_fixture(Path(tmp))
@@ -1071,17 +2258,9 @@ def main() -> None:
         goal_mode_payload["official_score_comparable_to_goal_harness_treatment"]
         is True
     ), goal_mode_payload
-    assert (
-        goal_mode_payload["interaction_counters"]["prompt_policy_injected"] is False
-    ), goal_mode_payload
-    assert (
-        goal_mode_payload["interaction_counters"]["harness_skill_or_packet_injected"]
-        is False
-    ), goal_mode_payload
-    assert (
-        goal_mode_payload["interaction_counters"]["codex_runtime_goal_tool_calls"]["total"]
-        == 2
-    ), goal_mode_payload
+    assert goal_mode_payload["interaction_counters"] is None, goal_mode_payload
+    assert goal_mode_payload["validation"]["raw_trajectory_excluded"] is True, goal_mode_payload
+    assert "trial:agent/trajectory.json" not in goal_mode_payload["evidence_files"], goal_mode_payload
     assert (
         goal_mode_payload["worker_bridge_outcome"]["bridge_surface"]
         == TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE
@@ -1093,9 +2272,7 @@ def main() -> None:
     assert (
         goal_mode_compact["case_semantics_changed_by_harness"] is False
     ), goal_mode_compact
-    assert (
-        goal_mode_compact["interaction_counters"]["prompt_policy_injected"] is False
-    ), goal_mode_compact
+    assert goal_mode_compact.get("interaction_counters") is None, goal_mode_compact
     assert (
         goal_mode_compact["worker_bridge_outcome"]["bridge_surface"]
         == TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE
@@ -1110,50 +2287,65 @@ def main() -> None:
     assert no_packet_payload["worker_goal_harness_cli_call_total"] == 0, no_packet_payload
     assert no_packet_payload["worker_counter_trace_trial_count"] == 0, no_packet_payload
     assert no_packet_payload["worker_bridge_outcome"]["counter_trace_present"] is False, no_packet_payload
-    counters = no_packet_payload["interaction_counters"]
-    assert counters["goal_harness_cli_calls"]["total"] == 0, counters
-    assert counters["codex_runtime_goal_tool_calls"]["create_goal"] == 1, counters
-    assert counters["codex_runtime_goal_tool_calls"]["update_goal"] == 1, counters
-    assert counters["codex_runtime_goal_tool_calls"]["total"] == 2, counters
-    assert counters["codex_runtime_goal_tool_trial_count"] == 1, counters
-    assert (
-        counters["counter_trust_level"]
-        == "runner_loaded_codex_trajectory_no_worker_trace"
-    ), counters
-    assert (
-        counters["case_result_writeback"]
-        == "runner_side_guaranteed_writeback_no_worker_cli_bridge"
-    ), counters
+    assert no_packet_payload["interaction_counters"] is None, no_packet_payload
+    assert no_packet_payload["validation"]["raw_trajectory_excluded"] is True, no_packet_payload
+    assert "trial:agent/trajectory.json" not in no_packet_payload["evidence_files"], no_packet_payload
     assert (
         no_packet_payload["overhead_attribution_counters"][
             "attribution_granularity"
         ]
-        == "codex_runtime_goal_tool_counts_only"
+        == "runner_usage_and_wall_time_only"
     ), no_packet_payload
     assert (
         no_packet_payload["overhead_attribution_counters"][
             "codex_runtime_goal_tool_call_total"
         ]
-        == 2
+        == 0
     ), no_packet_payload
     no_packet_compact = compact_benchmark_run(no_packet_payload)
-    assert no_packet_compact["interaction_counters"]["goal_harness_cli_calls"]["total"] == 0, no_packet_compact
-    assert (
-        no_packet_compact["interaction_counters"]["codex_runtime_goal_tool_calls"]["total"]
-        == 2
-    ), no_packet_compact
-    assert (
-        no_packet_compact["interaction_counters"]["codex_runtime_goal_tool_trial_count"]
-        == 1
-    ), no_packet_compact
+    assert no_packet_compact.get("interaction_counters") is None, no_packet_compact
     assert (
         no_packet_compact["overhead_attribution_counters"][
             "attribution_granularity"
         ]
-        == "codex_runtime_goal_tool_counts_only"
+        == "runner_usage_and_wall_time_only"
     ), no_packet_compact
     assert_public_safe(no_packet_payload)
     assert_public_safe(no_packet_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-private-trajectory-counts-") as tmp:
+        no_packet_private_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_no_packet_runtime_goal_fixture(Path(tmp)),
+            trace_publicness="private_debug_counts_from_raw_trajectory",
+            include_codex_trajectory_counts=True,
+        )
+    private_counters = no_packet_private_payload["interaction_counters"]
+    assert private_counters["goal_harness_cli_calls"]["total"] == 0, private_counters
+    assert private_counters["codex_runtime_goal_tool_calls"]["create_goal"] == 1, private_counters
+    assert private_counters["codex_runtime_goal_tool_calls"]["update_goal"] == 1, private_counters
+    assert private_counters["codex_runtime_goal_tool_calls"]["total"] == 2, private_counters
+    assert private_counters["codex_runtime_goal_tool_trial_count"] == 1, private_counters
+    assert (
+        private_counters["counter_trust_level"]
+        == "runner_loaded_codex_trajectory_no_worker_trace"
+    ), private_counters
+    assert (
+        private_counters["case_result_writeback"]
+        == "runner_side_guaranteed_writeback_no_worker_cli_bridge"
+    ), private_counters
+    assert no_packet_private_payload["validation"]["raw_trajectory_excluded"] is False, no_packet_private_payload
+    assert "trial:agent/trajectory.json" in no_packet_private_payload["evidence_files"], no_packet_private_payload
+    assert (
+        no_packet_private_payload["overhead_attribution_counters"][
+            "attribution_granularity"
+        ]
+        == "codex_runtime_goal_tool_counts_only"
+    ), no_packet_private_payload
+    assert (
+        no_packet_private_payload["overhead_attribution_counters"][
+            "codex_runtime_goal_tool_call_total"
+        ]
+        == 2
+    ), no_packet_private_payload
     with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-partial-stats-") as tmp:
         partial_payload = build_terminal_bench_harbor_result_benchmark_run(
             write_partial_harbor_stats_fixture(Path(tmp))
@@ -1208,9 +2400,86 @@ def main() -> None:
     ), long_compact
     assert_public_safe(long_payload)
     assert_public_safe(long_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-verifier-failure-default-") as tmp:
+        failure_default_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_verifier_dependency_failure_fixture(Path(tmp))
+        )
+    assert failure_default_payload["official_task_score"]["value"] == 0.0, failure_default_payload
+    assert failure_default_payload["score_failure_attribution"] == "none", failure_default_payload
+    assert failure_default_payload["verifier_dependency_failure_count"] == 0, failure_default_payload
+    assert failure_default_payload["failure_attribution_labels"] == [], failure_default_payload
+    assert failure_default_payload["validation"]["verifier_logs_excluded"] is True, failure_default_payload
+    assert_public_safe(failure_default_payload)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-worker-self-mismatch-") as tmp:
+        mismatch_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_worker_self_validation_mismatch_fixture(Path(tmp))
+        )
+    assert mismatch_payload["official_task_score"]["value"] == 0.0, mismatch_payload
+    assert mismatch_payload["worker_bridge_materialization_status"] == "verified", mismatch_payload
+    assert (
+        mismatch_payload["worker_self_validation_official_score_mismatch_count"]
+        == 1
+    ), mismatch_payload
+    assert (
+        mismatch_payload["score_failure_attribution"]
+        == "worker_self_validation_official_score_mismatch"
+    ), mismatch_payload
+    assert "worker_self_validation_official_score_mismatch" in mismatch_payload[
+        "failure_attribution_labels"
+    ], mismatch_payload
+    assert (
+        mismatch_payload["worker_bridge_outcome"][
+            "worker_self_validation_official_score_mismatch_count"
+        ]
+        == 1
+    ), mismatch_payload
+    mismatch_compact = compact_benchmark_run(mismatch_payload)
+    assert (
+        mismatch_compact["score_failure_attribution"]
+        == "worker_self_validation_official_score_mismatch"
+    ), mismatch_compact
+    assert (
+        mismatch_compact["worker_self_validation_official_score_mismatch_count"]
+        == 1
+    ), mismatch_compact
+    assert_public_safe(mismatch_payload)
+    assert_public_safe(mismatch_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-worker-scope-ambiguous-") as tmp:
+        ambiguous_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_worker_validation_scope_ambiguous_fixture(Path(tmp))
+        )
+    assert ambiguous_payload["official_task_score"]["value"] == 0.0, ambiguous_payload
+    assert (
+        ambiguous_payload["worker_self_validation_official_score_mismatch_count"]
+        == 0
+    ), ambiguous_payload
+    assert (
+        ambiguous_payload[
+            "worker_validation_scope_ambiguous_official_score_failure_count"
+        ]
+        == 1
+    ), ambiguous_payload
+    assert (
+        ambiguous_payload["score_failure_attribution"]
+        == "worker_validation_scope_ambiguous_official_score_failure"
+    ), ambiguous_payload
+    ambiguous_compact = compact_benchmark_run(ambiguous_payload)
+    assert (
+        ambiguous_compact["score_failure_attribution"]
+        == "worker_validation_scope_ambiguous_official_score_failure"
+    ), ambiguous_compact
+    assert (
+        ambiguous_compact[
+            "worker_validation_scope_ambiguous_official_score_failure_count"
+        ]
+        == 1
+    ), ambiguous_compact
+    assert_public_safe(ambiguous_payload)
+    assert_public_safe(ambiguous_compact)
     with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-verifier-failure-") as tmp:
         failure_payload = build_terminal_bench_harbor_result_benchmark_run(
-            write_verifier_dependency_failure_fixture(Path(tmp))
+            write_verifier_dependency_failure_fixture(Path(tmp)),
+            include_verifier_log_attribution=True,
         )
     assert failure_payload["official_task_score"]["value"] == 0.0, failure_payload
     assert failure_payload["official_task_score"]["passed"] is False, failure_payload
@@ -1248,11 +2517,12 @@ def main() -> None:
         failure_compact["trials"][0]["verifier_failure_attribution"]
         == "verifier_dependency_install_failure"
     ), failure_compact
-    assert_public_safe(failure_payload)
-    assert_public_safe(failure_compact)
+    assert failure_payload["validation"]["verifier_logs_excluded"] is False, failure_payload
+    assert failure_compact["validation"]["failed_checks"] == ["verifier_logs_excluded"], failure_compact
     with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-platform-failure-") as tmp:
         platform_payload = build_terminal_bench_harbor_result_benchmark_run(
-            write_verifier_platform_probe_failure_fixture(Path(tmp))
+            write_verifier_platform_probe_failure_fixture(Path(tmp)),
+            include_verifier_log_attribution=True,
         )
     assert platform_payload["official_task_score"]["value"] == 0.0, platform_payload
     assert platform_payload["official_task_score"]["passed"] is False, platform_payload
@@ -1319,6 +2589,7 @@ def main() -> None:
     assert "worker_submit_eligible_matches_runner_boundary" in platform_compact[
         "validation"
     ]["failed_checks"], platform_compact
+    assert "verifier_logs_excluded" in platform_compact["validation"]["failed_checks"], platform_compact
     assert (
         platform_compact["worker_bridge_outcome"][
             "worker_submit_eligible_mismatch_observed"
@@ -1334,9 +2605,36 @@ def main() -> None:
     ), platform_compact
     assert_public_safe(platform_payload)
     assert_public_safe(platform_compact)
+    with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-timeout-attribution-") as tmp:
+        timeout_payload = build_terminal_bench_harbor_result_benchmark_run(
+            write_worker_trace_timeout_writeback_loss_fixture(Path(tmp)),
+        )
+    assert timeout_payload["official_task_score"]["value"] == 0.0, timeout_payload
+    assert (
+        timeout_payload["score_failure_attribution"]
+        == "agent_timeout_before_solution_completion"
+    ), timeout_payload
+    assert "agent_timeout_before_solution_completion" in timeout_payload[
+        "failure_attribution_labels"
+    ], timeout_payload
+    assert (
+        timeout_payload["worker_bridge_outcome"]["score_failure_attribution"]
+        == "agent_timeout_before_solution_completion"
+    ), timeout_payload
+    timeout_compact = compact_benchmark_run(timeout_payload)
+    assert (
+        timeout_compact["score_failure_attribution"]
+        == "agent_timeout_before_solution_completion"
+    ), timeout_compact
+    assert "agent_timeout_before_solution_completion" in timeout_compact[
+        "failure_attribution_labels"
+    ], timeout_compact
+    assert_public_safe(timeout_payload)
+    assert_public_safe(timeout_compact)
     with tempfile.TemporaryDirectory(prefix="goal-harness-harbor-timeout-writeback-loss-") as tmp:
         writeback_loss_payload = build_terminal_bench_harbor_result_benchmark_run(
-            write_worker_trace_timeout_writeback_loss_fixture(Path(tmp))
+            write_worker_trace_timeout_writeback_loss_fixture(Path(tmp)),
+            include_verifier_log_attribution=True,
         )
     assert writeback_loss_payload["official_task_score"]["value"] == 0.0, writeback_loss_payload
     assert (

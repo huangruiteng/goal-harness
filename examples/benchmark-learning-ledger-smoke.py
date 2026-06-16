@@ -124,6 +124,35 @@ def test_startup_failure_routes_to_adapter_contract() -> None:
     assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
 
 
+def test_environment_setup_failure_routes_to_benchmark_environment_contract() -> None:
+    payload = build_benchmark_learning_ledger(
+        comparison(
+            0.0,
+            comparison_id="environment-setup-failure",
+            failure_labels=["environment_setup_failed_before_worker"],
+        ),
+        benchmark_runs=[
+            benchmark_run("hardened-codex", 0.0),
+            benchmark_run(
+                "codex-goal-harness",
+                0.0,
+                first_blocker="environment_setup_failed_before_worker",
+                failure_labels=["environment_setup_failed_before_worker"],
+            ),
+        ],
+    )
+
+    assert payload["schema_version"] == "benchmark_learning_ledger_v0", payload
+    assert payload["learning_status"] == "generic_goal_harness_repair_or_attribution_required", payload
+    assert "benchmark_environment_setup_contract" in payload["repair_candidates"], payload
+    assert "adapter_startup_argument_contract" not in payload["repair_candidates"], payload
+    assert payload["learning_quota_gate"]["spend_allowed"] is True, payload
+    assert payload["routing"]["new_candidate_allowed"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "repair_or_validate_benchmark_environment_setup_contract"
+    ), payload
+
+
 def test_materialization_blocker_is_countable_but_not_repeatable() -> None:
     payload = build_benchmark_learning_ledger(
         comparison(
@@ -163,8 +192,13 @@ def test_extra_cost_without_gain_routes_to_overhead_guard() -> None:
     assert payload["overhead"]["label"] == "extra_cost_without_official_gain", payload
     assert "claim_cost_overhead_guard" in payload["repair_candidates"], payload
     assert payload["learning_quota_gate"]["spend_allowed"] is True, payload
+    assert payload["learning_status"] == "loop_validation_cost_overhead_guard", payload
     assert payload["claim_strength"] == "loop_validation_no_score_uplift", payload
-    assert payload["routing"]["new_candidate_allowed"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "select_next_candidate_or_add_named_cost_control_hypothesis_before_repeat"
+    ), payload
 
 
 def test_no_learning_signal_blocks_learning_spend() -> None:
@@ -462,6 +496,7 @@ def test_cli_append_learning_ledger_to_history() -> None:
 
 def main() -> int:
     test_startup_failure_routes_to_adapter_contract()
+    test_environment_setup_failure_routes_to_benchmark_environment_contract()
     test_materialization_blocker_is_countable_but_not_repeatable()
     test_extra_cost_without_gain_routes_to_overhead_guard()
     test_no_learning_signal_blocks_learning_spend()

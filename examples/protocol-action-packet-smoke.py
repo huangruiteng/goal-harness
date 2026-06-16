@@ -21,6 +21,11 @@ ADVANCEMENT_TODO = (
 MONITOR_TODO = (
     "[P2] Meta canary/readiness observation lane: keep status health observable."
 )
+FULL_AIRLINE_ACTION = (
+    "Collect or aggregate additional same-protocol full-airline experience-route "
+    "repeats, then rebuild dynamic-beta labels and rerun the standard "
+    "source-heldout vector-aware scorer gate."
+)
 USER_TODO = "[P1] Decide whether to approve a no-submit setup check."
 
 
@@ -164,14 +169,25 @@ def todo(index: int, text: str, *, priority: str, task_class: str | None = None)
     return item
 
 
-def user_todo(index: int, text: str) -> dict:
-    return {
+def user_todo(
+    index: int,
+    text: str,
+    *,
+    task_class: str | None = None,
+    action_kind: str | None = None,
+) -> dict:
+    item = {
         "index": index,
         "text": text,
         "role": "user",
         "status": "open",
         "priority": "P1",
     }
+    if task_class:
+        item["task_class"] = task_class
+    if action_kind:
+        item["action_kind"] = action_kind
+    return item
 
 
 def assert_advancement_packet_prefers_backlog_candidate() -> None:
@@ -193,6 +209,9 @@ def assert_advancement_packet_prefers_backlog_candidate() -> None:
     assert "LLM-assisted protocol simplification" in packet["summary"], packet
     assert "compare a deterministic" not in packet["summary"], packet
     assert "llm=no_api" in packet["summary"], packet
+    summary = guard["agent_todo_summary"]
+    assert summary["first_executable_items"][0]["text"] == ADVANCEMENT_TODO, summary
+    assert summary["monitor_open_items"][0]["text"] == MONITOR_TODO, summary
     markdown = render_quota_should_run_markdown(guard)
     assert "protocol_action_packet: schema=protocol_action_packet_v0 actor=agent" in markdown, markdown
 
@@ -215,6 +234,48 @@ def assert_advancement_packet_keeps_user_todo_pending() -> None:
     assert f"user_action={USER_TODO}" in packet["summary"], packet
     assert "agent_action=[P1] LLM-assisted protocol simplification research spike" in packet["summary"], packet
     assert f"agent_action={USER_TODO}" not in packet["summary"], packet
+
+
+def assert_explicit_user_gate_preempts_agent_action() -> None:
+    gate_todo = (
+        "[P0] Approve one no-upload Terminal-Bench rerun before crossing the "
+        "resource boundary."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            agent_todos=[
+                todo(1, ADVANCEMENT_TODO, priority="P1", task_class="advancement_task"),
+            ],
+            user_todos=[
+                user_todo(
+                    1,
+                    gate_todo,
+                    task_class="user_gate",
+                    action_kind="approve_resource_boundary",
+                )
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    packet = guard["protocol_action_packet"]
+    contract = guard["interaction_contract"]
+    user_summary = guard["user_todo_summary"]
+    assert guard["requires_user_action"] is True, guard
+    assert guard["notify_user_on_gate"] is True, guard
+    assert guard["open_todo_notification_policy"] == "repeat_until_resolved", guard
+    assert user_summary["gate_open_items"][0]["text"] == gate_todo, user_summary
+    assert "actor=user" in packet["summary"], packet
+    assert "user_action_required=true" in packet["summary"], packet
+    assert "agent_action_required=false" in packet["summary"], packet
+    assert "user_action=[P0] Approve one no-upload Terminal-Bench rerun" in packet["summary"], packet
+    assert "agent_action=[P1] LLM-assisted protocol simplification" not in packet["summary"], packet
+    assert contract["mode"] == "user_gate", contract
+    assert contract["user_channel"]["action_required"] is True, contract
+    assert contract["user_channel"]["notify"] == "NOTIFY", contract
+    assert contract["agent_channel"]["must_attempt"] is False, contract
+    assert contract["agent_channel"]["primary_action"] == (
+        "wait for user/owner action after surfacing the blocker or gate"
+    ), contract
 
 
 def assert_monitor_only_packet_keeps_user_todo_pending() -> None:
@@ -257,11 +318,82 @@ def assert_monitor_only_packet_allows_quiet_noop() -> None:
     assert "material monitor transition" in packet["summary"], packet
 
 
+def assert_executable_recommended_action_overrides_monitor_todo() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            status="monitor_wording_fixture",
+            next_action=FULL_AIRLINE_ACTION,
+            agent_todos=[
+                todo(
+                    1,
+                    (
+                        "[P0] Current route support-blocked monitor: keep the "
+                        "full-airline experience-route repeat state visible."
+                    ),
+                    priority="P0",
+                    task_class="continuous_monitor",
+                ),
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    assert guard["should_run"] is True, guard
+    assert guard["effective_action"] == "normal_run", guard
+    assert guard["work_lane_contract"]["lane"] == "advancement_task", guard
+    assert "next_action_requires_advancement" in guard["work_lane_contract"]["reason_codes"], guard
+    assert guard["execution_obligation"]["must_attempt_work"] is True, guard
+    packet = guard["protocol_action_packet"]
+    assert "agent_action_required=true" in packet["summary"], packet
+    assert "Collect or aggregate additional same-protocol" in packet["summary"], packet
+    contract = guard["interaction_contract"]
+    assert contract["agent_channel"]["must_attempt"] is True, contract
+    assert (
+        "Collect or aggregate additional same-protocol"
+        in contract["agent_channel"]["primary_action"]
+    ), contract
+
+
+def assert_goal_scoped_primary_action_ignores_foreign_backlog() -> None:
+    payload = status_payload(
+        agent_todos=[
+            todo(1, ADVANCEMENT_TODO, priority="P1", task_class="advancement_task"),
+        ],
+    )
+    payload["attention_queue"]["autonomous_backlog_candidates"]["items"].insert(
+        0,
+        {
+            "goal_id": "foreign-goal",
+            "status": "foreign_status",
+            "waiting_on": "codex",
+            "quota_state": "eligible",
+            "priority": "P0",
+            "todo_index": 1,
+            "task_class": "advancement_task",
+            "text": "[P0] Foreign Terminal-Bench backlog candidate should not leak.",
+            "source": "agent_todos",
+        },
+    )
+    payload["attention_queue"]["autonomous_backlog_candidates"]["open_count"] = 2
+    guard = build_quota_should_run(payload, goal_id=GOAL_ID)
+    packet = guard["protocol_action_packet"]
+    contract = guard["interaction_contract"]
+    assert "Foreign Terminal-Bench" not in packet["summary"], packet
+    assert "Foreign Terminal-Bench" not in contract["agent_channel"]["primary_action"], contract
+    assert "LLM-assisted protocol simplification" in packet["summary"], packet
+    assert len(guard["autonomous_backlog_candidates"]["items"]) == 1, guard
+    assert (
+        guard["autonomous_backlog_candidates"]["items"][0]["goal_id"] == GOAL_ID
+    ), guard
+
+
 def main() -> None:
     assert_advancement_packet_prefers_backlog_candidate()
     assert_advancement_packet_keeps_user_todo_pending()
+    assert_explicit_user_gate_preempts_agent_action()
     assert_monitor_only_packet_keeps_user_todo_pending()
     assert_monitor_only_packet_allows_quiet_noop()
+    assert_executable_recommended_action_overrides_monitor_todo()
+    assert_goal_scoped_primary_action_ignores_foreign_backlog()
     print("ok: protocol action packet smoke")
 
 

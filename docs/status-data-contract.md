@@ -130,9 +130,13 @@ string such as `advance_unless_material_monitor_transition`. Agent todo items
 may include `task_class=advancement_task` or
 `task_class=continuous_monitor`, plus optional `action_kind` such as
 `run_eval`, `validate`, `rebuild`, `writeback`, `monitor`, or `poll`. Explicit
-`task_class` is authoritative; recognized generic `action_kind` can infer the
-lane when `task_class` is absent; legacy todo text is only a compatibility
-fallback. Hidden open todos are treated as advancement work rather than as
+`task_class` is authoritative for the todo item itself; recognized generic
+`action_kind` can infer the lane when `task_class` is absent; legacy todo text
+is only a compatibility fallback. The selected goal's
+`next_action`/`recommended_action` can still promote an otherwise monitor-only
+todo set back to `lane=advancement_task` when it names an executable chain such
+as collecting repeats, rebuilding labels, rerunning a scorer, or validating an
+eval gate. Hidden open todos are treated as advancement work rather than as
 monitor-only work, so a truncated top-N todo projection cannot accidentally
 silence an executable backlog.
 For a dependency-observation projection with open agent todos, the guard sets
@@ -143,9 +147,9 @@ monitor-class and no open todo is hidden, the guard sets
 `obligation=quiet_until_material_monitor_transition` and
 `must_attempt_work=false`. One narrow exception prevents long autonomous
 projects from stalling after finishing their last visible delivery todo: when
-the current `next_action`/`recommended_action` explicitly points at a
-planning/self-repair or advancement-class lane, monitor-only todos are promoted
-to `lane=advancement_task` with
+the current `next_action`/`recommended_action` explicitly points at an
+advancement-class executable chain, monitor-only todos are promoted to
+`lane=advancement_task` with
 `obligation=materialize_advancement_todo_or_blocker`. That obligation requires
 the worker to create a concrete advancement todo or write a blocker instead of
 quietly waiting on monitors. The heartbeat recommendation may say
@@ -746,7 +750,12 @@ Item fields:
   it to choose implementation work after gates and quota allow execution; it is
   not a user approval signal. Status, quota, and review-packet projections
   should preserve up to three unfinished agent todo items so short heartbeats do
-  not confuse "first visible item" with the whole backlog.
+  not confuse "first visible item" with the whole backlog. Todo summaries also
+  expose `first_executable_items` for advancement-class work and
+  `monitor_open_items` for continuous-monitor work; executable items are the
+  primary action surface, while monitor items are supplemental context that
+  should not consume the selected goal's advancement slot unless they record a
+  material transition or blocker.
 - Todo summaries use `schema_version=todo_summary_v0`; parsed todo items use
   `schema_version=todo_item_v0`. The source active state can remain ordinary
   Markdown checkboxes, but status/quota/dashboard consumers should prefer the
@@ -1534,6 +1543,37 @@ is for private paired-run diagnosis only; it is not a raw phase trace and must
 not be used as a score uplift claim. These fields must not include raw Codex
 sessions, host absolute paths, credentials, private benchmark material, or
 leaderboard upload claims.
+
+Benchmark adapters that write worker-side or bridge-side compact runs should
+reuse the generic validation/claim fields below instead of inventing
+benchmark-specific synonyms:
+
+- `validation_scope`: the layer the worker validated. Recommended values are
+  `worker_bridge_connectivity` for control-plane/bridge reachability,
+  `environment_ready` for environment-only readiness, `worker_case_success` for
+  an explicit worker-side case-success claim, and `official_verifier_result`
+  when an official verifier result is present.
+- `validation.bridge_connected`: whether the Goal Harness-enhanced worker
+  control path is connected. This supports a connectivity claim only; it is not
+  case success.
+- `validation.case_success_claimed`: whether the worker explicitly claims the
+  benchmark case is solved. A missing scope or a legacy `status=passed` must be
+  treated as ambiguous when the official score is zero.
+- `validation.official_verifier_validation_present`,
+  `validation.official_verifier_status`, and `official_task_score`: whether the
+  benchmark-owned verifier has spoken, and what it reported.
+- `claim_boundary.bridge_connectivity_claim_allowed`,
+  `claim_boundary.case_success_claim_allowed`,
+  `claim_boundary.official_score_claim_allowed`, and
+  `claim_boundary.forbidden_claims`: the reusable boundary that keeps
+  connectivity evidence, worker claims, official score claims, and leaderboard
+  claims separate.
+
+Consumers must not promote `bridge_connected=true`, worker CLI-call evidence,
+environment readiness, or unscoped `validation.status=passed` into official case
+success. Official case success requires an official verifier result or a
+benchmark-specific adapter contract that is explicitly mapped into
+`official_task_score`.
 
 When a compact run record includes `benchmark_result_summary`, it is a redacted
 projection of `benchmark_result_v0`, not a raw benchmark log reader. The summary

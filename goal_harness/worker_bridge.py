@@ -89,8 +89,10 @@ WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_TOP_LEVEL_FIELDS = (
     "submit_eligible",
     "leaderboard_evidence",
     "official_task_score",
+    "validation_scope",
     "progress",
     "validation",
+    "claim_boundary",
     "trials",
 )
 WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS = {
@@ -232,6 +234,10 @@ def build_worker_bridge_benchmark_run_writeback_contract(
             WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS
         ),
         "required_validation_flags": [
+            "validation_scope",
+            "bridge_connected",
+            "case_success_claimed",
+            "official_verifier_validation_present",
             "worker_bridge_trace_observed",
             "worker_cli_call_threshold_met",
             "runner_return_completed_or_blocker_recorded",
@@ -240,6 +246,24 @@ def build_worker_bridge_benchmark_run_writeback_contract(
             "paths_redacted",
             "raw_trace_excluded",
             "side_effect_audit_passed",
+        ],
+        "validation_scope_contract": {
+            "field": "validation_scope",
+            "recommended_values": [
+                "worker_bridge_connectivity",
+                "environment_ready",
+                "worker_case_success",
+                "official_verifier_result",
+            ],
+            "connectivity_is_not_case_success": True,
+            "legacy_unscoped_passed_validation_is_ambiguous": True,
+        },
+        "claim_boundary_required_fields": [
+            "bridge_connectivity_claim_allowed",
+            "case_success_claim_allowed",
+            "official_score_claim_allowed",
+            "leaderboard_claim_allowed",
+            "forbidden_claims",
         ],
         "forbidden_public_fields": list(
             WORKER_BRIDGE_BENCHMARK_RUN_FORBIDDEN_PUBLIC_FIELDS
@@ -1063,6 +1087,7 @@ def build_worker_bridge_outcome(
         raise ValueError("official_score_value requires official_score_completed=true")
 
     worker_bridge_verified = bool(counter_trace_present) and cli_total >= required_cli_total
+    official_case_success = bool(official_score_completed and official_score_value)
     runner_return_status = (
         "completed"
         if runner_return_completed
@@ -1136,8 +1161,13 @@ def build_worker_bridge_outcome(
                 if worker_bridge_verified
                 else "worker bridge install not yet verified"
             ),
+            "bridge_connectivity_claim_allowed": worker_bridge_verified,
+            "case_success_claim_allowed": official_case_success,
+            "official_score_claim_allowed": bool(official_score_completed),
+            "leaderboard_claim_allowed": False,
             "forbidden_claims": [
-                "official_reward_complete",
+                *([] if official_score_completed else ["official_reward_complete"]),
+                *([] if official_case_success else ["case_success"]),
                 "leaderboard_ready",
                 "uplift_over_baseline",
                 "raw_trace_public",
@@ -1201,6 +1231,39 @@ def build_worker_bridge_benchmark_run(
         official_score["passed"] = bool(official_score_value)
 
     runner_closed = bool(runner_return_completed)
+    official_case_success = bool(official_score_completed and official_score_value)
+    official_verifier_status = (
+        "passed"
+        if official_case_success
+        else "failed"
+        if official_score_completed
+        else "pending"
+    )
+    validation_scope = (
+        "official_verifier_result"
+        if official_score_completed
+        else "worker_bridge_connectivity"
+    )
+    claim_boundary = {
+        "public_claim_allowed": (
+            "official verifier result"
+            if official_score_completed
+            else "worker bridge install verified by compact in-worker CLI counts"
+            if outcome["worker_bridge_verified"]
+            else "worker bridge install not yet verified"
+        ),
+        "bridge_connectivity_claim_allowed": bool(outcome["worker_bridge_verified"]),
+        "case_success_claim_allowed": official_case_success,
+        "official_score_claim_allowed": bool(official_score_completed),
+        "leaderboard_claim_allowed": False,
+        "forbidden_claims": [
+            "leaderboard_ready",
+            "uplift_over_baseline",
+            "raw_trace_public",
+            *([] if official_score_completed else ["official_reward_complete"]),
+            *([] if official_case_success else ["case_success"]),
+        ],
+    }
     progress = {
         "n_total_trials": 1,
         "n_completed_trials": 1 if runner_closed else 0,
@@ -1248,9 +1311,25 @@ def build_worker_bridge_benchmark_run(
             outcome["required_worker_goal_harness_cli_call_total_min"]
         ),
         "official_task_score": official_score,
+        "validation_scope": validation_scope,
+        "bridge_connectivity_claim_allowed": bool(outcome["worker_bridge_verified"]),
+        "case_success_claimed": official_case_success,
+        "official_verifier_validation_present": bool(official_score_completed),
+        "official_case_success": official_case_success,
         "progress": progress,
         "worker_bridge_outcome": outcome,
+        "claim_boundary": claim_boundary,
         "validation": {
+            "validation_scope": validation_scope,
+            "bridge_connected": bool(outcome["worker_bridge_verified"]),
+            "bridge_connectivity_claim_allowed": bool(outcome["worker_bridge_verified"]),
+            "case_success_claimed": official_case_success,
+            "case_success_claim_kind": (
+                "official_verifier_score_positive" if official_case_success else "none"
+            ),
+            "official_verifier_validation_present": bool(official_score_completed),
+            "official_verifier_status": official_verifier_status,
+            "official_case_success": official_case_success,
             "worker_bridge_trace_observed": bool(counter_trace_present),
             "worker_cli_call_threshold_met": outcome["worker_bridge_verified"],
             "runner_return_completed_or_blocker_recorded": (

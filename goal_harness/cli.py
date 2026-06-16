@@ -45,8 +45,17 @@ from .benchmark import (
     TERMINAL_BENCH_DEFAULT_DATASET,
     TERMINAL_BENCH_DEFAULT_MODEL,
     TERMINAL_BENCH_DEFAULT_TASK,
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES,
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING,
+    TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES,
+    TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_WORKER_PATH,
     TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE,
     TERMINAL_BENCH_MODES,
+    SKILLSBENCH_DEFAULT_DATASET,
+    SKILLSBENCH_DEFAULT_MODEL,
+    SKILLSBENCH_DEFAULT_ROUTE,
+    SKILLSBENCH_DEFAULT_TASK,
+    SKILLSBENCH_ROUTES,
     build_agents_last_exam_result_benchmark_report,
     TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS,
     agent_kwargs_from_invocation,
@@ -67,16 +76,32 @@ from .benchmark import (
     build_benchmark_attempt_learning_gate,
     build_benchmark_adapter_kwarg_absorption_review,
     build_benchmark_baseline_failure_gate_comparison,
+    build_benchmark_candidate_source_boundary,
     build_benchmark_learning_ledger,
     build_benchmark_lifecycle_state,
     build_benchmark_runner_invariant_review,
     build_benchmark_verifier_attribution_review,
+    build_terminal_bench_result_finalization_gate,
     build_terminal_bench_benchmark_run,
+    build_skillsbench_benchflow_result_benchmark_run,
+    build_skillsbench_benchmark_run,
+    build_terminal_bench_environment_setup_probe_gate,
+    launch_terminal_bench_case_run,
     build_terminal_bench_harbor_result_benchmark_run,
+    launch_terminal_bench_environment_setup_probe,
+    launch_terminal_bench_worker_materialization_probe,
+    poll_terminal_bench_worker_materialization_probe,
+    resume_terminal_bench_materialized_job,
+    benchmark_result_from_benchmark_run_for_baseline_gate,
     collect_terminal_bench_goal_harness_cli_bridge_trace,
     filter_public_benchmark_artifact_paths,
     summarize_terminal_bench_post_launch_materialization,
     terminal_bench_recommended_action,
+    skillsbench_recommended_action,
+)
+from .benchmark_ledger import (
+    BENCHMARK_RUN_LEDGER_DEFAULT_PATH,
+    update_benchmark_run_ledger,
 )
 from .configure_goal import configure_goal, render_configure_goal_markdown
 from .contract import check_contract, render_contract_markdown
@@ -163,6 +188,7 @@ from .status import (
     compact_benchmark_comparison,
     compact_benchmark_experiment_report,
     compact_benchmark_learning_ledger,
+    compact_benchmark_post_launch_materialization,
     compact_benchmark_result,
     compact_benchmark_run,
     render_status_markdown,
@@ -244,6 +270,64 @@ def render_benchmark_artifact_path_filter_markdown(payload: dict[str, object]) -
     if isinstance(blocked, dict) and blocked:
         reasons = ", ".join(f"`{key}`={value}" for key, value in blocked.items())
         lines.append("- Blocked reasons: " + reasons)
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_candidate_source_boundary_markdown(payload: dict[str, object]) -> str:
+    lines = [
+        "# Benchmark Candidate Source Boundary",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Clean: `{payload.get('clean')}`",
+        f"- Allowed: `{payload.get('allowed_source_count')}`",
+        f"- Blocked: `{payload.get('blocked_source_count')}`",
+        f"- Paths recorded: `{payload.get('path_recorded')}`",
+    ]
+    blocked = payload.get("blocked_reasons")
+    if isinstance(blocked, dict) and blocked:
+        reasons = ", ".join(f"`{key}`={value}" for key, value in blocked.items())
+        lines.append("- Blocked reasons: " + reasons)
+    if payload.get("next_action"):
+        lines.append(f"- Next action: {payload.get('next_action')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_run_ledger_upsert_markdown(payload: dict[str, object]) -> str:
+    ledger = (
+        payload.get("benchmark_run_ledger")
+        if isinstance(payload.get("benchmark_run_ledger"), dict)
+        else {}
+    )
+    entry = ledger.get("entry") if isinstance(ledger.get("entry"), dict) else {}
+    decision = (
+        ledger.get("case_decision")
+        if isinstance(ledger.get("case_decision"), dict)
+        else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Run Ledger Upsert",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- dry_run: `{payload.get('dry_run')}`",
+        f"- updated: `{ledger.get('updated')}`",
+        f"- benchmark: `{entry.get('benchmark_id')}`",
+        f"- case: `{entry.get('case_id')}`",
+        f"- arm: `{entry.get('arm_id')}`",
+        f"- score: `{entry.get('official_score')}`",
+        f"- failure: `{entry.get('failure_class')}`",
+        f"- decision: `{decision.get('decision')}`",
+        f"- ledger: `{ledger.get('ledger_path')}`",
+        f"- compact only: `{read_boundary.get('compact_only')}`",
+        f"- raw logs read: `{read_boundary.get('raw_logs_read')}`",
+        f"- task text read: `{read_boundary.get('task_text_read')}`",
+    ]
+    if payload.get("error"):
+        lines.append(f"- error: {payload.get('error')}")
     return "\n".join(lines) + "\n"
 
 
@@ -918,6 +1002,11 @@ def render_benchmark_adapter_kwarg_absorption_review_markdown(
 
 def render_benchmark_lifecycle_state_markdown(payload: dict[str, object]) -> str:
     gates = payload.get("gates") if isinstance(payload.get("gates"), dict) else {}
+    setup = (
+        payload.get("environment_setup_readiness_preflight")
+        if isinstance(payload.get("environment_setup_readiness_preflight"), dict)
+        else {}
+    )
     read_boundary = (
         payload.get("read_boundary")
         if isinstance(payload.get("read_boundary"), dict)
@@ -935,10 +1024,252 @@ def render_benchmark_lifecycle_state_markdown(payload: dict[str, object]) -> str
             f"- Compact ingest allowed: `{gates.get('compact_result_ingest_allowed')}`",
             f"- Budget count allowed: `{gates.get('budget_count_allowed')}`",
             f"- New candidate allowed: `{gates.get('new_candidate_allowed')}`",
+            f"- Repeat allowed: `{gates.get('repeat_allowed')}`",
+            "- Environment setup repeat allowed: "
+            f"`{gates.get('environment_setup_repeat_allowed')}`",
+            "- Environment setup next action: "
+            f"{setup.get('next_allowed_action') or ''}",
             f"- Compact only: `{read_boundary.get('compact_only')}`",
             f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
         ]
     ) + "\n"
+
+
+def render_terminal_bench_environment_setup_gate_markdown(
+    payload: dict[str, object],
+) -> str:
+    capability = (
+        payload.get("harbor_run_help_capability")
+        if isinstance(payload.get("harbor_run_help_capability"), dict)
+        else {}
+    )
+    contract = (
+        payload.get("probe_contract")
+        if isinstance(payload.get("probe_contract"), dict)
+        else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Terminal-Bench Environment Setup Gate",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Benchmark: `{payload.get('benchmark_id')}`",
+        f"- Task: `{payload.get('task_id')}`",
+        f"- Preflight ready: `{payload.get('preflight_ready')}`",
+        "- Previous setup failure: "
+        f"`{payload.get('previous_environment_setup_failure_present')}`",
+        f"- Help probe ok: `{capability.get('probe_ok')}`",
+        f"- Direct setup-only route: `{payload.get('direct_setup_only_route_allowed')}`",
+        "- NOP disable-verification route: "
+        f"`{payload.get('nop_disable_verification_probe_allowed')}`",
+        "- Environment setup probe allowed: "
+        f"`{payload.get('environment_setup_probe_allowed')}`",
+        f"- Same-task repeat allowed: `{payload.get('same_task_repeat_allowed')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Next action: {payload.get('next_allowed_action')}",
+        f"- Probe agent: `{contract.get('agent')}`",
+        f"- No upload / submit eligible: `{contract.get('no_upload')}` / `{contract.get('submit_eligible')}`",
+        f"- Codex invoked: `{contract.get('codex_invoked')}`",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw help recorded: `{read_boundary.get('raw_help_recorded')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_terminal_bench_environment_setup_probe_launch_markdown(
+    payload: dict[str, object],
+) -> str:
+    post_launch = (
+        payload.get("post_launch_materialization")
+        if isinstance(payload.get("post_launch_materialization"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    lines = [
+        "# Terminal-Bench Environment Setup Probe Launch",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Dry run: `{payload.get('dry_run')}`",
+        f"- Run: `{payload.get('run_basename')}`",
+        f"- Job: `{payload.get('job_name')}`",
+        f"- Process started: `{payload.get('process_started')}`",
+        f"- Process state: `{payload.get('process_state')}`",
+        f"- Return code: `{payload.get('returncode')}`",
+        f"- Timed out: `{payload.get('process_timed_out')}`",
+        f"- Materialization wait seconds: `{payload.get('materialization_wait_seconds')}`",
+        f"- Materialization wait timed out: `{payload.get('materialization_wait_timed_out')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Compact failure: `{payload.get('compact_failure_class')}`",
+        f"- Ready for launch state: `{payload.get('ready_for_launch_state')}`",
+        f"- Ready for compact ingest: `{payload.get('ready_for_compact_result_ingest')}`",
+        f"- Ready for failure marker: `{payload.get('ready_for_compact_failure_marker')}`",
+        f"- Post-launch blocker: `{post_launch.get('first_blocker')}`",
+        f"- No upload / submit eligible: `{boundary.get('no_upload')}` / `{boundary.get('submit_eligible')}`",
+        f"- Raw logs read: `{boundary.get('raw_logs_read')}`",
+        f"- Task text read: `{boundary.get('task_text_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_terminal_bench_worker_materialization_probe_launch_markdown(
+    payload: dict[str, object],
+) -> str:
+    post_launch = (
+        payload.get("post_launch_materialization")
+        if isinstance(payload.get("post_launch_materialization"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    command_shape = (
+        payload.get("command_shape")
+        if isinstance(payload.get("command_shape"), dict)
+        else {}
+    )
+    lines = [
+        "# Terminal-Bench Worker Materialization Probe Launch",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Dry run: `{payload.get('dry_run')}`",
+        f"- Run: `{payload.get('run_basename')}`",
+        f"- Job: `{payload.get('job_name')}`",
+        f"- Process started: `{payload.get('process_started')}`",
+        f"- Process state: `{payload.get('process_state')}`",
+        f"- Return code: `{payload.get('returncode')}`",
+        f"- Timed out: `{payload.get('process_timed_out')}`",
+        f"- Resume after materialization: `{payload.get('resume_after_materialization')}`",
+        f"- Resume attempted: `{payload.get('resume_after_materialization_attempted')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Compact failure: `{payload.get('compact_failure_class')}`",
+        f"- Ready for launch state: `{payload.get('ready_for_launch_state')}`",
+        f"- Ready for compact ingest: `{payload.get('ready_for_compact_result_ingest')}`",
+        f"- Post-launch blocker: `{post_launch.get('first_blocker')}`",
+        "- Probe-only kwarg: "
+        f"`{command_shape.get('worker_materialization_probe_only')}`",
+        f"- No upload / submit eligible: `{boundary.get('no_upload')}` / `{boundary.get('submit_eligible')}`",
+        f"- Task solver invoked by probe: `{boundary.get('task_solver_invoked_by_probe')}`",
+        f"- Raw logs read: `{boundary.get('raw_logs_read')}`",
+        f"- Task text read: `{boundary.get('task_text_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_terminal_bench_case_run_launch_markdown(
+    payload: dict[str, object],
+) -> str:
+    post_launch = (
+        payload.get("post_launch_materialization")
+        if isinstance(payload.get("post_launch_materialization"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    command_shape = (
+        payload.get("command_shape")
+        if isinstance(payload.get("command_shape"), dict)
+        else {}
+    )
+    lines = [
+        "# Terminal-Bench Case Run Launch",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Dry run: `{payload.get('dry_run')}`",
+        f"- Run: `{payload.get('run_basename')}`",
+        f"- Job: `{payload.get('job_name')}`",
+        f"- Process started: `{payload.get('process_started')}`",
+        f"- Process state: `{payload.get('process_state')}`",
+        f"- Return code: `{payload.get('returncode')}`",
+        f"- Timed out: `{payload.get('process_timed_out')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Compact failure: `{payload.get('compact_failure_class')}`",
+        f"- Ready for launch state: `{payload.get('ready_for_launch_state')}`",
+        f"- Ready for compact ingest: `{payload.get('ready_for_compact_result_ingest')}`",
+        f"- Post-launch blocker: `{post_launch.get('first_blocker')}`",
+        "- Probe-only kwarg: "
+        f"`{command_shape.get('worker_materialization_probe_only')}`",
+        f"- No upload / submit eligible: `{boundary.get('no_upload')}` / `{boundary.get('submit_eligible')}`",
+        f"- Task solver invoked: `{boundary.get('task_solver_invoked')}`",
+        f"- Model API expected: `{boundary.get('model_api_expected')}`",
+        f"- Raw logs read: `{boundary.get('raw_logs_read')}`",
+        f"- Task text read: `{boundary.get('task_text_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_terminal_bench_worker_materialization_probe_poll_markdown(
+    payload: dict[str, object],
+) -> str:
+    post_launch = (
+        payload.get("post_launch_materialization")
+        if isinstance(payload.get("post_launch_materialization"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    pid_state = (
+        payload.get("pid_state") if isinstance(payload.get("pid_state"), dict) else {}
+    )
+    lines = [
+        "# Terminal-Bench Worker Materialization Probe Poll",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Run: `{payload.get('run_basename')}`",
+        f"- Job: `{payload.get('job_name')}`",
+        f"- Process state: `{payload.get('process_state')}`",
+        f"- PID file present/parsed: `{pid_state.get('pid_file_present')}`/`{pid_state.get('pid_parse_ok')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Compact failure: `{payload.get('compact_failure_class')}`",
+        f"- Ready for launch state: `{payload.get('ready_for_launch_state')}`",
+        f"- Ready for compact ingest: `{payload.get('ready_for_compact_result_ingest')}`",
+        f"- Ready for failure marker: `{payload.get('ready_for_compact_failure_marker')}`",
+        f"- Post-launch blocker: `{post_launch.get('first_blocker')}`",
+        f"- No upload / submit eligible: `{boundary.get('no_upload')}` / `{boundary.get('submit_eligible')}`",
+        f"- Raw logs read: `{boundary.get('raw_logs_read')}`",
+        f"- Task text read: `{boundary.get('task_text_read')}`",
+        f"- Command line read: `{boundary.get('command_line_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_terminal_bench_resume_observation_markdown(
+    payload: dict[str, object],
+) -> str:
+    post_launch = (
+        payload.get("post_launch_materialization")
+        if isinstance(payload.get("post_launch_materialization"), dict)
+        else {}
+    )
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    command_shape = (
+        payload.get("command_shape")
+        if isinstance(payload.get("command_shape"), dict)
+        else {}
+    )
+    lines = [
+        "# Terminal-Bench Job Resume",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Dry run: `{payload.get('dry_run')}`",
+        f"- Run: `{payload.get('run_basename')}`",
+        f"- Job: `{payload.get('job_name')}`",
+        f"- Process started: `{payload.get('process_started')}`",
+        f"- Process state: `{payload.get('process_state')}`",
+        f"- Return code: `{payload.get('returncode')}`",
+        f"- Timed out: `{payload.get('process_timed_out')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Compact failure: `{payload.get('compact_failure_class')}`",
+        f"- Ready for launch state: `{payload.get('ready_for_launch_state')}`",
+        f"- Ready for compact ingest: `{payload.get('ready_for_compact_result_ingest')}`",
+        f"- Ready for failure marker: `{payload.get('ready_for_compact_failure_marker')}`",
+        f"- Post-launch blocker: `{post_launch.get('first_blocker')}`",
+        f"- Uses Harbor job resume: `{command_shape.get('uses_harbor_job_resume')}`",
+        f"- No upload / submit eligible: `{boundary.get('no_upload')}` / `{boundary.get('submit_eligible')}`",
+        f"- Resume invoked: `{boundary.get('resume_invoked')}`",
+        f"- Raw logs read: `{boundary.get('raw_logs_read')}`",
+        f"- Task text read: `{boundary.get('task_text_read')}`",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def render_benchmark_verifier_attribution_review_markdown(
@@ -1029,7 +1360,55 @@ def render_terminal_bench_post_launch_materialization_markdown(
         f"- External handle kind: `{payload.get('external_handle_kind')}`",
         f"- External handle state: `{payload.get('external_handle_state')}`",
         f"- External handle terminal: `{payload.get('external_handle_terminal')}`",
+        f"- Compact monitor class: `{payload.get('compact_monitor_class')}`",
+        "- Stale active reconcile requested: "
+        f"`{payload.get('stale_active_reconcile_requested')}`",
         f"- Compact failure class: `{payload.get('compact_failure_class')}`",
+    ]
+    if payload.get("error"):
+        lines.append(f"- Error: {payload.get('error')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_terminal_bench_result_finalization_gate_markdown(
+    payload: dict[str, object],
+) -> str:
+    conditions = (
+        payload.get("gate_conditions")
+        if isinstance(payload.get("gate_conditions"), dict)
+        else {}
+    )
+    constraints = (
+        payload.get("rerun_constraints")
+        if isinstance(payload.get("rerun_constraints"), dict)
+        else {}
+    )
+    read_boundary = (
+        payload.get("read_boundary")
+        if isinstance(payload.get("read_boundary"), dict)
+        else {}
+    )
+    lines = [
+        "# Terminal-Bench Result Finalization Gate",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Decision: `{payload.get('decision')}`",
+        f"- Failure class: `{payload.get('failure_class')}`",
+        f"- Root cause: `{payload.get('root_cause')}`",
+        f"- First blocker: `{payload.get('first_blocker')}`",
+        f"- Repair class: `{payload.get('repair_class')}`",
+        "- Result finalization repair required: "
+        f"`{payload.get('result_finalization_repair_required')}`",
+        "- Repaired baseline rerun allowed: "
+        f"`{payload.get('repaired_baseline_rerun_allowed')}`",
+        f"- Next action: {payload.get('next_allowed_action')}",
+        f"- Launch state countable: `{conditions.get('launch_state_countable')}`",
+        f"- External handle terminal: `{conditions.get('external_handle_terminal')}`",
+        f"- No trial result: `{conditions.get('no_trial_result')}`",
+        f"- Baseline only: `{constraints.get('baseline_only')}`",
+        f"- Max reruns: `{constraints.get('max_reruns')}`",
+        f"- Compact only: `{read_boundary.get('compact_only')}`",
+        f"- Raw artifacts read: `{read_boundary.get('raw_artifacts_read')}`",
     ]
     if payload.get("error"):
         lines.append(f"- Error: {payload.get('error')}")
@@ -1121,6 +1500,7 @@ def resolve_heartbeat_active_state(
     active_state_arg: str | None,
     registry_path: Path,
     runtime_root_arg: str | None,
+    allow_global_goal_lookup_fallback: bool = True,
 ) -> tuple[Path | None, Path | None, str]:
     if active_state_arg:
         active_state = Path(active_state_arg).expanduser()
@@ -1129,6 +1509,15 @@ def resolve_heartbeat_active_state(
     resolved_registry = fallback_global_registry(registry_path, runtime_root_arg)
     registry = load_registry(resolved_registry)
     goal = next((item for item in registry_goals(registry) if item.get("id") == goal_id), None)
+    if goal is None and allow_global_goal_lookup_fallback:
+        global_registry = explicit_global_registry(runtime_root_arg)
+        if global_registry != resolved_registry and global_registry.exists():
+            global_payload = load_registry(global_registry)
+            global_goal = next((item for item in registry_goals(global_payload) if item.get("id") == goal_id), None)
+            if global_goal is not None:
+                resolved_registry = global_registry
+                registry = global_payload
+                goal = global_goal
     if goal is None:
         raise ValueError(f"goal_id not found in registry for heartbeat active-state lookup: {goal_id}")
     repo_text = str(goal.get("repo") or "")
@@ -1916,8 +2305,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     benchmark_run_parser.add_argument(
         "benchmark_name",
-        choices=["terminal-bench"],
-        help="Benchmark family. Only terminal-bench has a public fixture skeleton.",
+        choices=["terminal-bench", "skillsbench"],
+        help=(
+            "Benchmark family. terminal-bench supports Harbor ingest and fixtures; "
+            "skillsbench supports a no-run compact adapter skeleton."
+        ),
     )
     benchmark_run_parser.add_argument("--goal-id", required=True, help="Goal id for dry-run/append context.")
     benchmark_run_parser.add_argument(
@@ -1931,6 +2323,27 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_run_parser.add_argument("--runner", choices=["harbor"], default="harbor")
     benchmark_run_parser.add_argument("--agent", choices=["codex"], default="codex")
     benchmark_run_parser.add_argument("--model", default=TERMINAL_BENCH_DEFAULT_MODEL)
+    benchmark_run_parser.add_argument(
+        "--skillsbench-route",
+        choices=SKILLSBENCH_ROUTES,
+        default=SKILLSBENCH_DEFAULT_ROUTE,
+        help=(
+            "SkillsBench route for the no-run compact adapter skeleton. "
+            "Default is goal-harness-blind-loop-treatment: ordinary Codex "
+            "inside the case, no /goal mode, and no official reward/pass-fail "
+            "or verifier output returned during the loop. "
+            "automation-loop-treatment is a reward-feedback ablation."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--skillsbench-result-json",
+        help=(
+            "Ingest an official SkillsBench/BenchFlow result.json into a compact "
+            "benchmark_run_v0. This reducer reads only result.json and sibling "
+            "timing.json; it does not read prompts, trajectories, verifier logs, "
+            "task text, credentials, upload, or submit."
+        ),
+    )
     benchmark_run_parser.add_argument(
         "--timeout-multiplier",
         type=float,
@@ -1955,6 +2368,54 @@ def main(argv: list[str] | None = None) -> int:
         "--environment-build-timeout-multiplier",
         type=float,
         help="Preview Harbor --environment-build-timeout-multiplier for private long-horizon tiers.",
+    )
+    benchmark_run_parser.add_argument(
+        "--codex-install-strategy",
+        choices=TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES,
+        default=TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING,
+        help=(
+            "Preview the managed Codex setup strategy. require_existing_codex "
+            "disables runtime npm install and fails fast if Codex is not already "
+            "usable in the worker image."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--codex-preflight-timeout-sec",
+        type=int,
+        help=(
+            "Preview the per-command timeout for fail-fast Codex CLI setup probes "
+            "inside the worker before a benchmark task starts."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--worker-codex-materialization-strategy",
+        choices=TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES,
+        help=(
+            "Declare how Codex becomes visible inside the worker. "
+            "Use worker_path_preprovisioned only after a worker image or launcher "
+            "already proves codex is on PATH; use runtime_install_extended_setup "
+            "for a bounded setup probe that installs Codex during worker setup."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--worker-materialization-probe-only",
+        action="store_true",
+        help=(
+            "Preview a no-upload worker materialization probe that stops after "
+            "Codex install/preflight writes compact benchmark_run_v0 evidence; "
+            "it does not run task-solving or claim case success."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--setup-timeout-repair-profile",
+        action="store_true",
+        help=(
+            "Apply the generic pre-worker setup-timeout repair launch profile: "
+            "explicit 8x agent and setup timeout multipliers plus "
+            "a declared worker Codex materialization strategy. Without a "
+            "runtime materialization strategy it uses require_existing_codex "
+            "fail-fast probes."
+        ),
     )
     benchmark_run_parser.add_argument(
         "--harbor-job-dir",
@@ -2036,6 +2497,31 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_run_parser.add_argument("--classification")
     benchmark_run_parser.add_argument("--recommended-action")
     benchmark_run_parser.add_argument(
+        "--update-run-ledger",
+        action="store_true",
+        help=(
+            "After building/appending the compact benchmark_run_v0, upsert a "
+            "public-safe benchmark_run_ledger_v0 JSON row and Markdown view."
+        ),
+    )
+    benchmark_run_parser.add_argument(
+        "--run-ledger-path",
+        default=str(BENCHMARK_RUN_LEDGER_DEFAULT_PATH),
+        help="Path to benchmark_run_ledger_v0 JSON. Markdown is rendered next to it.",
+    )
+    benchmark_run_parser.add_argument(
+        "--run-group-id",
+        help="Optional stable run group id for the ledger row.",
+    )
+    benchmark_run_parser.add_argument(
+        "--arm-id",
+        help="Optional arm id override for the ledger row.",
+    )
+    benchmark_run_parser.add_argument(
+        "--run-ledger-note",
+        help="Optional compact note for the ledger row.",
+    )
+    benchmark_run_parser.add_argument(
         "--delivery-batch-scale",
         choices=DELIVERY_BATCH_SCALE_CHOICES,
         help="Optional delivery scale label for the run index.",
@@ -2048,6 +2534,57 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_run_parser.add_argument("--dry-run", action="store_true", help="Preview append without writing. This is the default.")
     benchmark_run_parser.add_argument("--execute", action="store_true", help="Append the compact fixture event.")
     benchmark_run_parser.add_argument("--no-global-sync", action="store_true", help="Skip global registry sync after append.")
+
+    benchmark_run_ledger_upsert_parser = benchmark_sub.add_parser(
+        "run-ledger-upsert",
+        help=(
+            "Upsert benchmark_run_ledger_v0 from an existing compact "
+            "benchmark_run_v0 JSON file. This does not read raw runner artifacts."
+        ),
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--benchmark-run-json",
+        help="Path to a compact benchmark_run_v0 JSON object. Use '-' to read stdin.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--post-launch-json",
+        help=(
+            "Path to a compact terminal_bench_post_launch_materialization_v0 "
+            "object. Use '-' to read stdin. This records result-finalization "
+            "or post-launch failure markers without reading raw runner artifacts."
+        ),
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--run-ledger-path",
+        default=str(BENCHMARK_RUN_LEDGER_DEFAULT_PATH),
+        help="Path to benchmark_run_ledger_v0 JSON. Markdown is rendered next to it.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--run-group-id",
+        help="Optional stable run group id for the ledger row.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--arm-id",
+        help="Optional arm id override for the ledger row.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--compact-artifact-ref",
+        help="Optional public-safe relative reference to the compact run artifact.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--run-ledger-note",
+        help="Optional compact note for the ledger row.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview ledger update without writing. This is the default.",
+    )
+    benchmark_run_ledger_upsert_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Write the benchmark run ledger update.",
+    )
 
     agentissue_runner_flow_parser = benchmark_sub.add_parser(
         "agentissue-codex-runner-flow",
@@ -2202,6 +2739,40 @@ def main(argv: list[str] | None = None) -> int:
             "Additional public compact basename to allow for this classification "
             "run. Only the basename is used and values are filtered."
         ),
+    )
+
+    benchmark_candidate_source_parser = benchmark_sub.add_parser(
+        "candidate-source-boundary",
+        help=(
+            "Classify candidate-selection source paths before using them. This "
+            "does not read files or echo host paths; it blocks raw runner roots, "
+            "trial directories, task bodies, trajectories, and Codex transcripts."
+        ),
+    )
+    add_subcommand_format(benchmark_candidate_source_parser)
+    benchmark_candidate_source_parser.add_argument(
+        "source_paths",
+        nargs="+",
+        help="Candidate-selection source paths to classify without reading.",
+    )
+    benchmark_candidate_source_parser.add_argument(
+        "--adapter-kind",
+        default="default",
+        help="Benchmark adapter artifact policy key for compact artifact allowlists.",
+    )
+    benchmark_candidate_source_parser.add_argument(
+        "--allow-public-filename",
+        action="append",
+        default=[],
+        help=(
+            "Additional compact/public basename to allow for this classification "
+            "run. Only the basename is used and values are filtered."
+        ),
+    )
+    benchmark_candidate_source_parser.add_argument(
+        "--require-clean",
+        action="store_true",
+        help="Return non-zero if any source is blocked.",
     )
 
     ale_local_preflight_parser = benchmark_sub.add_parser(
@@ -3041,11 +3612,56 @@ def main(argv: list[str] | None = None) -> int:
             "Use this before declaring a private launch state durable."
         ),
     )
+    benchmark_post_launch_parser.add_argument(
+        "--reconcile-stale-active",
+        action="store_true",
+        help=(
+            "When an externally ended worker still has a stale active Harbor "
+            "job with no trial result, emit a compact failure marker instead "
+            "of leaving the state as polling. This does not read logs, task "
+            "text, trajectories, Docker, model APIs, or uploads."
+        ),
+    )
+
+    benchmark_result_finalization_gate_parser = benchmark_sub.add_parser(
+        "result-finalization-gate",
+        help=(
+            "Reduce compact Terminal-Bench post-launch evidence into a "
+            "result-finalization repair and repaired-baseline rerun gate. "
+            "This reads only compact JSON, not logs, task text, trajectories, "
+            "Docker, model APIs, uploads, or local paths."
+        ),
+    )
+    add_subcommand_format(benchmark_result_finalization_gate_parser)
+    benchmark_result_finalization_gate_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family.",
+    )
+    benchmark_result_finalization_gate_parser.add_argument(
+        "--post-launch-json",
+        required=True,
+        help=(
+            "Path to compact terminal_bench_post_launch_materialization_v0 JSON. "
+            "Use '-' to read stdin."
+        ),
+    )
+    benchmark_result_finalization_gate_parser.add_argument(
+        "--max-repaired-baseline-reruns",
+        type=int,
+        default=1,
+        help="Maximum repaired baseline reruns this gate may authorize.",
+    )
+    benchmark_result_finalization_gate_parser.add_argument(
+        "--require-rerun-allowed",
+        action="store_true",
+        help="Return non-zero unless the gate allows exactly one repaired baseline rerun.",
+    )
 
     benchmark_baseline_gate_parser = benchmark_sub.add_parser(
         "baseline-failure-gate",
         help=(
-            "Reduce a compact goal-mode baseline benchmark_result_v0 into a "
+            "Reduce a compact goal-mode baseline benchmark_result_v0 or benchmark_run_v0 into a "
             "benchmark_comparison_v0 baseline-failure gate. This reads only "
             "compact JSON, not raw task text, logs, traces, Harbor job "
             "directories, Docker, model APIs, uploads, screenshots, or credentials."
@@ -3064,7 +3680,10 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_baseline_gate_parser.add_argument(
         "--baseline-result-json",
         required=True,
-        help="Path to a compact benchmark_result_v0 JSON object. Use '-' to read stdin.",
+        help=(
+            "Path to a compact benchmark_result_v0 or benchmark_run_v0 JSON object. "
+            "Use '-' to read stdin."
+        ),
     )
     benchmark_baseline_gate_parser.add_argument(
         "--baseline-mode",
@@ -3318,6 +3937,385 @@ def main(argv: list[str] | None = None) -> int:
         "--require-budget-count-allowed",
         action="store_true",
         help="Return non-zero unless the lifecycle state allows budget counting.",
+    )
+
+    benchmark_environment_setup_gate_parser = benchmark_sub.add_parser(
+        "environment-setup-gate",
+        help=(
+            "Gate a Terminal-Bench same-task environment setup probe after a "
+            "compact environment_setup failure. Reads compact JSON and optional "
+            "Harbor help only; it does not start Docker, Codex, model APIs, "
+            "uploads, or benchmark tasks."
+        ),
+    )
+    add_subcommand_format(benchmark_environment_setup_gate_parser)
+    benchmark_environment_setup_gate_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench is supported.",
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--dataset",
+        default=TERMINAL_BENCH_DEFAULT_DATASET,
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--include-task-name",
+        default=TERMINAL_BENCH_DEFAULT_TASK,
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--preflight-json",
+        help="Path to compact preflight or benchmark-run append JSON.",
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--benchmark-run-json",
+        required=True,
+        help="Path to the compact benchmark_run_v0 with the prior environment_setup failure.",
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--probe-runner-help",
+        action="store_true",
+        help=(
+            "Probe `harbor run --help` via uvx and store only compact capability "
+            "booleans. This does not run Docker, Codex, model APIs, uploads, or tasks."
+        ),
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--harbor-run-help-text",
+        help=(
+            "Fixture help text for deterministic tests. The raw text is consumed "
+            "only to derive capability booleans and is not emitted."
+        ),
+    )
+    benchmark_environment_setup_gate_parser.add_argument(
+        "--require-probe-allowed",
+        action="store_true",
+        help="Return non-zero unless a no-upload environment setup probe route is allowed.",
+    )
+
+    benchmark_environment_setup_probe_launch_parser = benchmark_sub.add_parser(
+        "launch-environment-setup-probe",
+        help=(
+            "Launch a gated Terminal-Bench no-upload NOP/disable-verification "
+            "environment setup probe and emit only compact process/materialization "
+            "signals. Stdout/stderr stay in a private log and are not read."
+        ),
+    )
+    add_subcommand_format(benchmark_environment_setup_probe_launch_parser)
+    benchmark_environment_setup_probe_launch_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench is supported.",
+    )
+    benchmark_environment_setup_probe_launch_parser.add_argument(
+        "--gate-json",
+        required=True,
+        help="Path to terminal_bench_environment_setup_probe_gate_v0 JSON.",
+    )
+    benchmark_environment_setup_probe_launch_parser.add_argument(
+        "--run-root",
+        required=True,
+        help=(
+            "Private run root for launcher artifacts. The value is used locally "
+            "and only its basename is emitted."
+        ),
+    )
+    benchmark_environment_setup_probe_launch_parser.add_argument(
+        "--jobs-dir",
+        required=True,
+        help=(
+            "Private Harbor jobs directory. The value is used locally and is not "
+            "echoed in output."
+        ),
+    )
+    benchmark_environment_setup_probe_launch_parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=20,
+        help="Seconds to wait for an immediate launcher exit before returning running state.",
+    )
+    benchmark_environment_setup_probe_launch_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually start the local no-upload setup probe. Without this flag, dry-run only.",
+    )
+
+    benchmark_worker_materialization_probe_launch_parser = benchmark_sub.add_parser(
+        "launch-worker-materialization-probe",
+        help=(
+            "Launch a Terminal-Bench no-upload Codex worker materialization "
+            "probe that stops after Codex setup/preflight and emits compact "
+            "process/materialization signals. Stdout/stderr stay in a private "
+            "log and are not read."
+        ),
+    )
+    add_subcommand_format(benchmark_worker_materialization_probe_launch_parser)
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench is supported.",
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--mode",
+        choices=["codex-goal-mode", "hardened-codex"],
+        default="codex-goal-mode",
+        help="Baseline worker surface to materialize without solving the task.",
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--dataset",
+        default=TERMINAL_BENCH_DEFAULT_DATASET,
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--include-task-name",
+        default=TERMINAL_BENCH_DEFAULT_TASK,
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--model",
+        default=TERMINAL_BENCH_DEFAULT_MODEL,
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--job-name",
+        help="Optional public-safe Harbor job basename.",
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--worker-codex-materialization-strategy",
+        choices=TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES,
+        default=TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGY_WORKER_PATH,
+        help=(
+            "Worker Codex materialization route to probe before task solving. "
+            "Defaults to the fail-fast worker PATH probe."
+        ),
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--run-root",
+        required=True,
+        help=(
+            "Private run root for launcher artifacts. The value is used locally "
+            "and only its basename is emitted."
+        ),
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--jobs-dir",
+        required=True,
+        help=(
+            "Private Harbor jobs directory. The value is used locally and is not "
+            "echoed in output."
+        ),
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=20,
+        help="Seconds to wait for an immediate launcher exit before returning running state.",
+    )
+    benchmark_worker_materialization_probe_launch_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Actually start the local no-upload worker materialization probe. "
+            "Without this flag, dry-run only."
+        ),
+    )
+
+    benchmark_case_run_launch_parser = benchmark_sub.add_parser(
+        "launch-terminal-bench-run",
+        help=(
+            "Launch one Terminal-Bench no-upload case run with compact "
+            "process/materialization reporting. Stdout/stderr stay in a "
+            "private log and are not read."
+        ),
+    )
+    add_subcommand_format(benchmark_case_run_launch_parser)
+    benchmark_case_run_launch_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench is supported.",
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--mode",
+        choices=["codex-goal-mode", "hardened-codex", "codex-goal-harness"],
+        default="codex-goal-mode",
+        help="Terminal-Bench worker surface to run.",
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--dataset",
+        default=TERMINAL_BENCH_DEFAULT_DATASET,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--include-task-name",
+        default=TERMINAL_BENCH_DEFAULT_TASK,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--model",
+        default=TERMINAL_BENCH_DEFAULT_MODEL,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--job-name",
+        help="Optional public-safe Harbor job basename.",
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--run-root",
+        required=True,
+        help=(
+            "Private run root for launcher artifacts. The value is used locally "
+            "and only its basename is emitted."
+        ),
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--jobs-dir",
+        required=True,
+        help=(
+            "Private Harbor jobs directory. The value is used locally and is not "
+            "echoed in output."
+        ),
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=20,
+        help="Seconds to wait for an immediate launcher exit before returning running state.",
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--materialization-wait-seconds",
+        type=int,
+        default=0,
+        help=(
+            "Seconds to wait for the Harbor job root or a compact startup "
+            "failure marker after launching. This observes only process state "
+            "and compact job materialization signals."
+        ),
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--resume-after-materialization",
+        action="store_true",
+        help=(
+            "If the launch driver exits after a Harbor job materializes with "
+            "active pending/running trials but no trial result, run one "
+            "no-upload `harbor job resume` driver and report compact state."
+        ),
+    )
+    benchmark_case_run_launch_parser.add_argument("--timeout-multiplier", type=float)
+    benchmark_case_run_launch_parser.add_argument("--agent-timeout-multiplier", type=float)
+    benchmark_case_run_launch_parser.add_argument("--verifier-timeout-multiplier", type=float)
+    benchmark_case_run_launch_parser.add_argument("--agent-setup-timeout-multiplier", type=float)
+    benchmark_case_run_launch_parser.add_argument(
+        "--environment-build-timeout-multiplier",
+        type=float,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--codex-install-strategy",
+        choices=TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES,
+        default=TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--codex-preflight-timeout-sec",
+        type=int,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--worker-codex-materialization-strategy",
+        choices=TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES,
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--setup-timeout-repair-profile",
+        action="store_true",
+        help=(
+            "Apply the generic setup-timeout repair launch profile before "
+            "starting the case run."
+        ),
+    )
+    benchmark_case_run_launch_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Actually start the local no-upload Terminal-Bench case run. "
+            "Without this flag, dry-run only."
+        ),
+    )
+
+    benchmark_resume_terminal_bench_job_parser = benchmark_sub.add_parser(
+        "resume-terminal-bench-job",
+        help=(
+            "Run one no-upload Harbor job resume for a materialized "
+            "Terminal-Bench job and emit compact process/result-finalization "
+            "state. Stdout/stderr stay private and are not read."
+        ),
+    )
+    add_subcommand_format(benchmark_resume_terminal_bench_job_parser)
+    benchmark_resume_terminal_bench_job_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench is supported.",
+    )
+    benchmark_resume_terminal_bench_job_parser.add_argument(
+        "--run-root",
+        required=True,
+        help=(
+            "Private run root for resume artifacts. The value is used locally "
+            "and only its basename is emitted."
+        ),
+    )
+    benchmark_resume_terminal_bench_job_parser.add_argument(
+        "--jobs-dir",
+        required=True,
+        help=(
+            "Private Harbor jobs directory. The value is used locally and is not "
+            "echoed in output."
+        ),
+    )
+    benchmark_resume_terminal_bench_job_parser.add_argument(
+        "--job-name",
+        required=True,
+        help="Public-safe Harbor job basename to resume.",
+    )
+    benchmark_resume_terminal_bench_job_parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=120,
+        help="Seconds to wait for the resume process before returning running state.",
+    )
+    benchmark_resume_terminal_bench_job_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Actually start the local no-upload Harbor resume. Without this "
+            "flag, dry-run only."
+        ),
+    )
+
+    benchmark_worker_materialization_probe_poll_parser = benchmark_sub.add_parser(
+        "poll-worker-materialization-probe",
+        help=(
+            "Poll a Terminal-Bench worker materialization probe by private pid "
+            "state plus compact Harbor materialization signals. This does not "
+            "read stdout/stderr logs, task text, trajectories, argv, Docker, "
+            "model APIs, or uploads."
+        ),
+    )
+    add_subcommand_format(benchmark_worker_materialization_probe_poll_parser)
+    benchmark_worker_materialization_probe_poll_parser.add_argument(
+        "benchmark_name",
+        choices=["terminal-bench"],
+        help="Benchmark family. Only terminal-bench is supported.",
+    )
+    benchmark_worker_materialization_probe_poll_parser.add_argument(
+        "--run-root",
+        required=True,
+        help=(
+            "Private run root containing the probe pid file. The value is used "
+            "locally and only its basename is emitted."
+        ),
+    )
+    benchmark_worker_materialization_probe_poll_parser.add_argument(
+        "--jobs-dir",
+        required=True,
+        help=(
+            "Private Harbor jobs directory. The value is used locally and is not "
+            "echoed in output."
+        ),
+    )
+    benchmark_worker_materialization_probe_poll_parser.add_argument(
+        "--job-name",
+        required=True,
+        help="Public-safe Harbor job basename to summarize.",
     )
 
     benchmark_verifier_attribution_parser = benchmark_sub.add_parser(
@@ -3929,6 +4927,7 @@ def main(argv: list[str] | None = None) -> int:
                 active_state_arg=args.active_state,
                 registry_path=registry_path,
                 runtime_root_arg=args.runtime_root,
+                allow_global_goal_lookup_fallback=not user_supplied_registry(argv),
             )
             payload = build_heartbeat_prompt(
                 goal_id=args.goal_id,
@@ -4556,6 +5555,20 @@ def main(argv: list[str] | None = None) -> int:
                 output_format(args),
                 render_benchmark_artifact_path_filter_markdown,
             )
+            return 0
+        if args.benchmark_command == "candidate-source-boundary":
+            payload = build_benchmark_candidate_source_boundary(
+                args.source_paths,
+                adapter_kind=args.adapter_kind,
+                extra_public_filenames=args.allow_public_filename,
+            )
+            print_payload(
+                payload,
+                output_format(args),
+                render_benchmark_candidate_source_boundary_markdown,
+            )
+            if args.require_clean and not payload.get("clean"):
+                return 1
             return 0
         if args.benchmark_command == "ale-local-preflight":
             try:
@@ -5563,6 +6576,281 @@ def main(argv: list[str] | None = None) -> int:
                 render_benchmark_lifecycle_state_markdown,
             )
             return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "environment-setup-gate":
+            def read_optional_json(path_text: str | None) -> dict[str, object] | None:
+                if not path_text:
+                    return None
+                payload = json.loads(Path(path_text).expanduser().read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("environment setup gate input JSON must contain an object")
+                return payload
+
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                preflight = read_optional_json(args.preflight_json)
+                run_input = read_optional_json(args.benchmark_run_json)
+                if run_input is None:
+                    raise ValueError("--benchmark-run-json is required")
+                benchmark_run = compact_benchmark_run(run_input)
+                if not benchmark_run:
+                    raise ValueError(
+                        "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                    )
+                payload = build_terminal_bench_environment_setup_probe_gate(
+                    dataset=args.dataset,
+                    task_id=args.include_task_name,
+                    preflight=preflight,
+                    previous_benchmark_run=benchmark_run,
+                    harbor_run_help_text=args.harbor_run_help_text,
+                    probe_runner_help=bool(args.probe_runner_help),
+                )
+                payload["ok"] = True
+                if (
+                    args.require_probe_allowed
+                    and payload.get("environment_setup_probe_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "environment_setup_probe_not_allowed"
+                    )
+                payload["require_probe_allowed"] = bool(args.require_probe_allowed)
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_environment_setup_probe_gate_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_help_recorded": False,
+                        "raw_artifacts_read": False,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "credential_values_recorded": False,
+                        "codex_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_environment_setup_gate_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "launch-environment-setup-probe":
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                gate = json.loads(Path(args.gate_json).expanduser().read_text(encoding="utf-8"))
+                if not isinstance(gate, dict):
+                    raise ValueError("--gate-json must contain a JSON object")
+                payload = launch_terminal_bench_environment_setup_probe(
+                    gate=gate,
+                    jobs_dir=args.jobs_dir,
+                    run_root=args.run_root,
+                    wait_seconds=args.wait_seconds,
+                    execute=bool(args.execute),
+                )
+                payload["ok"] = True
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_environment_setup_probe_launch_v0",
+                    "dry_run": not bool(args.execute),
+                    "error": str(exc),
+                    "boundary": {
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "command_argv_recorded": False,
+                        "codex_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_environment_setup_probe_launch_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "launch-worker-materialization-probe":
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                payload = launch_terminal_bench_worker_materialization_probe(
+                    jobs_dir=args.jobs_dir,
+                    run_root=args.run_root,
+                    dataset=args.dataset,
+                    task_id=args.include_task_name,
+                    model=args.model,
+                    mode=args.mode,
+                    job_name=args.job_name,
+                    worker_codex_materialization_strategy=(
+                        args.worker_codex_materialization_strategy
+                    ),
+                    wait_seconds=args.wait_seconds,
+                    execute=bool(args.execute),
+                )
+                payload["ok"] = True
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_worker_materialization_probe_launch_v0",
+                    "dry_run": not bool(args.execute),
+                    "error": str(exc),
+                    "boundary": {
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "command_argv_recorded": False,
+                        "task_solver_invoked_by_probe": False,
+                        "model_api_expected": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_worker_materialization_probe_launch_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "launch-terminal-bench-run":
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                payload = launch_terminal_bench_case_run(
+                    jobs_dir=args.jobs_dir,
+                    run_root=args.run_root,
+                    dataset=args.dataset,
+                    task_id=args.include_task_name,
+                    model=args.model,
+                    mode=args.mode,
+                    job_name=args.job_name,
+                    wait_seconds=args.wait_seconds,
+                    materialization_wait_seconds=(
+                        args.materialization_wait_seconds
+                    ),
+                    resume_after_materialization=bool(
+                        args.resume_after_materialization
+                    ),
+                    execute=bool(args.execute),
+                    timeout_multiplier=args.timeout_multiplier,
+                    agent_timeout_multiplier=args.agent_timeout_multiplier,
+                    verifier_timeout_multiplier=args.verifier_timeout_multiplier,
+                    agent_setup_timeout_multiplier=(
+                        args.agent_setup_timeout_multiplier
+                    ),
+                    environment_build_timeout_multiplier=(
+                        args.environment_build_timeout_multiplier
+                    ),
+                    codex_install_strategy=args.codex_install_strategy,
+                    codex_preflight_timeout_sec=args.codex_preflight_timeout_sec,
+                    worker_codex_materialization_strategy=(
+                        args.worker_codex_materialization_strategy
+                    ),
+                    setup_timeout_repair_profile=bool(
+                        args.setup_timeout_repair_profile
+                    ),
+                )
+                payload["ok"] = True
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_case_run_launch_v0",
+                    "dry_run": not bool(args.execute),
+                    "error": str(exc),
+                    "boundary": {
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "command_argv_recorded": False,
+                        "task_solver_invoked": False,
+                        "model_api_expected": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_case_run_launch_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "resume-terminal-bench-job":
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                payload = resume_terminal_bench_materialized_job(
+                    jobs_dir=args.jobs_dir,
+                    run_root=args.run_root,
+                    job_name=args.job_name,
+                    wait_seconds=args.wait_seconds,
+                    execute=bool(args.execute),
+                )
+                payload["ok"] = True
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_harbor_resume_observation_v0",
+                    "dry_run": not bool(args.execute),
+                    "error": str(exc),
+                    "boundary": {
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "command_argv_recorded": False,
+                        "resume_invoked": False,
+                        "model_api_expected": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_resume_observation_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "poll-worker-materialization-probe":
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                payload = poll_terminal_bench_worker_materialization_probe(
+                    jobs_dir=args.jobs_dir,
+                    run_root=args.run_root,
+                    job_name=args.job_name,
+                )
+                payload["ok"] = True
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_worker_materialization_probe_poll_v0",
+                    "error": str(exc),
+                    "boundary": {
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "local_paths_recorded": False,
+                        "command_argv_recorded": False,
+                        "command_line_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_worker_materialization_probe_poll_markdown,
+            )
+            return 0 if payload.get("ok") else 1
         if args.benchmark_command == "review-verifier-attribution":
             try:
                 runs = []
@@ -5661,6 +6949,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.jobs_dir,
                     job_name=args.job_name,
                     detached_process_state=args.detached_process_state,
+                    reconcile_stale_active=args.reconcile_stale_active,
                 )
                 ready = payload.get("ready_for_launch_state") is True
                 payload["ok"] = (
@@ -5703,6 +6992,62 @@ def main(argv: list[str] | None = None) -> int:
                 render_terminal_bench_post_launch_materialization_markdown,
             )
             return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "result-finalization-gate":
+            try:
+                if args.benchmark_name != "terminal-bench":
+                    raise ValueError("only terminal-bench is supported")
+                if args.post_launch_json == "-":
+                    post_launch = json.loads(sys.stdin.read())
+                else:
+                    post_launch = json.loads(
+                        Path(args.post_launch_json)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
+                if not isinstance(post_launch, dict):
+                    raise ValueError("--post-launch-json must contain a JSON object")
+                payload = build_terminal_bench_result_finalization_gate(
+                    post_launch,
+                    max_repaired_baseline_reruns=(
+                        args.max_repaired_baseline_reruns
+                    ),
+                )
+                payload["require_rerun_allowed"] = bool(
+                    args.require_rerun_allowed
+                )
+                if (
+                    args.require_rerun_allowed
+                    and payload.get("repaired_baseline_rerun_allowed") is not True
+                ):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        payload.get("first_blocker")
+                        or "result_finalization_gate_rerun_not_allowed"
+                    )
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "schema_version": "terminal_bench_result_finalization_gate_v0",
+                    "error": str(exc),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_artifacts_read": False,
+                        "raw_paths_recorded": False,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                        "raw_external_handle_payload_recorded": False,
+                    },
+                }
+            print_payload(
+                payload,
+                output_format(args),
+                render_terminal_bench_result_finalization_gate_markdown,
+            )
+            return 0 if payload.get("ok") else 1
         if args.benchmark_command == "baseline-failure-gate":
             try:
                 if args.dry_run and args.execute:
@@ -5724,10 +7069,20 @@ def main(argv: list[str] | None = None) -> int:
                 if not isinstance(baseline_result_input, dict):
                     raise ValueError("--baseline-result-json must contain a JSON object")
                 baseline_result = compact_benchmark_result(baseline_result_input)
+                baseline_gate_source = "compact_benchmark_result_v0"
                 if not baseline_result:
-                    raise ValueError(
-                        "--baseline-result-json did not contain a compactable benchmark_result_v0 object"
-                    )
+                    benchmark_run = compact_benchmark_run(baseline_result_input)
+                    if benchmark_run:
+                        baseline_result = (
+                            benchmark_result_from_benchmark_run_for_baseline_gate(
+                                benchmark_run
+                            )
+                        )
+                        baseline_gate_source = "compact_benchmark_run_v0"
+                    else:
+                        raise ValueError(
+                            "--baseline-result-json did not contain a compactable benchmark_result_v0 or benchmark_run_v0 object"
+                        )
                 comparison_input = build_benchmark_baseline_failure_gate_comparison(
                     baseline_result=baseline_result,
                     benchmark_id=args.benchmark_id,
@@ -5797,7 +7152,11 @@ def main(argv: list[str] | None = None) -> int:
                         "benchmark_comparison": comparison,
                     }
                 payload["baseline_gate_cli"] = {
-                    "source": "compact_benchmark_result_v0",
+                    "source": baseline_gate_source,
+                    "accepted_schemas": [
+                        "benchmark_result_v0",
+                        "benchmark_run_v0",
+                    ],
                     "raw_artifacts_read": False,
                     "task_text_read": False,
                     "local_paths_recorded": False,
@@ -5815,7 +7174,11 @@ def main(argv: list[str] | None = None) -> int:
                     or "benchmark_comparison_v0",
                     "error": str(exc),
                     "baseline_gate_cli": {
-                        "source": "compact_benchmark_result_v0",
+                        "source": "compact_benchmark_result_v0_or_benchmark_run_v0",
+                        "accepted_schemas": [
+                            "benchmark_result_v0",
+                            "benchmark_run_v0",
+                        ],
                         "raw_artifacts_read": False,
                         "task_text_read": False,
                         "local_paths_recorded": False,
@@ -5830,61 +7193,183 @@ def main(argv: list[str] | None = None) -> int:
                 render_benchmark_baseline_failure_gate_markdown,
             )
             return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "run-ledger-upsert":
+            try:
+                if args.dry_run and args.execute:
+                    raise ValueError(
+                        "benchmark run-ledger-upsert accepts either --dry-run or --execute, not both"
+                    )
+                if bool(args.benchmark_run_json) == bool(args.post_launch_json):
+                    raise ValueError(
+                        "provide exactly one of --benchmark-run-json or --post-launch-json"
+                    )
+
+                input_path_text = args.benchmark_run_json or args.post_launch_json
+                if input_path_text == "-":
+                    run_input = json.loads(sys.stdin.read())
+                    compact_artifact_ref = args.compact_artifact_ref
+                else:
+                    input_path = Path(input_path_text).expanduser()
+                    run_input = json.loads(input_path.read_text(encoding="utf-8"))
+                    compact_artifact_ref = args.compact_artifact_ref or str(input_path)
+                if not isinstance(run_input, dict):
+                    raise ValueError("ledger input JSON must contain an object")
+
+                if args.benchmark_run_json:
+                    benchmark_run = compact_benchmark_run(run_input)
+                    if not benchmark_run:
+                        raise ValueError(
+                            "--benchmark-run-json did not contain a compactable benchmark_run_v0 object"
+                        )
+                    input_kind = "benchmark_run_v0"
+                else:
+                    benchmark_run = compact_benchmark_post_launch_materialization(
+                        run_input
+                    )
+                    if not benchmark_run:
+                        raise ValueError(
+                            "--post-launch-json did not contain a compactable terminal_bench_post_launch_materialization_v0 object"
+                        )
+                    input_kind = "terminal_bench_post_launch_materialization_v0"
+                dry_run = not bool(args.execute)
+                ledger_update = update_benchmark_run_ledger(
+                    ledger_path=args.run_ledger_path,
+                    benchmark_run=benchmark_run,
+                    compact_artifact_ref=compact_artifact_ref,
+                    run_group_id=args.run_group_id,
+                    arm_id=args.arm_id,
+                    notes=args.run_ledger_note,
+                    dry_run=dry_run,
+                )
+                payload = {
+                    "ok": True,
+                    "dry_run": dry_run,
+                    "input_kind": input_kind,
+                    "benchmark_run_ledger": ledger_update,
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "dry_run": not bool(args.execute),
+                    "benchmark_run_ledger": {
+                        "updated": False,
+                        "ledger_path": args.run_ledger_path,
+                    },
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                    "error": str(exc),
+                }
+            print_payload(
+                payload,
+                args.format,
+                render_benchmark_run_ledger_upsert_markdown,
+            )
+            return 0 if payload.get("ok") else 1
         if args.benchmark_command == "run":
             try:
                 if args.dry_run and args.execute:
                     raise ValueError("benchmark run accepts either --dry-run or --execute, not both")
-                if args.benchmark_name != "terminal-bench":
-                    raise ValueError("only terminal-bench is supported")
-                classification = args.classification or (
-                    "terminal_bench_harbor_runner_result_ingest_v0"
-                    if args.harbor_job_dir
-                    else
-                    "terminal_bench_active_user_assisted_observation_fixture_v0"
-                    if args.active_user_observation_fixture
-                    else
-                    "terminal_bench_active_user_assisted_treatment_preflight_v0"
-                    if args.active_user_assisted_treatment
-                    else
-                    "terminal_bench_codex_goal_harness_active_cli_bridge_preflight_v0"
-                    if args.active_cli_bridge
-                    else
-                    "terminal_bench_codex_goal_harness_worker_cli_bridge_fixture_v0"
-                    if args.worker_cli_bridge_fixture
-                    else
-                    "terminal_bench_codex_goal_harness_cli_bridge_contract_runner_fixture_v0"
-                    if args.cli_bridge_contract
-                    else (
-                        (
-                            "terminal_bench_codex_goal_harness_preflight_guard_v0"
-                            if args.mode == "codex-goal-harness"
-                            else (
-                                TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE
-                                + "_v0"
-                            )
-                            if args.mode == "hardened-codex"
-                            else "terminal_bench_codex_goal_mode_baseline_preflight_guard_v0"
-                            if args.mode == "codex-goal-mode"
-                            else "terminal_bench_managed_real_run_preflight_guard_v0"
+                if args.benchmark_name == "skillsbench":
+                    classification = args.classification or (
+                        "skillsbench_official_benchflow_result_ingest_v0"
+                        if args.skillsbench_result_json
+                        else (
+                            "skillsbench_"
+                            + str(args.skillsbench_route).replace("-", "_")
+                            + "_skeleton_v0"
                         )
-                        if args.preflight_guard
+                    )
+                else:
+                    classification = args.classification or (
+                        "terminal_bench_harbor_runner_result_ingest_v0"
+                        if args.harbor_job_dir
+                        else
+                        "terminal_bench_active_user_assisted_observation_fixture_v0"
+                        if args.active_user_observation_fixture
+                        else
+                        "terminal_bench_active_user_assisted_treatment_preflight_v0"
+                        if args.active_user_assisted_treatment
+                        else
+                        "terminal_bench_codex_goal_harness_active_cli_bridge_preflight_v0"
+                        if args.active_cli_bridge
+                        else
+                        "terminal_bench_codex_goal_harness_worker_cli_bridge_fixture_v0"
+                        if args.worker_cli_bridge_fixture
+                        else
+                        "terminal_bench_codex_goal_harness_cli_bridge_contract_runner_fixture_v0"
+                        if args.cli_bridge_contract
                         else (
                             (
-                                "terminal_bench_codex_goal_harness_fake_worker_v0"
+                                "terminal_bench_codex_goal_harness_preflight_guard_v0"
                                 if args.mode == "codex-goal-harness"
-                                else "terminal_bench_cli_fake_worker_v0"
-                            )
-                            if args.fake_worker
-                            else (
-                                "terminal_bench_codex_goal_harness_dry_run_v0"
-                                if args.mode == "codex-goal-harness"
-                                else "terminal_bench_codex_goal_mode_baseline_dry_run_v0"
+                                else (
+                                    TERMINAL_BENCH_HARDENED_CODEX_BASELINE_PREFLIGHT_MODE
+                                    + "_v0"
+                                )
+                                if args.mode == "hardened-codex"
+                                else "terminal_bench_codex_goal_mode_baseline_preflight_guard_v0"
                                 if args.mode == "codex-goal-mode"
-                                else "terminal_bench_cli_dry_run_v0"
+                                else "terminal_bench_managed_real_run_preflight_guard_v0"
+                            )
+                            if args.preflight_guard
+                            else (
+                                (
+                                    "terminal_bench_codex_goal_harness_fake_worker_v0"
+                                    if args.mode == "codex-goal-harness"
+                                    else "terminal_bench_cli_fake_worker_v0"
+                                )
+                                if args.fake_worker
+                                else (
+                                    "terminal_bench_codex_goal_harness_dry_run_v0"
+                                    if args.mode == "codex-goal-harness"
+                                    else "terminal_bench_codex_goal_mode_baseline_dry_run_v0"
+                                    if args.mode == "codex-goal-mode"
+                                    else "terminal_bench_cli_dry_run_v0"
+                                )
                             )
                         )
                     )
+                terminal_bench_only_flags = (
+                    args.harbor_job_dir
+                    or args.fake_worker
+                    or args.preflight_guard
+                    or args.require_task_material_ready
+                    or args.cli_bridge_contract
+                    or args.worker_cli_bridge_fixture
+                    or args.active_cli_bridge
+                    or args.active_user_assisted_treatment
+                    or args.active_user_observation_fixture
+                    or args.setup_timeout_repair_profile
+                    or args.timeout_multiplier is not None
+                    or args.agent_timeout_multiplier is not None
+                    or args.verifier_timeout_multiplier is not None
+                    or args.agent_setup_timeout_multiplier is not None
+                    or args.environment_build_timeout_multiplier is not None
+                    or args.codex_preflight_timeout_sec is not None
+                    or args.worker_codex_materialization_strategy is not None
+                    or args.worker_materialization_probe_only
                 )
+                if args.benchmark_name == "skillsbench" and terminal_bench_only_flags:
+                    raise ValueError(
+                        "skillsbench skeleton does not accept Terminal-Bench runner, "
+                        "Harbor ingest, preflight, timeout, fake-worker, or bridge flags"
+                    )
                 if args.harbor_job_dir and (
                     args.fake_worker
                     or args.preflight_guard
@@ -5894,6 +7379,8 @@ def main(argv: list[str] | None = None) -> int:
                     or args.active_cli_bridge
                     or args.active_user_assisted_treatment
                     or args.active_user_observation_fixture
+                    or args.setup_timeout_repair_profile
+                    or args.worker_materialization_probe_only
                 ):
                     raise ValueError(
                         "--harbor-job-dir cannot be combined with fixture or preflight flags"
@@ -5908,6 +7395,8 @@ def main(argv: list[str] | None = None) -> int:
                         args.verifier_timeout_multiplier,
                         args.agent_setup_timeout_multiplier,
                         args.environment_build_timeout_multiplier,
+                        args.codex_preflight_timeout_sec,
+                        args.worker_codex_materialization_strategy,
                     )
                 )
                 timeout_multiplier_preview_defaulted = (
@@ -5932,7 +7421,39 @@ def main(argv: list[str] | None = None) -> int:
                         scan_path="goal_harness/benchmark.py",
                         classification=classification,
                     )
-                if args.harbor_job_dir:
+                if args.benchmark_name == "skillsbench":
+                    skillsbench_dataset = (
+                        SKILLSBENCH_DEFAULT_DATASET
+                        if args.dataset == TERMINAL_BENCH_DEFAULT_DATASET
+                        else args.dataset
+                    )
+                    skillsbench_task = (
+                        SKILLSBENCH_DEFAULT_TASK
+                        if args.include_task_name == TERMINAL_BENCH_DEFAULT_TASK
+                        else args.include_task_name
+                    )
+                    skillsbench_model = (
+                        SKILLSBENCH_DEFAULT_MODEL
+                        if args.model == TERMINAL_BENCH_DEFAULT_MODEL
+                        else args.model
+                    )
+                    if args.skillsbench_result_json:
+                        benchmark_run_input = build_skillsbench_benchflow_result_benchmark_run(
+                            args.skillsbench_result_json,
+                            route=args.skillsbench_route,
+                            dataset=skillsbench_dataset,
+                            agent=args.agent,
+                            model=skillsbench_model,
+                        )
+                    else:
+                        benchmark_run_input = build_skillsbench_benchmark_run(
+                            route=args.skillsbench_route,
+                            dataset=skillsbench_dataset,
+                            task_id=skillsbench_task,
+                            agent=args.agent,
+                            model=skillsbench_model,
+                        )
+                elif args.harbor_job_dir:
                     benchmark_run_input = build_terminal_bench_harbor_result_benchmark_run(
                         args.harbor_job_dir,
                     )
@@ -5962,17 +7483,35 @@ def main(argv: list[str] | None = None) -> int:
                         verifier_timeout_multiplier=args.verifier_timeout_multiplier,
                         agent_setup_timeout_multiplier=args.agent_setup_timeout_multiplier,
                         environment_build_timeout_multiplier=args.environment_build_timeout_multiplier,
+                        codex_install_strategy=args.codex_install_strategy,
+                        codex_preflight_timeout_sec=args.codex_preflight_timeout_sec,
+                        worker_codex_materialization_strategy=(
+                            args.worker_codex_materialization_strategy
+                        ),
+                        worker_materialization_probe_only=bool(
+                            args.worker_materialization_probe_only
+                        ),
+                        setup_timeout_repair_profile=bool(
+                            args.setup_timeout_repair_profile
+                        ),
                     )
                 benchmark_run = compact_benchmark_run(benchmark_run_input)
                 if not benchmark_run:
-                    raise ValueError("terminal-bench benchmark command did not produce a compactable benchmark_run_v0")
-                benchmark_cli_mode = (
-                    str(benchmark_run.get("mode") or args.mode)
-                    if args.harbor_job_dir
-                    else args.mode
+                    raise ValueError("benchmark command did not produce a compactable benchmark_run_v0")
+                benchmark_cli_mode = str(
+                    benchmark_run.get("mode")
+                    or (
+                        args.skillsbench_route
+                        if args.benchmark_name == "skillsbench"
+                        else args.mode
+                    )
                 )
                 benchmark_cli_mode_source = (
-                    "harbor_job_result" if args.harbor_job_dir else "cli_arg"
+                    "harbor_job_result"
+                    if args.harbor_job_dir
+                    else "skillsbench_route"
+                    if args.benchmark_name == "skillsbench"
+                    else "cli_arg"
                 )
 
                 dry_run = not bool(args.execute)
@@ -5984,18 +7523,21 @@ def main(argv: list[str] | None = None) -> int:
                     classification=classification,
                     recommended_action=args.recommended_action
                     or (
+                        skillsbench_recommended_action(route=args.skillsbench_route)
+                        if args.benchmark_name == "skillsbench"
+                        else
                         "inspect runner-side Terminal-Bench result and refine worker closure/writeback"
                         if args.harbor_job_dir
                         else terminal_bench_recommended_action(
-                        mode=args.mode,
-                        fake_worker=bool(args.fake_worker),
-                        preflight_guard=bool(args.preflight_guard),
-                        cli_bridge_contract=bool(args.cli_bridge_contract),
-                        worker_cli_bridge_fixture=bool(args.worker_cli_bridge_fixture),
-                        active_cli_bridge_preflight=bool(args.active_cli_bridge),
-                        active_user_assisted_treatment_preflight=bool(
-                            args.active_user_assisted_treatment
-                        ),
+                            mode=args.mode,
+                            fake_worker=bool(args.fake_worker),
+                            preflight_guard=bool(args.preflight_guard),
+                            cli_bridge_contract=bool(args.cli_bridge_contract),
+                            worker_cli_bridge_fixture=bool(args.worker_cli_bridge_fixture),
+                            active_cli_bridge_preflight=bool(args.active_cli_bridge),
+                            active_user_assisted_treatment_preflight=bool(
+                                args.active_user_assisted_treatment
+                            ),
                         )
                     ),
                     delivery_batch_scale=args.delivery_batch_scale,
@@ -6006,6 +7548,9 @@ def main(argv: list[str] | None = None) -> int:
                     "benchmark": args.benchmark_name,
                     "mode": benchmark_cli_mode,
                     "requested_mode": args.mode,
+                    "skillsbench_route": args.skillsbench_route
+                    if args.benchmark_name == "skillsbench"
+                    else None,
                     "mode_source": benchmark_cli_mode_source,
                     "fake_worker": bool(args.fake_worker),
                     "preflight_guard": bool(args.preflight_guard),
@@ -6017,6 +7562,9 @@ def main(argv: list[str] | None = None) -> int:
                         args.active_user_assisted_treatment
                     ),
                     "harbor_job_result_ingested": bool(args.harbor_job_dir),
+                    "skillsbench_result_ingested": bool(
+                        getattr(args, "skillsbench_result_json", None)
+                    ),
                     "timeout_multiplier_preview_requested": (
                         timeout_multiplier_preview_requested
                         or timeout_multiplier_preview_defaulted
@@ -6031,6 +7579,60 @@ def main(argv: list[str] | None = None) -> int:
                     "auth_values_read": False,
                     "submit_eligible": False,
                 }
+                if args.update_run_ledger:
+                    harbor_job_path = (
+                        Path(args.harbor_job_dir).expanduser()
+                        if args.harbor_job_dir
+                        else None
+                    )
+                    skillsbench_result_path = (
+                        Path(args.skillsbench_result_json).expanduser()
+                        if getattr(args, "skillsbench_result_json", None)
+                        else None
+                    )
+                    inferred_run_group_id = args.run_group_id
+                    if not inferred_run_group_id and harbor_job_path is not None:
+                        inferred_run_group_id = (
+                            harbor_job_path.parent.parent.name
+                            if harbor_job_path.parent.name == "jobs"
+                            else harbor_job_path.parent.name
+                        )
+                    if (
+                        not inferred_run_group_id
+                        and skillsbench_result_path is not None
+                    ):
+                        inferred_run_group_id = (
+                            skillsbench_result_path.parent.parent.name
+                        )
+                    payload["benchmark_run_ledger"] = update_benchmark_run_ledger(
+                        ledger_path=args.run_ledger_path,
+                        benchmark_run=benchmark_run,
+                        artifact_ref=(
+                            str(harbor_job_path)
+                            if harbor_job_path is not None
+                            else (
+                                skillsbench_result_path.parent.name
+                                if skillsbench_result_path is not None
+                                else None
+                            )
+                        ),
+                        result_ref=(
+                            str(harbor_job_path / "result.json")
+                            if harbor_job_path is not None
+                            else (
+                                skillsbench_result_path.name
+                                if skillsbench_result_path is not None
+                                else None
+                            )
+                        ),
+                        compact_artifact_ref=payload.get("json_path")
+                        if isinstance(payload.get("json_path"), str)
+                        else None,
+                        run_group_id=inferred_run_group_id,
+                        arm_id=args.arm_id,
+                        notes=args.run_ledger_note,
+                        dry_run=dry_run,
+                    )
                 if args.no_global_sync:
                     payload["global_sync"] = {
                         "ok": True,
@@ -6055,6 +7657,17 @@ def main(argv: list[str] | None = None) -> int:
                     "goal_id": args.goal_id,
                     "classification": args.classification
                     or (
+                        (
+                            "skillsbench_official_benchflow_result_ingest_v0"
+                            if getattr(args, "skillsbench_result_json", None)
+                            else (
+                                "skillsbench_"
+                                + str(getattr(args, "skillsbench_route", "")).replace("-", "_")
+                                + "_skeleton_v0"
+                            )
+                        )
+                        if getattr(args, "benchmark_name", None) == "skillsbench"
+                        else
                         "terminal_bench_active_user_assisted_treatment_preflight_v0"
                         if getattr(args, "active_user_assisted_treatment", False)
                         else
@@ -7063,6 +8676,7 @@ def main(argv: list[str] | None = None) -> int:
                     goal_id=args.goal_id,
                     execute=bool(args.execute),
                     source=args.source,
+                    reason_summary=args.reason_summary,
                 )
             elif args.quota_command == "spend-slot":
                 if not args.goal_id:

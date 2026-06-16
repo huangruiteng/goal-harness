@@ -1,0 +1,149 @@
+# Benchmark Run Ledger v0
+
+`benchmark_run_ledger_v0` is the operator-visible index for benchmark case
+evidence. It answers four questions without reading raw benchmark artifacts:
+
+- which benchmark cases have been run;
+- which arm ran (`codex_goal_mode_baseline`, `codex_goal_harness_treatment`,
+  calibration baselines, or another benchmark adapter arm);
+- what compact score/failure class was recorded;
+- where the compact run artifact and local private run root can be found.
+
+The ledger is intentionally separate from `benchmark_learning_ledger_v0`.
+`benchmark_run_ledger_v0` is the inventory of case attempts. The learning ledger
+is the budget/counting decision after a comparison or failure attribution is
+reviewed.
+
+The ledger is also intentionally separate from `benchmark_case_analysis_v0`.
+`benchmark_case_analysis_v0` is the durable interpretation layer for useful
+cases: positive uplift assets, treatment regressions, no-uplift controls, and
+infrastructure lessons. A completed case should first land in this run ledger,
+then receive a case-analysis entry when it teaches a reusable optimization or
+routing lesson.
+
+## Files
+
+- Machine source: `benchmark-run-ledger.json`
+- Human view: `benchmark-run-ledger.md`
+
+Both files are generated from compact `benchmark_run_v0` events. The Markdown
+view is for humans; the JSON is the source of truth.
+
+## Update Rule
+
+Every completed benchmark case ingest should upsert one run row:
+
+```bash
+PYTHONPATH=<goal-harness-repo> python3 -m goal_harness.cli \
+  benchmark run terminal-bench \
+  --goal-id goal-harness-meta \
+  --harbor-job-dir <private-job-dir> \
+  --update-run-ledger \
+  --execute
+```
+
+The command appends the compact run to Goal Harness history and updates the
+ledger in the same operator action. Dry-runs preview the ledger row but do not
+write it.
+
+If the compact `benchmark_run_v0` event already exists, for example in run
+history or a benchmark adapter closeout artifact, upsert the ledger without
+reopening raw runner artifacts:
+
+```bash
+PYTHONPATH=<goal-harness-repo> python3 -m goal_harness.cli \
+  benchmark run-ledger-upsert \
+  --benchmark-run-json <compact-benchmark-run-v0.json> \
+  --run-group-id <stable-run-group-id> \
+  --execute
+```
+
+If a case never reaches `benchmark_run_v0` but the post-launch compact poller
+has produced a terminal compact failure marker, upsert that marker directly
+instead of faking an official score:
+
+```bash
+PYTHONPATH=<goal-harness-repo> python3 -m goal_harness.cli \
+  benchmark run-ledger-upsert \
+  --post-launch-json <terminal-bench-post-launch-compact-json> \
+  --run-group-id <stable-run-group-id> \
+  --arm-id codex_goal_mode_baseline \
+  --execute
+```
+
+This route is for runner/worker finalization states such as
+`stale_active_job_without_trial_result`. It records the attempt as a blocked
+runner/setup closeout, keeps the official score missing, and must not be used
+as case-success evidence.
+
+Terminal-Bench private no-upload launch summaries also expose
+`closeout_command_templates` with the same `--update-run-ledger` route. A
+runner, heartbeat observer, or case-closeout agent should treat that template as
+the canonical post-run ingest path instead of relying on chat memory. For
+non-Harbor adapters or historical compact events, use `run-ledger-upsert` as the
+canonical catch-up path.
+
+SkillsBench uses the same compact ledger route. The no-run adapter skeleton is
+available for route inspection:
+
+```bash
+PYTHONPATH=<goal-harness-repo> python3 -m goal_harness.cli \
+  benchmark run skillsbench \
+  --goal-id goal-harness-meta \
+  --skillsbench-route codex-goal-mode-baseline \
+  --include-task-name citation-check
+```
+
+This command is not case evidence: it does not run BenchFlow, Docker, Codex, a
+model API, or leaderboard upload. Real SkillsBench runner closeout should write
+or provide a compact `benchmark_run_v0`, then call `benchmark run-ledger-upsert`.
+The ledger infers route arms such as `codex_goal_mode_baseline`,
+`goal_harness_automation_loop_treatment`, and `curated_skills_baseline` from
+compact run modes.
+
+## Schema
+
+Top-level fields:
+
+- `schema_version`: always `benchmark_run_ledger_v0`.
+- `updated_at`: local timestamp of the last ledger write.
+- `update_policy`: compact public/private boundary.
+- `benchmarks`: map from `benchmark_id` to case records.
+
+Each run row records:
+
+- `run_id`: deterministic compact identity for idempotent upserts.
+- `benchmark_id`, `case_id`, `case_ids`.
+- `run_group_id`, `arm_id`, `mode`, `job_name`.
+- `status`, `score_status`, `official_score`, `official_passed`.
+- `failure_class`, `failure_scope`, optional `failure_labels`.
+- `goal_harness_inside_case`, `worker_bridge_status`, `agent_model`.
+- `artifact_refs`: relative references to compact/private artifacts.
+
+Each case also has `latest_decision`, derived from the current rows:
+
+- `baseline_failed_treatment_candidate`
+- `baseline_failed_requires_attribution`
+- `baseline_passed_not_current_treatment_priority`
+- `baseline_blocked_by_runner_or_setup`
+- `paired_baseline_blocked_by_runner_or_setup`
+- `paired_treatment_blocked_by_runner_or_setup`
+- `paired_result_blocked_by_verifier_or_infra`
+- `paired_result_requires_attribution`
+- `paired_treatment_improved`
+- `paired_no_score_uplift`
+- `paired_treatment_regressed`
+- `paired_result_needs_score_review`
+- `single_arm_recorded`
+
+## Boundary
+
+The ledger must not contain raw logs, task prompts, trajectories, credentials,
+uploads, hidden test material, or absolute local paths. It may contain relative
+artifact references such as `.local/private-benchmark-jobs/.../result.json`
+because those point to private local evidence without copying the evidence into
+the repository.
+
+When a reducer reads raw runner artifacts to classify a failure, it must record
+only compact labels such as `codex_model_access_unsupported_for_account` or
+`agent_timeout_before_solution_completion`.

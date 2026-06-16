@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -209,17 +210,23 @@ def main() -> int:
         "Goal Harness CLI is source of truth",
         "registry/global quota truth",
         "active state, status/run history, repo state",
-        "Run `quota should-run`; follow `interaction_contract` first",
+        "Run `quota should-run`; follow `interaction_contract`",
+        "action_required=true/open_count>0",
+        "list concrete payload todo(s)/questions",
+        'never only "owner gate"',
+        "If false/0: 无用户待办/无需通知 or quiet",
+        "具体 user todo 未投影，需修复 Goal Harness 状态投影",
         "Do one bounded validated batch or quiet no-op",
-        "Spend exactly once after validated delivery/writeback",
+        "Spend once after validated writeback",
         "After 2 no-progress, self-repair",
-        "If P0 is blocked but the CLI contract permits safe work",
+        "If P0 is blocked but CLI contract permits safe work",
         "monitor-only quiet skips keep automation active and no-spend",
         "No project-specific branches here",
         "Do not consume the learning material queue unless explicitly asked",
         "Stop for private material, credentials, destructive git, or unauthorized production actions",
     ):
         assert phrase in thin_task, phrase
+    assert "if absent say" not in thin_task, thin_task
 
     doc = DOC.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
@@ -247,7 +254,15 @@ def main() -> int:
         "operator_question",
         "user_todo_summary",
         "user_todo_summary.open_count > 0",
-        "never summarize this case as \"no new user action\"",
+        "never say \"no new user action\"",
+        "Only when",
+        "`interaction_contract.user_channel.action_required=true`",
+        "name concrete payload todo(s)/questions",
+        'never only "owner gate"',
+        "When `interaction_contract.user_channel.action_required=false`",
+        "`user_todo_summary.open_count=0`",
+        "allow \"无用户待办/无需通知\"",
+        "具体 user todo 未投影，需修复 Goal Harness 状态投影",
         "NOTIFY",
         "notify_user_on_open_todo=true",
         "blocker-push opportunity",
@@ -341,6 +356,7 @@ def main() -> int:
     compact_doc = normalized(doc)
     for phrase in must_have:
         assert phrase in compact_doc, phrase
+    assert "if absent say" not in compact_doc, compact_doc
     for phrase in (
         'export PATH="$HOME/.local/bin:$PATH"',
         'install_script="$HOME/goal-harness/scripts/install-local.sh"',
@@ -357,7 +373,12 @@ def main() -> int:
         "operator_question",
         "user_todo_summary",
         "user_todo_summary.open_count > 0",
-        "never summarize this case as \"no new user action\"",
+        "never say \"no new user action\"",
+        "Only if action_required=true/open_count>0",
+        "name concrete payload todo(s)/questions",
+        'never only "owner gate"',
+        "If false/0, allow quiet/no-user-todo",
+        "具体 user todo 未投影，需修复 Goal Harness 状态投影",
         "NOTIFY",
         "notify_user_on_open_todo=true",
         "blocker-push",
@@ -431,6 +452,7 @@ def main() -> int:
         "ranker/cross-domain evidence artifact",
     ):
         assert phrase in compact_generated, phrase
+    assert "if absent say" not in compact_generated, compact_generated
 
     assert_ordered(
         doc,
@@ -476,14 +498,15 @@ def main() -> int:
 
     assert "docs/heartbeat-automation-prompt.md" in readme, readme
     assert "goal-harness heartbeat-prompt" in readme, readme
-    assert "goal-harness heartbeat-prompt --compact" in readme, readme
+    assert "goal-harness heartbeat-prompt --thin" in readme, readme
     assert "goal-harness-canary" in readme, readme
     assert "release snapshot" in readme, readme
-    assert "heartbeat_recommendation" in readme, readme
+    assert "execution_obligation" in readme, readme
+    assert "safe-bypass or self-repair hints" in readme, readme
     assert "execution_obligation" in doc, doc
     assert "must_attempt_work=true" in doc, doc
     assert "not an execution gate" in normalized(doc), doc
-    assert "do not hand-edit one-off automation prompt branches" in normalized(readme), readme
+    assert "Generate a guarded Codex App heartbeat body" in readme, readme
     assert "goal-harness heartbeat-prompt" in doc, doc
     assert "--compact" in doc, doc
     assert "--brief" in doc, doc
@@ -507,7 +530,7 @@ def main() -> int:
     assert "Two Prompt Layers" in doc, doc
     assert "Visible goal text" in doc, doc
     assert "Heartbeat automation task body" in doc, doc
-    assert "commit, push, and PR creation can proceed autonomously" in normalized(readme), readme
+    assert "Do not use Goal Harness as an autonomous production controller" in readme, readme
     assert "goal-harness heartbeat-prompt" in project_skill, project_skill
     assert "--compact" in project_skill, project_skill
     assert "--brief" in project_skill, project_skill
@@ -750,6 +773,80 @@ def main() -> int:
             cli_registry_thin_payload["task_body"]
         ), cli_registry_thin_payload
         assert "--active-state" not in cli_registry_thin_payload["task_body"], cli_registry_thin_payload
+
+    with tempfile.TemporaryDirectory() as fallback_tmp:
+        root = Path(fallback_tmp)
+        project = root / "project"
+        runtime = root / "runtime"
+        state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+        local_registry_path = project / ".goal-harness" / "registry.json"
+        global_registry_path = runtime / "registry.global.json"
+        state_file.parent.mkdir(parents=True)
+        local_registry_path.parent.mkdir(parents=True)
+        global_registry_path.parent.mkdir(parents=True)
+        state_file.write_text("# Active State\n", encoding="utf-8")
+        local_registry_path.write_text(
+            json.dumps(
+                {
+                    "goals": [
+                        {
+                            "id": "other-local-goal",
+                            "domain": "smoke",
+                            "status": "active",
+                            "repo": str(project),
+                            "state_file": ".codex/goals/other-local-goal/ACTIVE_GOAL_STATE.md",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        global_registry_path.write_text(
+            json.dumps(
+                {
+                    "goals": [
+                        {
+                            "id": GOAL_ID,
+                            "domain": "smoke",
+                            "status": "active",
+                            "repo": str(project),
+                            "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        cli_global_fallback_json = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--format",
+                "json",
+                "--runtime-root",
+                str(runtime),
+                "heartbeat-prompt",
+                "--goal-id",
+                GOAL_ID,
+                "--thin",
+            ],
+            cwd=project,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        cli_global_fallback_payload = json.loads(cli_global_fallback_json.stdout)
+        assert cli_global_fallback_payload["thin"] is True, cli_global_fallback_payload
+        assert cli_global_fallback_payload["active_state_source"] == f"registry:{global_registry_path}", (
+            cli_global_fallback_payload
+        )
+        assert cli_global_fallback_payload["resolved_active_state"] == str(state_file), (
+            cli_global_fallback_payload
+        )
 
     cli_markdown = subprocess.run(
         [

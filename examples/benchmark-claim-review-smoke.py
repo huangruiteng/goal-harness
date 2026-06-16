@@ -48,8 +48,15 @@ def benchmark_run(
     worker_calls: int = 0,
     attribution: str = "none",
     labels: list[str] | None = None,
+    exception_type: str | None = None,
+    worker_start_status: str | None = None,
+    startup_blocker: str | None = None,
+    runner_return_status: str | None = None,
+    official_score_status: str | None = None,
+    progress: dict[str, int] | None = None,
+    verifier_reward_present: bool | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": "benchmark_run_v0",
         "source_runner": "harbor",
         "benchmark_id": "terminal-bench@2.0",
@@ -75,6 +82,50 @@ def benchmark_run(
             "task_text_read": False,
         },
     }
+    if runner_return_status:
+        payload["runner_return_status"] = runner_return_status
+    if official_score_status:
+        payload["official_score_status"] = official_score_status
+    if progress:
+        payload["progress"] = progress
+    if startup_blocker:
+        payload.update(
+            {
+                "worker_startup_blocker_count": 1,
+                "worker_bridge_materialization_status": (
+                    "pre_worker_startup_blocker_recorded"
+                ),
+                "worker_bridge_materialization_blocker": startup_blocker,
+                "pre_worker_startup_blocker": startup_blocker,
+                "worker_bridge_outcome": {
+                    "worker_startup_blocker_count": 1,
+                    "worker_bridge_materialization_status": (
+                        "pre_worker_startup_blocker_recorded"
+                    ),
+                    "worker_bridge_materialization_blocker": startup_blocker,
+                    "pre_worker_startup_blocker": startup_blocker,
+                },
+            }
+        )
+    if exception_type or worker_start_status or verifier_reward_present is not None:
+        payload["trials"] = [
+            {
+                "task_id": "db-wal-recovery",
+                "exception_type": exception_type or "none",
+                "reward": {"reward": score},
+                **(
+                    {"worker_start_status": worker_start_status}
+                    if worker_start_status
+                    else {}
+                ),
+                **(
+                    {"verifier_reward_present": verifier_reward_present}
+                    if verifier_reward_present is not None
+                    else {}
+                ),
+            }
+        ]
+    return payload
 
 
 def test_candidate_with_baseline_attribution_caveat() -> None:
@@ -114,6 +165,86 @@ def test_loop_validation_without_score_uplift() -> None:
     assert decision["claim_strength"] == "loop_validation_no_score_uplift", payload
     assert decision["validation_enhancement_candidate"] is False, payload
     assert "no_positive_official_task_score_delta" in decision["blockers"], payload
+
+
+def test_claim_review_derives_compact_agent_timeout_attribution() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="AgentTimeoutError",
+    )
+    treatment = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        worker_calls=2,
+        exception_type="AgentTimeoutError",
+    )
+    payload = build_benchmark_claim_review(
+        comparison(0.0, comparison_id="timeout-no-uplift"),
+        benchmark_runs=[baseline, treatment],
+    )
+
+    assert payload["decision"]["claim_strength"] == "loop_validation_no_score_uplift", payload
+    assert payload["baseline_score_failure_attribution"] == "agent_timeout_score_failure", payload
+    assert "agent_timeout_before_solution_completion" in payload[
+        "baseline_failure_attribution_labels"
+    ], payload
+    assert payload["decision"]["blockers"] == ["no_positive_official_task_score_delta"], payload
+    assert payload["treatment_worker_evidence"]["present"] is True, payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_claim_review_derives_compact_agent_setup_timeout_attribution() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="AgentSetupTimeoutError",
+    )
+    treatment = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        worker_calls=0,
+        exception_type="AgentSetupTimeoutError",
+    )
+    payload = build_benchmark_claim_review(
+        comparison(0.0, comparison_id="setup-timeout-no-uplift"),
+        benchmark_runs=[baseline, treatment],
+    )
+
+    assert payload["decision"]["claim_strength"] == "no_validation_enhancement", payload
+    assert payload["baseline_score_failure_attribution"] == (
+        "agent_setup_timeout_score_failure"
+    ), payload
+    assert "agent_setup_timeout_before_worker_start" in payload[
+        "baseline_failure_attribution_labels"
+    ], payload
+    assert payload["decision"]["blockers"] == ["no_positive_official_task_score_delta"], payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_claim_review_derives_worker_start_setup_attribution() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="NonZeroAgentExitCodeError",
+        worker_start_status="pre_worker_agent_setup_failed",
+    )
+    treatment = benchmark_run("codex-goal-harness", 0.0, worker_calls=0)
+    payload = build_benchmark_claim_review(
+        comparison(0.0, comparison_id="worker-start-setup-failure"),
+        benchmark_runs=[baseline, treatment],
+    )
+
+    assert payload["baseline_score_failure_attribution"] == (
+        "agent_setup_score_failure"
+    ), payload
+    assert "agent_setup_failed_before_worker_start" in payload[
+        "baseline_failure_attribution_labels"
+    ], payload
+    assert "baseline_failure_attribution_caveat" not in payload["decision"][
+        "blockers"
+    ], payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
 
 
 def test_cli_review_claim() -> None:
@@ -228,6 +359,282 @@ def test_verifier_attribution_resolves_explicit_model_failure() -> None:
     assert payload["run_reviews"][0]["attribution_class"] == "model_or_solution_failure", payload
 
 
+def test_verifier_attribution_resolves_compact_agent_timeout() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="AgentTimeoutError",
+    )
+    treatment = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        worker_calls=2,
+        exception_type="AgentTimeoutError",
+    )
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
+    assert payload["decision"]["clean_model_failure_attribution"] is True, payload
+    assert payload["decision"]["blockers"] == [], payload
+    assert baseline_review["attribution_class"] == "agent_timeout_score_failure", payload
+    assert baseline_review["agent_timeout_count"] == 1, payload
+    assert "agent_timeout_before_solution_completion" in baseline_review[
+        "failure_attribution_labels"
+    ], payload
+    assert payload["routing"]["treatment_eligible"] is True, payload
+    assert payload["routing"]["repeat_allowed"] is True, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["requires_finer_compact_attribution"] is False, payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_routes_generic_agent_exception_to_case_research() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="RuntimeError",
+        verifier_reward_present=False,
+    )
+    treatment = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        worker_calls=2,
+        exception_type="RuntimeError",
+        verifier_reward_present=False,
+    )
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
+    assert payload["decision"]["blockers"] == [], payload
+    assert baseline_review["attribution_class"] == "agent_exception_score_failure", (
+        payload
+    )
+    assert baseline_review["agent_exception_count"] == 1, payload
+    assert "agent_exception_before_solution_completion" in baseline_review[
+        "failure_attribution_labels"
+    ], payload
+    assert payload["routing"]["treatment_eligible"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["requires_case_exception_research"] is True, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "inspect_compact_agent_exception_before_same_task_repeat"
+    ), payload
+    assert payload["routing"]["blocked_action_scope"] == (
+        "same_task_repeat_until_exception_hypothesis"
+    ), payload
+
+
+def test_verifier_attribution_routes_agent_setup_timeout_to_startup_repair() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="AgentSetupTimeoutError",
+    )
+    treatment = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        worker_calls=0,
+        exception_type="AgentSetupTimeoutError",
+    )
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
+    assert payload["decision"]["blockers"] == [], payload
+    assert baseline_review["attribution_class"] == (
+        "agent_setup_timeout_score_failure"
+    ), payload
+    assert baseline_review["agent_setup_timeout_count"] == 1, payload
+    assert "agent_setup_timeout_before_worker_start" in baseline_review[
+        "failure_attribution_labels"
+    ], payload
+    assert payload["routing"]["treatment_eligible"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is True, payload
+    assert payload["routing"]["requires_agent_setup_repair"] is True, payload
+    assert payload["routing"]["requires_finer_compact_attribution"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "repair_agent_setup_timeout_or_select_new_material_ready_case"
+    ), payload
+    assert payload["routing"]["blocked_action_scope"] == (
+        "same_task_repeat_until_setup_repair"
+    ), payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_uses_compact_worker_start_status() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        exception_type="NonZeroAgentExitCodeError",
+        worker_start_status="pre_worker_agent_setup_failed",
+    )
+    treatment = benchmark_run("codex-goal-harness", 0.0, worker_calls=0)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
+    assert "baseline_score_failure_unattributed" not in payload["decision"][
+        "blockers"
+    ], payload
+    assert baseline_review["attribution_class"] == (
+        "agent_setup_score_failure"
+    ), payload
+    assert baseline_review["agent_setup_failure_count"] == 1, payload
+    assert "agent_setup_failed_before_worker_start" in baseline_review[
+        "failure_attribution_labels"
+    ], payload
+    assert payload["routing"]["requires_agent_setup_repair"] is True, payload
+    assert payload["routing"]["requires_finer_compact_attribution"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_uses_startup_blocker_status() -> None:
+    baseline = benchmark_run(
+        "hardened-codex",
+        0.0,
+        startup_blocker="codex_cli_not_on_path",
+    )
+    treatment = benchmark_run("codex-goal-harness", 0.0)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert payload["decision"]["baseline_claim_caveat_resolved"] is True, payload
+    assert "baseline_score_failure_unattributed" not in payload["decision"][
+        "blockers"
+    ], payload
+    assert baseline_review["attribution_class"] == (
+        "agent_setup_score_failure"
+    ), payload
+    assert "pre_worker_startup_blocker_recorded" in baseline_review[
+        "failure_attribution_labels"
+    ], payload
+    assert payload["routing"]["requires_agent_setup_repair"] is True, payload
+    assert payload["routing"]["requires_finer_compact_attribution"] is False, payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_routes_worker_self_validation_mismatch() -> None:
+    baseline = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        attribution="worker_self_validation_official_score_mismatch",
+        labels=["worker_self_validation_official_score_mismatch"],
+    )
+    treatment = benchmark_run("codex-goal-harness", 0.0, worker_calls=2)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert baseline_review["attribution_class"] == (
+        "worker_self_validation_official_score_mismatch"
+    ), payload
+    assert "baseline_worker_verifier_alignment_caveat" in payload["decision"][
+        "blockers"
+    ], payload
+    assert payload["routing"]["requires_worker_verifier_alignment"] is True, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "align_worker_self_validation_with_official_verifier"
+    ), payload
+    assert payload["routing"]["blocked_action_scope"] == (
+        "same_task_repeat_until_worker_verifier_alignment"
+    ), payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_routes_worker_validation_scope_ambiguous() -> None:
+    baseline = benchmark_run(
+        "codex-goal-harness",
+        0.0,
+        attribution="worker_validation_scope_ambiguous_official_score_failure",
+        labels=["worker_validation_scope_ambiguous_official_score_failure"],
+    )
+    treatment = benchmark_run("codex-goal-harness", 0.0, worker_calls=2)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert baseline_review["attribution_class"] == (
+        "worker_validation_scope_ambiguous_official_score_failure"
+    ), payload
+    assert "baseline_worker_validation_scope_ambiguous_caveat" in payload[
+        "decision"
+    ]["blockers"], payload
+    assert payload["routing"]["requires_worker_validation_scope"] is True, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "add_worker_validation_scope_and_claim_boundary"
+    ), payload
+    assert payload["routing"]["blocked_action_scope"] == (
+        "same_task_repeat_until_worker_validation_scope"
+    ), payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
+def test_verifier_attribution_routes_clean_runner_zero_to_finer_compact() -> None:
+    baseline = benchmark_run(
+        "codex-goal-mode",
+        0.0,
+        runner_return_status="completed",
+        official_score_status="completed",
+        progress={
+            "n_completed_trials": 1,
+            "n_errored_trials": 0,
+            "n_pending_trials": 0,
+            "n_running_trials": 0,
+        },
+        verifier_reward_present=True,
+    )
+    treatment = benchmark_run("codex-goal-harness", 1.0, worker_calls=2)
+
+    payload = build_benchmark_verifier_attribution_review(
+        benchmark_runs=[baseline, treatment],
+    )
+
+    baseline_review = payload["run_reviews"][0]
+    assert baseline_review["attribution_class"] == (
+        "runner_completed_official_score_zero_unattributed"
+    ), payload
+    assert baseline_review["runner_completed_score_zero_signal"]["detected"] is True, payload
+    assert "baseline_score_failure_unattributed" in payload["decision"][
+        "blockers"
+    ], payload
+    assert payload["routing"]["requires_finer_compact_attribution"] is True, payload
+    assert payload["routing"]["treatment_eligible"] is False, payload
+    assert payload["routing"]["repeat_allowed"] is False, payload
+    assert payload["routing"]["new_candidate_allowed"] is False, payload
+    assert payload["routing"]["next_allowed_action"] == (
+        "collect_finer_compact_failure_attribution"
+    ), payload
+    assert payload["read_boundary"]["raw_artifacts_read"] is False, payload
+
+
 def test_verifier_attribution_all_passed_moves_to_new_candidate() -> None:
     baseline = benchmark_run("codex-goal-mode", 1.0)
     treatment = benchmark_run("codex-goal-harness", 1.0, worker_calls=2)
@@ -305,9 +712,20 @@ def test_cli_review_verifier_attribution() -> None:
 def main() -> int:
     test_candidate_with_baseline_attribution_caveat()
     test_loop_validation_without_score_uplift()
+    test_claim_review_derives_compact_agent_timeout_attribution()
+    test_claim_review_derives_compact_agent_setup_timeout_attribution()
+    test_claim_review_derives_worker_start_setup_attribution()
     test_cli_review_claim()
     test_verifier_attribution_keeps_compact_caveat()
     test_verifier_attribution_resolves_explicit_model_failure()
+    test_verifier_attribution_resolves_compact_agent_timeout()
+    test_verifier_attribution_routes_generic_agent_exception_to_case_research()
+    test_verifier_attribution_routes_agent_setup_timeout_to_startup_repair()
+    test_verifier_attribution_uses_compact_worker_start_status()
+    test_verifier_attribution_uses_startup_blocker_status()
+    test_verifier_attribution_routes_worker_self_validation_mismatch()
+    test_verifier_attribution_routes_worker_validation_scope_ambiguous()
+    test_verifier_attribution_routes_clean_runner_zero_to_finer_compact()
     test_verifier_attribution_all_passed_moves_to_new_candidate()
     test_cli_review_verifier_attribution()
     print("benchmark-claim-review-smoke ok")

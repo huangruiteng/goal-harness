@@ -221,6 +221,17 @@ def main() -> int:
         assert validate_item["status"] == "blocked", validate_item
         assert validate_item["done"] is False, validate_item
         assert validate_item["task_class"] == "blocker", validate_item
+        fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
+        executable_ids = {
+            item["todo_id"]
+            for item in fields["agent_todos"].get("first_executable_items", [])
+        }
+        item_ids = {
+            item["todo_id"]
+            for item in fields["agent_todos"].get("items", [])
+        }
+        assert validate_todo_id in item_ids, fields
+        assert validate_todo_id not in executable_ids, fields
 
     print("todo-lifecycle-cli-smoke ok")
     return 0

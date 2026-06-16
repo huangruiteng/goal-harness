@@ -43,6 +43,7 @@ TODO_METADATA_FIELDS = (
     "updated_at",
     "superseded_by",
 )
+TODO_PRIORITY_PREFIX_PATTERN = re.compile(r"^\[(P[0-4])\]\s+", re.IGNORECASE)
 
 
 def normalize_new_todo(text: str) -> str:
@@ -50,6 +51,23 @@ def normalize_new_todo(text: str) -> str:
     if not compact:
         raise ValueError("todo text must not be empty")
     return compact
+
+
+def todo_priority_prefix(text: str | None) -> str | None:
+    match = TODO_PRIORITY_PREFIX_PATTERN.match(str(text or "").strip())
+    if not match:
+        return None
+    return match.group(1).upper()
+
+
+def inherit_todo_priority(next_text: str, source_text: str | None) -> str:
+    normalized = normalize_new_todo(next_text)
+    if todo_priority_prefix(normalized):
+        return normalized
+    source_priority = todo_priority_prefix(source_text)
+    if not source_priority:
+        return normalized
+    return f"[{source_priority}] {normalized}"
 
 
 def section_bounds(lines: list[str], role: str) -> tuple[int, int, str] | None:
@@ -647,13 +665,26 @@ def complete_goal_todo(
             add_todo_to_lines(
                 lines,
                 role="agent",
-                text=next_agent_todo,
+                text=inherit_todo_priority(
+                    next_agent_todo,
+                    str(update_result.get("todo") or ""),
+                ),
                 task_class=next_task_class or "advancement_task",
                 action_kind=next_action_kind,
             )
         )
     if next_user_todo:
-        next_results.append(add_todo_to_lines(lines, role="user", text=next_user_todo, task_class="user_gate"))
+        next_results.append(
+            add_todo_to_lines(
+                lines,
+                role="user",
+                text=inherit_todo_priority(
+                    next_user_todo,
+                    str(update_result.get("todo") or ""),
+                ),
+                task_class="user_gate",
+            )
+        )
     next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
     changed = bool(update_result["changed"] or next_changed)
     new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
@@ -712,13 +743,26 @@ def supersede_goal_todo(
             add_todo_to_lines(
                 lines,
                 role="agent",
-                text=next_agent_todo,
+                text=inherit_todo_priority(
+                    next_agent_todo,
+                    str(update_result.get("todo") or ""),
+                ),
                 task_class=next_task_class or "advancement_task",
                 action_kind=next_action_kind,
             )
         )
     if next_user_todo:
-        next_results.append(add_todo_to_lines(lines, role="user", text=next_user_todo, task_class="user_gate"))
+        next_results.append(
+            add_todo_to_lines(
+                lines,
+                role="user",
+                text=inherit_todo_priority(
+                    next_user_todo,
+                    str(update_result.get("todo") or ""),
+                ),
+                task_class="user_gate",
+            )
+        )
     superseded_by = next((item.get("todo_id") for item in next_results if item.get("todo_id")), None)
     if superseded_by:
         block_match = find_todo_block(lines, todo_id=str(update_result["todo_id"]), role=role)

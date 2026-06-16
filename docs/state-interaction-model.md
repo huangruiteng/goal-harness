@@ -96,6 +96,13 @@ waiting on evidence?", and "is a controller handoff safe yet?" Raw
 classifications, paths, and adapter terms should be secondary drill-down
 details.
 
+The dashboard may eventually look like a channel workspace: one goal timeline,
+agent/member presence, task claims, approvals, and artifacts in one place. That
+frontstage view must remain a projection over durable Goal Harness events. A
+channel message can help a person collaborate, but the event ledger decides
+what is current, who owns a task, which lease is active, and whether a later
+agent may resume work.
+
 The first user-facing view should also make TODO ownership explicit. Before the
 operator reads a full action card or run history, the dashboard should surface
 the first open `user_todos` item and the highest-priority open `agent_todos`

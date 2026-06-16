@@ -42,12 +42,13 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path]:
+def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     registry_path = project / ".goal-harness" / "registry.json"
     baseline_result_path = root / "baseline_result.json"
+    baseline_run_path = root / "baseline_run.json"
 
     (project / Path(state_file).parent).mkdir(parents=True, exist_ok=True)
     (project / state_file).write_text(
@@ -106,7 +107,45 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
             "raw_log_path": "/" + "tmp/private/raw.log",
         },
     )
-    return registry_path, runtime, baseline_result_path
+    write_json(
+        baseline_run_path,
+        {
+            "classification": "terminal_bench_baseline_compact_result",
+            "benchmark_run": {
+                "schema_version": "benchmark_run_v0",
+                "benchmark_id": BENCHMARK_ID,
+                "job_name": "terminal_bench_fix_code_vulnerability_codex_goal_mode_baseline",
+                "mode": BASELINE_SCENARIO,
+                "worker_mode": "codex_goal_mode_baseline",
+                "trace_publicness": "compact_public",
+                "runner_return_status": "completed",
+                "official_score_status": "completed",
+                "official_score": 0.0,
+                "official_task_score": {
+                    "kind": "terminal_bench_verifier",
+                    "passed": False,
+                    "value": 0.0,
+                },
+                "score_failure_attribution": "worker_trace_without_benchmark_run_writeback",
+                "worker_bridge_outcome": {
+                    "schema_version": "worker_bridge_outcome_v0",
+                    "score_failure_attribution": "none",
+                    "trace_publicness": "compact_public",
+                    "raw_paths_recorded": False,
+                    "credential_values_recorded": False,
+                },
+                "trials": [
+                    {
+                        "task_id": TASK_ID,
+                        "exception_type": "none",
+                        "verifier_reward_present": True,
+                    }
+                ],
+                "raw_log_path": "/" + "tmp/private/raw.log",
+            },
+        },
+    )
+    return registry_path, runtime, baseline_result_path, baseline_run_path
 
 
 def run_cli(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -166,7 +205,13 @@ def assert_public_safe(payload: dict[str, Any]) -> None:
     assert len(text) < 16000, len(text)
 
 
-def assert_gate(payload: dict[str, Any], *, eligible: bool, appended: bool) -> None:
+def assert_gate(
+    payload: dict[str, Any],
+    *,
+    eligible: bool,
+    appended: bool,
+    source: str = "compact_benchmark_result_v0",
+) -> None:
     assert payload["ok"] is True, payload
     assert payload["appended"] is appended, payload
     comparison = payload["benchmark_comparison"]
@@ -187,6 +232,11 @@ def assert_gate(payload: dict[str, Any], *, eligible: bool, appended: bool) -> N
         assert gate["trace_publicness_verified"] is True, gate
     else:
         assert gate["negative_selection_reason"], gate
+    assert payload["baseline_gate_cli"]["source"] == source, payload
+    assert payload["baseline_gate_cli"]["accepted_schemas"] == [
+        "benchmark_result_v0",
+        "benchmark_run_v0",
+    ], payload
     assert_public_safe(payload)
 
 
@@ -256,7 +306,7 @@ def assert_codex_goal_mode_fixture(registry_path: Path, runtime: Path) -> None:
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="benchmark-baseline-gate-") as tmp:
-        registry_path, runtime, result_path = write_fixture(Path(tmp))
+        registry_path, runtime, result_path, run_path = write_fixture(Path(tmp))
         assert_codex_goal_mode_fixture(registry_path, runtime)
         positive = run_cli_json(
             base_args(registry_path, runtime, result_path)
@@ -271,6 +321,14 @@ def main() -> None:
 
         negative = run_cli_json(base_args(registry_path, runtime, result_path))
         assert_gate(negative, eligible=False, appended=False)
+
+        run_input = run_cli_json(base_args(registry_path, runtime, run_path))
+        assert_gate(
+            run_input,
+            eligible=False,
+            appended=False,
+            source="compact_benchmark_run_v0",
+        )
 
         appended = run_cli_json(
             base_args(registry_path, runtime, result_path)

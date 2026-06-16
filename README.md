@@ -275,6 +275,11 @@ goals stay out of the eligible lane.
 - safe-bypass or self-repair hints, when enabled;
 - the exact spend policy.
 
+Agent todo summaries separate `first_executable_items` from
+`monitor_open_items`: executable items drive the selected goal's primary action,
+while monitor items stay visible as supplemental observation context and only
+spend compute when they produce a material transition or blocker.
+
 Registry entries can expose per-goal `control_plane` policy. For example,
 `control_plane.self_repair.enabled=true` lets `quota should-run` return a
 bounded `decision=self_repair` contract for repairable control-plane stalls;

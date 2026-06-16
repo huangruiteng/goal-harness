@@ -340,7 +340,8 @@ def assert_payload(payload: dict[str, Any], *, appended: bool) -> None:
 
     cli = payload["benchmark_cli"]
     assert cli["benchmark"] == "terminal-bench", cli
-    assert cli["mode"] == "codex-goal-harness", cli
+    assert cli["requested_mode"] == "codex-goal-harness", cli
+    assert cli["mode"] == RUN_MODE, cli
     assert cli["preflight_guard"] is True, cli
     assert cli["active_cli_bridge"] is True, cli
     assert cli["active_user_assisted_treatment"] is True, cli

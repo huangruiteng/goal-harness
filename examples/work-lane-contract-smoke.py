@@ -244,15 +244,15 @@ def assert_monitor_only_with_user_todo_stays_quiet_without_transition() -> None:
     assert guard["requires_user_action"] is False, guard
     assert guard["execution_obligation"]["must_attempt_work"] is False, guard
     interaction = guard["interaction_contract"]
-    assert interaction["mode"] == "user_todo_blocker_push", interaction
-    assert interaction["user_channel"]["action_required"] is True, interaction
+    assert interaction["mode"] == "monitor_quiet_skip", interaction
+    assert interaction["user_channel"]["action_required"] is False, interaction
     assert interaction["agent_channel"]["must_attempt"] is False, interaction
-    assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
+    assert interaction["agent_channel"]["quiet_noop_allowed"] is True, interaction
     packet = guard["protocol_action_packet"]
-    assert "actor=user" in packet["summary"], packet
-    assert "user_action_required=true" in packet["summary"], packet
+    assert "actor=agent" in packet["summary"], packet
+    assert "user_action_required=false" in packet["summary"], packet
     assert "agent_action_required=false" in packet["summary"], packet
-    assert "quiet_noop_allowed=false" in packet["summary"], packet
+    assert "quiet_noop_allowed=true" in packet["summary"], packet
     markdown = render_quota_should_run_markdown(guard)
     assert "monitor_quiet_until_material_transition" in markdown, markdown
     assert "heartbeat_repeat_notification_required" not in markdown, markdown
@@ -755,6 +755,111 @@ def assert_behavior_regression_suite_routes_to_advancement() -> None:
     assert first_items[0]["task_class"] == "advancement_task", guard
 
 
+def assert_launched_external_observation_does_not_preempt_advancement_backlog() -> None:
+    observe_todo = (
+        "[P0] Observe launched private no-upload paired pilot for terminal-bench@2.0 / "
+        "git-multibranch (run_basename=terminal-bench-git-multibranch-paired-fixture; "
+        "baseline pid=111; treatment pid=222): poll compact Harbor materialization "
+        "only, inspect case execution status via compact result/blocker markers, and "
+        "when both arms close run verifier-attribution review before any repeat or claim."
+    )
+    backlog_todo = (
+        "[P1] Re-rank follow-on benchmark lanes after the first Terminal-Bench paired "
+        "pilot or a documented Terminal-Bench blocker."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="terminal_bench_git_multibranch_paired_launch_observation_v0",
+            next_action=(
+                "Observe launched private no-upload terminal-bench@2.0/git-multibranch "
+                "paired pilot run_basename=terminal-bench-git-multibranch-paired-fixture "
+                "via compact Harbor materialization/process state only; when both arms "
+                "close, ingest compact result/blocker and run verifier-attribution review "
+                "before any repeat or claim."
+            ),
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": observe_todo,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "continuous_monitor",
+                    "action_kind": "terminal_bench_case_observation",
+                },
+                {
+                    "index": 2,
+                    "text": backlog_todo,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P1",
+                    "task_class": "advancement_task",
+                    "action_kind": "planning_refresh",
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    lane = guard["work_lane_contract"]
+    assert guard["decision"] == "run", guard
+    assert guard["should_run"] is True, guard
+    assert guard["effective_action"] == "normal_run", guard
+    assert guard["actionable_by_codex"] is True, guard
+    assert lane["lane"] == "advancement_task", lane
+    assert lane["obligation"] == "advance_one_bounded_segment", lane
+    assert lane["reason_codes"] == [
+        "open_agent_todo",
+        "external_monitor_context",
+    ], lane
+    assert "external_evidence_observation" not in guard, guard
+    interaction = guard["interaction_contract"]
+    assert interaction["mode"] == "bounded_delivery", interaction
+    assert interaction["agent_channel"]["must_attempt"] is True, interaction
+    assert "Re-rank follow-on benchmark lanes" in interaction["agent_channel"]["primary_action"], interaction
+
+
+def assert_launch_then_poll_todo_without_handle_routes_to_advancement() -> None:
+    launch_repeat_todo = (
+        "[P0] Launch a private no-upload paired repeat for terminal-bench@2.0 / "
+        "large-scale-text-editing with agent_setup_timeout_multiplier=4 on both "
+        "codex-goal-mode baseline and goal-harness treatment; poll only compact "
+        "materialization/result summaries, then ingest and compare before any claim."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="terminal_bench_large_scale_repeat_handle_absent_v0",
+            next_action=(
+                "No observable public launch summary or compact writeback channel "
+                "exists yet for the planned paired repeat; launch the private "
+                "no-upload repeat before further polling."
+            ),
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": launch_repeat_todo,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "action_kind": "run_eval",
+                }
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    lane = guard["work_lane_contract"]
+    assert guard["decision"] == "run", guard
+    assert guard["should_run"] is True, guard
+    assert guard["effective_action"] == "normal_run", guard
+    assert lane["lane"] == "advancement_task", lane
+    assert lane["obligation"] == "advance_one_bounded_segment", lane
+    assert lane["reason_codes"] == ["open_agent_todo"], lane
+    assert "external_evidence_observation" not in guard, guard
+    first_items = guard["agent_todo_summary"]["first_open_items"]
+    assert first_items[0]["task_class"] == "advancement_task", guard
+    assert first_items[0]["action_kind"] == "run_eval", guard
+
+
 def main() -> int:
     assert_dependency_monitor_requires_advancement()
     assert_primary_status_stays_advancement_lane()
@@ -771,6 +876,8 @@ def main() -> int:
     assert_benchmark_readiness_scan_routes_to_advancement()
     assert_benchmark_source_preflight_routes_to_advancement()
     assert_behavior_regression_suite_routes_to_advancement()
+    assert_launched_external_observation_does_not_preempt_advancement_backlog()
+    assert_launch_then_poll_todo_without_handle_routes_to_advancement()
     print("work-lane-contract-smoke ok")
     return 0
 

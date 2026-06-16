@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,9 @@ from harbor.models.agent.context import AgentContext
 
 from goal_harness.benchmark import (
     TERMINAL_BENCH_CODEX_WORKER_CLI_BRIDGE_SURFACE,
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES,
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING,
+    TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING,
     TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_MODE,
     TERMINAL_BENCH_CODEX_GOAL_MODE_BASELINE_SURFACE,
     TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_AVAILABLE,
@@ -31,6 +35,9 @@ from goal_harness.benchmark import (
     TERMINAL_BENCH_GOAL_HARNESS_INTERFACE_SURFACE,
     TERMINAL_BENCH_HARDENED_CODEX_BASELINE_MODES,
     TERMINAL_BENCH_HARDENED_CODEX_BASELINE_SURFACE,
+    TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES,
+    TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE,
+    TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA,
     build_terminal_bench_goal_harness_access_packet,
     build_terminal_bench_goal_harness_interaction_counters,
     build_terminal_bench_single_agent_episode_policy,
@@ -41,6 +48,7 @@ from goal_harness.worker_bridge import (
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_OBSERVATION_JSON,
     DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
     DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
+    DEFAULT_WORKER_BRIDGE_TRACE_DIR,
     GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER,
     GOAL_HARNESS_RUNTIME_ROOT_PLACEHOLDER,
     WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION,
@@ -72,6 +80,14 @@ DEFAULT_GOAL_HARNESS_WORKER_REGISTRY_ARG = (
 DEFAULT_GOAL_HARNESS_WORKER_SCAN_PATH = (
     GOAL_HARNESS_PROJECT_ROOT_PLACEHOLDER + "/goal_harness/benchmark.py"
 )
+CODEX_REQUIRE_EXISTING_BLOCKER_NOT_ON_PATH = "codex_cli_not_on_path"
+CODEX_REQUIRE_EXISTING_BLOCKER_VERSION_PROBE_FAILED = (
+    "codex_cli_version_probe_failed"
+)
+CODEX_REQUIRE_EXISTING_BLOCKER_SYMLINK_REPAIR_FAILED = (
+    "codex_cli_symlink_repair_failed"
+)
+DEFAULT_CODEX_PREFLIGHT_TIMEOUT_SEC = 45
 UNRESOLVED_ANGLE_PLACEHOLDER_RE = re.compile(r"<[^>\s]+>")
 
 
@@ -140,7 +156,12 @@ def build_private_active_user_observe_instruction(
 
 
 def build_codex_goal_mode_baseline_instruction(task_instruction: str) -> str:
-    """Invoke native Codex goal mode without adding Goal Harness state."""
+    """Build a /goal-prefixed baseline prompt without Goal Harness state.
+
+    This requests goal-mode-like behavior. Native Codex CLI goal-mode
+    confirmation requires separate interactive slash-command or goal-state
+    evidence.
+    """
 
     return (
         "/goal Complete the following Terminal-Bench task. Keep working until "
@@ -278,6 +299,25 @@ def _coerce_int(value: Any) -> int | None:
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return None
+
+
+def _coerce_positive_timeout_sec(value: Any, *, default: int) -> int:
+    if value in (None, ""):
+        return default
+    parsed = _coerce_int(value)
+    if parsed is None and isinstance(value, str):
+        text = value.strip()
+        try:
+            parsed_float = float(text)
+        except ValueError:
+            parsed_float = -1.0
+        if parsed_float.is_integer():
+            parsed = int(parsed_float)
+    if parsed is None or parsed <= 0:
+        raise ValueError(
+            "goal_harness_codex_preflight_timeout_sec must be a positive integer"
+        )
+    return parsed
 
 
 def _compact_trace_event_text(value: Any) -> str:
@@ -510,6 +550,14 @@ class GoalHarnessManagedCodex(Codex):
         goal_harness_behavior_spec_id: str = GOAL_HARNESS_MANAGED_CODEX_BEHAVIOR_SPEC_ID,
         goal_harness_ablation_mode: str = "goal_harness_managed",
         goal_harness_mode: str = GOAL_HARNESS_MANAGED_CODEX_MODE,
+        goal_harness_codex_install_strategy: str = (
+            TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_RUNTIME_INSTALL_IF_MISSING
+        ),
+        goal_harness_codex_preflight_timeout_sec: int | str | None = (
+            DEFAULT_CODEX_PREFLIGHT_TIMEOUT_SEC
+        ),
+        goal_harness_worker_codex_materialization_strategy: str = "",
+        goal_harness_worker_materialization_probe_only: bool = False,
         goal_harness_goal_id: str = "<goal-id>",
         goal_harness_access_packet_mode: str = (
             TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_FULL
@@ -543,6 +591,31 @@ class GoalHarnessManagedCodex(Codex):
         self.goal_harness_behavior_spec_id = goal_harness_behavior_spec_id
         self.goal_harness_ablation_mode = goal_harness_ablation_mode
         self.goal_harness_mode = goal_harness_mode
+        if goal_harness_codex_install_strategy not in TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES:
+            raise ValueError(
+                "goal_harness_codex_install_strategy must be one of: "
+                + ", ".join(TERMINAL_BENCH_CODEX_INSTALL_STRATEGIES)
+            )
+        self.goal_harness_codex_install_strategy = goal_harness_codex_install_strategy
+        self.goal_harness_codex_preflight_timeout_sec = _coerce_positive_timeout_sec(
+            goal_harness_codex_preflight_timeout_sec,
+            default=DEFAULT_CODEX_PREFLIGHT_TIMEOUT_SEC,
+        )
+        if (
+            goal_harness_worker_codex_materialization_strategy
+            and goal_harness_worker_codex_materialization_strategy
+            not in TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES
+        ):
+            raise ValueError(
+                "goal_harness_worker_codex_materialization_strategy must be one of: "
+                + ", ".join(TERMINAL_BENCH_WORKER_CODEX_MATERIALIZATION_STRATEGIES)
+            )
+        self.goal_harness_worker_codex_materialization_strategy = (
+            goal_harness_worker_codex_materialization_strategy
+        )
+        self.goal_harness_worker_materialization_probe_only = bool(
+            goal_harness_worker_materialization_probe_only
+        )
         self.goal_harness_goal_id = goal_harness_goal_id
         if goal_harness_access_packet_mode not in TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODES:
             raise ValueError(
@@ -586,68 +659,600 @@ class GoalHarnessManagedCodex(Codex):
         self._goal_harness_context_metadata: dict[str, Any] = {}
         super().__init__(*args, **kwargs)
 
+    def _write_goal_harness_setup_diagnostic(
+        self,
+        *,
+        interrupted: bool,
+        interrupt_reason: str,
+        checkpoint_kind: str,
+        codex_path_observed: bool | None = None,
+    ) -> tuple[dict[str, Any], bool, str]:
+        """Write public-safe setup diagnostics for every Terminal-Bench arm."""
+
+        blocker = str(interrupt_reason or "").strip() or "worker_setup_unknown"
+        payload: dict[str, Any] = {
+            "schema_version": TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA,
+            "checkpoint_kind": checkpoint_kind,
+            "interrupted": bool(interrupted),
+            "first_blocker": blocker,
+            "pre_worker_startup_blocker": blocker if interrupted else "none",
+            "goal_harness_mode": self.goal_harness_mode,
+            "goal_harness_ablation_mode": self.goal_harness_ablation_mode,
+            "goal_harness_access_packet_mode": self.goal_harness_access_packet_mode,
+            "codex_install_strategy": self.goal_harness_codex_install_strategy,
+            "worker_codex_materialization_strategy": (
+                self.goal_harness_worker_codex_materialization_strategy
+            ),
+            "worker_codex_materialization_strategy_declared": bool(
+                self.goal_harness_worker_codex_materialization_strategy
+            ),
+            "codex_preflight_timeout_sec": (
+                self.goal_harness_codex_preflight_timeout_sec
+            ),
+            "codex_path_observed": codex_path_observed,
+            "raw_paths_recorded": False,
+            "raw_logs_read": False,
+            "raw_task_text_read": False,
+            "trajectory_read": False,
+            "credential_values_recorded": False,
+            "command_output_recorded": False,
+        }
+        try:
+            target = Path(self.logs_dir) / TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return payload, True, "worker_setup_diagnostic_written"
+        except Exception:
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                logger.exception("Goal Harness setup diagnostic write failed")
+            return payload, False, "worker_setup_diagnostic_write_failed"
+
+    def _best_effort_goal_harness_setup_diagnostic(
+        self,
+        *,
+        interrupted: bool,
+        interrupt_reason: str,
+        checkpoint_kind: str,
+        codex_path_observed: bool | None = None,
+    ) -> tuple[dict[str, Any] | None, bool, str]:
+        try:
+            return self._write_goal_harness_setup_diagnostic(
+                interrupted=interrupted,
+                interrupt_reason=interrupt_reason,
+                checkpoint_kind=checkpoint_kind,
+                codex_path_observed=codex_path_observed,
+            )
+        except Exception:
+            return None, False, "worker_setup_diagnostic_write_failed"
+
+    def _load_goal_harness_setup_diagnostic(self) -> dict[str, Any]:
+        """Load the compact setup diagnostic written during install/preflight."""
+
+        try:
+            target = Path(self.logs_dir) / TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_FILE
+            if not target.exists():
+                return {}
+            loaded = json.loads(target.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def _read_goal_harness_setup_stage_marker(self) -> str:
+        """Read a public-safe setup stage marker written before risky install steps."""
+
+        try:
+            target = Path(self.logs_dir) / "goal-harness-worker-setup-stage.txt"
+            if not target.exists():
+                return ""
+            value = target.read_text(encoding="utf-8").strip()
+        except Exception:
+            return ""
+        if not re.fullmatch(r"[a-z0-9_]{1,96}", value):
+            return ""
+        return value
+
+    def _write_goal_harness_worker_materialization_probe_result(
+        self,
+        *,
+        interface_surface: str,
+        runtime_preflight_status: str,
+        interrupted: bool = False,
+        interrupt_reason: str = "",
+    ) -> tuple[dict[str, Any] | None, bool, str]:
+        """Write a compact proof that the worker materialized Codex, not task success."""
+
+        if not self.goal_harness_benchmark_run_json:
+            return None, False, "worker_materialization_probe_path_missing"
+
+        setup = self._load_goal_harness_setup_diagnostic()
+        setup_schema_ok = (
+            setup.get("schema_version") == TERMINAL_BENCH_WORKER_SETUP_DIAGNOSTIC_SCHEMA
+        )
+        setup_file_count = 1 if setup else 0
+        setup_schema_ok_count = 1 if setup_schema_ok else 0
+        setup_blocker = str(
+            setup.get("pre_worker_startup_blocker")
+            or setup.get("first_blocker")
+            or ""
+        ).strip()
+        if interrupt_reason:
+            setup_blocker = interrupt_reason
+        setup_ok_blockers = {
+            "",
+            "none",
+            "codex_runtime_install_or_preflight_ok",
+            "codex_require_existing_preflight_ok",
+        }
+        setup_ok = (
+            setup_schema_ok
+            and setup.get("interrupted") is False
+            and setup_blocker in setup_ok_blockers
+            and not interrupted
+        )
+        materialization_status = (
+            "worker_codex_materialization_verified"
+            if setup_ok
+            else "worker_codex_materialization_blocked"
+        )
+        materialization_blocker = "none" if setup_ok else setup_blocker or "setup_diagnostic_missing"
+        runner_status = (
+            "worker_materialization_probe_completed"
+            if setup_ok
+            else "worker_materialization_probe_blocked"
+        )
+        official_score_status = "not_run_worker_materialization_probe"
+        mode = (
+            "codex_goal_mode_baseline_worker_materialization_probe"
+            if self._codex_goal_mode_baseline()
+            else "hardened_codex_baseline_worker_materialization_probe"
+            if self._hardened_codex_baseline()
+            else "goal_harness_worker_materialization_probe"
+        )
+        claim_boundary = {
+            "public_claim_allowed": "worker materialization only",
+            "bridge_connectivity_claim_allowed": False,
+            "case_success_claim_allowed": False,
+            "official_score_claim_allowed": False,
+            "leaderboard_claim_allowed": False,
+            "forbidden_claims": [
+                "case_success",
+                "official_reward_complete",
+                "leaderboard_ready",
+                "uplift_over_baseline",
+                "raw_trace_public",
+            ],
+        }
+        payload: dict[str, Any] = {
+            "ok": setup_ok,
+            "schema_version": self.goal_harness_benchmark_run_schema_version
+            or "benchmark_run_v0",
+            "source_runner": "terminal_bench_worker_materialization_probe",
+            "benchmark_id": "terminal-bench-worker-materialization@v0",
+            "job_name": "terminal_bench_worker_materialization_probe",
+            "mode": mode,
+            "worker_mode": self.goal_harness_mode,
+            "real_run": False,
+            "worker_materialization_real_probe": True,
+            "submit_eligible": False,
+            "leaderboard_evidence": False,
+            "trace_publicness": "compact_setup_diagnostic_only_no_raw_trace",
+            "task_prompt_changed_by_goal_harness_policy": False,
+            "raw_task_instruction_recorded": False,
+            "raw_managed_prompt_recorded": False,
+            "raw_interaction_trace_recorded": False,
+            "credential_values_recorded": False,
+            "auth_files_recorded": False,
+            "command_output_recorded": False,
+            "official_task_score": {"kind": official_score_status},
+            "official_score": None,
+            "first_blocker": "none" if setup_ok else materialization_blocker,
+            "repeat_blocked_by": "none" if setup_ok else materialization_blocker,
+            "progress": {
+                "n_total_trials": 0,
+                "n_completed_trials": 0,
+                "n_errored_trials": 0 if setup_ok else 1,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+                "n_cancelled_trials": 0,
+                "n_retries": 0,
+            },
+            "metrics": {
+                "input_tokens": 0,
+                "cache_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0,
+            },
+            "worker_setup_diagnostic_file_count": setup_file_count,
+            "worker_setup_diagnostic_schema_ok_count": setup_schema_ok_count,
+            "worker_setup_diagnostic_blockers": []
+            if setup_ok
+            else [materialization_blocker],
+            "worker_bridge_outcome": {
+                "schema_version": "terminal_bench_worker_materialization_probe_outcome_v0",
+                "bridge_surface": interface_surface,
+                "runner_return_status": runner_status,
+                "official_score_status": official_score_status,
+                "trace_publicness": "compact_setup_diagnostic_only_no_raw_trace",
+                "worker_bridge_verified": False,
+                "counter_trace_present": False,
+                "runner_return_completed": True,
+                "official_score_completed": False,
+                "side_effect_audit_passed": True,
+                "raw_paths_recorded": False,
+                "raw_trace_recorded": False,
+                "credential_values_recorded": False,
+                "worker_bridge_materialization_status": materialization_status,
+                "worker_bridge_materialization_blocker": materialization_blocker,
+                "worker_bridge_failure_attribution": (
+                    "none" if setup_ok else materialization_blocker
+                ),
+                "worker_setup_diagnostic_file_count": setup_file_count,
+                "worker_setup_diagnostic_schema_ok_count": setup_schema_ok_count,
+                "worker_startup_blocker_count": 0 if setup_ok else 1,
+                "next_action": (
+                    "run the paired baseline or treatment slice"
+                    if setup_ok
+                    else "repair worker Codex materialization before repeat"
+                ),
+            },
+            "claim_boundary": claim_boundary,
+            "validation": {
+                "validation_scope": "worker_codex_materialization_probe",
+                "worker_bridge_materialized_when_required": setup_ok,
+                "worker_bridge_repeat_ready": setup_ok,
+                "runner_return_completed_or_blocker_recorded": True,
+                "worker_startup_blocker_recorded": True,
+                "no_model_task_solution_invoked": True,
+                "no_leaderboard_upload_requested": True,
+                "paths_redacted": True,
+                "raw_trace_excluded": True,
+                "side_effect_audit_passed": True,
+            },
+            "case_semantics_changed_by_harness": False,
+            "goal_harness_inside_case": False,
+            "official_score_comparable_to_native_codex": False,
+            "official_score_comparable_to_goal_harness_treatment": False,
+            "model_plus_harness_pair": False,
+            "control_plane_score_applicable": False,
+            "startup_surface_calibration": True,
+            "codex_goal_mode_baseline": self._codex_goal_mode_baseline(),
+            "hardened_install_baseline": self._hardened_codex_baseline(),
+            "runtime_preflight_status": runtime_preflight_status,
+            "stop_conditions": [
+                "do_not_run_task_solver_in_materialization_probe",
+                "do_not_upload_or_submit_leaderboard",
+                "do_not_claim_case_success_from_worker_materialization",
+                "do_not_record_raw_trace_or_paths",
+            ],
+            "trials": [],
+        }
+        written = write_worker_bridge_benchmark_run_file(
+            self._host_worker_bridge_artifact_path(
+                self.goal_harness_benchmark_run_json
+            ),
+            payload,
+        )
+        status = (
+            "worker_materialization_probe_written"
+            if written
+            else "worker_materialization_probe_write_failed"
+        )
+        return payload, written, status
+
+    async def _require_existing_codex_cli(self, environment: BaseEnvironment) -> str:
+        """Fail fast with a precise setup blocker when Codex is unavailable."""
+
+        try:
+            result = await self.exec_as_agent(
+                environment,
+                command="set -euo pipefail; command -v codex",
+                timeout_sec=self.goal_harness_codex_preflight_timeout_sec,
+            )
+        except Exception:
+            self._best_effort_goal_harness_setup_diagnostic(
+                interrupted=True,
+                interrupt_reason=CODEX_REQUIRE_EXISTING_BLOCKER_NOT_ON_PATH,
+                checkpoint_kind="pre_worker_setup_probe",
+                codex_path_observed=False,
+            )
+            self._best_effort_goal_harness_worker_bridge_checkpoint(
+                interrupted=True,
+                interrupt_reason=CODEX_REQUIRE_EXISTING_BLOCKER_NOT_ON_PATH,
+                checkpoint_kind="pre_worker_startup_blocker",
+            )
+            raise
+
+        codex_path = ""
+        stdout = getattr(result, "stdout", "")
+        if isinstance(stdout, str):
+            codex_path = stdout.strip().splitlines()[0] if stdout.strip() else ""
+
+        try:
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    "set -euo pipefail; "
+                    "codex --version >/dev/null 2>&1; "
+                    "codex --version"
+                ),
+                timeout_sec=self.goal_harness_codex_preflight_timeout_sec,
+            )
+        except Exception:
+            self._best_effort_goal_harness_setup_diagnostic(
+                interrupted=True,
+                interrupt_reason=CODEX_REQUIRE_EXISTING_BLOCKER_VERSION_PROBE_FAILED,
+                checkpoint_kind="pre_worker_setup_probe",
+                codex_path_observed=bool(codex_path),
+            )
+            self._best_effort_goal_harness_worker_bridge_checkpoint(
+                interrupted=True,
+                interrupt_reason=CODEX_REQUIRE_EXISTING_BLOCKER_VERSION_PROBE_FAILED,
+                checkpoint_kind="pre_worker_startup_blocker",
+            )
+            raise
+
+        if codex_path.startswith("/"):
+            try:
+                await self.exec_as_root(
+                    environment,
+                    command=(
+                        "set -euo pipefail; "
+                        f"BIN_PATH={shlex.quote(codex_path)}; "
+                        'if [ "$BIN_PATH" != "/usr/local/bin/codex" ]; then '
+                        'ln -sf "$BIN_PATH" "/usr/local/bin/codex"; '
+                        "fi"
+                    ),
+                    timeout_sec=self.goal_harness_codex_preflight_timeout_sec,
+                )
+            except Exception:
+                self._best_effort_goal_harness_setup_diagnostic(
+                    interrupted=True,
+                    interrupt_reason=(
+                        CODEX_REQUIRE_EXISTING_BLOCKER_SYMLINK_REPAIR_FAILED
+                    ),
+                    checkpoint_kind="pre_worker_setup_probe",
+                    codex_path_observed=True,
+                )
+                self._best_effort_goal_harness_worker_bridge_checkpoint(
+                    interrupted=True,
+                    interrupt_reason=CODEX_REQUIRE_EXISTING_BLOCKER_SYMLINK_REPAIR_FAILED,
+                    checkpoint_kind="pre_worker_startup_blocker",
+                )
+                raise
+
+        self._best_effort_goal_harness_setup_diagnostic(
+            interrupted=False,
+            interrupt_reason="codex_require_existing_preflight_ok",
+            checkpoint_kind="pre_worker_setup_probe",
+            codex_path_observed=bool(codex_path),
+        )
+        return codex_path
+
+    async def _repair_agent_node_runtime_path(
+        self, environment: BaseEnvironment
+    ) -> None:
+        """Expose root-installed node/npm binaries on the agent-visible PATH."""
+
+        await self.exec_as_root(
+            environment,
+            command=(
+                "set -euo pipefail; "
+                "mkdir -p /usr/local/bin; "
+                "for bin in node npm; do "
+                '  BIN_PATH="$(command -v "$bin" 2>/dev/null || true)"; '
+                '  if [ -z "$BIN_PATH" ]; then '
+                "    for candidate in /usr/local/bin/$bin /usr/bin/$bin /bin/$bin; do "
+                '      if [ -x "$candidate" ]; then BIN_PATH="$candidate"; break; fi; '
+                "    done; "
+                "  fi; "
+                '  if [ "$bin" = "node" ] && [ -z "$BIN_PATH" ] && [ -x /usr/bin/nodejs ]; then '
+                "    BIN_PATH=/usr/bin/nodejs; "
+                "  fi; "
+                '  if [ -n "$BIN_PATH" ] && [ "$BIN_PATH" != "/usr/local/bin/$bin" ]; then '
+                '    ln -sf "$BIN_PATH" "/usr/local/bin/$bin"; '
+                "  fi; "
+                "done; "
+                "printf 'goal_harness_worker_node_runtime_path_repair_attempted\\n'"
+            ),
+        )
+
     async def install(self, environment: BaseEnvironment) -> None:
         """Install Codex with dependencies needed by minimal benchmark images."""
 
         version = getattr(self, "_version", None)
         version_spec = f"@{version}" if version else "@latest"
-        await self.exec_as_root(
-            environment,
-            command=(
-                "if [ -f /etc/alpine-release ] || "
-                "(command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl); then"
-                "  apk add --no-cache bash curl nodejs npm ripgrep;"
-                " elif command -v apt-get >/dev/null 2>&1; then"
-                "  apt-get update && apt-get install -y "
-                "bash ca-certificates curl git xz-utils tar gzip ripgrep;"
-                " elif command -v dnf >/dev/null 2>&1; then"
-                "  dnf install -y bash ca-certificates curl git xz tar gzip ripgrep;"
-                " elif command -v yum >/dev/null 2>&1; then"
-                "  yum install -y bash ca-certificates curl git xz tar gzip ripgrep;"
-                " else"
-                '  echo "Warning: No known package manager found, assuming Codex install prerequisites are available" >&2;'
-                " fi"
-            ),
-            env={"DEBIAN_FRONTEND": "noninteractive"},
-        )
-        await self.exec_as_agent(
-            environment,
-            command=(
+        if (
+            self.goal_harness_codex_install_strategy
+            == TERMINAL_BENCH_CODEX_INSTALL_STRATEGY_REQUIRE_EXISTING
+        ):
+            await self._require_existing_codex_cli(environment)
+            return
+        setup_stage = "package_manager_preinstall"
+        try:
+            await self.exec_as_root(
+                environment,
+                command=(
+                    "(if [ -f /etc/alpine-release ] || "
+                    "(command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl); then"
+                    "  apk add --no-cache bash curl nodejs npm ripgrep;"
+                    " elif command -v apt-get >/dev/null 2>&1; then"
+                    "  apt-get update && apt-get install -y "
+                    "bash ca-certificates curl git nodejs npm xz-utils tar gzip ripgrep;"
+                    " elif command -v dnf >/dev/null 2>&1; then"
+                    "  dnf install -y bash ca-certificates curl git nodejs npm xz tar gzip ripgrep;"
+                    " elif command -v yum >/dev/null 2>&1; then"
+                    "  yum install -y bash ca-certificates curl git nodejs npm xz tar gzip ripgrep;"
+                    " else"
+                    '  echo "Warning: No known package manager found, assuming Codex install prerequisites are available" >&2;'
+                    " fi) || "
+                    'echo "Warning: Package-manager prerequisite install failed; continuing with existing worker tools" >&2'
+                ),
+                env={"DEBIAN_FRONTEND": "noninteractive"},
+            )
+            setup_stage = "agent_codex_install"
+            agent_env_prefix = (
                 "set -euo pipefail; "
-                "codex_is_usable() {"
-                "  command -v codex >/dev/null 2>&1 && codex --version >/dev/null 2>&1;"
-                "}; "
-                "if codex_is_usable; then"
-                "  codex --version;"
-                " else"
-                '  echo "Codex CLI missing or version check failed; installing Codex CLI" >&2;'
-                "  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then"
-                f"    npm install -g @openai/codex{version_spec};"
-                "  else"
-                "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash &&"
-                '    export NVM_DIR="$HOME/.nvm" &&'
-                '    [ -s "$NVM_DIR/nvm.sh" ] || { echo "Error: NVM failed to install" >&2; exit 1; } &&'
-                '    . "$NVM_DIR/nvm.sh" &&'
-                "    command -v nvm >/dev/null 2>&1 || { echo 'Error: NVM failed to load' >&2; exit 1; } &&"
-                "    nvm install 22 && nvm alias default 22 && npm -v &&"
-                f"    npm install -g @openai/codex{version_spec};"
-                "  fi &&"
-                "  hash -r &&"
-                "  codex --version;"
-                " fi"
-            ),
-        )
-        await self.exec_as_root(
-            environment,
-            command=(
-                "for bin in node npm codex; do"
-                '  BIN_PATH="$(which "$bin" 2>/dev/null || true)";'
-                '  if [ -n "$BIN_PATH" ] && [ "$BIN_PATH" != "/usr/local/bin/$bin" ]; then'
-                '    ln -sf "$BIN_PATH" "/usr/local/bin/$bin";'
-                "  fi;"
-                " done"
-            ),
-        )
+                'export NPM_CONFIG_PREFIX="${HOME}/.goal-harness-codex"; '
+                'export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}"; '
+                'export PATH="${NPM_CONFIG_PREFIX}/bin:${PATH}"; '
+                'if [ -s "${HOME}/.nvm/nvm.sh" ]; then '
+                '  export NVM_DIR="${HOME}/.nvm"; . "$NVM_DIR/nvm.sh"; '
+                "fi; "
+            )
+            codex_probe = await self.exec_as_agent(
+                environment,
+                command=(
+                    agent_env_prefix
+                    + "if command -v codex >/dev/null 2>&1 && "
+                    "codex --version >/dev/null 2>&1; then "
+                    "  printf 'goal_harness_codex_usable\\n'; "
+                    "else "
+                    "  printf 'goal_harness_codex_missing\\n'; "
+                    "fi"
+                ),
+            )
+            codex_probe_stdout = str(getattr(codex_probe, "stdout", "") or "")
+            if "goal_harness_codex_usable" not in codex_probe_stdout:
+                runtime_probe = await self.exec_as_agent(
+                    environment,
+                    command=(
+                        agent_env_prefix
+                        + "if command -v node >/dev/null 2>&1 && "
+                        "command -v npm >/dev/null 2>&1; then "
+                        "  printf 'goal_harness_node_npm_ready\\n'; "
+                        "else "
+                        "  printf 'goal_harness_node_npm_missing\\n'; "
+                        "fi"
+                    ),
+                )
+                runtime_probe_stdout = str(
+                    getattr(runtime_probe, "stdout", "") or ""
+                )
+                if "goal_harness_node_npm_ready" not in runtime_probe_stdout:
+                    setup_stage = "agent_codex_install_node_path_repair"
+                    await self._repair_agent_node_runtime_path(environment)
+                    runtime_probe = await self.exec_as_agent(
+                        environment,
+                        command=(
+                            agent_env_prefix
+                            + "hash -r; "
+                            + "if command -v node >/dev/null 2>&1 && "
+                            "command -v npm >/dev/null 2>&1; then "
+                            "  printf 'goal_harness_node_npm_ready\\n'; "
+                            "else "
+                            "  printf 'goal_harness_node_npm_missing\\n'; "
+                            "fi"
+                        ),
+                    )
+                    runtime_probe_stdout = str(
+                        getattr(runtime_probe, "stdout", "") or ""
+                    )
+                if "goal_harness_node_npm_ready" in runtime_probe_stdout:
+                    setup_stage = "agent_codex_install_npm_existing"
+                    await self.exec_as_agent(
+                        environment,
+                        command=(
+                            agent_env_prefix
+                            + 'mkdir -p "$NPM_CONFIG_PREFIX" && '
+                            f'npm install -g --registry "$NPM_CONFIG_REGISTRY" @openai/codex{version_spec}'
+                        ),
+                    )
+                else:
+                    setup_stage = "agent_codex_install_nvm_bootstrap"
+                    await self.exec_as_agent(
+                        environment,
+                        command=(
+                            "set -euo pipefail; "
+                            "command -v curl >/dev/null 2>&1 || "
+                            "{ echo 'Error: curl unavailable for NVM bootstrap' >&2; exit 1; }; "
+                            "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash"
+                        ),
+                    )
+                    nvm_prefix = (
+                        agent_env_prefix
+                        + 'export NVM_DIR="$HOME/.nvm"; '
+                        + '[ -s "$NVM_DIR/nvm.sh" ] || '
+                        + '{ echo "Error: NVM failed to install" >&2; exit 1; }; '
+                        + '. "$NVM_DIR/nvm.sh"; '
+                        + "command -v nvm >/dev/null 2>&1 || "
+                        + "{ echo 'Error: NVM failed to load' >&2; exit 1; }; "
+                    )
+                    setup_stage = "agent_codex_install_nvm_node"
+                    await self.exec_as_agent(
+                        environment,
+                        command=nvm_prefix + "nvm install 22 && nvm alias default 22 && npm -v",
+                    )
+                    setup_stage = "agent_codex_install_npm_after_nvm"
+                    await self.exec_as_agent(
+                        environment,
+                        command=(
+                            nvm_prefix
+                            + 'export NPM_CONFIG_PREFIX="${HOME}/.goal-harness-codex"; '
+                            + 'export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}"; '
+                            + 'export PATH="${NPM_CONFIG_PREFIX}/bin:${PATH}"; '
+                            + 'mkdir -p "$NPM_CONFIG_PREFIX" && '
+                            + f'npm install -g --registry "$NPM_CONFIG_REGISTRY" @openai/codex{version_spec}'
+                        ),
+                    )
+            setup_stage = "agent_codex_install_codex_version_probe"
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    agent_env_prefix
+                    + "hash -r; codex --version >/dev/null 2>&1; codex --version"
+                ),
+            )
+            setup_stage = "root_codex_link"
+            await self.exec_as_root(
+                environment,
+                command=(
+                    "for bin in node npm codex; do"
+                    '  BIN_PATH="$(which "$bin" 2>/dev/null || true)";'
+                    '  if [ -z "$BIN_PATH" ]; then'
+                    "    for dir in "
+                    "/home/*/.goal-harness-codex/bin "
+                    "/root/.goal-harness-codex/bin "
+                    "/home/*/.nvm/versions/node/*/bin "
+                    "/root/.nvm/versions/node/*/bin; do"
+                    '      if [ -x "$dir/$bin" ]; then BIN_PATH="$dir/$bin"; break; fi;'
+                    "    done;"
+                    "  fi;"
+                    '  if [ -n "$BIN_PATH" ] && [ "$BIN_PATH" != "/usr/local/bin/$bin" ]; then'
+                    '    ln -sf "$BIN_PATH" "/usr/local/bin/$bin";'
+                    "  fi;"
+                    " done"
+                ),
+            )
+            self._best_effort_goal_harness_setup_diagnostic(
+                interrupted=False,
+                interrupt_reason="codex_runtime_install_or_preflight_ok",
+                checkpoint_kind="pre_worker_setup_install",
+                codex_path_observed=None,
+            )
+        except Exception:
+            stage_marker = self._read_goal_harness_setup_stage_marker()
+            blocker_stage = (
+                stage_marker
+                if setup_stage == "agent_codex_install" and stage_marker
+                else setup_stage
+            )
+            blocker = f"worker_install_failed_{blocker_stage}"
+            self._best_effort_goal_harness_setup_diagnostic(
+                interrupted=True,
+                interrupt_reason=blocker,
+                checkpoint_kind="pre_worker_setup_install",
+                codex_path_observed=None,
+            )
+            self._best_effort_goal_harness_worker_bridge_checkpoint(
+                interrupted=True,
+                interrupt_reason=blocker,
+                checkpoint_kind="pre_worker_startup_blocker",
+            )
+            raise
 
     def _active_goal_harness_cli_bridge(self) -> bool:
         return (
@@ -671,9 +1276,26 @@ class GoalHarnessManagedCodex(Codex):
             == TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_MODE_NONE
         )
 
+    def _host_worker_bridge_artifact_path(self, path: str | Path | None) -> Path | None:
+        """Map default in-container worker artifact paths to Harbor's host log dir."""
+
+        if not path:
+            return None
+        text = str(path)
+        prefix = DEFAULT_WORKER_BRIDGE_TRACE_DIR.rstrip("/") + "/"
+        if text.startswith(prefix):
+            try:
+                return Path(self.logs_dir) / text[len(prefix) :]
+            except Exception:
+                return Path(text)
+        return Path(text)
+
     def _load_goal_harness_trace_rows(self) -> list[dict[str, Any]]:
+        host_trace_path = self._host_worker_bridge_artifact_path(
+            self.goal_harness_counter_trace_json
+        )
         return (
-            load_goal_harness_counter_trace_file(self.goal_harness_counter_trace_json)
+            load_goal_harness_counter_trace_file(host_trace_path)
             or self.goal_harness_counter_trace
         )
 
@@ -776,8 +1398,24 @@ class GoalHarnessManagedCodex(Codex):
             "raw_trace_recorded": False,
             "raw_paths_recorded": False,
         }
+        if checkpoint_kind == "pre_worker_startup_blocker":
+            blocker = interrupt_reason.strip() or "pre_worker_startup_failure"
+            payload["first_blocker"] = blocker
+            payload["repeat_blocked_by"] = blocker
+            payload["pre_worker_startup_blocker"] = blocker
+            payload["worker_bridge_checkpoint"]["pre_worker_startup_blocker"] = blocker
+            payload["worker_bridge_outcome"]["pre_worker_startup_blocker"] = blocker
+            payload["worker_bridge_outcome"][
+                "next_action"
+            ] = "repair worker runtime preflight/startup before repeat"
+            payload["validation"]["worker_startup_blocker_recorded"] = True
+            payload["validation"][
+                "runner_return_completed_or_blocker_recorded"
+            ] = True
         written = write_worker_bridge_benchmark_run_file(
-            self.goal_harness_benchmark_run_json,
+            self._host_worker_bridge_artifact_path(
+                self.goal_harness_benchmark_run_json
+            ),
             payload,
         )
         status = (
@@ -786,6 +1424,25 @@ class GoalHarnessManagedCodex(Codex):
             else "worker_bridge_benchmark_run_write_failed"
         )
         return payload, written, status
+
+    def _best_effort_goal_harness_worker_bridge_checkpoint(
+        self,
+        *,
+        interrupted: bool,
+        interrupt_reason: str,
+        checkpoint_kind: str,
+    ) -> tuple[dict[str, Any] | None, bool, str]:
+        try:
+            return self._write_goal_harness_worker_benchmark_run_checkpoint(
+                interrupted=interrupted,
+                interrupt_reason=interrupt_reason,
+                checkpoint_kind=checkpoint_kind,
+            )
+        except Exception:
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                logger.exception("Goal Harness worker checkpoint write failed")
+            return None, False, "worker_bridge_benchmark_run_checkpoint_failed"
 
     async def _ensure_goal_harness_worker_bridge_runtime(
         self,
@@ -876,6 +1533,9 @@ class GoalHarnessManagedCodex(Codex):
             "ablation_mode": self.goal_harness_ablation_mode,
             "goal_harness_access_packet_mode": self.goal_harness_access_packet_mode,
             "trace_publicness": self.goal_harness_trace_publicness,
+            "goal_harness_codex_preflight_timeout_sec": (
+                self.goal_harness_codex_preflight_timeout_sec
+            ),
             "goal_harness_access_packet_injected": access_packet_injected,
             "goal_harness_interface_surface": interface_surface,
             "goal_harness_cli_bridge_available": (
@@ -1009,17 +1669,104 @@ class GoalHarnessManagedCodex(Codex):
         }
         self._goal_harness_context_metadata[
             "goal_harness_runtime_preflight_status"
-        ] = await self._ensure_goal_harness_worker_bridge_runtime(environment)
+        ] = "not_started"
+        if self.goal_harness_worker_materialization_probe_only:
+            try:
+                runtime_preflight_status = (
+                    await self._ensure_goal_harness_worker_bridge_runtime(environment)
+                )
+            except Exception:
+                self._goal_harness_context_metadata.update(
+                    {
+                        "goal_harness_runtime_preflight_status": "failed",
+                        "goal_harness_pre_worker_startup_blocker": (
+                            "runtime_preflight_failed"
+                        ),
+                    }
+                )
+                _, probe_written, probe_status = (
+                    self._write_goal_harness_worker_materialization_probe_result(
+                        interface_surface=interface_surface,
+                        runtime_preflight_status="failed",
+                        interrupted=True,
+                        interrupt_reason="runtime_preflight_failed",
+                    )
+                )
+                self._goal_harness_context_metadata.update(
+                    {
+                        "worker_materialization_probe_only": True,
+                        "worker_materialization_probe_written": probe_written,
+                        "worker_materialization_probe_writeback_status": probe_status,
+                    }
+                )
+                raise
+            self._goal_harness_context_metadata[
+                "goal_harness_runtime_preflight_status"
+            ] = runtime_preflight_status
+            _, probe_written, probe_status = (
+                self._write_goal_harness_worker_materialization_probe_result(
+                    interface_surface=interface_surface,
+                    runtime_preflight_status=runtime_preflight_status,
+                )
+            )
+            self._goal_harness_context_metadata.update(
+                {
+                    "worker_materialization_probe_only": True,
+                    "worker_materialization_probe_written": probe_written,
+                    "worker_materialization_probe_writeback_status": probe_status,
+                    "run_completed_or_interrupted": True,
+                    "agent_run_started": False,
+                    "agent_run_completed": False,
+                    "agent_run_interrupted": False,
+                    "credential_values_recorded": False,
+                    "auth_files_recorded": False,
+                    "leaderboard_evidence": False,
+                    "submit_eligible": False,
+                }
+            )
+            return
+        worker_run_started = False
         run_completed = False
         try:
+            try:
+                runtime_preflight_status = (
+                    await self._ensure_goal_harness_worker_bridge_runtime(environment)
+                )
+            except Exception:
+                self._goal_harness_context_metadata.update(
+                    {
+                        "goal_harness_runtime_preflight_status": "failed",
+                        "goal_harness_pre_worker_startup_blocker": (
+                            "runtime_preflight_failed"
+                        ),
+                    }
+                )
+                raise
+            self._goal_harness_context_metadata[
+                "goal_harness_runtime_preflight_status"
+            ] = runtime_preflight_status
+            worker_run_started = True
             await super().run(managed_instruction, environment, context)
             run_completed = True
         finally:
+            checkpoint_kind = (
+                "run_finally" if worker_run_started else "pre_worker_startup_blocker"
+            )
+            interrupt_reason = (
+                ""
+                if run_completed
+                else "agent_run_exception_or_nonzero_exit"
+                if worker_run_started
+                else "runtime_preflight_failed"
+            )
             self._goal_harness_context_metadata.update(
                 {
                     "run_completed_or_interrupted": True,
+                    "agent_run_started": worker_run_started,
                     "agent_run_completed": run_completed,
                     "agent_run_interrupted": not run_completed,
+                    "goal_harness_run_finally_checkpoint_kind": checkpoint_kind,
+                    "goal_harness_run_finally_interrupt_reason": interrupt_reason,
                     "credential_values_recorded": False,
                     "auth_files_recorded": False,
                     "leaderboard_evidence": False,
@@ -1027,14 +1774,10 @@ class GoalHarnessManagedCodex(Codex):
                 }
             )
             _, benchmark_run_written, benchmark_run_status = (
-                self._write_goal_harness_worker_benchmark_run_checkpoint(
+                self._best_effort_goal_harness_worker_bridge_checkpoint(
                     interrupted=not run_completed,
-                    interrupt_reason=(
-                        "agent_run_exception_or_nonzero_exit"
-                        if not run_completed
-                        else ""
-                    ),
-                    checkpoint_kind="run_finally",
+                    interrupt_reason=interrupt_reason,
+                    checkpoint_kind=checkpoint_kind,
                 )
             )
             self._goal_harness_context_metadata.update(
@@ -1096,7 +1839,7 @@ class GoalHarnessManagedCodex(Codex):
         )
         benchmark_run_json_declared = bool(self.goal_harness_benchmark_run_json)
         benchmark_run_payload, benchmark_run_written, benchmark_run_writeback_status = (
-            self._write_goal_harness_worker_benchmark_run_checkpoint(
+            self._best_effort_goal_harness_worker_bridge_checkpoint(
                 interrupted=False,
                 interrupt_reason="",
                 checkpoint_kind="post_run",

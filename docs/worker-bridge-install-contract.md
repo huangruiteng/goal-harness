@@ -190,8 +190,10 @@ real_run=true
 submit_eligible=false
 leaderboard_evidence=false
 official_task_score=<compact score or not-claimed kind>
+validation_scope=<worker_bridge_connectivity|environment_ready|worker_case_success|official_verifier_result>
 progress=<compact counts>
 validation=<compact booleans>
+claim_boundary=<compact claim permissions and forbidden claims>
 trials=<compact trial summaries>
 ```
 
@@ -200,6 +202,13 @@ Write this object at the top level of
 `{"benchmark_run": {...}}`; runner-side ingest can normalize that historical
 envelope, but worker prompts should emit the direct `benchmark_run_v0` shape so
 schema counters remain unambiguous.
+
+`validation_scope` and `claim_boundary` are benchmark-generic. They separate
+bridge or environment connectivity from case success and official verifier
+claims. A worker may claim bridge connectivity from compact Goal Harness CLI
+counts, but it must not promote that evidence into case success unless the
+adapter also records an explicit worker-case-success scope or an official
+verifier result.
 
 If `history append-benchmark-run` rejects the worker payload for schema shape,
 the worker should rewrite a minimal `benchmark_run_v0` from compact counters and

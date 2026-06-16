@@ -116,9 +116,29 @@ def assert_contract(payload: dict) -> None:
         "submit_eligible",
         "leaderboard_evidence",
         "official_task_score",
+        "validation_scope",
         "progress",
         "validation",
+        "claim_boundary",
         "trials",
+    }, payload
+    assert writeback["validation_scope_contract"] == {
+        "field": "validation_scope",
+        "recommended_values": [
+            "worker_bridge_connectivity",
+            "environment_ready",
+            "worker_case_success",
+            "official_verifier_result",
+        ],
+        "connectivity_is_not_case_success": True,
+        "legacy_unscoped_passed_validation_is_ambiguous": True,
+    }, payload
+    assert set(writeback["claim_boundary_required_fields"]) == {
+        "bridge_connectivity_claim_allowed",
+        "case_success_claim_allowed",
+        "official_score_claim_allowed",
+        "leaderboard_claim_allowed",
+        "forbidden_claims",
     }, payload
     assert set(writeback["forbidden_public_fields"]) == {
         "raw_paths",
@@ -215,6 +235,9 @@ def assert_outcome(payload: dict) -> None:
     }, payload
     assert "official_reward_complete" in payload["claim_boundary"]["forbidden_claims"], payload
     assert "leaderboard_ready" in payload["claim_boundary"]["forbidden_claims"], payload
+    assert payload["claim_boundary"]["bridge_connectivity_claim_allowed"] is True, payload
+    assert payload["claim_boundary"]["case_success_claim_allowed"] is False, payload
+    assert payload["claim_boundary"]["official_score_claim_allowed"] is False, payload
     assert payload["raw_paths_recorded"] is False, payload
     assert payload["raw_trace_recorded"] is False, payload
     assert payload["credential_values_recorded"] is False, payload
@@ -232,11 +255,18 @@ def assert_benchmark_run(payload: dict) -> None:
     assert payload["submit_eligible"] is False, payload
     assert payload["leaderboard_evidence"] is False, payload
     assert payload["worker_goal_harness_cli_call_total"] == 4, payload
+    assert payload["validation_scope"] == "worker_bridge_connectivity", payload
+    assert payload["case_success_claimed"] is False, payload
+    assert payload["official_verifier_validation_present"] is False, payload
     outcome = payload["worker_bridge_outcome"]
     assert outcome["worker_bridge_verified"] is True, payload
     assert outcome["runner_return_status"] == "interrupted_after_worker_bridge_success", payload
     assert outcome["official_score_status"] == "blocked_pending_runner_return", payload
     validation = payload["validation"]
+    assert validation["validation_scope"] == "worker_bridge_connectivity", payload
+    assert validation["bridge_connected"] is True, payload
+    assert validation["case_success_claimed"] is False, payload
+    assert validation["official_verifier_validation_present"] is False, payload
     assert validation["runner_return_completed_or_blocker_recorded"] is True, payload
     assert validation["official_score_completed_or_not_claimed"] is True, payload
     assert payload["progress"]["n_cancelled_trials"] == 1, payload

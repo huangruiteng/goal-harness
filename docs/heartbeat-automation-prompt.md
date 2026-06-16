@@ -190,9 +190,14 @@ If the result says should_run=false:
   unresolved gate has not already been asked in the recent visible thread,
   return heartbeat NOTIFY with
   one concise Chinese question that lists the gate and the expected reply
-  format. If user_todo_summary.open_count > 0, the notification must list the
-  existing open user todos even when there are no newly discovered user
-  actions; never summarize this case as "no new user action". Do not execute
+  format. Only when `interaction_contract.user_channel.action_required=true` or
+  `user_todo_summary.open_count > 0`, the notification must name concrete payload
+  todo(s)/questions, never only "owner gate"; if those required user-facing
+  items are not projected, say "具体 user todo 未投影，需修复 Goal Harness 状态投影";
+  never say "no new user action" for this case. When
+  `interaction_contract.user_channel.action_required=false` and
+  `user_todo_summary.open_count=0`, allow "无用户待办/无需通知" or a quiet
+  no-notification result; do not imply a state projection bug. Do not execute
   agent_command, adapter work, write-control, production actions, or the gated
   path while asking.
 - If the payload says notify_user_on_open_todo=true, treat the existing open
@@ -217,8 +222,8 @@ If the result says should_run=false:
   another P0/P1 item that does not depend on that gate. If you do a safe-bypass
   step, validate it, write back progress/critic/next action, optionally refresh
   state, append exactly one spend event, and report compactly. If
-  user_todo_summary.open_count > 0, include those todos and do not say there is
-  "no new user action". If
+  user_todo_summary.open_count > 0, include those todos as concrete todos and do not say
+  there is "no new user action". If
   agent_todo_summary.open_count > 0, the report should also name the first safe
   agent todo it can execute next. If no useful
   safe-bypass step exists, report the pending gate compactly instead of doing
