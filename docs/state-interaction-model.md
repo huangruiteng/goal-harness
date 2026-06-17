@@ -154,6 +154,41 @@ and optional `--action-kind ...`. The active-state metadata then feeds status,
 quota, dashboard, and review-packet consumers through the same CLI projection.
 Legacy todo text classification exists only to keep older states readable.
 
+### Operational Control Loop
+
+The reusable product loop is user / agent / state, not agent / chat alone.
+Goal Harness owns the shared control state; the operator supplies decisions,
+reward, and priority; the agent worker turns observation packets into bounded
+work; external systems supply evidence; and the guard decides whether the next
+transition is delivery, decision, evidence waiting, or boundary repair.
+
+```mermaid
+flowchart TB
+  U["User / operator"] -->|"gate / reward / priority"| GH["Goal Harness state"]
+  GH -->|"operator view / concrete todo"| U
+  GH --> C{"can continue?"}
+  C -->|"needs decision"| U
+  GH -->|"observation packet / interaction_contract"| A["Agent worker"]
+  C -->|"bounded delivery"| A
+  A -->|"artifact / validation / blocker"| GH
+  C -->|"await evidence"| E["External evidence / CI / benchmark"]
+  E --> GH
+  C -->|"scope mismatch"| B["Boundary repair"]
+  B --> GH
+```
+
+This diagram is the compact contract behind the dashboard and heartbeat
+surfaces:
+
+- if `can continue?` resolves to `bounded_delivery`, the agent must produce a
+  validated artifact, blocker, or state writeback before spending;
+- if it resolves to `needs decision`, the user-facing surface must show a
+  concrete question or todo, not a vague owner wait;
+- if it resolves to `await evidence`, the agent may perform bounded read-only
+  polling but must not invent delivery work;
+- if it resolves to `scope mismatch`, old approval or reward is only an audit
+  anchor until a fresh boundary projection grants the required write scope.
+
 ### Interaction Modes
 
 `interaction_contract.mode` should make these patterns explicit:

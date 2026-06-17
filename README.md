@@ -45,6 +45,33 @@ become:
 Goal Harness makes those questions machine-readable enough for agents and
 legible enough for operators.
 
+## Core Control Loop
+
+Goal Harness sits between the operator, the agent loop, and external evidence.
+It does not choose the model's task policy. It keeps the current facts,
+boundaries, evidence, and decisions stable enough that each agent turn can be
+bounded and recoverable.
+
+```mermaid
+flowchart TB
+  U["User / operator"] -->|"gate / reward / priority"| GH["Goal Harness state"]
+  GH -->|"operator view / concrete todo"| U
+  GH --> C{"can continue?"}
+  C -->|"needs decision"| U
+  GH -->|"observation packet / interaction_contract"| A["Agent worker"]
+  C -->|"bounded delivery"| A
+  A -->|"artifact / validation / blocker"| GH
+  C -->|"await evidence"| E["External evidence / CI / benchmark"]
+  E --> GH
+  C -->|"scope mismatch"| B["Boundary repair"]
+  B --> GH
+```
+
+The loop is intentionally conservative: user decisions become run-bound or
+gate-bound events; agent work becomes artifacts, validation, or blockers;
+external systems contribute evidence; and stale or missing write authority
+routes to boundary repair instead of silent execution.
+
 ## What You Get
 
 ```mermaid
