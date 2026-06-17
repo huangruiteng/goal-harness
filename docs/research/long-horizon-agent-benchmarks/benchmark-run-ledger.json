@@ -6784,6 +6784,12 @@
           "latest_decision": {
             "baseline_failure_scope": "case_or_solution",
             "baseline_run_id": "d8853f13e62c",
+            "case_routing": {
+              "class": "bridge_connected_no_uplift",
+              "evidence": "worker_bridge_connected_official_score_failure_runs=2; official_score_delta=0",
+              "next_action": "treat the bridge as connected and analyze case or solution quality; do not relaunch this case as a bridge repair",
+              "priority": "P1"
+            },
             "decision": "paired_no_score_uplift",
             "official_score_delta": 0.0,
             "treatment_failure_scope": "case_or_solution",
@@ -7324,6 +7330,12 @@
           "latest_decision": {
             "baseline_failure_scope": "case_or_solution",
             "baseline_run_id": "1e0e7327d18a",
+            "case_routing": {
+              "class": "timeout_tier_policy_candidate",
+              "evidence": "case_timeout_research_count=5",
+              "next_action": "decide the timeout tier and continuation cadence before rerunning; separate setup timeout from solver timeout evidence",
+              "priority": "P1"
+            },
             "decision": "paired_result_requires_attribution",
             "official_score_delta": 0.0,
             "treatment_failure_scope": "attribution_required",
@@ -9168,6 +9180,12 @@
           "latest_decision": {
             "baseline_failure_scope": "case_or_solution",
             "baseline_run_id": "2db3f1047704",
+            "case_routing": {
+              "class": "case_exception_research",
+              "evidence": "case_exception_research_count=3",
+              "next_action": "inspect compact exception attribution and form a case-level intervention hypothesis before rerunning this case",
+              "priority": "P1"
+            },
             "decision": "paired_no_score_uplift_exception_research_required",
             "failure_class": "agent_exception_before_solution_completion",
             "next_action": "inspect compact exception attribution and form a case-level intervention hypothesis",
