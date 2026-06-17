@@ -17,6 +17,7 @@ ANALYSIS_JSON = (
     / "benchmark-case-analysis.json"
 )
 ANALYSIS_MD = ANALYSIS_JSON.with_suffix(".md")
+LEDGER_JSON = ANALYSIS_JSON.with_name("benchmark-run-ledger.json")
 
 
 FORBIDDEN_PATTERNS = [
@@ -34,6 +35,7 @@ def assert_public_safe(text: str) -> None:
 
 def test_case_analysis_json() -> None:
     payload = json.loads(ANALYSIS_JSON.read_text(encoding="utf-8"))
+    ledger = json.loads(LEDGER_JSON.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "benchmark_case_analysis_v0", payload
     assert payload["update_policy"]["raw_logs_recorded"] is False, payload
     assert payload["update_policy"]["raw_task_text_recorded"] is False, payload
@@ -43,6 +45,39 @@ def test_case_analysis_json() -> None:
     cases = payload.get("cases")
     assert isinstance(cases, list) and len(cases) >= 2, payload
     by_case = {(case["benchmark_id"], case["case_id"]): case for case in cases}
+    terminal_coverage = payload["terminal_bench_current_protocol_coverage"]
+    assert terminal_coverage["schema_version"] == (
+        "terminal_bench_current_protocol_coverage_v0"
+    ), terminal_coverage
+    assert terminal_coverage["latest_decision_filter"] == (
+        "paired_baseline_solved_treatment_preserved"
+    ), terminal_coverage
+    expected_terminal_cases = {
+        case_id
+        for case_id, case in ledger["benchmarks"]["terminal-bench@2.0"][
+            "cases"
+        ].items()
+        if (case.get("latest_decision") or {}).get("decision")
+        == "paired_baseline_solved_treatment_preserved"
+    }
+    coverage_by_case = {
+        row["case_id"]: row for row in terminal_coverage["rows"]
+    }
+    assert set(coverage_by_case) == expected_terminal_cases, coverage_by_case
+    for case_id, row in coverage_by_case.items():
+        latest = ledger["benchmarks"]["terminal-bench@2.0"]["cases"][case_id][
+            "latest_decision"
+        ]
+        assert row["baseline_run_id"] == latest["baseline_run_id"], row
+        assert row["treatment_run_id"] == latest["treatment_run_id"], row
+        assert row["decision"] == "paired_baseline_solved_treatment_preserved", row
+        assert row["baseline_official_score"] == 1, row
+        assert row["treatment_official_score"] == 1, row
+        assert row["official_score_delta"] == 0.0, row
+        assert row["claimable_uplift"] is False, row
+        assert row["main_table_role"] == (
+            "current_protocol_baseline_solved_non_regression_guard"
+        ), row
     uplift = by_case[("terminal-bench@2.0", "multi-source-data-merger")]
     nginx_route_canary = by_case[("terminal-bench@2.0", "nginx-request-logging")]
     skillsbench_uplift = by_case[("skillsbench@1.1", "llm-prefix-cache-replay")]
@@ -954,6 +989,13 @@ def test_case_analysis_markdown() -> None:
     assert "positive-control" in text, text
     assert "negative-control" in text, text
     assert "Treatment Policy Control Set" in text, text
+    assert "Terminal-Bench Current-Protocol Coverage" in text, text
+    assert "current-protocol success-preservation guards" in text, text
+    assert "cobol-modernization" in text, text
+    assert "git-multibranch" in text, text
+    assert "large-scale-text-editing" in text, text
+    assert "regex-log" in text, text
+    assert "current_protocol_baseline_solved_non_regression_guard" in text, text
     assert "protected files" in text, text
     assert "Interaction-count assessment" in text, text
     assert "codex_goal_mode_baseline" in text, text

@@ -3074,5 +3074,97 @@
     "trajectory_recorded": false,
     "update_rule": "add one case analysis record after compact result ingest and benchmark-run-ledger update"
   },
-  "updated_at": "2026-06-17T21:05:00+08:00"
+  "updated_at": "2026-06-17T22:54:46+08:00",
+  "terminal_bench_current_protocol_coverage": {
+    "schema_version": "terminal_bench_current_protocol_coverage_v0",
+    "source_ledger": "benchmark-run-ledger.json",
+    "latest_decision_filter": "paired_baseline_solved_treatment_preserved",
+    "interpretation": "Rows here are current-protocol Terminal-Bench cases where both baseline and treatment reached official 1.0. They are success-preservation/non-regression guards, not uplift claims. Historical positive or runner-blocked evidence remains in case notes only.",
+    "rows": [
+      {
+        "benchmark_id": "terminal-bench@2.0",
+        "case_id": "cobol-modernization",
+        "baseline_run_id": "5d2bb1d5974a",
+        "treatment_run_id": "a14ad9487f8a",
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0.0,
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "claimable_uplift": false,
+        "main_table_role": "current_protocol_baseline_solved_non_regression_guard",
+        "case_analysis_status": "coverage_row_only_no_deep_case_note_yet",
+        "legacy_evidence_status": "no_legacy_positive_promoted"
+      },
+      {
+        "benchmark_id": "terminal-bench@2.0",
+        "case_id": "git-multibranch",
+        "baseline_run_id": "af14bc3210c8",
+        "treatment_run_id": "daf4b67ab222",
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0.0,
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "claimable_uplift": false,
+        "main_table_role": "current_protocol_baseline_solved_non_regression_guard",
+        "case_analysis_status": "coverage_row_only_no_deep_case_note_yet",
+        "legacy_evidence_status": "no_legacy_positive_promoted"
+      },
+      {
+        "benchmark_id": "terminal-bench@2.0",
+        "case_id": "large-scale-text-editing",
+        "baseline_run_id": "52105cdfe282",
+        "treatment_run_id": "01cd5e4bf562",
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0.0,
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "claimable_uplift": false,
+        "main_table_role": "current_protocol_baseline_solved_non_regression_guard",
+        "case_analysis_status": "coverage_row_only_no_deep_case_note_yet",
+        "legacy_evidence_status": "no_legacy_positive_promoted"
+      },
+      {
+        "benchmark_id": "terminal-bench@2.0",
+        "case_id": "multi-source-data-merger",
+        "baseline_run_id": "37d3587daf12",
+        "treatment_run_id": "76cbfb57f1ea",
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0.0,
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "claimable_uplift": false,
+        "main_table_role": "current_protocol_baseline_solved_non_regression_guard",
+        "case_analysis_status": "case_record_has_legacy_positive_plus_current_protocol_recheck",
+        "legacy_evidence_status": "legacy_positive_preserved_not_current_uplift"
+      },
+      {
+        "benchmark_id": "terminal-bench@2.0",
+        "case_id": "nginx-request-logging",
+        "baseline_run_id": "c9e583310242",
+        "treatment_run_id": "2a6a46cfb953",
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0.0,
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "claimable_uplift": false,
+        "main_table_role": "current_protocol_baseline_solved_non_regression_guard",
+        "case_analysis_status": "case_record_current_protocol_baseline_solved_with_legacy_runner_asset",
+        "legacy_evidence_status": "legacy_runner_materialization_asset_preserved"
+      },
+      {
+        "benchmark_id": "terminal-bench@2.0",
+        "case_id": "regex-log",
+        "baseline_run_id": "a9503b70072d",
+        "treatment_run_id": "5926107e45f4",
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0.0,
+        "decision": "paired_baseline_solved_treatment_preserved",
+        "claimable_uplift": false,
+        "main_table_role": "current_protocol_baseline_solved_non_regression_guard",
+        "case_analysis_status": "coverage_row_only_no_deep_case_note_yet",
+        "legacy_evidence_status": "no_legacy_positive_promoted"
+      }
+    ]
+  }
 }
