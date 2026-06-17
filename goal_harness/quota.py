@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .boundary_authority import checkpointed_boundary_authority_summary
 from .control_plane import (
     compact_control_plane_policy,
     control_plane_policy_summary,
@@ -1739,8 +1740,19 @@ def _goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> 
         if isinstance(coordination.get("requires_parent_approval"), list)
         else []
     )
-    if write_scope:
-        boundary["write_scope"] = [str(value) for value in write_scope if str(value).strip()]
+    normalized_write_scope: list[str] = []
+    for value in write_scope:
+        scope = str(value).strip()
+        if scope and scope not in normalized_write_scope:
+            normalized_write_scope.append(scope)
+    boundary_authority = checkpointed_boundary_authority_summary(coordination)
+    if boundary_authority:
+        for scope in normalize_required_write_scopes(boundary_authority.get("active_write_scope")):
+            if scope not in normalized_write_scope:
+                normalized_write_scope.append(scope)
+        boundary["checkpointed_boundary_authority"] = boundary_authority
+    if normalized_write_scope:
+        boundary["write_scope"] = normalized_write_scope
     if requires_approval:
         boundary["requires_parent_approval"] = [
             str(value) for value in requires_approval if str(value).strip()
@@ -2163,7 +2175,12 @@ def _boundary_projection_repair_hint(
     if not missing_scopes:
         return None
     selected_text = _protocol_action_text(selected.get("text"), limit=220)
-    return {
+    boundary_authority = (
+        boundary.get("checkpointed_boundary_authority")
+        if isinstance(boundary.get("checkpointed_boundary_authority"), dict)
+        else None
+    )
+    repair: dict[str, Any] = {
         "source": "quota.should-run",
         "trigger": "required_write_scope_missing_from_goal_boundary",
         "recommended_mode": "repair_boundary_projection",
@@ -2194,6 +2211,37 @@ def _boundary_projection_repair_hint(
         },
         "selected_todo_text": selected_text,
     }
+    if boundary_authority:
+        repair["checkpointed_boundary_authority"] = {
+            "schema_version": boundary_authority.get("schema_version"),
+            "active_count": boundary_authority.get("active_count"),
+            "inactive_count": boundary_authority.get("inactive_count"),
+            "active_write_scope": boundary_authority.get("active_write_scope"),
+        }
+        inactive_candidates = []
+        for entry in boundary_authority.get("entries") or []:
+            if not isinstance(entry, dict) or entry.get("active") is True:
+                continue
+            scopes = normalize_required_write_scopes(entry.get("write_scope"))
+            if any(_write_scope_allowed(scope, scopes) for scope in missing_scopes):
+                inactive_candidates.append(
+                    {
+                        key: entry.get(key)
+                        for key in (
+                            "decision_id",
+                            "source",
+                            "recorded_at",
+                            "expires_at",
+                            "freshness",
+                            "inactive_reasons",
+                            "write_scope",
+                        )
+                        if entry.get(key) is not None
+                    }
+                )
+        if inactive_candidates:
+            repair["inactive_authority_candidates"] = inactive_candidates[:3]
+    return repair
 
 
 def _control_plane_post_handoff_observation_hint(item: dict[str, Any]) -> dict[str, Any] | None:

@@ -2220,6 +2220,36 @@ def main(argv: list[str] | None = None) -> int:
         help="Remove the registry waiting_on override.",
     )
     configure_goal_parser.add_argument(
+        "--boundary-authority-scope",
+        action="append",
+        default=None,
+        help=(
+            "Checkpointed write scope approved by an operator/controller decision. "
+            "Repeatable; comma-separated values are also accepted."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--boundary-authority-source",
+        help="Public-safe provenance for the checkpointed boundary authority.",
+    )
+    configure_goal_parser.add_argument(
+        "--boundary-authority-decision-id",
+        help="Public-safe decision/run/gate id for the checkpointed boundary authority.",
+    )
+    configure_goal_parser.add_argument(
+        "--boundary-authority-recorded-at",
+        help="ISO timestamp for the checkpointed decision. Defaults to now.",
+    )
+    configure_goal_parser.add_argument(
+        "--boundary-authority-expires-at",
+        help="Optional ISO timestamp after which the checkpointed authority is no longer fresh.",
+    )
+    configure_goal_parser.add_argument(
+        "--clear-boundary-authority",
+        action="store_true",
+        help="Clear coordination.checkpointed_boundary_authority.",
+    )
+    configure_goal_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the registry. Without this flag, configure-goal is a dry-run preview.",
@@ -5297,6 +5327,12 @@ def main(argv: list[str] | None = None) -> int:
                 clear_allowed_domains=bool(args.clear_allowed_domains),
                 waiting_on=args.waiting_on,
                 clear_waiting_on=bool(args.clear_waiting_on),
+                boundary_authority_scopes=args.boundary_authority_scope,
+                boundary_authority_source=args.boundary_authority_source,
+                boundary_authority_decision_id=args.boundary_authority_decision_id,
+                boundary_authority_recorded_at=args.boundary_authority_recorded_at,
+                boundary_authority_expires_at=args.boundary_authority_expires_at,
+                clear_boundary_authority=bool(args.clear_boundary_authority),
                 execute=bool(args.execute),
             )
         except Exception as exc:

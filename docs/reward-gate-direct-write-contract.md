@@ -32,6 +32,21 @@ write is enabled:
 Unknown fields and private-looking text must be rejected instead of silently
 ignored.
 
+## Run-Bound Overlay
+
+A run-bound overlay is a compact append-only annotation attached to one exact
+run index row. It is "run-bound" because its target is a specific run, usually
+identified by `goal_id` plus `run_generated_at` / run path. It is an "overlay"
+because it annotates that prior run without rewriting the original run payload,
+active goal state, or every future decision.
+
+For `human_reward`, the overlay records the operator's judgment of that exact
+run or route outcome: decision label, reward value, reason summary, follow-up,
+and timestamp. Later status, dashboard, and controller-readiness projections may
+summarize the overlay, but the run-bound overlay remains the durable source of
+truth. It does not grant write-control, production access, public submission
+permission, or permission to skip a fresh registry/state/quota read.
+
 ## Human Reward
 
 `human_reward` judges one exact run or route outcome. The canonical writer is

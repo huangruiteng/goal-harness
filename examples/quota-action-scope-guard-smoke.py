@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from goal_harness.boundary_authority import build_checkpointed_boundary_authority_entry  # noqa: E402
 from goal_harness.quota import build_quota_should_run, render_quota_should_run_markdown  # noqa: E402
 from goal_harness.status import compact_todo_group, project_asset_todo_summary  # noqa: E402
 from goal_harness.todo_contract import format_todo_metadata_line, parse_todo_metadata_line  # noqa: E402
@@ -20,7 +21,11 @@ GOAL_ID = "action-scope-guard-fixture"
 TODO_TEXT = "Patch the runner adapter after the checkpointed owner decision is projected."
 
 
-def status_payload(*, allowed_scopes: list[str]) -> dict:
+def status_payload(
+    *,
+    allowed_scopes: list[str],
+    checkpointed_boundary_authority: list[dict] | None = None,
+) -> dict:
     todo = {
         "index": 1,
         "done": False,
@@ -77,6 +82,7 @@ def status_payload(*, allowed_scopes: list[str]) -> dict:
                     "coordination": {
                         "write_scope": allowed_scopes,
                         "requires_parent_approval": ["publish", "production-action"],
+                        "checkpointed_boundary_authority": checkpointed_boundary_authority or [],
                     },
                     "latest_runs": [],
                 }
@@ -158,10 +164,61 @@ def assert_allowed_scope_remains_runnable() -> None:
     assert payload["goal_boundary"]["write_scope"] == ["runners/**", "docs/**"], payload
 
 
+def assert_checkpointed_authority_compiles_into_goal_boundary() -> None:
+    authority = build_checkpointed_boundary_authority_entry(
+        write_scopes=["runners/**"],
+        source="operator_gate_resume_contract_v0:fixture",
+        decision_id="gate-fixture-1",
+        recorded_at="2026-06-17T00:00:00+00:00",
+    )
+    payload = build_quota_should_run(
+        status_payload(
+            allowed_scopes=["docs/**"],
+            checkpointed_boundary_authority=[authority],
+        ),
+        goal_id=GOAL_ID,
+    )
+    assert payload["should_run"] is True, payload
+    assert payload["normal_delivery_allowed"] is True, payload
+    assert payload["effective_action"] == "normal_run", payload
+    boundary = payload["goal_boundary"]
+    assert boundary["write_scope"] == ["docs/**", "runners/**"], boundary
+    assert boundary["checkpointed_boundary_authority"]["active_count"] == 1, boundary
+    assert boundary["checkpointed_boundary_authority"]["active_write_scope"] == ["runners/**"], boundary
+    assert "boundary_projection_gap" not in payload, payload
+
+
+def assert_expired_checkpointed_authority_does_not_authorize_write() -> None:
+    expired_authority = build_checkpointed_boundary_authority_entry(
+        write_scopes=["runners/**"],
+        source="operator_gate_resume_contract_v0:expired-fixture",
+        decision_id="gate-expired-1",
+        recorded_at="2026-06-17T00:00:00+00:00",
+        expires_at="2000-01-01T00:00:00+00:00",
+    )
+    payload = build_quota_should_run(
+        status_payload(
+            allowed_scopes=["docs/**"],
+            checkpointed_boundary_authority=[expired_authority],
+        ),
+        goal_id=GOAL_ID,
+    )
+    assert payload["normal_delivery_allowed"] is False, payload
+    assert payload["effective_action"] == "boundary_projection_repair", payload
+    gap = payload["boundary_projection_gap"]
+    assert gap["missing_write_scopes"] == ["runners/openviking/**"], gap
+    assert gap["checkpointed_boundary_authority"]["inactive_count"] == 1, gap
+    candidates = gap["inactive_authority_candidates"]
+    assert candidates[0]["decision_id"] == "gate-expired-1", candidates
+    assert "expired" in candidates[0]["inactive_reasons"], candidates
+
+
 def main() -> int:
     assert_required_write_scope_metadata_roundtrip()
     assert_missing_scope_repairs_boundary()
     assert_allowed_scope_remains_runnable()
+    assert_checkpointed_authority_compiles_into_goal_boundary()
+    assert_expired_checkpointed_authority_does_not_authorize_write()
     print("quota-action-scope-guard-smoke ok")
     return 0
 

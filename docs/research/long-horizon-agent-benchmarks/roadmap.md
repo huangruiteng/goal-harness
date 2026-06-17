@@ -280,6 +280,14 @@ meta-step that re-reads authority, run history, benchmark evidence, open todos,
 and recent failures, then decides whether to keep the current todo, split it,
 add a new todo, retire stale work, or request an operator decision.
 
+This is control-plane planning, not task-policy planning. The refresh may
+repair the execution track when the project stops converting intent into
+evidence, but the worker model still owns belief synthesis and the concrete
+implementation/debug strategy inside the authorized boundary. Goal Harness can
+say "this todo is stale; split it and validate the next slice with command X."
+It should not silently decide the semantic solution to the task or rewrite
+project direction as if a dreaming or replan proposal were already approved.
+
 Initial trigger conditions:
 
 - **Periodic research review:** every 20-30 visible turns or durable run events
@@ -310,6 +318,15 @@ This mechanism is part of the benchmark program itself: one result dimension is
 whether Goal Harness can autonomously maintain a useful research agenda over
 many turns without drifting into prompt-only planning or waiting for the user to
 restate the strategy.
+
+Planning outputs should carry their authority level:
+
+| Authority level | Meaning | Default consumer behavior |
+| --- | --- | --- |
+| `control_signal` | A guard, quota, freshness, or safety fact that constrains the next run. | Obey before delivery or ask the user/controller if blocked. |
+| `bounded_replan_obligation` | A required control-plane repair slice, such as todo split, blocker writeback, or state rebase. | Execute one validated repair slice, then write back or record why blocked. |
+| `proposal` | A dreaming/exploration/research suggestion that may improve future work. | Route to operator/controller review before making it active project truth. |
+| `agent_policy_choice` | A concrete task-solving strategy chosen from current belief. | Belongs to the worker inside the current authorized boundary. |
 
 ## Goal Harness Integration
 
