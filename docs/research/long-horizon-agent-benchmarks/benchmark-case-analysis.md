@@ -7,7 +7,7 @@ It is intentionally separate from `benchmark-run-ledger.md`. The run ledger
 records compact attempts and scores; this file records why a result matters.
 
 - schema_version: `benchmark_case_analysis_v0`
-- updated_at: `2026-06-17T20:33:39+08:00`
+- updated_at: `2026-06-17T21:05:00+08:00`
 - machine_source: `benchmark-case-analysis.json`
 
 ## Summary
@@ -22,7 +22,7 @@ current main-table uplift until a current-protocol rerun closes.
 | Benchmark | Case | Class | Baseline | Treatment | Delta | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
 | `terminal-bench@2.0` | `multi-source-data-merger` | legacy positive / current-protocol baseline-solved | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
-| `terminal-bench@2.0` | `nginx-request-logging` | runner materialization asset | `0.0` | `1.0` | `+1.0` | `paired_baseline_runner_or_setup_repair_required` |
+| `terminal-bench@2.0` | `nginx-request-logging` | current-protocol baseline-solved / legacy runner asset | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
 | `terminal-bench@2.0` | `make-doom-for-mips` | timeout attribution asset | `0.0` | `0.0` | `0.0` | `paired_result_requires_attribution` |
 | `terminal-bench@2.0` | `mteb-retrieve` | setup probe asset | `0.0` | `0.0` | `0.0` | `environment_setup_probe_materialized_with_exception_repeat_blocked` |
 | `terminal-bench@2.0` | `pytorch-model-recovery` | exception attribution asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift_exception_research_required` |
@@ -438,33 +438,36 @@ Follow-up guidance:
 
 ## Case: Terminal-Bench nginx-request-logging
 
-This is a treatment-route pass plus baseline materialization blocker, not a
-clean solver-uplift case.
+This is now a current-protocol baseline-solved non-regression guard. The older
+`0.0 -> 1.0` row remains useful as a runner-materialization lesson, not as a
+main-table uplift claim.
 
 Compact evidence:
 
 - benchmark: `terminal-bench@2.0`
-- run group:
-  `terminal-bench-nginx-request-logging-hardened-blind-pair-20260616T110017CST`
 - baseline arm: `hardened_codex_baseline`
-- baseline run id: `890f0a8487e4`
-- baseline score: `0.0`
-- baseline failure: `worker_install_failed_agent_codex_install_nvm_node`
+- baseline run id: `c9e583310242`
+- baseline score: `1.0`
+- baseline failure: `none`
 - treatment arm: `codex_goal_harness_treatment`
 - treatment run id: `2a6a46cfb953`
 - treatment score: `1.0`
 - treatment failure: `none`
 - treatment worker CLI calls observed: `0`
+- legacy blocked baseline run id: `890f0a8487e4`
+- legacy blocked baseline score: `0.0`
+- legacy blocked baseline failure:
+  `worker_install_failed_agent_codex_install_nvm_node`
 - follow-up worker materialization probe run id: `51fa05316d18`
 - follow-up worker materialization probe failure: `codex_cli_not_on_path`
 
 Interpretation:
 
-The treatment arm reached official verifier pass, so it is a real route-canary
-that the Goal Harness treatment can complete `nginx-request-logging` under
-official scoring. The paired baseline, however, failed at worker Codex CLI
-materialization before a comparable solver path. That makes the raw score delta
-`+1.0`, but `claimable_uplift=false`.
+The Goal Harness treatment arm reached official verifier pass, and after the
+worker materialization route was repaired the hardened Codex baseline also
+reached official verifier pass. The current comparable conclusion is therefore
+`1.0 -> 1.0`: treatment preserved success, but there is no current-protocol
+uplift.
 
 A follow-up fail-fast worker materialization probe used the `require_existing_codex`
 repair profile and ended before solver execution with compact
@@ -472,15 +475,17 @@ repair profile and ended before solver execution with compact
 does not contain a usable Codex CLI; same-config baseline reruns would mostly
 remeasure runner setup rather than case solving.
 
-This distinction matters because the old `nginx-request-logging` record had
-the opposite shape: baseline passed and treatment timed out before worker
-setup. The useful durable signal is therefore not "Goal Harness always helps
-this case"; it is that runner/materialization state must be fixed before the
-case can be used for a fair treatment comparison.
+This distinction matters because earlier `nginx-request-logging` evidence had
+unstable runner/setup shape: at one point treatment was setup-blocked; later a
+hardened baseline was setup-blocked while treatment passed. The useful durable
+signal is therefore not "Goal Harness always helps this case"; it is that
+runner/materialization state must be fixed before the case can be used for a
+fair treatment comparison.
 
 Why it matters:
 
 - It preserves the treatment pass as a useful end-to-end route-canary.
+- It converts nginx into a current-protocol success-preservation guard.
 - It prevents a false uplift claim from a baseline worker/setup blocker.
 - It records that access-packet presence is not the same as observed
   worker-side Goal Harness CLI use.
@@ -489,11 +494,10 @@ Why it matters:
 
 Follow-up guidance:
 
-- Repair the hardened baseline Codex CLI materialization path before repeating
-  this case as a comparable baseline/treatment pair; require compact
-  `codex --version` preflight success before solver start.
-- Keep this case out of pure solver-uplift counts until baseline reaches
-  worker materialization and official scoring under the same protocol.
+- Keep this case out of pure solver-uplift counts because the repaired baseline
+  reaches worker materialization and official `1.0`.
+- Use the legacy blocked baseline as a regression guard for worker setup and
+  false-claim prevention, not as the active score comparison.
 - Continue alternating to fresh baseline-failing cases if the next goal is
   evidence breadth rather than this specific materialization repair.
 
@@ -1609,7 +1613,7 @@ Follow-up guidance:
 | --- | --- | --- |
 | Connectivity is not case success. | Terminal-Bench needed materialization and closeout repair before scores were meaningful. | Keep lifecycle stages separate: launch, materialization, trial, solver, result, verifier. |
 | Historical treatment route can help, but current-protocol claims need reruns. | `multi-source-data-merger` improved from `0.0` to `1.0` under the legacy Terminal-Bench route; under the current protocol, baseline and treatment both scored `1.0`. | Keep the treatment lane alive, but make the main table prefer current product-mode evidence over legacy uplift rows. |
-| Score delta is not automatically claimable uplift. | `nginx-request-logging` treatment scored `1.0`, but the hardened baseline `0.0` came from worker Codex materialization failure, and a follow-up probe confirmed `codex_cli_not_on_path`. | Record `claimable_uplift=false` when one arm fails before a comparable solver/verifier path; require worker-path Codex preflight before repeat. |
+| Score delta is not automatically claimable uplift. | `nginx-request-logging` once showed treatment `1.0` while the hardened baseline `0.0` came from worker Codex materialization failure; after repair, the current comparison is `1.0 -> 1.0`. | Preserve legacy blocked rows as runner lessons, but make the main table prefer repaired comparable evidence. |
 | Treatment can preserve baseline success. | `ada-bathroom-plan-repair`, `organize-messy-files`, `citation-check`, `3d-scan-calc`, and `bike-rebalance` scored `1.0` in both blind-loop arms with first_success_round=1. | Keep baseline-solved non-regression guards so treatment prompts do not damage easy wins. |
 | Baseline comparability must be repaired before uplift claims. | `bike-rebalance` first looked like a treatment-only pass because the baseline ended with `skillsbench_runner_error`; after baseline repair, the rerun also passed at `1.0`. | Treat initial runner errors as readiness evidence, not case-score deltas. |
 | Timeout policy needs phase attribution. | `make-doom-for-mips` default attempts timed out, a 2h relaunch exposed setup timeout, and setup8+2h still needed verifier attribution. | Do not treat a longer timeout as a case result unless setup, worker, solver, result, and verifier phases are compactly separated. |
