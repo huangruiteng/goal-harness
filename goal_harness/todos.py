@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .state_refresh import now_local, resolve_goal_state
 from .status import (
@@ -70,6 +71,27 @@ def inherit_todo_priority(next_text: str, source_text: str | None) -> str:
     if not source_priority:
         return normalized
     return f"[{source_priority}] {normalized}"
+
+
+def resolve_todo_state_path(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    project: Path | None = None,
+    state_file: Path | None = None,
+) -> tuple[Path | None, Path]:
+    registry = load_registry(registry_path)
+    goal, resolved_project, resolved_state_file = resolve_goal_state(
+        registry=registry,
+        goal_id=goal_id,
+        project_override=project,
+        state_file_override=state_file,
+    )
+    if goal is None:
+        raise ValueError(f"goal {goal_id!r} is not present in the registry")
+    if not resolved_state_file.exists():
+        raise ValueError(f"active state file does not exist: {resolved_state_file}")
+    return resolved_project, resolved_state_file
 
 
 def section_bounds(lines: list[str], role: str) -> tuple[int, int, str] | None:
@@ -458,37 +480,33 @@ def add_goal_todo(
     if role not in TODO_SECTION_HEADINGS:
         raise ValueError("todo role must be one of: user, agent")
     todo_text = normalize_new_todo(text)
-    registry = load_registry(registry_path)
-    goal, resolved_project, resolved_state_file = resolve_goal_state(
-        registry=registry,
+    resolved_project, resolved_state_file = resolve_todo_state_path(
+        registry_path=registry_path,
         goal_id=goal_id,
-        project_override=project,
-        state_file_override=state_file,
+        project=project,
+        state_file=state_file,
     )
-    if goal is None:
-        raise ValueError(f"goal {goal_id!r} is not present in the registry")
-    if not resolved_state_file.exists():
-        raise ValueError(f"active state file does not exist: {resolved_state_file}")
 
-    original = resolved_state_file.read_text(encoding="utf-8")
-    lines = original.splitlines()
-    add_result = add_todo_to_lines(
-        lines,
-        role=role,
-        text=todo_text,
-        task_class=task_class,
-        action_kind=action_kind,
-        required_write_scopes=required_write_scopes,
-    )
-    added = bool(add_result["added"])
-    metadata_updated = bool(add_result["metadata_updated"])
+    with exclusive_file_lock(resolved_state_file):
+        original = resolved_state_file.read_text(encoding="utf-8")
+        lines = original.splitlines()
+        add_result = add_todo_to_lines(
+            lines,
+            role=role,
+            text=todo_text,
+            task_class=task_class,
+            action_kind=action_kind,
+            required_write_scopes=required_write_scopes,
+        )
+        added = bool(add_result["added"])
+        metadata_updated = bool(add_result["metadata_updated"])
 
-    updated_at = now_local()
-    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-    if added or metadata_updated:
-        new_text = replace_updated_at(new_text, updated_at)
-    if (added or metadata_updated) and not dry_run:
-        resolved_state_file.write_text(new_text, encoding="utf-8")
+        updated_at = now_local()
+        new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        if added or metadata_updated:
+            new_text = replace_updated_at(new_text, updated_at)
+        if (added or metadata_updated) and not dry_run:
+            resolved_state_file.write_text(new_text, encoding="utf-8")
 
     return {
         "ok": True,
@@ -517,17 +535,12 @@ def resolve_todo_state(
     project: Path | None = None,
     state_file: Path | None = None,
 ) -> tuple[Path | None, Path, str, list[str]]:
-    registry = load_registry(registry_path)
-    goal, resolved_project, resolved_state_file = resolve_goal_state(
-        registry=registry,
+    resolved_project, resolved_state_file = resolve_todo_state_path(
+        registry_path=registry_path,
         goal_id=goal_id,
-        project_override=project,
-        state_file_override=state_file,
+        project=project,
+        state_file=state_file,
     )
-    if goal is None:
-        raise ValueError(f"goal {goal_id!r} is not present in the registry")
-    if not resolved_state_file.exists():
-        raise ValueError(f"active state file does not exist: {resolved_state_file}")
     original = resolved_state_file.read_text(encoding="utf-8")
     return resolved_project, resolved_state_file, original, original.splitlines()
 
@@ -618,32 +631,35 @@ def update_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    resolved_project, resolved_state_file, original, lines = resolve_todo_state(
+    resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
         project=project,
         state_file=state_file,
     )
-    updated_at = now_local()
-    update_result = apply_todo_update_to_lines(
-        lines,
-        todo_id=todo_id,
-        status=status,
-        role=role,
-        note=note,
-        evidence=evidence,
-        reason=reason,
-        task_class=task_class,
-        action_kind=action_kind,
-        required_write_scopes=required_write_scopes,
-        updated_at=updated_at,
-    )
-    changed = bool(update_result["changed"])
-    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-    if changed:
-        new_text = replace_updated_at(new_text, updated_at)
-    if changed and not dry_run:
-        resolved_state_file.write_text(new_text, encoding="utf-8")
+    with exclusive_file_lock(resolved_state_file):
+        original = resolved_state_file.read_text(encoding="utf-8")
+        lines = original.splitlines()
+        updated_at = now_local()
+        update_result = apply_todo_update_to_lines(
+            lines,
+            todo_id=todo_id,
+            status=status,
+            role=role,
+            note=note,
+            evidence=evidence,
+            reason=reason,
+            task_class=task_class,
+            action_kind=action_kind,
+            required_write_scopes=required_write_scopes,
+            updated_at=updated_at,
+        )
+        changed = bool(update_result["changed"])
+        new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        if changed:
+            new_text = replace_updated_at(new_text, updated_at)
+        if changed and not dry_run:
+            resolved_state_file.write_text(new_text, encoding="utf-8")
     return {
         "ok": True,
         "dry_run": dry_run,
@@ -672,55 +688,58 @@ def complete_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    resolved_project, resolved_state_file, original, lines = resolve_todo_state(
+    resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
         project=project,
         state_file=state_file,
     )
-    updated_at = now_local()
-    update_result = apply_todo_update_to_lines(
-        lines,
-        todo_id=todo_id,
-        status=TODO_STATUS_DONE,
-        role=role,
-        note=note,
-        evidence=evidence,
-        updated_at=updated_at,
-    )
-    next_results: list[dict[str, Any]] = []
-    if next_agent_todo:
-        next_results.append(
-            add_todo_to_lines(
-                lines,
-                role="agent",
-                text=inherit_todo_priority(
-                    next_agent_todo,
-                    str(update_result.get("todo") or ""),
-                ),
-                task_class=next_task_class or "advancement_task",
-                action_kind=next_action_kind,
-            )
+    with exclusive_file_lock(resolved_state_file):
+        original = resolved_state_file.read_text(encoding="utf-8")
+        lines = original.splitlines()
+        updated_at = now_local()
+        update_result = apply_todo_update_to_lines(
+            lines,
+            todo_id=todo_id,
+            status=TODO_STATUS_DONE,
+            role=role,
+            note=note,
+            evidence=evidence,
+            updated_at=updated_at,
         )
-    if next_user_todo:
-        next_results.append(
-            add_todo_to_lines(
-                lines,
-                role="user",
-                text=inherit_todo_priority(
-                    next_user_todo,
-                    str(update_result.get("todo") or ""),
-                ),
-                task_class="user_gate",
+        next_results: list[dict[str, Any]] = []
+        if next_agent_todo:
+            next_results.append(
+                add_todo_to_lines(
+                    lines,
+                    role="agent",
+                    text=inherit_todo_priority(
+                        next_agent_todo,
+                        str(update_result.get("todo") or ""),
+                    ),
+                    task_class=next_task_class or "advancement_task",
+                    action_kind=next_action_kind,
+                )
             )
-        )
-    next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
-    changed = bool(update_result["changed"] or next_changed)
-    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-    if changed:
-        new_text = replace_updated_at(new_text, updated_at)
-    if changed and not dry_run:
-        resolved_state_file.write_text(new_text, encoding="utf-8")
+        if next_user_todo:
+            next_results.append(
+                add_todo_to_lines(
+                    lines,
+                    role="user",
+                    text=inherit_todo_priority(
+                        next_user_todo,
+                        str(update_result.get("todo") or ""),
+                    ),
+                    task_class="user_gate",
+                )
+            )
+        next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
+        changed = bool(update_result["changed"] or next_changed)
+        new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        if changed:
+            new_text = replace_updated_at(new_text, updated_at)
+        if changed and not dry_run:
+            resolved_state_file.write_text(new_text, encoding="utf-8")
     return {
         "ok": True,
         "dry_run": dry_run,
@@ -750,67 +769,70 @@ def supersede_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    resolved_project, resolved_state_file, original, lines = resolve_todo_state(
+    resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
         project=project,
         state_file=state_file,
     )
-    updated_at = now_local()
-    update_result = apply_todo_update_to_lines(
-        lines,
-        todo_id=todo_id,
-        status=TODO_STATUS_DONE,
-        role=role,
-        reason=reason,
-        note="superseded",
-        updated_at=updated_at,
-    )
-    next_results: list[dict[str, Any]] = []
-    if next_agent_todo:
-        next_results.append(
-            add_todo_to_lines(
-                lines,
-                role="agent",
-                text=inherit_todo_priority(
-                    next_agent_todo,
-                    str(update_result.get("todo") or ""),
-                ),
-                task_class=next_task_class or "advancement_task",
-                action_kind=next_action_kind,
-            )
+    with exclusive_file_lock(resolved_state_file):
+        original = resolved_state_file.read_text(encoding="utf-8")
+        lines = original.splitlines()
+        updated_at = now_local()
+        update_result = apply_todo_update_to_lines(
+            lines,
+            todo_id=todo_id,
+            status=TODO_STATUS_DONE,
+            role=role,
+            reason=reason,
+            note="superseded",
+            updated_at=updated_at,
         )
-    if next_user_todo:
-        next_results.append(
-            add_todo_to_lines(
-                lines,
-                role="user",
-                text=inherit_todo_priority(
-                    next_user_todo,
-                    str(update_result.get("todo") or ""),
-                ),
-                task_class="user_gate",
+        next_results: list[dict[str, Any]] = []
+        if next_agent_todo:
+            next_results.append(
+                add_todo_to_lines(
+                    lines,
+                    role="agent",
+                    text=inherit_todo_priority(
+                        next_agent_todo,
+                        str(update_result.get("todo") or ""),
+                    ),
+                    task_class=next_task_class or "advancement_task",
+                    action_kind=next_action_kind,
+                )
             )
-        )
-    superseded_by = next((item.get("todo_id") for item in next_results if item.get("todo_id")), None)
-    if superseded_by:
-        block_match = find_todo_block(lines, todo_id=str(update_result["todo_id"]), role=role)
-        if block_match:
-            _resolved_role, _section, _start, _end, block = block_match
-            update_result["metadata_updated"] = upsert_todo_metadata(
-                lines,
-                block,
-                metadata_line_for_block(block, {"superseded_by": superseded_by}),
-            ) or update_result["metadata_updated"]
-            update_result["superseded_by"] = superseded_by
-            update_result["changed"] = True
-    next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
-    changed = bool(update_result["changed"] or next_changed)
-    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-    if changed:
-        new_text = replace_updated_at(new_text, updated_at)
-    if changed and not dry_run:
-        resolved_state_file.write_text(new_text, encoding="utf-8")
+        if next_user_todo:
+            next_results.append(
+                add_todo_to_lines(
+                    lines,
+                    role="user",
+                    text=inherit_todo_priority(
+                        next_user_todo,
+                        str(update_result.get("todo") or ""),
+                    ),
+                    task_class="user_gate",
+                )
+            )
+        superseded_by = next((item.get("todo_id") for item in next_results if item.get("todo_id")), None)
+        if superseded_by:
+            block_match = find_todo_block(lines, todo_id=str(update_result["todo_id"]), role=role)
+            if block_match:
+                _resolved_role, _section, _start, _end, block = block_match
+                update_result["metadata_updated"] = upsert_todo_metadata(
+                    lines,
+                    block,
+                    metadata_line_for_block(block, {"superseded_by": superseded_by}),
+                ) or update_result["metadata_updated"]
+                update_result["superseded_by"] = superseded_by
+                update_result["changed"] = True
+        next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
+        changed = bool(update_result["changed"] or next_changed)
+        new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        if changed:
+            new_text = replace_updated_at(new_text, updated_at)
+        if changed and not dry_run:
+            resolved_state_file.write_text(new_text, encoding="utf-8")
     return {
         "ok": True,
         "dry_run": dry_run,
@@ -839,68 +861,64 @@ def archive_completed_todos(
         raise ValueError("todo role must be one of: user, agent")
     if max_active_done < 0:
         raise ValueError("max_active_done must be non-negative")
-    registry = load_registry(registry_path)
-    goal, resolved_project, resolved_state_file = resolve_goal_state(
-        registry=registry,
+    resolved_project, resolved_state_file = resolve_todo_state_path(
+        registry_path=registry_path,
         goal_id=goal_id,
-        project_override=project,
-        state_file_override=state_file,
+        project=project,
+        state_file=state_file,
     )
-    if goal is None:
-        raise ValueError(f"goal {goal_id!r} is not present in the registry")
-    if not resolved_state_file.exists():
-        raise ValueError(f"active state file does not exist: {resolved_state_file}")
 
-    original = resolved_state_file.read_text(encoding="utf-8")
-    lines = original.splitlines()
-    bounds = section_bounds(lines, role)
-    section = bounds[2] if bounds else TODO_SECTION_HEADINGS[role]
-    moved_blocks: list[list[str]] = []
-    active_done_count = 0
-    moved_count = 0
-    kept_done_count = 0
+    with exclusive_file_lock(resolved_state_file):
+        original = resolved_state_file.read_text(encoding="utf-8")
+        lines = original.splitlines()
+        bounds = section_bounds(lines, role)
+        section = bounds[2] if bounds else TODO_SECTION_HEADINGS[role]
+        moved_blocks: list[list[str]] = []
+        active_done_count = 0
+        moved_count = 0
+        kept_done_count = 0
 
-    if bounds:
-        blocks = todo_blocks(lines, bounds[0], bounds[1], role=role, source_section=section)
-        done_blocks = [block for block in blocks if block.get("done") is True]
-        active_done_count = len(done_blocks)
-        move_count = max(0, active_done_count - max_active_done)
-        move_starts = {int(block["start"]) for block in done_blocks[:move_count]}
-        kept_done_count = active_done_count - move_count
-        for block in done_blocks[:move_count]:
-            moved_blocks.append(lines[int(block["start"]) : int(block["end"])])
-        if move_starts:
-            new_lines: list[str] = []
-            index = 0
-            while index < len(lines):
-                if index in move_starts:
-                    matching = next(
-                        block
-                        for block in done_blocks[:move_count]
-                        if int(block["start"]) == index
-                    )
-                    index = int(matching["end"])
-                    while (
-                        new_lines
-                        and not new_lines[-1].strip()
-                        and index < len(lines)
-                        and not lines[index].strip()
-                    ):
-                        index += 1
-                    continue
-                new_lines.append(lines[index])
-                index += 1
-            lines = new_lines
-            insert_archive_blocks(lines, moved_blocks)
-            moved_count = move_count
+        if bounds:
+            blocks = todo_blocks(lines, bounds[0], bounds[1], role=role, source_section=section)
+            done_blocks = [block for block in blocks if block.get("done") is True]
+            active_done_count = len(done_blocks)
+            move_count = max(0, active_done_count - max_active_done)
+            move_starts = {int(block["start"]) for block in done_blocks[:move_count]}
+            kept_done_count = active_done_count - move_count
+            for block in done_blocks[:move_count]:
+                moved_blocks.append(lines[int(block["start"]) : int(block["end"])])
+            if move_starts:
+                new_lines: list[str] = []
+                index = 0
+                while index < len(lines):
+                    if index in move_starts:
+                        matching = next(
+                            block
+                            for block in done_blocks[:move_count]
+                            if int(block["start"]) == index
+                        )
+                        index = int(matching["end"])
+                        while (
+                            new_lines
+                            and not new_lines[-1].strip()
+                            and index < len(lines)
+                            and not lines[index].strip()
+                        ):
+                            index += 1
+                        continue
+                    new_lines.append(lines[index])
+                    index += 1
+                lines = new_lines
+                insert_archive_blocks(lines, moved_blocks)
+                moved_count = move_count
 
-    updated_at = now_local()
-    changed = moved_count > 0
-    new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-    if changed:
-        new_text = replace_updated_at(new_text, updated_at)
-    if changed and not dry_run:
-        resolved_state_file.write_text(new_text, encoding="utf-8")
+        updated_at = now_local()
+        changed = moved_count > 0
+        new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        if changed:
+            new_text = replace_updated_at(new_text, updated_at)
+        if changed and not dry_run:
+            resolved_state_file.write_text(new_text, encoding="utf-8")
 
     return {
         "ok": True,
