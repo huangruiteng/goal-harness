@@ -116,18 +116,20 @@ from .benchmark_core import (
     render_codex_app_parity_posthoc_check_markdown,
 )
 from .configure_goal import configure_goal, render_configure_goal_markdown
-from .contract import check_contract, render_contract_markdown
 from .cli_commands import (
+    handle_check_command,
     handle_demo_command,
     handle_doctor_command,
     handle_new_project_prompt_command,
+    handle_review_packet_command,
+    handle_status_command,
     register_doctor_command,
     register_starter_commands,
+    register_status_commands,
 )
 from .execution_profile import DEFAULT_EXECUTION_PROFILE
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
-from .handoff_budget import build_handoff_interface_budget
 from .heartbeat_prompt import build_heartbeat_prompt, render_heartbeat_prompt_markdown
 from .history import (
     append_active_user_assisted_pilot,
@@ -175,7 +177,6 @@ from .quota import (
     void_quota_slot,
 )
 from .registry import inspect_registry, registry_goals, render_registry_markdown, resolve_state_file
-from .review_packet import build_review_packet, render_review_packet_markdown
 from .runtime import archive_runtime_goal, render_archive_runtime_markdown
 from .state_refresh import (
     DEFAULT_REFRESH_ACTION,
@@ -1440,50 +1441,6 @@ def output_format(args: argparse.Namespace, *local_dests: str) -> str:
         if value:
             return str(value)
     return str(args.format)
-
-
-def review_packet_handoff_only_payload(payload: dict[str, object]) -> dict[str, object]:
-    result: dict[str, object] = {
-        "ok": bool(payload.get("ok")),
-        "goal_id": payload.get("goal_id"),
-        "handoff_only": True,
-    }
-    if not payload.get("ok"):
-        result["error"] = payload.get("error")
-        return result
-    handoff_text = str(payload.get("project_agent_handoff") or "")
-    raw_contract = payload.get("handoff_delivery_contract")
-    agent_contract = raw_contract
-    if isinstance(raw_contract, dict):
-        agent_contract = {
-            "mode": raw_contract.get("mode"),
-            "instruction": raw_contract.get("instruction"),
-            "minimum_scale": raw_contract.get("minimum_scale"),
-            "must_include": raw_contract.get("must_include"),
-            "if_blocked": raw_contract.get("if_blocked"),
-        }
-    handoff_budget = payload.get("handoff_interface_budget")
-    if not isinstance(handoff_budget, dict):
-        handoff_budget = build_handoff_interface_budget(handoff_text)
-    result.update(
-        {
-            "kind": payload.get("kind"),
-            "status": payload.get("status"),
-            "waiting_on": payload.get("waiting_on"),
-            "project_agent_command": payload.get("project_agent_command"),
-            "project_agent_handoff": handoff_text,
-            "handoff_text": handoff_text,
-            "benchmark_report_chain_handoff": payload.get("benchmark_report_chain_handoff"),
-            "operator_gate_approved_handoff": payload.get("operator_gate_approved_handoff"),
-            "connected_delivery_handoff": payload.get("connected_delivery_handoff"),
-            "handoff_delivery_contract": agent_contract,
-            "handoff_interface_budget": handoff_budget,
-            "line_count": handoff_budget.get("line_count"),
-            "char_count": handoff_budget.get("char_count"),
-            "within_budget": handoff_budget.get("within_budget"),
-        }
-    )
-    return result
 
 
 def user_supplied_registry(argv: list[str] | None) -> bool:
@@ -4696,65 +4653,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not refresh the shared global registry after writing the local source registry.",
     )
 
-    check_parser = sub.add_parser("check", help="Run a read-only contract and public/private boundary check.")
-    check_parser.add_argument("--scan-root", default=".", help="Public files to scan for obvious private material.")
-    check_parser.add_argument(
-        "--scan-path",
-        action="append",
-        default=[],
-        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
-    )
-    check_parser.add_argument("--limit", type=int, default=5)
-
-    status_parser = sub.add_parser("status", help="Show a first-screen goal status and attention queue.")
-    add_subcommand_format(status_parser)
-    status_parser.add_argument(
-        "--scan-root",
-        default=default_public_scan_root(),
-        help="Public files to scan for obvious private material. Defaults to the Goal Harness install root.",
-    )
-    status_parser.add_argument(
-        "--scan-path",
-        action="append",
-        default=[],
-        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
-    )
-    status_parser.add_argument("--limit", type=int, default=5)
-
-    review_packet_parser = sub.add_parser(
-        "review-packet",
-        help="Generate a CLI-visible Review Packet from the current status contract.",
-    )
-    review_packet_parser.add_argument("--goal-id", required=True, help="Goal id to package for review or handoff.")
-    review_packet_parser.add_argument(
-        "--action-kind",
-        choices=["reward", "controller", "codex", "evidence", "health"],
-        help="Override inferred action kind. Defaults to the goal's current attention item.",
-    )
-    review_packet_parser.add_argument("--review-url", help="Optional dashboard review URL to include in the packet.")
-    review_packet_parser.add_argument(
-        "--scan-root",
-        default=default_public_scan_root(),
-        help="Public files to scan for obvious private material. Defaults to the Goal Harness install root.",
-    )
-    review_packet_parser.add_argument(
-        "--scan-path",
-        action="append",
-        default=[],
-        help="Specific public file or directory to scan. Repeatable. Overrides --scan-root when set.",
-    )
-    review_packet_parser.add_argument(
-        "--handoff-only",
-        action="store_true",
-        help="Print only the target project-agent handoff in markdown output; JSON output returns a minimized handoff payload.",
-    )
-    review_packet_parser.add_argument(
-        "--format",
-        dest="review_packet_format",
-        choices=["markdown", "json"],
-        help="Output format for review-packet. This mirrors the global --format flag and may appear after the subcommand.",
-    )
-    review_packet_parser.add_argument("--limit", type=int, default=5)
+    register_status_commands(sub, add_subcommand_format)
 
     todo_parser = sub.add_parser(
         "todo",
@@ -8510,100 +8409,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if payload.get("ok") else 1
 
     if args.command == "check":
-        try:
-            scan_roots = [Path(item).expanduser() for item in args.scan_path]
-            if not scan_roots:
-                scan_roots = [Path(args.scan_root).expanduser()]
-            payload = check_contract(
-                registry_path=registry_path,
-                runtime_root_override=args.runtime_root,
-                scan_roots=scan_roots,
-                limit=max(0, args.limit),
-                allow_missing_registry=not user_supplied_registry(argv),
-            )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "registry": str(registry_path),
-                "runtime_root": args.runtime_root,
-                "scan_roots": args.scan_path or [args.scan_root],
-                "summary": {"errors": 1, "warnings": 0, "checks": 0},
-                "errors": [str(exc)],
-                "warnings": [],
-                "checks": [],
-            }
-        print_payload(payload, args.format, render_contract_markdown)
-        return 0 if payload.get("ok") else 1
+        return handle_check_command(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=args.runtime_root,
+            allow_missing_registry=not user_supplied_registry(argv),
+            print_payload=print_payload,
+        )
 
     if args.command == "status":
-        try:
-            scan_roots = [Path(item).expanduser() for item in args.scan_path]
-            if not scan_roots:
-                scan_roots = [Path(args.scan_root).expanduser()]
-            payload = collect_status(
-                registry_path=registry_path,
-                runtime_root_override=args.runtime_root,
-                scan_roots=scan_roots,
-                limit=max(0, args.limit),
-            )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "registry": str(registry_path),
-                "runtime_root": args.runtime_root,
-                "error": str(exc),
-                "attention_queue": {
-                    "available": False,
-                    "item_count": 1,
-                    "needs_user_or_controller": 0,
-                    "needs_codex": 1,
-                    "watching_external_evidence": 0,
-                    "items": [
-                        {
-                            "goal_id": "goal-harness-status",
-                            "status": "status_collection_failed",
-                            "waiting_on": "codex",
-                            "severity": "high",
-                            "recommended_action": str(exc),
-                            "source": "status",
-                        }
-                    ],
-                },
-            }
-        print_payload(payload, output_format(args), render_status_markdown)
-        return 0 if payload.get("ok") else 1
+        return handle_status_command(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=args.runtime_root,
+            output_format=output_format,
+            print_payload=print_payload,
+        )
 
     if args.command == "review-packet":
-        selected_format = output_format(args, "review_packet_format")
-        try:
-            scan_roots = [Path(item).expanduser() for item in args.scan_path]
-            if not scan_roots:
-                scan_roots = [Path(args.scan_root).expanduser()]
-            status_payload = collect_status(
-                registry_path=registry_path,
-                runtime_root_override=args.runtime_root,
-                scan_roots=scan_roots,
-                limit=max(0, args.limit),
-            )
-            payload = build_review_packet(
-                status_payload,
-                goal_id=args.goal_id,
-                action_kind=args.action_kind,
-                review_url=args.review_url,
-            )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "goal_id": args.goal_id,
-                "error": str(exc),
-            }
-        if args.handoff_only:
-            payload = review_packet_handoff_only_payload(payload)
-        if args.handoff_only and selected_format != "json" and payload.get("ok"):
-            print(str(payload.get("handoff_text") or ""))
-        else:
-            print_payload(payload, selected_format, render_review_packet_markdown)
-        return 0 if payload.get("ok") else 1
+        return handle_review_packet_command(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=args.runtime_root,
+            output_format=output_format,
+            print_payload=print_payload,
+        )
 
     if args.command == "todo":
         try:

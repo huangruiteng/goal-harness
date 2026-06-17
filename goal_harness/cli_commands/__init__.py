@@ -14,11 +14,21 @@ from .starter import (
     handle_new_project_prompt_command,
     register_starter_commands,
 )
+from .status import (
+    handle_check_command,
+    handle_review_packet_command,
+    handle_status_command,
+    register_status_commands,
+)
 
 __all__ = [
+    "handle_check_command",
     "handle_demo_command",
     "handle_doctor_command",
     "handle_new_project_prompt_command",
+    "handle_review_packet_command",
+    "handle_status_command",
     "register_doctor_command",
     "register_starter_commands",
+    "register_status_commands",
 ]
