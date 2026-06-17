@@ -11,6 +11,7 @@ TODO_METADATA_PATTERN = re.compile(r"^\s*<!--\s*goal-harness:(?:todo\s+)?(?P<bod
 TODO_METADATA_TOKEN_PATTERN = re.compile(r"(?P<key>[a-z_][a-z0-9_-]*)=(?P<value>[^\s<>]+)")
 TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
+TODO_WRITE_SCOPE_MAX_CHARS = 160
 
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
@@ -148,6 +149,32 @@ def normalize_todo_id(value: Any) -> str | None:
     return None
 
 
+def normalize_required_write_scopes(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw_values = [str(item or "") for item in value]
+    else:
+        raw_values = re.split(r"[,;|]", str(value or ""))
+    scopes: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        scope = compact_todo_text(raw)
+        if not scope:
+            continue
+        if len(scope) > TODO_WRITE_SCOPE_MAX_CHARS:
+            continue
+        if scope.startswith(("/", "~")) or ".." in scope.split("/"):
+            continue
+        if re.search(r"[\s<>]", scope):
+            continue
+        if scope in seen:
+            continue
+        seen.add(scope)
+        scopes.append(scope)
+    return scopes
+
+
 def build_todo_id(
     *,
     role: Any,
@@ -204,11 +231,11 @@ def decode_metadata_value(value: Any) -> str:
     return compact_todo_text(unquote(str(value or "")))
 
 
-def parse_todo_metadata_line(line: str) -> dict[str, str] | None:
+def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
     match = TODO_METADATA_PATTERN.match(line)
     if not match:
         return None
-    metadata: dict[str, str] = {}
+    metadata: dict[str, Any] = {}
     for token in TODO_METADATA_TOKEN_PATTERN.finditer(match.group("body")):
         key = token.group("key").replace("-", "_")
         value = decode_metadata_value(token.group("value"))
@@ -228,6 +255,10 @@ def parse_todo_metadata_line(line: str) -> dict[str, str] | None:
             action_kind = normalize_todo_action_kind(value)
             if action_kind:
                 metadata["action_kind"] = action_kind
+        elif key in {"required_write_scope", "required_write_scopes"}:
+            scopes = normalize_required_write_scopes(value)
+            if scopes:
+                metadata["required_write_scopes"] = scopes
         elif key in {"note", "evidence", "reason", "completed_at", "updated_at"}:
             if value:
                 metadata[key] = value
@@ -244,6 +275,7 @@ def format_todo_metadata_line(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    required_write_scopes: Any = None,
     note: str | None = None,
     evidence: str | None = None,
     reason: str | None = None,
@@ -272,6 +304,14 @@ def format_todo_metadata_line(
         raise ValueError("todo action_kind must be a public-safe token: lowercase letters, digits, '_' or '-'")
     if normalized_action_kind:
         fields.append(f"action_kind={encode_metadata_value(normalized_action_kind)}")
+    normalized_write_scopes = normalize_required_write_scopes(required_write_scopes)
+    if required_write_scopes and not normalized_write_scopes:
+        raise ValueError("required_write_scopes must contain public-safe relative scope tokens")
+    if normalized_write_scopes:
+        fields.append(
+            "required_write_scopes="
+            f"{encode_metadata_value(','.join(normalized_write_scopes))}"
+        )
     for key, value in (
         ("note", note),
         ("evidence", evidence),

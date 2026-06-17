@@ -17,6 +17,7 @@ from .todo_contract import (
     TODO_TASK_PATTERN,
     build_todo_id,
     format_todo_metadata_line,
+    normalize_required_write_scopes,
     normalize_todo_id,
     normalize_todo_status,
     parse_todo_metadata_line,
@@ -36,6 +37,7 @@ TODO_METADATA_FIELDS = (
     "status",
     "task_class",
     "action_kind",
+    "required_write_scopes",
     "note",
     "evidence",
     "reason",
@@ -261,12 +263,20 @@ def matching_todo_block(
     return None
 
 
-def block_metadata(block: dict[str, Any]) -> dict[str, str]:
-    return {
-        key: str(block[key])
-        for key in TODO_METADATA_FIELDS
-        if block.get(key) is not None and str(block.get(key) or "").strip()
-    }
+def block_metadata(block: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for key in TODO_METADATA_FIELDS:
+        value = block.get(key)
+        if value is None:
+            continue
+        if key == "required_write_scopes":
+            scopes = normalize_required_write_scopes(value)
+            if scopes:
+                metadata[key] = scopes
+            continue
+        if str(value or "").strip():
+            metadata[key] = str(value).strip()
+    return metadata
 
 
 def metadata_line_for_block(block: dict[str, Any], updates: dict[str, Any]) -> str | None:
@@ -276,6 +286,12 @@ def metadata_line_for_block(block: dict[str, Any], updates: dict[str, Any]) -> s
             continue
         if value is None:
             metadata.pop(key, None)
+        elif key == "required_write_scopes":
+            scopes = normalize_required_write_scopes(value)
+            if scopes:
+                metadata[key] = scopes
+            else:
+                metadata.pop(key, None)
         elif str(value).strip():
             metadata[key] = str(value).strip()
     if "todo_id" not in metadata and block.get("todo_id"):
@@ -357,6 +373,7 @@ def add_todo_to_lines(
     text: str,
     task_class: str | None = None,
     action_kind: str | None = None,
+    required_write_scopes: list[str] | None = None,
 ) -> dict[str, Any]:
     todo_text = normalize_new_todo(text)
     bounds = section_bounds(lines, role)
@@ -389,6 +406,7 @@ def add_todo_to_lines(
             status=TODO_STATUS_OPEN,
             task_class=task_class,
             action_kind=action_kind,
+            required_write_scopes=required_write_scopes,
         )
         todo_line = "\n".join([f"- [ ] {todo_text}", metadata_line] if metadata_line else [f"- [ ] {todo_text}"])
         if bounds:
@@ -404,6 +422,8 @@ def add_todo_to_lines(
             updates["task_class"] = task_class
         if action_kind:
             updates["action_kind"] = action_kind
+        if required_write_scopes is not None:
+            updates["required_write_scopes"] = required_write_scopes
         metadata_line = metadata_line_for_block(block, updates)
         metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
         todo_id = str(block.get("todo_id") or "")
@@ -418,6 +438,7 @@ def add_todo_to_lines(
         "todo_id": todo_id,
         "task_class": task_class,
         "action_kind": action_kind,
+        "required_write_scopes": normalize_required_write_scopes(required_write_scopes),
     }
 
 
@@ -429,6 +450,7 @@ def add_goal_todo(
     text: str,
     task_class: str | None = None,
     action_kind: str | None = None,
+    required_write_scopes: list[str] | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -456,6 +478,7 @@ def add_goal_todo(
         text=todo_text,
         task_class=task_class,
         action_kind=action_kind,
+        required_write_scopes=required_write_scopes,
     )
     added = bool(add_result["added"])
     metadata_updated = bool(add_result["metadata_updated"])
@@ -480,6 +503,7 @@ def add_goal_todo(
         "todo_id": add_result.get("todo_id"),
         "task_class": add_result.get("task_class"),
         "action_kind": add_result.get("action_kind"),
+        "required_write_scopes": add_result.get("required_write_scopes"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if added or metadata_updated else None,
@@ -519,6 +543,7 @@ def apply_todo_update_to_lines(
     reason: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    required_write_scopes: list[str] | None = None,
     updated_at: str,
 ) -> dict[str, Any]:
     normalized_todo_id = normalize_todo_id(todo_id)
@@ -556,6 +581,8 @@ def apply_todo_update_to_lines(
         updates["task_class"] = task_class
     if action_kind:
         updates["action_kind"] = action_kind
+    if required_write_scopes is not None:
+        updates["required_write_scopes"] = required_write_scopes
     metadata_line = metadata_line_for_block(block, updates)
     semantic_metadata_changed = todo_metadata_would_change(lines, block, metadata_line)
     if status_changed or semantic_metadata_changed:
@@ -586,6 +613,7 @@ def update_goal_todo(
     reason: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    required_write_scopes: list[str] | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -607,6 +635,7 @@ def update_goal_todo(
         reason=reason,
         task_class=task_class,
         action_kind=action_kind,
+        required_write_scopes=required_write_scopes,
         updated_at=updated_at,
     )
     changed = bool(update_result["changed"])
