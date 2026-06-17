@@ -106,12 +106,20 @@ def main() -> int:
             "validation",
             "--waiting-on",
             "user_or_controller",
+            "--boundary-authority-scope",
+            "docs/**",
+            "--boundary-authority-source",
+            "operator_gate_resume_contract_v0:fixture",
+            "--boundary-authority-decision-id",
+            "gate-fixture-1",
         ))
         assert dry["ok"] is True, dry
         assert dry["dry_run"] is True, dry
         assert dry["changed"] is True, dry
         assert "waiting_on" in dry["changed_fields"], dry
+        assert "checkpointed_boundary_authority" in dry["changed_fields"], dry
         assert dry["after"]["waiting_on"] == "user_or_controller", dry
+        assert dry["after"]["checkpointed_boundary_authority"]["active_write_scope"] == ["docs/**"], dry
         assert dry["written"] is False, dry
         assert registry_path.read_text(encoding="utf-8") == original
 
@@ -134,6 +142,12 @@ def main() -> int:
             "docs,validation",
             "--waiting-on",
             "user_or_controller",
+            "--boundary-authority-scope",
+            "docs/**",
+            "--boundary-authority-source",
+            "operator_gate_resume_contract_v0:fixture",
+            "--boundary-authority-decision-id",
+            "gate-fixture-1",
             "--execute",
         ))
         assert applied["ok"] is True, applied
@@ -149,6 +163,11 @@ def main() -> int:
         assert goal["spawn_policy"]["max_children"] == 2, goal
         assert goal["spawn_policy"]["allowed_domains"] == ["docs", "validation"], goal
         assert goal["waiting_on"] == "user_or_controller", goal
+        authority = goal["coordination"]["checkpointed_boundary_authority"][0]
+        assert authority["schema_version"] == "checkpointed_boundary_authority_v0", authority
+        assert authority["write_scope"] == ["docs/**"], authority
+        assert authority["source"] == "operator_gate_resume_contract_v0:fixture", authority
+        assert authority["decision_id"] == "gate-fixture-1", authority
 
         no_change = payload(run_cli(
             registry_path,
@@ -173,6 +192,19 @@ def main() -> int:
         assert cleared["changed"] is True, cleared
         assert "waiting_on" in cleared["changed_fields"], cleared
         assert "waiting_on" not in goal_from_registry(registry_path), cleared
+
+        authority_cleared = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--clear-boundary-authority",
+            "--execute",
+        ))
+        assert authority_cleared["ok"] is True, authority_cleared
+        assert authority_cleared["changed"] is True, authority_cleared
+        assert "checkpointed_boundary_authority" in authority_cleared["changed_fields"], authority_cleared
+        assert "checkpointed_boundary_authority" not in goal_from_registry(registry_path)["coordination"], authority_cleared
 
         invalid = payload(run_cli(
             registry_path,

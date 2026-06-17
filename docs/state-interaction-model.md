@@ -210,6 +210,112 @@ This keeps the user's role high-value: the user resolves real boundaries and
 reward judgments, while Goal Harness prevents the agent from stalling on
 routine routing choices.
 
+## Agentic RL Boundary Model
+
+Goal Harness should be the external control plane around an agentic RL-style
+worker, not the policy itself. Its job is to turn partial, long-running project
+history into a current, auditable observation packet. The model's job is to
+turn that packet plus the live workspace context into an internal belief state
+and choose the next bounded action.
+
+The runtime split is:
+
+```text
+observation_t = project(
+  registry,
+  active_goal_state,
+  event_ledger,
+  run_history,
+  todos,
+  gates,
+  quota,
+  authority_sources,
+  decision_freshness
+)
+
+belief_t = model.update(
+  observation_t,
+  system_prompt,
+  current_thread_context,
+  current_tool_observations,
+  model_memory,
+  uncertainty
+)
+
+action_t = model.policy(belief_t)
+checked_action_t = goal_harness.guard(action_t, observation_t)
+event_or_reward_t+1 = append_after_validation(checked_action_t, outcome_t)
+```
+
+In this model, `event replay` is input material for `observation_t`, and
+`human_reward` is a later evaluation signal. Neither one is the model's full
+execution state. The execution state is the model's current belief, which is
+allowed to be richer than the Goal Harness projection but must not silently
+override Goal Harness boundaries, authority, freshness warnings, or user gates.
+
+| Layer | Owns | Must not own |
+| --- | --- | --- |
+| Goal Harness control plane | Durable facts, event ledger, active-state projection, authority source registration, decision freshness, quota, gates, restartability, public/private boundary checks, run-bound reward overlays. | Semantic planning, hidden preference learning, task-specific policy, unrecorded approvals, or model-internal belief. |
+| Agentic model / executor | Belief synthesis, uncertainty handling, action selection, semantic rebase of old decisions against current evidence, bounded implementation, validation choice, and asking the user when ambiguity is real. | Durable source of truth, implicit write authorization, permanent user preference storage outside goal events, or treating chat memory as stronger than current status. |
+| Human/operator | Reward, approval, private-material access, production/destructive/external-resource decisions, and high-level tradeoff judgment. | Routine public reads, ordinary local validation, or reconstructing current state by hand when Goal Harness can project it. |
+
+This keeps checkpointed decisions narrow. A checkpointed approval, reward, or
+resume contract is an audit anchor with a validity check, not an instruction to
+replay the old chat. Before a worker reuses it, Goal Harness should indicate
+whether the decision point needs a rebase against current registry, active
+state, quota, policy, repo/run status, and newer evidence. The model then
+interprets whether the old decision still applies, asks the user if the answer
+is ambiguous, and records the resulting transition as a new event.
+
+For write authority, the checkpoint must become a boundary projection before
+execution. `coordination.checkpointed_boundary_authority[]` is the compact
+machine shape for this projection: fresh approved entries with public-safe
+provenance, `recorded_at`, and `write_scope` compile into
+`goal_boundary.write_scope`. Prose in a handoff, chat memory, or an old
+approval run can motivate the agent to repair the projection, but it does not
+grant write authority by itself. If a selected todo declares
+`required_write_scopes` and the compiled boundary does not cover them,
+`quota should-run` must route to `boundary_projection_repair` or a concrete
+user/controller gate instead of letting the agent perform the protected write.
+
+```mermaid
+flowchart TB
+  subgraph Harness["Goal Harness control plane"]
+    Registry["Registry and authority sources"]
+    ActiveState["Active goal state"]
+    Ledger["Append-only event ledger"]
+    Runs["Run history and overlays"]
+    Gates["Gates, quota, freshness"]
+    Observation["Compact observation packet"]
+  end
+
+  subgraph Model["Agentic model / executor"]
+    Belief["belief_t: awareness of current task"]
+    Policy["policy(belief_t)"]
+    Action["bounded action proposal"]
+  end
+
+  subgraph Operator["Human/operator"]
+    Approval["approval or deferral"]
+    Reward["run-bound human_reward overlay"]
+  end
+
+  Registry --> Observation
+  ActiveState --> Observation
+  Ledger --> Observation
+  Runs --> Observation
+  Gates --> Observation
+  Observation --> Belief
+  Belief --> Policy
+  Policy --> Action
+  Action --> Gates
+  Gates -->|"allowed or needs rebase/user gate"| Action
+  Action -->|"validated work, blocker, evidence"| Ledger
+  Approval --> Ledger
+  Reward --> Runs
+  Runs --> Observation
+```
+
 ## State Stores
 
 | Store | Owner | Reader | Writer | Purpose |

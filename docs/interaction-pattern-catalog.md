@@ -270,13 +270,32 @@ user/controller gate. The agent should not execute the write, and should not
 spend turns on repo-only handoff if the real blocker is missing scope
 projection.
 
+Only structured checkpointed authority can extend the runtime boundary. A
+historical approval written in prose is not enough. The registry may carry
+`coordination.checkpointed_boundary_authority[]` entries with:
+
+- `schema_version=checkpointed_boundary_authority_v0`;
+- `write_scope`;
+- `source` or equivalent public-safe provenance;
+- `recorded_at`;
+- optional `expires_at`;
+- `decision=approve` and active status.
+
+Fresh approved entries are compiled into `goal_boundary.write_scope` and
+exposed under `goal_boundary.checkpointed_boundary_authority`. Expired,
+rejected, missing-provenance, or missing-timestamp entries remain visible only
+as diagnostics; they do not authorize writes.
+
 **Visual Model**
 
 ```mermaid
 flowchart TD
   A["selected action"] --> S{"requires write scope?"}
   S -->|"no"| E["execute if otherwise safe"]
-  S -->|"yes"| B{"scope in goal_boundary.write_scope?"}
+  S -->|"yes"| C{"fresh checkpointed authority?"}
+  C -->|"yes"| P["compile authority into goal_boundary.write_scope"]
+  C -->|"no"| B{"scope already in explicit write_scope?"}
+  P --> B
   B -->|"yes"| E
   B -->|"no"| R["boundary projection repair or user/controller gate"]
 ```
@@ -290,6 +309,7 @@ the checkpointed decision.
 **Validation**
 
 - `examples/quota-action-scope-guard-smoke.py`;
+- `examples/configure-goal-smoke.py`;
 - `docs/state-interaction-model.md` checkpointed decision sections.
 
 ## IP-006 Outcome Floor Recovery
