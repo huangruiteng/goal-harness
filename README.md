@@ -449,6 +449,7 @@ goal-harness upgrade-plan --format json
 Start here:
 
 - [State interaction model](docs/state-interaction-model.md)
+- [Interaction pattern catalog](docs/interaction-pattern-catalog.md)
 - [Integration guide](docs/integration.md)
 - [Attention queue](docs/attention-queue.md)
 - [Project agent todo contract](docs/project-agent-todo-contract.md)
