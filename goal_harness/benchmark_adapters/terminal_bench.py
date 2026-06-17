@@ -17,6 +17,13 @@ from ..benchmark_core.io import (
     optional_float as _optional_float,
     optional_positive_int as _optional_positive_int,
 )
+from ..benchmark_case_state import (
+    BENCHMARK_CASE_ACTIVE_STATE_PROOF_FIELDS,
+    BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
+    benchmark_case_active_state_init_contract,
+    benchmark_case_active_state_path,
+    benchmark_case_goal_id,
+)
 from ..worker_bridge import (
     ACTIVE_USER_INTERVENTION_CHANNEL_CONTRACT_VERSION,
     ACTIVE_USER_INTERVENTION_CHANNEL_SURFACE,
@@ -50,6 +57,13 @@ TERMINAL_BENCH_MODES = (
 TERMINAL_BENCH_DEFAULT_DATASET = "terminal-bench@2.0"
 TERMINAL_BENCH_DEFAULT_TASK = "build-cython-ext"
 TERMINAL_BENCH_DEFAULT_MODEL = "gpt-5.5"
+TERMINAL_BENCH_CASE_STATE_BENCHMARK_ID = "terminal-bench"
+TERMINAL_BENCH_CASE_GOAL_ID = benchmark_case_goal_id(
+    TERMINAL_BENCH_CASE_STATE_BENCHMARK_ID
+)
+TERMINAL_BENCH_CASE_STATE_PATH = benchmark_case_active_state_path(
+    TERMINAL_BENCH_CASE_GOAL_ID
+)
 
 TERMINAL_BENCH_HARBOR_REF = (
     "git+https://github.com/harbor-framework/harbor@"
@@ -6138,6 +6152,11 @@ def build_terminal_bench_goal_harness_interaction_counters(
     goal_harness_state_writes: int = 0,
     case_result_writeback: str = "runner_only",
     counter_trust_level: str = "fixture_declared_zero",
+    case_goal_state_init_required: bool = False,
+    case_goal_state_initialized_before_agent: bool = False,
+    case_goal_state_init_status: str | None = None,
+    case_goal_state_path: str | None = None,
+    case_goal_state_schema_version: str | None = None,
 ) -> dict[str, Any]:
     """Build compact interaction counters without conflating goal-tool surfaces."""
 
@@ -6150,7 +6169,7 @@ def build_terminal_bench_goal_harness_interaction_counters(
         command: 0 for command in TERMINAL_BENCH_GOAL_HARNESS_COUNTER_TRACE_COMMANDS
     }
     cli_calls.update(goal_harness_cli_calls or {})
-    return {
+    counters = {
         "schema_version": TERMINAL_BENCH_GOAL_HARNESS_INTERACTION_COUNTERS_VERSION,
         "prompt_policy_injected": bool(prompt_policy_injected),
         "harness_skill_or_packet_injected": bool(harness_skill_or_packet_injected),
@@ -6169,6 +6188,38 @@ def build_terminal_bench_goal_harness_interaction_counters(
         "raw_trace_recorded": False,
         "raw_task_prompt_recorded": False,
     }
+    if case_goal_state_init_required or case_goal_state_path:
+        counters.update(
+            {
+                "case_goal_state_init_required": bool(
+                    case_goal_state_init_required
+                ),
+                "case_goal_state_initialized_before_agent": bool(
+                    case_goal_state_initialized_before_agent
+                ),
+                "case_goal_state_init_status": (
+                    case_goal_state_init_status
+                    or (
+                        "passed"
+                        if case_goal_state_initialized_before_agent
+                        else "not_started"
+                    )
+                ),
+                "case_goal_state_schema_version": (
+                    case_goal_state_schema_version
+                    or BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION
+                ),
+                "case_goal_state_path": (
+                    case_goal_state_path or TERMINAL_BENCH_CASE_STATE_PATH
+                ),
+                "goal_harness_case_state_reads": 0,
+                "goal_harness_case_state_writes": (
+                    1 if case_goal_state_initialized_before_agent else 0
+                ),
+                "goal_harness_case_state_path_count": 1,
+            }
+        )
+    return counters
 
 def build_terminal_bench_goal_harness_cli_bridge_contract(
     *,
@@ -6289,6 +6340,19 @@ def build_terminal_bench_goal_harness_cli_bridge_contract(
             "raw_paths_required_in_public_artifacts": False,
         },
     }
+
+def build_terminal_bench_case_state_init_contract(
+    *,
+    initialized_by_launch_packet: bool = False,
+) -> dict[str, object]:
+    """Return the shared Goal Harness case active-state contract."""
+
+    return benchmark_case_active_state_init_contract(
+        benchmark_id=TERMINAL_BENCH_CASE_STATE_BENCHMARK_ID,
+        goal_id=TERMINAL_BENCH_CASE_GOAL_ID,
+        case_state_path=TERMINAL_BENCH_CASE_STATE_PATH,
+        initialized_by_launch_packet=initialized_by_launch_packet,
+    )
 
 def collect_terminal_bench_goal_harness_cli_bridge_trace(
     *,
@@ -6552,6 +6616,23 @@ def build_terminal_bench_goal_harness_access_packet(
         if cli_bridge_available
         else TERMINAL_BENCH_GOAL_HARNESS_INTERFACE_SURFACE
     )
+    case_state_contract = build_terminal_bench_case_state_init_contract()
+    case_state_lines = [
+        "case_goal_state_init_flow: "
+        + str(case_state_contract.get("init_flow") or ""),
+        "case_goal_state_init_stage: "
+        + str(case_state_contract.get("init_stage") or ""),
+        "case_goal_state_init_required_before_worker: "
+        + str(case_state_contract.get("init_required_before_worker")).lower(),
+        "case_goal_state_path: "
+        + str(case_state_contract.get("case_state_path") or ""),
+        "case_goal_state_schema_version: "
+        + str(case_state_contract.get("schema_version") or ""),
+        "case_goal_state_proof_fields: "
+        + ",".join(str(field) for field in BENCHMARK_CASE_ACTIVE_STATE_PROOF_FIELDS),
+        "case_goal_state_surrogate_state_files_allowed: "
+        + str(case_state_contract.get("surrogate_state_files_allowed")).lower(),
+    ]
     bridge_lines: list[str] = []
     if cli_bridge_available:
         registry_arg_quoted = shlex.quote(registry_arg)
@@ -6705,6 +6786,7 @@ def build_terminal_bench_goal_harness_access_packet(
             "goal_harness_cli_bridge_contract: "
             + TERMINAL_BENCH_GOAL_HARNESS_CLI_BRIDGE_CONTRACT_VERSION,
             "declared_goal_harness_interface_commands: " + commands,
+            *case_state_lines,
             *bridge_lines,
             "if_cli_bridge_available_use_lean_check_and_final_append_policy: true",
             "status_quota_todo_history_are_optional_blocked_or_resume_calls: true",
@@ -6729,7 +6811,12 @@ def build_terminal_bench_goal_harness_access_packet_fixture(
         prompt_policy_injected=True,
         harness_skill_or_packet_injected=True,
         case_result_writeback="not_observed_no_run_fixture",
+        case_goal_state_init_required=True,
+        case_goal_state_initialized_before_agent=False,
+        case_goal_state_init_status="fixture_contract_only",
+        case_goal_state_path=TERMINAL_BENCH_CASE_STATE_PATH,
     )
+    case_state_contract = build_terminal_bench_case_state_init_contract()
     return {
         "schema_version": "terminal_bench_goal_harness_access_packet_fixture_v0",
         "arm": "codex_goal_harness",
@@ -6740,6 +6827,7 @@ def build_terminal_bench_goal_harness_access_packet_fixture(
         "access_packet": {
             "schema_version": TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_VERSION,
             "packet_public_preview": build_terminal_bench_goal_harness_access_packet(),
+            "case_state_init_contract": case_state_contract,
             "interface_surface": TERMINAL_BENCH_GOAL_HARNESS_INTERFACE_SURFACE,
             "interfaces_available": [],
             "interfaces_declared": list(TERMINAL_BENCH_GOAL_HARNESS_ACCESS_PACKET_COMMANDS),
