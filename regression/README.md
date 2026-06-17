@@ -20,6 +20,16 @@ Docker, private prompts, raw trajectories, raw logs, verifier tails, or local
 credential material. Keep real-agent paths as explicit per-file opt-ins.
 
 ```bash
+python3 regression/blocked-priority-fallback-contract.py
+```
+
+Runs a contract-only projection regression for the human-in-the-loop pattern
+where a higher-priority todo is blocked but a lower-priority fallback is safe.
+It checks that `quota should-run` keeps the blocked item user-visible with
+`notify=NOTIFY`, does not require a new user answer, and still selects the safe
+fallback as the agent action in the interaction contract and protocol packet.
+
+```bash
 python3 regression/external-evidence-observation-real-codex.py
 ```
 
