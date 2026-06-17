@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import fnmatch
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,7 @@ from .todo_contract import (
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
     next_action_requires_advancement_text,
+    normalize_required_write_scopes,
     normalize_todo_status,
     normalize_todo_task_class,
 )
@@ -101,6 +103,7 @@ SELF_REPAIR_SPEND_ACTIONS = {
     "control_plane_health_repair",
     "control_plane_projection_repair",
     "state_projection_gap_repair",
+    "boundary_projection_repair",
 }
 STALL_HEALTH_ITEM_COMPACT_FIELDS = (
     "goal_id",
@@ -864,9 +867,15 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
         "source_section",
         "task_class",
         "action_kind",
+        "required_write_scopes",
     ):
         if item.get(key) is not None:
             compact[key] = item.get(key)
+    required_write_scopes = normalize_required_write_scopes(compact.get("required_write_scopes"))
+    if required_write_scopes:
+        compact["required_write_scopes"] = required_write_scopes
+    else:
+        compact.pop("required_write_scopes", None)
     compact["task_class"] = _todo_task_class(compact)
     return compact
 
@@ -1425,6 +1434,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return "monitor_quiet_skip"
     if payload.get("recovery_delivery_allowed") or effective_action == "outcome_floor_recovery":
         return "outcome_floor_recovery"
+    if effective_action == "boundary_projection_repair":
+        return "boundary_projection_repair"
     if payload.get("self_repair_allowed"):
         return "control_plane_self_repair"
     if payload.get("normal_delivery_allowed") or payload.get("should_run"):
@@ -1472,6 +1483,8 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
         return "produce the required outcome-floor evidence artifact or write the concrete blocker"
     if mode == "control_plane_self_repair":
         return "repair the bounded control-plane/status projection fault exposed by quota"
+    if mode == "boundary_projection_repair":
+        return "repair goal_boundary.write_scope projection before attempting the selected write"
     if mode == "bounded_delivery":
         return _protocol_first_candidate_action(payload) or "advance one bounded validated segment"
     if mode == "mapped_noop_if_unchanged":
@@ -1494,7 +1507,13 @@ def _interaction_next_cli_actions(payload: dict[str, Any], *, mode: str) -> list
             f"goal-harness refresh-state --goal-id {goal_id} --classification <compact_blocker_or_transition>",
             f"goal-harness quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute",
         ]
-    if mode in {"bounded_delivery", "outcome_floor_recovery", "autonomous_replan", "control_plane_self_repair"}:
+    if mode in {
+        "bounded_delivery",
+        "outcome_floor_recovery",
+        "autonomous_replan",
+        "control_plane_self_repair",
+        "boundary_projection_repair",
+    }:
         return [
             f"goal-harness refresh-state --goal-id {goal_id} --classification <validated_progress>",
             f"goal-harness quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute",
@@ -1550,6 +1569,7 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         "outcome_floor_recovery",
         "autonomous_replan",
         "control_plane_self_repair",
+        "boundary_projection_repair",
         "external_evidence_observation",
     }
     return {
@@ -2091,6 +2111,91 @@ def _state_projection_gap_repair_hint(
     }
 
 
+def _write_scope_allowed(required_scope: str, allowed_scopes: list[str]) -> bool:
+    required = str(required_scope or "").strip()
+    if not required:
+        return True
+    for allowed in allowed_scopes:
+        pattern = str(allowed or "").strip()
+        if not pattern:
+            continue
+        if required == pattern:
+            return True
+        if fnmatch.fnmatchcase(required, pattern):
+            return True
+    return False
+
+
+def _boundary_projection_repair_hint(
+    goal_boundary: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None,
+    *,
+    candidate_should_run: bool,
+) -> dict[str, Any] | None:
+    if not candidate_should_run or not isinstance(agent_todo_summary, dict):
+        return None
+    candidate_items: list[dict[str, Any]] = []
+    for key in ("first_executable_items", "first_open_items"):
+        value = agent_todo_summary.get(key)
+        if isinstance(value, list):
+            candidate_items.extend(item for item in value if isinstance(item, dict))
+    selected: dict[str, Any] | None = None
+    for item in candidate_items:
+        if not _todo_item_is_actionable_open(item):
+            continue
+        if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+            continue
+        required = normalize_required_write_scopes(item.get("required_write_scopes"))
+        if required:
+            selected = item
+            break
+    if not selected:
+        return None
+
+    required_scopes = normalize_required_write_scopes(selected.get("required_write_scopes"))
+    boundary = goal_boundary if isinstance(goal_boundary, dict) else {}
+    allowed_scopes = normalize_required_write_scopes(boundary.get("write_scope"))
+    missing_scopes = [
+        scope
+        for scope in required_scopes
+        if not _write_scope_allowed(scope, allowed_scopes)
+    ]
+    if not missing_scopes:
+        return None
+    selected_text = _protocol_action_text(selected.get("text"), limit=220)
+    return {
+        "source": "quota.should-run",
+        "trigger": "required_write_scope_missing_from_goal_boundary",
+        "recommended_mode": "repair_boundary_projection",
+        "effective_action": "boundary_projection_repair",
+        "blocked_action_scope": "boundary_projection",
+        "allowed": True,
+        "notify": "DONT_NOTIFY",
+        "reason": (
+            "selected executable todo requires write scope not present in "
+            "goal_boundary.write_scope"
+        ),
+        "repair_focus": (
+            "repair the checkpointed decision projection: either add the approved "
+            "scope to goal_boundary.write_scope, rewrite the todo inside the current "
+            "boundary, or create a concrete user/controller gate"
+        ),
+        "spend_policy": (
+            "append exactly one heartbeat spend only after boundary projection repair, "
+            "todo rewrite, or blocker writeback is validated"
+        ),
+        "required_write_scopes": required_scopes,
+        "allowed_write_scopes": allowed_scopes,
+        "missing_write_scopes": missing_scopes,
+        "selected_todo": {
+            key: selected.get(key)
+            for key in ("todo_id", "index", "priority", "task_class", "action_kind")
+            if selected.get(key) is not None
+        },
+        "selected_todo_text": selected_text,
+    }
+
+
 def _control_plane_post_handoff_observation_hint(item: dict[str, Any]) -> dict[str, Any] | None:
     control_plane = compact_control_plane_policy(item.get("control_plane"))
     self_repair = (
@@ -2513,6 +2618,25 @@ def _execution_obligation(
                 "normal bounded delivery is blocked until projection is repaired"
             ),
         }
+    if should_run and recommended_mode == "repair_boundary_projection":
+        return {
+            "must_attempt_work": True,
+            "kind": "boundary_projection_repair",
+            "minimum": "one_boundary_projection_or_blocker_writeback_segment",
+            "delivery_allowed": False,
+            "notify_is_execution_gate": False,
+            "contract": "goal_boundary.write_scope",
+            "contract_obligation": (
+                "do not execute the selected write; repair goal_boundary.write_scope "
+                "projection, rewrite the selected todo within boundary, or create a "
+                "concrete user/controller gate"
+            ),
+            "spend_policy": heartbeat_recommendation.get("spend_policy"),
+            "reason": (
+                "selected executable todo requires a write scope that the current "
+                "goal_boundary does not project"
+            ),
+        }
     if should_run and work_lane_contract:
         return {
             "must_attempt_work": bool(work_lane_contract.get("must_attempt_work", should_run)),
@@ -2863,6 +2987,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         agent_todo_summary = _summarize_project_asset_todos(
             project_asset.get("agent_todos") if project_asset else None
         ) or _summarize_user_todos(item.get("agent_todos"))
+        goal_boundary = _goal_boundary(item)
         blocked_priority_fallback = _blocked_priority_fallback(agent_todo_summary)
         stall_self_repair = _stall_self_repair_hint(
             item,
@@ -2890,6 +3015,19 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             normal_delivery_allowed = False
             recovery_allowed = False
             reason = str(projection_gap_repair.get("reason") or reason)
+        boundary_projection_repair = _boundary_projection_repair_hint(
+            goal_boundary,
+            agent_todo_summary,
+            candidate_should_run=bool(
+                normal_delivery_allowed or recovery_allowed or self_repair_allowed
+            ),
+        )
+        if boundary_projection_repair:
+            stall_self_repair = boundary_projection_repair
+            self_repair_allowed = True
+            normal_delivery_allowed = False
+            recovery_allowed = False
+            reason = str(boundary_projection_repair.get("reason") or reason)
         should_run = bool(normal_delivery_allowed or recovery_allowed or self_repair_allowed)
         effective_action = _effective_action(
             normal_delivery_allowed=normal_delivery_allowed,
@@ -2986,7 +3124,11 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             ),
             "quota": quota,
             "state": state,
-            "blocked_action_scope": quota.get("blocked_action_scope"),
+            "blocked_action_scope": (
+                boundary_projection_repair.get("blocked_action_scope")
+                if boundary_projection_repair
+                else quota.get("blocked_action_scope")
+            ),
             "safe_bypass_allowed": bool(quota.get("safe_bypass_allowed")),
             "safe_bypass_kind": quota.get("safe_bypass_kind"),
             "safe_bypass_policy": quota.get("safe_bypass_policy"),
@@ -3011,7 +3153,7 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
                 work_lane_contract=work_lane_contract,
                 external_evidence_observation=external_evidence_observation,
             ),
-            "goal_boundary": _goal_boundary(item),
+            "goal_boundary": goal_boundary,
             "plan_summary": plan.get("summary"),
             "todo_write_hint": _todo_write_hint(safe_goal_id),
         }
@@ -3026,6 +3168,8 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
             payload["stall_self_repair"] = stall_self_repair
         if projection_gap:
             payload["state_projection_gap"] = projection_gap
+        if boundary_projection_repair:
+            payload["boundary_projection_gap"] = boundary_projection_repair
         if item.get("operator_question"):
             payload["operator_question"] = item.get("operator_question")
         if item.get("missing_gates"):
@@ -4491,6 +4635,11 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if stall_self_repair.get("repair_focus"):
             lines.append(f"- stall_repair_focus: {stall_self_repair.get('repair_focus')}")
+        if stall_self_repair.get("missing_write_scopes"):
+            lines.append(
+                "- boundary_missing_write_scopes: "
+                f"{', '.join(str(value) for value in stall_self_repair.get('missing_write_scopes') or [])}"
+            )
         blockers = (
             stall_self_repair.get("blocking_health_items")
             if isinstance(stall_self_repair.get("blocking_health_items"), list)

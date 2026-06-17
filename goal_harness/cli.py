@@ -4794,6 +4794,15 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild_score, compact_blocker_writeback, or monitor."
         ),
     )
+    todo_parser.add_argument(
+        "--required-write-scope",
+        dest="required_write_scopes",
+        action="append",
+        help=(
+            "For todo add/update, declare a required relative write scope such as "
+            "src/** or runners/openviking/**. Repeat for multiple scopes."
+        ),
+    )
     todo_parser.add_argument("--next-agent-todo", help="For complete/supersede, atomically add or update the next agent todo.")
     todo_parser.add_argument("--next-user-todo", help="For complete/supersede, atomically add or update the next user todo.")
     todo_parser.add_argument(
@@ -8636,6 +8645,7 @@ def main(argv: list[str] | None = None) -> int:
                     text=args.text,
                     task_class=args.task_class,
                     action_kind=args.action_kind,
+                    required_write_scopes=args.required_write_scopes,
                     project=Path(args.project).expanduser() if args.project else None,
                     state_file=Path(args.state_file).expanduser() if args.state_file else None,
                     dry_run=bool(args.dry_run),
@@ -8643,8 +8653,16 @@ def main(argv: list[str] | None = None) -> int:
             elif args.todo_command == "update":
                 if not args.todo_id:
                     raise ValueError("todo update requires --todo-id")
-                if not any([args.status, args.note, args.evidence, args.reason, args.task_class, args.action_kind]):
-                    raise ValueError("todo update requires at least one of --status, --note, --evidence, --reason, --task-class, or --action-kind")
+                if not any([
+                    args.status,
+                    args.note,
+                    args.evidence,
+                    args.reason,
+                    args.task_class,
+                    args.action_kind,
+                    args.required_write_scopes,
+                ]):
+                    raise ValueError("todo update requires at least one of --status, --note, --evidence, --reason, --task-class, --action-kind, or --required-write-scope")
                 payload = update_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -8656,6 +8674,7 @@ def main(argv: list[str] | None = None) -> int:
                     reason=args.reason,
                     task_class=args.task_class,
                     action_kind=args.action_kind,
+                    required_write_scopes=args.required_write_scopes,
                     project=Path(args.project).expanduser() if args.project else None,
                     state_file=Path(args.state_file).expanduser() if args.state_file else None,
                     dry_run=bool(args.dry_run),

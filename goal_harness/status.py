@@ -38,6 +38,7 @@ from .todo_contract import (
     TODO_TASK_PATTERN,
     build_todo_id,
     normalize_todo_action_kind,
+    normalize_required_write_scopes,
     normalize_todo_status,
     normalize_todo_task_class,
     parse_todo_metadata_line,
@@ -3573,6 +3574,9 @@ def structured_todo_item(
     action_kind = normalize_todo_action_kind(item.get("action_kind"))
     if action_kind:
         normalized["action_kind"] = action_kind
+    required_write_scopes = normalize_required_write_scopes(item.get("required_write_scopes"))
+    if required_write_scopes:
+        normalized["required_write_scopes"] = required_write_scopes
     if priority:
         normalized["priority"] = priority
         normalized["title"] = normalize_todo_text(title)
@@ -3596,6 +3600,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "source_section",
         "task_class",
         "action_kind",
+        "required_write_scopes",
         "note",
         "evidence",
         "reason",
