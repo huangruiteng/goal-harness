@@ -17,7 +17,11 @@ from goal_harness.benchmark import (  # noqa: E402
     AGENTS_LAST_EXAM_CASE_STATE_PATH,
     SKILLSBENCH_PRODUCT_MODE_CASE_GOAL_ID,
     SKILLSBENCH_PRODUCT_MODE_CASE_STATE_PATH,
+    TERMINAL_BENCH_CASE_GOAL_ID,
+    TERMINAL_BENCH_CASE_STATE_PATH,
     build_agents_last_exam_local_launch_packet,
+    build_terminal_bench_case_state_init_contract,
+    build_terminal_bench_goal_harness_access_packet_fixture,
 )
 from goal_harness.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_PROOF_FIELDS,
@@ -52,15 +56,13 @@ def assert_contract_shape(contract: dict[str, object], expected_path: str) -> No
 
 
 def test_shared_contract_for_current_benchmark_routes() -> None:
-    terminal_goal_id = benchmark_case_goal_id("terminal-bench")
-    terminal_path = benchmark_case_active_state_path(terminal_goal_id)
     cases = [
         (
             "skillsbench",
             SKILLSBENCH_PRODUCT_MODE_CASE_GOAL_ID,
             SKILLSBENCH_PRODUCT_MODE_CASE_STATE_PATH,
         ),
-        ("terminal-bench", terminal_goal_id, terminal_path),
+        ("terminal-bench", TERMINAL_BENCH_CASE_GOAL_ID, TERMINAL_BENCH_CASE_STATE_PATH),
         (
             AGENTS_LAST_EXAM_BENCHMARK_ID,
             AGENTS_LAST_EXAM_CASE_GOAL_ID,
@@ -132,8 +134,27 @@ def test_ale_launch_packet_reuses_shared_contract() -> None:
     assert packet["case_state_init_contract"] == expected
 
 
+def test_terminal_bench_access_packet_fixture_reuses_shared_contract() -> None:
+    fixture = build_terminal_bench_goal_harness_access_packet_fixture()
+    expected = build_terminal_bench_case_state_init_contract()
+    access_packet = fixture["access_packet"]
+    counters = fixture["interaction_counters"]
+    assert access_packet["case_state_init_contract"] == expected
+    assert_contract_shape(
+        access_packet["case_state_init_contract"], TERMINAL_BENCH_CASE_STATE_PATH
+    )
+    preview = access_packet["packet_public_preview"]
+    assert TERMINAL_BENCH_CASE_STATE_PATH in preview
+    assert "case_goal_state_init_required_before_worker: true" in preview
+    assert counters["case_goal_state_init_required"] is True
+    assert counters["case_goal_state_initialized_before_agent"] is False
+    assert counters["case_goal_state_init_status"] == "fixture_contract_only"
+    assert counters["case_goal_state_path"] == TERMINAL_BENCH_CASE_STATE_PATH
+
+
 if __name__ == "__main__":
     test_shared_contract_for_current_benchmark_routes()
     test_seed_text_uses_real_goal_harness_active_state_shape()
     test_seed_write_command_uses_canonical_path()
     test_ale_launch_packet_reuses_shared_contract()
+    test_terminal_bench_access_packet_fixture_reuses_shared_contract()
