@@ -11,18 +11,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def main() -> int:
-    sys.path.insert(0, str(REPO_ROOT))
-    from goal_harness.cli_commands import handle_doctor_command, register_doctor_command
-
-    assert callable(register_doctor_command)
-    assert callable(handle_doctor_command)
-
+def run_cli(*args: str) -> dict[str, object]:
     result = subprocess.run(
         [
             sys.executable,
@@ -30,7 +25,7 @@ def main() -> int:
             "goal_harness.cli",
             "--format",
             "json",
-            "doctor",
+            *args,
         ],
         cwd=REPO_ROOT,
         check=True,
@@ -39,8 +34,57 @@ def main() -> int:
     )
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict), payload
-    assert payload.get("ok") is True, payload
-    assert "checks" in payload, payload
+    return payload
+
+
+def main() -> int:
+    sys.path.insert(0, str(REPO_ROOT))
+    from goal_harness.cli_commands import (
+        handle_demo_command,
+        handle_doctor_command,
+        handle_new_project_prompt_command,
+        register_doctor_command,
+        register_starter_commands,
+    )
+
+    assert callable(handle_demo_command)
+    assert callable(register_doctor_command)
+    assert callable(register_starter_commands)
+    assert callable(handle_doctor_command)
+    assert callable(handle_new_project_prompt_command)
+
+    doctor = run_cli("doctor")
+    assert doctor.get("ok") is True, doctor
+    assert "checks" in doctor, doctor
+
+    prompt = run_cli(
+        "new-project-prompt",
+        "--project",
+        "/tmp/goal-harness-command-module-fixture",
+        "--goal-doc",
+        "GOAL.md",
+        "--goal-id",
+        "command-module-fixture",
+    )
+    assert prompt.get("ok") is True, prompt
+    assert prompt.get("goal_id") == "command-module-fixture", prompt
+    assert "prompt" in prompt, prompt
+
+    with tempfile.TemporaryDirectory(prefix="goal-harness-cli-command-module-") as raw_tmp:
+        root = Path(raw_tmp)
+        demo = run_cli(
+            "--runtime-root",
+            str(root / "runtime"),
+            "demo",
+            "--project",
+            str(root / "project"),
+            "--goal-id",
+            "command-module-demo",
+        )
+    assert demo.get("ok") is True, demo
+    assert demo.get("goal_id") == "command-module-demo", demo
+    assert "quota" in demo, demo
+
     print("cli-command-module-contract-regression ok")
     return 0
 
