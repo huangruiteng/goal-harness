@@ -56,17 +56,26 @@ Each case records:
 - `routing_guidance`: whether to repeat, analyze, retire, or alternate.
 - `public_boundary`: compact proof that raw/private material was not copied.
 
+When a case has been rerun under the current main comparison protocol, the
+top-level `analysis_id`, `classification`, `decision`, `scores`, and `arms`
+must describe that current protocol first. Older positive/regression rows stay
+valuable, but they belong in explicit fields such as `legacy_positive_result`,
+`legacy_reward_feedback_result`, or `legacy_blind_loop_positive_result`. Do not
+mix a legacy `0.0 -> 1.0` score delta into the main table after a current
+protocol rerun has shown `1.0 -> 1.0` or `0.0 -> 0.0`.
+
 ## Current Seed Cases
 
-- `terminal-bench@2.0 / multi-source-data-merger` is a positive uplift asset:
-  Codex goal-mode baseline reached an official `0.0` case/solution failure
-  after the worker materialization path was repaired, while the
-  `codex_goal_harness` treatment reached official `1.0`.
+- `terminal-bench@2.0 / multi-source-data-merger` is a legacy positive asset
+  and a current-protocol non-regression guard: the old `0.0 -> 1.0` row remains
+  useful as an end-to-end pass and runner-repair lesson, but the comparable
+  current protocol rerun is `1.0 -> 1.0`, so it must not be counted as current
+  main-table uplift.
 - `skillsbench@1.1 / debug-trl-grpo` is a treatment regression asset:
   after repairing the local Docker CPU setup blocker, the Codex goal-mode
   baseline scored `0.25`, while the automation-loop treatment scored `0.0`.
 
-These two records are intentionally paired in the analysis layer: together they
-show that Goal Harness can produce real uplift, but the automation-loop
-treatment route is not automatically better and needs prompt/round-policy
-analysis rather than broad claims.
+These records are intentionally paired in the analysis layer: old positive
+assets show what helped under older or ablation protocols, while current
+protocol rows decide the main table. Regression and no-uplift rows keep prompt,
+round-policy, and product-mode claims grounded instead of broad.

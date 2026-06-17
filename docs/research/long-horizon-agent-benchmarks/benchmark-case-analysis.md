@@ -7,7 +7,7 @@ It is intentionally separate from `benchmark-run-ledger.md`. The run ledger
 records compact attempts and scores; this file records why a result matters.
 
 - schema_version: `benchmark_case_analysis_v0`
-- updated_at: `2026-06-17T22:54:46+08:00`
+- updated_at: `2026-06-18T02:18:00+08:00`
 - machine_source: `benchmark-case-analysis.json`
 
 ## Summary
@@ -21,14 +21,14 @@ current main-table uplift until a current-protocol rerun closes.
 
 | Benchmark | Case | Class | Baseline | Treatment | Delta | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
-| `terminal-bench@2.0` | `multi-source-data-merger` | legacy positive / current-protocol baseline-solved | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
+| `terminal-bench@2.0` | `multi-source-data-merger` | current-protocol baseline-solved / legacy positive asset | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
 | `terminal-bench@2.0` | `nginx-request-logging` | current-protocol baseline-solved / legacy runner asset | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
 | `terminal-bench@2.0` | `make-doom-for-mips` | timeout attribution asset | `0.0` | `0.0` | `0.0` | `paired_result_requires_attribution` |
 | `terminal-bench@2.0` | `mteb-retrieve` | setup probe asset | `0.0` | `0.0` | `0.0` | `environment_setup_probe_materialized_with_exception_repeat_blocked` |
 | `terminal-bench@2.0` | `pytorch-model-recovery` | exception attribution asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift_exception_research_required` |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
-| `skillsbench@1.1` | `dapt-intrusion-detection` | reward-feedback positive / current protocol unresolved | legacy `0.0` | legacy `1.0` | n/a | `reward_feedback_ablation_positive_current_protocol_unresolved` |
-| `skillsbench@1.1` | `paratransit-routing` | product-mode no-uplift asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
+| `skillsbench@1.1` | `dapt-intrusion-detection` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
+| `skillsbench@1.1` | `paratransit-routing` | product-mode no-uplift / blind-loop positive asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
 | `skillsbench@1.1` | `debug-trl-grpo` | regression asset | `0.25` | `0.0` | `-0.25` | `paired_treatment_regressed` |
 | `skillsbench@1.1` | `civ6-adjacency-optimizer` | no-uplift asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
 | `skillsbench@1.1` | `manufacturing-codebook-normalization` | no-uplift asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
