@@ -82,49 +82,65 @@ def test_case_analysis_json() -> None:
     assert current_protocol["decision"] == (
         "paired_baseline_solved_treatment_preserved"
     ), current_protocol
-    assert nginx_route_canary["classification"] == "runner_materialization_asset", (
+    assert nginx_route_canary["classification"] == (
+        "baseline_solved_non_regression_asset"
+    ), (
         nginx_route_canary
     )
     assert nginx_route_canary["decision"] == (
-        "paired_baseline_runner_or_setup_repair_required"
+        "paired_baseline_solved_treatment_preserved"
     ), nginx_route_canary
-    assert nginx_route_canary["scores"]["official_score_delta"] == 1.0, (
+    assert nginx_route_canary["scores"]["official_score_delta"] == 0, (
         nginx_route_canary
     )
     assert nginx_route_canary["scores"]["claimable_uplift"] is False, (
         nginx_route_canary
     )
-    assert nginx_route_canary["arms"]["baseline"]["run_id"] == "890f0a8487e4", (
+    assert nginx_route_canary["arms"]["baseline"]["run_id"] == "c9e583310242", (
         nginx_route_canary
     )
     assert nginx_route_canary["arms"]["treatment"]["run_id"] == "2a6a46cfb953", (
         nginx_route_canary
     )
-    assert nginx_route_canary["arms"]["baseline"]["failure_scope"] == (
-        "runner_or_setup"
-    ), nginx_route_canary
+    assert nginx_route_canary["arms"]["baseline"]["failure_scope"] == "passed", (
+        nginx_route_canary
+    )
     assert nginx_route_canary["arms"]["treatment"]["failure_scope"] == "passed", (
         nginx_route_canary
     )
-    assert nginx_route_canary["compact_lifecycle_analysis"][
+    legacy_nginx = nginx_route_canary["legacy_runner_materialization_asset"]
+    assert legacy_nginx["classification"] == "runner_materialization_asset", (
+        legacy_nginx
+    )
+    assert legacy_nginx["decision"] == (
+        "paired_baseline_runner_or_setup_repair_required"
+    ), legacy_nginx
+    assert legacy_nginx["scores"]["official_score_delta"] == 1.0, legacy_nginx
+    assert legacy_nginx["arms"]["baseline"]["run_id"] == "890f0a8487e4", (
+        legacy_nginx
+    )
+    assert legacy_nginx["arms"]["baseline"]["failure_scope"] == (
+        "runner_or_setup"
+    ), legacy_nginx
+    assert legacy_nginx["compact_lifecycle_analysis"][
         "baseline_case_attempt_countable"
-    ] is False, nginx_route_canary
-    assert nginx_route_canary["compact_lifecycle_analysis"][
+    ] is False, legacy_nginx
+    assert legacy_nginx["compact_lifecycle_analysis"][
         "claimable_uplift"
-    ] is False, nginx_route_canary
+    ] is False, legacy_nginx
     assert nginx_route_canary["arms"]["treatment"][
         "worker_goal_harness_cli_call_total"
     ] == 0, nginx_route_canary
-    nginx_probe = nginx_route_canary["worker_materialization_probe"]
+    nginx_probe = legacy_nginx["worker_materialization_probe"]
     assert nginx_probe["run_id"] == "51fa05316d18", nginx_probe
     assert nginx_probe["failure_class"] == "codex_cli_not_on_path", nginx_probe
     assert nginx_probe["case_solution_attempted"] is False, nginx_probe
     assert nginx_probe["benchmark_budget_countable"] is False, nginx_probe
-    assert nginx_route_canary["compact_lifecycle_analysis"][
+    assert legacy_nginx["compact_lifecycle_analysis"][
         "baseline_repair_probe_failure"
-    ] == "codex_cli_not_on_path", nginx_route_canary
+    ] == "codex_cli_not_on_path", legacy_nginx
     assert nginx_route_canary["routing_guidance"]["repeat_policy"] == (
-        "do_not_repeat_until_codex_cli_on_worker_path_probe_passes"
+        "repeat_only_after_worker_setup_or_managed_route_policy_change"
     ), nginx_route_canary
     assert skillsbench_uplift["classification"] == (
         "reward_feedback_positive_blind_loop_neutral_asset"

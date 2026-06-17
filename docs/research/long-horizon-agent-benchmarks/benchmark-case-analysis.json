@@ -97,14 +97,14 @@
       }
     },
     {
-      "analysis_id": "terminal-bench-2.0__nginx-request-logging__treatment-pass-baseline-runner-blocked",
+      "analysis_id": "terminal-bench-2.0__nginx-request-logging__baseline-solved-treatment-preserved",
       "arms": {
         "baseline": {
           "arm_id": "hardened_codex_baseline",
-          "failure_class": "worker_install_failed_agent_codex_install_nvm_node",
-          "failure_scope": "runner_or_setup",
-          "run_group_id": "terminal-bench-nginx-request-logging-hardened-blind-pair-20260616T110017CST",
-          "run_id": "890f0a8487e4",
+          "failure_class": "none",
+          "failure_scope": "passed",
+          "run_group_id": "terminal-bench-nginx-request-logging-hardened-after-materialization-fix",
+          "run_id": "c9e583310242",
           "worker_bridge_status": "not_required"
         },
         "treatment": {
@@ -120,9 +120,9 @@
         }
       },
       "benchmark_id": "terminal-bench@2.0",
-      "capability_signal": "The Goal Harness treatment arm reached official 1.0 on a real Terminal-Bench case, but the paired baseline 0.0 is attributed to Codex CLI materialization in the worker before a comparable solver attempt. This is a treatment-route pass and runner-materialization lesson, not a clean pure-solver uplift claim.",
+      "capability_signal": "After hardened baseline worker materialization was repaired, the Codex baseline also reached official 1.0 while the Goal Harness treatment preserved 1.0. The current main-table signal is therefore success preservation / non-regression, not uplift.",
       "case_id": "nginx-request-logging",
-      "classification": "runner_materialization_asset",
+      "classification": "baseline_solved_non_regression_asset",
       "compact_lifecycle_analysis": {
         "baseline_case_attempt_countable": false,
         "baseline_lifecycle_stage": "worker_codex_cli_materialization_failed_before_comparable_solver_attempt",
@@ -135,14 +135,14 @@
         "treatment_lifecycle_stage": "official_verifier_passed",
         "worker_bridge_note": "The treatment had Goal Harness access packet state but no worker CLI bridge call evidence; do not treat this as in-case CLI bridge uplift evidence."
       },
-      "control_plane_signal": "The useful control-plane signal is separation of official score delta from claim eligibility. The ledger can store the 0.0 -> 1.0 pair, while case analysis keeps the baseline runner/setup blocker from becoming a false treatment-uplift narrative.",
-      "decision": "paired_baseline_runner_or_setup_repair_required",
-      "evidence_status": "compact_pair_complete_baseline_runner_setup_blocked",
+      "control_plane_signal": "The old 0.0 -> 1.0 row remains valuable as a runner-materialization warning: before the repair, a baseline setup blocker created a false-positive score delta. The current protocol now prefers the repaired comparable baseline result.",
+      "decision": "paired_baseline_solved_treatment_preserved",
+      "evidence_status": "compact_pair_complete_after_worker_materialization_repair",
       "optimization_guidance": [
-        "Materialize a usable Codex CLI on the hardened baseline worker PATH before any same-case comparable rerun.",
-        "Keep runtime_install_extended_setup as setup-materialization evidence only; do not count it as solver progress until the pre-worker Codex preflight is ok.",
-        "Keep the treatment pass as a route-canary showing the Goal Harness treatment can complete nginx-request-logging under official scoring.",
-        "Record worker CLI bridge availability separately from access-packet presence; this treatment passed without observed worker-side Goal Harness CLI calls."
+        "Do not count nginx-request-logging as current-protocol treatment uplift; the repaired hardened baseline also passes.",
+        "Keep the legacy runner-materialization asset as a guard against false uplift claims when one arm fails before comparable solver execution.",
+        "Use this case as a Terminal-Bench success-preservation guard when changing worker setup, managed route prompts, or compact closeout policy.",
+        "Continue recording worker CLI bridge availability separately from access-packet presence; the treatment pass still has zero observed worker-side Goal Harness CLI calls."
       ],
       "public_boundary": {
         "artifact_reference_policy": "refer to compact ledger ids and run groups only",
@@ -152,25 +152,22 @@
         "verifier_output_copied": false
       },
       "routing_guidance": {
-        "next_action": "materialize Codex CLI on the hardened baseline worker PATH or provide an equivalent launcher, then rerun only after a compact fail-fast preflight proves codex --version succeeds before solver start",
-        "repeat_policy": "do_not_repeat_until_codex_cli_on_worker_path_probe_passes"
+        "next_action": "keep as a current-protocol baseline-solved non-regression guard; choose another baseline-failing case for uplift mining",
+        "repeat_policy": "repeat_only_after_worker_setup_or_managed_route_policy_change"
       },
       "scores": {
-        "baseline_official_score": 0,
-        "claimable_uplift": false,
-        "official_score_delta": 1,
-        "treatment_official_score": 1
+        "baseline_official_score": 1,
+        "treatment_official_score": 1,
+        "official_score_delta": 0,
+        "claimable_uplift": false
       },
       "stability_assessment": {
-        "end_to_end_treatment_pass": "high",
+        "current_protocol_comparability": "high",
+        "current_uplift_claim": "blocked_by_repaired_baseline_success",
+        "legacy_runner_materialization_lesson": "preserved",
         "main_confounds": [
-          "baseline worker Codex CLI materialization failed before comparable solver execution",
-          "treatment worker CLI bridge was not observed, so the pass should not be attributed to active in-case Goal Harness CLI use"
-        ],
-        "pure_solver_uplift_claim": "blocked",
-        "stabilization_needed": [
-          "make the hardened baseline worker find or receive a valid Codex CLI without runtime install failure",
-          "rerun only after compact preflight proves baseline worker materialization reached ok"
+          "treatment and repaired baseline were not launched as a single simultaneous pair, but both are compact official scored no-upload runs for the same case and current route family",
+          "treatment worker Goal Harness CLI calls remain unobserved, so the pass should not be attributed to active in-case CLI use"
         ]
       },
       "worker_materialization_probe": {
@@ -193,6 +190,72 @@
         "setup_blockers": [
           "codex_cli_not_on_path"
         ]
+      },
+      "legacy_runner_materialization_asset": {
+        "decision": "paired_baseline_runner_or_setup_repair_required",
+        "evidence_status": "compact_pair_complete_baseline_runner_setup_blocked",
+        "classification": "runner_materialization_asset",
+        "scores": {
+          "baseline_official_score": 0,
+          "claimable_uplift": false,
+          "official_score_delta": 1,
+          "treatment_official_score": 1
+        },
+        "arms": {
+          "baseline": {
+            "arm_id": "hardened_codex_baseline",
+            "failure_class": "worker_install_failed_agent_codex_install_nvm_node",
+            "failure_scope": "runner_or_setup",
+            "run_group_id": "terminal-bench-nginx-request-logging-hardened-blind-pair-20260616T110017CST",
+            "run_id": "890f0a8487e4",
+            "worker_bridge_status": "not_required"
+          },
+          "treatment": {
+            "arm_id": "codex_goal_harness_treatment",
+            "failure_class": "none",
+            "failure_scope": "passed",
+            "goal_harness_inside_case": true,
+            "run_group_id": "terminal-bench-nginx-request-logging-hardened-blind-pair-20260616T110017CST",
+            "run_id": "2a6a46cfb953",
+            "worker_bridge_status": "not_required",
+            "worker_cli_bridge_available": false,
+            "worker_goal_harness_cli_call_total": 0
+          }
+        },
+        "compact_lifecycle_analysis": {
+          "baseline_case_attempt_countable": false,
+          "baseline_lifecycle_stage": "worker_codex_cli_materialization_failed_before_comparable_solver_attempt",
+          "baseline_repair_probe_case_attempt_countable": false,
+          "baseline_repair_probe_failure": "codex_cli_not_on_path",
+          "baseline_repair_probe_run_id": "51fa05316d18",
+          "claimable_uplift": false,
+          "next_comparable_baseline_requirement": "worker_path_contains_usable_codex_cli_before_solver_start",
+          "treatment_case_attempt_countable": true,
+          "treatment_lifecycle_stage": "official_verifier_passed",
+          "worker_bridge_note": "The treatment had Goal Harness access packet state but no worker CLI bridge call evidence; do not treat this as in-case CLI bridge uplift evidence."
+        },
+        "worker_materialization_probe": {
+          "arm_id": "hardened_codex_worker_materialization_probe",
+          "benchmark_budget_countable": false,
+          "case_solution_attempted": false,
+          "compact_boundary": {
+            "raw_logs_read": false,
+            "raw_task_text_read": false,
+            "trajectory_read": false,
+            "verifier_output_read": false
+          },
+          "failure_class": "codex_cli_not_on_path",
+          "failure_scope": "runner_or_setup",
+          "interpretation": "Fail-fast require_existing_codex probe proved the current hardened baseline worker path does not contain a usable Codex CLI. Do not rerun the same baseline until the worker image or launcher materializes Codex on PATH, or switch to an explicit runtime_install_extended_setup probe and classify it as setup evidence only.",
+          "official_score": 0,
+          "run_group_id": "terminal-bench-nginx-hardened-worker-materialization-probe-20260616T111726CST",
+          "run_id": "51fa05316d18",
+          "score_status": "failed",
+          "setup_blockers": [
+            "codex_cli_not_on_path"
+          ]
+        },
+        "interpretation": "Legacy hardened baseline 0.0 plus treatment 1.0 remains a runner-materialization asset: the baseline failed before a comparable solver attempt, so the old +1.0 delta is not claimable uplift."
       }
     },
     {
@@ -3011,5 +3074,5 @@
     "trajectory_recorded": false,
     "update_rule": "add one case analysis record after compact result ingest and benchmark-run-ledger update"
   },
-  "updated_at": "2026-06-17T20:33:39+08:00"
+  "updated_at": "2026-06-17T21:05:00+08:00"
 }
