@@ -25,9 +25,9 @@ python3 regression/cli-command-module-contract.py
 
 Runs a contract-only compatibility check for the first modular CLI command
 seam. It imports `goal_harness.cli_commands`, then verifies the old public
-`doctor`, `new-project-prompt`, and `demo` invocations still return successful
-JSON payloads after their registration/handling moves out of the top-level
-`cli.py` file.
+`doctor`, `new-project-prompt`, `demo`, `check`, `status`, and
+`review-packet` invocations still return successful JSON payloads after their
+registration/handling moves out of the top-level `cli.py` file.
 
 ```bash
 python3 regression/blocked-priority-fallback-contract.py
