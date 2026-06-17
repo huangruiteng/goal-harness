@@ -7,7 +7,7 @@ It is intentionally separate from `benchmark-run-ledger.md`. The run ledger
 records compact attempts and scores; this file records why a result matters.
 
 - schema_version: `benchmark_case_analysis_v0`
-- updated_at: `2026-06-17T21:05:00+08:00`
+- updated_at: `2026-06-17T22:54:46+08:00`
 - machine_source: `benchmark-case-analysis.json`
 
 ## Summary
@@ -44,6 +44,21 @@ current main-table uplift until a current-protocol rerun closes.
 | `skillsbench@1.1` | `travel-planning` | baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
 | `skillsbench@1.1` | `setup-fuzzing-py` | setup blocker asset | missing | n/a | n/a | `baseline_runner_or_setup_repair_required` |
 | `skillsbench@1.1` | `adaptive-cruise-control` | setup blocker asset | missing | n/a | n/a | `baseline_runner_or_setup_repair_required` |
+
+## Terminal-Bench Current-Protocol Coverage
+
+These rows are generated from the latest compact ledger decisions. They are
+current-protocol success-preservation guards: both baseline and treatment
+score `1.0`, so none of them should be counted as current uplift.
+
+| Case | Baseline | Treatment | Delta | Role | Case Analysis Status |
+| --- | --- | --- | --- | --- | --- |
+| `cobol-modernization` | `1` (`5d2bb1d5974a`) | `1` (`a14ad9487f8a`) | `0.0` | `current_protocol_baseline_solved_non_regression_guard` | `coverage_row_only_no_deep_case_note_yet` |
+| `git-multibranch` | `1` (`af14bc3210c8`) | `1` (`daf4b67ab222`) | `0.0` | `current_protocol_baseline_solved_non_regression_guard` | `coverage_row_only_no_deep_case_note_yet` |
+| `large-scale-text-editing` | `1` (`52105cdfe282`) | `1` (`01cd5e4bf562`) | `0.0` | `current_protocol_baseline_solved_non_regression_guard` | `coverage_row_only_no_deep_case_note_yet` |
+| `multi-source-data-merger` | `1` (`37d3587daf12`) | `1` (`76cbfb57f1ea`) | `0.0` | `current_protocol_baseline_solved_non_regression_guard` | `case_record_has_legacy_positive_plus_current_protocol_recheck` |
+| `nginx-request-logging` | `1` (`c9e583310242`) | `1` (`2a6a46cfb953`) | `0.0` | `current_protocol_baseline_solved_non_regression_guard` | `case_record_current_protocol_baseline_solved_with_legacy_runner_asset` |
+| `regex-log` | `1` (`a9503b70072d`) | `1` (`5926107e45f4`) | `0.0` | `current_protocol_baseline_solved_non_regression_guard` | `coverage_row_only_no_deep_case_note_yet` |
 
 ## Treatment Policy Control Set
 
