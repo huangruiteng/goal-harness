@@ -51,6 +51,26 @@ MIXED_TRACKED_FILES = [
     "docs/research/long-horizon-agent-benchmarks/README.md",
 ]
 
+AGENTISSUE_CLI_BEHAVIOR_MARKERS = [
+    "agentissue-codex-runner-flow",
+    "--synthetic-staging-root",
+    "--execution-gate-root",
+    "--first-run-handoff-root",
+    "--workflow-check-root",
+    "--run-gate-root",
+    "--target-runner-handoff-root",
+    "--real-result-root",
+    "--private-runner-root",
+    "args.synthetic_staging_root",
+    "args.execution_gate_root",
+    "args.first_run_handoff_root",
+    "args.workflow_check_root",
+    "args.run_gate_root",
+    "args.target_runner_handoff_root",
+    "args.real_result_root",
+    "args.private_runner_root",
+]
+
 REQUIRED_SOURCE_SNIPPETS = [
     "AGENTISSUE_BENCHMARK_ID",
     "AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION",
@@ -114,6 +134,41 @@ def git_diff_name_only() -> set[str] | None:
     return changed
 
 
+def git_changed_lines(path: str) -> list[str] | None:
+    lines: list[str] = []
+    for diff_args in (
+        ["git", "diff", "--unified=0", "--", path],
+        ["git", "diff", "--cached", "--unified=0", "--", path],
+        ["git", "diff", "--unified=0", "origin/main", "--", path],
+    ):
+        result = subprocess.run(
+            diff_args,
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            if line.startswith(("+++", "---")):
+                continue
+            if line.startswith(("+", "-")):
+                lines.append(line[1:])
+    return lines
+
+
+def agentissue_cli_behavior_changed() -> bool:
+    changed_lines = git_changed_lines("goal_harness/cli.py")
+    if changed_lines is None:
+        return True
+    return any(
+        marker in line
+        for line in changed_lines
+        for marker in AGENTISSUE_CLI_BEHAVIOR_MARKERS
+    )
+
+
 def assert_packet_exists_and_indexed() -> None:
     assert PACKET.exists(), PACKET
     readme = read(README)
@@ -151,6 +206,8 @@ def assert_mixed_files_are_detected() -> None:
         return
     unexpected = [name for name in changed if name not in MIXED_TRACKED_FILES]
     assert not unexpected, unexpected
+    if changed == {"goal_harness/cli.py"} and not agentissue_cli_behavior_changed():
+        return
     assert (
         "goal_harness/benchmark.py" in changed
         or "goal_harness/benchmark_adapters/agentissue.py" in changed
