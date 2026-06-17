@@ -9,48 +9,48 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 
 ## Case Decisions
 
-| Benchmark | Case | Decision | Runs |
-| --- | --- | --- | --- |
-| `skillsbench@1.1` | `3d-scan-calc` | `paired_baseline_solved_treatment_preserved` | `3` |
-| `skillsbench@1.1` | `ada-bathroom-plan-repair` | `paired_baseline_solved_treatment_preserved` | `4` |
-| `skillsbench@1.1` | `adaptive-cruise-control` | `baseline_runner_or_setup_repair_required` | `1` |
-| `skillsbench@1.1` | `azure-bgp-oscillation-route-leak` | `paired_no_score_uplift` | `10` |
-| `skillsbench@1.1` | `bike-rebalance` | `paired_baseline_solved_treatment_preserved` | `3` |
-| `skillsbench@1.1` | `citation-check` | `paired_baseline_solved_treatment_preserved` | `4` |
-| `skillsbench@1.1` | `civ6-adjacency-optimizer` | `paired_no_score_uplift` | `4` |
-| `skillsbench@1.1` | `dapt-intrusion-detection` | `paired_baseline_setup_preflight_selection_required` | `5` |
-| `skillsbench@1.1` | `debug-trl-grpo` | `paired_baseline_runner_or_setup_repair_required` | `9` |
-| `skillsbench@1.1` | `fix-build-agentops` | `baseline_runner_or_setup_repair_required` | `2` |
-| `skillsbench@1.1` | `llm-prefix-cache-replay` | `paired_baseline_runner_or_setup_repair_required` | `20` |
-| `skillsbench@1.1` | `manufacturing-codebook-normalization` | `paired_no_score_uplift` | `4` |
-| `skillsbench@1.1` | `organize-messy-files` | `paired_baseline_solved_treatment_preserved` | `3` |
-| `skillsbench@1.1` | `paratransit-routing` | `paired_treatment_improved` | `9` |
-| `skillsbench@1.1` | `pddl-airport-planning` | `paired_no_score_uplift` | `9` |
-| `skillsbench@1.1` | `react-performance-debugging` | `paired_no_score_uplift` | `4` |
-| `skillsbench@1.1` | `setup-fuzzing-py` | `baseline_runner_or_setup_repair_required` | `3` |
-| `skillsbench@1.1` | `software-dependency-audit` | `paired_no_score_uplift` | `6` |
-| `skillsbench@1.1` | `suricata-custom-exfil` | `paired_baseline_solved_treatment_preserved` | `4` |
-| `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | `baseline_runner_or_setup_repair_required` | `1` |
-| `skillsbench@1.1` | `travel-planning` | `baseline_passed_not_current_treatment_priority` | `1` |
-| `terminal-bench-worker-materialization@v0` | `nginx-request-logging` | `single_arm_recorded` | `2` |
-| `terminal-bench@2.0` | `build-cython-ext` | `baseline_passed_not_current_treatment_priority` | `5` |
-| `terminal-bench@2.0` | `cobol-modernization` | `paired_baseline_solved_treatment_preserved` | `2` |
-| `terminal-bench@2.0` | `compile-compcert` | `baseline_passed_not_current_treatment_priority` | `1` |
-| `terminal-bench@2.0` | `financial-document-processor` | `baseline_passed_not_current_treatment_priority` | `2` |
-| `terminal-bench@2.0` | `fix-code-vulnerability` | `baseline_passed_not_current_treatment_priority` | `1` |
-| `terminal-bench@2.0` | `git-multibranch` | `paired_baseline_solved_treatment_preserved` | `5` |
-| `terminal-bench@2.0` | `headless-terminal` | `paired_no_score_uplift` | `5` |
-| `terminal-bench@2.0` | `install-windows-3.11` | `paired_treatment_worker_verifier_alignment_required` | `4` |
-| `terminal-bench@2.0` | `large-scale-text-editing` | `paired_baseline_solved_treatment_preserved` | `5` |
-| `terminal-bench@2.0` | `make-doom-for-mips` | `paired_result_requires_attribution` | `9` |
-| `terminal-bench@2.0` | `merge-diff-arc-agi-task` | `baseline_passed_not_current_treatment_priority` | `1` |
-| `terminal-bench@2.0` | `mteb-retrieve` | `paired_baseline_environment_setup_repair_required` | `4` |
-| `terminal-bench@2.0` | `multi-source-data-merger` | `paired_baseline_solved_treatment_preserved` | `18` |
-| `terminal-bench@2.0` | `nginx-request-logging` | `paired_baseline_solved_treatment_preserved` | `7` |
-| `terminal-bench@2.0` | `path-tracing` | `baseline_passed_not_current_treatment_priority` | `2` |
-| `terminal-bench@2.0` | `pytorch-model-recovery` | `paired_no_score_uplift_exception_research_required` | `3` |
-| `terminal-bench@2.0` | `regex-log` | `paired_baseline_solved_treatment_preserved` | `2` |
-| `terminal-bench@2.0` | `sqlite-db-truncate` | `baseline_passed_not_current_treatment_priority` | `1` |
+| Benchmark | Case | Decision | Case Routing | Runs |
+| --- | --- | --- | --- | --- |
+| `skillsbench@1.1` | `3d-scan-calc` | `paired_baseline_solved_treatment_preserved` | - | `3` |
+| `skillsbench@1.1` | `ada-bathroom-plan-repair` | `paired_baseline_solved_treatment_preserved` | - | `4` |
+| `skillsbench@1.1` | `adaptive-cruise-control` | `baseline_runner_or_setup_repair_required` | - | `1` |
+| `skillsbench@1.1` | `azure-bgp-oscillation-route-leak` | `paired_no_score_uplift` | - | `10` |
+| `skillsbench@1.1` | `bike-rebalance` | `paired_baseline_solved_treatment_preserved` | - | `3` |
+| `skillsbench@1.1` | `citation-check` | `paired_baseline_solved_treatment_preserved` | - | `4` |
+| `skillsbench@1.1` | `civ6-adjacency-optimizer` | `paired_no_score_uplift` | - | `4` |
+| `skillsbench@1.1` | `dapt-intrusion-detection` | `paired_baseline_setup_preflight_selection_required` | - | `5` |
+| `skillsbench@1.1` | `debug-trl-grpo` | `paired_baseline_runner_or_setup_repair_required` | - | `9` |
+| `skillsbench@1.1` | `fix-build-agentops` | `baseline_runner_or_setup_repair_required` | - | `2` |
+| `skillsbench@1.1` | `llm-prefix-cache-replay` | `paired_baseline_runner_or_setup_repair_required` | - | `20` |
+| `skillsbench@1.1` | `manufacturing-codebook-normalization` | `paired_no_score_uplift` | - | `4` |
+| `skillsbench@1.1` | `organize-messy-files` | `paired_baseline_solved_treatment_preserved` | - | `3` |
+| `skillsbench@1.1` | `paratransit-routing` | `paired_treatment_improved` | - | `9` |
+| `skillsbench@1.1` | `pddl-airport-planning` | `paired_no_score_uplift` | - | `9` |
+| `skillsbench@1.1` | `react-performance-debugging` | `paired_no_score_uplift` | - | `4` |
+| `skillsbench@1.1` | `setup-fuzzing-py` | `baseline_runner_or_setup_repair_required` | - | `3` |
+| `skillsbench@1.1` | `software-dependency-audit` | `paired_no_score_uplift` | - | `6` |
+| `skillsbench@1.1` | `suricata-custom-exfil` | `paired_baseline_solved_treatment_preserved` | - | `4` |
+| `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | `baseline_runner_or_setup_repair_required` | - | `1` |
+| `skillsbench@1.1` | `travel-planning` | `baseline_passed_not_current_treatment_priority` | - | `1` |
+| `terminal-bench-worker-materialization@v0` | `nginx-request-logging` | `single_arm_recorded` | - | `2` |
+| `terminal-bench@2.0` | `build-cython-ext` | `baseline_passed_not_current_treatment_priority` | - | `5` |
+| `terminal-bench@2.0` | `cobol-modernization` | `paired_baseline_solved_treatment_preserved` | - | `2` |
+| `terminal-bench@2.0` | `compile-compcert` | `baseline_passed_not_current_treatment_priority` | - | `1` |
+| `terminal-bench@2.0` | `financial-document-processor` | `baseline_passed_not_current_treatment_priority` | - | `2` |
+| `terminal-bench@2.0` | `fix-code-vulnerability` | `baseline_passed_not_current_treatment_priority` | - | `1` |
+| `terminal-bench@2.0` | `git-multibranch` | `paired_baseline_solved_treatment_preserved` | - | `5` |
+| `terminal-bench@2.0` | `headless-terminal` | `paired_no_score_uplift` | `bridge_connected_no_uplift` | `5` |
+| `terminal-bench@2.0` | `install-windows-3.11` | `paired_treatment_worker_verifier_alignment_required` | - | `4` |
+| `terminal-bench@2.0` | `large-scale-text-editing` | `paired_baseline_solved_treatment_preserved` | - | `5` |
+| `terminal-bench@2.0` | `make-doom-for-mips` | `paired_result_requires_attribution` | `timeout_tier_policy_candidate` | `9` |
+| `terminal-bench@2.0` | `merge-diff-arc-agi-task` | `baseline_passed_not_current_treatment_priority` | - | `1` |
+| `terminal-bench@2.0` | `mteb-retrieve` | `paired_baseline_environment_setup_repair_required` | - | `4` |
+| `terminal-bench@2.0` | `multi-source-data-merger` | `paired_baseline_solved_treatment_preserved` | - | `18` |
+| `terminal-bench@2.0` | `nginx-request-logging` | `paired_baseline_solved_treatment_preserved` | - | `7` |
+| `terminal-bench@2.0` | `path-tracing` | `baseline_passed_not_current_treatment_priority` | - | `2` |
+| `terminal-bench@2.0` | `pytorch-model-recovery` | `paired_no_score_uplift_exception_research_required` | `case_exception_research` | `3` |
+| `terminal-bench@2.0` | `regex-log` | `paired_baseline_solved_treatment_preserved` | - | `2` |
+| `terminal-bench@2.0` | `sqlite-db-truncate` | `baseline_passed_not_current_treatment_priority` | - | `1` |
 
 ## Repair Backlog
 
