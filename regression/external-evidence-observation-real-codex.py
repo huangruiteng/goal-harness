@@ -372,38 +372,46 @@ def run_real_codex(
 
 
 def assert_contract(guard: dict[str, Any]) -> None:
-    assert guard["should_run"] is False, guard
+    assert guard["should_run"] is True, guard
     assert guard["state"] == "waiting", guard
     assert guard["waiting_on"] == "external_evidence", guard
     assert guard["effective_action"] == "external_evidence_observe", guard
+    assert guard["normal_delivery_allowed"] is False, guard
+    assert guard["actionable_by_codex"] is True, guard
     observation = guard["external_evidence_observation"]
     assert observation["required"] is True, observation
+    assert observation["kind"] == "external_evidence_monitor", observation
+    assert observation["trigger"] == "registry_waiting_on_external_evidence", observation
     assert observation["requires_observable_handle"] is True, observation
     assert guard["execution_obligation"]["must_attempt_work"] is True, guard
     assert (
         guard["execution_obligation"]["kind"]
         == "external_evidence_observation_required"
     ), guard
+    interaction = guard["interaction_contract"]
+    assert interaction["mode"] == "external_evidence_observation", interaction
+    assert interaction["agent_channel"]["delivery_allowed"] is False, interaction
+    assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
+    assert interaction["cli_channel"]["spend_allowed_now"] is False, interaction
 
 
 def assert_launched_poll_contract(guard: dict[str, Any]) -> None:
-    assert guard["should_run"] is False, guard
+    assert guard["should_run"] is True, guard
     assert guard["state"] == "eligible", guard
     assert guard["waiting_on"] == "codex", guard
-    assert guard["effective_action"] == "external_evidence_observe", guard
+    assert guard["effective_action"] == "normal_run", guard
     work_lane = guard["work_lane_contract"]
-    assert work_lane["lane"] == "continuous_monitor", work_lane
-    assert work_lane["monitor_kind"] == "external_evidence", work_lane
-    observation = guard["external_evidence_observation"]
-    assert observation["required"] is True, observation
-    assert observation["kind"] == "launched_external_work_monitor", observation
-    assert observation["trigger"] == "implicit_launched_external_poll", observation
-    assert observation["requires_observable_handle"] is True, observation
+    assert work_lane["lane"] == "advancement_task", work_lane
+    assert work_lane["reason_codes"] == ["open_agent_todo", "external_monitor_context"], work_lane
     assert guard["execution_obligation"]["must_attempt_work"] is True, guard
     assert (
         guard["execution_obligation"]["kind"]
-        == "external_evidence_observation_required"
+        == "work_lane_contract"
     ), guard
+    interaction = guard["interaction_contract"]
+    assert interaction["mode"] == "bounded_delivery", interaction
+    assert interaction["agent_channel"]["delivery_allowed"] is True, interaction
+    assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
 
 
 def assert_real_codex_decision(decision: dict[str, Any]) -> None:
