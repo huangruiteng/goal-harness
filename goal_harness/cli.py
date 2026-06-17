@@ -117,6 +117,7 @@ from .benchmark_core import (
 )
 from .configure_goal import configure_goal, render_configure_goal_markdown
 from .contract import check_contract, render_contract_markdown
+from .cli_commands import handle_doctor_command, register_doctor_command
 from .demo import (
     DEFAULT_DEMO_AGENT_TODO,
     DEFAULT_DEMO_GOAL_ID,
@@ -126,7 +127,6 @@ from .demo import (
     render_demo_markdown,
     run_demo,
 )
-from .doctor import collect_doctor, render_doctor_markdown
 from .execution_profile import DEFAULT_EXECUTION_PROFILE
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
 from .global_registry import render_global_sync_markdown, sync_project_registry_to_global
@@ -1701,7 +1701,7 @@ def main(argv: list[str] | None = None) -> int:
     demo_parser.add_argument("--user-todo", default=DEFAULT_DEMO_USER_TODO)
     demo_parser.add_argument("--agent-todo", default=DEFAULT_DEMO_AGENT_TODO)
 
-    sub.add_parser("doctor", help="Diagnose local CLI installation, PATH, wrapper, and import health.")
+    register_doctor_command(sub)
 
     worker_bridge_parser = sub.add_parser(
         "worker-bridge",
@@ -5049,9 +5049,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if payload.get("ok") else 1
 
     if args.command == "doctor":
-        payload = collect_doctor()
-        print_payload(payload, args.format, render_doctor_markdown)
-        return 0 if payload.get("ok") else 1
+        return handle_doctor_command(args, print_payload)
 
     if args.command == "worker-bridge":
         if args.worker_bridge_command not in (

@@ -20,6 +20,10 @@ class Regression:
 
 CONTRACT_ONLY_REGRESSIONS = (
     Regression(
+        path="regression/cli-command-module-contract.py",
+        description="modular CLI command seam preserves the public doctor invocation",
+    ),
+    Regression(
         path="regression/blocked-priority-fallback-contract.py",
         description="blocked P0 work stays visible while safe fallback work proceeds",
     ),
