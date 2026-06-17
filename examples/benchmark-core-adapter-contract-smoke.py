@@ -21,6 +21,8 @@ from goal_harness.benchmark_adapters.agents_last_exam import (  # noqa: E402
 from goal_harness.benchmark_adapters.terminal_bench import (  # noqa: E402
     TERMINAL_BENCH_DEFAULT_DATASET,
     TERMINAL_BENCH_DEFAULT_TASK,
+    build_terminal_bench_private_runner_launch,
+    build_terminal_bench_goal_harness_access_packet,
 )
 from goal_harness.benchmark_core import (  # noqa: E402
     AdapterClassification,
@@ -146,6 +148,14 @@ def test_benchmark_adapter_modules_own_public_config() -> None:
 
 
 def test_benchmark_adapter_modules_own_helper_surfaces() -> None:
+    assert (
+        build_terminal_bench_private_runner_launch.__module__
+        == "goal_harness.benchmark_adapters.terminal_bench"
+    )
+    assert (
+        build_terminal_bench_goal_harness_access_packet.__module__
+        == "goal_harness.benchmark_adapters.terminal_bench"
+    )
     assert (
         build_agents_last_exam_local_preflight.__module__
         == "goal_harness.benchmark_adapters.agents_last_exam"

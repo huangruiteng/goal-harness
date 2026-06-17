@@ -40,7 +40,7 @@ surfaces into smaller modules:
 | --- | --- | --- |
 | `goal_harness.benchmark_core` | adapter-neutral lifecycle, round summaries, artifact/source boundary policy, JSON/number IO reducers | benchmark-specific launchers or scoring quirks |
 | `goal_harness.benchmark_adapters.skillsbench` | SkillsBench routes, arm semantics, job names, public-safe setup failure attribution | Terminal-Bench/ALE/AgentIssue behavior |
-| `goal_harness.benchmark_adapters.terminal_bench` | Terminal-Bench public constants, runner modes, CLI-bridge/access-packet labels, timeout and compact validation policy constants | ALE/SkillsBench/AgentIssue behavior or live Harbor execution |
+| `goal_harness.benchmark_adapters.terminal_bench` | Terminal-Bench public constants, runner modes, CLI-bridge/access-packet labels, private-runner launch/materialization/readiness helpers, Harbor result reducers, timeout and compact validation policy constants | ALE/SkillsBench/AgentIssue behavior |
 | `goal_harness.benchmark_adapters.agents_last_exam` | ALE public constants, case-state path, local runner/source readiness, launch-packet, validation-gate, CUA/Codex-route, task-material and result-report helpers | Terminal-Bench/SkillsBench/AgentIssue behavior or raw ALE task material |
 | `goal_harness.benchmark_adapters.agentissue` | AgentIssue-Bench runner packets, synthetic staging, execution gates, compact result reducer | shared artifact boundary or unrelated benchmark policy |
 | `goal_harness.benchmark` | backward-compatible public imports plus legacy functions not yet extracted | new benchmark-specific code when a narrower adapter module exists |
@@ -69,10 +69,14 @@ Completed slices:
 7. `benchmark_core.io` for shared JSON/number reducers and
    `benchmark_adapters.agents_last_exam` for ALE helper surfaces formerly kept
    in the legacy facade.
+8. `benchmark_adapters.terminal_bench` for Terminal-Bench helper surfaces
+   formerly kept in the legacy facade, including runner launch/materialization,
+   access-packet, bridge-trace, and Harbor compact result reducers.
 
 Next slices:
 
-1. Move Terminal-Bench private-runner launch/materialization helper functions behind the
-   `benchmark_adapters.terminal_bench` module.
-2. Keep `benchmark.py` as the compatibility facade until callers are migrated
+1. Keep `benchmark.py` as the compatibility facade until callers are migrated
    to adapter imports.
+2. Split shared compact/result helper functions that are still only imported
+   through the Terminal-Bench adapter into narrower `benchmark_core` modules
+   when a second benchmark needs them.
