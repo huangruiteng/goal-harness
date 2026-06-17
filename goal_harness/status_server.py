@@ -49,6 +49,12 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
     "max_children",
     "allowed_domains",
     "clear_allowed_domains",
+    "boundary_authority_scopes",
+    "boundary_authority_source",
+    "boundary_authority_decision_id",
+    "boundary_authority_recorded_at",
+    "boundary_authority_expires_at",
+    "clear_boundary_authority",
 }
 CONFIGURE_GOAL_APPLY_FIELDS = CONFIGURE_GOAL_REQUEST_FIELDS | {"preview_id"}
 
@@ -293,6 +299,9 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         allowed_domains = body.get("allowed_domains")
         if allowed_domains is not None and not isinstance(allowed_domains, list):
             raise ValueError("allowed_domains must be a list of strings")
+        boundary_authority_scopes = body.get("boundary_authority_scopes")
+        if boundary_authority_scopes is not None and not isinstance(boundary_authority_scopes, list):
+            raise ValueError("boundary_authority_scopes must be a list of strings")
         return {
             "goal_id": goal_id,
             "quota_compute": body.get("quota_compute"),
@@ -305,6 +314,16 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "max_children": body.get("max_children"),
             "allowed_domains": [str(item) for item in allowed_domains] if allowed_domains is not None else None,
             "clear_allowed_domains": bool(body.get("clear_allowed_domains", False)),
+            "boundary_authority_scopes": (
+                [str(item) for item in boundary_authority_scopes]
+                if boundary_authority_scopes is not None
+                else None
+            ),
+            "boundary_authority_source": body.get("boundary_authority_source"),
+            "boundary_authority_decision_id": body.get("boundary_authority_decision_id"),
+            "boundary_authority_recorded_at": body.get("boundary_authority_recorded_at"),
+            "boundary_authority_expires_at": body.get("boundary_authority_expires_at"),
+            "clear_boundary_authority": bool(body.get("clear_boundary_authority", False)),
         }
 
     def _configure_goal_payload(self, body: dict[str, Any], *, apply: bool, execute: bool) -> dict[str, Any]:
@@ -322,6 +341,12 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             max_children=values["max_children"],
             allowed_domains=values["allowed_domains"],
             clear_allowed_domains=values["clear_allowed_domains"],
+            boundary_authority_scopes=values["boundary_authority_scopes"],
+            boundary_authority_source=values["boundary_authority_source"],
+            boundary_authority_decision_id=values["boundary_authority_decision_id"],
+            boundary_authority_recorded_at=values["boundary_authority_recorded_at"],
+            boundary_authority_expires_at=values["boundary_authority_expires_at"],
+            clear_boundary_authority=values["clear_boundary_authority"],
             execute=execute,
         )
 

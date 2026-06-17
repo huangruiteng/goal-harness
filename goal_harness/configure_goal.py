@@ -6,6 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .boundary_authority import (
+    build_checkpointed_boundary_authority_entry,
+    checkpointed_boundary_authority_summary,
+)
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .quota import goal_quota_config
@@ -56,6 +60,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
     quota = goal_quota_config(goal)
     control_plane = compact_control_plane_policy(goal.get("control_plane"))
     orchestration = compact_orchestration_policy(goal.get("spawn_policy"))
+    coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
     return {
         "quota": {
             "compute": quota.get("compute"),
@@ -64,6 +69,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "control_plane": control_plane,
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
+        "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(coordination),
     }
 
 
@@ -92,6 +98,12 @@ def configure_goal(
     clear_allowed_domains: bool = False,
     waiting_on: str | None = None,
     clear_waiting_on: bool = False,
+    boundary_authority_scopes: list[str] | None = None,
+    boundary_authority_source: str | None = None,
+    boundary_authority_decision_id: str | None = None,
+    boundary_authority_recorded_at: str | None = None,
+    boundary_authority_expires_at: str | None = None,
+    clear_boundary_authority: bool = False,
     execute: bool = False,
 ) -> dict[str, Any]:
     if not registry_path.exists():
@@ -100,6 +112,18 @@ def configure_goal(
         raise ValueError("--clear-allowed-domains cannot be combined with --allowed-domain")
     if clear_waiting_on and waiting_on:
         raise ValueError("--clear-waiting-on cannot be combined with --waiting-on")
+    adding_boundary_authority = any(
+        value
+        for value in (
+            boundary_authority_scopes,
+            boundary_authority_source,
+            boundary_authority_decision_id,
+            boundary_authority_recorded_at,
+            boundary_authority_expires_at,
+        )
+    )
+    if clear_boundary_authority and adding_boundary_authority:
+        raise ValueError("--clear-boundary-authority cannot be combined with boundary authority fields")
     if waiting_on and waiting_on not in WAITING_ON_CHOICES:
         raise ValueError("--waiting-on must be one of: " + ", ".join(WAITING_ON_CHOICES))
 
@@ -165,6 +189,26 @@ def configure_goal(
         goal["waiting_on"] = waiting_on
     elif clear_waiting_on:
         goal.pop("waiting_on", None)
+
+    if clear_boundary_authority or adding_boundary_authority:
+        coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
+        if clear_boundary_authority:
+            coordination.pop("checkpointed_boundary_authority", None)
+        if adding_boundary_authority:
+            entry = build_checkpointed_boundary_authority_entry(
+                write_scopes=boundary_authority_scopes or [],
+                source=boundary_authority_source or "",
+                decision_id=boundary_authority_decision_id,
+                recorded_at=boundary_authority_recorded_at,
+                expires_at=boundary_authority_expires_at,
+            )
+            entries = (
+                coordination.get("checkpointed_boundary_authority")
+                if isinstance(coordination.get("checkpointed_boundary_authority"), list)
+                else []
+            )
+            coordination["checkpointed_boundary_authority"] = [*entries, entry]
+        goal["coordination"] = coordination
 
     after = _settings_summary(goal)
     changed_fields = _changed_fields(before, after)
