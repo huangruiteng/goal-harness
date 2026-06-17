@@ -395,6 +395,24 @@ def assert_contract(guard: dict[str, Any]) -> None:
     assert interaction["cli_channel"]["spend_allowed_now"] is False, interaction
 
 
+def assert_compact_blocker_codex_input_contract(guard: dict[str, Any]) -> None:
+    compact = compact_guard_for_codex(guard)
+    assert compact["fixture_observed_handle_present"] is False, compact
+    assert compact["execution_obligation"]["kind"] == (
+        "external_evidence_observation_required"
+    ), compact
+    assert compact["external_evidence_observation"]["requires_observable_handle"] is True, compact
+    assert "missing worker/controller handle" in (
+        compact["external_evidence_observation"]["if_handle_missing"]
+    ), compact
+
+    prompt = codex_prompt(compact)
+    assert "compact_blocker_writeback" in prompt, prompt
+    assert "quiet_noop_allowed must be false" in prompt, prompt
+    assert "benchmark_execution_allowed must be false" in prompt, prompt
+    assert "Do not read files" in prompt, prompt
+
+
 def assert_launched_poll_contract(guard: dict[str, Any]) -> None:
     assert guard["should_run"] is True, guard
     assert guard["state"] == "eligible", guard
@@ -437,6 +455,7 @@ def main() -> int:
             runtime=runtime,
         )
         assert_contract(guard)
+        assert_compact_blocker_codex_input_contract(guard)
         launched_project, launched_runtime, launched_registry = write_launched_poll_fixture(root / "launched-poll")
         launched_guard = run_goal_harness(
             root,

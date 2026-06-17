@@ -48,6 +48,9 @@ checks two projection contracts:
 - explicit `waiting_on=external_evidence` goals return an
   external-evidence observation obligation with delivery disabled until the
   observation or compact blocker is written back;
+- the compact guard/prompt handed to Codex is sufficient to require
+  `compact_blocker_writeback` when no observable worker/controller handle is
+  present, while forbidding quiet no-op and benchmark execution;
 - already-launched advancement work with compact-result poll context remains a
   bounded delivery lane, with the external monitor treated as auxiliary
   context rather than a quiet no-op excuse.
