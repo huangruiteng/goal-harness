@@ -20,6 +20,16 @@ Docker, private prompts, raw trajectories, raw logs, verifier tails, or local
 credential material. Keep real-agent paths as explicit per-file opt-ins.
 
 ```bash
+python3 regression/cli-command-module-contract.py
+```
+
+Runs a contract-only compatibility check for the first modular CLI command
+seam. It imports `goal_harness.cli_commands`, then verifies the old public
+`python -m goal_harness.cli --format json doctor` invocation still returns a
+successful JSON payload after `doctor` registration/handling moves out of the
+top-level `cli.py` file.
+
+```bash
 python3 regression/blocked-priority-fallback-contract.py
 ```
 
