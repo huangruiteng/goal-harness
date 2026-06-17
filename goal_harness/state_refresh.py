@@ -9,7 +9,7 @@ from typing import Any
 
 from .feedback import validate_public_safe_text
 from .global_registry import sync_project_registry_to_global
-from .history import load_registry, unique_run_paths
+from .history import load_registry, reserve_unique_run_paths, unique_run_paths
 from .paths import resolve_runtime_root
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
@@ -348,6 +348,11 @@ def refresh_state_run(
     }
     if not dry_run:
         runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
+        index_record["json_path"] = str(json_path)
+        index_record["markdown_path"] = str(markdown_path)
+        payload["json_path"] = str(json_path)
+        payload["markdown_path"] = str(markdown_path)
         json_path.write_text(
             json.dumps(record, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

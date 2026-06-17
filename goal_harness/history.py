@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .authority import goal_authority_registry_summary
 from .control_plane import compact_control_plane_policy
@@ -72,6 +72,28 @@ def reserve_unique_run_paths(runs_dir: Path, generated_at: str) -> tuple[Path, P
         else:
             os.close(fd)
             return json_path, markdown_path
+
+
+def write_reserved_run_artifacts(
+    *,
+    runs_dir: Path,
+    generated_at: str,
+    record: dict[str, Any],
+    index_record: dict[str, Any],
+    payload: dict[str, Any],
+    render_markdown: Callable[[dict[str, Any]], str],
+) -> None:
+    json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
+    index_path = runs_dir / "index.jsonl"
+    index_record["json_path"] = str(json_path)
+    index_record["markdown_path"] = str(markdown_path)
+    payload["json_path"] = str(json_path)
+    payload["markdown_path"] = str(markdown_path)
+    payload["index_path"] = str(index_path)
+    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text(render_markdown(payload) + "\n", encoding="utf-8")
+    with index_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
 
 
 def validate_goal_id_path_segment(goal_id: str) -> str:
@@ -210,15 +232,14 @@ def append_benchmark_run(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
-        index_record["json_path"] = str(json_path)
-        index_record["markdown_path"] = str(markdown_path)
-        payload["json_path"] = str(json_path)
-        payload["markdown_path"] = str(markdown_path)
-        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        markdown_path.write_text(render_benchmark_run_append_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_benchmark_run_append_markdown,
+        )
     return payload
 
 
@@ -287,11 +308,14 @@ def append_benchmark_result(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        markdown_path.write_text(render_benchmark_result_append_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_benchmark_result_append_markdown,
+        )
     return payload
 
 
@@ -360,11 +384,14 @@ def append_benchmark_comparison(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        markdown_path.write_text(render_benchmark_comparison_append_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_benchmark_comparison_append_markdown,
+        )
     return payload
 
 
@@ -433,11 +460,14 @@ def append_benchmark_learning_ledger(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        markdown_path.write_text(render_benchmark_learning_ledger_append_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_benchmark_learning_ledger_append_markdown,
+        )
     return payload
 
 
@@ -506,11 +536,14 @@ def append_benchmark_experiment_report(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        markdown_path.write_text(render_benchmark_experiment_report_append_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_benchmark_experiment_report_append_markdown,
+        )
     return payload
 
 
@@ -579,11 +612,14 @@ def append_active_user_assisted_pilot(
         payload["delivery_outcome"] = delivery_outcome
 
     if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        markdown_path.write_text(render_active_user_assisted_pilot_append_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_active_user_assisted_pilot_append_markdown,
+        )
     return payload
 
 
