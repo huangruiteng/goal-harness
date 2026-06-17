@@ -7510,14 +7510,17 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark_run = compact_benchmark_run(benchmark_run_input)
                 if not benchmark_run:
                     raise ValueError("benchmark command did not produce a compactable benchmark_run_v0")
-                benchmark_cli_mode = str(
-                    benchmark_run.get("mode")
-                    or (
-                        args.skillsbench_route
-                        if args.benchmark_name == "skillsbench"
-                        else args.mode
-                    )
-                )
+                if args.harbor_job_dir:
+                    benchmark_cli_mode = str(benchmark_run.get("mode") or args.mode)
+                elif (
+                    args.benchmark_name == "terminal-bench"
+                    and args.active_user_assisted_treatment
+                ):
+                    benchmark_cli_mode = str(benchmark_run.get("mode") or args.mode)
+                elif args.benchmark_name == "skillsbench":
+                    benchmark_cli_mode = str(args.skillsbench_route)
+                else:
+                    benchmark_cli_mode = str(args.mode)
                 benchmark_cli_mode_source = (
                     "harbor_job_result"
                     if args.harbor_job_dir
