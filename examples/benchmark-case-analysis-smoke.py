@@ -33,6 +33,19 @@ def assert_public_safe(text: str) -> None:
         assert not pattern.search(text), pattern.pattern
 
 
+def assert_compact_legacy_result(result: dict) -> None:
+    assert result["schema_version"] == "compact_legacy_case_result_v0", result
+    noisy_legacy_fields = {
+        "capability_signal",
+        "control_plane_signal",
+        "optimization_guidance",
+        "routing_guidance",
+        "stability_assessment",
+        "trajectory_analysis",
+    }
+    assert noisy_legacy_fields.isdisjoint(result), result
+
+
 def test_case_analysis_json() -> None:
     payload = json.loads(ANALYSIS_JSON.read_text(encoding="utf-8"))
     ledger = json.loads(LEDGER_JSON.read_text(encoding="utf-8"))
@@ -101,8 +114,14 @@ def test_case_analysis_json() -> None:
     bike_success = by_case[("skillsbench@1.1", "bike-rebalance")]
     adaptive_setup = by_case[("skillsbench@1.1", "adaptive-cruise-control")]
 
-    assert uplift["classification"] == "positive_uplift_asset", uplift
-    assert uplift["scores"]["official_score_delta"] == 1.0, uplift
+    assert uplift["classification"] == (
+        "baseline_solved_non_regression_asset"
+    ), uplift
+    assert uplift["decision"] == (
+        "paired_baseline_solved_treatment_preserved"
+    ), uplift
+    assert uplift["scores"]["official_score_delta"] == 0.0, uplift
+    assert uplift["scores"]["claimable_uplift"] is False, uplift
     current_protocol = uplift["current_protocol_recheck"]
     assert current_protocol["schema_version"] == (
         "terminal_bench_current_protocol_recheck_v0"
@@ -117,6 +136,13 @@ def test_case_analysis_json() -> None:
     assert current_protocol["decision"] == (
         "paired_baseline_solved_treatment_preserved"
     ), current_protocol
+    assert uplift["arms"]["baseline"]["run_id"] == "37d3587daf12", uplift
+    assert uplift["arms"]["treatment"]["run_id"] == "76cbfb57f1ea", uplift
+    legacy_uplift = uplift["legacy_positive_result"]
+    assert_compact_legacy_result(legacy_uplift)
+    assert legacy_uplift["classification"] == "positive_uplift_asset", legacy_uplift
+    assert legacy_uplift["decision"] == "paired_treatment_improved", legacy_uplift
+    assert legacy_uplift["scores"]["official_score_delta"] == 1.0, legacy_uplift
     assert nginx_route_canary["classification"] == (
         "baseline_solved_non_regression_asset"
     ), (
@@ -183,7 +209,16 @@ def test_case_analysis_json() -> None:
     assert skillsbench_uplift["decision"] == (
         "reward_feedback_positive_primary_blind_loop_no_uplift"
     ), skillsbench_uplift
-    assert skillsbench_uplift["scores"]["official_score_delta"] == 1.0, skillsbench_uplift
+    assert skillsbench_uplift["scores"]["official_score_delta"] == 0.0, skillsbench_uplift
+    assert skillsbench_uplift["scores"]["claimable_uplift"] is False, skillsbench_uplift
+    legacy_reward_uplift = skillsbench_uplift["legacy_reward_feedback_result"]
+    assert_compact_legacy_result(legacy_reward_uplift)
+    assert legacy_reward_uplift["scores"]["official_score_delta"] == 1.0, (
+        legacy_reward_uplift
+    )
+    assert legacy_reward_uplift["arms"]["treatment"]["failure_scope"] == "passed", (
+        legacy_reward_uplift
+    )
     blind_recheck = skillsbench_uplift["blind_loop_recheck"]
     assert blind_recheck["decision"] == "paired_no_score_uplift", blind_recheck
     assert blind_recheck["official_score_delta"] == 0.0, blind_recheck
@@ -203,51 +238,75 @@ def test_case_analysis_json() -> None:
     assert max5_recheck["treatment_round_rewards"] == (
         "1:0,2:0,3:0,4:0,5:0"
     ), max5_recheck
-    assert skillsbench_dapt_uplift["classification"] == "positive_uplift_asset", skillsbench_dapt_uplift
-    assert skillsbench_dapt_uplift["scores"]["official_score_delta"] == 1.0, skillsbench_dapt_uplift
+    assert skillsbench_dapt_uplift["classification"] == (
+        "reward_feedback_positive_blind_loop_neutral_asset"
+    ), skillsbench_dapt_uplift
+    assert skillsbench_dapt_uplift["decision"] == (
+        "reward_feedback_positive_primary_blind_loop_no_uplift"
+    ), skillsbench_dapt_uplift
+    assert skillsbench_dapt_uplift["scores"]["official_score_delta"] == 0.0, skillsbench_dapt_uplift
+    assert skillsbench_dapt_uplift["scores"]["claimable_uplift"] is False, (
+        skillsbench_dapt_uplift
+    )
+    legacy_dapt_uplift = skillsbench_dapt_uplift["legacy_reward_feedback_result"]
+    assert_compact_legacy_result(legacy_dapt_uplift)
+    assert legacy_dapt_uplift["scores"]["official_score_delta"] == 1.0, (
+        legacy_dapt_uplift
+    )
+    assert legacy_dapt_uplift["decision"] == "paired_treatment_improved", (
+        legacy_dapt_uplift
+    )
     dapt_blind_recheck = skillsbench_dapt_uplift["blind_loop_recheck"]
     assert dapt_blind_recheck["decision"] == "paired_no_score_uplift", dapt_blind_recheck
     assert dapt_blind_recheck["official_score_delta"] == 0.0, dapt_blind_recheck
     assert dapt_blind_recheck["reward_feedback_forwarded"] is False, dapt_blind_recheck
     assert dapt_blind_recheck["official_feedback_blinded"] is True, dapt_blind_recheck
     assert dapt_blind_recheck["first_success_round"] is None, dapt_blind_recheck
-    assert paratransit_uplift["classification"] == "positive_uplift_asset", (
+    assert paratransit_uplift["classification"] == "product_mode_no_uplift_asset", (
         paratransit_uplift
     )
     assert paratransit_uplift["evidence_status"] == (
-        "compact_pair_complete_primary_blind_loop"
+        "compact_pair_complete_product_mode"
     ), paratransit_uplift
     assert paratransit_uplift["scores"]["baseline_official_score"] == 0.0, (
         paratransit_uplift
     )
-    assert paratransit_uplift["scores"]["treatment_official_score"] == 1.0, (
+    assert paratransit_uplift["scores"]["treatment_official_score"] == 0.0, (
         paratransit_uplift
     )
-    assert paratransit_uplift["scores"]["official_score_delta"] == 1.0, (
+    assert paratransit_uplift["scores"]["official_score_delta"] == 0.0, (
         paratransit_uplift
     )
-    assert paratransit_uplift["scores"]["first_success_round"] == 1, (
+    assert paratransit_uplift["scores"]["claimable_uplift"] is False, (
         paratransit_uplift
     )
-    assert paratransit_uplift["scores"]["baseline_round_rewards"] == (
-        "1:0,2:0,3:0,4:0,5:0"
-    ), paratransit_uplift
-    assert paratransit_uplift["scores"]["treatment_round_rewards"] == "1:1", (
+    assert paratransit_uplift["scores"]["treatment_round_rewards"] == "1:0", (
         paratransit_uplift
     )
-    assert paratransit_uplift["arms"]["treatment"]["followup_prompt_count"] == 0, (
+    assert paratransit_uplift["arms"]["treatment"]["goal_harness_cli_call_count"] == 1, (
         paratransit_uplift
     )
-    assert paratransit_uplift["arms"]["treatment"]["last_decision"] == (
-        "stop_after_blind_loop_official_success_observed_without_feedback"
-    ), paratransit_uplift
+    assert paratransit_uplift["arms"]["treatment"]["agent_declared_done"] is True, (
+        paratransit_uplift
+    )
     assert paratransit_uplift["arms"]["treatment"]["reward_feedback_forwarded"] is False, (
         paratransit_uplift
     )
     assert paratransit_uplift["arms"]["treatment"]["official_feedback_blinded"] is True, (
         paratransit_uplift
     )
-    paratransit_trace = paratransit_uplift["trajectory_public_summary"]
+    legacy_paratransit = paratransit_uplift["legacy_blind_loop_positive_result"]
+    assert_compact_legacy_result(legacy_paratransit)
+    assert legacy_paratransit["classification"] == "positive_uplift_asset", (
+        legacy_paratransit
+    )
+    assert legacy_paratransit["scores"]["official_score_delta"] == 1.0, (
+        legacy_paratransit
+    )
+    assert legacy_paratransit["arms"]["treatment"]["last_decision"] == (
+        "stop_after_blind_loop_official_success_observed_without_feedback"
+    ), legacy_paratransit
+    paratransit_trace = legacy_paratransit["trajectory_public_summary"]
     assert paratransit_trace["raw_text_copied_to_public"] is False, paratransit_trace
     assert paratransit_trace["round_count"] == 1, paratransit_trace
     assert paratransit_trace["tool_call_count"] == 16, paratransit_trace
