@@ -316,6 +316,44 @@ flowchart TB
   Runs --> Observation
 ```
 
+### Agent Loop Adapter Depth
+
+Deep agent-loop integration is an upper bound, not a prerequisite. Goal
+Harness must still add value when the worker is a black-box CLI, hosted agent,
+benchmark runner, or third-party loop that cannot be modified. The control
+plane should therefore support three adapter depths:
+
+| Mode | When available | Goal Harness responsibilities |
+| --- | --- | --- |
+| `in_loop` | The worker can call Goal Harness APIs or tools during its own loop. | Inject observation packets, expose freshness/gate/quota checks before actions, require writeback after validated transitions, and let the worker use current status as first-class context. |
+| `wrapper` | Goal Harness can launch or wrap the worker command, prompt, workspace, or environment, but cannot alter the internal loop. | Run pre-flight status/freshness checks, prepend or mount a compact state packet, guard high-risk external actions where hooks exist, collect stdout/artifacts/diffs, and reduce the result into durable events. |
+| `passive_posthoc` | Goal Harness cannot launch or intercept the worker; it can only inspect observable outputs after the fact. | Read repo diffs, logs, run artifacts, benchmark outputs, or user notes; classify work/evidence/blocker/decision targets; append compact events; and produce restart packets for the next run. |
+
+The invariant across all three depths is the same: Goal Harness produces and
+validates control-plane context around the agent loop, whether or not the loop
+natively cooperates. If the loop cannot be trusted to stop on a boundary, the
+boundary must move outward to the wrapper, submit path, PR gate, benchmark
+upload, cloud job launcher, production command, or operator approval surface.
+
+```mermaid
+flowchart LR
+  Status["status / quota / freshness"] --> Preflight["pre-flight packet"]
+  Preflight --> Worker["black-box or cooperative agent loop"]
+  Worker --> Artifacts["diffs, logs, stdout, artifacts, tests"]
+  Artifacts --> Reducer["post-run reducer"]
+  Reducer --> Events["durable events and overlays"]
+  Events --> Restart["restart packet"]
+  Restart --> Preflight
+  Status --> Guard["external gate for risky actions"]
+  Guard -->|"approve, block, or ask user"| Worker
+```
+
+This makes passive and wrapper modes first-class product surfaces, not
+fallbacks. The passive baseline should prove that even a non-cooperative worker
+gets better restartability, stale-state avoidance, evidence discipline, and
+reward attribution from Goal Harness before deeper agent-loop cooperation is
+treated as required.
+
 ## State Stores
 
 | Store | Owner | Reader | Writer | Purpose |
