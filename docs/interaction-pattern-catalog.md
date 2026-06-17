@@ -289,7 +289,7 @@ the checkpointed decision.
 
 **Validation**
 
-- future focused quota/status smoke for action-scope guard;
+- `examples/quota-action-scope-guard-smoke.py`;
 - `docs/state-interaction-model.md` checkpointed decision sections.
 
 ## IP-006 Outcome Floor Recovery

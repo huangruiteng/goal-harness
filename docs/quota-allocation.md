@@ -232,6 +232,18 @@ unchanged monitor polls are quiet no-spend checks with `should_run=false` and
 letting it consume every eligible turn, and it keeps the hard routing rule in
 one small machine contract.
 
+Executable todos can also declare explicit write-scope requirements through
+todo metadata, for example `required_write_scopes=runner%2F%2A%2A` or the CLI
+flag `goal-harness todo add --required-write-scope runner/**`. Before normal
+delivery, `quota should-run` compares the first executable advancement todo's
+`required_write_scopes` with `goal_boundary.write_scope`. If the current
+boundary does not cover the selected scope, the guard keeps `should_run=true`
+for a bounded repair turn but sets `normal_delivery_allowed=false`,
+`effective_action=boundary_projection_repair`, and
+`blocked_action_scope=boundary_projection`. The worker must repair the
+checkpointed boundary projection, rewrite the todo inside the current boundary,
+or write a concrete user/controller gate before attempting the write.
+
 External-evidence waits have an additional CLI-level observation contract. When
 the selected goal is `state=waiting`, `waiting_on=external_evidence`, and its
 current lane is a continuous monitor, or when the active state says a
