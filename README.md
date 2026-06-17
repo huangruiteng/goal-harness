@@ -454,6 +454,7 @@ Start here:
 - [Project agent todo contract](docs/project-agent-todo-contract.md)
 - [Quota allocation](docs/quota-allocation.md)
 - [Heartbeat automation prompt](docs/heartbeat-automation-prompt.md)
+- [Long-task cadence policy](docs/long-task-cadence-policy.md)
 - [Public/private boundary](docs/public-private-boundary.md)
 - [Public launch narrative draft](docs/public-launch-narrative-draft.md)
 - [Xiaohongshu launch draft](docs/xiaohongshu-launch-draft.md)
