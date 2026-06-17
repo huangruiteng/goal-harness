@@ -73,6 +73,27 @@ Default permissions are intentionally narrow:
 The output of dreaming is a proposal, warning, or candidate patch plan. The
 operator or project controller decides whether it becomes normal project work.
 
+## Relationship To Replanning
+
+Dreaming and autonomous replanning are control-plane planning lanes. They are
+allowed to repair the execution track, summarize cross-run patterns, and create
+reviewable options. They must not silently become the task policy that decides
+how the project agent solves the current implementation problem.
+
+Use this boundary:
+
+| Lane | Output authority | Typical output | Promotion path |
+| --- | --- | --- | --- |
+| Delivery agent policy | Executes within the current authorized boundary. | Implementation plan, debug strategy, validation choice, bounded patch. | Writes validated work events and active-state updates after delivery. |
+| Autonomous replan | Bounded control-plane obligation when execution is stuck or stale. | Split/retire/add todo, request blocker writeback, ask for operator decision, name next validation command and stop condition. | Writes control-plane state only after validation, or routes to user/controller gate. |
+| Dreaming / exploration | Advisory proposal by default. | Refactor warning, memory consolidation, option comparison, archive suggestion, risk note. | Enters operator/controller review before becoming normal delivery work or active project truth. |
+
+The question for any planning output is whether it is `authority` or
+`proposal`. Guard and freshness outputs can be authority-like control signals;
+dreaming outputs are proposals unless a later operator/controller decision
+promotes them. This keeps Goal Harness from becoming a second brittle agent
+while still letting it maintain the long-horizon execution track.
+
 ## Run Record Shape
 
 Dreaming runs should be visible but not mixed with delivery runs:
