@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
 import re
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 
-from ..benchmark_case_state import benchmark_case_active_state_path
+from ..benchmark_case_state import (
+    BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
+    benchmark_case_active_state_path,
+)
 
 
 SKILLSBENCH_DEFAULT_DATASET = "skillsbench@1.1"
@@ -23,6 +28,23 @@ SKILLSBENCH_ROUTES = (
     "goal-harness-product-mode",
 )
 SKILLSBENCH_DEFAULT_ROUTE = "goal-harness-blind-loop-treatment"
+
+
+BENCHMARK_MODEL_CONTROL_SCHEMA_VERSION = "benchmark_model_control_v0"
+CODEX_ACP_SET_MODEL_UNSUPPORTED_LABEL = "codex_acp_set_model_unsupported"
+
+
+def _skillsbench_public_safe_label(value: Any, *, limit: int = 120) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    cleaned = []
+    for char in text:
+        cleaned.append(char.lower() if char.isalnum() or char in {"-", "_", ".", ":"} else "-")
+    label = "".join(cleaned).strip("-_.:")
+    while "--" in label:
+        label = label.replace("--", "-")
+    return (label or None)[:limit]
 
 
 def skillsbench_route_contract(route: str) -> dict[str, Any]:
@@ -427,3 +449,1202 @@ def skillsbench_runner_error_fingerprint(error_text: str) -> dict[str, Any]:
         "raw_error_recorded": False,
         "fingerprint_confidence": "coarse_public_safe_pattern_match",
     }
+
+
+def build_skillsbench_benchmark_run(
+    *,
+    route: str = SKILLSBENCH_DEFAULT_ROUTE,
+    dataset: str = SKILLSBENCH_DEFAULT_DATASET,
+    task_id: str = SKILLSBENCH_DEFAULT_TASK,
+    agent: str = "codex",
+    model: str = SKILLSBENCH_DEFAULT_MODEL,
+) -> dict[str, Any]:
+    """Build a compact no-run SkillsBench benchmark_run_v0 skeleton."""
+
+    if agent != "codex":
+        raise ValueError("SkillsBench skeleton currently supports agent=codex only")
+    if route not in SKILLSBENCH_ROUTES:
+        raise ValueError(f"unsupported SkillsBench route: {route}")
+    contract = skillsbench_route_contract(route)
+    job_name = skillsbench_job_name(dataset, task_id, route)
+    validation: dict[str, Any] = {
+        "cli_skeleton_present": True,
+        "skillsbench_route_declared": True,
+        "compact_ingest_route_declared": True,
+        "no_real_codex_invoked": True,
+        "no_benchflow_invoked": True,
+        "no_docker_or_cloud_invoked": True,
+        "no_model_api_invoked": True,
+        "no_leaderboard_upload_requested": True,
+        "paths_redacted": True,
+    }
+    benchmark_run: dict[str, Any] = {
+        "schema_version": "benchmark_run_v0",
+        "source_runner": contract["source_runner"],
+        "benchmark_id": dataset,
+        "job_name": job_name,
+        "mode": contract["mode"],
+        "route": route,
+        "agent": {
+            "name": agent,
+            "model": model,
+            "kwargs_keys": (
+                [
+                    "codex_goal_mode_invocation_surface",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "codex-goal-mode-baseline"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "fixed_blind_loop_budget",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "codex-acp-blind-loop-baseline"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "raw_codex_autonomous_max5",
+                    "official_feedback_withheld",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "raw-codex-autonomous-max5"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "goal_harness_product_mode",
+                    "goal_state_todos_replan_cli",
+                    "official_feedback_withheld",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "goal-harness-product-mode"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "goal_harness_blind_loop",
+                    "official_feedback_withheld",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "goal-harness-blind-loop-treatment"
+                else [
+                    "ordinary_codex_cli_actor",
+                    "goal_harness_automation_loop",
+                    "reward_feedback_ablation",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "automation-loop-treatment"
+                else [
+                    "skillsbench_curated_skills_visible",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+            ),
+        },
+        "progress": {
+            "n_total_trials": 0,
+            "n_completed_trials": 0,
+            "n_errored_trials": 0,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+        },
+        "metrics": {
+            "input_tokens": 0,
+            "cache_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0,
+        },
+        "interaction_counters": {
+            "schema_version": "skillsbench_interaction_counters_v0",
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "goal_harness_state_reads": 0,
+            "goal_harness_state_writes": 0,
+            "goal_harness_case_state_reads": 0,
+            "goal_harness_case_state_writes": 0,
+            "heartbeat_count": 0,
+            "case_goal_state_packet_present": route == "goal-harness-product-mode",
+            "case_goal_state_init_required": route == "goal-harness-product-mode",
+            "case_goal_state_initialized_before_agent": False,
+            "case_goal_state_init_status": (
+                "not_run_adapter_skeleton"
+                if route == "goal-harness-product-mode"
+                else ""
+            ),
+            "case_goal_state_schema_version": (
+                BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION
+                if route == "goal-harness-product-mode"
+                else ""
+            ),
+            "case_goal_state_path": (
+                SKILLSBENCH_PRODUCT_MODE_CASE_STATE_PATH
+                if route == "goal-harness-product-mode"
+                else ""
+            ),
+            "declared_done_requires_no_remaining_goals": route
+            == "goal-harness-product-mode",
+            "case_result_writeback": "not_run_adapter_skeleton",
+            "counter_trust_level": "adapter_contract_fixture",
+        },
+        "episode_policy": {
+            "schema_version": "skillsbench_episode_policy_v0",
+            "route": route,
+            "outer_controller": (
+                "goal_harness_blind_automation_loop"
+                if route == "goal-harness-blind-loop-treatment"
+                else "goal_harness_product_mode"
+                if route == "goal-harness-product-mode"
+                else "reward_feedback_automation_loop_ablation"
+                if route == "automation-loop-treatment"
+                else "raw_codex_autonomous_max5"
+                if route == "raw-codex-autonomous-max5"
+                else "fixed_blind_loop_runner"
+                if route == "codex-acp-blind-loop-baseline"
+                else "runner_only"
+            ),
+            "inner_case_actor": (
+                "ordinary_codex_acp_agent"
+                if route
+                in {
+                    "automation-loop-treatment",
+                    "goal-harness-blind-loop-treatment",
+                    "codex-acp-blind-loop-baseline",
+                    "raw-codex-autonomous-max5",
+                    "goal-harness-product-mode",
+                }
+                else "codex_acp_goal_prompt_request_unconfirmed_native_goal_mode"
+                if route == "codex-goal-mode-baseline"
+                else "codex_acp_with_curated_skills"
+            ),
+            "blind_loop": contract["blind_loop"],
+            "product_mode": contract.get("product_mode") is True,
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "verifier_output_tail_forwarded_by_default": False,
+            "raw_trace_recorded": False,
+            "raw_task_text_recorded": False,
+            "does_not_upload_or_submit": True,
+        },
+        "trials": [
+            {
+                "task_id": task_id,
+                "trial_name": f"{task_id}_{route}",
+                "source": dataset,
+                "exception_type": contract["first_blocker"],
+                "reward": {"reward": 0},
+                "metrics": {
+                    "input_tokens": 0,
+                    "cache_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0,
+                },
+                "trajectory_present": False,
+                "verifier_reward_present": False,
+                "artifact_manifest_present": False,
+                "trial_result_present": False,
+            }
+        ],
+        "validation": validation,
+        "authorization": {
+            "real_case_execution_authorized": False,
+            "submit_eligible": False,
+        },
+        "redaction": {
+            "secret_values_recorded": False,
+            "raw_sessions_recorded": False,
+            "host_paths_recorded": False,
+            "raw_prompts_recorded": False,
+            "raw_solutions_recorded": False,
+        },
+        "mode_contract": {
+            "requested_route": route,
+            "arm_id": contract["arm_id"],
+            "case_semantics_changed_by_harness": contract[
+                "case_semantics_changed_by_harness"
+            ],
+            "goal_harness_inside_case": contract["goal_harness_inside_case"],
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "official_score_comparable_to_native_codex": contract[
+                "official_score_comparable_to_native_codex"
+            ],
+            "official_score_comparable_to_goal_harness_treatment": contract[
+                "official_score_comparable_to_goal_harness_treatment"
+            ],
+            "leaderboard_evidence": False,
+        },
+        "evidence_files": [
+            "doc:automation-loop-treatment-case-selection-20260614.md",
+            "doc:benchmark-run-ledger-v0.md",
+            "smoke:skillsbench-benchmark-run-smoke.py",
+        ],
+        "resume_or_inspect_commands": [
+            (
+                "goal-harness benchmark run skillsbench "
+                f"--skillsbench-route {route} --include-task-name {task_id}"
+            ),
+            (
+                "goal-harness benchmark run-ledger-upsert "
+                "--benchmark-run-json <skillsbench-compact-benchmark-run-v0.json>"
+            ),
+        ],
+        "real_run": False,
+        "submit_eligible": False,
+        "official_task_score": {
+            "kind": "not_run",
+            "value": None,
+        },
+        "case_semantics_changed_by_harness": contract[
+            "case_semantics_changed_by_harness"
+        ],
+        "goal_harness_inside_case": contract["goal_harness_inside_case"],
+        "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+        "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+        "native_goal_mode_requested": contract["native_goal_mode_requested"],
+        "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+        "native_goal_mode_confirmation_status": contract[
+            "native_goal_mode_confirmation_status"
+        ],
+        "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+        "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+        "curated_skills_visible": contract["curated_skills_visible"],
+        "product_mode": contract.get("product_mode") is True,
+        "blind_loop": contract["blind_loop"],
+        "official_feedback_blinded": contract["official_feedback_blinded"],
+        "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+        "official_score_comparable_to_native_codex": contract[
+            "official_score_comparable_to_native_codex"
+        ],
+        "official_score_comparable_to_goal_harness_treatment": contract[
+            "official_score_comparable_to_goal_harness_treatment"
+        ],
+        "leaderboard_evidence": False,
+        "trace_publicness": "public_skillsbench_adapter_skeleton",
+        "first_blocker": contract["first_blocker"],
+        "stop_conditions": [
+            "do_not_run_benchflow_from_skeleton",
+            "do_not_invoke_real_codex_from_skeleton",
+            "do_not_start_docker_or_cloud_from_skeleton",
+            "do_not_call_model_api_from_skeleton",
+            "do_not_read_raw_task_prompt_solution_or_trajectory",
+            "do_not_upload_or_submit_leaderboard",
+            "do_not_record_secrets_or_raw_sessions",
+        ],
+    }
+    return benchmark_run
+
+
+def _skillsbench_controller_trace_counters(
+    controller_trace: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(controller_trace, dict):
+        return {}
+    schema_version = str(controller_trace.get("schema_version") or "")
+    if schema_version != "skillsbench_goal_harness_controller_trace_v0":
+        return {}
+
+    def count(key: str) -> int:
+        value = controller_trace.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        return 0
+
+    def positive_int(key: str) -> int | None:
+        value = controller_trace.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return None
+
+    def round_reward_records() -> list[dict[str, Any]]:
+        raw_records = controller_trace.get("round_rewards")
+        if not isinstance(raw_records, list):
+            return []
+        records: list[dict[str, Any]] = []
+        seen_rounds: set[int] = set()
+        for item in raw_records:
+            if not isinstance(item, dict):
+                continue
+            agent_round = item.get("agent_round")
+            if (
+                not isinstance(agent_round, int)
+                or isinstance(agent_round, bool)
+                or agent_round <= 0
+                or agent_round in seen_rounds
+            ):
+                continue
+            seen_rounds.add(agent_round)
+            record: dict[str, Any] = {"agent_round": agent_round}
+            for field in ("reward_present", "passed"):
+                if isinstance(item.get(field), bool):
+                    record[field] = item[field]
+            reward = item.get("reward")
+            if isinstance(reward, (int, float)) and not isinstance(reward, bool):
+                record["reward"] = float(reward)
+            tool_calls = item.get("tool_calls")
+            if (
+                isinstance(tool_calls, int)
+                and not isinstance(tool_calls, bool)
+                and tool_calls >= 0
+            ):
+                record["tool_calls"] = tool_calls
+            records.append(record)
+        return sorted(records, key=lambda record: record["agent_round"])
+
+    reward_records = round_reward_records()
+    first_success_round = positive_int("first_success_round")
+    if first_success_round is None:
+        for record in reward_records:
+            if record.get("passed") is True:
+                first_success_round = int(record["agent_round"])
+                break
+
+    counters: dict[str, Any] = {
+        "controller_trace_present": True,
+        "controller_trace_schema_version": schema_version,
+        "controller_trace_publicness": "public_counts_only_no_task_text_no_verifier_output",
+        "controller_action_decisions": count("controller_action_decisions"),
+        "initial_prompt_count": count("initial_prompt_count"),
+        "followup_prompt_count": count("followup_prompt_count"),
+        "stop_decision_count": count("stop_decision_count"),
+        "reward_observation_count": count("reward_observation_count"),
+        "round_reward_count": len(reward_records),
+        "official_success_observed": controller_trace.get("official_success_observed")
+        is True
+        or first_success_round is not None,
+        "official_success_observation_count": count(
+            "official_success_observation_count"
+        ),
+        "first_success_round": first_success_round,
+        "verifier_feedback_observation_count": count(
+            "verifier_feedback_observation_count"
+        ),
+        "official_feedback_blinded_count": count("official_feedback_blinded_count"),
+        "official_feedback_forwarded": controller_trace.get(
+            "official_feedback_forwarded"
+        )
+        is True,
+        "blind_loop": controller_trace.get("blind_loop") is True,
+        "product_mode": controller_trace.get("product_mode") is True,
+        "case_goal_state_packet_present": controller_trace.get(
+            "case_goal_state_packet_present"
+        )
+        is True,
+        "case_goal_state_init_required": controller_trace.get(
+            "case_goal_state_init_required"
+        )
+        is True,
+        "case_goal_state_initialized_before_agent": controller_trace.get(
+            "case_goal_state_initialized_before_agent"
+        )
+        is True,
+        "declared_done_requires_no_remaining_goals": controller_trace.get(
+            "declared_done_requires_no_remaining_goals"
+        )
+        is True,
+        "agent_declared_done": controller_trace.get("agent_declared_done") is True,
+        "agent_declared_no_remaining_goals": controller_trace.get(
+            "agent_declared_no_remaining_goals"
+        )
+        is True,
+        "max_rounds_budget": count("max_rounds_budget"),
+        "goal_harness_state_reads": count("goal_harness_state_reads"),
+        "goal_harness_state_writes": count("goal_harness_state_writes"),
+        "goal_harness_case_state_reads": count("goal_harness_case_state_reads"),
+        "goal_harness_case_state_writes": count("goal_harness_case_state_writes"),
+        "heartbeat_count": count("heartbeat_count"),
+        "raw_task_text_recorded": controller_trace.get("raw_task_text_recorded")
+        is True,
+        "raw_verifier_output_recorded": controller_trace.get(
+            "raw_verifier_output_recorded"
+        )
+        is True,
+        "raw_agent_trajectory_recorded": controller_trace.get(
+            "raw_agent_trajectory_recorded"
+        )
+        is True,
+    }
+    last_decision = _skillsbench_public_safe_label(
+        controller_trace.get("last_decision") or ""
+    )
+    if last_decision:
+        counters["last_decision"] = last_decision
+    init_status = _skillsbench_public_safe_label(
+        controller_trace.get("case_goal_state_init_status") or ""
+    )
+    if init_status:
+        counters["case_goal_state_init_status"] = init_status
+    case_state_schema = _skillsbench_public_safe_label(
+        controller_trace.get("case_goal_state_schema_version") or ""
+    )
+    if case_state_schema:
+        counters["case_goal_state_schema_version"] = case_state_schema
+    case_state_path = str(controller_trace.get("case_goal_state_path") or "")
+    if (
+        "/.codex/goals/" in case_state_path
+        and case_state_path.endswith("/ACTIVE_GOAL_STATE.md")
+        and not re.search(r"^/(Users|private|var/folders)/", case_state_path)
+    ):
+        counters["case_goal_state_path"] = case_state_path
+    declared_done_round = positive_int("declared_done_round")
+    if declared_done_round is not None:
+        counters["declared_done_round"] = declared_done_round
+    declared_done_score = controller_trace.get("declared_done_score")
+    if (
+        isinstance(declared_done_score, (int, float))
+        and not isinstance(declared_done_score, bool)
+    ):
+        counters["declared_done_score"] = float(declared_done_score)
+    if reward_records:
+        counters["round_rewards"] = reward_records
+    trajectory_summary = (
+        controller_trace.get("acp_trajectory_summary")
+        if isinstance(controller_trace.get("acp_trajectory_summary"), dict)
+        else {}
+    )
+    if trajectory_summary:
+        counters["acp_trajectory_summary"] = {
+            key: trajectory_summary.get(key)
+            for key in (
+                "schema_version",
+                "private_trajectory_present",
+                "raw_text_copied_to_public",
+                "event_count",
+                "round_count",
+                "user_message_count",
+                "agent_message_count",
+                "tool_call_count",
+                "action_category_counts",
+                "round_action_category_counts",
+                "goal_harness_cli_call_count",
+                "goal_harness_cli_calls",
+                "goal_harness_cli_state_usage_counts",
+                "goal_harness_cli_state_read_count",
+                "goal_harness_cli_state_write_count",
+                "goal_harness_case_state_path_count",
+                "goal_harness_case_state_read_count",
+                "goal_harness_case_state_write_count",
+                "protected_path_mention_count",
+                "protected_path_edit_signal_count",
+                "codex_acp_text_present",
+                "codex_acp_text_bytes",
+            )
+            if trajectory_summary.get(key) is not None
+        }
+    return counters
+
+
+def _round_reward_trace_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    numeric_records: list[dict[str, Any]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        agent_round = item.get("agent_round")
+        reward = item.get("reward")
+        if (
+            not isinstance(agent_round, int)
+            or isinstance(agent_round, bool)
+            or agent_round <= 0
+            or not isinstance(reward, (int, float))
+            or isinstance(reward, bool)
+        ):
+            continue
+        numeric_records.append(
+            {
+                "agent_round": agent_round,
+                "reward": float(reward),
+                "passed": item.get("passed") if isinstance(item.get("passed"), bool) else reward >= 1,
+            }
+        )
+    if not numeric_records:
+        return {}
+    by_round = sorted(numeric_records, key=lambda item: item["agent_round"])
+    best = max(by_round, key=lambda item: (item["reward"], -item["agent_round"]))
+    final = by_round[-1]
+    return {
+        "final_round": final["agent_round"],
+        "final_round_reward": final["reward"],
+        "final_round_passed": final["passed"],
+        "best_reward_round": best["agent_round"],
+        "best_round_reward": best["reward"],
+        "best_round_passed": best["passed"],
+        "best_round_is_final": final["reward"] == best["reward"],
+        "loop_score_policy": "best_round_for_offline_controller_analysis",
+        "official_score_policy": "final_workspace_official_result",
+    }
+
+
+def _post_success_controller_trace_score(
+    round_reward_trace: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(round_reward_trace, dict):
+        return {}
+    if round_reward_trace.get("success_observed") is not True:
+        return {}
+    reward = round_reward_trace.get("best_round_reward")
+    if not isinstance(reward, (int, float)) or isinstance(reward, bool):
+        return {}
+    round_index = round_reward_trace.get("best_reward_round")
+    return {
+        "value": float(reward),
+        "passed": reward >= 1.0,
+        "round": round_index
+        if isinstance(round_index, int) and not isinstance(round_index, bool)
+        else None,
+        "policy": "best_round_for_post_success_acp_closeout_recovery",
+    }
+
+
+def build_skillsbench_benchflow_result_benchmark_run(
+    result_json_path: str | Path,
+    *,
+    route: str = SKILLSBENCH_DEFAULT_ROUTE,
+    dataset: str = SKILLSBENCH_DEFAULT_DATASET,
+    agent: str = "codex",
+    model: str | None = None,
+    runner_warning_labels: Iterable[str] | None = None,
+    controller_trace: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a public-safe benchmark_run_v0 from an official SkillsBench result.
+
+    The official BenchFlow result.json already contains the compact fields we
+    need for ledgering: task name, agent/model, reward, error, tool-call count,
+    and timing. This reducer deliberately reads only result.json and sibling
+    timing.json; it does not read prompts, trajectories, verifier stdout, task
+    text, screenshots, or credential material.
+    """
+
+    result_path = Path(result_json_path).expanduser()
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    if not isinstance(result, dict):
+        raise ValueError("SkillsBench result.json must contain a JSON object")
+
+    task_id = str(result.get("task_name") or "").strip()
+    if not task_id:
+        raise ValueError("SkillsBench result.json is missing task_name")
+
+    contract = skillsbench_route_contract(route)
+    observed_agent = str(result.get("agent") or result.get("agent_name") or agent)
+    if observed_agent not in {"codex", "codex-acp"}:
+        raise ValueError(
+            "SkillsBench BenchFlow ingest currently supports codex/codex-acp only"
+        )
+    requested_model = str(model or result.get("model") or SKILLSBENCH_DEFAULT_MODEL)
+    observed_model = str(result.get("model") or requested_model)
+    warning_labels = [
+        label
+        for label in (
+            _skillsbench_public_safe_label(item)
+            for item in (runner_warning_labels or [])
+        )
+        if label
+    ]
+    model_control_status = "reported_model_from_result_metadata"
+    actual_model_verified = False
+    actual_model_source = "official_skillsbench_result_model_field"
+    if CODEX_ACP_SET_MODEL_UNSUPPORTED_LABEL in warning_labels:
+        model_control_status = "requested_model_not_enforced_by_acp"
+        actual_model_verified = False
+        actual_model_source = "codex_acp_default_or_launch_config"
+    rollout_name = str(result.get("rollout_name") or f"{task_id}_{route}")
+
+    rewards = result.get("rewards") if isinstance(result.get("rewards"), dict) else {}
+    reward_value = rewards.get("reward")
+    if not isinstance(reward_value, (int, float)) or isinstance(reward_value, bool):
+        reward_value = None
+    official_passed = bool(reward_value is not None and reward_value >= 1)
+
+    timing_path = result_path.with_name("timing.json")
+    timing: dict[str, Any] = {}
+    if timing_path.exists():
+        raw_timing = json.loads(timing_path.read_text(encoding="utf-8"))
+        if isinstance(raw_timing, dict):
+            timing = raw_timing
+    timing_summary = {
+        key: value
+        for key, value in timing.items()
+        if key
+        in {
+            "environment_setup",
+            "agent_setup",
+            "agent_execution",
+            "verifier",
+            "total",
+        }
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    }
+
+    error = result.get("error")
+    verifier_error = result.get("verifier_error")
+    error_text = str(error).strip() if error else ""
+    verifier_error_text = str(verifier_error).strip() if verifier_error else ""
+    failure_labels: list[str] = []
+    exception_type = "none"
+    score_failure_attribution = "none"
+    runner_score_failure_attribution = "none"
+    if error_text:
+        exception_type, score_failure_attribution, failure_labels = (
+            skillsbench_runner_error_attribution(error_text)
+        )
+        runner_score_failure_attribution = score_failure_attribution
+    if verifier_error_text:
+        exception_type = "skillsbench_verifier_error"
+        failure_labels.append("verifier_infrastructure_failure")
+        score_failure_attribution = "verifier_infrastructure_failure"
+
+    n_tool_calls = result.get("n_tool_calls")
+    tool_calls = n_tool_calls if isinstance(n_tool_calls, int) else 0
+    partial_trajectory = bool(result.get("partial_trajectory") is True)
+    if reward_value == 0 and not failure_labels and not partial_trajectory:
+        failure_labels.append("official_verifier_solution_failure")
+        score_failure_attribution = "official_verifier_solution_failure"
+    elif reward_value == 0 and not failure_labels:
+        failure_labels.append("official_score_zero_case_failure")
+    real_run_completed = not error_text and not verifier_error_text
+    job_name = skillsbench_job_name(dataset, task_id, route)
+    controller_counters = _skillsbench_controller_trace_counters(controller_trace)
+    controller_trace_present = bool(controller_counters.get("controller_trace_present"))
+    controller_raw_material_recorded = bool(
+        controller_counters.get("raw_task_text_recorded")
+        or controller_counters.get("raw_verifier_output_recorded")
+        or controller_counters.get("raw_agent_trajectory_recorded")
+    )
+    counter_trust_level = "official_benchflow_compact_result"
+    if controller_trace_present:
+        counter_trust_level = (
+            "official_benchflow_compact_result_plus_goal_harness_controller_trace"
+        )
+    evidence_files = [
+        "official_skillsbench:result.json",
+        "official_skillsbench:timing.json" if timing else "official_skillsbench:timing_missing",
+    ]
+    if controller_trace_present:
+        evidence_files.append("goal_harness:controller_trace.public.json")
+    trajectory_summary = (
+        controller_counters.get("acp_trajectory_summary")
+        if isinstance(controller_counters.get("acp_trajectory_summary"), dict)
+        else {}
+    )
+    if trajectory_summary:
+        evidence_files.append("goal_harness:acp_trajectory_summary")
+    runner_failure: dict[str, Any] | None = None
+    if error_text:
+        runner_failure = {
+            "schema_version": "skillsbench_runner_failure_v0",
+            "exception_type": exception_type,
+            "failure_class": runner_score_failure_attribution,
+            "raw_error_recorded": False,
+            "raw_logs_read": False,
+            "raw_task_text_read": False,
+            "raw_trajectory_read": False,
+        }
+        runner_failure_fingerprint = skillsbench_runner_error_fingerprint(
+            error_text
+        )
+    round_reward_records = controller_counters.get("round_rewards")
+    if not isinstance(round_reward_records, list):
+        round_reward_records = []
+    first_success_round = controller_counters.get("first_success_round")
+    first_success_round_value = (
+        first_success_round
+        if isinstance(first_success_round, int)
+        and not isinstance(first_success_round, bool)
+        and first_success_round > 0
+        else None
+    )
+    round_reward_trace: dict[str, Any] | None = None
+    if controller_trace_present:
+        round_stats = _round_reward_trace_stats(round_reward_records)
+        round_reward_trace = {
+            "schema_version": "benchmark_round_reward_trace_v0",
+            "source": "goal_harness_controller_trace",
+            "round_index_origin": "agent_round_1_is_first_completed_agent_attempt",
+            "records": round_reward_records,
+            "first_success_round": first_success_round_value,
+            "success_observed": controller_counters.get(
+                "official_success_observed",
+                False,
+            ),
+            "max_rounds_budget": controller_counters.get("max_rounds_budget", 0),
+            "official_feedback_returned_to_agent": contract[
+                "reward_feedback_forwarded"
+            ],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "agent_declared_done": controller_counters.get("agent_declared_done")
+            is True,
+            "declared_done_requires_no_remaining_goals": controller_counters.get(
+                "declared_done_requires_no_remaining_goals"
+            )
+            is True,
+            "agent_declared_no_remaining_goals": controller_counters.get(
+                "agent_declared_no_remaining_goals"
+            )
+            is True,
+        }
+        declared_done_round = controller_counters.get("declared_done_round")
+        if (
+            isinstance(declared_done_round, int)
+            and not isinstance(declared_done_round, bool)
+            and declared_done_round > 0
+        ):
+            round_reward_trace["declared_done_round"] = declared_done_round
+        declared_done_score = controller_counters.get("declared_done_score")
+        if (
+            isinstance(declared_done_score, (int, float))
+            and not isinstance(declared_done_score, bool)
+        ):
+            round_reward_trace["declared_done_score"] = float(declared_done_score)
+        round_reward_trace.update(round_stats)
+
+    post_success_score = {}
+    if (
+        reward_value is None
+        and score_failure_attribution == "skillsbench_codex_acp_jsonrpc_internal_error"
+        and controller_trace_present
+    ):
+        post_success_score = _post_success_controller_trace_score(round_reward_trace)
+        if post_success_score:
+            reward_value = post_success_score["value"]
+            official_passed = post_success_score["passed"]
+            score_failure_attribution = "none"
+            counter_trust_level = (
+                "goal_harness_controller_trace_post_success_official_reward_recovery"
+            )
+            if round_reward_trace is not None:
+                round_reward_trace["official_score_policy"] = post_success_score["policy"]
+                round_reward_trace["official_score_recovered_from_controller_trace"] = True
+                if post_success_score.get("round") is not None:
+                    round_reward_trace["official_score_recovered_round"] = post_success_score[
+                        "round"
+                    ]
+
+    official_score_kind = "skillsbench_verifier_reward"
+    official_score_source = "official_skillsbench_benchflow_result_json"
+    official_score_status = "completed" if reward_value is not None else "missing"
+    validation_scope = "official_benchflow_result_json_only"
+    if post_success_score:
+        official_score_kind = (
+            "skillsbench_verifier_reward_recovered_from_controller_trace"
+        )
+        official_score_source = (
+            "goal_harness_controller_trace_best_round_reward_post_success_acp_closeout"
+        )
+        validation_scope = (
+            "official_benchflow_result_json_plus_goal_harness_controller_trace"
+        )
+
+    benchmark_run: dict[str, Any] = {
+        "schema_version": "benchmark_run_v0",
+        "source_runner": "official_skillsbench_benchflow_result",
+        "benchmark_id": dataset,
+        "job_name": job_name,
+        "mode": contract["mode"],
+        "route": route,
+        "agent": {
+            "name": "codex",
+            "model": observed_model,
+            "kwargs_keys": [
+                "benchflow_agent=codex-acp",
+                "sandbox=docker",
+                "no_upload",
+                "single_task",
+            ],
+        },
+        "model_control": {
+            "schema_version": BENCHMARK_MODEL_CONTROL_SCHEMA_VERSION,
+            "requested_model": requested_model,
+            "reported_model": observed_model,
+            "control_method": "benchflow_acp_session_set_model",
+            "control_status": model_control_status,
+            "actual_model_verified": actual_model_verified,
+            "actual_model_source": actual_model_source,
+            "warning_labels": warning_labels,
+        },
+        "progress": {
+            "n_total_trials": 1,
+            "n_completed_trials": 1 if real_run_completed else 0,
+            "n_errored_trials": 0 if real_run_completed else 1,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+        },
+        "metrics": {
+            "input_tokens": 0,
+            "cache_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0,
+        },
+        "interaction_counters": {
+            "schema_version": "skillsbench_interaction_counters_v0",
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "goal_harness_state_reads": controller_counters.get(
+                "goal_harness_state_reads", 0
+            ),
+            "goal_harness_state_writes": controller_counters.get(
+                "goal_harness_state_writes", 0
+            ),
+            "goal_harness_case_state_reads": controller_counters.get(
+                "goal_harness_case_state_reads", 0
+            ),
+            "goal_harness_case_state_writes": controller_counters.get(
+                "goal_harness_case_state_writes", 0
+            ),
+            "heartbeat_count": controller_counters.get("heartbeat_count", 0),
+            "controller_trace_present": controller_trace_present,
+            "controller_action_decisions": controller_counters.get(
+                "controller_action_decisions", 0
+            ),
+            "controller_initial_prompt_count": controller_counters.get(
+                "initial_prompt_count", 0
+            ),
+            "controller_followup_prompt_count": controller_counters.get(
+                "followup_prompt_count", 0
+            ),
+            "controller_stop_decision_count": controller_counters.get(
+                "stop_decision_count", 0
+            ),
+            "controller_reward_observation_count": controller_counters.get(
+                "reward_observation_count", 0
+            ),
+            "controller_round_reward_count": controller_counters.get(
+                "round_reward_count", 0
+            ),
+            "controller_official_success_observed": controller_counters.get(
+                "official_success_observed", False
+            ),
+            "controller_official_success_observation_count": controller_counters.get(
+                "official_success_observation_count", 0
+            ),
+            "controller_first_success_round": first_success_round_value or 0,
+            "controller_verifier_feedback_observation_count": controller_counters.get(
+                "verifier_feedback_observation_count", 0
+            ),
+            "controller_official_feedback_blinded_count": controller_counters.get(
+                "official_feedback_blinded_count", 0
+            ),
+            "controller_official_feedback_forwarded": controller_counters.get(
+                "official_feedback_forwarded", False
+            ),
+            "controller_blind_loop": controller_counters.get("blind_loop", False),
+            "product_mode": controller_counters.get("product_mode", False),
+            "case_goal_state_packet_present": controller_counters.get(
+                "case_goal_state_packet_present", False
+            ),
+            "case_goal_state_init_required": controller_counters.get(
+                "case_goal_state_init_required", False
+            ),
+            "case_goal_state_initialized_before_agent": controller_counters.get(
+                "case_goal_state_initialized_before_agent", False
+            ),
+            "case_goal_state_init_status": controller_counters.get(
+                "case_goal_state_init_status", ""
+            ),
+            "case_goal_state_schema_version": controller_counters.get(
+                "case_goal_state_schema_version", ""
+            ),
+            "case_goal_state_path": controller_counters.get(
+                "case_goal_state_path", ""
+            ),
+            "declared_done_requires_no_remaining_goals": controller_counters.get(
+                "declared_done_requires_no_remaining_goals", False
+            ),
+            "agent_declared_done": controller_counters.get(
+                "agent_declared_done", False
+            ),
+            "agent_declared_no_remaining_goals": controller_counters.get(
+                "agent_declared_no_remaining_goals", False
+            ),
+            "declared_done_round": controller_counters.get("declared_done_round", 0),
+            "controller_max_rounds_budget": controller_counters.get(
+                "max_rounds_budget", 0
+            ),
+            "controller_trace_schema_version": controller_counters.get(
+                "controller_trace_schema_version", ""
+            ),
+            "controller_trace_publicness": controller_counters.get(
+                "controller_trace_publicness", ""
+            ),
+            "private_trajectory_summary_present": bool(trajectory_summary),
+            "private_trajectory_event_count": trajectory_summary.get("event_count", 0),
+            "private_trajectory_round_count": trajectory_summary.get("round_count", 0),
+            "private_trajectory_tool_call_count": trajectory_summary.get(
+                "tool_call_count", 0
+            ),
+            "goal_harness_cli_call_count": trajectory_summary.get(
+                "goal_harness_cli_call_count", 0
+            ),
+            "goal_harness_cli_calls": trajectory_summary.get(
+                "goal_harness_cli_calls", []
+            ),
+            "trajectory_action_category_counts": trajectory_summary.get(
+                "action_category_counts", {}
+            ),
+            "goal_harness_cli_state_usage_counts": trajectory_summary.get(
+                "goal_harness_cli_state_usage_counts", {}
+            ),
+            "goal_harness_cli_state_read_count": trajectory_summary.get(
+                "goal_harness_cli_state_read_count", 0
+            ),
+            "goal_harness_cli_state_write_count": trajectory_summary.get(
+                "goal_harness_cli_state_write_count", 0
+            ),
+            "goal_harness_case_state_path_count": trajectory_summary.get(
+                "goal_harness_case_state_path_count", 0
+            ),
+            "goal_harness_case_state_read_count": trajectory_summary.get(
+                "goal_harness_case_state_read_count", 0
+            ),
+            "goal_harness_case_state_write_count": trajectory_summary.get(
+                "goal_harness_case_state_write_count", 0
+            ),
+            "protected_path_mention_count": trajectory_summary.get(
+                "protected_path_mention_count", 0
+            ),
+            "protected_path_edit_signal_count": trajectory_summary.get(
+                "protected_path_edit_signal_count", 0
+            ),
+            "codex_acp_text_bytes": trajectory_summary.get("codex_acp_text_bytes", 0),
+            "last_decision": controller_counters.get("last_decision", ""),
+            "case_result_writeback": official_score_source,
+            "counter_trust_level": counter_trust_level,
+        },
+        "episode_policy": {
+            "schema_version": "skillsbench_episode_policy_v0",
+            "route": route,
+            "outer_controller": (
+                "goal_harness_blind_automation_loop"
+                if route == "goal-harness-blind-loop-treatment"
+                else "goal_harness_product_mode"
+                if route == "goal-harness-product-mode"
+                else "reward_feedback_automation_loop_ablation"
+                if route == "automation-loop-treatment"
+                else "raw_codex_autonomous_max5"
+                if route == "raw-codex-autonomous-max5"
+                else "fixed_blind_loop_runner"
+                if route == "codex-acp-blind-loop-baseline"
+                else "runner_only"
+            ),
+            "inner_case_actor": (
+                "ordinary_codex_acp_agent"
+                if route
+                in {
+                    "automation-loop-treatment",
+                    "goal-harness-blind-loop-treatment",
+                    "codex-acp-blind-loop-baseline",
+                    "raw-codex-autonomous-max5",
+                    "goal-harness-product-mode",
+                }
+                else "codex_acp_goal_prompt_request_unconfirmed_native_goal_mode"
+                if route == "codex-goal-mode-baseline"
+                else "codex_acp_with_curated_skills"
+            ),
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "verifier_output_tail_forwarded_by_default": False,
+            "raw_trace_recorded": False,
+            "raw_task_text_recorded": False,
+            "controller_trace_recorded": controller_trace_present,
+            "does_not_upload_or_submit": True,
+        },
+        "trials": [
+            {
+                "task_id": task_id,
+                "trial_name": rollout_name,
+                "source": dataset,
+                "exception_type": exception_type,
+                "reward": {"reward": reward_value if reward_value is not None else 0},
+                "metrics": {
+                    "input_tokens": 0,
+                    "cache_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0,
+                },
+                "trajectory_present": bool(result.get("trajectory_source")),
+                "verifier_reward_present": reward_value is not None,
+                "artifact_manifest_present": True,
+                "trial_result_present": True,
+            }
+        ],
+        "validation": {
+            "official_verifier_validation_present": reward_value is not None,
+            "official_case_success": official_passed,
+            "no_upload": True,
+            "no_submit": True,
+            "no_raw_logs_public": True,
+            "no_credential_values_recorded": True,
+            "validation_scope": validation_scope,
+            "official_verifier_status": official_score_status,
+            "goal_harness_controller_trace_present": controller_trace_present,
+            "goal_harness_controller_trace_public_safe": not controller_raw_material_recorded,
+        },
+        "authorization": {
+            "real_case_execution_authorized": True,
+            "submit_eligible": False,
+        },
+        "redaction": {
+            "secret_values_recorded": False,
+            "raw_sessions_recorded": False,
+            "host_paths_recorded": False,
+            "raw_prompts_recorded": False,
+            "raw_solutions_recorded": False,
+        },
+        "mode_contract": {
+            "requested_route": route,
+            "arm_id": contract["arm_id"],
+            "case_semantics_changed_by_harness": contract[
+                "case_semantics_changed_by_harness"
+            ],
+            "goal_harness_inside_case": contract["goal_harness_inside_case"],
+            "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+            "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+            "native_goal_mode_requested": contract["native_goal_mode_requested"],
+            "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+            "native_goal_mode_confirmation_status": contract[
+                "native_goal_mode_confirmation_status"
+            ],
+            "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+            "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+            "curated_skills_visible": contract["curated_skills_visible"],
+            "product_mode": contract.get("product_mode") is True,
+            "blind_loop": contract["blind_loop"],
+            "official_feedback_blinded": contract["official_feedback_blinded"],
+            "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+            "official_score_comparable_to_native_codex": contract[
+                "official_score_comparable_to_native_codex"
+            ],
+            "official_score_comparable_to_goal_harness_treatment": contract[
+                "official_score_comparable_to_goal_harness_treatment"
+            ],
+            "leaderboard_evidence": False,
+        },
+        "evidence_files": evidence_files,
+        "resume_or_inspect_commands": [
+            (
+                "goal-harness benchmark run skillsbench "
+                "--skillsbench-result-json <official-skillsbench-result.json>"
+            ),
+            (
+                "goal-harness benchmark run-ledger-upsert "
+                "--benchmark-run-json <skillsbench-compact-benchmark-run-v0.json>"
+            ),
+        ],
+        "real_run": True,
+        "submit_eligible": False,
+        "official_task_score": {
+            "kind": official_score_kind,
+            "value": reward_value,
+            "passed": official_passed,
+        },
+        "official_score": reward_value,
+        "official_score_status": official_score_status,
+        "official_score_source": official_score_source,
+        "score_failure_attribution": score_failure_attribution,
+        "case_semantics_changed_by_harness": contract[
+            "case_semantics_changed_by_harness"
+        ],
+        "goal_harness_inside_case": contract["goal_harness_inside_case"],
+        "goal_harness_automation_loop": contract["goal_harness_automation_loop"],
+        "product_mode": contract.get("product_mode") is True,
+        "inner_codex_goal_mode": contract["inner_codex_goal_mode"],
+        "native_goal_mode_requested": contract["native_goal_mode_requested"],
+        "native_goal_mode_invoked": contract["native_goal_mode_invoked"],
+        "native_goal_mode_confirmation_status": contract[
+            "native_goal_mode_confirmation_status"
+        ],
+        "codex_acp_protocol_used": contract["codex_acp_protocol_used"],
+        "skillsbench_route_semantics": contract["skillsbench_route_semantics"],
+        "curated_skills_visible": contract["curated_skills_visible"],
+        "blind_loop": contract["blind_loop"],
+        "official_feedback_blinded": contract["official_feedback_blinded"],
+        "reward_feedback_forwarded": contract["reward_feedback_forwarded"],
+        "official_score_comparable_to_native_codex": contract[
+            "official_score_comparable_to_native_codex"
+        ],
+        "official_score_comparable_to_goal_harness_treatment": contract[
+            "official_score_comparable_to_goal_harness_treatment"
+        ],
+        "leaderboard_evidence": False,
+        "trace_publicness": "public_skillsbench_official_compact_result_only",
+        "failure_attribution_labels": failure_labels,
+        "runner_warning_labels": warning_labels,
+        "stop_conditions": [
+            "do_not_read_raw_task_prompt_solution_or_trajectory",
+            "do_not_record_absolute_job_paths_in_public_ledger",
+            "do_not_upload_or_submit_leaderboard",
+            "do_not_record_secrets_or_raw_sessions",
+        ],
+        "read_boundary": {
+            "compact_only": True,
+            "raw_artifacts_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "controller_trace_read": controller_trace_present,
+            "local_paths_recorded": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }
+    if timing_summary:
+        benchmark_run["timing"] = timing_summary
+    if round_reward_trace is not None:
+        benchmark_run["round_reward_trace"] = round_reward_trace
+    if runner_failure is not None:
+        benchmark_run["runner_failure"] = runner_failure
+        benchmark_run["runner_failure_fingerprint"] = runner_failure_fingerprint
+    if partial_trajectory:
+        benchmark_run["failure_attribution_labels"].append("partial_trajectory")
+    return benchmark_run
+
+
+def skillsbench_recommended_action(*, route: str) -> str:
+    contract = skillsbench_route_contract(route)
+    return str(contract["next_action"])

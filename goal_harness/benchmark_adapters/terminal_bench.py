@@ -220,6 +220,7 @@ TERMINAL_BENCH_MANAGED_CODEX_GOAL_HARNESS_KWARGS = (
     "goal_harness_trace_publicness",
     "goal_harness_counter_trace",
     "goal_harness_cli_bridge_enabled",
+    "goal_harness_codex_install_strategy",
     "goal_harness_command_prefix",
     "goal_harness_runtime_preflight_command",
     "goal_harness_registry_arg",
