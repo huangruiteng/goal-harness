@@ -117,15 +117,12 @@ from .benchmark_core import (
 )
 from .configure_goal import configure_goal, render_configure_goal_markdown
 from .contract import check_contract, render_contract_markdown
-from .cli_commands import handle_doctor_command, register_doctor_command
-from .demo import (
-    DEFAULT_DEMO_AGENT_TODO,
-    DEFAULT_DEMO_GOAL_ID,
-    DEFAULT_DEMO_OBJECTIVE,
-    DEFAULT_DEMO_PROJECT,
-    DEFAULT_DEMO_USER_TODO,
-    render_demo_markdown,
-    run_demo,
+from .cli_commands import (
+    handle_demo_command,
+    handle_doctor_command,
+    handle_new_project_prompt_command,
+    register_doctor_command,
+    register_starter_commands,
 )
 from .execution_profile import DEFAULT_EXECUTION_PROFILE
 from .feedback import append_human_reward, compact_reward, render_reward_markdown
@@ -160,12 +157,6 @@ from .operator_gate import (
     render_operator_gate_markdown,
 )
 from .paths import DEFAULT_RUNTIME_ROOT, default_registry_path, global_registry_path, resolve_runtime_root
-from .project_prompt import (
-    DEFAULT_HANDOFF_ADAPTER_KIND,
-    DEFAULT_HANDOFF_ADAPTER_STATUS,
-    build_new_project_prompt,
-    render_new_project_prompt_markdown,
-)
 from .project_map import (
     DEFAULT_PROJECT_MAP_CLASSIFICATION,
     read_only_project_map_run,
@@ -1631,21 +1622,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not merge this project registry into the shared global registry.",
     )
 
-    prompt_parser = sub.add_parser(
-        "new-project-prompt",
-        help="Generate a copy-paste Codex prompt for connecting a project from a goal document.",
-    )
-    prompt_parser.add_argument("--project", required=True, help="Project directory the target Codex session can access.")
-    prompt_parser.add_argument("--goal-doc", required=True, help="Goal document path for the target project.")
-    prompt_parser.add_argument("--goal-id", help="Initial stable goal id. Defaults to <project-name>-goal.")
-    prompt_parser.add_argument("--objective", help="Initial objective. Defaults to an extraction placeholder.")
-    prompt_parser.add_argument("--domain", help="Initial domain label. Defaults to an extraction placeholder.")
-    prompt_parser.add_argument("--adapter-kind", default=DEFAULT_HANDOFF_ADAPTER_KIND)
-    prompt_parser.add_argument("--adapter-status", default=DEFAULT_HANDOFF_ADAPTER_STATUS)
-    prompt_parser.add_argument("--next-probe", help="Optional read-only pre-tick command for the target project.")
-    prompt_parser.add_argument("--spawn-allowed", action="store_true", help="Include controller/sub-agent flags.")
-    prompt_parser.add_argument("--allowed-domain", action="append", default=[], help="Allowed child work domain. Repeatable.")
-    prompt_parser.add_argument("--write-scope", action="append", default=[], help="Allowed write scope such as docs/**. Repeatable.")
+    register_starter_commands(sub)
 
     heartbeat_prompt_parser = sub.add_parser(
         "heartbeat-prompt",
@@ -1686,20 +1663,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Generate the thinnest generic dispatcher body for trusted agents that inspect Goal Harness state themselves.",
     )
-
-    demo_parser = sub.add_parser(
-        "demo",
-        help="Create a disposable local demo goal and show status/quota output.",
-    )
-    demo_parser.add_argument(
-        "--project",
-        default=str(DEFAULT_DEMO_PROJECT),
-        help=f"Disposable demo project directory. Defaults to {DEFAULT_DEMO_PROJECT}.",
-    )
-    demo_parser.add_argument("--goal-id", default=DEFAULT_DEMO_GOAL_ID)
-    demo_parser.add_argument("--objective", default=DEFAULT_DEMO_OBJECTIVE)
-    demo_parser.add_argument("--user-todo", default=DEFAULT_DEMO_USER_TODO)
-    demo_parser.add_argument("--agent-todo", default=DEFAULT_DEMO_AGENT_TODO)
 
     register_doctor_command(sub)
 
@@ -4982,21 +4945,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if payload.get("ok") else 1
 
     if args.command == "new-project-prompt":
-        payload = build_new_project_prompt(
-            project=Path(args.project),
-            goal_doc=Path(args.goal_doc),
-            goal_id=args.goal_id,
-            objective=args.objective,
-            domain=args.domain,
-            adapter_kind=args.adapter_kind,
-            adapter_status=args.adapter_status,
-            next_probe=args.next_probe,
-            spawn_allowed=bool(args.spawn_allowed),
-            allowed_domains=args.allowed_domain,
-            write_scope=args.write_scope,
-        )
-        print_payload(payload, args.format, render_new_project_prompt_markdown)
-        return 0
+        return handle_new_project_prompt_command(args, print_payload)
 
     if args.command == "heartbeat-prompt":
         try:
@@ -5029,24 +4978,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if payload.get("ok") else 1
 
     if args.command == "demo":
-        try:
-            payload = run_demo(
-                project=Path(args.project).expanduser(),
-                runtime_root=Path(args.runtime_root).expanduser() if args.runtime_root else None,
-                goal_id=args.goal_id,
-                objective=args.objective,
-                user_todo=args.user_todo,
-                agent_todo=args.agent_todo,
-            )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "project": args.project,
-                "goal_id": args.goal_id,
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_demo_markdown)
-        return 0 if payload.get("ok") else 1
+        return handle_demo_command(args, print_payload)
 
     if args.command == "doctor":
         return handle_doctor_command(args, print_payload)
