@@ -9,6 +9,16 @@ run deliberately during release or major control-plane changes.
 
 ## Current Regressions
 
+Run all default contract-only regressions:
+
+```bash
+python3 regression/run-regressions.py
+```
+
+The default suite must stay public-safe and dependency-light: no real Codex CLI,
+Docker, private prompts, raw trajectories, raw logs, verifier tails, or local
+credential material. Keep real-agent paths as explicit per-file opt-ins.
+
 ```bash
 python3 regression/external-evidence-observation-real-codex.py
 ```
@@ -17,10 +27,11 @@ Runs the contract-only path. It creates an isolated Goal Harness fixture and
 checks two projection contracts:
 
 - explicit `waiting_on=external_evidence` goals return an
-  external-evidence observation obligation;
-- already-launched long-running work with an observable compact-result poll
-  target is treated as read-only external evidence, even when the open todo
-  still carries its original `advancement_task/run_eval` metadata.
+  external-evidence observation obligation with delivery disabled until the
+  observation or compact blocker is written back;
+- already-launched advancement work with compact-result poll context remains a
+  bounded delivery lane, with the external monitor treated as auxiliary
+  context rather than a quiet no-op excuse.
 
 ```bash
 python3 regression/quota-executable-backlog-projection.py
