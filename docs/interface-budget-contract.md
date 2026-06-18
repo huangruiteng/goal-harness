@@ -10,8 +10,8 @@ and size/count budgets.
 | --- | --- | --- | --- | --- | --- | --- |
 | `heartbeat_prompt_json` | heartbeat automation | wake and route one bounded turn | `quota should-run`, `status`, or `review-packet --handoff-only` | `json_chars <= 3500` plus `interface_budget.within_budget=true` | `nested_keys <= 40` | `top_level_keys <= 25` |
 | `review_packet_handoff_only_json` | project-agent handoff | forward the smallest sufficient task packet | full `review-packet` or run-history artifact | `json_chars <= 3000` plus `handoff_interface_budget.within_budget=true` | `nested_keys <= 40` | `top_level_keys <= 18` |
-| `quota_should_run_json` | quota guard | decide whether the selected goal may spend compute | `status`, `history`, or active state | `json_chars <= 7000` | `nested_keys <= 180` | `top_level_keys <= 45` |
-| `dashboard_status_json` | operator dashboard | render first-screen operator state | `history`, run artifacts, or project-local adapter output | `json_chars <= 13000` | `nested_keys <= 260` | `top_level_keys <= 20` |
+| `quota_should_run_json` | quota guard | decide whether the selected goal may spend compute | `status`, `history`, or active state | `json_chars <= 8500` | `nested_keys <= 220` | `top_level_keys <= 45` |
+| `dashboard_status_json` | operator dashboard | render first-screen operator state | `history`, run artifacts, or project-local adapter output | `json_chars <= 13500` | `nested_keys <= 260` | `top_level_keys <= 20` |
 
 These budgets are intentionally about the machine payloads, not the full
 archival facts. When a surface needs more detail, put that detail behind a

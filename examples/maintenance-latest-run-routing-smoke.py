@@ -101,9 +101,10 @@ def main() -> int:
     assert decision["should_run"] is True, decision
     assert decision["state"] == "eligible", decision
     assert decision["status"] == "state_refreshed", decision
-    assert decision["recommended_action"] == WORK_ACTION, decision
+    assert decision["recommended_action"] == AGENT_TODO, decision
     protocol_summary = decision["protocol_action_packet"]["summary"]
     assert READINESS_ACTION not in protocol_summary, decision
+    assert WORK_ACTION not in protocol_summary, decision
     assert "agent_action=[P1] Benchmark e2e-first evidence lane" in protocol_summary, decision
     assert "promotion_readiness_warning" not in decision, decision
 

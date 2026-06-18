@@ -1346,7 +1346,7 @@ def assert_project_asset_backed_no_evidence_should_run() -> None:
     assert decision["should_run"] is True, decision
     assert decision["state"] == "eligible", decision
     assert decision["project_asset_source"] == "project_asset", decision
-    assert decision["recommended_action"] == expected_next, decision
+    assert decision["recommended_action"] == expected_agent_todo, decision
     assert decision["quota"]["compute"] == 1.0, decision
     assert decision["quota"]["state"] == "eligible", decision
     assert decision["quota"]["spent_slots"] == 0, decision
@@ -1355,6 +1355,10 @@ def assert_project_asset_backed_no_evidence_should_run() -> None:
     assert decision["user_todo_summary"]["first_open_items"][0]["text"] == expected_user_todo, decision
     assert decision["agent_todo_summary"]["open_count"] == 1, decision
     assert decision["agent_todo_summary"]["first_open_items"][0]["text"] == expected_agent_todo, decision
+    warning = decision["state_action_projection_warning"]
+    assert warning["requires_state_writeback"] is True, decision
+    assert warning["active_state_next_action"] == expected_next, decision
+    assert warning["selected_recommended_action"] == expected_agent_todo, decision
     assert decision["goal_boundary"]["stop_condition"] == expected_stop, decision
     assert decision["heartbeat_recommendation"]["recommended_mode"] == "steering_audit_then_one_step", decision
     assert decision["heartbeat_recommendation"]["notify"] == "DONT_NOTIFY", decision

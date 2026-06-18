@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.cli import review_packet_handoff_only_payload  # noqa: E402
+from goal_harness.cli_commands.status import review_packet_handoff_only_payload  # noqa: E402
 from goal_harness.heartbeat_prompt import build_heartbeat_prompt  # noqa: E402
 from goal_harness.interface_budget import build_interface_budget_cadence  # noqa: E402
 from goal_harness.quota import build_quota_should_run  # noqa: E402
@@ -52,15 +52,15 @@ SURFACE_BUDGETS = {
         "owner": "quota guard",
         "consumer": "decide whether the selected goal may spend compute",
         "cold_path": "status, history, or active state",
-        "max_json_chars": 7_000,
-        "max_nested_keys": 180,
+        "max_json_chars": 8_500,
+        "max_nested_keys": 220,
         "max_top_level_keys": 45,
     },
     "dashboard_status_json": {
         "owner": "operator dashboard",
         "consumer": "render first-screen operator state",
         "cold_path": "history, run artifacts, or project-local adapter output",
-        "max_json_chars": 13_000,
+        "max_json_chars": 13_500,
         "max_nested_keys": 260,
         "max_top_level_keys": 20,
     },

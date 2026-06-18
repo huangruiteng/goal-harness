@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.cli import review_packet_handoff_only_payload  # noqa: E402
+from goal_harness.cli_commands.status import review_packet_handoff_only_payload  # noqa: E402
 from goal_harness.review_packet import build_review_packet  # noqa: E402
 from goal_harness.status import collect_status  # noqa: E402
 
