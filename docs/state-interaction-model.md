@@ -60,6 +60,8 @@ The user is the operator and reward source. The user supplies high-quality
 judgment that the executor cannot infer safely:
 
 - whether a route, result, or tradeoff was good,
+- whether a correction should become a durable operating lesson for future
+  agents,
 - whether a controller may move from observation to advice,
 - whether write or production actions are allowed,
 - whether a project should stay active, pause, or archive,
@@ -73,6 +75,14 @@ was rewarded.
 
 User intent can authorize a transition, but it should still be persisted as a
 goal event, state update, or reward overlay before future agents rely on it.
+When the user corrects a route, priority, benchmark protocol, or product
+assumption, the correction should not live only in chat or model memory. Treat
+it as a candidate operating lesson: write it into active state or a compact
+run-bound/user-reward event, add or update the concrete agent todo that will
+make the lesson executable, and refresh state so `quota should-run` can project
+the corrected rule. The model may still use the richer conversational context
+to interpret the lesson, but Goal Harness must carry the durable hook that
+future agents can see.
 
 ### Dashboard
 
@@ -692,6 +702,22 @@ Dashboard effect: selected runs show whether human judgment exists and what
 class of decision it judged. This is the main improvement over bare goal-mode
 chat, where feedback is easy to lose.
 
+Human reward also covers explicit operating corrections, not only numeric
+score-like approval. A correction such as "Codex stays local; the remote host is
+only the execution substrate" should be promoted into a durable operating
+lesson before the next benchmark or adapter turn relies on it. The minimal
+writeback is:
+
+- a compact summary of the corrected rule;
+- the scope it applies to, such as a benchmark family, route, project, or goal;
+- the old assumption it supersedes;
+- the next agent todo that makes the rule executable;
+- validation or freshness checks that will prove future projection.
+
+If the correction changes a safety boundary, it must still go through the
+checkpointed boundary projection path before authorizing protected writes or
+resource actions.
+
 ## Dashboard Architecture
 
 The dashboard should optimize for operator decisions, not decorative reporting.
@@ -795,6 +821,10 @@ CLI surface:
 - Durable reward belongs in the run-bound `human_reward` overlay. Active goal
   state can summarize that a reward was recorded, but it should not become the
   only reward source that other project agents rely on.
+- Explicit user corrections that change operating policy should be promoted to
+  a durable operating lesson, successor todo, or compact reward/gate event
+  before future agents rely on them. Chat memory alone is not a replayable
+  control-plane signal.
 - The global registry is synced from project-local registries; agents should
   not manually paste project entries into a separate queue.
 - Automation cadence is not the compute quota source of truth. It may wake an

@@ -5,7 +5,7 @@ benchmark case outcomes and artifact references; it must not contain raw
 logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 
 - schema_version: `benchmark_run_ledger_v0`
-- updated_at: `2026-06-18T12:31:16+08:00`
+- updated_at: `2026-06-18T22:54:59+08:00`
 
 ## Case Decisions
 
@@ -29,7 +29,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `skillsbench@1.1` | `react-performance-debugging` | `paired_no_score_uplift` | - | `4` |
 | `skillsbench@1.1` | `setup-fuzzing-py` | `baseline_runner_or_setup_repair_required` | - | `3` |
 | `skillsbench@1.1` | `software-dependency-audit` | `paired_no_score_uplift` | - | `6` |
-| `skillsbench@1.1` | `suricata-custom-exfil` | `paired_baseline_solved_treatment_preserved` | - | `4` |
+| `skillsbench@1.1` | `suricata-custom-exfil` | `paired_treatment_codex_acp_runtime_preflight_required` | - | `5` |
 | `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | `baseline_runner_or_setup_repair_required` | - | `1` |
 | `skillsbench@1.1` | `travel-planning` | `baseline_passed_not_current_treatment_priority` | - | `1` |
 | `terminal-bench-worker-materialization@v0` | `nginx-request-logging` | `single_arm_recorded` | - | `2` |
@@ -51,7 +51,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `terminal-bench@2.0` | `pytorch-model-recovery` | `paired_no_score_uplift_exception_research_required` | `case_exception_research` | `3` |
 | `terminal-bench@2.0` | `regex-log` | `paired_baseline_solved_treatment_preserved` | - | `2` |
 | `terminal-bench@2.0` | `sqlite-db-truncate` | `baseline_passed_not_current_treatment_priority` | - | `1` |
-| `terminal-bench@2.0` | `train-fasttext` | `single_arm_recorded` | - | `1` |
+| `terminal-bench@2.0` | `train-fasttext` | `single_arm_recorded` | - | `2` |
 
 ## Repair Backlog
 
@@ -62,6 +62,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `P0` | `terminal-bench@2.0` | `nginx-request-logging` | `hardened_codex_worker_materialization_probe` | `runner_codex_cli_materialization` | `codex_cli_not_on_path` | runner_codex_cli_materialization | materialize an existing Codex CLI on the worker PATH or provide an equivalent launcher before rerunning; require a compact setup diagnostic that proves the Codex preflight reach... |
 | `P0` | `skillsbench@1.1` | `ada-bathroom-plan-repair` | `codex_goal_mode_baseline` | `skillsbench_codex_acp_runtime_preflight` | `skillsbench_codex_acp_binary_missing` | required_preflight=codex_acp_runtime_dependency_preflight,codex_acp_runtime_launch_preflight,skillsbench_compact_failure_class | prove the Codex ACP runtime can start inside the SkillsBench sandbox before rerunning or launching treatment; require compact dependency and launch preflight evidence instead of... |
 | `P0` | `skillsbench@1.1` | `setup-fuzzing-py` | `codex_goal_mode_baseline` | `skillsbench_codex_acp_runtime_preflight` | `skillsbench_codex_acp_runtime_libssl_missing` | required_preflight=codex_acp_runtime_dependency_preflight,codex_acp_runtime_launch_preflight,skillsbench_compact_failure_class | prove the Codex ACP runtime can start inside the SkillsBench sandbox before rerunning or launching treatment; require compact dependency and launch preflight evidence instead of... |
+| `P0` | `skillsbench@1.1` | `suricata-custom-exfil` | `codex_goal_harness_treatment` | `skillsbench_codex_acp_runtime_preflight` | `skillsbench_codex_acp_jsonrpc_internal_error` | required_preflight=codex_acp_runtime_dependency_preflight,codex_acp_runtime_launch_preflight,skillsbench_compact_failure_class | prove the Codex ACP runtime can start inside the SkillsBench sandbox before rerunning or launching treatment; require compact dependency and launch preflight evidence instead of... |
 | `P0` | `terminal-bench@2.0` | `make-doom-for-mips` | `codex_goal_harness_treatment` | `verifier_attribution_required` | `score_failure_unattributed` |  | collect finer compact failure attribution before launching treatment |
 | `P0` | `terminal-bench@2.0` | `install-windows-3.11` | `codex_goal_harness_treatment` | `worker_verifier_alignment` | `worker_validation_scope_ambiguous_official_score_failure` |  | align worker self-validation with verifier-facing compact evidence before repeating |
 | `P1` | `terminal-bench@2.0` | `pytorch-model-recovery` | `codex_goal_harness_treatment` | `case_exception_research` | `agent_exception_before_solution_completion` |  | inspect compact exception attribution and form a case-level intervention hypothesis |
@@ -180,6 +181,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `skillsbench@1.1` | `suricata-custom-exfil` | `baseline` | `` | `1.0` | `1` | `1:1*` | `none` | `.local/private-benchmark-jobs/skillsbench-suricata-custom-exfil-codex-acp-blind-loop-baseline-20260616T235745CST/suricata-custom-exfil__codex_acp_blind_loop/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `suricata-custom-exfil` | `codex_goal_harness_treatment` | `` | `missing` | `` | `` | `skillsbench_docker_compose_volume_mount_failure` | `.local/private-benchmark-jobs/skillsbench-suricata-custom-exfil-goal-harness-product-mode-20260617T1420CST/suricata-custom-exfil__goal_harness_product_mode/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `suricata-custom-exfil` | `codex_goal_harness_treatment` | `` | `1.0` | `1` | `1:1*,2:1*,3:missing` | `none` | `.local/private-benchmark-jobs/skillsbench-suricata-custom-exfil-goal-harness-product-mode-mountfix-20260617T1508CST/suricata-custom-exfil__goal_harness_product_mode/benchmark_run.compact.json` |
+| `skillsbench@1.1` | `suricata-custom-exfil` | `codex_goal_harness_treatment` | `` | `missing` | `` | `` | `skillsbench_codex_acp_jsonrpc_internal_error` | `` |
 | `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | `skillsbench_raw_codex_autonomous_max5_baseline` | `` | `missing` | `` | `` | `skillsbench_docker_compose_setup_failure` | `.local/private-benchmark-jobs/skillsbench-product-mode-tictoc-unnecessary-abort-detection-raw-baseline-20260616T202521CST/skillsbench-product-mode-tictoc-unnecessary-abort-detection-raw-baseline-20260616T202521CST/tictoc-unnecessary-abort-detection__raw_codex_autonomous_max5/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `travel-planning` | `baseline` | `` | `1.0` | `1` | `1:1*` | `none` | `.local/private-benchmark-jobs/skillsbench-travel-planning-blind-baseline-20260616T1238CST/travel-planning__codex_acp_blind_loop/benchmark_run.compact.json` |
 | `terminal-bench-worker-materialization@v0` | `nginx-request-logging` | `hardened_codex_worker_materialization_runtime_probe` | `` | `missing` | `` | `` | `not_applicable_worker_materialization_probe` | `.local/private-benchmark-jobs/terminal-bench-nginx-hardened-worker-materialization-runtime-probe-20260616T113050CST/jobs/terminal_bench_nginx_request_logging_hardened_worker_materialization_runtime_probe_20260616T113050CST/result.json` |
@@ -262,3 +264,4 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `terminal-bench@2.0` | `regex-log` | `codex_goal_mode_baseline` | `` | `1.0` | `` | `` | `none` | `.local/private-benchmark-jobs/terminal-bench-regex-log-paired-20260614T1232CST/baseline_benchmark_run.compact.json` |
 | `terminal-bench@2.0` | `sqlite-db-truncate` | `codex_goal_mode_baseline` | `` | `1.0` | `` | `` | `none` | `.local/private-benchmark-jobs/terminal-bench-sqlite-db-truncate-baseline-2h-20260615T185855CST/baseline/jobs/terminal_bench_sqlite_db_truncate_codex_goal_mode_baseline_2h_20260615T185855CST/result.json` |
 | `terminal-bench@2.0` | `train-fasttext` | `codex_goal_harness_treatment` | `` | `0.0` | `` | `` | `official_verifier_solution_failure` | `` |
+| `terminal-bench@2.0` | `train-fasttext` | `goal_harness_managed_codex` | `` | `0.0` | `` | `` | `official_verifier_solution_failure` | `.local/private-benchmark-jobs/terminal-bench-train-fasttext-managed-20260618T035534CST/jobs/terminal_bench_train_fasttext_goal_harness_managed_codex_20260618T035534CST/result.json` |
