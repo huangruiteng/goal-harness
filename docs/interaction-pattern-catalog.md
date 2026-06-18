@@ -92,6 +92,7 @@ silent fallback.
 | IP-014 | Decision Write Preview And Append | User/operator | explicit preview/apply decision | append only exact run-bound reward or gate decision event |
 | IP-015 | Benchmark Lifecycle Countability | Benchmark adapter/controller | no interruption by default | advance only through compact countable lifecycle gates |
 | IP-016 | Task Lease Claim | Controller/agent | no interruption unless conflict requires decision | claim bounded work with TTL, write scope, and conflict policy |
+| IP-017 | User Reward Lesson Promotion | User plus Goal Harness | acknowledge only when lesson changes route/priority/boundary | promote correction into durable lesson, todo, or projection before continuing |
 
 ## Visual Model
 
@@ -882,6 +883,67 @@ files because the only ownership signal was a chat message or dashboard label.
 - `docs/frontstage-channel-lease-roadmap.md`
 - `docs/architecture.md` local server / daemon roadmap
 - future `task_lease_v0` status and conflict smoke.
+
+## IP-017 User Reward Lesson Promotion
+
+**Trigger**
+
+- the user explicitly corrects a product route, priority, benchmark protocol,
+  safety boundary, or operating rule;
+- the correction supersedes a current todo, `recommended_action`, route
+  assumption, or benchmark adapter plan;
+- future agents would be likely to repeat the old assumption if the correction
+  remains only in chat.
+
+**Expected behavior**
+
+The agent must pause ordinary delivery selection and promote the correction
+into durable state before continuing. The minimal durable promotion is one of:
+
+- update active `Next Action` and the relevant open `Agent Todo`;
+- append or prepare a run-bound `human_reward` / operating-lesson event;
+- add a concrete successor todo for the product/runtime change;
+- update this catalog or the self-repair pattern table if the situation is
+  reusable.
+
+The correction should record:
+
+- corrected rule;
+- scope, such as goal, project, benchmark family, route, or adapter;
+- superseded assumption;
+- owner of the next implementation step;
+- validation that future `quota should-run` or posthoc parity checks can see
+  the rule.
+
+This is not the same as hidden model memory. The model may remember the
+conversation, but Goal Harness must expose a replayable hook for future agents.
+
+**Visual Model**
+
+```mermaid
+flowchart TD
+  U["user correction / reward"] --> S{"does it change route, priority, or policy?"}
+  S -->|"no"| C["ordinary chat acknowledgement"]
+  S -->|"yes"| P["promote compact lesson"]
+  P --> T["update todo / Next Action / reward overlay"]
+  T --> Q["refresh-state and rerun quota"]
+  Q --> A["continue corrected bounded delivery"]
+```
+
+**Bad smell**
+
+The user says "the three benchmarks should run on the remote development
+machine, but Codex stays local and the remote host is only the execution
+environment"; a later agent turn treats missing remote Codex/Codex-ACP as the
+main blocker or keeps following a stale local-only benchmark staging todo.
+
+**Validation**
+
+- `skills/goal-harness-self-repair/references/repair-patterns.md`
+- `docs/state-interaction-model.md`
+- future `user_reward_lesson_projection_gap` status/quota smoke that checks
+  explicit operating lessons are projected into `recommended_action`,
+  active `Agent Todo`, or a state-projection repair warning.
 
 ## Maintenance Rules
 
