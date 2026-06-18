@@ -30,6 +30,8 @@ def main() -> int:
             "Goal Harness run history is a\ncompact control projection.",
             "Phase 1: Read-Only Projection",
             "Phase 2: Controlled Writeback",
+            "build_session_runtime_readonly_projection",
+            "python3 examples/session-runtime-readonly-projection-smoke.py",
             "quota decision as a scheduler hint, not billing",
             "These metrics are goal-control metrics, not model-quality scores.",
         ],

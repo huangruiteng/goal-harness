@@ -1,6 +1,6 @@
 # Session Runtime Control-Plane Adapter
 
-Status: public-safe architecture target.
+Status: public-safe architecture target + read-only projection contract v0.
 
 Goal Harness should be able to sit beside an existing agent host without
 becoming that host. The target role is a long-horizon task control plane:
@@ -139,6 +139,25 @@ A minimal read-only adapter contract can be shaped as:
 The public fixture should prove only projection semantics. Private source ids,
 raw event bodies, exact host URLs, raw logs, credentials, and local paths stay
 outside the repository.
+
+The current v0 implementation is a pure builder,
+`goal_harness.session_runtime.build_session_runtime_readonly_projection(...)`.
+It accepts compact session, event, outcome, gate, artifact, and decision-result
+summaries, then returns:
+
+- `first_screen`: waiting owner, user action, agent action, validation, blocker,
+  and recommended next step;
+- `attention_item`: a compact dashboard/status item with source pointers;
+- `work_lane_contract`: `user_gate`, `advancement_task`, `blocker`, or
+  `monitor`;
+- `reconcile_rule`: the rule that host logs remain raw facts while Goal
+  Harness stores only compact control projection.
+
+Run:
+
+```bash
+python3 examples/session-runtime-readonly-projection-smoke.py
+```
 
 ## Metrics
 
