@@ -13,8 +13,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from goal_harness.benchmark_core import (  # noqa: E402
+    BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_LAUNCH_PLAN_SCHEMA_VERSION,
+    BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_RUNNER_BATCH_SCHEMA_VERSION,
     BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_SCHEMA_VERSION,
+    build_split_control_remote_executor_launch_plan,
     build_split_control_remote_executor_readiness,
+    build_split_control_remote_executor_runner_batch,
 )
 
 
@@ -205,13 +209,259 @@ def test_partial_ready_subset_can_launch_without_remote_codex() -> None:
     }, payload
     assert payload["parallel_policy"]["suggested_next_batch_size"] == 2, payload
     assert payload["remote_executor"]["remote_agent_components_blocking"] is False, payload
+    plan = build_split_control_remote_executor_launch_plan(payload)
+    assert (
+        plan["schema_version"]
+        == BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_LAUNCH_PLAN_SCHEMA_VERSION
+    ), plan
+    assert plan["ready_to_launch"] is True, plan
+    assert [case["benchmark_id"] for case in plan["launch_cases"]] == [
+        "terminal-bench@2.0",
+        "skillsbench@1.1",
+    ], plan
+    assert all(
+        case["execution_mode"] == "local_agent_remote_executor"
+        and case["requires_fresh_readiness_recheck"] is True
+        and case["compact_evidence_required"] is True
+        and case["raw_material_allowed"] is False
+        and case["upload_allowed"] is False
+        and case["submit_allowed"] is False
+        for case in plan["launch_cases"]
+    ), plan
+    assert plan["third_gate"] == {
+        "benchmark_id": "agents-last-exam@local-docker",
+        "required": True,
+        "status": "provider_or_task_data_gate",
+        "first_blocker": "remote_task_data_or_image_missing",
+        "blockers": [
+            "remote_task_data_or_image_missing",
+            "ale_task_data_staging_venue_missing",
+        ],
+        "repair_action": "validate ALE provider/task-data substrate before formal launch",
+    }, plan
+    assert plan["boundary"]["codex_auth_stays_local"] is True, plan
+    assert plan["boundary"]["remote_codex_invocation_allowed"] is False, plan
+    assert plan["post_launch_evidence_contract"]["required_fields"] == [
+        "benchmark_id",
+        "route",
+        "readiness_rechecked",
+        "compact_result_or_blocker",
+        "raw_material_read",
+        "upload_attempted",
+        "submit_attempted",
+    ], plan
+    batch = build_split_control_remote_executor_runner_batch(
+        plan,
+        fresh_readiness=payload,
+    )
+    assert (
+        batch["schema_version"]
+        == BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_RUNNER_BATCH_SCHEMA_VERSION
+    ), batch
+    assert batch["ready_to_execute"] is True, batch
+    assert batch["ready_to_spend"] is False, batch
+    assert batch["blockers"] == [], batch
+    assert [case["benchmark_id"] for case in batch["runner_cases"]] == [
+        "terminal-bench@2.0",
+        "skillsbench@1.1",
+    ], batch
+    assert all(
+        case["route"] == "local_agent_remote_executor"
+        and case["execution_mode"] == "compact_no_upload_dry_run"
+        and case["raw_material_allowed"] is False
+        and case["upload_allowed"] is False
+        and case["submit_allowed"] is False
+        and "shell_command" not in case
+        for case in batch["runner_cases"]
+    ), batch
+    assert batch["next_action"] == "execute runner_cases and record compact evidence", batch
+    assert_public_safe(batch)
+
+    completed = build_split_control_remote_executor_runner_batch(
+        plan,
+        fresh_readiness=payload,
+        case_results={
+            "terminal-bench@2.0": {
+                "status": "blocked",
+                "readiness_rechecked": True,
+                "compact_result_or_blocker": "runner wrapper missing",
+                "best_score": 0.0,
+            },
+            "skillsbench@1.1": {
+                "status": "passed",
+                "readiness_rechecked": True,
+                "compact_result_or_blocker": "one compact fixture passed",
+                "best_score": 1.0,
+            },
+        },
+    )
+    assert completed["ready_to_execute"] is True, completed
+    assert completed["ready_to_spend"] is True, completed
+    assert completed["post_launch_evidence_boundary"]["violations"] == [], completed
+    assert completed["next_action"] == "write compact evidence and score summary", completed
+    assert_public_safe(completed)
+
+
+def test_runner_batch_requires_fresh_readiness_recheck() -> None:
+    payload = build_split_control_remote_executor_readiness(
+        benchmark_ids=("terminal-bench@2.0",),
+        local_agent={
+            "codex_cli_available": True,
+            "goal_harness_available": True,
+            "codex_auth_ready": True,
+            "codex_auth_local_only": True,
+            "model_invocation_local": True,
+        },
+        remote_executor={
+            "docker_available": True,
+            "python_available": True,
+            "git_available": True,
+            "rsync_available": True,
+        },
+        adapter_readiness={
+            "terminal-bench@2.0": {
+                "split_control_adapter_ready": True,
+                "runner_tooling_ready": True,
+                "task_data_ready": True,
+            },
+        },
+    )
+    plan = build_split_control_remote_executor_launch_plan(payload)
+    missing = build_split_control_remote_executor_runner_batch(plan)
+    assert missing["ready_to_execute"] is False, missing
+    assert missing["runner_cases"] == [], missing
+    assert missing["blockers"] == ["fresh_readiness_recheck_missing"], missing
+
+    stale = build_split_control_remote_executor_runner_batch(
+        plan,
+        fresh_readiness=build_split_control_remote_executor_readiness(
+            benchmark_ids=("terminal-bench@2.0",),
+            local_agent={
+                "codex_cli_available": True,
+                "goal_harness_available": True,
+                "codex_auth_ready": True,
+                "codex_auth_local_only": True,
+                "model_invocation_local": True,
+            },
+            remote_executor={
+                "docker_available": True,
+                "python_available": True,
+                "git_available": True,
+                "rsync_available": True,
+            },
+            adapter_readiness={
+                "terminal-bench@2.0": {
+                    "split_control_adapter_ready": True,
+                    "runner_tooling_ready": False,
+                    "task_data_ready": True,
+                },
+            },
+        ),
+    )
+    assert stale["ready_to_execute"] is False, stale
+    assert stale["blockers"] == ["fresh_readiness_recheck_changed"], stale
+    assert stale["stale_launch_case_ids"] == ["terminal-bench@2.0"], stale
+    assert_public_safe(missing)
+    assert_public_safe(stale)
+
+
+def test_runner_batch_sanitizes_post_launch_evidence() -> None:
+    payload = build_split_control_remote_executor_readiness(
+        benchmark_ids=("skillsbench@1.1",),
+        local_agent={
+            "codex_cli_available": True,
+            "goal_harness_available": True,
+            "codex_auth_ready": True,
+            "codex_auth_local_only": True,
+            "model_invocation_local": True,
+        },
+        remote_executor={
+            "docker_available": True,
+            "python_available": True,
+            "git_available": True,
+            "rsync_available": True,
+        },
+        adapter_readiness={
+            "skillsbench@1.1": {
+                "split_control_adapter_ready": True,
+                "runner_tooling_ready": True,
+                "task_data_ready": True,
+            },
+        },
+    )
+    plan = build_split_control_remote_executor_launch_plan(payload)
+    batch = build_split_control_remote_executor_runner_batch(
+        plan,
+        fresh_readiness=payload,
+        case_results={
+            "skillsbench@1.1": {
+                "status": "passed",
+                "readiness_rechecked": True,
+                "compact_result_or_blocker": "public compact summary only",
+                "raw_logs": "private verifier body must not be copied",
+                "upload_attempted": True,
+            },
+            "unexpected@bench": {"status": "ignored"},
+        },
+    )
+    assert batch["ready_to_execute"] is True, batch
+    assert batch["ready_to_spend"] is False, batch
+    boundary = batch["post_launch_evidence_boundary"]
+    assert boundary["raw_result_key_hits"] == {
+        "skillsbench@1.1": ["raw_logs"]
+    }, batch
+    assert boundary["unexpected_case_ids"] == ["unexpected@bench"], batch
+    assert boundary["unsafe_flags"] == {"skillsbench@1.1": ["upload_attempted"]}, batch
+    assert set(boundary["violations"]) == {
+        "raw_result_keys_present",
+        "unexpected_case_result",
+        "unsafe_result_flag_true",
+    }, batch
+    assert "private verifier body must not be copied" not in json.dumps(batch), batch
+    assert_public_safe(plan)
+    assert_public_safe(batch)
+
+
+def test_launch_plan_blocks_when_no_subset_is_ready() -> None:
+    payload = build_split_control_remote_executor_readiness(
+        benchmark_ids=("agents-last-exam@local-docker",),
+        local_agent={
+            "codex_cli_available": True,
+            "goal_harness_available": True,
+            "codex_auth_ready": True,
+            "codex_auth_local_only": True,
+            "model_invocation_local": True,
+        },
+        remote_executor={
+            "docker_available": True,
+            "python_available": True,
+            "git_available": True,
+            "rsync_available": True,
+        },
+        adapter_readiness={
+            "agents-last-exam@local-docker": {
+                "split_control_adapter_ready": True,
+                "runner_tooling_ready": True,
+                "task_data_ready": False,
+            },
+        },
+    )
+    plan = build_split_control_remote_executor_launch_plan(payload)
+    assert plan["ready_to_launch"] is False, plan
+    assert plan["launch_cases"] == [], plan
+    assert plan["third_gate"]["required"] is True, plan
+    assert plan["next_action"] == "repair third_gate before launch", plan
     assert_public_safe(payload)
+    assert_public_safe(plan)
 
 
 def main() -> int:
     test_remote_codex_is_not_required_for_split_control()
     test_ready_parallel_batch_size_is_capped()
     test_partial_ready_subset_can_launch_without_remote_codex()
+    test_runner_batch_requires_fresh_readiness_recheck()
+    test_runner_batch_sanitizes_post_launch_evidence()
+    test_launch_plan_blocks_when_no_subset_is_ready()
     print("benchmark-split-control-remote-executor-smoke: ok")
     return 0
 

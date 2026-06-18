@@ -1,6 +1,7 @@
 # Benchmark Split-Control Remote Executor V0
 
-Status: design contract + smoke-tested public gate.
+Status: readiness contract + launch-plan contract + runner-batch contract +
+smoke-tested public gate.
 
 This contract defines the benchmark route used when Codex and Goal Harness stay
 on the local trusted machine while a remote development host provides Docker,
@@ -46,6 +47,43 @@ parallel batch such as Terminal-Bench plus SkillsBench while ALE remains
 task-data-gated, without pretending the whole three-benchmark rotation is
 ready.
 
+## Launch Plan V0
+
+`build_split_control_remote_executor_launch_plan(...)` turns a readiness matrix
+into a non-executing launch packet:
+
+- `launch_cases` contains only ready benchmark families, with a compact command
+  label rather than a shell script or raw runner command.
+- each launch case requires a fresh readiness re-check and compact evidence
+  writeback before any score or uplift claim.
+- `third_gate` keeps ALE provider/task-data validation visible when Terminal
+  Bench and SkillsBench are launchable but ALE is not.
+- `post_launch_evidence_contract` names the public-safe fields a later runner
+  must report: benchmark id, route, readiness re-check, compact result or
+  blocker, and explicit no raw material/upload/submit flags.
+
+The launch plan is still a control-plane artifact. It does not execute remote
+commands, copy credentials, read task bodies, expose raw logs, or grant upload
+or submit rights.
+
+## Runner Batch V0
+
+`build_split_control_remote_executor_runner_batch(...)` is the narrow bridge
+from a launch packet to runner execution:
+
+- it requires a fresh readiness payload before producing any `runner_cases`;
+- if a planned benchmark is no longer in the fresh ready batch, it blocks with
+  `fresh_readiness_recheck_changed` instead of executing a stale launch case;
+- each runner case keeps Codex/auth/model ownership local and allows the remote
+  executor only dependency checks, bounded command execution, and compact
+  result reduction;
+- post-launch evidence keeps only compact result fields and records raw-key or
+  unsafe-flag violations without copying raw values.
+
+This keeps the benchmark runner interface close to the real split-control
+route while avoiding a second benchmark harness that hides stale readiness,
+raw logs, task text, uploads, or submit attempts.
+
 ## Current Use
 
 The same route applies to the three active benchmark families:
@@ -69,5 +107,6 @@ python3 examples/benchmark-split-control-remote-executor-smoke.py
 
 The smoke asserts that missing remote Codex/Codex-ACP is non-blocking, while
 adapter, runner-tooling, and task-data blockers remain explicit. It also checks
-that a partial-ready route can produce a launchable subset plus a concrete
-repair target.
+that a partial-ready route can produce a launchable subset, a concrete repair
+target, a public-safe non-executing launch plan, and a runner batch that refuses
+to execute without a fresh readiness re-check.
