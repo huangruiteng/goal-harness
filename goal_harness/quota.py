@@ -14,6 +14,12 @@ from .control_plane import (
     control_plane_policy_summary,
     control_plane_self_repair_allows,
 )
+from .delivery_outcome import (
+    ACCOUNTABLE_DELIVERY_OUTCOMES,
+    DeliveryOutcome,
+    FOLLOWTHROUGH_REQUIRED_DELIVERY_OUTCOMES,
+    normalize_delivery_outcome,
+)
 from .execution_profile import (
     execution_profile_outcome_floor,
     execution_profile_summary,
@@ -48,7 +54,6 @@ QUOTA_STATE_ORDER = (
 QUOTA_SLOT_SPENT_CLASSIFICATION = "quota_slot_spent"
 QUOTA_SLOT_VOIDED_CLASSIFICATION = "quota_slot_voided"
 QUOTA_MONITOR_POLL_CLASSIFICATION = "quota_monitor_poll"
-ACCOUNTABLE_DELIVERY_OUTCOMES = {"outcome_progress", "primary_goal_outcome"}
 DEFAULT_SLOT_SPEND_SOURCE = "heartbeat"
 VALID_SLOT_SPEND_SOURCES = {"heartbeat", "controller", "adapter"}
 USER_GATE_ACTION_KIND_HINTS = (
@@ -414,17 +419,17 @@ def _outcome_followthrough_hint(item: dict[str, Any]) -> dict[str, Any] | None:
     if not latest_run:
         return None
     explicit_required = latest_run.get("outcome_followthrough_required") is True
-    delivery_outcome = str(latest_run.get("delivery_outcome") or "").strip()
-    if delivery_outcome == "primary_goal_outcome":
+    delivery_outcome = normalize_delivery_outcome(latest_run.get("delivery_outcome"))
+    if delivery_outcome == DeliveryOutcome.PRIMARY_GOAL_OUTCOME:
         return None
     classification = str(latest_run.get("classification") or "").strip()
-    if not explicit_required and delivery_outcome not in {"surface_only", "outcome_gap"}:
+    if not explicit_required and delivery_outcome not in FOLLOWTHROUGH_REQUIRED_DELIVERY_OUTCOMES:
         return None
     return {
         "source": "post_handoff_latest_run",
         "required": True,
         "latest_classification": classification,
-        "latest_delivery_outcome": delivery_outcome or None,
+        "latest_delivery_outcome": delivery_outcome.value if delivery_outcome else None,
         "obligation": "advance_primary_outcome_or_write_blocker",
         "spend_policy": (
             "do not spend for another contract/preparation-only slice; spend only "
@@ -2673,7 +2678,7 @@ def _control_plane_post_handoff_observation_hint(item: dict[str, Any]) -> dict[s
         return None
     if str(handoff_readiness.get("handoff_status") or "") != "post_handoff_run_seen":
         return None
-    if str(latest_run.get("delivery_outcome") or "") != "primary_goal_outcome":
+    if normalize_delivery_outcome(latest_run.get("delivery_outcome")) != DeliveryOutcome.PRIMARY_GOAL_OUTCOME:
         return None
 
     return {
@@ -4093,7 +4098,7 @@ def build_quota_monitor_poll_event(
             if external_monitor_poll
             else "monitor-only poll unchanged; no quota spend; no material transition"
         ),
-        "delivery_outcome": "surface_only",
+        "delivery_outcome": DeliveryOutcome.SURFACE_ONLY.value,
         "monitor_event": {
             "event_type": QUOTA_MONITOR_POLL_CLASSIFICATION,
             "source": safe_source,
@@ -4238,7 +4243,7 @@ def _latest_unspent_accountable_delivery_run(runtime_root: Path, goal_id: str) -
             return None
         if classification == QUOTA_MONITOR_POLL_CLASSIFICATION:
             return None
-        delivery_outcome = str(run.get("delivery_outcome") or "").strip()
+        delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
         if delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
             return run
         return None

@@ -493,6 +493,21 @@ goal-harness refresh-state \
   --delivery-outcome outcome_progress
 ```
 
+Use `delivery_outcome` as a machine enum, not as prose:
+
+- `surface_only`: docs, contracts, smokes, setup, or preparation moved, but the
+  primary product/case result did not.
+- `outcome_gap`: the run should have advanced the primary result but ended with
+  a concrete blocker or missing outcome.
+- `outcome_progress`: primary result evidence advanced materially, but the
+  selected stage is not fully complete.
+- `primary_goal_outcome`: the selected stage's primary result is complete,
+  validated, and written back.
+
+Do not rely on `classification` names such as `*_contract_v0_delivered` to carry
+this meaning. `classification` is a human/history label; `delivery_outcome` is
+the control-plane signal consumed by quota, status, and review packets.
+
 This fixes stale dashboards where the latest run still shows an old
 `ready_for_controller_opt_in` or similar state. It also auto-syncs the project
 entry into the global registry. If you do not pass `--recommended-action`, the

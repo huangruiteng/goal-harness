@@ -9,6 +9,13 @@ from typing import Any
 
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .contract import check_contract
+from .delivery_outcome import (
+    DELIVERY_OUTCOME_NOT_CONFIGURED,
+    DELIVERY_OUTCOME_UNKNOWN,
+    DeliveryOutcome,
+    PROGRESS_DELIVERY_OUTCOMES,
+    normalize_delivery_outcome,
+)
 from .doctor import (
     PROMOTION_READINESS_CLASSIFICATIONS,
     PROMOTION_READINESS_FRESHNESS_HOURS,
@@ -372,10 +379,7 @@ AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = (
         re.compile(r"(?i)(?:autonomous replan|replan obligation|planning[- ]?trigger|重新规划|重规划|规划触发)"),
     ),
 )
-AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES = {
-    "outcome_progress",
-    "primary_goal_outcome",
-}
+AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES = PROGRESS_DELIVERY_OUTCOMES
 AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
     "quota_slot_voided",
@@ -4000,14 +4004,19 @@ def _run_history_stall_signal(run: dict[str, Any]) -> dict[str, Any] | None:
     classification = str(run.get("classification") or "").strip()
     if not classification or classification in AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS:
         return None
-    delivery_outcome = str(run.get("delivery_outcome") or "").strip()
+    delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
     if delivery_outcome in AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES:
         return None
     recommended_action = public_safe_compact_text(run.get("recommended_action"), limit=140)
     health_check = public_safe_compact_text(run.get("health_check"), limit=140)
     combined = " ".join(
         value
-        for value in (classification, recommended_action, health_check, delivery_outcome)
+        for value in (
+            classification,
+            recommended_action,
+            health_check,
+            delivery_outcome.value if delivery_outcome else "",
+        )
         if value
     )
     if not combined or not AUTONOMOUS_RUN_HISTORY_STALL_PATTERN.search(combined):
@@ -4017,7 +4026,7 @@ def _run_history_stall_signal(run: dict[str, Any]) -> dict[str, Any] | None:
         "classification": classification,
         "generated_at": str(run.get("generated_at") or ""),
         "recommended_action": recommended_action,
-        "delivery_outcome": delivery_outcome or None,
+        "delivery_outcome": delivery_outcome.value if delivery_outcome else None,
         "signature": _normalized_run_history_stall_signature(action_or_classification),
     }
 
@@ -4759,24 +4768,26 @@ def _classification_contains_any(classification: str, hints: list[Any]) -> bool:
 
 
 def delivery_outcome_for_run(run: dict[str, Any], profile: dict[str, Any] | None = None) -> str:
-    explicit = str(run.get("delivery_outcome") or "").strip()
+    explicit = normalize_delivery_outcome(run.get("delivery_outcome"))
     if explicit:
-        return explicit
+        return explicit.value
+    if str(run.get("delivery_outcome") or "").strip():
+        return DELIVERY_OUTCOME_UNKNOWN
     classification = str(run.get("classification") or "")
     if not classification:
-        return "unknown"
+        return DELIVERY_OUTCOME_UNKNOWN
     floor = execution_profile_outcome_floor(profile)
     outcome_markers = floor.get("outcome_markers") if isinstance(floor.get("outcome_markers"), list) else []
     surface_hints = floor.get("surface_only_hints") if isinstance(floor.get("surface_only_hints"), list) else []
     if not outcome_markers and not surface_hints:
-        return "not_configured"
+        return DELIVERY_OUTCOME_NOT_CONFIGURED
     marker_hit = _classification_contains_any(classification, outcome_markers)
     surface_hit = _classification_contains_any(classification, surface_hints)
     if surface_hit:
-        return "surface_only"
+        return DeliveryOutcome.SURFACE_ONLY.value
     if marker_hit:
-        return "outcome_progress"
-    return "outcome_gap"
+        return DeliveryOutcome.OUTCOME_PROGRESS.value
+    return DeliveryOutcome.OUTCOME_GAP.value
 
 
 def outcome_floor_configured(profile: dict[str, Any] | None) -> bool:
@@ -4790,7 +4801,8 @@ def outcome_gap_streak(runs: list[dict[str, Any]], profile: dict[str, Any] | Non
     streak = 0
     for run in runs:
         outcome = delivery_outcome_for_run(run, profile)
-        if outcome in {"outcome_progress", "primary_goal_outcome", "not_configured"}:
+        normalized = normalize_delivery_outcome(outcome)
+        if normalized in PROGRESS_DELIVERY_OUTCOMES or outcome == DELIVERY_OUTCOME_NOT_CONFIGURED:
             break
         streak += 1
     return streak
@@ -4803,7 +4815,7 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
             compact[field] = run[field]
     compact["delivery_batch_scale"] = delivery_batch_scale_for_run(run)
     outcome = delivery_outcome_for_run(run, profile)
-    if outcome != "not_configured":
+    if outcome != DELIVERY_OUTCOME_NOT_CONFIGURED:
         compact["delivery_outcome"] = outcome
     benchmark_run = compact_benchmark_run(run)
     if benchmark_run:

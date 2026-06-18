@@ -6,6 +6,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from ..delivery_outcome import DeliveryOutcome
+
 
 AGENTISSUE_BENCHMARK_ID = "agentissue-bench"
 AGENTISSUE_CODEX_CLI_RUNNER_WRAPPER_SCHEMA_VERSION = (
@@ -750,7 +752,7 @@ def materialize_agentissue_codex_cli_runner_first_run_handoff(
         "--delivery-batch-scale",
         "multi_surface",
         "--delivery-outcome",
-        "outcome_progress",
+        DeliveryOutcome.OUTCOME_PROGRESS.value,
         "--execute",
     ]
     safety_checklist = [
@@ -1948,7 +1950,7 @@ PY
 reduce_compact_public_evidence() {{
   local args=("$GOAL_HARNESS_BIN" "benchmark" "agentissue-codex-runner-flow" "--goal-id" "$GOAL_ID" "--tag" "$TAG" "--real-result-root" "$JOB_ROOT")
   if [ "$APPEND_HISTORY" = "1" ]; then
-    args+=("--delivery-batch-scale" "multi_surface" "--delivery-outcome" "primary_goal_outcome" "--execute")
+    args+=("--delivery-batch-scale" "multi_surface" "--delivery-outcome" "{DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value}" "--execute")
   fi
   "${{args[@]}}"
 }}

@@ -409,10 +409,20 @@ goal-harness refresh-state \
 ```
 
 Use `--delivery-batch-scale` for `test_only`, `single_surface`,
-`multi_surface`, or `implementation`, and use `--delivery-outcome` for
-`outcome_progress`, `surface_only`, or `outcome_gap` when the execution profile
-has an outcome floor. This keeps quota guards, review packets, and dashboards
-truthful after a coherent artifact without exposing raw evidence.
+`multi_surface`, or `implementation`. `--delivery-outcome` is a structured enum,
+not a classification string:
+
+| Value | Meaning |
+| --- | --- |
+| `surface_only` | Contract, docs, smoke, setup, or preparation moved, but the primary product/case result did not. |
+| `outcome_gap` | The run should have advanced the primary result, but ended with a concrete blocker or missing outcome. |
+| `outcome_progress` | The primary result has materially advanced, but the stage is not fully complete. |
+| `primary_goal_outcome` | The selected stage's primary result is complete, validated, and written back. |
+
+This keeps quota guards, review packets, and dashboards truthful after a
+coherent artifact without exposing raw evidence. Do not encode this decision in
+`classification`; classification is for human indexing, while delivery outcome
+is the machine decision signal.
 
 For a newly connected read-only project, append a generic map run before
 building a custom adapter:

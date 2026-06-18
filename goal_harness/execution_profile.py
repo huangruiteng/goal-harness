@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .delivery_outcome import DeliveryOutcome
+
 
 DEFAULT_EXECUTION_PROFILE: dict[str, Any] = {
     "cadence": "bounded_progress_segment",
@@ -19,7 +21,7 @@ DEFAULT_EXECUTION_PROFILE: dict[str, Any] = {
         "outcome_markers": [],
         "surface_only_hints": [],
         "must_advance": [
-            "primary_goal_outcome",
+            DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value,
         ],
         "avoid": [
             "surface_only_progress_loop",

@@ -118,6 +118,7 @@ from .benchmark_core import (
     render_codex_app_parity_posthoc_check_markdown,
 )
 from .configure_goal import configure_goal, render_configure_goal_markdown
+from .delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from .cli_commands import (
     handle_check_command,
     handle_diagnose_command,
@@ -194,7 +195,6 @@ from .state_refresh import (
     DEFAULT_REFRESH_ACTION,
     DEFAULT_REFRESH_CLASSIFICATION,
     DELIVERY_BATCH_SCALE_CHOICES,
-    DELIVERY_OUTCOME_CHOICES,
     refresh_state_run,
     render_state_refresh_markdown,
 )

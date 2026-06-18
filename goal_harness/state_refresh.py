@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .delivery_outcome import DELIVERY_OUTCOME_CHOICES, require_delivery_outcome
 from .feedback import validate_public_safe_text
 from .global_registry import sync_project_registry_to_global
 from .history import load_registry, reserve_unique_run_paths, unique_run_paths
@@ -21,7 +22,6 @@ DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the n
 RECOMMENDED_ACTION_SECTION_LINE_LIMIT = 16
 BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 DELIVERY_BATCH_SCALE_CHOICES = ("test_only", "single_surface", "multi_surface", "implementation")
-DELIVERY_OUTCOME_CHOICES = ("outcome_progress", "surface_only", "outcome_gap", "primary_goal_outcome")
 
 
 def now_local() -> str:
@@ -285,8 +285,9 @@ def refresh_state_run(
         raise ValueError(
             "delivery_batch_scale must be one of: " + ", ".join(DELIVERY_BATCH_SCALE_CHOICES)
         )
-    if delivery_outcome and delivery_outcome not in DELIVERY_OUTCOME_CHOICES:
-        raise ValueError("delivery_outcome must be one of: " + ", ".join(DELIVERY_OUTCOME_CHOICES))
+    normalized_delivery_outcome = (
+        require_delivery_outcome(delivery_outcome).value if delivery_outcome else None
+    )
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     registry_goal, resolved_project, resolved_state_file = resolve_goal_state(
@@ -310,7 +311,7 @@ def refresh_state_run(
         generated_at=generated_at,
         registry_goal=registry_goal,
         delivery_batch_scale=delivery_batch_scale,
-        delivery_outcome=delivery_outcome,
+        delivery_outcome=normalized_delivery_outcome,
     )
 
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
@@ -327,8 +328,8 @@ def refresh_state_run(
     }
     if delivery_batch_scale:
         index_record["delivery_batch_scale"] = delivery_batch_scale
-    if delivery_outcome:
-        index_record["delivery_outcome"] = delivery_outcome
+    if normalized_delivery_outcome:
+        index_record["delivery_outcome"] = normalized_delivery_outcome
     payload = {
         "ok": True,
         "dry_run": dry_run,

@@ -191,6 +191,20 @@ by a repairable control-plane condition, `quota should-run` may instead return
 machine-readable bounded action for the selected goal, not a prompt-specific
 branch. Spend is allowed only after validation and durable writeback.
 
+Delivery outcome is a structured enum consumed by quota, not a suffix inferred
+from `classification`. New writes should use one of:
+
+| Value | Quota meaning |
+| --- | --- |
+| `surface_only` | Useful surface work, but not primary result evidence; may trigger follow-through when an advancement todo remains. |
+| `outcome_gap` | The run exposed a concrete blocker or missing outcome; follow-up should advance the result or write a precise blocker. |
+| `outcome_progress` | Accountable delivery progress that may be eligible for spend after validation/writeback. |
+| `primary_goal_outcome` | The selected stage's primary outcome is complete; it satisfies outcome-floor recovery. |
+
+`classification` remains a human/history label. Quota may use old
+execution-profile hints only as a compatibility fallback for historical runs;
+new control-plane decisions should be driven by the enum above.
+
 `quota should-run` also separates long-running observation from work that should
 advance the selected goal. When the selected goal's current projection is a
 dependency-only observation, the payload includes `work_lane_contract` with

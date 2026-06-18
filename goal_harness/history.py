@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from .authority import goal_authority_registry_summary
 from .control_plane import compact_control_plane_policy
+from .delivery_outcome import require_delivery_outcome
 from .execution_profile import compact_execution_profile
 from .paths import resolve_runtime_root
 from .quota import goal_quota_with_spend_ledger
@@ -29,6 +30,10 @@ REGISTRY_ATTENTION_FIELDS = (
 
 def now_local() -> str:
     return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
+
+
+def _normalize_optional_delivery_outcome(value: str | None) -> str | None:
+    return require_delivery_outcome(value).value if value else None
 
 
 def run_file_stem(generated_at: str) -> str:
@@ -182,6 +187,7 @@ def append_benchmark_run(
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     if benchmark_run.get("schema_version") != "benchmark_run_v0":
         raise ValueError("benchmark run must have schema_version=benchmark_run_v0")
+    delivery_outcome = _normalize_optional_delivery_outcome(delivery_outcome)
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -258,6 +264,7 @@ def append_benchmark_result(
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     if benchmark_result.get("schema_version") != "benchmark_result_v0":
         raise ValueError("benchmark result must have schema_version=benchmark_result_v0")
+    delivery_outcome = _normalize_optional_delivery_outcome(delivery_outcome)
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -334,6 +341,7 @@ def append_benchmark_comparison(
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     if benchmark_comparison.get("schema_version") != "benchmark_comparison_v0":
         raise ValueError("benchmark comparison must have schema_version=benchmark_comparison_v0")
+    delivery_outcome = _normalize_optional_delivery_outcome(delivery_outcome)
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -410,6 +418,7 @@ def append_benchmark_learning_ledger(
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     if benchmark_learning_ledger.get("schema_version") != "benchmark_learning_ledger_v0":
         raise ValueError("benchmark learning ledger must have schema_version=benchmark_learning_ledger_v0")
+    delivery_outcome = _normalize_optional_delivery_outcome(delivery_outcome)
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -486,6 +495,7 @@ def append_benchmark_experiment_report(
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     if benchmark_experiment_report.get("schema_version") != "benchmark_experiment_report_v0":
         raise ValueError("benchmark experiment report must have schema_version=benchmark_experiment_report_v0")
+    delivery_outcome = _normalize_optional_delivery_outcome(delivery_outcome)
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -562,6 +572,7 @@ def append_active_user_assisted_pilot(
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     if active_user_assisted_pilot.get("schema_version") != "active_user_assisted_pilot_v0":
         raise ValueError("active user assisted pilot must have schema_version=active_user_assisted_pilot_v0")
+    delivery_outcome = _normalize_optional_delivery_outcome(delivery_outcome)
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
