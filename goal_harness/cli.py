@@ -1636,6 +1636,39 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Outcome/evidence floor label that future delivery must advance. Repeatable.",
     )
+    bootstrap_parser.add_argument(
+        "--no-onboarding-scan",
+        action="store_true",
+        help="Skip the fast first-connect repository scan and todo candidate proposal.",
+    )
+    bootstrap_parser.add_argument(
+        "--accept-onboarding-agent-todos",
+        action="store_true",
+        help="Write all proposed onboarding agent todos into the initial active state.",
+    )
+    bootstrap_parser.add_argument(
+        "--begin-autonomous-advance",
+        action="store_true",
+        help="Record that Codex may begin from accepted onboarding agent todos after the quota guard permits work.",
+    )
+    bootstrap_parser.add_argument(
+        "--onboarding-max-commits",
+        type=int,
+        default=5,
+        help="Maximum recent commits sampled by the fast onboarding scan.",
+    )
+    bootstrap_parser.add_argument(
+        "--onboarding-max-status-paths",
+        type=int,
+        default=12,
+        help="Maximum git status lines sampled by the fast onboarding scan.",
+    )
+    bootstrap_parser.add_argument(
+        "--onboarding-max-top-level-files",
+        type=int,
+        default=24,
+        help="Maximum top-level names sampled by the fast onboarding scan.",
+    )
     bootstrap_parser.add_argument("--force", action="store_true", help="Replace existing goal entry or state file.")
     bootstrap_parser.add_argument("--dry-run", action="store_true", help="Show planned writes without changing files.")
     bootstrap_parser.add_argument(
@@ -4953,6 +4986,12 @@ def main(argv: list[str] | None = None) -> int:
                 execution_surface_only_hints=args.execution_surface_only_hint or None,
                 execution_surface_streak_threshold=args.execution_surface_streak_threshold,
                 execution_outcome_must_advance=args.execution_outcome_must_advance or None,
+                onboarding_scan_enabled=not bool(args.no_onboarding_scan),
+                accept_onboarding_agent_todos=bool(args.accept_onboarding_agent_todos),
+                begin_autonomous_advance=bool(args.begin_autonomous_advance),
+                onboarding_max_commits=args.onboarding_max_commits,
+                onboarding_max_status_paths=args.onboarding_max_status_paths,
+                onboarding_max_top_level_files=args.onboarding_max_top_level_files,
                 force=args.force,
                 dry_run=args.dry_run,
                 sync_global=not bool(args.no_global_sync),
