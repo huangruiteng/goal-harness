@@ -3,6 +3,14 @@
 This is the first product dashboard shell for Goal Harness. It renders the
 status data contract with a React/Vite control-plane UI.
 
+## Current Status
+
+The dashboard is an experimental operator preview, not the primary Goal Harness
+workflow. The CLI, status JSON, run history, and active goal files remain the
+source of truth for day-to-day work. Use the dashboard for public-safe demos,
+local inspection, and focused UI experiments until it receives a dedicated
+product iteration pass.
+
 ## Run
 
 ```bash

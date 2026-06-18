@@ -12,6 +12,11 @@ run history, quota, feedback, and project boundaries across many turns.
 The product promise is not "more todo lists." It is a better human-in-the-loop
 control surface:
 
+Goal Harness assumes the underlying agent loop is already capable. Its job is
+to make that loop usable over long horizons: keep human judgment at high-value
+decision points, keep safe fallback work moving when one lane is gated, and
+stop compute spend when a turn cannot produce a verified transition.
+
 - when a high-priority item is blocked on a human decision, the exact user todo
   stays visible instead of disappearing into chat;
 - when safe fallback work exists, the agent can keep using the turn on lower
@@ -467,6 +472,12 @@ See [docs/quota-allocation.md](docs/quota-allocation.md) and
 [docs/heartbeat-automation-prompt.md](docs/heartbeat-automation-prompt.md).
 
 ## Dashboard
+
+Dashboard status: experimental operator preview. The CLI and
+`goal-harness status` remain the canonical daily workflow; the React dashboard
+is useful for demos, public-safe fixtures, and local inspection, but it has not
+yet received the same product iteration as the CLI, benchmark adapters, and
+control-plane contracts.
 
 Serve status JSON:
 
