@@ -89,6 +89,25 @@ Agents should not patch active-state checkboxes directly to move work forward.
 Use the lifecycle commands so Goal Harness can preserve `todo_id`, status,
 classification metadata, timestamps, and idempotency in one write.
 
+Todo lifecycle should stay simple. Do not add a separate feature state machine
+such as `slice_done`, `rolled_out`, or `proven_in_product_path` unless the
+product has a concrete UI/runtime need for it. For ordinary project work, use
+**todo succession** instead: complete the implementation slice, then create the
+next concrete todo for rollout, product-path audit, benchmark proof, docs,
+telemetry, or operator decision.
+
+A non-trivial feature todo is done only as a slice. Before or during completion,
+the agent should do one of two things:
+
+- create the next public-safe agent or user todo with `--next-agent-todo`,
+  `--next-user-todo`, or a follow-up `todo add`;
+- record a compact no-follow-up rationale in the completion note, explaining why
+  the feature is truly finished and does not need rollout, audit, docs, or
+  product-path proof.
+
+This keeps the active checklist honest without making Goal Harness a heavyweight
+project-management state machine.
+
 Complete the current todo and atomically register the next executable todo:
 
 ```bash

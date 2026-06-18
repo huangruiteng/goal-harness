@@ -111,6 +111,7 @@ before implementation.
 | GH-C36 | narrative | Prepare a public-safe blocked-priority fallback demo: a fake benchmark rotation where one lane is user-gated and the harness continues a safe fallback while preserving the blocked gate, quota decision, and evidence boundary. Do not use private raw benchmark artifacts. | Demo fixture or doc plus `goal-harness check --scan-path README.md --scan-path docs/outreach/xiaohongshu-launch-draft.md` |
 | GH-C37 | interaction model | Curate the interaction pattern catalog with one new public-safe good/bad case, including trigger signals, user channel, agent channel, state contract, bad smell, and validation reference. Do not copy raw chat, private benchmark artifacts, or internal links. | `goal-harness check --scan-path docs/interaction-pattern-catalog.md` |
 | GH-C38 | narrative | Create a public-safe visual or short animated demo storyboard for one interaction pattern, starting with blocked-priority fallback. Use fake data, show user/agent/Goal Harness channels, and keep raw benchmark evidence out. | Storyboard, Mermaid/SVG, or video script plus `goal-harness check --scan-path docs/interaction-pattern-catalog.md` |
+| GH-C39 | interaction model | Design explicit `decision_scope` / `required_decision_scopes` metadata for user gates and agent todos so scoped fallback does not rely on prompt memory or text inference. | RFC update to `docs/interaction-pattern-catalog.md` plus one projection fixture |
 
 ### Maintainer-Owned / Coordination Required
 

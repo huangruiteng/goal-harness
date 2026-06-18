@@ -29,19 +29,63 @@ Keep examples public-safe. Do not copy raw benchmark tasks, raw trajectories,
 private logs, verifier output tails, credentials, internal URLs, or local
 machine paths.
 
+## Decision Scope Model
+
+User gates are not global booleans. The first-class model is a scoped decision:
+
+- a **decision/gate** names the authority still needed, such as a private
+  material read, resource spend, write boundary, production action, public
+  submission, or product-direction choice;
+- an **agent action** names the authority it depends on and the effect it will
+  produce, such as read-only analysis, local code edit, external run, private
+  source sync, or dashboard write;
+- the controller compares the two as a scope relation:
+  `gate covers action`, `gate does not cover action`, or `scope is ambiguous`.
+
+This keeps the product behavior simple:
+
+| Relation | User Channel | Agent Channel |
+| --- | --- | --- |
+| gate covers selected action and no independent fallback exists | ask concrete user todo | stop gated delivery; no spend |
+| gate covers selected action but an independent fallback exists | notify concrete user todo | execute fallback, validate, write back, spend once |
+| gate does not cover selected action | keep gate visible if useful | execute selected action normally |
+| scope is ambiguous | ask/repair projection | do not infer permission from prose |
+
+The durable target schema should make this relation explicit rather than
+relying on prompt memory or text matching:
+
+```text
+user_todo.decision_scope = {
+  kind: private_read | write_scope | resource | production | public_claim | direction,
+  granularity: action | lane | goal | project | global,
+  scope_key: "...",
+  expires_at?: "..."
+}
+
+agent_todo.required_decision_scopes[] = [...]
+agent_todo.required_write_scopes[] = [...]
+agent_todo.safety_class = read_only | local_write | external_run | protected_write
+```
+
+Compatibility inference from `action_kind`, title, or text is allowed only as a
+transition layer. If explicit scope is missing and inference is not confident,
+the correct behavior is projection repair or a user/controller gate, not a
+silent fallback.
+
 ## Catalog
 
 | ID | Name | Primary Owner | User Channel | Agent Channel |
 | --- | --- | --- | --- | --- |
 | IP-001 | Bounded Delivery | Agent | no interruption | implement, validate, write back, spend once |
 | IP-002 | Blocked Priority With Safe Fallback | Agent plus user-visible notification | notify without requiring an answer | continue safe fallback after exposing blocked higher-priority work |
-| IP-003 | Concrete User Todo Projection | User | ask or notify with concrete todo/question | do not hide behind generic "owner gate" text |
-| IP-004 | State Projection Gap | Agent | no user ask unless a user todo is missing | repair todo/state projection before ordinary delivery |
-| IP-005 | Checkpointed Scope Mismatch | CLI/controller | ask or repair boundary projection | do not execute action whose write scope is not projected |
-| IP-006 | Outcome Floor Recovery | Agent | usually no interruption | produce missing outcome-scale evidence or blocker only |
-| IP-007 | Monitor Quiet Skip | CLI/controller | no notification | append at most one no-spend poll, then stay quiet |
-| IP-008 | Active User Assistance | User simulator / operator | bounded intervention | inject audited user help without leaking reward/oracle signals |
-| IP-009 | Cadence Widening | Agent/controller | no interruption by default | widen next work segment when turns become too small |
+| IP-003 | Scoped Gate With Safe Fallback | User plus agent | notify concrete scoped gate | execute non-dependent fallback; no gated action |
+| IP-004 | Concrete User Todo Projection | User | ask or notify with concrete todo/question | do not hide behind generic "owner gate" text |
+| IP-005 | State Projection Gap | Agent | no user ask unless a user todo is missing | repair todo/state projection before ordinary delivery |
+| IP-006 | Checkpointed Scope Mismatch | CLI/controller | ask or repair boundary projection | do not execute action whose write scope is not projected |
+| IP-007 | Outcome Floor Recovery | Agent | usually no interruption | produce missing outcome-scale evidence or blocker only |
+| IP-008 | Monitor Quiet Skip | CLI/controller | no notification | append at most one no-spend poll, then stay quiet |
+| IP-009 | Active User Assistance | User simulator / operator | bounded intervention | inject audited user help without leaking reward/oracle signals |
+| IP-010 | Cadence Widening | Agent/controller | no interruption by default | widen next work segment when turns become too small |
 
 ## Visual Model
 
@@ -175,7 +219,73 @@ of the P0 blocker.
 - `examples/todo-first-open-summary-smoke.py`
 - `docs/heartbeat-automation-prompt.md`
 
-## IP-003 Concrete User Todo Projection
+## IP-003 Scoped Gate With Safe Fallback
+
+**Trigger**
+
+- an open user todo is a real gate, not just advisory context;
+- the gate can be scoped to one selected agent action, lane, resource, or
+  boundary;
+- another executable agent todo is independent of that gate;
+- the fallback remains inside public/private, write-scope, resource, and quota
+  boundaries.
+
+**Expected behavior**
+
+The user channel must still notify the concrete gate. The agent channel must
+not execute the gated action, but should continue the independent fallback when
+quota and safety allow it. This is a dual-channel state, not a contradiction:
+
+```text
+user_action_required=true
+agent_action_required=true
+agent_action=<independent fallback>
+```
+
+The controller should expose a durable field such as
+`scoped_user_gate_fallback` with:
+
+- the blocked user gate;
+- the gated agent item(s);
+- the selected fallback;
+- a spend policy that permits spending only after validated fallback writeback.
+
+The best long-term implementation is explicit scope metadata:
+`user_todo.decision_scope` and `agent_todo.required_decision_scopes`. Runtime
+text or `action_kind` inference is only a compatibility bridge for older goal
+states.
+
+**Visual Model**
+
+```mermaid
+flowchart TD
+  G["open user gate"] --> S{"which action scope?"}
+  S -->|"covers selected action"| F{"independent fallback exists?"}
+  S -->|"ambiguous"| R["repair projection or ask user/controller"]
+  F -->|"no"| U["notify user; stop gated delivery"]
+  F -->|"yes"| D["notify user and run fallback"]
+  D --> V["validate fallback"]
+  V --> W["write back; spend once"]
+```
+
+**Bad smell**
+
+The payload says `must_attempt_work=true` and `do_not_cancel_on_block=true`,
+but `interaction_contract.agent_channel.delivery_allowed=false` only because
+`requires_user_action=true`. The agent then repeats the gate forever even
+though another safe todo is available.
+
+The opposite bad smell is also dangerous: the agent silently continues work
+without naming the blocked user decision, so the fallback becomes the main
+story and the human loses the critical gate.
+
+**Validation**
+
+- `regression/scoped-user-gate-fallback-contract.py`
+- `examples/protocol-action-packet-smoke.py`
+- `examples/work-lane-contract-smoke.py`
+
+## IP-004 Concrete User Todo Projection
 
 **Trigger**
 
@@ -218,7 +328,7 @@ needed.
 - `examples/quota-plan-smoke.py`
 - `examples/heartbeat-quota-flow-smoke.py`
 
-## IP-004 State Projection Gap
+## IP-005 State Projection Gap
 
 **Trigger**
 
@@ -254,7 +364,7 @@ todo and the automation drifts into monitor-only no-ops.
 - `examples/state-projection-gap-smoke.py`
 - `docs/project-agent-todo-contract.md`
 
-## IP-005 Checkpointed Scope Mismatch
+## IP-006 Checkpointed Scope Mismatch
 
 **Trigger**
 
@@ -312,7 +422,7 @@ the checkpointed decision.
 - `examples/configure-goal-smoke.py`;
 - `docs/state-interaction-model.md` checkpointed decision sections.
 
-## IP-006 Outcome Floor Recovery
+## IP-007 Outcome Floor Recovery
 
 **Trigger**
 
@@ -350,7 +460,7 @@ the evidence needed to decide whether the goal is working.
 - `examples/quota-plan-smoke.py`
 - `examples/upgrade-plan-smoke.py`
 
-## IP-007 Monitor Quiet Skip
+## IP-008 Monitor Quiet Skip
 
 **Trigger**
 
@@ -386,7 +496,7 @@ no-op status repetition.
 - `examples/heartbeat-quota-flow-smoke.py`
 - `docs/heartbeat-automation-prompt.md`
 
-## IP-008 Active User Assistance
+## IP-009 Active User Assistance
 
 **Trigger**
 
@@ -411,7 +521,7 @@ sequenceDiagram
   Sim->>GH: Public-safe intervention within budget
   GH->>Agent: Audited assistance channel
   Agent->>GH: Assisted result evidence
-  GH->>GH: Label assisted; keep official score separate
+  GH->>GH: Label assisted and keep official score separate
 ```
 
 **Bad smell**
@@ -425,7 +535,7 @@ reward signals, oracle information, or unbounded human hints.
 - `examples/worker-bridge-install-contract-smoke.py`
 - benchmark active-user protocol docs.
 
-## IP-009 Cadence Widening
+## IP-010 Cadence Widening
 
 **Trigger**
 

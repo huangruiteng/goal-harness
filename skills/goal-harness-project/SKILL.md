@@ -500,6 +500,12 @@ The dashboard uses `user_todos` for the first-screen human checklist; project
 agents should read `agent_todos` only after health, operator gates, evidence,
 and quota allow execution.
 
+For non-trivial feature work, prefer todo succession over extra lifecycle
+states. When a slice merges or validates, complete the current todo only after
+creating the next concrete agent/user todo for rollout, product-path audit,
+docs, telemetry, benchmark proof, or operator decision; if there is truly no
+follow-up, write a compact no-follow-up rationale in the completion note.
+
 ## Record Human Reward
 
 When the user gives a clear reward judgment for an exact run, first validate

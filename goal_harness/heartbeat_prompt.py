@@ -296,6 +296,8 @@ If the result says `should_run=true`:
    ```
 
    Use `--role agent` for project-agent follow-up work.
+   For non-trivial feature slices, complete the current todo only after adding
+   a successor todo, or include a compact no-follow-up rationale.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the Goal Harness checkout.
 8. After validation and writeback complete, append exactly one spend event
@@ -379,7 +381,8 @@ Blocker-push first; obey
 `handoff_delivery_contract`; do 1 bounded segment/batch when
 `execution_obligation.must_attempt_work=true`; if recovery, run
 ranker/cross-domain evidence recovery or blocker writeback;
-validate/writeback/todos; spend once; refresh with explicit delivery
+validate/writeback/todos; successor todo or no-follow-up rationale for
+non-trivial feature slices; spend once; refresh with explicit delivery
 scale/outcome for progress artifacts. Stop on private, credentials, destructive
 git, prod, or review rules.
 
@@ -474,7 +477,8 @@ If `should_run=true`:
    explicit review rules.
 8. Validate; write files/validation/critic/next action to active state;
    use `goal-harness todo add --goal-id {goal_id} --role user|agent` for
-   blockers/follow-ups, not prose.
+   blockers/follow-ups, not prose. Nontrivial done -> successor todo or
+   no-follow-up rationale.
 9. After completed delivery or safe-bypass work, spend once before state
    refresh:
 
@@ -526,11 +530,12 @@ state. Run `quota should-run`; follow `interaction_contract`. If
 action_required=true/open_count>0, list concrete payload todo(s)/questions;
 never only "owner gate"; missing -> "具体 user todo 未投影，需修复 Goal Harness 状态投影".
 If false/0: 无用户待办/无需通知 or quiet.
-Do one bounded validated batch or quiet no-op. Spend once after validated
-writeback. After 2 no-progress, self-repair.
+Do bounded validated batch or quiet no-op; spend after writeback.
+Nontrivial done -> successor/no-follow-up.
+After 2 no-progress, self-repair.
 
 If P0 is blocked but CLI contract permits safe work, continue verifiable
-P1/P2; monitor-only quiet skips keep automation active and no-spend.
+P1/P2; monitor-only quiet skips stay active/no-spend.
 
 No project-specific branches here. {material_sentence} Stop for private material,
 credentials, destructive git, or unauthorized production actions{permission_tail}"""
