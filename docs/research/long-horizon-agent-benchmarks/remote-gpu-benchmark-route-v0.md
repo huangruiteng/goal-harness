@@ -155,7 +155,16 @@ Do not run a real benchmark remotely until all are true:
 
 ## Current Verdict
 
-The remote GPU route is worth evaluating as a provider-readiness lane, but it
-is not yet approved for scored benchmark execution. The next bounded step is a
-no-auth remote readiness probe plan, followed by a sync dry-run plan that
-proves credentials are excluded before any remote install or benchmark setup.
+The remote GPU route is worth evaluating as a provider-readiness lane for any
+Docker-heavy benchmark, not only the first local-capacity incident that
+triggered this note. A later local cleanup made this more important: local
+Docker images and build cache may disappear between benchmark slices, while
+compact ledgers and run-history evidence remain intact. Terminal-Bench,
+SkillsBench, and ALE should therefore all be eligible for the same split-control
+route when their local blocker is Docker/provider capacity rather than task
+semantics.
+
+This route is still not blanket approval for scored benchmark execution. The
+next bounded step remains a no-auth remote readiness probe or route-specific
+sync dry-run that proves credentials are excluded before any remote install,
+Docker pull/run, benchmark setup, Codex/model invocation, upload, or submit.
