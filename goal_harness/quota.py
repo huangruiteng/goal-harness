@@ -3429,6 +3429,15 @@ def build_quota_should_run(status_payload: dict[str, Any], *, goal_id: str) -> d
         )
         if dreaming_proposal:
             payload["dreaming_proposal"] = dreaming_proposal
+        dreaming_lane_badge = (
+            item.get("dreaming_lane_badge")
+            if isinstance(item.get("dreaming_lane_badge"), dict)
+            else project_asset.get("dreaming_lane_badge")
+            if isinstance(project_asset.get("dreaming_lane_badge"), dict)
+            else None
+        )
+        if dreaming_lane_badge:
+            payload["dreaming_lane_badge"] = dreaming_lane_badge
         interface_budget_cadence = (
             project_asset.get("interface_budget_cadence")
             if isinstance(project_asset.get("interface_budget_cadence"), dict)

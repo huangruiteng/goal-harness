@@ -5183,8 +5183,12 @@ def attention_item(
     if todo_state_file:
         item["todo_state_file"] = todo_state_file
     if dreaming_proposal:
+        dreaming_lane_badge = compact_dreaming_lane_badge(dreaming_proposal)
         item["dreaming_proposal"] = dreaming_proposal
         item["project_asset"]["dreaming_proposal"] = dreaming_proposal
+        if dreaming_lane_badge:
+            item["dreaming_lane_badge"] = dreaming_lane_badge
+            item["project_asset"]["dreaming_lane_badge"] = dreaming_lane_badge
     return item
 
 
@@ -5606,6 +5610,43 @@ def compact_dreaming_proposal(run: dict[str, Any] | None) -> dict[str, Any] | No
     if question:
         proposal["operator_question"] = question
     return proposal
+
+
+def compact_dreaming_lane_badge(proposal: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(proposal, dict):
+        return None
+    classification = public_safe_compact_text(proposal.get("classification"), limit=80)
+    badge: dict[str, Any] = {
+        "schema_version": "dreaming_lane_badge_v0",
+        "lane": "dreaming",
+        "label": "Dreaming",
+        "advisory": bool(proposal.get("advisory", True)),
+        "interrupts_delivery": False,
+        "review_required": True,
+        "execution_allowed": False,
+        "delivery_spend_allowed": False,
+        "promoted_to_delivery": False,
+    }
+    if classification:
+        badge["status"] = classification
+    for field in ("proposal_type", "confidence", "evidence_window"):
+        value = public_safe_compact_text(proposal.get(field), limit=80)
+        if value:
+            badge[field] = value
+    server_contract = proposal.get("server_planning_contract")
+    if isinstance(server_contract, dict):
+        lane = public_safe_compact_text(server_contract.get("lane"), limit=80)
+        authority = public_safe_compact_text(server_contract.get("authority"), limit=120)
+        if lane or authority:
+            badge["server_planning"] = {
+                key: value
+                for key, value in {
+                    "lane": lane,
+                    "authority": authority,
+                }.items()
+                if value
+            }
+    return badge
 
 
 def dreaming_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]:
@@ -7152,6 +7193,20 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             asset_next_action = _markdown_scalar(project_asset.get("next_action") or "")
             if asset_next_action:
                 lines.append(f"    - asset_next_action: {asset_next_action}")
+            dreaming_lane_badge = (
+                project_asset.get("dreaming_lane_badge")
+                if isinstance(project_asset.get("dreaming_lane_badge"), dict)
+                else {}
+            )
+            if dreaming_lane_badge:
+                lines.append(
+                    "    - dreaming_lane_badge: "
+                    f"lane={_markdown_scalar(dreaming_lane_badge.get('lane') or '')} "
+                    f"status={_markdown_scalar(dreaming_lane_badge.get('status') or '')} "
+                    f"advisory={dreaming_lane_badge.get('advisory')} "
+                    f"interrupts_delivery={dreaming_lane_badge.get('interrupts_delivery')} "
+                    f"execution_allowed={dreaming_lane_badge.get('execution_allowed')}"
+                )
             asset_execution_profile = (
                 project_asset.get("execution_profile")
                 if isinstance(project_asset.get("execution_profile"), dict)

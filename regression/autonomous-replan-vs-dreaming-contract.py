@@ -166,6 +166,20 @@ def main() -> int:
         assert planning_contract["may_append_delivery_history"] is False, proposal
         assert planning_contract["may_spend_delivery_quota"] is False, proposal
         assert planning_contract["promotion_required"] is True, proposal
+        lane_badge = item["project_asset"]["dreaming_lane_badge"]
+        assert item["dreaming_lane_badge"] == lane_badge, item
+        assert lane_badge["schema_version"] == "dreaming_lane_badge_v0", lane_badge
+        assert lane_badge["lane"] == "dreaming", lane_badge
+        assert lane_badge["label"] == "Dreaming", lane_badge
+        assert lane_badge["status"] == "dreaming_exploration_proposal", lane_badge
+        assert lane_badge["proposal_type"] == "refactor_warning", lane_badge
+        assert lane_badge["advisory"] is True, lane_badge
+        assert lane_badge["review_required"] is True, lane_badge
+        assert lane_badge["interrupts_delivery"] is False, lane_badge
+        assert lane_badge["execution_allowed"] is False, lane_badge
+        assert lane_badge["delivery_spend_allowed"] is False, lane_badge
+        assert lane_badge["promoted_to_delivery"] is False, lane_badge
+        assert lane_badge["server_planning"]["lane"] == "dreaming_planning", lane_badge
 
         guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
         assert guard["should_run"] is False, guard
@@ -177,6 +191,7 @@ def main() -> int:
         assert "agent_command" not in guard, guard
         assert "autonomous_replan_obligation" not in guard, guard
         assert guard["dreaming_proposal"] == proposal, guard
+        assert guard["dreaming_lane_badge"] == lane_badge, guard
 
         interaction = guard["interaction_contract"]
         assert interaction["mode"] == "user_gate", interaction
