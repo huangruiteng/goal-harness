@@ -42,22 +42,30 @@ from .parity import (
     render_codex_app_parity_posthoc_check_markdown,
 )
 from .rounds import RoundReward, compact_round_rewards, summarize_round_rewards
+from .split_control import (
+    BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_SCHEMA_VERSION,
+    DEFAULT_SPLIT_CONTROL_BENCHMARK_IDS,
+    build_split_control_remote_executor_readiness,
+)
 
 __all__ = [
     "AdapterClassification",
     "BENCHMARK_CANONICAL_LIFECYCLE_SCHEMA_VERSION",
     "BENCHMARK_LIFECYCLE_STATE_SCHEMA_VERSION",
+    "BENCHMARK_SPLIT_CONTROL_REMOTE_EXECUTOR_SCHEMA_VERSION",
     "BenchmarkAdapter",
     "BenchmarkLifecyclePhase",
     "BenchmarkRequest",
     "build_benchmark_candidate_source_boundary",
     "build_codex_app_parity_posthoc_check",
+    "build_split_control_remote_executor_readiness",
     "CANONICAL_LIFECYCLE_PHASES",
     "classify_benchmark_artifact_path",
     "classify_benchmark_candidate_source_path",
     "CODEX_APP_PARITY_REQUIRED_CLI_CALLS",
     "CODEX_APP_PARITY_POSTHOC_CHECK_SCHEMA_VERSION",
     "CODEX_APP_PARITY_TARGET",
+    "DEFAULT_SPLIT_CONTROL_BENCHMARK_IDS",
     "IngestResult",
     "filter_public_benchmark_artifact_paths",
     "LaunchResult",

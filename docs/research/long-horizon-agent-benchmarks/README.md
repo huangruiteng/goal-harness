@@ -52,6 +52,12 @@ work still belongs in the existing code, examples, and contract documents:
   matrix, shared score metrics, trace-retention contract, and current ALE
   readiness blocker without running Docker, reading task material, or claiming
   score evidence.
+- `benchmark-split-control-remote-executor-v0.md`: shared route contract for
+  running Docker-heavy benchmarks with Codex/Goal Harness/auth/model invocation
+  kept local while the remote development host only provides Docker, runner
+  dependencies, task-data staging, bounded execution, and compact result
+  reduction. It makes missing remote Codex/Codex-ACP non-blocking and routes
+  real blockers to adapter, runner-tooling, or task-data gates.
 - `benchmark-priority-review-20260614.md`: corrected priority review using
   Codex CLI goal mode as the baseline. It separates direct low Codex baselines,
   selected hard-subset failures, and adjacent-agent-low benchmarks that still
