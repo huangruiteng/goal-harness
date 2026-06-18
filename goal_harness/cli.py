@@ -187,6 +187,7 @@ from .state_refresh import (
     render_state_refresh_markdown,
 )
 from .status import (
+    AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
     collect_status,
     compact_active_user_assisted_pilot,
     compact_benchmark_comparison,
@@ -8551,11 +8552,14 @@ def main(argv: list[str] | None = None) -> int:
             scan_roots = [Path(item).expanduser() for item in args.scan_path]
             if not scan_roots:
                 scan_roots = [Path(args.scan_root).expanduser()]
+            status_limit = max(0, args.limit)
+            if args.quota_command == "should-run":
+                status_limit = max(status_limit, AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK)
             status_payload = collect_status(
                 registry_path=registry_path,
                 runtime_root_override=args.runtime_root,
                 scan_roots=scan_roots,
-                limit=max(0, args.limit),
+                limit=status_limit,
             )
             if args.quota_command == "should-run":
                 if not args.goal_id:

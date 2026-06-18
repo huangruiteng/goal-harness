@@ -323,6 +323,8 @@ MAX_SUBAGENT_SCOPE_ITEMS = 4
 MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS = 3
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
+AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD = 20
+AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK = 30
 AUTONOMOUS_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4][^\]]*)\]\s*(.+)$", re.IGNORECASE)
 BACKLOG_HYGIENE_SECTION_HEADINGS = ("Next Action", "Operating Lessons")
 BACKLOG_HYGIENE_BULLET_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$")
@@ -3943,6 +3945,29 @@ def build_autonomous_replan_obligation(
                 "text": "retire or downgrade stale monitor-only next actions after the executable replan is selected",
             }
         )
+    if any(item.get("kind") in {"periodic_review", "periodic_review_due"} for item in evidence):
+        todo_actions.append(
+            {
+                "action": "ask_decision",
+                "role": "user",
+                "priority": "P2",
+                "text": (
+                    "ask the operator only if the review changes benchmark family, public claims, "
+                    "resource budget, or protected scope"
+                ),
+            }
+        )
+
+    if any(item.get("kind") in {"periodic_review", "periodic_review_due"} for item in evidence):
+        recommended_action = (
+            "run a bounded autonomous periodic review: keep, split, add, retire, or ask for "
+            "a decision; then update todos and select the next validated slice"
+        )
+    else:
+        recommended_action = (
+            "run an autonomous replan after two consecutive stalled turns before another "
+            "monitor-only or repeated action consumes the eligible turn"
+        )
 
     return {
         "schema_version": AUTONOMOUS_REPLAN_SCHEMA_VERSION,
@@ -3950,16 +3975,14 @@ def build_autonomous_replan_obligation(
         "stall_threshold": AUTONOMOUS_REPLAN_STALL_THRESHOLD,
         "trigger_count": len(evidence),
         "triggers": evidence,
+        "guidance_actions": ["keep", "split", "add", "retire", "ask_decision"],
         "todo_actions": todo_actions[:3],
         "next_validation_command": "python3 examples/autonomous-replan-obligation-smoke.py",
         "stop_condition": (
             "stop if the replan requires private material, credentials, destructive git, "
             "production actions, or owner-only decisions"
         ),
-        "recommended_action": (
-            "run an autonomous replan after two consecutive stalled turns before another "
-            "monitor-only or repeated action consumes the eligible turn"
-        ),
+        "recommended_action": recommended_action,
     }
 
 
@@ -4014,6 +4037,46 @@ def run_history_monitor_wait_already_acknowledged(
     return False
 
 
+def autonomous_replan_periodic_review_from_runs(
+    latest_runs: list[dict[str, Any]] | None,
+    *,
+    agent_todos: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    durable_runs: list[dict[str, Any]] = []
+    for run in latest_runs or []:
+        if not isinstance(run, dict):
+            continue
+        classification = str(run.get("classification") or "").strip()
+        if not classification:
+            continue
+        if AUTONOMOUS_RUN_HISTORY_REPLAN_ACK_CLASSIFICATION.search(classification):
+            break
+        if classification in AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS:
+            continue
+        durable_runs.append(run)
+        if len(durable_runs) >= AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD:
+            break
+
+    if len(durable_runs) < AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD:
+        return None
+
+    evidence: list[dict[str, Any]] = [
+        {
+            "kind": "periodic_review_due",
+            "section": "run_history",
+            "text": (
+                f"latest {len(durable_runs)} durable public run records since last autonomous "
+                f"replan reached periodic review threshold {AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD}"
+            ),
+            "run_count": len(durable_runs),
+            "threshold": AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD,
+            "latest_generated_at": str(durable_runs[0].get("generated_at") or ""),
+            "oldest_counted_generated_at": str(durable_runs[-1].get("generated_at") or ""),
+        }
+    ]
+    return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
+
+
 def autonomous_replan_obligation_from_runs(
     latest_runs: list[dict[str, Any]] | None,
     *,
@@ -4034,7 +4097,10 @@ def autonomous_replan_obligation_from_runs(
             break
 
     if len(signals) < AUTONOMOUS_REPLAN_STALL_THRESHOLD:
-        return None
+        return autonomous_replan_periodic_review_from_runs(
+            latest_runs,
+            agent_todos=agent_todos,
+        )
 
     signatures = {str(signal.get("signature") or "") for signal in signals if signal.get("signature")}
     classifications = {
@@ -4042,13 +4108,17 @@ def autonomous_replan_obligation_from_runs(
         for signal in signals
         if signal.get("classification")
     }
+    periodic_review = autonomous_replan_periodic_review_from_runs(
+        latest_runs,
+        agent_todos=agent_todos,
+    )
     if len(signatures) > 1 and len(classifications) > 1:
-        return None
+        return periodic_review
     if classifications == {"quota_monitor_poll"} and run_history_monitor_wait_already_acknowledged(
         latest_runs,
         signal_count=len(signals),
     ):
-        return None
+        return periodic_review
 
     action = public_safe_compact_text(
         signals[0].get("recommended_action") or signals[0].get("classification"),

@@ -36,11 +36,35 @@ def run_cli(*args: str, registry_path: Path, runtime: Path) -> dict:
     return json.loads(result.stdout)
 
 
+def append_run_record(runs_dir: Path, record: dict) -> None:
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    generated_at = str(record["generated_at"])
+    json_path = runs_dir / f"{generated_at.replace(':', '-')}.json"
+    markdown_path = runs_dir / f"{generated_at.replace(':', '-')}.md"
+    record = {
+        **record,
+        "goal_id": GOAL_ID,
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+    }
+    json_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+    markdown_path.write_text(
+        "# Fixture Run\n\n"
+        f"- classification: `{record['classification']}`\n"
+        f"- recommended_action: {record.get('recommended_action', '')}\n",
+        encoding="utf-8",
+    )
+    with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+
+
 def write_fixture(
     root: Path,
     *,
     include_replan_signals: bool,
     include_run_history_stalls: bool = False,
+    periodic_run_count: int = 0,
+    include_recent_replan_ack: bool = False,
 ) -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
@@ -120,35 +144,50 @@ def write_fixture(
         + "\n",
         encoding="utf-8",
     )
+    if include_run_history_stalls or periodic_run_count or include_recent_replan_ack:
+        runs_dir = runtime / "goals" / GOAL_ID / "runs"
+        if include_recent_replan_ack:
+            append_run_record(
+                runs_dir,
+                {
+                    "generated_at": "2026-01-02T00:30:00+00:00",
+                    "classification": "autonomous_replan_recorded",
+                    "recommended_action": "Periodic review was recorded; continue selected next slice.",
+                    "health_check": "compact replan ack",
+                    "delivery_outcome": "outcome_progress",
+                },
+            )
+    if periodic_run_count:
+        runs_dir = runtime / "goals" / GOAL_ID / "runs"
+        for offset in range(periodic_run_count):
+            minute = periodic_run_count - offset
+            append_run_record(
+                runs_dir,
+                {
+                    "generated_at": f"2026-01-01T00:{minute:02d}:00+00:00",
+                    "classification": "benchmark_rotation_iteration",
+                    "recommended_action": f"Advance bounded benchmark/control-plane slice {minute}.",
+                    "health_check": "compact durable run event",
+                    "delivery_outcome": "outcome_progress",
+                },
+            )
     if include_run_history_stalls:
         runs_dir = runtime / "goals" / GOAL_ID / "runs"
-        runs_dir.mkdir(parents=True, exist_ok=True)
         repeated_action = "Observe dependency state; no material transition yet."
         for generated_at in (
             "2026-01-01T00:04:00+00:00",
             "2026-01-01T00:00:00+00:00",
         ):
-            json_path = runs_dir / f"{generated_at.replace(':', '-')}.json"
-            markdown_path = runs_dir / f"{generated_at.replace(':', '-')}.md"
-            record = {
-                "generated_at": generated_at,
-                "goal_id": GOAL_ID,
-                "classification": "dependency_observation_monitor",
-                "recommended_action": repeated_action,
-                "health_check": "monitor-only observation unchanged",
-                "delivery_outcome": "surface_only",
-                "json_path": str(json_path),
-                "markdown_path": str(markdown_path),
-            }
-            json_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
-            markdown_path.write_text(
-                "# Fixture Run\n\n"
-                f"- classification: `{record['classification']}`\n"
-                f"- recommended_action: {record['recommended_action']}\n",
-                encoding="utf-8",
+            append_run_record(
+                runs_dir,
+                {
+                    "generated_at": generated_at,
+                    "classification": "dependency_observation_monitor",
+                    "recommended_action": repeated_action,
+                    "health_check": "monitor-only observation unchanged",
+                    "delivery_outcome": "surface_only",
+                },
             )
-            with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
-                f.write(json.dumps(record, sort_keys=True) + "\n")
     return registry_path, runtime
 
 
@@ -224,6 +263,84 @@ def assert_replan_obligation_projected_from_run_history() -> None:
         assert guard["automation_liveness"]["pause_allowed"] is False, guard
 
 
+def assert_periodic_replan_obligation_projected_from_run_history() -> None:
+    with tempfile.TemporaryDirectory(prefix="goal-harness-autonomous-replan-") as tmp:
+        registry_path, runtime = write_fixture(
+            Path(tmp),
+            include_replan_signals=False,
+            periodic_run_count=20,
+        )
+        status_payload = run_cli(
+            "status",
+            "--limit",
+            "30",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        item = attention_item(status_payload)
+        obligation = item["project_asset"]["autonomous_replan_obligation"]
+        assert obligation["schema_version"] == "autonomous_replan_obligation_v0", obligation
+        assert obligation["required"] is True, obligation
+        assert obligation["trigger_count"] == 1, obligation
+        assert obligation["triggers"][0]["kind"] == "periodic_review_due", obligation
+        assert obligation["triggers"][0]["section"] == "run_history", obligation
+        assert obligation["triggers"][0]["run_count"] == 20, obligation
+        assert obligation["triggers"][0]["threshold"] == 20, obligation
+        assert obligation["guidance_actions"] == [
+            "keep",
+            "split",
+            "add",
+            "retire",
+            "ask_decision",
+        ], obligation
+        assert obligation["todo_actions"][0]["action"] == "split", obligation
+        assert obligation["todo_actions"][1]["action"] == "add", obligation
+        assert obligation["todo_actions"][2]["action"] == "ask_decision", obligation
+        assert "bounded autonomous periodic review" in obligation["recommended_action"], obligation
+
+        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
+        assert guard["should_run"] is True, guard
+        assert guard["autonomous_replan_obligation"] == obligation, guard
+        recommendation = guard["heartbeat_recommendation"]
+        assert recommendation["recommended_mode"] == "autonomous_replan_required", recommendation
+        assert guard["execution_obligation"]["kind"] == "autonomous_replan_required", guard
+        assert guard["automation_liveness"]["automation_action"] == "execute_bounded_work", guard
+
+
+def assert_no_periodic_replan_before_threshold_or_after_ack() -> None:
+    with tempfile.TemporaryDirectory(prefix="goal-harness-autonomous-replan-") as tmp:
+        registry_path, runtime = write_fixture(
+            Path(tmp),
+            include_replan_signals=False,
+            periodic_run_count=19,
+        )
+        status_payload = run_cli(
+            "status",
+            "--limit",
+            "30",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        item = attention_item(status_payload)
+        assert "autonomous_replan_obligation" not in item, item
+        assert "autonomous_replan_obligation" not in item["project_asset"], item
+
+        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
+        assert "autonomous_replan_obligation" not in guard, guard
+        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
+
+    with tempfile.TemporaryDirectory(prefix="goal-harness-autonomous-replan-") as tmp:
+        registry_path, runtime = write_fixture(
+            Path(tmp),
+            include_replan_signals=False,
+            periodic_run_count=20,
+            include_recent_replan_ack=True,
+        )
+        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
+        assert "autonomous_replan_obligation" not in guard, guard
+        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
+
+
 def assert_no_replan_obligation_without_signal() -> None:
     with tempfile.TemporaryDirectory(prefix="goal-harness-autonomous-replan-") as tmp:
         registry_path, runtime = write_fixture(Path(tmp), include_replan_signals=False)
@@ -240,6 +357,8 @@ def assert_no_replan_obligation_without_signal() -> None:
 def main() -> int:
     assert_replan_obligation_projected()
     assert_replan_obligation_projected_from_run_history()
+    assert_periodic_replan_obligation_projected_from_run_history()
+    assert_no_periodic_replan_before_threshold_or_after_ack()
     assert_no_replan_obligation_without_signal()
     print("autonomous-replan-obligation-smoke ok")
     return 0
