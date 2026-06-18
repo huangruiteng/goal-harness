@@ -70,6 +70,7 @@ def run_demo(
         allowed_domains=[],
         write_scope=[],
         claim_ttl_minutes=30,
+        onboarding_scan_enabled=False,
         force=False,
         dry_run=False,
         sync_global=False,

@@ -5192,6 +5192,20 @@ def attention_item(
     return item
 
 
+def sync_connected_attention_action_from_todos(item: dict[str, Any]) -> None:
+    if item.get("status") != "connected_without_run":
+        return
+    agent_action = first_open_todo_text(
+        item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None
+    )
+    if not agent_action:
+        return
+    item["recommended_action"] = agent_action
+    project_asset = item.get("project_asset")
+    if isinstance(project_asset, dict):
+        project_asset["next_action"] = agent_action
+
+
 def compact_global_registry_shadow_finding(finding: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {
         "kind": str(finding.get("kind") or "global_registry_finding"),
@@ -5930,6 +5944,7 @@ def build_attention_queue(
                     item["project_asset"]["stale_latest_run_warning"] = projection_warning
             if goal.get("registry_member"):
                 item.update(active_state_todo_fields(goal))
+                sync_connected_attention_action_from_todos(item)
                 backlog_warning = (
                     item.get("backlog_hygiene_warning")
                     if isinstance(item.get("backlog_hygiene_warning"), dict)
