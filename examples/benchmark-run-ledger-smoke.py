@@ -1128,6 +1128,148 @@ def test_cli_compact_run_json_updates_run_ledger() -> None:
         assert (root / "visible-ledger.md").exists(), "CLI should render markdown"
 
 
+def test_cli_run_ledger_check_reports_and_clears_history_drift() -> None:
+    with tempfile.TemporaryDirectory(prefix="benchmark-run-ledger-drift-cli-") as tmp:
+        root = Path(tmp)
+        registry_path, runtime = write_registry(root)
+        ledger_path = root / "visible-ledger.json"
+        compact_path = root / "compact-run.json"
+        write_json(
+            compact_path,
+            {
+                "schema_version": "benchmark_run_v0",
+                "benchmark_id": "terminal-bench@2.0",
+                "job_name": "terminal_bench_2_0_drift_fixture_codex_goal_mode_baseline",
+                "mode": "codex_goal_mode_baseline",
+                "official_task_score": {
+                    "kind": "harbor_verifier_reward",
+                    "value": 0.0,
+                    "passed": False,
+                },
+                "score_failure_attribution": "none",
+                "trials": [
+                    {
+                        "task_id": "drift-fixture",
+                        "exception_type": "AgentTimeoutError",
+                    }
+                ],
+            },
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "history",
+                "append-benchmark-run",
+                "--goal-id",
+                GOAL_ID,
+                "--benchmark-run-json",
+                str(compact_path),
+                "--execute",
+                "--no-global-sync",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        check_result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "benchmark",
+                "run-ledger-check",
+                "--goal-id",
+                GOAL_ID,
+                "--run-ledger-path",
+                str(ledger_path),
+                "--history-limit",
+                "20",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        check_payload = json.loads(check_result.stdout)
+        drift = check_payload["benchmark_run_ledger_drift"]
+        assert drift["schema_version"] == "benchmark_run_ledger_drift_v0", drift
+        assert drift["drift_detected"] is True, drift
+        assert drift["missing_ledger_run_count"] == 1, drift
+        assert drift["missing_runs"][0]["case_id"] == "drift-fixture", drift
+        assert drift["read_boundary"]["raw_logs_read"] is False, drift
+        assert drift["read_boundary"]["trajectory_read"] is False, drift
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "benchmark",
+                "run-ledger-upsert",
+                "--benchmark-run-json",
+                str(compact_path),
+                "--run-ledger-path",
+                str(ledger_path),
+                "--execute",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        clean_result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "benchmark",
+                "run-ledger-check",
+                "--goal-id",
+                GOAL_ID,
+                "--run-ledger-path",
+                str(ledger_path),
+                "--history-limit",
+                "20",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        clean_payload = json.loads(clean_result.stdout)
+        clean_drift = clean_payload["benchmark_run_ledger_drift"]
+        assert clean_drift["drift_detected"] is False, clean_drift
+        assert clean_drift["missing_ledger_run_count"] == 0, clean_drift
+        assert clean_drift["matched_history_run_count"] == 1, clean_drift
+
+
 def test_cli_post_launch_json_updates_run_ledger() -> None:
     with tempfile.TemporaryDirectory(prefix="benchmark-run-ledger-post-launch-cli-") as tmp:
         root = Path(tmp)
@@ -1202,5 +1344,6 @@ if __name__ == "__main__":
     test_ledger_ingests_post_launch_ended_active_marker()
     test_cli_harbor_ingest_updates_run_ledger()
     test_cli_compact_run_json_updates_run_ledger()
+    test_cli_run_ledger_check_reports_and_clears_history_drift()
     test_cli_post_launch_json_updates_run_ledger()
     print("benchmark-run-ledger-smoke: ok")
