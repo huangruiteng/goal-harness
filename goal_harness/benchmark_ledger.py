@@ -1908,3 +1908,148 @@ def update_benchmark_run_ledger(
             entry["case_id"]
         ]["latest_decision"],
     }
+
+
+def _ledger_entry_signature(entry: dict[str, Any]) -> tuple[str, ...]:
+    return (
+        _compact_text(entry.get("benchmark_id"), limit=120),
+        _compact_text(entry.get("case_id"), limit=160),
+        _compact_text(entry.get("arm_id"), limit=120),
+        _compact_text(entry.get("mode"), limit=120),
+        _compact_text(entry.get("job_name"), limit=160),
+        _compact_text(entry.get("score_status"), limit=80),
+        _compact_text(entry.get("official_score"), limit=80),
+        _compact_text(entry.get("failure_class"), limit=120),
+    )
+
+
+def _iter_ledger_runs(ledger: dict[str, Any]) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    benchmarks = ledger.get("benchmarks") if isinstance(ledger.get("benchmarks"), dict) else {}
+    for benchmark in benchmarks.values():
+        if not isinstance(benchmark, dict):
+            continue
+        cases = benchmark.get("cases") if isinstance(benchmark.get("cases"), dict) else {}
+        for case in cases.values():
+            if not isinstance(case, dict):
+                continue
+            for run in case.get("runs") or []:
+                if isinstance(run, dict):
+                    runs.append(run)
+    return runs
+
+
+def _history_benchmark_run(record: dict[str, Any]) -> dict[str, Any] | None:
+    if record.get("schema_version") == "benchmark_run_v0":
+        return record
+    nested = record.get("benchmark_run")
+    if isinstance(nested, dict) and nested.get("schema_version") == "benchmark_run_v0":
+        return nested
+    return None
+
+
+def check_benchmark_run_ledger_drift(
+    *,
+    history_records: list[dict[str, Any]],
+    ledger: dict[str, Any],
+    ledger_path: str | Path | None = None,
+    limit: int = 20,
+    cwd: Path | None = None,
+) -> dict[str, Any]:
+    """Compare compact benchmark_run_v0 history events with the public run ledger."""
+
+    normalized_ledger = _normalize_benchmark_run_ledger(dict(ledger))
+    ledger_runs = _iter_ledger_runs(normalized_ledger)
+    ledger_run_ids = {
+        _compact_text(run.get("run_id"), limit=80)
+        for run in ledger_runs
+        if _compact_text(run.get("run_id"), limit=80)
+    }
+    ledger_signatures = {_ledger_entry_signature(run) for run in ledger_runs}
+
+    checked_history_run_count = 0
+    terminal_history_run_count = 0
+    matched_count = 0
+    non_terminal_skipped_count = 0
+    missing: list[dict[str, Any]] = []
+    for record in history_records:
+        if not isinstance(record, dict):
+            continue
+        benchmark_run = _history_benchmark_run(record)
+        if not benchmark_run:
+            continue
+        checked_history_run_count += 1
+        entry = build_benchmark_run_ledger_entry(
+            benchmark_run,
+            compact_artifact_ref=record.get("json_path")
+            if isinstance(record.get("json_path"), str)
+            else None,
+            recorded_at=record.get("generated_at")
+            if isinstance(record.get("generated_at"), str)
+            else None,
+            cwd=cwd,
+        )
+        if not _entry_is_public_ledger_closeout(entry):
+            non_terminal_skipped_count += 1
+            continue
+        terminal_history_run_count += 1
+        run_id = _compact_text(entry.get("run_id"), limit=80)
+        signature = _ledger_entry_signature(entry)
+        if run_id in ledger_run_ids or signature in ledger_signatures:
+            matched_count += 1
+            continue
+        catch_up = "goal-harness benchmark run-ledger-upsert --benchmark-run-json <compact-benchmark-run-v0.json>"
+        if ledger_path:
+            ledger_ref_path = Path(ledger_path)
+            ledger_ref = (
+                "<benchmark-run-ledger.json>"
+                if ledger_ref_path.is_absolute()
+                else ledger_ref_path.as_posix()
+            )
+            catch_up += f" --run-ledger-path {ledger_ref}"
+        if entry.get("run_group_id"):
+            catch_up += f" --run-group-id {entry['run_group_id']}"
+        if entry.get("arm_id"):
+            catch_up += f" --arm-id {entry['arm_id']}"
+        catch_up += " --execute"
+        missing.append(
+            {
+                "run_id": run_id,
+                "generated_at": _compact_text(record.get("generated_at"), limit=80),
+                "benchmark_id": entry.get("benchmark_id"),
+                "case_id": entry.get("case_id"),
+                "arm_id": entry.get("arm_id"),
+                "mode": entry.get("mode"),
+                "job_name": entry.get("job_name"),
+                "score_status": entry.get("score_status"),
+                "official_score": entry.get("official_score"),
+                "failure_class": entry.get("failure_class"),
+                "catch_up_command_template": catch_up,
+            }
+        )
+
+    limited_missing = missing[: max(0, limit)]
+    return {
+        "schema_version": "benchmark_run_ledger_drift_v0",
+        "ok": True,
+        "drift_detected": bool(missing),
+        "ledger_schema_version": normalized_ledger.get("schema_version"),
+        "ledger_run_count": len(ledger_runs),
+        "checked_history_run_count": checked_history_run_count,
+        "terminal_history_run_count": terminal_history_run_count,
+        "matched_history_run_count": matched_count,
+        "non_terminal_skipped_count": non_terminal_skipped_count,
+        "missing_ledger_run_count": len(missing),
+        "missing_runs": limited_missing,
+        "truncated": len(missing) > len(limited_missing),
+        "limit": limit,
+        "read_boundary": {
+            "compact_only": True,
+            "raw_logs_read": False,
+            "task_text_read": False,
+            "trajectory_read": False,
+            "docker_invoked": False,
+            "model_api_invoked": False,
+            "upload_invoked": False,
+        },
+    }

@@ -58,6 +58,24 @@ PYTHONPATH=<goal-harness-repo> python3 -m goal_harness.cli \
   --execute
 ```
 
+Closeout agents should also run the compact drift check before deciding a case
+is fully recorded:
+
+```bash
+PYTHONPATH=<goal-harness-repo> python3 -m goal_harness.cli \
+  benchmark run-ledger-check \
+  --goal-id goal-harness-meta \
+  --history-limit 500
+```
+
+The check compares recent compact `benchmark_run_v0` run-history events against
+`benchmark-run-ledger.json`. It reports `benchmark_run_ledger_drift_v0` with
+missing compact run rows and `run-ledger-upsert` catch-up command templates.
+It is read-only and compact-only: it does not open raw logs, task text,
+trajectories, Docker, model APIs, uploads, or verifier output. This is the
+default posthoc guard for missed closeout writeback across Terminal-Bench,
+SkillsBench, and future benchmark adapters.
+
 If a case never reaches `benchmark_run_v0` but the post-launch compact poller
 has produced a terminal compact failure marker, upsert that marker directly
 instead of faking an official score:

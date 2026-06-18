@@ -107,6 +107,8 @@ from .benchmark_adapters.terminal_bench import (
 )
 from .benchmark_ledger import (
     BENCHMARK_RUN_LEDGER_DEFAULT_PATH,
+    check_benchmark_run_ledger_drift,
+    load_benchmark_run_ledger,
     update_benchmark_run_ledger,
 )
 from .benchmark_core import (
@@ -333,6 +335,52 @@ def render_benchmark_run_ledger_upsert_markdown(payload: dict[str, object]) -> s
         f"- raw logs read: `{read_boundary.get('raw_logs_read')}`",
         f"- task text read: `{read_boundary.get('task_text_read')}`",
     ]
+    if payload.get("error"):
+        lines.append(f"- error: {payload.get('error')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_run_ledger_check_markdown(payload: dict[str, object]) -> str:
+    drift = (
+        payload.get("benchmark_run_ledger_drift")
+        if isinstance(payload.get("benchmark_run_ledger_drift"), dict)
+        else {}
+    )
+    lines = [
+        "# Benchmark Run Ledger Drift Check",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- drift_detected: `{drift.get('drift_detected')}`",
+        f"- checked_history_run_count: `{drift.get('checked_history_run_count')}`",
+        f"- terminal_history_run_count: `{drift.get('terminal_history_run_count')}`",
+        f"- matched_history_run_count: `{drift.get('matched_history_run_count')}`",
+        f"- missing_ledger_run_count: `{drift.get('missing_ledger_run_count')}`",
+        f"- non_terminal_skipped_count: `{drift.get('non_terminal_skipped_count')}`",
+        f"- ledger_run_count: `{drift.get('ledger_run_count')}`",
+    ]
+    missing_runs = drift.get("missing_runs") if isinstance(drift.get("missing_runs"), list) else []
+    if missing_runs:
+        lines.extend(
+            [
+                "",
+                "## Missing Compact Runs",
+                "",
+                "| Benchmark | Case | Arm | Score | Failure | Catch-up |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for run in missing_runs:
+            if not isinstance(run, dict):
+                continue
+            lines.append(
+                "| "
+                f"`{run.get('benchmark_id')}` | "
+                f"`{run.get('case_id')}` | "
+                f"`{run.get('arm_id')}` | "
+                f"`{run.get('official_score')}` | "
+                f"`{run.get('failure_class')}` | "
+                f"`{run.get('catch_up_command_template')}` |"
+            )
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
     return "\n".join(lines) + "\n"
@@ -2571,6 +2619,35 @@ def main(argv: list[str] | None = None) -> int:
         "--execute",
         action="store_true",
         help="Write the benchmark run ledger update.",
+    )
+    benchmark_run_ledger_check_parser = benchmark_sub.add_parser(
+        "run-ledger-check",
+        help=(
+            "Compare compact benchmark_run_v0 run history with the public "
+            "benchmark_run_ledger_v0. This reads compact history only."
+        ),
+    )
+    benchmark_run_ledger_check_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Goal id whose compact benchmark run history should be checked.",
+    )
+    benchmark_run_ledger_check_parser.add_argument(
+        "--run-ledger-path",
+        default=str(BENCHMARK_RUN_LEDGER_DEFAULT_PATH),
+        help="Path to benchmark_run_ledger_v0 JSON.",
+    )
+    benchmark_run_ledger_check_parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=500,
+        help="Maximum recent compact run-history rows to compare.",
+    )
+    benchmark_run_ledger_check_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum missing rows to include in output.",
     )
 
     agentissue_runner_flow_parser = benchmark_sub.add_parser(
@@ -7146,6 +7223,62 @@ def main(argv: list[str] | None = None) -> int:
                 lambda value: render_codex_app_parity_posthoc_check_markdown(
                     value["codex_app_parity_posthoc_check"]
                 ),
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "run-ledger-check":
+            try:
+                history_payload = collect_history(
+                    registry_path=registry_path,
+                    runtime_root=resolve_runtime_root(
+                        load_registry(registry_path),
+                        args.runtime_root,
+                    ),
+                    goal_id=args.goal_id,
+                    limit=max(0, int(args.history_limit)),
+                )
+                ledger = load_benchmark_run_ledger(args.run_ledger_path)
+                drift = check_benchmark_run_ledger_drift(
+                    history_records=[
+                        run
+                        for run in history_payload.get("runs", [])
+                        if isinstance(run, dict)
+                    ],
+                    ledger=ledger,
+                    ledger_path=args.run_ledger_path,
+                    limit=max(0, int(args.limit)),
+                    cwd=Path.cwd(),
+                )
+                payload = {
+                    "ok": True,
+                    "goal_id": args.goal_id,
+                    "history_limit": args.history_limit,
+                    "benchmark_run_ledger_drift": drift,
+                    "read_boundary": drift.get("read_boundary"),
+                }
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "goal_id": args.goal_id,
+                    "benchmark_run_ledger_drift": {
+                        "schema_version": "benchmark_run_ledger_drift_v0",
+                        "ok": False,
+                        "drift_detected": False,
+                    },
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                    "error": str(exc),
+                }
+            print_payload(
+                payload,
+                args.format,
+                render_benchmark_run_ledger_check_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "run-ledger-upsert":
