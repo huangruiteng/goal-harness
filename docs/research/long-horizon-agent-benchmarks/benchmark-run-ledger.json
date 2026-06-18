@@ -5518,10 +5518,14 @@
           "latest_decision": {
             "baseline_failure_scope": "passed",
             "baseline_run_id": "793ed0aac6e3",
-            "decision": "paired_baseline_solved_treatment_preserved",
-            "official_score_delta": 0.0,
-            "treatment_failure_scope": "passed",
-            "treatment_run_id": "f0bbf063e249"
+            "decision": "paired_treatment_codex_acp_runtime_preflight_required",
+            "failure_class": "skillsbench_codex_acp_jsonrpc_internal_error",
+            "next_action": "prove the Codex ACP runtime can start inside the SkillsBench sandbox before rerunning or launching treatment; require compact dependency and launch preflight evidence instead of a generic ACP launch failure",
+            "official_score_delta": null,
+            "repair_class": "skillsbench_codex_acp_runtime_preflight",
+            "repair_priority": "P0",
+            "treatment_failure_scope": "score_missing",
+            "treatment_run_id": "d9949ec296f1"
           },
           "runs": [
             {
@@ -5858,6 +5862,54 @@
               "source_event_schema": "benchmark_run_v0",
               "status": "completed",
               "submit_eligible": false
+            },
+            {
+              "actual_model_verified": false,
+              "agent_declared_done": false,
+              "agent_model": "gpt-5.5",
+              "arm_id": "codex_goal_harness_treatment",
+              "benchmark_id": "skillsbench@1.1",
+              "case_id": "suricata-custom-exfil",
+              "case_ids": [
+                "suricata-custom-exfil"
+              ],
+              "codex_acp_runtime_preflight_passed": false,
+              "failure_class": "skillsbench_codex_acp_jsonrpc_internal_error",
+              "failure_labels": [
+                "skillsbench_codex_acp_jsonrpc_internal_error",
+                "skillsbench_codex_acp_transport_error"
+              ],
+              "failure_scope": "score_missing",
+              "goal_harness_inside_case": true,
+              "job_name": "skillsbench_1_1_suricata_custom_exfil_goal_harness_product_mode",
+              "leaderboard_evidence": false,
+              "mode": "skillsbench_goal_harness_product_mode_treatment",
+              "model_control_status": "reported_model_from_result_metadata",
+              "next_action": "prove the Codex ACP runtime can start inside the SkillsBench sandbox before rerunning or launching treatment; require compact dependency and launch preflight evidence instead of a generic ACP launch failure",
+              "notes": "Current remote-migration rotation compact ingest of existing SkillsBench product-mode result; no raw trajectory/log/task material read by Goal Harness.",
+              "recorded_at": "2026-06-18T22:54:59+08:00",
+              "repair_class": "skillsbench_codex_acp_runtime_preflight",
+              "repair_priority": "P0",
+              "repair_profile": {
+                "raw_logs_required": false,
+                "raw_task_text_required": false,
+                "repair_class": "skillsbench_codex_acp_runtime_preflight",
+                "required_preflight": [
+                  "codex_acp_runtime_dependency_preflight",
+                  "codex_acp_runtime_launch_preflight",
+                  "skillsbench_compact_failure_class"
+                ],
+                "rerun_allowed_after_profile_applied": true,
+                "schema_version": "benchmark_repair_profile_v0"
+              },
+              "round_reward_count": 0,
+              "round_success_observed": false,
+              "run_group_id": "skillsbench_1_1_suricata_custom_exfil_goal_harness_product_mode",
+              "run_id": "d9949ec296f1",
+              "score_status": "missing",
+              "source_event_schema": "benchmark_run_v0",
+              "status": "recorded",
+              "submit_eligible": false
             }
           ]
         },
@@ -5999,7 +6051,7 @@
           ]
         }
       },
-      "run_count": 109
+      "run_count": 110
     },
     "terminal-bench-worker-materialization@v0": {
       "benchmark_id": "terminal-bench-worker-materialization@v0",
@@ -9402,7 +9454,7 @@
           "case_id": "train-fasttext",
           "latest_decision": {
             "decision": "single_arm_recorded",
-            "latest_run_id": "5a8f56f61908"
+            "latest_run_id": "936e5375a8a5"
           },
           "runs": [
             {
@@ -9437,11 +9489,48 @@
               "status": "completed",
               "submit_eligible": false,
               "worker_bridge_status": "not_required"
+            },
+            {
+              "agent_declared_done": false,
+              "agent_model": "gpt-5.5",
+              "arm_id": "goal_harness_managed_codex",
+              "artifact_refs": {
+                "artifact_ref": ".local/private-benchmark-jobs/terminal-bench-train-fasttext-managed-20260618T035534CST/jobs/terminal_bench_train_fasttext_goal_harness_managed_codex_20260618T035534CST",
+                "result_ref": ".local/private-benchmark-jobs/terminal-bench-train-fasttext-managed-20260618T035534CST/jobs/terminal_bench_train_fasttext_goal_harness_managed_codex_20260618T035534CST/result.json"
+              },
+              "benchmark_id": "terminal-bench@2.0",
+              "case_id": "train-fasttext",
+              "case_ids": [
+                "train-fasttext"
+              ],
+              "codex_acp_runtime_preflight_passed": false,
+              "failure_class": "official_verifier_solution_failure",
+              "failure_labels": [
+                "official_verifier_solution_failure"
+              ],
+              "failure_scope": "case_or_solution",
+              "goal_harness_inside_case": true,
+              "job_name": "terminal_bench_train_fasttext_goal_harness_managed_codex_20260618T035534CST",
+              "leaderboard_evidence": false,
+              "mode": "goal_harness_managed_codex",
+              "notes": "Current rotation closeout: compact ingest for train-fasttext managed run after prior ready_for_compact_polling state.",
+              "official_passed": false,
+              "official_score": 0.0,
+              "recorded_at": "2026-06-18T22:45:55+08:00",
+              "round_reward_count": 0,
+              "round_success_observed": false,
+              "run_group_id": "terminal-bench-train-fasttext-managed-20260618T035534CST",
+              "run_id": "936e5375a8a5",
+              "score_status": "failed",
+              "source_event_schema": "benchmark_run_v0",
+              "status": "completed",
+              "submit_eligible": false,
+              "worker_bridge_status": "not_required"
             }
           ]
         }
       },
-      "run_count": 78
+      "run_count": 79
     }
   },
   "schema_version": "benchmark_run_ledger_v0",
@@ -9452,5 +9541,5 @@
     "source_of_truth": "benchmark_run_v0 compact run events",
     "update_rule": "upsert one run entry when a benchmark case is ingested or closed"
   },
-  "updated_at": "2026-06-18T12:31:16+08:00"
+  "updated_at": "2026-06-18T22:54:59+08:00"
 }
