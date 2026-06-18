@@ -686,6 +686,15 @@ Item fields:
   `agent_command` is present and public-safe, `project_asset.next_safe_command`
   may repeat that command so first-screen dashboards and handoff packets can
   show the next executable local step without scanning top-level queue fields.
+  Advisory dreaming outputs may include both `dreaming_proposal` and
+  `dreaming_lane_badge`. The proposal carries compact rationale and promotion
+  requirements; the badge carries only routing facts for UI/heartbeat
+  consumers: `lane=dreaming`, `advisory=true`,
+  `interrupts_delivery=false`, `review_required=true`,
+  `execution_allowed=false`, `delivery_spend_allowed=false`, and
+  `promoted_to_delivery=false`. Consumers should render the badge as a
+  separate Dreaming lane or secondary badge and must not treat it as delivery
+  authorization.
   Markdown renderers should
   include the first unfinished user and agent todo here when available, so
   hot-path readers do not need to scan the detailed todo sections. The richer
@@ -1890,6 +1899,10 @@ A first useful UI can be built from the export alone:
 - User lane: items with `waiting_on=user_or_controller` or `controller`.
 - Codex lane: items with `waiting_on=codex`.
 - Watch lane: items with `waiting_on=external_evidence`.
+- Dreaming lane/badge: items with
+  `project_asset.dreaming_lane_badge.schema_version=dreaming_lane_badge_v0`.
+  These items are advisory review surfaces; delivery lanes continue to follow
+  quota and current owner/gate routing.
 - Health panel: contract `errors`, `warnings`, and `checks`.
 - Run detail panel: selected goal from the attention queue, compact
   classifications, authority coverage, controller readiness, health checks,

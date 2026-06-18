@@ -140,6 +140,39 @@ Goal
 This keeps project-agent work clean while still giving the user a central place
 to review broader learning and refactor requests.
 
+`goal-harness status` should expose the proposal plus a compact lane badge:
+
+```json
+{
+  "dreaming_proposal": {
+    "schema_version": "dreaming_proposal_v0",
+    "classification": "dreaming_exploration_proposal",
+    "proposal_type": "refactor_warning",
+    "advisory": true,
+    "execution_allowed": false,
+    "delivery_spend_allowed": false
+  },
+  "dreaming_lane_badge": {
+    "schema_version": "dreaming_lane_badge_v0",
+    "lane": "dreaming",
+    "label": "Dreaming",
+    "status": "dreaming_exploration_proposal",
+    "proposal_type": "refactor_warning",
+    "advisory": true,
+    "interrupts_delivery": false,
+    "review_required": true,
+    "execution_allowed": false,
+    "delivery_spend_allowed": false,
+    "promoted_to_delivery": false
+  }
+}
+```
+
+The badge intentionally carries routing facts, not the full explanation. The
+full rationale stays in `dreaming_proposal` and the run artifact, while
+dashboards and heartbeat consumers can render a separate Dreaming lane without
+mistaking the advisory proposal for delivery work.
+
 ## First Implementation Slice
 
 The first useful slice is documentation and status schema, not an autonomous
