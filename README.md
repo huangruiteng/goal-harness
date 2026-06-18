@@ -147,6 +147,10 @@ The installer creates:
 - `~/.local/bin/goal-harness-canary`, pointing at the live checkout;
 - the Goal Harness Codex skills under `~/.codex/skills`.
 
+Those global skills are the intended product surface for reusable Goal Harness
+agent behavior; project-specific state and private decisions stay in the local
+registry and active goal files.
+
 Use the canary wrapper for one or two selected controllers before promoting a
 checkout to the default local release.
 

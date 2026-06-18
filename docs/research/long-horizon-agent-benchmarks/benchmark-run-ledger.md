@@ -5,7 +5,7 @@ benchmark case outcomes and artifact references; it must not contain raw
 logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 
 - schema_version: `benchmark_run_ledger_v0`
-- updated_at: `2026-06-17T20:31:44+08:00`
+- updated_at: `2026-06-18T12:31:16+08:00`
 
 ## Case Decisions
 
@@ -51,6 +51,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `terminal-bench@2.0` | `pytorch-model-recovery` | `paired_no_score_uplift_exception_research_required` | `case_exception_research` | `3` |
 | `terminal-bench@2.0` | `regex-log` | `paired_baseline_solved_treatment_preserved` | - | `2` |
 | `terminal-bench@2.0` | `sqlite-db-truncate` | `baseline_passed_not_current_treatment_priority` | - | `1` |
+| `terminal-bench@2.0` | `train-fasttext` | `single_arm_recorded` | - | `1` |
 
 ## Repair Backlog
 
@@ -260,3 +261,4 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `terminal-bench@2.0` | `regex-log` | `codex_goal_harness_treatment` | `` | `1.0` | `` | `` | `none` | `.local/private-benchmark-jobs/terminal-bench-regex-log-paired-20260614T1232CST/treatment_benchmark_run.compact.json` |
 | `terminal-bench@2.0` | `regex-log` | `codex_goal_mode_baseline` | `` | `1.0` | `` | `` | `none` | `.local/private-benchmark-jobs/terminal-bench-regex-log-paired-20260614T1232CST/baseline_benchmark_run.compact.json` |
 | `terminal-bench@2.0` | `sqlite-db-truncate` | `codex_goal_mode_baseline` | `` | `1.0` | `` | `` | `none` | `.local/private-benchmark-jobs/terminal-bench-sqlite-db-truncate-baseline-2h-20260615T185855CST/baseline/jobs/terminal_bench_sqlite_db_truncate_codex_goal_mode_baseline_2h_20260615T185855CST/result.json` |
+| `terminal-bench@2.0` | `train-fasttext` | `codex_goal_harness_treatment` | `` | `0.0` | `` | `` | `official_verifier_solution_failure` | `` |

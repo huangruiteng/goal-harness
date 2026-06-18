@@ -12,7 +12,7 @@
           "run_id": "37d3587daf12"
         },
         "treatment": {
-          "arm_id": "goal-harness-managed-codex",
+          "arm_id": "codex_goal_harness_treatment",
           "failure_class": "none",
           "failure_scope": "passed",
           "job_name": "terminal_bench_multi_source_data_merger_goal_harness_managed_codex_current_protocol_20260617T201625CST",
@@ -2044,6 +2044,62 @@
       "updated_at": "2026-06-16T20:13:04+08:00"
     },
     {
+      "analysis_id": "terminal-bench-2.0__train-fasttext__single-arm-managed-codex-failure",
+      "arms": {
+        "baseline": null,
+        "treatment": {
+          "arm_id": "goal-harness-managed-codex",
+          "failure_class": "official_verifier_solution_failure",
+          "failure_scope": "case_or_solution",
+          "official_score": 0.0,
+          "run_group_id": "terminal-bench-train-fasttext-managed-20260618T035534CST",
+          "run_id": "5a8f56f61908"
+        }
+      },
+      "benchmark_id": "terminal-bench@2.0",
+      "capability_signal": "No paired uplift signal yet: this is a single-arm Goal Harness managed Codex run that reached verifier scoring and failed at official score 0.0.",
+      "case_id": "train-fasttext",
+      "classification": "single_arm_failure_asset",
+      "control_plane_signal": "The previous monitor was stale: the process had ended and compact result artifacts existed, but the active todo still reported it as running. The useful control-plane lesson is monitor closeout discipline, not solver uplift.",
+      "decision": "single_arm_recorded",
+      "evidence_status": "compact_single_arm_completed",
+      "optimization_guidance": [
+        "Do not count this as treatment uplift or no-uplift evidence until a comparable baseline or paired treatment protocol exists.",
+        "Use it as a monitor-closeout regression reminder: compact Terminal-Bench jobs that have result.json and zero running trials must be ingested promptly.",
+        "Continue benchmark rotation through ALE/Terminal/Skills, but keep train-fasttext out of main paired tables until the missing counterpart is run or explicitly deprioritized."
+      ],
+      "public_boundary": {
+        "artifact_reference_policy": "refer to compact run id and run group only",
+        "raw_logs_copied": false,
+        "task_text_copied": false,
+        "trajectory_copied": false,
+        "verifier_output_copied": false
+      },
+      "routing_guidance": {
+        "next_action": "do not repeat immediately; continue the current ALE split-control lane or choose the next benchmark case only after the ledger-vs-case-analysis migration gap is tracked",
+        "repeat_policy": "repeat only if a paired baseline/treatment protocol explicitly selects train-fasttext"
+      },
+      "scores": {
+        "baseline_official_score": null,
+        "official_score_delta": null,
+        "treatment_official_score": 0.0
+      },
+      "stability_assessment": {
+        "main_confounds": [
+          "single-arm only",
+          "no first_success_round because the official reward stayed 0.0",
+          "case-analysis migration was performed after delayed monitor closeout"
+        ],
+        "reason": "The compact Harbor result has one completed trial, zero errors, official reward mean 0.0, and no upload/submit evidence.",
+        "single_arm_claim": "stable_as_failure_record_only",
+        "stabilization_needed": [
+          "add a comparable baseline or treatment counterpart before using this case in any effect-size claim",
+          "keep a migration audit for ledger-only cases so monitor closeouts do not remain invisible in case-analysis"
+        ]
+      },
+      "updated_at": "2026-06-18T12:27:07+08:00"
+    },
+    {
       "analysis_id": "skillsbench-1.1__setup-fuzzing-py__codex-acp-focal-apt-setup-blocker",
       "arms": {
         "baseline": {
@@ -3157,7 +3213,7 @@
     "trajectory_recorded": false,
     "update_rule": "add one case analysis record after compact result ingest and benchmark-run-ledger update"
   },
-  "updated_at": "2026-06-18T02:24:00+08:00",
+  "updated_at": "2026-06-18T12:27:07+08:00",
   "terminal_bench_current_protocol_coverage": {
     "schema_version": "terminal_bench_current_protocol_coverage_v0",
     "source_ledger": "benchmark-run-ledger.json",

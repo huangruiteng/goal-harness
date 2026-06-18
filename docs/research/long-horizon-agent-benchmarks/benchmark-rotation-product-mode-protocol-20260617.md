@@ -90,6 +90,25 @@ without opening raw trajectories:
 | Terminal-Bench | Valuable evidence exists for materialization, verifier attribution, timeout tiers, and baseline-solved cases. | Select one fresh or attribution-required case only when the lifecycle trace hypothesis is explicit. |
 | ALE | PR #8 source is route-ready in a clean source lock at merge commit `3002622`; `uv` and `ale_run` are available; `docker.yaml`, `example_exp.yaml`, and `selected_tasks/linux_no_dind.txt` exist. The launch packet is blocked on `docker_image_missing` for `agentslastexam/ale-ubuntu22-docker:latest`. | Decide or schedule the large image acquisition boundary, then do a no-upload dry-run before any task-level run. |
 
+## Local Disk Cleanup Update 2026-06-18
+
+A later local cleanup removed the default Docker/Colima image, container,
+volume, and build-cache inventory. Compact ledgers, case-analysis summaries,
+and run-history records remain usable, but new local benchmark execution that
+needs Docker images or runner-local Harbor tooling should be treated as not
+launch-ready until explicitly rehydrated. The compact ALE local preflight now
+stops on `docker_image_missing`; the existing ALE source checkout still imports
+`ale_run` but is behind upstream and should not be treated as the fresh source
+lock for a new non-demo run.
+
+This changes routing, not historical interpretation. For Docker-heavy
+ALE/Terminal-Bench/SkillsBench work, prefer the split-control provider route:
+keep Codex CLI, Goal Harness state, credentials, and model invocation local;
+use prod/remote only for Docker/CUA/provider capacity; and record only compact
+readiness/run counters. Stop before syncing Codex auth, reading raw task bodies,
+raw logs, trajectories, screenshots, hidden refs, uploads, leaderboard paths, or
+public score claims.
+
 ## ALE Readiness Facts From This Batch
 
 Compact probes on 2026-06-17:

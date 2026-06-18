@@ -337,6 +337,8 @@ If the result says should_run=true:
    goal-harness todo add --goal-id <GOAL_ID> --role user --text "<public-safe user/owner action>"
 
    Use `--role agent` for project-agent follow-up work.
+   For non-trivial feature slices, complete the current todo only after adding
+   a successor todo, or include a compact no-follow-up rationale.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the Goal Harness checkout.
 8. After validation and writeback complete, append exactly one spend event
@@ -430,7 +432,8 @@ quiet no-op. Do one bounded verifiable progress batch when a real boundary
 exists: implementation, validation, docs, and state writeback may belong in the
 same batch. Do not stop at the first tiny substep when the validation/writeback
 boundary is already clear. Validate it, write back changed files / validation /
-critic / next action, append exactly one
+critic / next action; for non-trivial feature slices, create a successor todo
+or write a compact no-follow-up rationale; append exactly one
 `goal-harness --registry "$HOME/.codex/goal-harness/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --slots 1 --source heartbeat --execute`
 event after the completed turn and before any state-only refresh that might
 close the active delivery lane. Then refresh state if needed. Use `--slots 1` for minute-based
@@ -488,7 +491,8 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 11. Start bounded self-repair/replan if 2 consecutive eligible turns are only
    repeated no-progress status loops. Cancel or pause instead of spending only
    if that repair path is itself stuck for 2 more eligible turns.
-12. Treat routine public commit, push, and PR creation as autonomous after clean
+12. Nontrivial done -> successor todo or no-follow-up rationale.
+13. Treat routine public commit, push, and PR creation as autonomous after clean
    validation and a public/private boundary scan; stop for private/company
    material, credentials, destructive git, production actions, or repo rules
    that explicitly require review.

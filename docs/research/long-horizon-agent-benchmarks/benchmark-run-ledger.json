@@ -6075,7 +6075,7 @@
     },
     "terminal-bench@2.0": {
       "benchmark_id": "terminal-bench@2.0",
-      "case_count": 18,
+      "case_count": 19,
       "cases": {
         "build-cython-ext": {
           "case_id": "build-cython-ext",
@@ -9397,9 +9397,51 @@
               "worker_bridge_status": "not_required"
             }
           ]
+        },
+        "train-fasttext": {
+          "case_id": "train-fasttext",
+          "latest_decision": {
+            "decision": "single_arm_recorded",
+            "latest_run_id": "5a8f56f61908"
+          },
+          "runs": [
+            {
+              "agent_declared_done": false,
+              "agent_model": "gpt-5.5",
+              "arm_id": "codex_goal_harness_treatment",
+              "benchmark_id": "terminal-bench@2.0",
+              "case_id": "train-fasttext",
+              "case_ids": [
+                "train-fasttext"
+              ],
+              "codex_acp_runtime_preflight_passed": false,
+              "failure_class": "official_verifier_solution_failure",
+              "failure_labels": [
+                "official_verifier_solution_failure"
+              ],
+              "failure_scope": "case_or_solution",
+              "goal_harness_inside_case": true,
+              "job_name": "terminal_bench_train_fasttext_goal_harness_managed_codex_20260618T035534CST",
+              "leaderboard_evidence": false,
+              "mode": "goal_harness_managed_codex",
+              "notes": "Canonical catch-up for train-fasttext monitor closeout using compact benchmark_run_v0 history event; no raw task/log/trajectory/verifier body read.",
+              "official_passed": false,
+              "official_score": 0.0,
+              "recorded_at": "2026-06-18T12:31:16+08:00",
+              "round_reward_count": 0,
+              "round_success_observed": false,
+              "run_group_id": "terminal_bench_train_fasttext_goal_harness_managed_codex_20260618T035534CST",
+              "run_id": "5a8f56f61908",
+              "score_status": "failed",
+              "source_event_schema": "benchmark_run_v0",
+              "status": "completed",
+              "submit_eligible": false,
+              "worker_bridge_status": "not_required"
+            }
+          ]
         }
       },
-      "run_count": 77
+      "run_count": 78
     }
   },
   "schema_version": "benchmark_run_ledger_v0",
@@ -9410,5 +9452,5 @@
     "source_of_truth": "benchmark_run_v0 compact run events",
     "update_rule": "upsert one run entry when a benchmark case is ingested or closed"
   },
-  "updated_at": "2026-06-17T20:31:44+08:00"
+  "updated_at": "2026-06-18T12:31:16+08:00"
 }

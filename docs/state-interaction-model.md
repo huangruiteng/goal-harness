@@ -154,6 +154,15 @@ and optional `--action-kind ...`. The active-state metadata then feeds status,
 quota, dashboard, and review-packet consumers through the same CLI projection.
 Legacy todo text classification exists only to keep older states readable.
 
+For larger features, prefer todo succession over lifecycle inflation. Goal
+Harness should not need many feature states to know whether work remains. The
+agent should complete the current implementation slice, then immediately create
+the next concrete todo for rollout, product-path audit, docs, telemetry,
+benchmark proof, or operator decision. If no follow-up is needed, the completion
+note should say why. This keeps Goal Harness responsible for durable checklist
+truth while leaving the semantic judgment about "what should happen next" to
+the model/executor.
+
 ### Operational Control Loop
 
 The reusable product loop is user / agent / state, not agent / chat alone.
@@ -200,6 +209,10 @@ surfaces:
   concise question and does not run the gated path. If the CLI exposes safe
   bypass, a later turn may do unrelated bounded P1/P2 work after the gate has
   been surfaced.
+- `scoped_user_gate_fallback`: a concrete user gate owns one action scope, but
+  a non-dependent fallback is executable. The user channel remains
+  `NOTIFY/action_required`; the agent channel remains `must_attempt` for the
+  selected fallback; the gated action itself must not run.
 - `user_todo_blocker_push`: the user owns an open todo. The agent notifies,
   does not spend, and should not describe the turn as "no user action".
 - `external_evidence_observation`: Codex does not run benchmark/model/Docker

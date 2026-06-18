@@ -94,6 +94,22 @@ dreaming outputs are proposals unless a later operator/controller decision
 promotes them. This keeps Goal Harness from becoming a second brittle agent
 while still letting it maintain the long-horizon execution track.
 
+For periodic autonomous replan, keep the ownership split explicit:
+
+| Layer | Responsibility |
+| --- | --- |
+| Goal Harness | Detect that a periodic review is due from compact run history, state freshness, quota, and boundary facts; emit the obligation, stop condition, and compact guidance vocabulary; record the later replan acknowledgement. |
+| Agent loop | Read the obligation during preflight, route the current turn into a bounded replan segment, inject current state into the model/executor, run validated todo writes, and spend only after writeback. |
+| Model / executor | Decide semantically which work to keep, split, add, retire, or escalate to a user/controller decision; explain the tradeoff and choose the next bounded slice. |
+
+The v0 implementation may compute the periodic-review trigger synchronously in
+`status` / `quota` because that is deterministic control-plane projection. If
+the review becomes more expensive or semantic, move it to a server/dreaming
+planning lane as an advisory proposal. The server may run that proposal in
+parallel with delivery observation, but promotion and execution should remain
+client-serial through the normal agent loop, `quota should-run`, and
+goal-boundary checks.
+
 ## Run Record Shape
 
 Dreaming runs should be visible but not mixed with delivery runs:

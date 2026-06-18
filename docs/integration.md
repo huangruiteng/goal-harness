@@ -25,6 +25,18 @@ workflow. Use `goal-harness doctor` from any project folder to inspect the
 resolved command path, symlink target, release snapshot, canary wrapper,
 installed skill delivery-hint state, wrapper script, and Python import health.
 
+## Global Skill Policy
+
+Goal Harness product behavior belongs in installed global Codex skills, not in
+one repository's `AGENTS.md`. Keep the global skills narrow and versioned:
+they should teach Goal Harness connection, quota/state/todo writeback,
+self-repair, and generic product contracts such as todo succession. Project
+state, benchmark-specific choices, private material, and one-off operator
+decisions stay in the registry, active state, run history, or project docs.
+When a recurring behavior should improve every future worker, update the repo
+skill source and run `scripts/install-local.sh`; when it applies only to this
+repo's contribution hygiene, keep it in `AGENTS.md`.
+
 Gray rollout flow:
 
 ```bash

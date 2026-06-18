@@ -7,8 +7,10 @@ It is intentionally separate from `benchmark-run-ledger.md`. The run ledger
 records compact attempts and scores; this file records why a result matters.
 
 - schema_version: `benchmark_case_analysis_v0`
-- updated_at: `2026-06-18T02:18:00+08:00`
+- updated_at: `2026-06-18T12:49:19+08:00`
 - machine_source: `benchmark-case-analysis.json`
+- ledger-only migration audit:
+  `benchmark-case-analysis-ledger-only-migration-audit-20260618.md`
 
 ## Summary
 
@@ -19,6 +21,13 @@ product-mode, and Terminal-Bench rows must distinguish legacy
 Legacy positives stay in the case notes as assets, but should not be counted as
 current main-table uplift until a current-protocol rerun closes.
 
+The latest ledger-only migration audit explicitly classified 17 compact
+ledger-only cases. Seven are promotion-ready when they teach a reusable routing
+or non-regression lesson; four are already represented by Terminal-Bench
+current-protocol coverage rows; the remainder are setup/probe/defer rows that
+should not be promoted into main case analysis until compact score or blocker
+evidence becomes useful.
+
 | Benchmark | Case | Class | Baseline | Treatment | Delta | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
 | `terminal-bench@2.0` | `multi-source-data-merger` | current-protocol baseline-solved / legacy positive asset | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
@@ -26,6 +35,7 @@ current main-table uplift until a current-protocol rerun closes.
 | `terminal-bench@2.0` | `make-doom-for-mips` | timeout attribution asset | `0.0` | `0.0` | `0.0` | `paired_result_requires_attribution` |
 | `terminal-bench@2.0` | `mteb-retrieve` | setup probe asset | `0.0` | `0.0` | `0.0` | `environment_setup_probe_materialized_with_exception_repeat_blocked` |
 | `terminal-bench@2.0` | `pytorch-model-recovery` | exception attribution asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift_exception_research_required` |
+| `terminal-bench@2.0` | `train-fasttext` | single-arm managed-Codex failure asset | n/a | `0.0` | n/a | `single_arm_recorded` |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
 | `skillsbench@1.1` | `dapt-intrusion-detection` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
 | `skillsbench@1.1` | `paratransit-routing` | product-mode no-uplift / blind-loop positive asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
@@ -64,6 +74,38 @@ score `1.0`, so none of them should be counted as current uplift.
 
 Current active control set:
 `skillsbench_automation_loop_policy_controls_20260615`.
+
+## Case: Terminal-Bench train-fasttext
+
+This is a single-arm monitor closeout asset, not uplift evidence.
+
+Compact evidence:
+
+- benchmark: `terminal-bench@2.0`
+- treatment arm: `codex_goal_harness_treatment`
+- treatment run id: `5a8f56f61908`
+- treatment score: `0.0`
+- failure: `official_verifier_solution_failure`
+- run group: `terminal-bench-train-fasttext-managed-20260618T035534CST`
+
+Interpretation:
+
+The run completed one no-upload trial and reached verifier scoring, but official
+reward stayed `0.0`. There is no comparable baseline or paired treatment arm
+for this case yet, so it must not be counted as uplift or no-uplift evidence.
+
+The important process lesson is monitor closeout: the active todo still reported
+the detached process as running after compact result artifacts already existed.
+Future Terminal-Bench monitors should promptly ingest completed `result.json`
+and update the ledger/case-analysis instead of leaving stale running state.
+
+Follow-up guidance:
+
+- Do not repeat immediately unless a paired baseline/treatment protocol selects
+  `train-fasttext`.
+- Keep it out of main paired tables until a comparable counterpart exists.
+- Continue ALE/Terminal/Skills rotation, but track remaining ledger-only cases
+  as a migration gap instead of claiming the case table is complete.
 
 Good-case conclusion:
 
