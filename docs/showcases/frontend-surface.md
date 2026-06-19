@@ -78,6 +78,14 @@ Each case card should show:
 - evidence boundary badge;
 - demo command only when `demo_command` is present.
 
+The polished mock should also expose lightweight catalog controls:
+
+- a segmented status filter generated from the catalog's `status` values;
+- a search input over title, headline, domain, audience, tags, behavior,
+  user value, and evidence boundary;
+- a visible result count so the surface feels like a product view rather than
+  a static README excerpt.
+
 Do not render raw run logs, screenshots, private chat excerpts, task ids, or
 internal document links. A public case card should feel like a reusable product
 pattern, not a transcript.
@@ -131,7 +139,8 @@ The first implementation should be static and catalog-driven:
 
 1. Load `showcase-catalog.json`.
 2. Validate the known `schema_version`.
-3. Render the comparison block, case grid, and detail story from catalog fields.
+3. Render the comparison block, filter/search controls, case grid, and detail
+   story from catalog fields.
 4. Link back to Markdown case pages.
 5. Use `docs/assets/control-plane-board.svg` as the first shared visual asset.
 6. Use `examples/showcase-frontstage-prototype.py` as the no-build static

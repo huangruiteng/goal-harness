@@ -38,6 +38,40 @@ def render_badges(values: list[Any]) -> str:
     return "".join(f"<span>{esc(value)}</span>" for value in values)
 
 
+def search_blob(case: dict[str, Any]) -> str:
+    frontend = case.get("frontend_card") if isinstance(case.get("frontend_card"), dict) else {}
+    values: list[Any] = [
+        case.get("id"),
+        case.get("date"),
+        case.get("title"),
+        case.get("headline"),
+        case.get("domain"),
+        case.get("status"),
+        case.get("user_value"),
+        case.get("evidence_boundary"),
+    ]
+    for key in ("audience", "pattern_tags", "goal_harness_behavior"):
+        field = case.get(key)
+        if isinstance(field, list):
+            values.extend(field)
+    for key in ("badges", "story_beats"):
+        field = frontend.get(key)
+        if isinstance(field, list):
+            values.extend(field)
+    return " ".join(str(value).lower() for value in values if value)
+
+
+def render_status_filters(cases: list[dict[str, Any]]) -> str:
+    statuses = sorted({str(case.get("status") or "") for case in cases if case.get("status")})
+    buttons = ['<button type="button" data-status-filter="all" aria-pressed="true">All cases</button>']
+    for status in statuses:
+        label = STATUS_LABELS.get(status, status.replace("_", " "))
+        buttons.append(
+            f'<button type="button" data-status-filter="{esc(status)}" aria-pressed="false">{esc(label)}</button>'
+        )
+    return "\n          ".join(buttons)
+
+
 def render_case(case: dict[str, Any], *, output: Path | None) -> str:
     frontend = case.get("frontend_card") if isinstance(case.get("frontend_card"), dict) else {}
     badges = frontend.get("badges") if isinstance(frontend.get("badges"), list) else []
@@ -79,7 +113,11 @@ def render_case(case: dict[str, Any], *, output: Path | None) -> str:
     behavior_items = "".join(f"<li>{esc(item)}</li>" for item in behavior)
 
     return f"""
-      <article class="case-card" data-case-id="{esc(case.get("id") or "")}">
+      <article class="case-card"
+        data-case-id="{esc(case.get("id") or "")}"
+        data-status="{esc(status)}"
+        data-domain="{esc(case.get("domain") or "")}"
+        data-search="{esc(search_blob(case))}">
         <div class="case-card__header">
           <span class="status-badge">{esc(status_label)}</span>
           <time>{esc(case.get("date") or "")}</time>
@@ -117,6 +155,9 @@ def render(catalog: dict[str, Any], *, output: Path | None) -> str:
     asset_href = repo_link("docs/assets/control-plane-board.svg", output=output)
     case_cards = "\n".join(render_case(case, output=output) for case in cases)
     case_count = len(cases)
+    status_filters = render_status_filters(cases)
+    schema_version = str(catalog.get("schema_version") or "")
+    schema_label = schema_version.removeprefix("goal_harness_showcase_catalog_") or schema_version
     pattern_count = len(
         {
             tag
@@ -167,6 +208,26 @@ def render(catalog: dict[str, Any], *, output: Path | None) -> str:
     .comparison section {{ border: 1px solid var(--line); border-radius: 8px; padding: 18px; }}
     .comparison h2 {{ font-size: 18px; margin: 0 0 8px; }}
     .comparison p {{ margin: 0; color: var(--muted); }}
+    .showcase-controls {{ border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 18px 0; margin: 0 0 24px; display: grid; gap: 12px; }}
+    .control-row {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); gap: 16px; align-items: center; }}
+    .segmented-controls {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+    .segmented-controls button {{
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      min-height: 38px;
+      padding: 7px 11px;
+    }}
+    .segmented-controls button[aria-pressed="true"] {{ border-color: var(--green); color: var(--green); background: #eefaf4; }}
+    .search-control {{ display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 700; }}
+    .search-control input {{ border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font: inherit; min-height: 40px; padding: 8px 10px; width: 100%; }}
+    .result-count {{ color: var(--muted); margin: 0; }}
+    .result-count strong {{ color: var(--ink); }}
     .cases {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 18px; }}
     .case-card {{ border: 1px solid var(--line); border-radius: 8px; padding: 20px; background: var(--paper); }}
     .case-card__header {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 13px; }}
@@ -186,9 +247,10 @@ def render(catalog: dict[str, Any], *, output: Path | None) -> str:
     code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: normal; }}
     .case-link {{ display: inline-block; margin-top: 16px; color: var(--blue); font-weight: 700; text-decoration: none; }}
     .boundary {{ margin-top: 34px; border-left: 4px solid var(--amber); padding-left: 16px; color: var(--muted); }}
+    [hidden] {{ display: none !important; }}
     @media (max-width: 840px) {{
       main {{ padding: 28px 16px 44px; }}
-      .hero, .comparison {{ grid-template-columns: 1fr; }}
+      .hero, .comparison, .control-row {{ grid-template-columns: 1fr; }}
       h1 {{ font-size: 34px; }}
       .punchline {{ font-size: 20px; }}
     }}
@@ -208,7 +270,7 @@ def render(catalog: dict[str, Any], *, output: Path | None) -> str:
     <section class="metrics" aria-label="Catalog metrics">
       <div><strong>{case_count}</strong><span>public-safe cases</span></div>
       <div><strong>{pattern_count}</strong><span>pattern tags</span></div>
-      <div><strong>{esc(catalog.get("schema_version") or "")}</strong><span>catalog schema</span></div>
+      <div title="{esc(schema_version)}"><strong>{esc(schema_label)}</strong><span>catalog schema</span></div>
     </section>
     <section class="comparison" aria-label="Executor loop versus control plane">
       <section>
@@ -220,6 +282,18 @@ def render(catalog: dict[str, Any], *, output: Path | None) -> str:
         <p>Preserves the lifetime-goal control plane across turns, tools, agents, gates, evidence, and quota.</p>
       </section>
     </section>
+    <section class="showcase-controls" aria-label="Showcase filters">
+      <div class="control-row">
+        <div class="segmented-controls" role="group" aria-label="Filter by evidence status">
+          {status_filters}
+        </div>
+        <label class="search-control">
+          Search
+          <input type="search" data-case-search placeholder="Pattern, audience, domain">
+        </label>
+      </div>
+      <p class="result-count" aria-live="polite"><strong data-visible-count>{case_count}</strong> of {case_count} cases visible</p>
+    </section>
     <section class="cases" aria-label="Showcase cases">
       {case_cards}
     </section>
@@ -227,6 +301,44 @@ def render(catalog: dict[str, Any], *, output: Path | None) -> str:
       <p>Every card is rendered from <code>docs/showcases/showcase-catalog.json</code>. Case pages carry narrative context; the catalog carries public-safe renderable data and evidence boundaries.</p>
     </section>
   </main>
+  <script>
+    (() => {{
+      const buttons = [...document.querySelectorAll("[data-status-filter]")];
+      const cards = [...document.querySelectorAll("[data-case-id]")];
+      const input = document.querySelector("[data-case-search]");
+      const visibleCount = document.querySelector("[data-visible-count]");
+      let activeStatus = "all";
+
+      const update = () => {{
+        const query = (input?.value || "").trim().toLowerCase();
+        let count = 0;
+        for (const card of cards) {{
+          const matchesStatus = activeStatus === "all" || card.dataset.status === activeStatus;
+          const matchesQuery = !query || (card.dataset.search || "").includes(query);
+          const visible = matchesStatus && matchesQuery;
+          card.hidden = !visible;
+          if (visible) {{
+            count += 1;
+          }}
+        }}
+        if (visibleCount) {{
+          visibleCount.textContent = String(count);
+        }}
+        for (const button of buttons) {{
+          button.setAttribute("aria-pressed", String(button.dataset.statusFilter === activeStatus));
+        }}
+      }};
+
+      for (const button of buttons) {{
+        button.addEventListener("click", () => {{
+          activeStatus = button.dataset.statusFilter || "all";
+          update();
+        }});
+      }}
+      input?.addEventListener("input", update);
+      update();
+    }})();
+  </script>
 </body>
 </html>
 """

@@ -51,17 +51,28 @@ def main() -> int:
         '<section class="hero">',
         '<p class="punchline">',
         'aria-label="Executor loop versus control plane"',
+        'aria-label="Showcase filters"',
+        'data-status-filter="all"',
+        'data-case-search',
+        'data-visible-count',
         "docs/showcases/showcase-catalog.json",
         "control-plane-board.svg",
         str(catalog["schema_version"]),
     ):
         assert required in html, required
 
+    statuses = {str(case["status"]) for case in cases}
+    for status in statuses:
+        assert f'data-status-filter="{status}"' in html, status
+
     for case in cases:
         case_id = str(case["id"])
         assert f'data-case-id="{case_id}"' in html, case_id
+        assert f'data-status="{case["status"]}"' in html, case_id
+        assert f'data-domain="{case["domain"]}"' in html, case_id
         for field in ("title", "headline", "user_value", "evidence_boundary"):
             assert str(case[field]) in html, (case_id, field)
+            assert str(case[field]).lower() in html.lower(), (case_id, field, "search")
         assert str(case["case_page"]).replace("docs/showcases/", "") in html or str(case["case_page"]) in html
         storyboard_path = case.get("storyboard_path")
         if isinstance(storyboard_path, str) and storyboard_path:
