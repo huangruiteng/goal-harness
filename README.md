@@ -516,8 +516,10 @@ registries without `coordination.registered_agents` also fail closed when a
 scoped heartbeat or todo claim names an agent; register the agent identity first
 instead of letting workers invent claim ids. Set exactly one
 `coordination.primary_agent`: that primary agent owns final review,
-verification, merge, and publication, while side agents are prompted to work in
-separate worktrees and hand finished work back through a primary review todo.
+verification, merge, publication, and high-risk side-agent review. Side agents
+are prompted to work in separate worktrees. Small AGENTS-eligible validated
+changes may be self-merged with explicit Goal Harness evidence; higher-risk or
+unclear work should still be handed back through a primary review todo.
 
 See [docs/quota-allocation.md](docs/quota-allocation.md) and
 [docs/heartbeat-automation-prompt.md](docs/heartbeat-automation-prompt.md).

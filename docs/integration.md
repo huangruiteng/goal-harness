@@ -353,13 +353,14 @@ lightweight runtime surface uses todo `claimed_by` as a soft owner written under
 the active-state CLI lock. Claim ids must be listed in
 `coordination.registered_agents`; exactly one `coordination.primary_agent`
 owns final review, verification, merge, and publication. Side agents keep their
-scope in the automation prompt or handoff, work in separate git worktrees, and
-complete side-agent todos by adding a successor review todo claimed by the
-primary agent. A future version can add claim files, stale-claim detection,
-overlap warnings, TTLs, and compare-and-swap conflict responses. That future pending
-contract should be per todo: a pending lease is keyed by `(goal_id, todo_id)`,
-so unrelated todos under the same goal can still run in parallel when scopes
-permit.
+scope in the automation prompt or handoff and work in separate git worktrees.
+They may self-merge small AGENTS-eligible validated changes with explicit
+evidence; broader or higher-risk side-agent work should complete by adding a
+successor review todo claimed by the primary agent. A future version can add
+claim files, stale-claim detection, overlap warnings, TTLs, and
+compare-and-swap conflict responses. That future pending contract should be per
+todo: a pending lease is keyed by `(goal_id, todo_id)`, so unrelated todos under
+the same goal can still run in parallel when scopes permit.
 
 ## Shared Runtime
 

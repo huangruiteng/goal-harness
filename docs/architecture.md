@@ -165,11 +165,13 @@ the active-state file lock. That field is a soft owner for visibility only, and
 the CLI accepts it only when the id is registered in
 `coordination.registered_agents`. Each shared goal should also declare one
 `coordination.primary_agent`: the primary owns review, verification, merge, and
-publication, while side agents keep repository edits in independent git
-worktrees/branches and hand off via primary review todos. Agent scope remains
-in heartbeat automation prompts or sub-agent handoffs; a future server lease
-should be per todo and add TTL, idempotency key, stale-claim detection, overlap
-warnings, and compare-and-swap style conflict responses.
+publication for high-risk or unclear changes. Side agents keep repository edits
+in independent git worktrees/branches. They may self-merge small
+AGENTS-eligible validated changes with explicit evidence, and otherwise hand
+off via primary review todos. Agent scope remains in heartbeat automation
+prompts or sub-agent handoffs; a future server lease should be per todo and add
+TTL, idempotency key, stale-claim detection, overlap warnings, and
+compare-and-swap style conflict responses.
 
 ## State Interaction Model
 

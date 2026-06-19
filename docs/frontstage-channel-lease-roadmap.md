@@ -91,8 +91,9 @@ Goal Harness does not have a separate issue object in this runtime model:
 inside that boundary.
 The v0.1 control plane still keeps role assignment simple: one
 `coordination.primary_agent` owns review/merge/publication for the goal, and
-side agents claim scoped todos, work in separate git worktrees, and add a
-primary-agent review todo when finishing.
+side agents claim scoped todos and work in separate git worktrees. They may
+self-merge small AGENTS-eligible validated changes with explicit evidence;
+otherwise they add a primary-agent review todo when finishing.
 
 ```json
 {

@@ -119,9 +119,10 @@ identity before writing. If the first executable todo is already claimed by
 another agent or is outside the child's scope, the child should pick another
 in-scope unclaimed todo or report that no in-scope work is available.
 The controller goal should declare exactly one primary agent. Side agents use
-independent git worktrees/branches for repository edits, do not merge directly,
-and finish by adding a primary-agent review todo so the main controller can
-review, verify, and merge.
+independent git worktrees/branches for repository edits. They may self-merge
+small AGENTS-eligible validated changes with explicit Goal Harness evidence;
+otherwise they finish by adding a primary-agent review todo so the main
+controller can review, verify, and merge.
 When this becomes a server-backed pending/lease path, the contention unit should
 stay per todo: one pending lease for `(goal_id, todo_id)`, not a broad lock on
 the whole goal. In this context, `goal_id` is the shared control-plane lane and

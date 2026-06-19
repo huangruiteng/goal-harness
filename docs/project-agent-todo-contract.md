@@ -84,12 +84,13 @@ soft owner with `claimed_by`, but the todo itself should not carry the agent's
 scope. Scope belongs in the automation prompt or sub-agent handoff; the agent
 uses that scope to decide which open todo it may claim. Each goal should have
 one `coordination.primary_agent`: the primary agent owns final review,
-verification, merge, publication, and reassignment decisions. All other
-registered agents are side agents. Side agents should do repository edits only
-in an independent git worktree/branch, never in the primary checkout, and
-should hand finished work back through a primary-agent review todo instead of
-merging directly. First register the agent ids and primary agent in the goal
-registry:
+verification, merge, publication, high-risk side-agent review, and reassignment
+decisions. All other registered agents are side agents. Side agents should do
+repository edits only in an independent git worktree/branch, never in the
+primary checkout. Small AGENTS-eligible validated changes may be self-merged
+when the side agent records public-safe evidence; higher-risk or unclear work
+should be handed back through a primary-agent review todo. First register the
+agent ids and primary agent in the goal registry:
 
 ```bash
 goal-harness configure-goal \
@@ -188,12 +189,28 @@ goal-harness todo complete \
   --next-claimed-by codex-main-control
 ```
 
-If `--claimed-by` names a side agent, `todo complete` requires
-`--next-agent-todo` and defaults that successor todo's `claimed_by` to the
-goal's `primary_agent`. Passing `--next-claimed-by` is allowed only when it
-matches the primary agent. This keeps the side-agent handoff visible to the
-shared control plane and leaves merge/publication authority with the single
-main agent.
+If `--claimed-by` names a side agent, `todo complete` defaults to requiring a
+successor primary review todo and defaults that successor todo's `claimed_by`
+to the goal's `primary_agent`. Passing `--next-claimed-by` is allowed only when
+it matches the primary agent. This keeps broad side-agent handoff visible to
+the shared control plane.
+
+For small changes that satisfy the repository's self-merge rules, the side
+agent may self-merge and complete without a successor review todo by making the
+exception explicit:
+
+```bash
+goal-harness todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by codex-side-bypass \
+  --side-agent-self-merged \
+  --evidence "<public-safe commit, validation, and self-merge summary>"
+```
+
+`--side-agent-self-merged` requires `--evidence`. Do not use it for runtime,
+benchmark, permission, production, destructive git, publication, public
+evidence-policy, or broad coordination changes that need primary review.
 
 Use `todo update` for lower-level status changes:
 
