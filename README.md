@@ -15,7 +15,7 @@ across many turns.
 
 [Quick Start](#quick-start) · [Product Vision](docs/product/vision.md) ·
 [Showcases](docs/showcases/README.md) · [Architecture](docs/architecture.md) ·
-[Dashboard](#dashboard)
+[Dashboard](#dashboard) · [简体中文](README.zh-CN.md)
 
 > Long-running agent work should be recoverable, reviewable, handoffable, and
 > safe by default.
