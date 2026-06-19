@@ -148,6 +148,13 @@ Frontstage consumers should treat this as an input snapshot:
 - never let the channel view override `goal_boundary`, operator gates, quota,
   required capabilities, workspace guards, or task leases.
 
+The first product-path fixture lives in `goal_harness.frontstage` and is covered
+by `examples/goal-channel-projection-smoke.py`. It intentionally stays a pure
+read-only builder: callers pass already-compact status, quota, run-history,
+review-packet, artifact, and lease/claim payloads; the builder emits
+`source_warnings` when raw or private-looking fields appear instead of copying
+those values into the channel.
+
 ### `agent_member_v0`
 
 This is an identity and permission projection for an actor participating in a
