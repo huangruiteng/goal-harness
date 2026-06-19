@@ -98,6 +98,33 @@ directory, or an unrelated git worktree, it returns `workspace_guard` and blocks
 normal delivery until the agent moves to an independent worktree and reruns the
 guard.
 
+Contributor-facing example:
+
+```bash
+goal-harness --format json quota should-run \
+  --goal-id <goal-id> \
+  --agent-id codex-side-bypass
+```
+
+If the response includes
+`effective_action=side_agent_workspace_repair` and
+`workspace_guard.current_workspace=primary_checkout`, the side agent should not
+edit files yet. Create or switch to a separate worktree and rerun the same
+guard:
+
+```bash
+git worktree add /tmp/<goal-id>-side-agent -b codex/<side-agent-branch>
+cd /tmp/<goal-id>-side-agent
+goal-harness --format json quota should-run \
+  --goal-id <goal-id> \
+  --agent-id codex-side-bypass
+```
+
+Only after that rerun returns normal delivery should the side agent claim an
+in-scope todo and edit repository files. A primary-owned todo remains
+primary-owned even when the side-agent workspace guard passes; the side agent
+must pick a todo inside its scope or create a primary review successor.
+
 ```bash
 goal-harness configure-goal \
   --goal-id <goal-id> \

@@ -354,12 +354,15 @@ identity first instead of letting workers invent claim ids.
 
 Set exactly one `coordination.primary_agent`: that primary agent owns final
 review, verification, merge, publication, and high-risk side-agent review. Side
-agents are prompted to work in separate worktrees. Small AGENTS-eligible
+agents are prompted to work in separate worktrees, and `quota should-run
+--agent-id <side-agent-id>` fails closed with `workspace_guard` when a side
+agent runs from the primary checkout. Small AGENTS-eligible
 validated changes may be self-merged with explicit Goal Harness evidence;
 higher-risk or unclear work should still be handed back through a primary
 review todo.
 
-See [heartbeat automation prompt](../heartbeat-automation-prompt.md).
+See [heartbeat automation prompt](../heartbeat-automation-prompt.md) and
+[project agent todo contract](../project-agent-todo-contract.md).
 
 ## Dashboard
 
