@@ -819,11 +819,15 @@ def complete_goal_todo(
                     "--next-agent-todo for primary review, verification, and merge, "
                     "or --side-agent-self-merged with --evidence for a small validated self-merge"
                 )
-            if effective_next_claimed_by and effective_next_claimed_by != primary_agent:
+            if (
+                not side_agent_self_merged
+                and effective_next_claimed_by
+                and effective_next_claimed_by != primary_agent
+            ):
                 raise ValueError(
                     f"side-agent completion review todo must be claimed_by primary_agent={primary_agent!r}"
                 )
-            if next_agent_todo:
+            if next_agent_todo and not side_agent_self_merged:
                 effective_next_claimed_by = primary_agent
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")

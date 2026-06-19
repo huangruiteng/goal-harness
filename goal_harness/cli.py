@@ -5490,7 +5490,8 @@ def main(argv: list[str] | None = None) -> int:
         "--next-claimed-by",
         help=(
             "For complete with --next-agent-todo, soft-claim the successor todo for "
-            "a registered agent. Side-agent completions default this to primary_agent."
+            "a registered agent. Side-agent review handoffs default this to primary_agent; "
+            "self-merged side-agent continuations may claim their own successor."
         ),
     )
     todo_parser.add_argument(

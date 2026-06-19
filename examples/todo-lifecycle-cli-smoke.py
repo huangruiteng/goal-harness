@@ -22,6 +22,7 @@ RUN_TODO = "Run a fresh-seed full PR3-r8 treatment repeat after the support-bloc
 REBUILD_TODO = "Rebuild labels and scorer after the fresh repeat."
 VALIDATE_TODO = "Validate scorer labels and write back the compact result."
 SIDE_TODO = "Refine todo ownership contract from a side worktree."
+SIDE_CONTINUATION_TODO = "Continue the small side-agent productization lane after self-merge."
 SIDE_REVIEW_TODO = "Refine todo ownership contract with primary review required."
 REVIEW_TODO = "Primary agent review, verify, and merge the side-agent ownership contract work."
 
@@ -259,6 +260,54 @@ def main() -> int:
         assert side_self_merged["side_agent_self_merged"] is True, side_self_merged
         assert side_self_merged["next_todos"] == [], side_self_merged
 
+        side_continuation_added = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            "Prepare another small side-agent doc slice.",
+            "--claimed-by",
+            "codex-side-bypass",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "contract_refine",
+        )
+        side_continuation_todo_id = side_continuation_added["todo_id"]
+        side_continuation_completed = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            side_continuation_todo_id,
+            "--claimed-by",
+            "codex-side-bypass",
+            "--evidence",
+            "self-merged commit def456 after focused validation",
+            "--side-agent-self-merged",
+            "--next-agent-todo",
+            SIDE_CONTINUATION_TODO,
+            "--next-claimed-by",
+            "codex-side-bypass",
+            "--next-action-kind",
+            "contract_refine",
+        )
+        assert side_continuation_completed["changed"] is True, side_continuation_completed
+        assert side_continuation_completed["side_agent_self_merged"] is True, side_continuation_completed
+        assert side_continuation_completed["next_todos"][0]["claimed_by"] == "codex-side-bypass", (
+            side_continuation_completed
+        )
+        side_successor_id = side_continuation_completed["next_todos"][0]["todo_id"]
+        side_successor_item = next(item for item in parsed_items(state_file) if item["todo_id"] == side_successor_id)
+        assert side_successor_item["done"] is False, side_successor_item
+        assert side_successor_item["claimed_by"] == "codex-side-bypass", side_successor_item
+
         side_review_added = run_cli(
             registry_path,
             "todo",
@@ -278,6 +327,27 @@ def main() -> int:
         )
         assert side_review_added["added"] is True, side_review_added
         side_review_todo_id = side_review_added["todo_id"]
+
+        side_review_claim_error = run_cli_error(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            side_review_todo_id,
+            "--claimed-by",
+            "codex-side-bypass",
+            "--evidence",
+            "side-worktree-contract-diff",
+            "--next-agent-todo",
+            REVIEW_TODO,
+            "--next-claimed-by",
+            "codex-side-bypass",
+        )
+        assert "side-agent completion review todo must be claimed_by primary_agent" in (
+            side_review_claim_error["error"]
+        ), side_review_claim_error
 
         side_completed = run_cli(
             registry_path,
