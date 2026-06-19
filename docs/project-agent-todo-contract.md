@@ -189,11 +189,11 @@ goal-harness todo complete \
   --next-claimed-by codex-main-control
 ```
 
-If `--claimed-by` names a side agent, `todo complete` defaults to requiring a
-successor primary review todo and defaults that successor todo's `claimed_by`
-to the goal's `primary_agent`. Passing `--next-claimed-by` is allowed only when
-it matches the primary agent. This keeps broad side-agent handoff visible to
-the shared control plane.
+If `--claimed-by` names a side agent, broad side-agent completion defaults to
+requiring a successor primary review todo and defaults that successor todo's
+`claimed_by` to the goal's `primary_agent`. Passing `--next-claimed-by` is
+allowed only when it matches the primary agent. This keeps broad side-agent
+handoff visible to the shared control plane.
 
 For small changes that satisfy the repository's self-merge rules, the side
 agent may self-merge and complete without a successor review todo by making the
@@ -211,6 +211,23 @@ goal-harness todo complete \
 `--side-agent-self-merged` requires `--evidence`. Do not use it for runtime,
 benchmark, permission, production, destructive git, publication, public
 evidence-policy, or broad coordination changes that need primary review.
+When a self-merged side-agent slice has an obvious same-scope continuation, it
+may also atomically add that successor todo and claim it back to the same side
+agent:
+
+```bash
+goal-harness todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by codex-side-bypass \
+  --side-agent-self-merged \
+  --evidence "<public-safe commit, validation, and self-merge summary>" \
+  --next-agent-todo "Continue the next small docs/productization slice." \
+  --next-claimed-by codex-side-bypass
+```
+
+Without `--side-agent-self-merged`, a side-agent successor remains a primary
+review handoff and must stay claimed by the primary agent.
 
 Use `todo update` for lower-level status changes:
 
