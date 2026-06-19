@@ -37,26 +37,116 @@ history, quota, gates, and leases.
 
 ### `goal_channel_projection_v0`
 
-This is a human-facing projection over existing Goal Harness state:
+This is a read-only, human-facing projection over existing Goal Harness state.
+It lets a frontstage render a goal as a channel without making the channel a
+new source of truth. The append-only run ledger, active state, and registry
+remain authoritative; the projection only carries compact source references and
+freshness metadata.
 
 ```json
 {
   "schema_version": "goal_channel_projection_v0",
   "goal_id": "goal-harness-meta",
   "display_name": "Goal Harness Meta",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "source_refs": {
+    "status_generated_at": "2026-06-20T00:00:00Z",
+    "active_state_updated_at": "2026-06-20T00:00:00Z",
+    "latest_run_generated_at": "2026-06-19T23:55:00Z",
+    "review_packet_generated_at": null
+  },
   "waiting_on": "codex",
   "latest_status": "terminal_bench_case_running",
   "next_action": "compact-poll the active benchmark job",
-  "user_todos": [],
-  "agent_todos": [],
-  "open_gates": [],
-  "active_leases": [],
-  "recent_events": []
+  "decision_frame": {
+    "user_action_required": false,
+    "agent_action_required": true,
+    "quiet_noop_allowed": false
+  },
+  "quota": {
+    "state": "eligible",
+    "reason": "1 compute quota",
+    "spend_policy": "spend after validated writeback"
+  },
+  "user_todos": [
+    {
+      "todo_id": "todo_user_1",
+      "title": "Review the bounded delivery packet.",
+      "status": "open",
+      "priority": "P0"
+    }
+  ],
+  "agent_todos": [
+    {
+      "todo_id": "todo_agent_1",
+      "title": "Advance the first executable safe side path.",
+      "status": "open",
+      "priority": "P1",
+      "claimed_by": "codex-side-bypass"
+    }
+  ],
+  "open_gates": [
+    {
+      "gate_id": "gate_owner_decision",
+      "kind": "operator_gate",
+      "status": "waiting_on_user",
+      "blocks": ["todo_user_1"]
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "doc",
+      "label": "latest public review packet",
+      "path": "docs/showcases/README.md"
+    }
+  ],
+  "active_leases": [
+    {
+      "todo_id": "todo_agent_1",
+      "owner_agent": "codex-side-bypass",
+      "lease_until": "2026-06-20T00:30:00Z",
+      "write_scope": ["docs/**"]
+    }
+  ],
+  "recent_events": [
+    {
+      "generated_at": "2026-06-19T23:55:00Z",
+      "classification": "validated_progress",
+      "summary": "public-safe compact progress event"
+    }
+  ],
+  "source_warnings": []
 }
 ```
 
-It should be derived from `status`, active state, run history, todos, quota,
-and review packets. It must not parse raw chats or private logs.
+The v0 source map should stay boring and inspectable:
+
+| Projection field | Source surface |
+| --- | --- |
+| `goal_id`, `display_name`, `waiting_on`, `latest_status` | `goal-harness status` project asset and registry metadata |
+| `next_action`, `user_todos`, `agent_todos`, `open_gates` | active state todo/gate sections plus `review-packet` summaries |
+| `decision_frame` | `interaction_contract` from `quota should-run` and review-packet routing |
+| `quota` | `quota should-run`, including the spend policy and capability/workspace guards when present |
+| `artifacts` | public-safe docs, compact run artifacts, review packets, or showcase assets already allowed by `goal_boundary` |
+| `active_leases` | current soft claims and future `task_lease_v0` records |
+| `recent_events` | compact run-history rows only, not raw logs or transcripts |
+| `source_warnings` | stale state, todo projection gaps, private-boundary omissions, or missing authority sources |
+
+The projection must exclude raw chat transcripts, raw benchmark task text, raw
+trajectories, credentials, production logs, private document URLs, local
+absolute paths, and write-capable commands. If a useful frontstage field would
+need one of those sources, emit a compact `source_warnings` item instead of
+copying the raw material.
+
+Frontstage consumers should treat this as an input snapshot:
+
+- refresh it from Goal Harness rather than editing it in the UI;
+- render controlled actions as links to CLI/review-packet flows, not as hidden
+  write authority;
+- show stale or missing-source warnings near the affected card;
+- keep event detail drill-downs tied to compact run artifacts; and
+- never let the channel view override `goal_boundary`, operator gates, quota,
+  required capabilities, workspace guards, or task leases.
 
 ### `agent_member_v0`
 
