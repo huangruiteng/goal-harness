@@ -528,6 +528,7 @@ def build_skillsbench_worker_handshake_preflight(
     codex_agent_launch_registered: bool = False,
     local_codex_cli_participant_ready: bool = False,
     local_acp_relay_ready: bool = False,
+    local_acp_relay_probe: dict[str, Any] | None = None,
     remote_executor_ready: bool = True,
     remote_task_data_ready: bool = True,
     compact_artifact_reducer_ready: bool = True,
@@ -621,6 +622,9 @@ def build_skillsbench_worker_handshake_preflight(
         "local_driver_contract": {
             "codex_cli_participant_materialized": local_codex_cli_participant_ready,
             "acp_relay_materialized": local_acp_relay_ready,
+            "acp_relay_probe": _skillsbench_public_acp_relay_probe(
+                local_acp_relay_probe
+            ),
             "credential_sync_allowed": False,
             "remote_codex_runtime_allowed": False,
             "remote_model_api_invocation_allowed": False,
@@ -649,6 +653,33 @@ def build_skillsbench_worker_handshake_preflight(
             "submit_allowed": False,
         },
     }
+
+
+def _skillsbench_public_acp_relay_probe(
+    probe: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(probe, dict):
+        return None
+    compact: dict[str, Any] = {}
+    for field in ("schema_version", "first_blocker", "stage", "worker_protocol"):
+        value = probe.get(field)
+        if isinstance(value, str) and value:
+            compact[field] = _skillsbench_public_safe_label(value, limit=120)
+    for field in (
+        "ready",
+        "codex_cli_invoked",
+        "raw_output_recorded",
+        "raw_event_jsonl_recorded",
+        "credential_values_recorded",
+        "host_paths_recorded",
+    ):
+        value = probe.get(field)
+        if isinstance(value, bool):
+            compact[field] = value
+    value = probe.get("request_count")
+    if isinstance(value, int) and not isinstance(value, bool):
+        compact["request_count"] = max(0, min(value, 20))
+    return compact or None
 
 
 def skillsbench_runner_error_attribution(error_text: str) -> tuple[str, str, list[str]]:

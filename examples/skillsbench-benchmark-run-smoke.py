@@ -34,6 +34,10 @@ from goal_harness.benchmark_ledger import (  # noqa: E402
     load_benchmark_run_ledger,
     update_benchmark_run_ledger,
 )
+from goal_harness.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
+    SKILLSBENCH_LOCAL_ACP_RELAY_PROBE_SCHEMA_VERSION,
+    run_skillsbench_local_acp_relay_probe,
+)
 from goal_harness.status import compact_benchmark_run  # noqa: E402
 from scripts.skillsbench_automation_loop import (  # noqa: E402
     CODEX_ACP_RUNTIME_CONTAINER_BOOTSTRAP_CMD,
@@ -207,6 +211,56 @@ def test_skillsbench_worker_handshake_preflight_exposes_acp_relay_gap() -> None:
     assert payload["benchflow_contract"]["stdio_transport_required"] is True, payload
     assert payload["local_driver_contract"]["remote_codex_runtime_allowed"] is False, payload
     assert payload["boundary"]["raw_task_text_read"] is False, payload
+    assert payload["boundary"]["credential_values_recorded"] is False, payload
+    text = json.dumps(payload, sort_keys=True)
+    for forbidden in ("/Users/", "~/.codex", "OPENAI_API_KEY", "HF_TOKEN"):
+        assert forbidden not in text, forbidden
+
+
+def test_skillsbench_local_acp_relay_probe_completes_stdio_handshake() -> None:
+    payload = run_skillsbench_local_acp_relay_probe(timeout_sec=10)
+    assert (
+        payload["schema_version"]
+        == SKILLSBENCH_LOCAL_ACP_RELAY_PROBE_SCHEMA_VERSION
+    ), payload
+    assert payload["ready"] is True, payload
+    assert payload["first_blocker"] == "skillsbench_local_acp_relay_ready", payload
+    assert payload["worker_protocol"] == "acp_stdio", payload
+    assert payload["request_count"] == 4, payload
+    assert payload["codex_cli_invoked"] is False, payload
+    assert payload["raw_output_recorded"] is False, payload
+    assert payload["raw_event_jsonl_recorded"] is False, payload
+    assert payload["credential_values_recorded"] is False, payload
+    assert payload["host_paths_recorded"] is False, payload
+    text = json.dumps(payload, sort_keys=True)
+    for forbidden in ("/Users/", "~/.codex", "OPENAI_API_KEY", "HF_TOKEN"):
+        assert forbidden not in text, forbidden
+
+
+def test_skillsbench_worker_handshake_preflight_probe_clears_relay_gap() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/skillsbench_automation_loop.py"),
+            "--local-driver-worker-handshake-preflight",
+            "--local-codex-cli-participant-ready",
+            "--local-acp-relay-probe",
+            "--task-id",
+            "ada-bathroom-plan-repair",
+        ],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["local_driver_contract"]["acp_relay_materialized"] is True, payload
+    assert (
+        payload["local_driver_contract"]["acp_relay_probe"]["ready"] is True
+    ), payload
+    assert "skillsbench_local_acp_relay_missing" not in payload["blockers"], payload
     assert payload["boundary"]["credential_values_recorded"] is False, payload
     text = json.dumps(payload, sort_keys=True)
     for forbidden in ("/Users/", "~/.codex", "OPENAI_API_KEY", "HF_TOKEN"):
@@ -3552,6 +3606,10 @@ if __name__ == "__main__":
     test_skillsbench_local_driver_a2a_contract_keeps_codex_local()
     test_skillsbench_local_driver_a2a_contract_ready_only_after_both_sides()
     test_skillsbench_local_driver_a2a_contract_distinguishes_cli_from_handshake()
+    test_skillsbench_worker_handshake_preflight_exposes_acp_relay_gap()
+    test_skillsbench_local_acp_relay_probe_completes_stdio_handshake()
+    test_skillsbench_worker_handshake_preflight_probe_clears_relay_gap()
+    test_skillsbench_worker_handshake_preflight_missing_runtime_is_compact()
     test_local_codex_participant_ping_missing_binary_is_compact()
     test_blind_loop_continuation_reprojects_round_one_constraints()
     test_product_mode_declared_done_marker_detection()
