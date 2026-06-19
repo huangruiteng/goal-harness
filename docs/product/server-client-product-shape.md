@@ -7,7 +7,8 @@ share one mental model.
 
 Goal Harness is the control plane around agent loops:
 
-- the server owns durable goal state and governed planning lanes;
+- the server owns durable goal state, event history, and governed planning
+  lanes;
 - the client acts as the user's intent proxy;
 - executor loops do bounded work and write back evidence.
 
@@ -15,10 +16,11 @@ Goal Harness is the control plane around agent loops:
 
 ### Server
 
-The Goal Harness server is the durable control-plane owner. In local-first
-mode, this may still be implemented by files plus CLI commands. In the product
-shape, however, the server is the place where long-running state becomes
-coherent:
+The Goal Harness server is the durable control-plane owner. It should be
+thought of first as a database-backed state system, not as the place where
+agent intelligence lives. In local-first mode, this may still be implemented
+by files plus CLI commands. In the product shape, however, the server is where
+long-running facts become coherent:
 
 - stable goal identity, current belief, todo state, gate state, and run
   history;
@@ -30,10 +32,63 @@ coherent:
 - scheduled planning, dreaming, and replanning queues;
 - proposal promotion from advisory lanes into normal user or agent todos.
 
+The backend layer around that store should be thin but strict: typed reads,
+idempotent writes, conflict checks, compact projections, scheduler decisions,
+and public/private boundary enforcement. It is closer to a control-plane
+database plus projection API than to a traditional application server that
+owns domain behavior.
+
 The server should stay conservative. Planning lanes may rank candidate todos,
 surface refactor warnings, or propose evidence probes, but they do not execute
 protected work, read private material, or spend delivery quota until promoted
 through the normal gate, quota, and boundary path.
+
+## Multica Reference Point
+
+Multica is a useful reference implementation for this product split, but Goal
+Harness should borrow the shape rather than the full product category.
+
+Public Multica docs describe a stack with a Next.js frontend, a Go backend
+using Chi / sqlc / WebSocket, PostgreSQL 17 with pgvector, and a local agent
+daemon that runs coding CLIs. Its CLI/daemon guide makes the daemon the local
+runtime: it detects installed agent CLIs, registers runtimes with the server,
+polls for claimed tasks, creates isolated workspaces, starts the agent CLI,
+streams results back, and sends heartbeats.
+
+The Goal Harness takeaway:
+
+- **Database first**: durable coordination facts should live in a real state
+  store or a file-backed equivalent before they are projected into UI, prompts,
+  or handoff packets.
+- **Backend as control API**: server code should enforce schemas,
+  idempotency, leases, boundaries, quota, and projection contracts.
+- **Daemon / executor outside the state store**: agent execution belongs in a
+  local daemon, Codex/App loop, terminal agent, or benchmark runner. The server
+  schedules and observes; it does not become the model runtime.
+- **Event stream plus projections**: issue/task status, comments, blockers,
+  heartbeats, claims, and results should be appendable facts that can produce
+  first-screen cards, review packets, and automation prompts.
+- **Vector memory is optional**: pgvector is useful when a product wants skill
+  or memory retrieval. Goal Harness should not require vector storage for v0
+  control-plane correctness; relational/event facts come first.
+
+So "server" in Goal Harness should usually mean:
+
+```text
+durable state store
+  + event ledger
+  + typed write API
+  + projection API
+  + scheduler / quota decisions
+```
+
+not:
+
+```text
+agent runtime
+  + hidden planner
+  + autonomous executor
+```
 
 ### Client
 
@@ -153,3 +208,10 @@ The near-term roadmap should therefore prefer:
 The product promise stays the same across these layers: make the human decision
 explicit, keep safe side work moving when it is independent, and make every
 agent loop leave enough evidence for the next loop to recover the plot.
+
+## References
+
+- Multica README architecture section:
+  <https://github.com/multica-ai/multica#architecture>
+- Multica CLI and Agent Daemon Guide:
+  <https://github.com/multica-ai/multica/blob/main/CLI_AND_DAEMON.md>
