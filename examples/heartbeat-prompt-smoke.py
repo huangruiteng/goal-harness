@@ -114,6 +114,21 @@ def main() -> int:
     except ValueError as exc:
         missing_agent_id = str(exc)
     assert missing_agent_id and "requires --agent-id" in missing_agent_id, missing_agent_id
+    registered_without_agent_id = None
+    try:
+        build_heartbeat_prompt(
+            goal_id=GOAL_ID,
+            active_state=ACTIVE_STATE,
+            compact=True,
+            registered_agents=["codex-main-control", "codex-side-bypass"],
+            primary_agent="codex-main-control",
+        )
+    except ValueError as exc:
+        registered_without_agent_id = str(exc)
+    assert registered_without_agent_id and "identity-aware heartbeat prompt required" in registered_without_agent_id, (
+        registered_without_agent_id
+    )
+    assert "--agent-id codex-main-control" in registered_without_agent_id, registered_without_agent_id
     unregistered_agent = None
     try:
         build_heartbeat_prompt(
@@ -216,6 +231,9 @@ def main() -> int:
     assert "--agent-scope 'control-plane coordination and todo claim ergonomics'" in scoped_payload["compact_prompt_command"], (
         scoped_payload
     )
+    assert scoped_payload["quota_guard_command"].endswith(
+        "quota should-run --goal-id public-heartbeat-goal --agent-id codex-side-bypass"
+    ), scoped_payload
     for phrase in (
         "Agent identity and scope",
         "role: side-agent",
@@ -227,7 +245,7 @@ def main() -> int:
         "control-plane coordination and todo claim ergonomics",
         "do not take benchmark execution todos unless reassigned",
         "goal-harness todo claim --goal-id public-heartbeat-goal --todo-id <todo_id> --claimed-by codex-side-bypass",
-        "Do not write agent scope into todo metadata",
+        "Do not write scope into todo metadata",
     ):
         assert phrase in scoped_task, phrase
     primary_task = normalized(str(primary_scoped_payload["task_body"]))
@@ -795,7 +813,7 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
-        cli_registry_default_json = subprocess.run(
+        cli_registry_default_result = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -810,25 +828,60 @@ def main() -> int:
                 "--brief",
             ],
             cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert cli_registry_default_result.returncode != 0, cli_registry_default_result.stdout
+        cli_registry_default_error = json.loads(cli_registry_default_result.stdout)
+        assert "identity-aware heartbeat prompt required" in cli_registry_default_error["error"], (
+            cli_registry_default_error
+        )
+        assert "--agent-id codex-main-control" in cli_registry_default_error["error"], (
+            cli_registry_default_error
+        )
+        assert "--agent-scope" in cli_registry_default_error["error"], cli_registry_default_error
+
+        cli_registry_default_json = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--format",
+                "json",
+                "--registry",
+                str(registry_path),
+                "heartbeat-prompt",
+                "--goal-id",
+                GOAL_ID,
+                "--brief",
+                "--agent-id",
+                "codex-main-control",
+                "--agent-scope",
+                "primary review and coordination",
+            ],
+            cwd=REPO_ROOT,
             check=True,
             capture_output=True,
             text=True,
         )
         cli_registry_default_payload = json.loads(cli_registry_default_json.stdout)
         assert cli_registry_default_payload["brief"] is True, cli_registry_default_payload
+        assert cli_registry_default_payload["agent_id"] == "codex-main-control", cli_registry_default_payload
         assert cli_registry_default_payload["active_state"] == "the registry-declared active state", (
             cli_registry_default_payload
         )
         assert cli_registry_default_payload["active_state_source"].startswith("registry:"), cli_registry_default_payload
         assert cli_registry_default_payload["resolved_active_state"] == str(state_file), cli_registry_default_payload
         assert cli_registry_default_payload["expanded_prompt_command"] == (
-            "goal-harness heartbeat-prompt --goal-id public-heartbeat-goal"
+            "goal-harness heartbeat-prompt --goal-id public-heartbeat-goal "
+            "--agent-id codex-main-control --agent-scope 'primary review and coordination'"
         ), cli_registry_default_payload
         assert "goal-harness heartbeat-prompt --compact --goal-id public-heartbeat-goal" in (
             cli_registry_default_payload["task_body"]
         ), cli_registry_default_payload
         assert "--active-state" not in cli_registry_default_payload["task_body"], cli_registry_default_payload
-        cli_registry_thin_json = subprocess.run(
+        cli_registry_thin_result = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -843,12 +896,43 @@ def main() -> int:
                 "--thin",
             ],
             cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert cli_registry_thin_result.returncode != 0, cli_registry_thin_result.stdout
+        cli_registry_thin_error = json.loads(cli_registry_thin_result.stdout)
+        assert "identity-aware heartbeat prompt required" in cli_registry_thin_error["error"], (
+            cli_registry_thin_error
+        )
+        assert "heartbeat-prompt --thin" in cli_registry_thin_error["error"], cli_registry_thin_error
+
+        cli_registry_thin_json = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--format",
+                "json",
+                "--registry",
+                str(registry_path),
+                "heartbeat-prompt",
+                "--goal-id",
+                GOAL_ID,
+                "--thin",
+                "--agent-id",
+                "codex-main-control",
+                "--agent-scope",
+                "primary review and coordination",
+            ],
+            cwd=REPO_ROOT,
             check=True,
             capture_output=True,
             text=True,
         )
         cli_registry_thin_payload = json.loads(cli_registry_thin_json.stdout)
         assert cli_registry_thin_payload["thin"] is True, cli_registry_thin_payload
+        assert cli_registry_thin_payload["agent_id"] == "codex-main-control", cli_registry_thin_payload
         assert cli_registry_thin_payload["active_state"] == "the registry-declared active state", (
             cli_registry_thin_payload
         )
@@ -1011,7 +1095,7 @@ def main() -> int:
         )
         env = dict(os.environ)
         env["PYTHONPATH"] = str(REPO_ROOT)
-        cli_global_fallback_json = subprocess.run(
+        cli_global_fallback_result = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -1027,12 +1111,46 @@ def main() -> int:
             ],
             cwd=project,
             env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert cli_global_fallback_result.returncode != 0, cli_global_fallback_result.stdout
+        cli_global_fallback_error = json.loads(cli_global_fallback_result.stdout)
+        assert "identity-aware heartbeat prompt required" in cli_global_fallback_error["error"], (
+            cli_global_fallback_error
+        )
+        assert "--agent-id codex-side-bypass" in cli_global_fallback_error["error"], (
+            cli_global_fallback_error
+        )
+
+        cli_global_fallback_json = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "goal_harness.cli",
+                "--format",
+                "json",
+                "--runtime-root",
+                str(runtime),
+                "heartbeat-prompt",
+                "--goal-id",
+                GOAL_ID,
+                "--thin",
+                "--agent-id",
+                "codex-side-bypass",
+                "--agent-scope",
+                "control-plane coordination",
+            ],
+            cwd=project,
+            env=env,
             check=True,
             capture_output=True,
             text=True,
         )
         cli_global_fallback_payload = json.loads(cli_global_fallback_json.stdout)
         assert cli_global_fallback_payload["thin"] is True, cli_global_fallback_payload
+        assert cli_global_fallback_payload["agent_id"] == "codex-side-bypass", cli_global_fallback_payload
         assert cli_global_fallback_payload["active_state_source"] == f"registry:{global_registry_path}", (
             cli_global_fallback_payload
         )

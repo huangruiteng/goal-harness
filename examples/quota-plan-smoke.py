@@ -1453,6 +1453,8 @@ def assert_goal_boundary_in_should_run() -> None:
                     "production-action",
                     "managed-mirror-sync",
                 ],
+                "registered_agents": ["codex-main-control", "codex-side-bypass"],
+                "primary_agent": "codex-main-control",
             },
             "spawn_policy": {
                 "mode": "multi_subagent",
@@ -1486,8 +1488,22 @@ def assert_goal_boundary_in_should_run() -> None:
     decision = build_quota_should_run(payload, goal_id="delivery-side-bypass")
     boundary = decision["goal_boundary"]
     markdown = render_quota_should_run_markdown(decision)
+    side_agent_decision = build_quota_should_run(
+        payload,
+        goal_id="delivery-side-bypass",
+        agent_id="codex-side-bypass",
+    )
+    side_agent_markdown = render_quota_should_run_markdown(side_agent_decision)
 
     assert decision["should_run"] is True, decision
+    assert decision["automation_prompt_upgrade"]["required"] is True, decision
+    assert decision["automation_prompt_upgrade"]["blocks_should_run"] is False, decision
+    assert "--agent-id codex-main-control" in decision["automation_prompt_upgrade"]["primary_example_command"], decision
+    assert "- automation_prompt_upgrade: required=True blocks_should_run=False" in markdown, markdown
+    assert side_agent_decision["agent_identity"]["agent_id"] == "codex-side-bypass", side_agent_decision
+    assert side_agent_decision["agent_identity"]["role"] == "side-agent", side_agent_decision
+    assert "automation_prompt_upgrade" not in side_agent_decision, side_agent_decision
+    assert "agent_identity: agent_id=codex-side-bypass role=side-agent" in side_agent_markdown, side_agent_markdown
     assert boundary["adapter"]["status"] == "connected-delivery", boundary
     assert boundary["write_scope"] == ["docs/design/**", "src/agent_harness/**", "tests/**"], boundary
     assert "production-action" in boundary["requires_parent_approval"], boundary

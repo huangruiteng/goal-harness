@@ -130,6 +130,16 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
+        "`automation_prompt_upgrade.required=true`",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
+        "does not flip `should_run`; it is a lightweight migration signal for stale installed automations",
+        label="quota doc",
+    )
+    assert_contains(
+        quota_doc,
         "ask the user or target controller the concrete gate question instead of silently skipping",
         label="quota doc",
     )
