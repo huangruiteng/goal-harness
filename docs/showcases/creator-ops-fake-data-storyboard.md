@@ -200,6 +200,9 @@ Render feedback buttons as explicit control-plane effects:
 | Do not use this source | boundary correction |
 | Publish after tone review | gate decision |
 
+The feedback classes and source-status rules are defined in
+[creator-ops-feedback-boundary-contract.md](creator-ops-feedback-boundary-contract.md).
+
 ### 7. Controlled Replan
 
 Purpose: show how feedback changes the next agent move.

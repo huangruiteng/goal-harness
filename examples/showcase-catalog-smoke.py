@@ -82,6 +82,12 @@ def main() -> int:
             storyboard_path = REPO_ROOT / storyboard
             assert storyboard_path.is_file(), case
             assert_public_safe(storyboard_path)
+            feedback_contract = case.get("feedback_contract_path")
+            if feedback_contract is not None:
+                assert isinstance(feedback_contract, str) and feedback_contract.startswith("docs/showcases/"), case
+                feedback_contract_path = REPO_ROOT / feedback_contract
+                assert feedback_contract_path.is_file(), case
+                assert_public_safe(feedback_contract_path)
         if case_id == "2026-06-19-goal-harness-self-iteration":
             assert case.get("status") == "public_evidence_case", case
             assert demo_command is None, case

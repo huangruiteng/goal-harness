@@ -52,6 +52,12 @@ def render_case(case: dict[str, Any], *, output: Path | None) -> str:
         if isinstance(storyboard_path, str) and storyboard_path
         else None
     )
+    feedback_contract_path = case.get("feedback_contract_path")
+    feedback_contract_href = (
+        repo_link(str(feedback_contract_path), output=output)
+        if isinstance(feedback_contract_path, str) and feedback_contract_path
+        else None
+    )
     status = str(case.get("status") or "")
     status_label = STATUS_LABELS.get(status, status.replace("_", " "))
     demo = (
@@ -62,6 +68,11 @@ def render_case(case: dict[str, Any], *, output: Path | None) -> str:
     storyboard = (
         f'<a class="case-link" href="{esc(storyboard_href)}">Open storyboard</a>'
         if storyboard_href
+        else ""
+    )
+    feedback_contract = (
+        f'<a class="case-link" href="{esc(feedback_contract_href)}">Open feedback contract</a>'
+        if feedback_contract_href
         else ""
     )
     story = "".join(f"<li>{esc(beat)}</li>" for beat in story_beats)
@@ -93,6 +104,7 @@ def render_case(case: dict[str, Any], *, output: Path | None) -> str:
         </div>
         {demo}
         {storyboard}
+        {feedback_contract}
         <a class="case-link" href="{esc(case_href)}">Open case page</a>
       </article>
     """

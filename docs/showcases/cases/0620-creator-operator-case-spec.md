@@ -142,6 +142,9 @@ The user can respond with structured feedback:
 The feedback changes the next plan without becoming an invisible chat-only
 memory.
 
+The public feedback and source-status rules are specified in
+[creator-ops-feedback-boundary-contract.md](../creator-ops-feedback-boundary-contract.md).
+
 ## User-Facing Value
 
 For a creator-operator, the value is not "the agent can browse and write." The
@@ -189,3 +192,5 @@ The first public-safe storyboard is available in
 It defines a synthetic fixture and frontend panel sequence for trend
 candidates, preference map, insight board, draft queue, material library,
 human feedback, and controlled replan. No executable demo is included yet.
+The companion feedback contract is
+[creator-ops-feedback-boundary-contract.md](../creator-ops-feedback-boundary-contract.md).

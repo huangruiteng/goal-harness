@@ -207,6 +207,7 @@
       "case_page": "docs/showcases/cases/0620-creator-operator-case-spec.md",
       "demo_command": null,
       "storyboard_path": "docs/showcases/creator-ops-fake-data-storyboard.md",
+      "feedback_contract_path": "docs/showcases/creator-ops-feedback-boundary-contract.md",
       "domain": "creator-operations",
       "audience": [
         "non-technical-operator",

@@ -66,6 +66,9 @@ def main() -> int:
         storyboard_path = case.get("storyboard_path")
         if isinstance(storyboard_path, str) and storyboard_path:
             assert storyboard_path.replace("docs/showcases/", "") in html or storyboard_path in html
+        feedback_contract_path = case.get("feedback_contract_path")
+        if isinstance(feedback_contract_path, str) and feedback_contract_path:
+            assert feedback_contract_path.replace("docs/showcases/", "") in html or feedback_contract_path in html
         for tag in case.get("pattern_tags", []):
             assert str(tag) in html, (case_id, tag)
         frontend = case["frontend_card"]
