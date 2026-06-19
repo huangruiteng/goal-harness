@@ -146,7 +146,7 @@
       "user_value": "The operator can let a fast-moving multi-lane agent project continue across benchmark, product, docs, and side-agent work while keeping ownership, gates, validation, and follow-up visible in one shared control plane.",
       "workload_signal": {
         "anchor_commit": "0510dda",
-        "scope": "whole_public_repository_with_side_agent_slice",
+        "scope": "whole_public_repository",
         "whole_repository": {
           "commit_count": 736,
           "files_touched": 547,
@@ -159,13 +159,6 @@
           "files_touched": 189,
           "insertions": 41958,
           "deletions": 19641
-        },
-        "side_agent_slice": {
-          "git_range": "32b466d^..0510dda",
-          "commit_count": 14,
-          "files_touched": 45,
-          "insertions": 3248,
-          "deletions": 165
         },
         "main_surfaces": [
           "CLI",
@@ -191,7 +184,7 @@
       "evidence_boundary": "Public Git evidence only; no private thread text, local active-state bodies, internal document links, screenshots, raw benchmark material, credentials, or machine-specific paths.",
       "frontend_card": {
         "visual_metaphor": "many repo lanes flowing through one control plane, with a side-agent lane branching safely beside the primary benchmark lane",
-        "primary_metric_hint": "736 public repo commits, 179 recent commits, and a 14-commit side-agent slice stayed reviewable through one control plane",
+        "primary_metric_hint": "736 public repo commits and 179 recent commits stayed reviewable through one control plane",
         "badges": [
           "self-iteration",
           "commit-backed",

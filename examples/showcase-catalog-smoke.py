@@ -81,7 +81,7 @@ def main() -> int:
             workload = case.get("workload_signal")
             assert isinstance(workload, dict), case
             assert workload.get("anchor_commit") == "0510dda", workload
-            assert workload.get("scope") == "whole_public_repository_with_side_agent_slice", workload
+            assert workload.get("scope") == "whole_public_repository", workload
             whole_repository = workload.get("whole_repository")
             assert isinstance(whole_repository, dict), workload
             assert whole_repository.get("commit_count", 0) >= 700, whole_repository
@@ -93,12 +93,6 @@ def main() -> int:
             assert recent_window.get("since") == "2026-06-18T00:00:00+08:00", recent_window
             assert recent_window.get("commit_count", 0) >= 170, recent_window
             assert recent_window.get("files_touched", 0) >= 180, recent_window
-            side_agent_slice = workload.get("side_agent_slice")
-            assert isinstance(side_agent_slice, dict), workload
-            assert side_agent_slice.get("git_range") == "32b466d^..0510dda", side_agent_slice
-            assert side_agent_slice.get("commit_count", 0) >= 14, side_agent_slice
-            assert side_agent_slice.get("files_touched", 0) >= 45, side_agent_slice
-            assert side_agent_slice.get("insertions", 0) >= 3000, side_agent_slice
             assert "side_agent_scope" in case.get("pattern_tags", []), case
             page_text = read(page)
             for phrase in (
@@ -109,7 +103,6 @@ def main() -> int:
                 "Planning and dreaming lanes",
                 "--side-agent-self-merged --evidence",
                 "The workload signal is the whole public repository through fixed anchor commit",
-                "32b466d^..0510dda",
                 "completion evidence recorded self-merge and validation outcomes",
             ):
                 assert phrase in page_text, phrase

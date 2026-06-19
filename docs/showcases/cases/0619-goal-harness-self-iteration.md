@@ -36,17 +36,6 @@ letting this documentation update change its own evidence window.
 | 2026-06-19 unique files touched | 114 |
 | 2026-06-19 cumulative insertions / deletions | 15181 / 957 |
 
-Inside that repo-scale activity, the side-agent coordination slice from
-`32b466d^..0510dda` is the productization lane that made multi-agent ownership
-visible:
-
-| Signal | Value |
-| --- | --- |
-| Commits | 14 |
-| Unique files touched | 45 |
-| Cumulative insertions / deletions | 3248 / 165 |
-| Main side-agent surfaces | CLI, todo metadata, quota/status/review projection, heartbeat prompt, docs, smokes, showcases |
-
 The repo-scale numbers show the environment Goal Harness had to manage:
 benchmark work, control-plane fixes, public docs, smoke coverage,
 dashboard/status contracts, and product positioning all moved in the same short
@@ -59,7 +48,6 @@ can inspect locally with commands such as:
 git rev-list --count HEAD
 git log --numstat --format=COMMIT:%H
 git log --reverse --oneline --since="2026-06-18T00:00:00+08:00"
-git log --reverse --oneline 32b466d^..0510dda
 ```
 
 ## Feature Chain
