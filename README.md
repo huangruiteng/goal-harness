@@ -86,7 +86,8 @@ legible enough for operators.
 ## What You Get
 
 - **Lifetime goals**: durable project intentions that outlive one chat thread,
-  run, todo, or implementation plan.
+  run, todo, or implementation plan. A lifetime goal does not grant open-ended
+  autonomy: only the next bounded transition is executable.
 - **User gates**: concrete human decisions that stay visible instead of
   disappearing into chat.
 - **Safe fallback**: audited side paths that can continue when one lane is
@@ -156,6 +157,14 @@ Then:
 Do not commit `.goal-harness/`, `.codex/goals/`, live ACTIVE_GOAL_STATE files,
 runtime registries, raw logs, credentials, or private local paths.
 ```
+
+Success looks like this:
+
+- `goal-harness doctor` passes;
+- the project has `.goal-harness/registry.json`;
+- the project has `.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md`;
+- `goal-harness status` shows who should act next;
+- local runtime state is ignored, not committed.
 
 Manual install is still available when you want to drive the setup yourself:
 
@@ -236,6 +245,16 @@ More detail lives in [Getting Started](docs/guides/getting-started.md);
 contracts live in [Status Data](docs/status-data-contract.md),
 [Quota Allocation](docs/quota-allocation.md), and
 [Public/Private Boundary](docs/public-private-boundary.md).
+
+## Boundary Snapshot
+
+Safe to publish: registry schema, runtime layout, adapter lifecycle, generic
+control-plane contracts, sanitized examples, smoke fixtures, and generic
+validation commands.
+
+Keep private: real local paths, task ids, internal document links, production
+logs, raw experiment metrics, credentials, auth material, user-specific active
+goal state, local registries, raw agent sessions, and benchmark traces.
 
 ## Product Vision
 
