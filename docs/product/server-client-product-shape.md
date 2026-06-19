@@ -1,0 +1,155 @@
+# Server-Client Product Shape
+
+This note describes a medium-term product shape for Goal Harness. It is not an
+implementation spec for a network service. The purpose is to name the product
+roles clearly enough that future CLI, dashboard, Lark, MCP, and server work can
+share one mental model.
+
+Goal Harness is the control plane around agent loops:
+
+- the server owns durable goal state and governed planning lanes;
+- the client acts as the user's intent proxy;
+- executor loops do bounded work and write back evidence.
+
+## Product Roles
+
+### Server
+
+The Goal Harness server is the durable control-plane owner. In local-first
+mode, this may still be implemented by files plus CLI commands. In the product
+shape, however, the server is the place where long-running state becomes
+coherent:
+
+- stable goal identity, current belief, todo state, gate state, and run
+  history;
+- registered agent identity, role, scope, worktree policy, and review handoff
+  defaults;
+- per-todo claim and future lease state;
+- quota, spend, idempotency, and concurrency policy;
+- compact public/private boundary summaries;
+- scheduled planning, dreaming, and replanning queues;
+- proposal promotion from advisory lanes into normal user or agent todos.
+
+The server should stay conservative. Planning lanes may rank candidate todos,
+surface refactor warnings, or propose evidence probes, but they do not execute
+protected work, read private material, or spend delivery quota until promoted
+through the normal gate, quota, and boundary path.
+
+### Client
+
+The client is the user's agent-facing proxy. It turns human intent into
+governed control-plane transitions and turns raw agent activity back into an
+operator-readable surface.
+
+The client can be a CLI, dashboard, Lark document workflow, browser UI, or host
+adapter. The important product responsibility is the same:
+
+- explain what the goal is trying to accomplish now;
+- show what happened, what is blocked, and what will happen next;
+- collect user judgment, taste, approval, rejection, deferral, or reward;
+- translate that input into gates, preferences, todo changes, or handoffs;
+- route executor loops toward the current state without embedding stale policy;
+- make side-agent ownership and review expectations visible.
+
+This is why the client is more than intent classification. It is a product
+surface for long-running work: it carries context, permission, feedback,
+visibility, and trust.
+
+### Executor Loop
+
+The executor loop is Codex, Claude Code, Cursor, a terminal agent, a benchmark
+runner, or another bounded worker. It does the work, but it should not be the
+long-term source of truth.
+
+An executor loop should:
+
+- read the current goal state and quota decision before work;
+- respect user gates, public/private boundaries, and claimed todo ownership;
+- keep one turn bounded to the selected todo or safe side path;
+- write back evidence, validation, blockers, and next-step proposals;
+- stop before credentials, destructive git, private material, production
+  actions, or unapproved publication boundaries.
+
+The executor can be powerful without being the product authority. Goal Harness
+keeps the authority in the shared state that the user, primary agent, and side
+agents can all inspect.
+
+## Interaction Loop
+
+The product loop is:
+
+```text
+user
+  -> client
+  -> Goal Harness server/state
+  -> executor loop
+  -> Goal Harness server/state
+  -> client
+  -> user
+```
+
+The client should not bypass the server by turning every user sentence directly
+into an agent instruction. The executor should not bypass the client by hiding
+important decisions in chat or local memory. Goal Harness exists so user
+judgment, agent work, evidence, and future planning remain visible in the same
+control plane.
+
+## Capability Boundaries
+
+Goal Harness should not become:
+
+- an agent runtime that owns model execution, tools, billing, or permissions;
+- a generic workflow engine where every step is a hidden automation edge;
+- a raw transcript store for private chat, logs, benchmark traces, or local
+  evidence;
+- a crawler, publisher, or production-action authority;
+- a replacement for project-specific adapters, evaluators, or domain tools.
+
+It should provide the governed projection around those systems: goal state,
+gates, todos, claims or leases, quota, evidence summaries, run history,
+feedback, planning proposals, and handoff packets.
+
+## First Contract Slices
+
+The first product slices should remain small and compatible with CLI-only mode.
+
+1. **`goal_channel_projection_v0`**: a read-only first-screen projection for
+   goal, gate, todos, current blocker, latest evidence, quota, and next action.
+2. **`agent_profile_v0`**: registered agent identity with role, primary/side
+   relationship, default scope, worktree policy, and review handoff policy.
+3. **`task_lease_v0`**: per-`(goal_id, todo_id)` ownership with TTL,
+   idempotency key, write scope, renewal, transfer, and conflict behavior.
+4. **`planning_queue_v0`**: advisory planning, dreaming, and replanning
+   proposals that remain non-executable until promoted by controller or user
+   decision plus normal quota and boundary checks.
+5. **`feedback_signal_v0`**: user feedback captured as one of four control
+   effects: gate decision, preference hint, todo mutation, or product
+   improvement note. Raw private chat should not become public evidence.
+6. **`handoff_packet_v0`**: compact executor input that carries the selected
+   todo, stop condition, validation expectation, boundary notes, and writeback
+   target without copying the whole project history.
+
+Each slice should have a CLI fallback, a compact status projection, and one
+public/private boundary check before it becomes part of a richer UI.
+
+## Roadmap Implication
+
+This product shape changes the center of gravity from "a CLI around a Markdown
+goal file" to "a lifetime-goal control plane with CLI as the first client."
+
+That does not make the CLI obsolete. The CLI is the compatibility baseline and
+the safety fallback. It also keeps contracts honest: if a future server or
+dashboard cannot fall back to equivalent CLI reads and writes, it is probably
+creating a second source of truth.
+
+The near-term roadmap should therefore prefer:
+
+- contract-first status and write APIs over UI-only state;
+- local concurrency correctness before broad server scheduling;
+- side-agent scope and worktree policy before autonomous multi-agent merging;
+- planning proposals before background execution;
+- user feedback modeling before personalization claims.
+
+The product promise stays the same across these layers: make the human decision
+explicit, keep safe side work moving when it is independent, and make every
+agent loop leave enough evidence for the next loop to recover the plot.
