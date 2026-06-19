@@ -23,6 +23,8 @@ The first static visual asset is the public-safe
 [control-plane board](../assets/control-plane-board.svg), which shows a user
 gate staying visible while a scoped side path continues through claimed todo,
 quota guard, run history, and evidence writeback.
+The first static frontstage prototype is generated from the catalog with
+`python3 examples/showcase-frontstage-prototype.py --output /tmp/goal-harness-showcases.html`.
 
 ## Current Cases
 

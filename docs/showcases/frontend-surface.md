@@ -131,7 +131,10 @@ The first implementation should be static and catalog-driven:
 3. Render the comparison block, case grid, and detail story from catalog fields.
 4. Link back to Markdown case pages.
 5. Use `docs/assets/control-plane-board.svg` as the first shared visual asset.
-6. Run `python3 examples/showcase-catalog-smoke.py` and
+6. Use `examples/showcase-frontstage-prototype.py` as the no-build static
+   prototype until a real frontend app exists.
+7. Run `python3 examples/showcase-catalog-smoke.py`,
+   `python3 examples/showcase-frontstage-prototype-smoke.py`, and
    `goal-harness check --scan-path docs/showcases --scan-path docs/assets`.
 
 This keeps the marketing surface honest: if a case is not in the catalog, it
