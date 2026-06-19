@@ -810,7 +810,7 @@ material belongs to another connected project.
 
 - multiple agents, heartbeats, child workers, or frontstage channel views may
   act on the same todo;
-- the selected work has a bounded `task_id`, owner, TTL, write scope, and
+- the selected work has a bounded `todo_id`, owner, TTL, write scope, and
   idempotency key;
 - the system needs to prevent duplicate work, duplicate spend, or overlapping
   writes without moving truth into chat.
@@ -818,9 +818,13 @@ material belongs to another connected project.
 **Expected behavior**
 
 A task claim should become `task_lease_v0`: an explicit, expiring claim over
-one bounded work item. Status and future channel projections may render the
-claim, but the lease remains a projection over the Goal Harness ledger and
-does not override `goal_boundary`, user gates, quota, or write-scope checks.
+one bounded todo. The pending key is `(goal_id, todo_id)`: `goal_id` names the
+control-plane lane, while `todo_id` names the work item inside it. Different
+todos inside the same goal do not conflict merely because they share a goal;
+only competing pending leases for the same `todo_id` or overlapping write
+scopes should conflict. Status and future channel projections may render the
+claim, but the lease remains a projection over the Goal Harness ledger and does
+not override `goal_boundary`, user gates, quota, or write-scope checks.
 
 When a lease is active and the selected action is inside its scope, the owner
 may proceed. When a competing worker sees an active overlapping lease, it must

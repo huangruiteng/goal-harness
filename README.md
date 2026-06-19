@@ -485,6 +485,29 @@ Generate a guarded Codex App heartbeat body:
 goal-harness heartbeat-prompt --thin --goal-id your-project-goal
 ```
 
+For shared-control-plane agents, pass identity and scope in the automation
+prompt, then let the agent soft-claim matching todos with a registered
+`--claimed-by` id:
+
+```bash
+goal-harness configure-goal --goal-id your-project-goal \
+  --registered-agent codex-main-control \
+  --registered-agent codex-side-bypass \
+  --primary-agent codex-main-control \
+  --execute
+
+goal-harness heartbeat-prompt --compact --goal-id your-project-goal \
+  --agent-id codex-side-bypass \
+  --agent-scope "control-plane coordination"
+```
+
+Old goal registries without `coordination.registered_agents` fail closed when a
+scoped heartbeat or todo claim names an agent; register the agent identity first
+instead of letting workers invent claim ids. Set exactly one
+`coordination.primary_agent`: that primary agent owns final review,
+verification, merge, and publication, while side agents are prompted to work in
+separate worktrees and hand finished work back through a primary review todo.
+
 See [docs/quota-allocation.md](docs/quota-allocation.md) and
 [docs/heartbeat-automation-prompt.md](docs/heartbeat-automation-prompt.md).
 
@@ -630,7 +653,7 @@ refresh-state           append a state-only run
 read-only-map           map a project without mutating files
 operator-gate           record a human gate decision
 reward                  append run-bound human reward
-todo                    add, complete, update, supersede, or archive todos
+todo                    add, claim, complete, update, supersede, or archive todos
 quota                   inspect or account for automatic agent turns
 heartbeat-prompt        generate Codex App heartbeat task bodies
 upgrade-plan            plan local default-upgrade heartbeat propagation

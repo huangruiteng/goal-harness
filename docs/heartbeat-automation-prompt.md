@@ -86,6 +86,52 @@ The expanded prompt remains the audit source and compatibility default. The
 compact prompt is the daily driver: it reduces per-tick context while preserving
 the same commands and decision points.
 
+When multiple agents share the same project control plane, first register the
+public-safe agent ids on the goal, then give each automation an explicit
+identity and natural-language scope:
+
+```bash
+goal-harness configure-goal \
+  --goal-id <GOAL_ID> \
+  --registered-agent codex-main-control \
+  --registered-agent codex-side-bypass \
+  --primary-agent codex-main-control \
+  --execute
+```
+
+```bash
+goal-harness heartbeat-prompt \
+  --goal-id <GOAL_ID> \
+  --compact \
+  --agent-id codex-main-control \
+  --agent-scope "benchmark readiness, benchmark execution, and benchmark writeback"
+```
+
+For a side/bypass agent, use a different id and a disjoint scope:
+
+```bash
+goal-harness heartbeat-prompt \
+  --goal-id <GOAL_ID> \
+  --compact \
+  --agent-id codex-side-bypass \
+  --agent-scope "control-plane coordination and todo claim ergonomics" \
+  --agent-scope "do not take benchmark execution todos unless reassigned"
+```
+
+The generated body tells the agent to claim only in-scope todos with
+`goal-harness todo claim --claimed-by <agent-id>`. `--agent-scope` requires
+`--agent-id`, and the CLI accepts that agent id only when it is registered for
+the goal. Scope stays in the automation prompt or handoff; todo metadata records
+only the soft `claimed_by` owner. The prompt also classifies the agent as
+`primary-agent` or `side-agent` from `coordination.primary_agent`. Side-agent
+prompts require repository edits to happen in an independent git worktree/branch
+and instruct the worker to finish by creating a primary review todo with
+`--next-agent-todo` and `--next-claimed-by <primary-agent>`.
+For an old goal registry that does not yet define
+`coordination.registered_agents`, or a scoped registry that has agents but no
+`coordination.primary_agent`, scoped prompt generation fails closed and prints
+the configuration command needed to register the agent identity and primary.
+
 If even the compact body is too heavy for an installed automation, generate the
 brief body:
 

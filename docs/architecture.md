@@ -107,6 +107,12 @@ The CLI remains the compatibility baseline. A future local server should be an
 optional control-plane coordinator over the same registry, active state, run
 history, quota, todo, and boundary contracts, not a replacement state machine.
 
+In the current control plane, a **goal** is the stable `goal_id` boundary: one
+registry entry, active-state file, quota lane, run-history stream, and status
+projection. A **todo** is a structured active-state checkbox inside that goal,
+addressed by `todo_id` and projected as an agent or user work item. There is no
+separate issue object in the Goal Harness runtime model.
+
 The server path should land in layers:
 
 1. **Writer correctness before a server**: make existing CLI writers safe under
@@ -115,6 +121,10 @@ The server path should land in layers:
    append paths should fail closed on stale revision or overlapping write scope.
 2. **Lease projection**: add `task_lease_v0` records for claimed todos,
    including owner, TTL, write scope, idempotency key, and conflict policy.
+   The pending/lease key should be per todo: `(goal_id, todo_id)` is the
+   contention unit, not the whole goal or project. Different todos under the
+   same goal may proceed in parallel when their write scopes and gates allow
+   it; competing claims on the same todo fail closed or renew.
    Status and quota should expose active leases so Codex/App/CLI loops can
    avoid duplicate work without reading chat history.
 3. **Loopback coordinator**: extend the existing local status server into a
@@ -148,6 +158,18 @@ Acceptance criteria for the first server-backed milestone:
   source of project truth;
 - all compact server responses pass the public/private boundary scan;
 - tests cover one concurrent writer conflict and one daemon-down fallback.
+
+Before the server-backed lease exists, v0.1 keeps a lighter shared-control-plane
+contract: todo metadata may include `claimed_by`, written by the todo CLI under
+the active-state file lock. That field is a soft owner for visibility only, and
+the CLI accepts it only when the id is registered in
+`coordination.registered_agents`. Each shared goal should also declare one
+`coordination.primary_agent`: the primary owns review, verification, merge, and
+publication, while side agents keep repository edits in independent git
+worktrees/branches and hand off via primary review todos. Agent scope remains
+in heartbeat automation prompts or sub-agent handoffs; a future server lease
+should be per todo and add TTL, idempotency key, stale-claim detection, overlap
+warnings, and compare-and-swap style conflict responses.
 
 ## State Interaction Model
 

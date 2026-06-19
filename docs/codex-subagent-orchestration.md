@@ -93,6 +93,40 @@ Only after that shared-control-plane prefix should the task brief include:
 - validation command if applicable,
 - merge rule: what the main controller may accept, ignore, or retry.
 
+For the lightweight shared-control-plane model, the brief or automation prompt
+is also where agent scope lives. Do not stamp a scope field onto every todo.
+Instead, register the agent id, give the child that `agent_id` and scope, then
+have it claim only matching open todos:
+
+```bash
+goal-harness configure-goal \
+  --goal-id <goal-id> \
+  --registered-agent codex-main-control \
+  --registered-agent codex-side-bypass \
+  --primary-agent codex-main-control \
+  --execute
+
+goal-harness todo claim \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by codex-side-bypass
+```
+
+The claim is soft ownership for visibility and conflict avoidance. It does not
+replace disjoint write scopes, parent approval, quota, or user gates. The CLI
+rejects unregistered claim ids so child agents learn the shared-control-plane
+identity before writing. If the first executable todo is already claimed by
+another agent or is outside the child's scope, the child should pick another
+in-scope unclaimed todo or report that no in-scope work is available.
+The controller goal should declare exactly one primary agent. Side agents use
+independent git worktrees/branches for repository edits, do not merge directly,
+and finish by adding a primary-agent review todo so the main controller can
+review, verify, and merge.
+When this becomes a server-backed pending/lease path, the contention unit should
+stay per todo: one pending lease for `(goal_id, todo_id)`, not a broad lock on
+the whole goal. In this context, `goal_id` is the shared control-plane lane and
+`todo_id` is the work item being claimed.
+
 The main controller owns the shared-control-plane handoff and the final
 writeback. A child may produce evidence, a validation result, or a blocker, but
 the controller decides whether to accept it and whether quota can be spent.
@@ -138,6 +172,8 @@ Controller/sub-agent fields should stay minimal in v0.1:
     "max_agent_turns": 12
   },
   "coordination": {
+    "registered_agents": ["codex-main-control", "codex-docs-map", "codex-validation-map", "codex-implementation-slice"],
+    "primary_agent": "codex-main-control",
     "write_scope": ["docs/**", "examples/**"],
     "claim_ttl_minutes": 30,
     "requires_parent_approval": ["write", "publish", "production-action"]
@@ -152,6 +188,12 @@ and the coordination/write-scope rules. Status and quota derive the same
 compact `orchestration` projection from this policy so agents do not need to
 infer sub-agent permissions from chat history.
 
+The controller goal should declare exactly one `coordination.primary_agent`.
+That main agent owns final review, verification, merge, publication, and
+reassignment. Child or bypass agents are side agents: they should use independent
+git worktrees/branches for repository edits, should not merge directly into the
+primary checkout, and should finish by adding a primary-agent review todo.
+
 For a child goal:
 
 ```json
@@ -159,6 +201,8 @@ For a child goal:
   "role": "subagent",
   "parent_goal_id": "agent-harness-main-control",
   "coordination": {
+    "registered_agents": ["codex-docs-map"],
+    "primary_agent": "codex-docs-map",
     "write_scope": [],
     "requires_parent_approval": ["write"]
   }

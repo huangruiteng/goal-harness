@@ -74,6 +74,61 @@ inserts the metadata comment instead of creating a duplicate checkbox.
 lanes for owner input and concrete blockers; quota/executor code must not treat
 them as advancement work.
 
+Terminology: a `goal_id` is the Goal Harness control-plane boundary: registry
+entry, active-state file, quota lane, status projection, and run-history stream.
+A `todo_id` is a structured work item inside that goal. Goal Harness does not
+currently model issues as a separate runtime object.
+
+Multiple agents may share the same project control plane. A todo can carry a
+soft owner with `claimed_by`, but the todo itself should not carry the agent's
+scope. Scope belongs in the automation prompt or sub-agent handoff; the agent
+uses that scope to decide which open todo it may claim. Each goal should have
+one `coordination.primary_agent`: the primary agent owns final review,
+verification, merge, publication, and reassignment decisions. All other
+registered agents are side agents. Side agents should do repository edits only
+in an independent git worktree/branch, never in the primary checkout, and
+should hand finished work back through a primary-agent review todo instead of
+merging directly. First register the agent ids and primary agent in the goal
+registry:
+
+```bash
+goal-harness configure-goal \
+  --goal-id <goal-id> \
+  --registered-agent codex-main-control \
+  --registered-agent codex-side-bypass \
+  --primary-agent codex-main-control \
+  --execute
+```
+
+Then claim through the dedicated command. `--claimed-by` is required for
+`todo claim` and must match one of the registered agent ids:
+
+```bash
+goal-harness todo claim \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by codex-main-control
+```
+
+Old projects that do not yet have `coordination.registered_agents` are
+intentionally blocked when an agent tries to claim work. The CLI error includes
+the `configure-goal --registered-agent <agent-id> --execute` command so the
+agent or controller can register its identity before writing ownership metadata.
+
+Use `--clear-claim` when the controller reassigns a todo or an agent releases
+work. `claimed_by` is visibility, not a runtime lease: it does not bypass quota,
+user gates, write-scope checks, or validation. `todo add/update/complete` also
+accept `--claimed-by`, but the value is checked against the same registered
+agent list. Claimed completion also requires `coordination.primary_agent`, so
+old projects fail closed before side-agent handoff semantics become ambiguous.
+`todo claim` is non-destructive: if another registered agent already owns the
+todo, it fails closed instead of silently replacing `claimed_by`. Transfer
+ownership with an explicit `todo update --clear-claim` or
+`todo update --claimed-by <agent-id>` decision. The CLI writes claim changes and
+completion handoffs under the same active-state file lock as todo
+add/update/complete, so concurrent CLI writers re-read the latest state before
+editing instead of overwriting a stale snapshot.
+
 The command resolves the active state from the project registry, creates the
 canonical section when needed, updates `updated_at`, and avoids duplicate exact
 todo text. If a dashboard or controller needs the new checklist immediately,
@@ -120,6 +175,26 @@ goal-harness todo complete \
   --next-action-kind run_eval
 ```
 
+If an agent takes ownership at completion time, include the claim in the same
+locked lifecycle write:
+
+```bash
+goal-harness todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by codex-side-bypass \
+  --evidence "<public-safe artifact or result>" \
+  --next-agent-todo "Primary agent review, verify, and merge this side-agent work." \
+  --next-claimed-by codex-main-control
+```
+
+If `--claimed-by` names a side agent, `todo complete` requires
+`--next-agent-todo` and defaults that successor todo's `claimed_by` to the
+goal's `primary_agent`. Passing `--next-claimed-by` is allowed only when it
+matches the primary agent. This keeps the side-agent handoff visible to the
+shared control plane and leaves merge/publication authority with the single
+main agent.
+
 Use `todo update` for lower-level status changes:
 
 ```bash
@@ -155,18 +230,20 @@ the structured projection emitted by status/quota when available. Todo summaries
 carry `schema_version=todo_summary_v0`; individual items carry
 `schema_version=todo_item_v0`, `todo_id`, `role`, `status`, `priority`,
 `title`, `archive_state`, `source_section`, `index`, `text`, `task_class`, and
-optional `action_kind`. The `todo_id`
-is first-class when written by the CLI. Legacy Markdown without metadata still
-gets a parser-derived compatibility id from local section/index/text, and the
-first lifecycle command will materialize that id back into metadata. Future
-timestamp, dependency, and evidence-link fields should extend this item shape
+optional `action_kind` and `claimed_by`. The `todo_id`
+is first-class when written by the CLI. `claimed_by` values are normalized
+public-safe agent ids and should correspond to
+`coordination.registered_agents`. Legacy Markdown without metadata still gets a
+parser-derived compatibility id from local section/index/text, and the first
+lifecycle command will materialize that id back into metadata. Future lease
+timestamps, dependency, and evidence-link fields should extend this item shape
 instead of adding another todo format.
 In Markdown, lane metadata is stored as an indented HTML comment directly under
 the checkbox, for example:
 
 ```markdown
 - [ ] Run one validated benchmark case and write back result or blocker.
-  <!-- goal-harness:todo todo_id=todo_8e280be49441 status=open task_class=advancement_task action_kind=run_eval -->
+  <!-- goal-harness:todo todo_id=todo_8e280be49441 status=open task_class=advancement_task action_kind=run_eval claimed_by=codex-main-control -->
 ```
 
 Plain checkbox text remains a compatibility fallback. New automation-facing
@@ -196,10 +273,14 @@ Two dependency-free public fixtures cover this contract:
 python3 examples/todo-cli-smoke.py
 python3 examples/todo-lifecycle-cli-smoke.py
 python3 examples/project-agent-adoption-smoke.py
+python3 examples/todo-concurrent-write-lock-smoke.py
 ```
 
 The first verifies the todo CLI writes canonical active-state sections. The
-second verifies lifecycle transitions by `todo_id`, including complete,
-supersede, idempotent next-todo insertion, and non-executable blocker lanes.
+second verifies lifecycle transitions by `todo_id`, including claimed
+completion, supersede, idempotent next-todo insertion, and non-executable
+blocker lanes.
 The third verifies an executor-facing path from quota guard hint, to user todo
 write, to status projection, to approved project-agent handoff.
+The fourth verifies concurrent todo writers wait on the active-state lock and
+preserve both claim metadata and unrelated updates.

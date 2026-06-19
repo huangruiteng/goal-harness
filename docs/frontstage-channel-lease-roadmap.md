@@ -24,8 +24,8 @@ truth into chat history:
 - An **agent can project as a workspace member**: controller, executor,
   reviewer, monitor, critic, or dreaming/planning proposer, each with scope and
   last action.
-- A **task claim should be a lease**: explicit ownership of a bounded work item
-  with TTL, write scope, idempotency key, and conflict policy.
+- A **task claim should be a per-todo lease**: explicit ownership of one
+  `todo_id` with TTL, write scope, idempotency key, and conflict policy.
 - A **chat or channel thread is a projection**: useful for human collaboration,
   but never the only durable authority.
 
@@ -82,12 +82,22 @@ leases, and active-state todos.
 
 ### `task_lease_v0`
 
-This is the concurrency contract that should eventually back task claim:
+This is the concurrency contract that should eventually back task claim. The
+pending key is per todo: `(goal_id, todo_id)`. Do not serialize an entire
+goal just because one todo is claimed; independent todos under the same goal
+should remain independently claimable when gates and write scopes allow it.
+Goal Harness does not have a separate issue object in this runtime model:
+`goal_id` names the control-plane boundary, and `todo_id` names the work item
+inside that boundary.
+The v0.1 control plane still keeps role assignment simple: one
+`coordination.primary_agent` owns review/merge/publication for the goal, and
+side agents claim scoped todos, work in separate git worktrees, and add a
+primary-agent review todo when finishing.
 
 ```json
 {
   "schema_version": "task_lease_v0",
-  "task_id": "todo_123",
+  "todo_id": "todo_123",
   "owner_agent": "codex-local-controller",
   "goal_id": "goal-harness-meta",
   "lease_until": "2026-06-15T12:30:00Z",
@@ -100,6 +110,10 @@ This is the concurrency contract that should eventually back task claim:
 
 The first implementation can be local and file-backed. A later server can own
 the same schema with stronger locking, lease renewal, and stale-claim cleanup.
+Conflicts should be detected by `(goal_id, todo_id)` plus overlapping
+write-scope checks: another agent may claim a different todo in the same goal,
+but a second pending claim on the same todo must fail closed, renew, or
+explicitly transfer ownership.
 
 ## Priority
 
@@ -107,7 +121,8 @@ P1:
 
 - Design and test `task_lease_v0` first. It prevents lost writes and concurrent
   controller confusion, and it naturally extends the existing todo locking
-  lane.
+  lane. The durable invariant is per-todo pending: one active pending lease per
+  `(goal_id, todo_id)`, not one active lease per goal or project.
 - Add a compact channel projection contract to `status` or a new read-only CLI
   command so UI can show a goal as a channel without becoming truth.
 

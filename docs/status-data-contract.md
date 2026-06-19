@@ -791,12 +791,18 @@ Item fields:
   structured item fields when present: `todo_id`, `role`, `status`,
   `priority`, `title`, `archive_state`, `source_section`, `index`, `text`,
   `task_class`, `action_kind`, `note`, `evidence`, `reason`, `completed_at`,
-  `updated_at`, and `superseded_by`. `todo_id` is first-class when written by
-  the todo CLI; legacy Markdown without metadata still gets a parser-derived
+  `updated_at`, `superseded_by`, and `claimed_by`. Todo summaries may also
+  expose `claimed_open_count` and `unclaimed_open_count` so dashboards and
+  heartbeat dispatchers can show soft ownership without inferring a lock.
+  `claimed_by` is a visibility hint written through the todo CLI, not a lease
+  or permission grant; claim ids must be registered on the goal's coordination
+  contract, and agents must still obey quota, gates, write-scope checks, and
+  their automation/handoff scope. `todo_id` is first-class when written by the
+  todo CLI; legacy Markdown without metadata still gets a parser-derived
   compatibility id from the current item text and section, and the first
   lifecycle command materializes that id back into metadata. Optional future
-  fields such as `created_at`, dependencies, or evidence links should extend
-  this item shape rather than inventing another todo surface.
+  fields such as `created_at`, lease TTLs, dependencies, or evidence links
+  should extend this item shape rather than inventing another todo surface.
 - `dependency_blockers`: optional compact summary of unfinished user todos from
   other current attention-queue goals. This lets dashboards and heartbeat
   dispatchers show sibling/project dependency gates separately from the current
