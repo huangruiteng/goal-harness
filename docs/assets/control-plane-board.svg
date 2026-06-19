@@ -18,7 +18,7 @@
 
   <rect width="1200" height="620" fill="#fbfbf8" />
   <text x="60" y="58" class="label" style="font-size:28px">Gate-aware human-in-the-loop control plane</text>
-  <text x="60" y="88" class="body">The required human decision is explicit; safe side work can still continue with evidence.</text>
+  <text x="60" y="92" class="body">The required human decision is explicit; safe side work can still continue with evidence.</text>
 
   <rect x="60" y="130" width="255" height="128" fill="#fff7ed" stroke="#f59e0b" class="box" />
   <text x="84" y="166" class="label">User gate</text>
@@ -38,10 +38,10 @@
   <text x="416" y="343" class="body">latest validation / blocker</text>
   <text x="416" y="370" class="body">public/private boundary</text>
 
-  <rect x="790" y="108" width="292" height="110" fill="#eef2ff" stroke="#6366f1" class="box" />
-  <text x="814" y="144" class="label">Quota guard</text>
-  <text x="814" y="173" class="body">should-run before work</text>
-  <text x="814" y="198" class="small">spend after validated writeback</text>
+  <rect x="790" y="132" width="292" height="110" fill="#eef2ff" stroke="#6366f1" class="box" />
+  <text x="814" y="168" class="label">Quota guard</text>
+  <text x="814" y="197" class="body">should-run before work</text>
+  <text x="814" y="222" class="small">spend after validated writeback</text>
 
   <rect x="790" y="266" width="292" height="110" fill="#ecfdf5" stroke="#10b981" class="box" />
   <text x="814" y="302" class="label">Claimed todo</text>
@@ -53,24 +53,24 @@
   <text x="814" y="489" class="body">evidence writeback</text>
   <text x="814" y="514" class="small">blocker, validation, outcome</text>
 
-  <rect x="392" y="464" width="320" height="96" fill="#f0fdf4" stroke="#22c55e" class="box" />
+  <rect x="392" y="464" width="320" height="116" fill="#f0fdf4" stroke="#22c55e" class="box" />
   <text x="416" y="500" class="label">Safe side path</text>
-  <text x="416" y="529" class="body">continues only when independent of the gate</text>
+  <text x="416" y="529" class="body">continues only when independent</text>
+  <text x="416" y="556" class="body">of the blocked gate</text>
 
   <path d="M315 194 C342 194 356 220 390 238" class="line" />
   <path d="M315 406 C350 406 358 372 390 354" class="line" />
-  <path d="M710 245 C748 220 752 180 790 164" class="line" />
+  <path d="M710 252 C748 238 752 194 790 188" class="line" />
   <path d="M710 318 C746 318 754 318 790 318" class="line" />
   <path d="M710 378 C750 414 752 474 790 482" class="line" />
   <path d="M552 407 L552 464" class="softline" />
-  <path d="M650 512 C714 512 735 494 790 486" class="line" />
+  <path d="M650 568 C718 568 742 514 790 500" class="line" />
 
   <text x="345" y="176" class="tiny">gate stays visible</text>
-  <text x="724" y="248" class="tiny">bounded turn</text>
-  <text x="686" y="536" class="tiny">validated writeback</text>
+  <text x="724" y="258" class="tiny">bounded turn</text>
 
   <rect x="60" y="522" width="260" height="46" fill="#ffffff" stroke="#cbd5e1" rx="12" />
   <text x="82" y="551" class="small">No bypass: gated route still waits</text>
 
-  <rect x="60" y="86" width="1070" height="1" fill="#e5e7eb" />
+  <rect x="60" y="114" width="1070" height="1" fill="#e5e7eb" />
 </svg>
