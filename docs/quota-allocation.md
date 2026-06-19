@@ -441,6 +441,13 @@ For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
 `goal-harness todo add --role user` instead of hiding it in `Next Action`,
 review docs, or chat.
+For goals with `coordination.registered_agents`, `quota should-run` accepts an
+optional `--agent-id <registered-agent>`. Identity-aware heartbeat prompts pass
+that flag through their quota guard. If a registered goal is checked without an
+agent id, the payload includes `automation_prompt_upgrade.required=true` and a
+recommended `heartbeat-prompt --agent-id ... --agent-scope ...` command. This
+does not flip `should_run`; it is a lightweight migration signal for stale
+installed automations.
 When the status payload has same-goal checkpointed decisions that are stale or
 have newer sampled events, `quota should-run` includes
 `decision_freshness_warning`. This warning does not make an eligible goal skip;

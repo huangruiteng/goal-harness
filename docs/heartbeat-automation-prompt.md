@@ -127,6 +127,10 @@ only the soft `claimed_by` owner. The prompt also classifies the agent as
 prompts require repository edits to happen in an independent git worktree/branch
 and instruct the worker to finish by creating a primary review todo with
 `--next-agent-todo` and `--next-claimed-by <primary-agent>`.
+Once a goal has `coordination.registered_agents`, prompt generation without
+`--agent-id` fails closed. That is the lightweight migration signal for stale
+Codex App automations: the next refresh attempt surfaces a concrete
+identity/scope upgrade command instead of returning a legacy unscoped prompt.
 For an old goal registry that does not yet define
 `coordination.registered_agents`, or a scoped registry that has agents but no
 `coordination.primary_agent`, scoped prompt generation fails closed and prints

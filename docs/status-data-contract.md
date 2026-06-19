@@ -908,6 +908,13 @@ actions. When the payload also includes `gate_prompt`, `operator_question`,
 concrete gate in the visible thread with `NOTIFY` unless the same unresolved
 gate was already asked recently; the guard should not collapse a user decision
 into a silent skip.
+When a goal has `coordination.registered_agents`, identity-aware heartbeat
+prompts should call `quota should-run --agent-id <registered-agent>`. If an
+old installed prompt omits that flag, the quota payload should include
+`automation_prompt_upgrade.required=true`, `blocks_should_run=false`, and
+example `heartbeat-prompt --agent-id ... --agent-scope ...` commands. Executors
+should treat this as a prompt-upgrade action, not as delivery permission or a
+new operator gate.
 When the payload includes `notify_user_on_open_todo=true`, the open
 `user_todo_summary` is the current blocker-push surface even if there is no
 operator gate. This is intended for `focus_wait`, `waiting`,

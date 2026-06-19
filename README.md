@@ -501,7 +501,10 @@ goal-harness heartbeat-prompt --compact --goal-id your-project-goal \
   --agent-scope "control-plane coordination"
 ```
 
-Old goal registries without `coordination.registered_agents` fail closed when a
+Once `coordination.registered_agents` is set, `heartbeat-prompt` fails closed
+when called without `--agent-id`; this makes stale Codex App automations surface
+an upgrade error instead of silently running without identity or scope. Old goal
+registries without `coordination.registered_agents` also fail closed when a
 scoped heartbeat or todo claim names an agent; register the agent identity first
 instead of letting workers invent claim ids. Set exactly one
 `coordination.primary_agent`: that primary agent owns final review,

@@ -123,6 +123,16 @@ eligible:
 goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <STABLE_GOAL_ID>
 ```
 
+For a registered multi-agent goal, include this agent's identity:
+
+```bash
+goal-harness --format json --registry "$HOME/.codex/goal-harness/registry.global.json" quota should-run --goal-id <STABLE_GOAL_ID> --agent-id <REGISTERED_AGENT_ID>
+```
+
+If a registered goal returns `automation_prompt_upgrade.required=true`, treat
+the installed automation prompt as stale and regenerate it with
+`heartbeat-prompt --agent-id ... --agent-scope ...`.
+
 If the response has `state=operator_gate`, treat it as a user/controller
 interaction, not a silent skip. Read `gate_prompt`, `operator_question`,
 `recommended_action`, `next_handoff_condition`, `missing_gates`, and
@@ -267,6 +277,18 @@ If the installed automation body still needs to be smaller, use the brief body:
 ```bash
 goal-harness heartbeat-prompt --brief --goal-id <STABLE_GOAL_ID>
 ```
+
+For a shared-control-plane goal with `coordination.registered_agents`, always
+include the registered identity and scope in the installed automation prompt:
+
+```bash
+goal-harness heartbeat-prompt --thin --goal-id <STABLE_GOAL_ID> \
+  --agent-id <REGISTERED_AGENT_ID> \
+  --agent-scope "<THIS_AGENT_SCOPE>"
+```
+
+Once agents are registered, an unscoped `heartbeat-prompt` call fails closed so
+stale automations surface an upgrade error instead of running without identity.
 
 For connected goals, omit `--active-state`; the CLI resolves the active state
 from the registry goal `state_file`, which keeps installed automations from
