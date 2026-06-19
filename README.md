@@ -6,8 +6,9 @@ Goal Harness is a local control plane for AI agent projects: keep goals, gates,
 todos, run history, quota, side-agent ownership, and human decisions visible
 across many turns.
 
-[Quick Start](#quick-start) · [Showcases](docs/showcases/README.md) ·
-[Architecture](docs/architecture.md) · [Dashboard](#dashboard)
+[Quick Start](#quick-start) · [Product Vision](docs/product/vision.md) ·
+[Showcases](docs/showcases/README.md) · [Architecture](docs/architecture.md) ·
+[Dashboard](#dashboard)
 
 > Long-running agent work should be recoverable, reviewable, handoffable, and
 > safe by default.
@@ -96,6 +97,25 @@ corrections legible for future humans and agents. See
 [Architecture](docs/architecture.md#lifetime-goal-invariant) for the design
 invariant.
 
+## Product Vision
+
+Goal Harness starts with AI coding, research, and benchmark loops because those
+workflows make state drift easy to see. The broader product direction is a
+lifetime-goal control plane for any long-running agent work where humans need
+clear progress, gates, feedback, and recovery without reading raw logs.
+
+One medium-term productization case is a creator-operator workflow: a
+non-engineering user asks an agent to track social-platform trends, map them to
+personal creative preferences, extract insights, draft content, and maintain a
+material library. The bottleneck is not only model capability. The product has
+to translate agent work into a friendly first screen: what happened, what is
+happening, where it is blocked, what comes next, and how user feedback changes
+the plan.
+
+See [Product Vision](docs/product/vision.md) for the planned creator-operator
+case, non-technical status model, fake-data demo path, and feedback/boundary
+contract.
+
 ## Core Control Loop
 
 Goal Harness sits between the operator, the agent loop, and external evidence.
@@ -166,6 +186,8 @@ boundaries:
 - benchmark and experiment loops that must wait for evidence;
 - projects with owner/SOP gates or human reward judgments;
 - controller agents that spawn scoped child agents;
+- creator, research, or operations workflows where non-engineering users need
+  agent progress translated into clear state, blockers, and feedback prompts;
 - public/private boundary checks before publishing artifacts;
 - local dashboards that should foreground user decisions before raw logs.
 
@@ -730,8 +752,9 @@ read-only project maps, benchmark control-plane evidence, and a small
 multi-project dashboard.
 
 The next milestones are stronger project adapters, safer controller/sub-agent
-coordination, better benchmark-runner ergonomics, and a more polished operator
-view.
+coordination, better benchmark-runner ergonomics, a more polished operator
+view, and creator/operator showcases that make the same control-plane value
+legible beyond software engineering.
 
 ## License
 

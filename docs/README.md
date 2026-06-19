@@ -8,6 +8,8 @@ incident report, or launch draft.
 
 - [Project README](../README.md): installation, quick start, smoke tests, and
   command reference.
+- [Product vision](product/vision.md): long-term product direction and the
+  creator-operator medium-term case.
 - [Architecture](architecture.md): core concepts and control-plane shape.
 - [Integration guide](integration.md): how to connect a project to Goal
   Harness.
@@ -58,6 +60,7 @@ incident report, or launch draft.
 
 ### Product Direction
 
+- [Product vision](product/vision.md)
 - [Frontstage channel and lease roadmap](frontstage-channel-lease-roadmap.md)
 - [Long-task cadence policy](long-task-cadence-policy.md)
 - [Dreaming exploration lane](dreaming-exploration-lane.md)
@@ -90,6 +93,8 @@ incident report, or launch draft.
 - Put dated release-readiness packets, incident reports, and superseded
   decision records under `docs/archive/`.
 - Put public launch, narrative, demo, and PR copy drafts under `docs/outreach/`.
+- Put stable product-direction notes that cross individual contracts under
+  `docs/product/`.
 - Put machine-facing protocol contracts under `docs/reference/`.
 - Every new doc should be linked from this index or from a subdirectory
   `README.md`. If it is not worth indexing, it probably belongs in local notes

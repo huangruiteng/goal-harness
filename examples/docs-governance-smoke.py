@@ -59,6 +59,7 @@ def main() -> int:
         "docs/research/",
         "docs/archive/",
         "docs/outreach/",
+        "docs/product/",
         "docs/reference/",
         "docs/showcases/",
     ]:
@@ -69,6 +70,7 @@ def main() -> int:
         "docs/archive/incidents/README.md",
         "docs/archive/release-readiness/README.md",
         "docs/outreach/README.md",
+        "docs/product/README.md",
         "docs/reference/README.md",
         "docs/reference/protocols/README.md",
         "docs/research/long-horizon-agent-benchmarks/README.md",
@@ -90,6 +92,7 @@ def main() -> int:
             read("docs/README.md"),
             read("docs/archive/README.md"),
             read("docs/outreach/README.md"),
+            read("docs/product/README.md"),
             read("docs/reference/protocols/README.md"),
             read("docs/research/long-horizon-agent-benchmarks/README.md"),
             read("docs/showcases/README.md"),
