@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Serve the Goal Harness SkillsBench local ACP relay over stdio."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from goal_harness.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
+    CodexExecConfig,
+    SkillsBenchLocalAcpRelay,
+)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--codex-bin",
+        default="codex",
+        help="Local Codex CLI binary used outside dry-run mode.",
+    )
+    parser.add_argument(
+        "--sandbox",
+        choices=("read-only", "workspace-write", "danger-full-access"),
+        default="workspace-write",
+        help="Sandbox mode passed to local codex exec outside dry-run mode.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Optional model passed to local codex exec.",
+    )
+    parser.add_argument(
+        "--timeout-sec",
+        type=int,
+        default=7200,
+        help="Per-prompt local codex exec timeout outside dry-run mode.",
+    )
+    parser.add_argument(
+        "--dry-run-response",
+        default=None,
+        help=(
+            "Return this fixed response for session/prompt instead of invoking "
+            "Codex. Intended for handshake/preflight smokes."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+    relay = SkillsBenchLocalAcpRelay(
+        CodexExecConfig(
+            codex_bin=args.codex_bin,
+            sandbox=args.sandbox,
+            model=args.model,
+            timeout_sec=args.timeout_sec,
+            dry_run_response=args.dry_run_response,
+        )
+    )
+    return relay.serve()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

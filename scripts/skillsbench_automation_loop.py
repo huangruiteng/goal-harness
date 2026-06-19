@@ -68,6 +68,9 @@ from goal_harness.benchmark_case_state import (  # noqa: E402
 from goal_harness.benchmark_adapters.skillsbench import (  # noqa: E402
     build_skillsbench_worker_handshake_preflight,
 )
+from goal_harness.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
+    run_skillsbench_local_acp_relay_probe,
+)
 from goal_harness.benchmark_trajectory import summarize_public_acp_trajectory
 
 DEFAULT_SKILLSBENCH_ROOT = REPO_ROOT / ".local/benchmark/externals/skillsbench"
@@ -453,6 +456,9 @@ def inspect_skillsbench_worker_handshake(
     dataset: str,
     task_id: str,
     local_codex_cli_participant_ready: bool = False,
+    local_acp_relay_command: str | None = None,
+    probe_local_acp_relay: bool = False,
+    local_acp_relay_probe_timeout_sec: float = 10.0,
     remote_executor_ready: bool = True,
     remote_task_data_ready: bool = True,
 ) -> dict[str, Any]:
@@ -467,6 +473,14 @@ def inspect_skillsbench_worker_handshake(
     default_codex_agent = "codex-acp"
     codex_agent_protocol = None
     codex_agent_launch_registered = False
+    local_acp_relay_probe = None
+    local_acp_relay_ready = False
+    if probe_local_acp_relay:
+        local_acp_relay_probe = run_skillsbench_local_acp_relay_probe(
+            local_acp_relay_command,
+            timeout_sec=local_acp_relay_probe_timeout_sec,
+        )
+        local_acp_relay_ready = local_acp_relay_probe.get("ready") is True
     try:
         __import__("benchflow")
         benchflow_available = True
@@ -503,7 +517,8 @@ def inspect_skillsbench_worker_handshake(
         codex_agent_protocol=codex_agent_protocol,
         codex_agent_launch_registered=codex_agent_launch_registered,
         local_codex_cli_participant_ready=local_codex_cli_participant_ready,
-        local_acp_relay_ready=False,
+        local_acp_relay_ready=local_acp_relay_ready,
+        local_acp_relay_probe=local_acp_relay_probe,
         remote_executor_ready=remote_executor_ready,
         remote_task_data_ready=remote_task_data_ready,
     )
@@ -3005,6 +3020,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--local-acp-relay-probe",
+        action="store_true",
+        help=(
+            "During --local-driver-worker-handshake-preflight, launch a local "
+            "ACP stdio relay handshake probe. The default probe uses the "
+            "Goal Harness dry-run relay and does not invoke Codex."
+        ),
+    )
+    parser.add_argument(
+        "--local-acp-relay-command",
+        default=None,
+        help=(
+            "Optional command for --local-acp-relay-probe. Omit to use the "
+            "Goal Harness dry-run relay."
+        ),
+    )
+    parser.add_argument(
+        "--local-acp-relay-probe-timeout-sec",
+        type=float,
+        default=10.0,
+        help="Timeout for --local-acp-relay-probe.",
+    )
+    parser.add_argument(
         "--fail-fast-on-apt-risk",
         action="store_true",
         help=(
@@ -3103,6 +3141,9 @@ def main(argv: list[str] | None = None) -> int:
             dataset=args.dataset,
             task_id=args.task_id,
             local_codex_cli_participant_ready=args.local_codex_cli_participant_ready,
+            local_acp_relay_command=args.local_acp_relay_command,
+            probe_local_acp_relay=args.local_acp_relay_probe,
+            local_acp_relay_probe_timeout_sec=args.local_acp_relay_probe_timeout_sec,
             remote_executor_ready=True,
             remote_task_data_ready=True,
         )
