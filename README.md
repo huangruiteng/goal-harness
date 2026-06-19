@@ -27,10 +27,15 @@ Goal Harness does not replace Codex, Claude Code, Cursor, or another agent
 runtime. It sits above them and gives humans and agents a shared state layer for
 long-running work.
 
+Short answer: Goal Harness is not replacing Codex goal mode. Codex goal,
+Codex App automation, and CLI scripts can trigger executor loops; Goal Harness
+preserves the lifetime-goal state those loops need to keep working across
+turns.
+
 | Layer | Role |
 | --- | --- |
 | Codex / Claude Code / Cursor | Execute an agent loop: read, write, run commands, and respond. |
-| Goal / automation / external scripts | Trigger or schedule the next agent loop. |
+| Codex goal / automation / CLI scripts | Trigger or schedule the next executor loop. |
 | Goal Harness | Preserve the lifetime goal: gates, todos, run history, quota, evidence, boundaries, and handoff state. |
 
 The product promise is not "more todo lists." It is a better
