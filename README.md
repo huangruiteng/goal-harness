@@ -235,16 +235,6 @@ contracts live in [Status Data](docs/status-data-contract.md),
 [Quota Allocation](docs/quota-allocation.md), and
 [Public/Private Boundary](docs/public-private-boundary.md).
 
-## Boundary Snapshot
-
-Safe to publish: registry schema, runtime layout, adapter lifecycle, generic
-control-plane contracts, sanitized examples, smoke fixtures, and generic
-validation commands.
-
-Keep private: real local paths, task ids, internal document links, production
-logs, raw experiment metrics, credentials, auth material, user-specific active
-goal state, local registries, raw agent sessions, and benchmark traces.
-
 ## Product Vision
 
 Goal Harness starts with AI coding, research, and benchmark loops because those
