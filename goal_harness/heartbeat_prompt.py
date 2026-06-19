@@ -127,6 +127,19 @@ def render_agent_scope_instruction(
         "'Primary agent review, verify, and merge this side-agent work.' "
         f"--next-claimed-by {primary_agent or '<primary_agent>'}"
     )
+    if thin:
+        if agent_role == "primary-agent":
+            role_rule = "Primary: own review, verification, merge/publication, and reassignment."
+        else:
+            role_rule = (
+                f"Side-agent: use independent git worktree/branch; no merge/publish; "
+                f"finish with a primary review todo claimed_by `{primary_agent or '<primary_agent>'}`."
+            )
+        return (
+            f"Agent: `{identity}`; role: {agent_role}; primary: `{primary_agent}`; "
+            f"scope: {scope_text}. {role_rule} Claim in-scope todo: "
+            f"`{claim_command}`. Do not write scope into todo metadata."
+        )
     if compact or thin:
         if agent_role == "primary-agent":
             role_rule = (

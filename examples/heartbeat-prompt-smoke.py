@@ -104,6 +104,15 @@ def main() -> int:
         registered_agents=["codex-main-control", "codex-side-bypass"],
         primary_agent="codex-main-control",
     )
+    thin_scoped_payload = build_heartbeat_prompt(
+        goal_id=GOAL_ID,
+        active_state=ACTIVE_STATE,
+        thin=True,
+        agent_id="codex-side-bypass",
+        agent_scopes=["control-plane coordination and todo claim ergonomics"],
+        registered_agents=["codex-main-control", "codex-side-bypass"],
+        primary_agent="codex-main-control",
+    )
     missing_agent_id = None
     try:
         build_heartbeat_prompt(
@@ -151,6 +160,7 @@ def main() -> int:
     assert_interface_budget_payload("thin", thin_payload)
     assert_interface_budget_payload("compact", scoped_payload)
     assert_interface_budget_payload("compact", primary_scoped_payload)
+    assert_interface_budget_payload("thin", thin_scoped_payload)
     assert_no_project_specific_prompt_leaks("full", str(payload["task_body"]))
     assert_no_project_specific_prompt_leaks("compact", str(compact_payload["task_body"]))
     assert_no_project_specific_prompt_leaks("brief", str(brief_payload["task_body"]))
@@ -252,6 +262,10 @@ def main() -> int:
     assert primary_scoped_payload["agent_role"] == "primary-agent", primary_scoped_payload
     assert "role: primary-agent" in primary_task, primary_task
     assert "single primary agent" in primary_task, primary_task
+    thin_scoped_task = normalized(str(thin_scoped_payload["task_body"]))
+    assert "role: side-agent" in thin_scoped_task, thin_scoped_task
+    assert "independent git worktree/branch" in thin_scoped_task, thin_scoped_task
+    assert "primary review todo claimed_by `codex-main-control`" in thin_scoped_task, thin_scoped_task
     assert "--active-state" not in registry_default_payload["expanded_prompt_command"], registry_default_payload
     assert brief_payload["brief"] is True, brief_payload
     assert brief_payload["compact"] is False, brief_payload
