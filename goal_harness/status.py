@@ -46,6 +46,7 @@ from .todo_contract import (
     build_todo_id,
     normalize_todo_action_kind,
     normalize_required_write_scopes,
+    normalize_todo_claimed_by,
     normalize_todo_status,
     normalize_todo_task_class,
     parse_todo_metadata_line,
@@ -3591,6 +3592,9 @@ def structured_todo_item(
     required_write_scopes = normalize_required_write_scopes(item.get("required_write_scopes"))
     if required_write_scopes:
         normalized["required_write_scopes"] = required_write_scopes
+    claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+    if claimed_by:
+        normalized["claimed_by"] = claimed_by
     if priority:
         normalized["priority"] = priority
         normalized["title"] = normalize_todo_text(title)
@@ -3615,6 +3619,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "task_class",
         "action_kind",
         "required_write_scopes",
+        "claimed_by",
         "note",
         "evidence",
         "reason",
@@ -3671,6 +3676,7 @@ def compact_todo_group(
     done_items = [item for item in items if item.get("done")]
     budgeted_items = [*open_items, *done_items]
     projected_open_items = sorted(open_items, key=todo_projection_sort_key)
+    claimed_open_items = [item for item in projected_open_items if item.get("claimed_by")]
     executable_items = [
         item
         for item in projected_open_items
@@ -3693,7 +3699,7 @@ def compact_todo_group(
         )
         == TODO_TASK_CLASS_MONITOR
     ]
-    return {
+    summary = {
         "schema_version": "todo_summary_v0",
         "source_section": source_section,
         "total_count": len(items),
@@ -3718,6 +3724,10 @@ def compact_todo_group(
         ],
         "items": budgeted_items[:MAX_STATUS_TODOS_PER_ROLE],
     }
+    if claimed_open_items:
+        summary["claimed_open_count"] = len(claimed_open_items)
+        summary["unclaimed_open_count"] = len(open_items) - len(claimed_open_items)
+    return summary
 
 
 def redacted_status_todo_fields(fields: dict[str, Any]) -> dict[str, Any]:
@@ -4314,11 +4324,20 @@ def project_asset_todo_summary(todos: dict[str, Any] | None) -> dict[str, Any] |
         "total": todos.get("total_count", 0),
     }
     open_items = open_todo_items(todos, limit=MAX_STATUS_TODOS_PER_ROLE)
+    claimed_open_count = sum(1 for item in open_items if item.get("claimed_by"))
+    if claimed_open_count or todos.get("claimed_open_count"):
+        summary["claimed_open_count"] = todos.get("claimed_open_count", claimed_open_count)
+        summary["unclaimed_open_count"] = todos.get(
+            "unclaimed_open_count",
+            max(0, int(summary.get("open") or 0) - int(summary["claimed_open_count"] or 0)),
+        )
     if open_items:
         summary["items"] = open_items
         summary["next"] = open_items[0]["text"]
         if open_items[0].get("index") is not None:
             summary["next_index"] = open_items[0].get("index")
+        if open_items[0].get("claimed_by"):
+            summary["next_claimed_by"] = open_items[0].get("claimed_by")
     backlog_items = open_todo_items(todos, limit=MAX_PROJECT_ASSET_TODO_BACKLOG_ITEMS)
     if backlog_items:
         summary["backlog_items"] = backlog_items
@@ -7330,23 +7349,35 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 todo_parts = []
                 if asset_user_todos:
                     todo_parts.append(f"user_open={asset_user_todos.get('open')}")
+                    if asset_user_todos.get("claimed_open_count"):
+                        todo_parts.append(f"user_claimed={asset_user_todos.get('claimed_open_count')}")
                 if asset_agent_todos:
                     todo_parts.append(f"agent_open={asset_agent_todos.get('open')}")
+                    if asset_agent_todos.get("claimed_open_count"):
+                        todo_parts.append(f"agent_claimed={asset_agent_todos.get('claimed_open_count')}")
                 lines.append(f"    - asset_todos: {' '.join(todo_parts)}")
                 if asset_user_todos.get("next"):
-                    lines.append(f"      - asset_user_todo: {_markdown_scalar(asset_user_todos.get('next') or '')}")
+                    claimed = asset_user_todos.get("next_claimed_by")
+                    claim_suffix = f" claimed_by={_markdown_scalar(claimed)}" if claimed else ""
+                    lines.append(f"      - asset_user_todo: {_markdown_scalar(asset_user_todos.get('next') or '')}{claim_suffix}")
                 for todo in (asset_user_todos.get("items") or [])[1:3]:
                     if isinstance(todo, dict) and todo.get("text"):
                         index = todo.get("index")
                         suffix = f"[{index}]" if index is not None else ""
-                        lines.append(f"      - asset_user_todo{suffix}: {_markdown_scalar(todo.get('text') or '')}")
+                        claimed = todo.get("claimed_by")
+                        claim_suffix = f" claimed_by={_markdown_scalar(claimed)}" if claimed else ""
+                        lines.append(f"      - asset_user_todo{suffix}: {_markdown_scalar(todo.get('text') or '')}{claim_suffix}")
                 if asset_agent_todos.get("next"):
-                    lines.append(f"      - asset_agent_todo: {_markdown_scalar(asset_agent_todos.get('next') or '')}")
+                    claimed = asset_agent_todos.get("next_claimed_by")
+                    claim_suffix = f" claimed_by={_markdown_scalar(claimed)}" if claimed else ""
+                    lines.append(f"      - asset_agent_todo: {_markdown_scalar(asset_agent_todos.get('next') or '')}{claim_suffix}")
                 for todo in (asset_agent_todos.get("items") or [])[1:3]:
                     if isinstance(todo, dict) and todo.get("text"):
                         index = todo.get("index")
                         suffix = f"[{index}]" if index is not None else ""
-                        lines.append(f"      - asset_agent_todo{suffix}: {_markdown_scalar(todo.get('text') or '')}")
+                        claimed = todo.get("claimed_by")
+                        claim_suffix = f" claimed_by={_markdown_scalar(claimed)}" if claimed else ""
+                        lines.append(f"      - asset_agent_todo{suffix}: {_markdown_scalar(todo.get('text') or '')}{claim_suffix}")
             asset_quota = (
                 project_asset.get("quota")
                 if isinstance(project_asset.get("quota"), dict)
@@ -7563,16 +7594,21 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     lines.append(f"      - handoff_probe: `{handoff_probe}`")
         user_todos = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else {}
         if user_todos:
-            lines.append(
-                "  - user_todos: "
-                f"open={user_todos.get('open_count')} "
-                f"done={user_todos.get('done_count')} "
-                f"total={user_todos.get('total_count')}"
-            )
+            todo_parts = [
+                f"open={user_todos.get('open_count')}",
+                f"done={user_todos.get('done_count')}",
+                f"total={user_todos.get('total_count')}",
+            ]
+            if user_todos.get("claimed_open_count"):
+                todo_parts.insert(1, f"claimed={user_todos.get('claimed_open_count')}")
+                todo_parts.insert(2, f"unclaimed={user_todos.get('unclaimed_open_count', 0)}")
+            lines.append(f"  - user_todos: {' '.join(todo_parts)}")
             for todo in user_todos.get("items") or []:
                 if not isinstance(todo, dict) or todo.get("done"):
                     continue
-                lines.append(f"    - next_user_todo: {_markdown_scalar(todo.get('text') or '')}")
+                claimed = todo.get("claimed_by")
+                claim_suffix = f" claimed_by={_markdown_scalar(claimed)}" if claimed else ""
+                lines.append(f"    - next_user_todo: {_markdown_scalar(todo.get('text') or '')}{claim_suffix}")
                 for material in todo.get("review_materials") or []:
                     if not isinstance(material, dict):
                         continue
@@ -7584,16 +7620,21 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                 break
         agent_todos = item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else {}
         if agent_todos:
-            lines.append(
-                "  - agent_todos: "
-                f"open={agent_todos.get('open_count')} "
-                f"done={agent_todos.get('done_count')} "
-                f"total={agent_todos.get('total_count')}"
-            )
+            todo_parts = [
+                f"open={agent_todos.get('open_count')}",
+                f"done={agent_todos.get('done_count')}",
+                f"total={agent_todos.get('total_count')}",
+            ]
+            if agent_todos.get("claimed_open_count"):
+                todo_parts.insert(1, f"claimed={agent_todos.get('claimed_open_count')}")
+                todo_parts.insert(2, f"unclaimed={agent_todos.get('unclaimed_open_count', 0)}")
+            lines.append(f"  - agent_todos: {' '.join(todo_parts)}")
             for todo in agent_todos.get("items") or []:
                 if not isinstance(todo, dict) or todo.get("done"):
                     continue
-                lines.append(f"    - next_agent_todo: {_markdown_scalar(todo.get('text') or '')}")
+                claimed = todo.get("claimed_by")
+                claim_suffix = f" claimed_by={_markdown_scalar(claimed)}" if claimed else ""
+                lines.append(f"    - next_agent_todo: {_markdown_scalar(todo.get('text') or '')}{claim_suffix}")
                 break
         dependency_blockers = (
             item.get("dependency_blockers")

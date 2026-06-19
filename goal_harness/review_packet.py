@@ -331,10 +331,14 @@ def open_todo_texts(todos: Any, *, limit: int = 3, rank_for_handoff: bool = Fals
             continue
         text = str(item.get("text") or "").strip()
         if text:
+            claimed_by = str(item.get("claimed_by") or "").strip()
+            display_text = text
+            if claimed_by:
+                display_text = f"{display_text} claimed_by={claimed_by}"
             if rank_for_handoff:
-                ranked_result.append((handoff_todo_rank(item, text, ordinal), compact_packet_text(text)))
+                ranked_result.append((handoff_todo_rank(item, text, ordinal), compact_packet_text(display_text)))
                 continue
-            result.append(compact_packet_text(text))
+            result.append(compact_packet_text(display_text))
             if len(result) >= limit:
                 return result
     if rank_for_handoff:

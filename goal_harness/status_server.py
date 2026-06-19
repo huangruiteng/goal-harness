@@ -49,6 +49,10 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
     "max_children",
     "allowed_domains",
     "clear_allowed_domains",
+    "registered_agents",
+    "clear_registered_agents",
+    "primary_agent",
+    "clear_primary_agent",
     "boundary_authority_scopes",
     "boundary_authority_source",
     "boundary_authority_decision_id",
@@ -299,6 +303,9 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         allowed_domains = body.get("allowed_domains")
         if allowed_domains is not None and not isinstance(allowed_domains, list):
             raise ValueError("allowed_domains must be a list of strings")
+        registered_agents = body.get("registered_agents")
+        if registered_agents is not None and not isinstance(registered_agents, list):
+            raise ValueError("registered_agents must be a list of strings")
         boundary_authority_scopes = body.get("boundary_authority_scopes")
         if boundary_authority_scopes is not None and not isinstance(boundary_authority_scopes, list):
             raise ValueError("boundary_authority_scopes must be a list of strings")
@@ -314,6 +321,10 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "max_children": body.get("max_children"),
             "allowed_domains": [str(item) for item in allowed_domains] if allowed_domains is not None else None,
             "clear_allowed_domains": bool(body.get("clear_allowed_domains", False)),
+            "registered_agents": [str(item) for item in registered_agents] if registered_agents is not None else None,
+            "clear_registered_agents": bool(body.get("clear_registered_agents", False)),
+            "primary_agent": body.get("primary_agent"),
+            "clear_primary_agent": bool(body.get("clear_primary_agent", False)),
             "boundary_authority_scopes": (
                 [str(item) for item in boundary_authority_scopes]
                 if boundary_authority_scopes is not None
@@ -341,6 +352,10 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             max_children=values["max_children"],
             allowed_domains=values["allowed_domains"],
             clear_allowed_domains=values["clear_allowed_domains"],
+            registered_agents=values["registered_agents"],
+            clear_registered_agents=values["clear_registered_agents"],
+            primary_agent=values["primary_agent"],
+            clear_primary_agent=values["clear_primary_agent"],
             boundary_authority_scopes=values["boundary_authority_scopes"],
             boundary_authority_source=values["boundary_authority_source"],
             boundary_authority_decision_id=values["boundary_authority_decision_id"],

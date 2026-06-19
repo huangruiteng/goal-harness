@@ -11,6 +11,7 @@ TODO_METADATA_PATTERN = re.compile(r"^\s*<!--\s*goal-harness:(?:todo\s+)?(?P<bod
 TODO_METADATA_TOKEN_PATTERN = re.compile(r"(?P<key>[a-z_][a-z0-9_-]*)=(?P<value>[^\s<>]+)")
 TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
+TODO_AGENT_CLAIM_PATTERN = re.compile(r"^[a-z][a-z0-9_.:@-]{0,79}$")
 TODO_WRITE_SCOPE_MAX_CHARS = 160
 
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
@@ -142,6 +143,13 @@ def normalize_todo_action_kind(value: Any) -> str | None:
     return None
 
 
+def normalize_todo_claimed_by(value: Any) -> str | None:
+    candidate = compact_todo_text(value).lower().replace(" ", "-")
+    if candidate and TODO_AGENT_CLAIM_PATTERN.match(candidate):
+        return candidate
+    return None
+
+
 def normalize_todo_id(value: Any) -> str | None:
     candidate = str(value or "").strip().lower()
     if candidate and TODO_ID_PATTERN.match(candidate):
@@ -259,6 +267,10 @@ def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
             scopes = normalize_required_write_scopes(value)
             if scopes:
                 metadata["required_write_scopes"] = scopes
+        elif key == "claimed_by":
+            claimed_by = normalize_todo_claimed_by(value)
+            if claimed_by:
+                metadata["claimed_by"] = claimed_by
         elif key in {"note", "evidence", "reason", "completed_at", "updated_at"}:
             if value:
                 metadata[key] = value
@@ -276,6 +288,7 @@ def format_todo_metadata_line(
     task_class: str | None = None,
     action_kind: str | None = None,
     required_write_scopes: Any = None,
+    claimed_by: str | None = None,
     note: str | None = None,
     evidence: str | None = None,
     reason: str | None = None,
@@ -312,6 +325,11 @@ def format_todo_metadata_line(
             "required_write_scopes="
             f"{encode_metadata_value(','.join(normalized_write_scopes))}"
         )
+    normalized_claimed_by = normalize_todo_claimed_by(claimed_by)
+    if claimed_by and not normalized_claimed_by:
+        raise ValueError("claimed_by must be a public-safe agent token such as codex-main-control")
+    if normalized_claimed_by:
+        fields.append(f"claimed_by={encode_metadata_value(normalized_claimed_by)}")
     for key, value in (
         ("note", note),
         ("evidence", evidence),

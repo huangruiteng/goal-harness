@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .agent_registry import primary_agent_id_from_registry, require_registered_agent_id
 from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .state_refresh import now_local, resolve_goal_state
@@ -19,6 +20,7 @@ from .todo_contract import (
     build_todo_id,
     format_todo_metadata_line,
     normalize_required_write_scopes,
+    normalize_todo_claimed_by,
     normalize_todo_id,
     normalize_todo_status,
     parse_todo_metadata_line,
@@ -39,6 +41,7 @@ TODO_METADATA_FIELDS = (
     "task_class",
     "action_kind",
     "required_write_scopes",
+    "claimed_by",
     "note",
     "evidence",
     "reason",
@@ -417,6 +420,7 @@ def add_todo_to_lines(
     task_class: str | None = None,
     action_kind: str | None = None,
     required_write_scopes: list[str] | None = None,
+    claimed_by: str | None = None,
 ) -> dict[str, Any]:
     todo_text = normalize_new_todo(text)
     bounds = section_bounds(lines, role)
@@ -450,6 +454,7 @@ def add_todo_to_lines(
             task_class=task_class,
             action_kind=action_kind,
             required_write_scopes=required_write_scopes,
+            claimed_by=claimed_by,
         )
         todo_line = "\n".join([f"- [ ] {todo_text}", metadata_line] if metadata_line else [f"- [ ] {todo_text}"])
         if bounds:
@@ -467,6 +472,8 @@ def add_todo_to_lines(
             updates["action_kind"] = action_kind
         if required_write_scopes is not None:
             updates["required_write_scopes"] = required_write_scopes
+        if claimed_by:
+            updates["claimed_by"] = claimed_by
         metadata_line = metadata_line_for_block(block, updates)
         metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
         todo_id = str(block.get("todo_id") or "")
@@ -482,6 +489,7 @@ def add_todo_to_lines(
         "task_class": task_class,
         "action_kind": action_kind,
         "required_write_scopes": normalize_required_write_scopes(required_write_scopes),
+        "claimed_by": normalize_todo_claimed_by(claimed_by),
     }
 
 
@@ -494,6 +502,7 @@ def add_goal_todo(
     task_class: str | None = None,
     action_kind: str | None = None,
     required_write_scopes: list[str] | None = None,
+    claimed_by: str | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -511,6 +520,16 @@ def add_goal_todo(
     with exclusive_file_lock(resolved_state_file):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
+        updated_at = now_local()
+        effective_claimed_by = (
+            require_registered_agent_id(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                agent_id=claimed_by,
+            )
+            if claimed_by
+            else None
+        )
         add_result = add_todo_to_lines(
             lines,
             role=role,
@@ -518,11 +537,11 @@ def add_goal_todo(
             task_class=task_class,
             action_kind=action_kind,
             required_write_scopes=required_write_scopes,
+            claimed_by=effective_claimed_by,
         )
         added = bool(add_result["added"])
         metadata_updated = bool(add_result["metadata_updated"])
 
-        updated_at = now_local()
         new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         if added or metadata_updated:
             new_text = replace_updated_at(new_text, updated_at)
@@ -543,6 +562,7 @@ def add_goal_todo(
         "task_class": add_result.get("task_class"),
         "action_kind": add_result.get("action_kind"),
         "required_write_scopes": add_result.get("required_write_scopes"),
+        "claimed_by": add_result.get("claimed_by"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if added or metadata_updated else None,
@@ -579,6 +599,9 @@ def apply_todo_update_to_lines(
     task_class: str | None = None,
     action_kind: str | None = None,
     required_write_scopes: list[str] | None = None,
+    claimed_by: str | None = None,
+    clear_claim: bool = False,
+    claim_only: bool = False,
     updated_at: str,
 ) -> dict[str, Any]:
     normalized_todo_id = normalize_todo_id(todo_id)
@@ -621,6 +644,16 @@ def apply_todo_update_to_lines(
         updates["action_kind"] = action_kind
     if required_write_scopes is not None:
         updates["required_write_scopes"] = required_write_scopes
+    if clear_claim:
+        updates["claimed_by"] = None
+    elif claimed_by:
+        existing_claim = normalize_todo_claimed_by(block.get("claimed_by"))
+        if claim_only and existing_claim and existing_claim != claimed_by:
+            raise ValueError(
+                f"todo_id {normalized_todo_id!r} is already claimed_by={existing_claim!r}; "
+                "clear or transfer the claim explicitly before claiming it"
+            )
+        updates["claimed_by"] = claimed_by
     metadata_line = metadata_line_for_block(block, updates)
     semantic_metadata_changed = todo_metadata_would_change(lines, block, metadata_line)
     if status_changed or text_changed or semantic_metadata_changed:
@@ -637,6 +670,7 @@ def apply_todo_update_to_lines(
         "text_changed": text_changed,
         "metadata_updated": metadata_updated,
         "changed": status_changed or text_changed or metadata_updated,
+        "claimed_by": normalize_todo_claimed_by(updates.get("claimed_by")),
     }
 
 
@@ -654,6 +688,9 @@ def update_goal_todo(
     task_class: str | None = None,
     action_kind: str | None = None,
     required_write_scopes: list[str] | None = None,
+    claimed_by: str | None = None,
+    clear_claim: bool = False,
+    claim_only: bool = False,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -668,6 +705,15 @@ def update_goal_todo(
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
+        effective_claimed_by = (
+            require_registered_agent_id(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                agent_id=claimed_by,
+            )
+            if claimed_by
+            else None
+        )
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
@@ -680,6 +726,9 @@ def update_goal_todo(
             task_class=task_class,
             action_kind=action_kind,
             required_write_scopes=required_write_scopes,
+            claimed_by=effective_claimed_by,
+            clear_claim=clear_claim,
+            claim_only=claim_only,
             updated_at=updated_at,
         )
         changed = bool(update_result["changed"])
@@ -708,8 +757,11 @@ def complete_goal_todo(
     role: str | None = None,
     evidence: str | None = None,
     note: str | None = None,
+    claimed_by: str | None = None,
+    clear_claim: bool = False,
     next_agent_todo: str | None = None,
     next_user_todo: str | None = None,
+    next_claimed_by: str | None = None,
     next_task_class: str | None = None,
     next_action_kind: str | None = None,
     project: Path | None = None,
@@ -726,6 +778,44 @@ def complete_goal_todo(
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
+        effective_claimed_by = (
+            require_registered_agent_id(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                agent_id=claimed_by,
+            )
+            if claimed_by
+            else None
+        )
+        primary_agent = primary_agent_id_from_registry(registry_path, goal_id)
+        effective_next_claimed_by = (
+            require_registered_agent_id(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                agent_id=next_claimed_by,
+                field="next_claimed_by",
+            )
+            if next_claimed_by
+            else None
+        )
+        if effective_claimed_by and not primary_agent:
+            raise ValueError(
+                "todo complete with --claimed-by requires coordination.primary_agent "
+                "so Goal Harness can distinguish the primary agent from side agents"
+            )
+        if effective_claimed_by and primary_agent and effective_claimed_by != primary_agent:
+            if not next_agent_todo:
+                raise ValueError(
+                    f"side-agent completion by {effective_claimed_by!r} requires "
+                    "--next-agent-todo for primary review, verification, and merge"
+                )
+            if effective_next_claimed_by and effective_next_claimed_by != primary_agent:
+                raise ValueError(
+                    f"side-agent completion review todo must be claimed_by primary_agent={primary_agent!r}"
+                )
+            effective_next_claimed_by = primary_agent
+        if effective_next_claimed_by and not next_agent_todo:
+            raise ValueError("--next-claimed-by requires --next-agent-todo")
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
@@ -733,6 +823,8 @@ def complete_goal_todo(
             role=role,
             note=note,
             evidence=evidence,
+            claimed_by=effective_claimed_by,
+            clear_claim=clear_claim,
             updated_at=updated_at,
         )
         next_results: list[dict[str, Any]] = []
@@ -747,6 +839,7 @@ def complete_goal_todo(
                     ),
                     task_class=next_task_class or "advancement_task",
                     action_kind=next_action_kind,
+                    claimed_by=effective_next_claimed_by,
                 )
             )
         if next_user_todo:
@@ -996,6 +1089,7 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
                 f"- already_exists: `{payload.get('already_exists')}`",
                 f"- todo_id: `{payload.get('todo_id')}`",
                 f"- status: `{payload.get('status')}`",
+                f"- claimed_by: `{payload.get('claimed_by')}`",
             ]
         )
     if payload.get("error"):

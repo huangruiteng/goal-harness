@@ -934,6 +934,7 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
         "task_class",
         "action_kind",
         "required_write_scopes",
+        "claimed_by",
     ):
         if item.get(key) is not None:
             compact[key] = item.get(key)
@@ -1038,12 +1039,13 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
         if _todo_item_is_actionable_open(item)
         if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
     ]
+    claimed_open_items = [item for item in open_items if item.get("claimed_by")]
     gate_items = [
         item
         for item in open_items
         if _is_user_gate_todo_item(item)
     ]
-    return {
+    summary = {
         "schema_version": value.get("schema_version"),
         "source_section": value.get("source_section"),
         "total_count": value.get("total_count"),
@@ -1056,6 +1058,13 @@ def _summarize_user_todos(value: Any) -> dict[str, Any] | None:
         "backlog_items": open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": executable_items[:TODO_BACKLOG_ITEM_LIMIT],
     }
+    if claimed_open_items or value.get("claimed_open_count"):
+        summary["claimed_open_count"] = value.get("claimed_open_count", len(claimed_open_items))
+        summary["unclaimed_open_count"] = value.get(
+            "unclaimed_open_count",
+            max(0, int(value.get("open_count", len(open_items)) or 0) - len(claimed_open_items)),
+        )
+    return summary
 
 
 def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
@@ -1077,6 +1086,9 @@ def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
         next_text = str(value.get("next") or "").strip()
         next_index = value.get("next_index", 1)
         open_items = [{"index": next_index, "text": next_text}] if next_text else []
+        next_claimed_by = str(value.get("next_claimed_by") or "").strip()
+        if open_items and next_claimed_by:
+            open_items[0]["claimed_by"] = next_claimed_by
     executable_items = [
         item
         for item in open_items
@@ -1089,8 +1101,9 @@ def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
         if _todo_item_is_actionable_open(item)
         if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
     ]
+    claimed_open_items = [item for item in open_items if item.get("claimed_by")]
     open_count = value.get("open", value.get("open_count", len(open_items)))
-    return {
+    summary = {
         "schema_version": value.get("schema_version"),
         "source_section": value.get("source_section") or "project_asset",
         "total_count": value.get("total", value.get("total_count")),
@@ -1102,6 +1115,13 @@ def _summarize_project_asset_todos(value: Any) -> dict[str, Any] | None:
         "backlog_items": open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": executable_items[:TODO_BACKLOG_ITEM_LIMIT],
     }
+    if claimed_open_items or value.get("claimed_open_count"):
+        summary["claimed_open_count"] = value.get("claimed_open_count", len(claimed_open_items))
+        summary["unclaimed_open_count"] = value.get(
+            "unclaimed_open_count",
+            max(0, int(open_count or 0) - len(claimed_open_items)),
+        )
+    return summary
 
 
 def _same_todo_identity(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -5099,11 +5119,14 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- control_plane: {control_plane_policy_summary(control_plane)}")
 
     def append_todo_summary(label: str, summary: dict[str, Any]) -> None:
-        lines.append(
-            f"- {label}_summary: "
-            f"open={summary.get('open_count')} "
-            f"total={summary.get('total_count')}"
-        )
+        summary_parts = [
+            f"open={summary.get('open_count')}",
+            f"total={summary.get('total_count')}",
+        ]
+        if summary.get("claimed_open_count"):
+            summary_parts.insert(1, f"claimed={summary.get('claimed_open_count')}")
+            summary_parts.insert(2, f"unclaimed={summary.get('unclaimed_open_count', 0)}")
+        lines.append(f"- {label}_summary: {' '.join(summary_parts)}")
         first_open = summary.get("first_open_items") if isinstance(summary.get("first_open_items"), list) else []
         for todo in first_open[:3]:
             if not isinstance(todo, dict):
@@ -5113,7 +5136,12 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 continue
             index = todo.get("index")
             suffix = f"[{index}]" if index is not None else ""
-            lines.append(f"- {label}_next{suffix}: {text}")
+            claim_suffix = (
+                f" claimed_by={todo.get('claimed_by')}"
+                if todo.get("claimed_by")
+                else ""
+            )
+            lines.append(f"- {label}_next{suffix}: {text}{claim_suffix}")
         first_keys = {
             (
                 str(todo.get("todo_id") or ""),
@@ -5136,7 +5164,12 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 continue
             index = todo.get("index")
             suffix = f"[{index}]" if index is not None else ""
-            lines.append(f"- {label}_backlog{suffix}: {text}")
+            claim_suffix = (
+                f" claimed_by={todo.get('claimed_by')}"
+                if todo.get("claimed_by")
+                else ""
+            )
+            lines.append(f"- {label}_backlog{suffix}: {text}{claim_suffix}")
             extra_count += 1
             if extra_count >= 5:
                 break

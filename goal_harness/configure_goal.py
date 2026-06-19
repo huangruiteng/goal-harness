@@ -10,10 +10,12 @@ from .boundary_authority import (
     build_checkpointed_boundary_authority_entry,
     checkpointed_boundary_authority_summary,
 )
+from .agent_registry import normalize_registered_agents, primary_agent_id_for_goal
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .quota import goal_quota_config
 from .registry import read_json, registry_goals
+from .todo_contract import normalize_todo_claimed_by
 
 
 WAITING_ON_CHOICES = (
@@ -56,6 +58,23 @@ def _clean_domains(values: list[str] | None) -> list[str] | None:
     return domains
 
 
+def _clean_registered_agents(values: list[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    agents: list[str] = []
+    for value in values:
+        for part in str(value).split(","):
+            raw_agent = part.strip()
+            if not raw_agent:
+                continue
+            agent = normalize_todo_claimed_by(raw_agent)
+            if not agent:
+                raise ValueError("registered agents must be public-safe tokens such as codex-main-control")
+            if agent not in agents:
+                agents.append(agent)
+    return agents
+
+
 def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
     quota = goal_quota_config(goal)
     control_plane = compact_control_plane_policy(goal.get("control_plane"))
@@ -70,6 +89,8 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
         "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(coordination),
+        "registered_agents": normalize_registered_agents(coordination.get("registered_agents")),
+        "primary_agent": primary_agent_id_for_goal(goal),
     }
 
 
@@ -96,6 +117,10 @@ def configure_goal(
     max_children: int | None = None,
     allowed_domains: list[str] | None = None,
     clear_allowed_domains: bool = False,
+    registered_agents: list[str] | None = None,
+    clear_registered_agents: bool = False,
+    primary_agent: str | None = None,
+    clear_primary_agent: bool = False,
     waiting_on: str | None = None,
     clear_waiting_on: bool = False,
     boundary_authority_scopes: list[str] | None = None,
@@ -110,6 +135,12 @@ def configure_goal(
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
     if clear_allowed_domains and allowed_domains:
         raise ValueError("--clear-allowed-domains cannot be combined with --allowed-domain")
+    if clear_registered_agents and registered_agents:
+        raise ValueError("--clear-registered-agents cannot be combined with --registered-agent")
+    if clear_primary_agent and primary_agent:
+        raise ValueError("--clear-primary-agent cannot be combined with --primary-agent")
+    if clear_registered_agents and primary_agent:
+        raise ValueError("--clear-registered-agents cannot be combined with --primary-agent")
     if clear_waiting_on and waiting_on:
         raise ValueError("--clear-waiting-on cannot be combined with --waiting-on")
     adding_boundary_authority = any(
@@ -131,6 +162,10 @@ def configure_goal(
     quota_window_hours = _positive_number(quota_window_hours, field="quota_window_hours")
     max_children = _non_negative_int(max_children, field="max_children")
     allowed_domains = _clean_domains(allowed_domains)
+    registered_agents = _clean_registered_agents(registered_agents)
+    normalized_primary_agent = normalize_todo_claimed_by(primary_agent) if primary_agent else None
+    if primary_agent and not normalized_primary_agent:
+        raise ValueError("--primary-agent must be a public-safe registered agent id")
 
     payload = read_json(registry_path)
     goals = registry_goals(payload)
@@ -190,8 +225,31 @@ def configure_goal(
     elif clear_waiting_on:
         goal.pop("waiting_on", None)
 
-    if clear_boundary_authority or adding_boundary_authority:
+    if (
+        clear_registered_agents
+        or registered_agents is not None
+        or normalized_primary_agent is not None
+        or clear_primary_agent
+        or clear_boundary_authority
+        or adding_boundary_authority
+    ):
         coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
+        existing_registered_agents = normalize_registered_agents(coordination.get("registered_agents"))
+        effective_registered_agents = registered_agents if registered_agents is not None else existing_registered_agents
+        if normalized_primary_agent and normalized_primary_agent not in effective_registered_agents:
+            raise ValueError(
+                f"--primary-agent {normalized_primary_agent!r} must also be listed in coordination.registered_agents; "
+                "pass --registered-agent for it in the same command or register it first"
+            )
+        if clear_registered_agents:
+            coordination.pop("registered_agents", None)
+            coordination.pop("primary_agent", None)
+        elif registered_agents is not None:
+            coordination["registered_agents"] = registered_agents
+        if clear_primary_agent:
+            coordination.pop("primary_agent", None)
+        elif normalized_primary_agent is not None:
+            coordination["primary_agent"] = normalized_primary_agent
         if clear_boundary_authority:
             coordination.pop("checkpointed_boundary_authority", None)
         if adding_boundary_authority:

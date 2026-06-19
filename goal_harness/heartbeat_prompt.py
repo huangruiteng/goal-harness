@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Any
 
+from .agent_registry import normalize_registered_agents
 from .project_prompt import render_cli_preflight, render_quota_guard_command, render_quota_spend_command
+from .todo_contract import normalize_todo_claimed_by
 
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
@@ -15,10 +18,10 @@ USER_TODO_FINAL_MESSAGE_RULE = (
     "If false/0, allow quiet/no-user-todo."
 )
 INTERFACE_BUDGET_CHARS = {
-    "full": 11_200,
-    "compact": 5_000,
-    "brief": 2_700,
-    "thin": 1_000,
+    "full": 12_000,
+    "compact": 6_000,
+    "brief": 3_500,
+    "thin": 1_500,
 }
 
 
@@ -34,6 +37,114 @@ def heartbeat_prompt_mode(*, compact: bool = False, brief: bool = False, thin: b
 
 def prompt_budget_text(text: str, *, goal_id: str, active_state: str) -> str:
     return text.replace(goal_id, "<GOAL_ID>").replace(active_state, "<ACTIVE_STATE>")
+
+
+def normalize_agent_scope(value: Any) -> str | None:
+    candidate = " ".join(str(value or "").strip().split())
+    if not candidate:
+        return None
+    if len(candidate) > 180 or any(char in candidate for char in "<>"):
+        raise ValueError("agent scope must be compact text without angle brackets")
+    return candidate
+
+
+def normalize_agent_scopes(values: list[str] | tuple[str, ...] | None) -> list[str]:
+    scopes: list[str] = []
+    for value in values or []:
+        scope = normalize_agent_scope(value)
+        if scope and scope not in scopes:
+            scopes.append(scope)
+    return scopes
+
+
+def agent_prompt_command_args(*, agent_id: str | None, agent_scopes: list[str]) -> str:
+    parts: list[str] = []
+    if agent_id:
+        parts.extend(["--agent-id", agent_id])
+    for scope in agent_scopes:
+        parts.extend(["--agent-scope", scope])
+    return "".join(f" {shlex.quote(part)}" for part in parts)
+
+
+def render_agent_scope_instruction(
+    *,
+    goal_id: str,
+    agent_id: str | None,
+    agent_scopes: list[str],
+    primary_agent: str | None,
+    cli_bin: str,
+    compact: bool = False,
+    thin: bool = False,
+) -> str:
+    if not agent_id and not agent_scopes:
+        return ""
+    identity = agent_id or "unclaimed-agent"
+    agent_role = "primary-agent" if agent_id and primary_agent and agent_id == primary_agent else "side-agent"
+    scope_text = "; ".join(agent_scopes) if agent_scopes else "read goal state and choose only clearly in-scope work"
+    claim_command = (
+        f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> --claimed-by {agent_id}"
+        if agent_id
+        else f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> --claimed-by <agent_id>"
+    )
+    completion_command = (
+        f"{cli_bin} todo complete --goal-id {goal_id} --todo-id <todo_id> "
+        f"--claimed-by {agent_id or '<agent_id>'} --next-agent-todo "
+        "'Primary agent review, verify, and merge this side-agent work.' "
+        f"--next-claimed-by {primary_agent or '<primary_agent>'}"
+    )
+    if compact or thin:
+        if agent_role == "primary-agent":
+            role_rule = (
+                "You are the single primary agent: own review, verification, "
+                "merge/publication, reassignment, and side-agent review todos."
+            )
+        else:
+            role_rule = (
+                "You are a side-agent. Edit only in an independent git worktree/branch. Do not merge "
+                "or publish. Finish with primary review todo: "
+                f"`{completion_command}`."
+            )
+        return (
+            f"Agent identity and scope: agent_id `{identity}`; role: {agent_role}; "
+            f"primary_agent `{primary_agent}`; scope: {scope_text}. {role_rule} "
+            f"Before delivery, claim an unclaimed in-scope todo with "
+            f"`{claim_command}`; if claimed/outside scope, choose another or "
+            "report none. Do not write agent scope into todo metadata."
+        )
+    if agent_role == "primary-agent":
+        role_rule = (
+            "You are the single primary agent for this goal: own final review, "
+            "verification, merge/publication decisions, and reassignment. Side-agent "
+            "review todos claimed_by you are your responsibility."
+        )
+    else:
+        role_rule = (
+            f"You are a side-agent for this goal; primary_agent is `{primary_agent}`. "
+            "Do development only in an independent git worktree/branch, never in the "
+            "main checkout. Do not merge, publish, or mutate main-control state except "
+            "through Goal Harness todo/status writeback. When finishing side-agent work, "
+            f"complete it with a primary review todo, for example `{completion_command}`."
+        )
+    return f"""Agent identity and scope:
+
+- agent_id: `{identity}`
+- role: `{agent_role}`
+- primary_agent: `{primary_agent}`
+- scope: {scope_text}
+
+{role_rule}
+
+Before delivery, choose an unclaimed open agent todo that matches this scope and
+soft-claim it:
+
+```bash
+{claim_command}
+```
+
+If the first executable todo is claimed by another agent or outside this scope,
+choose another in-scope unclaimed todo or report no in-scope work. Do not write
+agent scope into todo metadata; scope belongs in this automation/handoff prompt.
+"""
 
 
 def build_interface_budget(
@@ -71,6 +182,10 @@ def build_heartbeat_prompt(
     brief: bool = False,
     thin: bool = False,
     cli_bin: str = "goal-harness",
+    agent_id: str | None = None,
+    agent_scopes: list[str] | tuple[str, ...] | None = None,
+    registered_agents: list[str] | tuple[str, ...] | None = None,
+    primary_agent: str | None = None,
 ) -> dict[str, Any]:
     effective_resolved_active_state = resolved_active_state or active_state
     active_state_text = str(active_state.expanduser()) if active_state else "the registry-declared active state"
@@ -81,13 +196,64 @@ def build_heartbeat_prompt(
     active_state_arg = f" --active-state {active_state_text}" if active_state else ""
     resolved_material_rule = material_queue_rule or DEFAULT_MATERIAL_QUEUE_RULE
     resolved_permission_rule = permission_rule or DEFAULT_PERMISSION_RULE
+    normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
+    if agent_id and not normalized_agent_id:
+        raise ValueError("agent_id must be a public-safe token such as codex-main-control")
+    normalized_agent_scopes = normalize_agent_scopes(agent_scopes)
+    if normalized_agent_scopes and not normalized_agent_id:
+        raise ValueError("--agent-scope requires --agent-id so claimed_by uses a registered agent")
+    normalized_registered_agents = normalize_registered_agents(registered_agents)
+    if normalized_agent_id:
+        if registered_agents is not None and not normalized_registered_agents:
+            raise ValueError("agent_id cannot be used until registered_agents are configured")
+        if normalized_registered_agents and normalized_agent_id not in normalized_registered_agents:
+            raise ValueError(
+                f"agent_id={normalized_agent_id!r} is not registered; "
+                f"registered_agents={', '.join(normalized_registered_agents)}"
+            )
+    normalized_primary_agent = normalize_todo_claimed_by(primary_agent) if primary_agent else None
+    if primary_agent and not normalized_primary_agent:
+        raise ValueError("primary_agent must be a public-safe registered agent id")
+    if normalized_agent_id and normalized_registered_agents:
+        if not normalized_primary_agent:
+            raise ValueError("primary_agent must be configured when registered_agents are configured")
+        if normalized_primary_agent not in normalized_registered_agents:
+            raise ValueError(
+                f"primary_agent={normalized_primary_agent!r} is not registered; "
+                f"registered_agents={', '.join(normalized_registered_agents)}"
+            )
+    elif normalized_primary_agent and normalized_registered_agents and normalized_primary_agent not in normalized_registered_agents:
+        raise ValueError(
+            f"primary_agent={normalized_primary_agent!r} is not registered; "
+            f"registered_agents={', '.join(normalized_registered_agents)}"
+        )
+    agent_role = (
+        "primary-agent"
+        if normalized_agent_id and normalized_primary_agent and normalized_agent_id == normalized_primary_agent
+        else "side-agent"
+        if normalized_agent_id
+        else None
+    )
+    agent_args = agent_prompt_command_args(
+        agent_id=normalized_agent_id,
+        agent_scopes=normalized_agent_scopes,
+    )
+    agent_scope_instruction = render_agent_scope_instruction(
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+        agent_scopes=normalized_agent_scopes,
+        primary_agent=normalized_primary_agent,
+        cli_bin=cli_bin,
+        compact=compact or brief,
+        thin=thin,
+    )
     quota_guard_command = render_quota_guard_command(goal_id, cli_bin=cli_bin)
     quota_spend_command = render_quota_spend_command(goal_id, source="heartbeat", cli_bin=cli_bin)
     cli_preflight = render_cli_preflight(cli_bin=cli_bin)
-    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --goal-id {goal_id}{active_state_arg}"
-    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}"
-    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}"
-    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}"
+    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --goal-id {goal_id}{active_state_arg}{agent_args}"
+    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}"
+    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}"
+    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}"
     if thin:
         task_body_renderer = render_thin_heartbeat_task_body
     elif brief:
@@ -105,6 +271,7 @@ def build_heartbeat_prompt(
         material_queue_rule=resolved_material_rule,
         permission_rule=resolved_permission_rule,
         cli_bin=cli_bin,
+        agent_scope_instruction=agent_scope_instruction,
         expanded_prompt_command=expanded_prompt_command,
         compact_prompt_command=compact_prompt_command,
         brief_prompt_command=brief_prompt_command,
@@ -122,6 +289,11 @@ def build_heartbeat_prompt(
         "brief": brief,
         "thin": thin,
         "cli_bin": cli_bin,
+        "agent_id": normalized_agent_id,
+        "agent_role": agent_role,
+        "agent_scopes": normalized_agent_scopes,
+        "registered_agents": normalized_registered_agents,
+        "primary_agent": normalized_primary_agent,
         "expanded_prompt_command": expanded_prompt_command,
         "compact_prompt_command": compact_prompt_command,
         "brief_prompt_command": brief_prompt_command,
@@ -153,17 +325,20 @@ def render_heartbeat_task_body(
     material_queue_rule: str,
     permission_rule: str,
     cli_bin: str,
+    agent_scope_instruction: str,
     expanded_prompt_command: str,
     compact_prompt_command: str,
     brief_prompt_command: str,
     thin_prompt_command: str,
 ) -> str:
+    scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 Generic Goal Harness lifecycle. Keep project-specific branching out of the
 automation prompt. Put local policy in registry, active-state sections, adapter
 output, `quota should-run.goal_boundary`, or boundary rules; if a lifecycle
 rule is needed, update `goal-harness heartbeat-prompt` so all projects inherit it.
+{scope_block}
 
 Before spending delivery compute, first make the Goal Harness CLI reachable and
 run the quota guard:
@@ -346,15 +521,18 @@ def render_brief_heartbeat_task_body(
     material_queue_rule: str,
     permission_rule: str,
     cli_bin: str,
+    agent_scope_instruction: str,
     expanded_prompt_command: str,
     compact_prompt_command: str,
     brief_prompt_command: str,
     thin_prompt_command: str,
 ) -> str:
+    scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 Brief installed Goal Harness heartbeat. Thin dispatcher: keep context small;
 pull details on demand: `{compact_prompt_command}`.
+{scope_block}
 
 Preflight and quota guard:
 
@@ -408,16 +586,19 @@ def render_compact_heartbeat_task_body(
     material_queue_rule: str,
     permission_rule: str,
     cli_bin: str,
+    agent_scope_instruction: str,
     expanded_prompt_command: str,
     compact_prompt_command: str,
     brief_prompt_command: str,
     thin_prompt_command: str,
 ) -> str:
+    scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 This compact Goal Harness heartbeat body keeps project-specific branches out.
 Put local policy in registry/state/adapter/`goal_boundary`.
 Expanded lifecycle contract: `{expanded_prompt_command}`.
+{scope_block}
 
 Before delivery, make CLI reachable; run quota guard:
 
@@ -510,6 +691,7 @@ def render_thin_heartbeat_task_body(
     material_queue_rule: str,
     permission_rule: str,
     cli_bin: str,
+    agent_scope_instruction: str,
     expanded_prompt_command: str,
     compact_prompt_command: str,
     brief_prompt_command: str,
@@ -521,10 +703,12 @@ def render_thin_heartbeat_task_body(
         if material_queue_rule == DEFAULT_MATERIAL_QUEUE_RULE
         else material_queue_rule
     )
+    scope_sentence = f"\n\n{agent_scope_instruction}" if agent_scope_instruction else ""
     return f"""Advance `{goal_id}` from {active_state}.
 
 Use skills: `goal-harness-project`; if surprising/tiny/contradictory,
 `goal-harness-self-repair`. Goal Harness CLI is source of truth.
+{scope_sentence}
 
 Inspect registry/global quota truth, active state, status/run history, repo
 state. Run `quota should-run`; follow `interaction_contract`. If
@@ -570,6 +754,10 @@ Copy this {style}task body into a Codex App heartbeat automation.
 - brief: `{payload.get("brief")}`
 - thin: `{payload.get("thin")}`
 - cli_bin: `{payload.get("cli_bin")}`
+- agent_id: `{payload.get("agent_id")}`
+- agent_role: `{payload.get("agent_role")}`
+- primary_agent: `{payload.get("primary_agent")}`
+- agent_scopes: `{payload.get("agent_scopes")}`
 - expanded_prompt_command: `{payload.get("expanded_prompt_command")}`
 - compact_prompt_command: `{payload.get("compact_prompt_command")}`
 - brief_prompt_command: `{payload.get("brief_prompt_command")}`

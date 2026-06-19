@@ -12,6 +12,11 @@ from .authority import (
     render_doc_registry_authority_import_markdown,
     render_authority_source_markdown,
 )
+from .agent_registry import (
+    primary_agent_id_from_registry,
+    registered_agent_ids_from_registry,
+    require_registered_agent_id,
+)
 from .bootstrap import (
     DEFAULT_DOMAIN,
     DEFAULT_OBJECTIVE,
@@ -1970,6 +1975,16 @@ def main(argv: list[str] | None = None) -> int:
         default="goal-harness",
         help="Command name embedded in generated preflight/guard/spend commands. Use goal-harness-canary for gray rollout targets.",
     )
+    heartbeat_prompt_parser.add_argument(
+        "--agent-id",
+        help="Optional public-safe automation agent id, such as codex-main-control or codex-side-bypass.",
+    )
+    heartbeat_prompt_parser.add_argument(
+        "--agent-scope",
+        dest="agent_scopes",
+        action="append",
+        help="Optional natural-language scope for this automation agent. Repeat for multiple scope lines.",
+    )
     heartbeat_style_group = heartbeat_prompt_parser.add_mutually_exclusive_group()
     heartbeat_style_group.add_argument(
         "--compact",
@@ -2520,6 +2535,33 @@ def main(argv: list[str] | None = None) -> int:
         "--clear-allowed-domains",
         action="store_true",
         help="Clear allowed child-agent domains.",
+    )
+    configure_goal_parser.add_argument(
+        "--registered-agent",
+        dest="registered_agents",
+        action="append",
+        default=None,
+        help=(
+            "Registered public-safe agent id allowed to claim todos and receive scoped "
+            "heartbeat prompts. Repeatable; comma-separated values are also accepted."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-registered-agents",
+        action="store_true",
+        help="Clear coordination.registered_agents.",
+    )
+    configure_goal_parser.add_argument(
+        "--primary-agent",
+        help=(
+            "The single registered agent id that owns main-control review, "
+            "verification, merge, and final project coordination."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-primary-agent",
+        action="store_true",
+        help="Clear coordination.primary_agent.",
     )
     configure_goal_parser.add_argument(
         "--waiting-on",
@@ -5389,12 +5431,12 @@ def main(argv: list[str] | None = None) -> int:
     todo_parser.add_argument(
         "todo_command",
         nargs="?",
-        choices=["add", "update", "complete", "supersede", "archive-completed"],
+        choices=["add", "claim", "update", "complete", "supersede", "archive-completed"],
         default="add",
         help=(
-            "Use add to append a checkbox todo, update/complete/supersede to "
-            "transition by todo_id, or archive-completed to move older completed "
-            "todos into Completed Work Archive."
+            "Use add to append a checkbox todo, claim to soft-claim by registered "
+            "agent id, update/complete/supersede to transition by todo_id, or "
+            "archive-completed to move older completed todos into Completed Work Archive."
         ),
     )
     todo_parser.add_argument("--goal-id", required=True, help="Goal id whose active state should receive the todo.")
@@ -5430,8 +5472,27 @@ def main(argv: list[str] | None = None) -> int:
             "src/** or runners/openviking/**. Repeat for multiple scopes."
         ),
     )
+    todo_parser.add_argument(
+        "--claimed-by",
+        help=(
+            "For todo add/claim/update/complete, soft-claim the todo for a registered "
+            "public-safe agent id such as codex-main-control."
+        ),
+    )
+    todo_parser.add_argument(
+        "--clear-claim",
+        action="store_true",
+        help="For todo update, remove the soft claimed_by owner from the todo.",
+    )
     todo_parser.add_argument("--next-agent-todo", help="For complete/supersede, atomically add or update the next agent todo.")
     todo_parser.add_argument("--next-user-todo", help="For complete/supersede, atomically add or update the next user todo.")
+    todo_parser.add_argument(
+        "--next-claimed-by",
+        help=(
+            "For complete with --next-agent-todo, soft-claim the successor todo for "
+            "a registered agent. Side-agent completions default this to primary_agent."
+        ),
+    )
     todo_parser.add_argument(
         "--next-task-class",
         choices=["advancement_task", "continuous_monitor", "user_gate", "blocker"],
@@ -5588,6 +5649,19 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root_arg=args.runtime_root,
                 allow_global_goal_lookup_fallback=not user_supplied_registry(argv),
             )
+            agent_registry_path = registry_path
+            if active_state_source.startswith("registry:"):
+                agent_registry_path = Path(active_state_source.removeprefix("registry:"))
+            registered_agents = registered_agent_ids_from_registry(agent_registry_path, args.goal_id)
+            primary_agent = primary_agent_id_from_registry(agent_registry_path, args.goal_id)
+            effective_agent_id = None
+            if args.agent_id:
+                effective_agent_id = require_registered_agent_id(
+                    registry_path=agent_registry_path,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    field="agent_id",
+                )
             payload = build_heartbeat_prompt(
                 goal_id=args.goal_id,
                 active_state=active_state,
@@ -5599,6 +5673,10 @@ def main(argv: list[str] | None = None) -> int:
                 brief=bool(args.brief),
                 thin=bool(args.thin),
                 cli_bin=args.cli_bin,
+                agent_id=effective_agent_id,
+                agent_scopes=args.agent_scopes,
+                registered_agents=registered_agents,
+                primary_agent=primary_agent,
             )
         except Exception as exc:
             payload = {
@@ -5913,6 +5991,10 @@ def main(argv: list[str] | None = None) -> int:
                 max_children=args.max_children,
                 allowed_domains=args.allowed_domain,
                 clear_allowed_domains=bool(args.clear_allowed_domains),
+                registered_agents=args.registered_agents,
+                clear_registered_agents=bool(args.clear_registered_agents),
+                primary_agent=args.primary_agent,
+                clear_primary_agent=bool(args.clear_primary_agent),
                 waiting_on=args.waiting_on,
                 clear_waiting_on=bool(args.clear_waiting_on),
                 boundary_authority_scopes=args.boundary_authority_scope,
@@ -9564,6 +9646,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("todo add requires --role")
                 if not args.text:
                     raise ValueError("todo add requires --text")
+                if args.clear_claim:
+                    raise ValueError("todo add accepts --claimed-by but not --clear-claim")
+                if args.next_claimed_by:
+                    raise ValueError("todo add does not support --next-claimed-by")
                 payload = add_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9572,6 +9658,50 @@ def main(argv: list[str] | None = None) -> int:
                     task_class=args.task_class,
                     action_kind=args.action_kind,
                     required_write_scopes=args.required_write_scopes,
+                    claimed_by=args.claimed_by,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    dry_run=bool(args.dry_run),
+                )
+            elif args.todo_command == "claim":
+                if not args.todo_id:
+                    raise ValueError("todo claim requires --todo-id")
+                if not args.claimed_by:
+                    raise ValueError("todo claim requires --claimed-by")
+                if args.clear_claim:
+                    raise ValueError("todo claim requires --claimed-by and does not support --clear-claim")
+                unsupported = [
+                    flag
+                    for flag, value in (
+                        ("--text", args.text),
+                        ("--status", args.status),
+                        ("--note", args.note),
+                        ("--evidence", args.evidence),
+                        ("--reason", args.reason),
+                        ("--task-class", args.task_class),
+                        ("--action-kind", args.action_kind),
+                        ("--required-write-scope", args.required_write_scopes),
+                        ("--next-agent-todo", args.next_agent_todo),
+                        ("--next-user-todo", args.next_user_todo),
+                        ("--next-claimed-by", args.next_claimed_by),
+                        ("--next-task-class", args.next_task_class),
+                        ("--next-action-kind", args.next_action_kind),
+                    )
+                    if value
+                ]
+                if unsupported:
+                    raise ValueError(
+                        "todo claim only accepts --todo-id, --claimed-by, optional --role, "
+                        "--project, --state-file, and --dry-run; unsupported: "
+                        + ", ".join(unsupported)
+                    )
+                payload = update_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    todo_id=args.todo_id,
+                    role=args.role,
+                    claimed_by=args.claimed_by,
+                    claim_only=True,
                     project=Path(args.project).expanduser() if args.project else None,
                     state_file=Path(args.state_file).expanduser() if args.state_file else None,
                     dry_run=bool(args.dry_run),
@@ -9579,6 +9709,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.todo_command == "update":
                 if not args.todo_id:
                     raise ValueError("todo update requires --todo-id")
+                if args.claimed_by and args.clear_claim:
+                    raise ValueError("todo update accepts either --claimed-by or --clear-claim, not both")
                 if not any([
                     args.text,
                     args.status,
@@ -9588,8 +9720,12 @@ def main(argv: list[str] | None = None) -> int:
                     args.task_class,
                     args.action_kind,
                     args.required_write_scopes,
+                    args.claimed_by,
+                    args.clear_claim,
                 ]):
-                    raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, or --required-write-scope")
+                    raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, --required-write-scope, --claimed-by, or --clear-claim")
+                if args.next_claimed_by:
+                    raise ValueError("todo update does not support --next-claimed-by")
                 payload = update_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9603,6 +9739,8 @@ def main(argv: list[str] | None = None) -> int:
                     task_class=args.task_class,
                     action_kind=args.action_kind,
                     required_write_scopes=args.required_write_scopes,
+                    claimed_by=args.claimed_by,
+                    clear_claim=bool(args.clear_claim),
                     project=Path(args.project).expanduser() if args.project else None,
                     state_file=Path(args.state_file).expanduser() if args.state_file else None,
                     dry_run=bool(args.dry_run),
@@ -9610,6 +9748,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.todo_command == "complete":
                 if not args.todo_id:
                     raise ValueError("todo complete requires --todo-id")
+                if args.claimed_by and args.clear_claim:
+                    raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
                 payload = complete_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9617,8 +9757,11 @@ def main(argv: list[str] | None = None) -> int:
                     role=args.role,
                     evidence=args.evidence,
                     note=args.note,
+                    claimed_by=args.claimed_by,
+                    clear_claim=bool(args.clear_claim),
                     next_agent_todo=args.next_agent_todo,
                     next_user_todo=args.next_user_todo,
+                    next_claimed_by=args.next_claimed_by,
                     next_task_class=args.next_task_class,
                     next_action_kind=args.next_action_kind,
                     project=Path(args.project).expanduser() if args.project else None,
@@ -9628,6 +9771,10 @@ def main(argv: list[str] | None = None) -> int:
             elif args.todo_command == "supersede":
                 if not args.todo_id:
                     raise ValueError("todo supersede requires --todo-id")
+                if args.claimed_by or args.clear_claim:
+                    raise ValueError("todo supersede does not support --claimed-by or --clear-claim")
+                if args.next_claimed_by:
+                    raise ValueError("todo supersede does not support --next-claimed-by")
                 payload = supersede_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9643,6 +9790,10 @@ def main(argv: list[str] | None = None) -> int:
                     dry_run=bool(args.dry_run),
                 )
             elif args.todo_command == "archive-completed":
+                if args.claimed_by or args.clear_claim:
+                    raise ValueError("todo archive-completed does not support --claimed-by or --clear-claim")
+                if args.next_claimed_by:
+                    raise ValueError("todo archive-completed does not support --next-claimed-by")
                 payload = archive_completed_todos(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
