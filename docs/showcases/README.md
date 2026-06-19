@@ -16,6 +16,8 @@ into a reusable control-plane pattern:
 The machine-readable catalog lives in
 [showcase-catalog.json](showcase-catalog.json). Public docs and future frontend
 surfaces should consume that file instead of scraping prose.
+The first frontend surface contract lives in
+[frontend-surface.md](frontend-surface.md).
 
 The first static visual asset is the public-safe
 [control-plane board](../assets/control-plane-board.svg), which shows a user
