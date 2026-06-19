@@ -142,6 +142,7 @@ Projection, authority, write scope, and lease integrity.
 | P0 | IP-006 | Checkpointed Scope Mismatch | CLI/controller | ask or repair boundary projection | do not execute action whose write scope is not projected |
 | P1 | IP-011 | Authority Material Intake | Agent plus registry | notify only on gate/conflict | register redacted source contract before relying on material |
 | P1 | IP-016 | Task Lease Claim | Controller/agent | no interruption unless conflict requires decision | claim bounded work with TTL, write scope, and conflict policy |
+| P1 | IP-019 | Side-Agent Scoped Continuation | Primary plus side agent | no interruption unless scope/review is ambiguous | side agent claims scoped todo, uses independent worktree, then self-merges small validated work or hands review to primary |
 
 ### Evidence Lifecycle
 
@@ -856,6 +857,85 @@ files because the only ownership signal was a chat message or dashboard label.
 - `docs/frontstage-channel-lease-roadmap.md`
 - `docs/architecture.md` local server / daemon roadmap
 - future `task_lease_v0` status and conflict smoke.
+
+#### IP-019 Side-Agent Scoped Continuation
+
+**Trigger**
+
+- a shared-control-plane goal declares `coordination.registered_agents` and one
+  `coordination.primary_agent`;
+- a side agent has an automation prompt or handoff scope, such as product docs,
+  showcase work, validation, or another low-conflict side lane;
+- an in-scope agent todo can be claimed with `claimed_by`, while the primary
+  agent remains responsible for high-risk review, publication, reassignment,
+  and merge decisions outside self-merge policy.
+
+**Expected behavior**
+
+The control plane should keep identity and ownership visible without turning
+scope into todo metadata. The side agent learns its scope from the automation
+prompt or handoff, then claims only a concrete in-scope todo:
+
+```bash
+goal-harness todo claim \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by <side-agent-id>
+```
+
+Repository edits happen in an independent worktree/branch. When the slice is
+small, validated, public-safe, and allowed by repository policy, the side agent
+may self-merge and complete the todo with evidence:
+
+```bash
+goal-harness todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by <side-agent-id> \
+  --side-agent-self-merged \
+  --evidence "<commit, validation, and self-merge summary>"
+```
+
+If the self-merged lane has an obvious same-scope continuation, the completion
+may atomically add a successor and claim it back to the same side agent. If the
+work is broad, risky, unclear, or outside the side scope, completion must create
+a primary review todo claimed by the primary agent instead. `claimed_by` remains
+a soft owner and not a permission grant: quota, user gates, public/private
+boundary checks, write scopes, and repository rules still apply.
+
+**Visual Model**
+
+```mermaid
+flowchart TD
+  S["registered side agent wakes with scope"] --> T{"in-scope open todo?"}
+  T -->|"no"| Q["quiet no-op or add public-safe candidate todo"]
+  T -->|"yes"| C["claim todo with claimed_by side-agent"]
+  C --> W["work in independent worktree / branch"]
+  W --> V{"validated and AGENTS self-merge eligible?"}
+  V -->|"yes"| M["self-merge small change with evidence"]
+  M --> K{"same-scope continuation?"}
+  K -->|"yes"| N["complete + add successor claimed_by same side agent"]
+  K -->|"no"| X["complete with no successor or no-follow-up rationale"]
+  V -->|"no"| R["complete with primary review successor"]
+  R --> P["successor claimed_by primary_agent"]
+```
+
+**Bad smell**
+
+A side agent edits the primary checkout, chooses work from chat memory instead
+of the shared todo list, encodes scope into todo metadata, self-merges broad or
+runtime-sensitive work, or creates a review successor and claims it back to
+itself without the explicit self-merge path.
+
+**Validation**
+
+- `docs/project-agent-todo-contract.md`
+- `docs/codex-subagent-orchestration.md`
+- `docs/heartbeat-automation-prompt.md`
+- `examples/todo-lifecycle-cli-smoke.py`
+- `examples/todo-cli-smoke.py`
+- `examples/todo-concurrent-write-lock-smoke.py`
+- `examples/heartbeat-prompt-smoke.py`
 
 ### Evidence Lifecycle
 
