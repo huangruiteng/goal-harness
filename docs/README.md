@@ -65,6 +65,7 @@ incident report, or launch draft.
 ### Product Direction
 
 - [Product vision](product/vision.md)
+- [Reward-style replanning hints](product/reward-style-replanning.md)
 - [Frontstage channel and lease roadmap](frontstage-channel-lease-roadmap.md)
 - [Long-task cadence policy](long-task-cadence-policy.md)
 - [Dreaming exploration lane](dreaming-exploration-lane.md)

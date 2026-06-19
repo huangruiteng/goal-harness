@@ -13,6 +13,10 @@ runtime contract, benchmark route, or launch draft.
 - [Non-technical operator status model](nontechnical-operator-status-model.md):
   first-screen card model for people who need to understand agent progress,
   blockers, next moves, and feedback paths without reading logs or CLI output.
+- [Reward-style replanning hints](reward-style-replanning.md): public-safe
+  design for turning explicit reward, corrections, and steering feedback into
+  compact candidate-ranking hints without raw chat, hidden profiling, or hard
+  gate semantics.
 - [Naming decision packet](naming-decision-packet.md): why the project should
   keep `Goal Harness` as the brand while testing `lifetime-goal control plane`
   as category/tagline language.
