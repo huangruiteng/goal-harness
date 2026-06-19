@@ -764,6 +764,7 @@ def complete_goal_todo(
     next_claimed_by: str | None = None,
     next_task_class: str | None = None,
     next_action_kind: str | None = None,
+    side_agent_self_merged: bool = False,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -803,17 +804,27 @@ def complete_goal_todo(
                 "todo complete with --claimed-by requires coordination.primary_agent "
                 "so Goal Harness can distinguish the primary agent from side agents"
             )
-        if effective_claimed_by and primary_agent and effective_claimed_by != primary_agent:
-            if not next_agent_todo:
+        side_agent_completion = bool(
+            effective_claimed_by and primary_agent and effective_claimed_by != primary_agent
+        )
+        if side_agent_completion:
+            if side_agent_self_merged and not evidence:
+                raise ValueError(
+                    "--side-agent-self-merged requires --evidence with a public-safe "
+                    "self-merge, commit, and validation summary"
+                )
+            if not side_agent_self_merged and not next_agent_todo:
                 raise ValueError(
                     f"side-agent completion by {effective_claimed_by!r} requires "
-                    "--next-agent-todo for primary review, verification, and merge"
+                    "--next-agent-todo for primary review, verification, and merge, "
+                    "or --side-agent-self-merged with --evidence for a small validated self-merge"
                 )
             if effective_next_claimed_by and effective_next_claimed_by != primary_agent:
                 raise ValueError(
                     f"side-agent completion review todo must be claimed_by primary_agent={primary_agent!r}"
                 )
-            effective_next_claimed_by = primary_agent
+            if next_agent_todo:
+                effective_next_claimed_by = primary_agent
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")
         update_result = apply_todo_update_to_lines(
@@ -869,6 +880,7 @@ def complete_goal_todo(
         **update_result,
         "changed": changed,
         "next_todos": next_results,
+        "side_agent_self_merged": bool(side_agent_completion and side_agent_self_merged),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,

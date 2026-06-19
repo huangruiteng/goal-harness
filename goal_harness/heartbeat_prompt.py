@@ -127,13 +127,19 @@ def render_agent_scope_instruction(
         "'Primary agent review, verify, and merge this side-agent work.' "
         f"--next-claimed-by {primary_agent or '<primary_agent>'}"
     )
+    self_merge_command = (
+        f"{cli_bin} todo complete --goal-id {goal_id} --todo-id <todo_id> "
+        f"--claimed-by {agent_id or '<agent_id>'} --side-agent-self-merged "
+        "--evidence '<public-safe self-merge commit and validation summary>'"
+    )
     if thin:
         if agent_role == "primary-agent":
             role_rule = "Primary: own review, verification, merge/publication, and reassignment."
         else:
             role_rule = (
-                f"Side-agent: use independent git worktree/branch; no merge/publish; "
-                f"finish with a primary review todo claimed_by `{primary_agent or '<primary_agent>'}`."
+                "Side-agent: use independent git worktree/branch; self-merge only "
+                "small AGENTS-eligible validated changes; otherwise finish with a "
+                f"primary review todo claimed_by `{primary_agent or '<primary_agent>'}`."
             )
         return (
             f"Agent: `{identity}`; role: {agent_role}; primary: `{primary_agent}`; "
@@ -148,9 +154,10 @@ def render_agent_scope_instruction(
             )
         else:
             role_rule = (
-                "You are a side-agent. Use an independent git worktree/branch. Do not merge/publish. "
-                "Finish with primary review todo: "
-                f"`{completion_command}`."
+                "You are a side-agent. Use an independent git worktree/branch. "
+                "Self-merge only small AGENTS-eligible validated changes with "
+                "`--side-agent-self-merged --evidence`; otherwise create a primary "
+                f"review todo with `--next-agent-todo` and `--next-claimed-by {primary_agent}`."
             )
         return (
             f"Agent identity and scope: agent_id `{identity}`; role: {agent_role}; "
@@ -169,9 +176,11 @@ def render_agent_scope_instruction(
         role_rule = (
             f"You are a side-agent for this goal; primary_agent is `{primary_agent}`. "
             "Do development only in an independent git worktree/branch, never in the "
-            "main checkout. Do not merge, publish, or mutate main-control state except "
-            "through Goal Harness todo/status writeback. When finishing side-agent work, "
-            f"complete it with a primary review todo, for example `{completion_command}`."
+            "main checkout. Self-merge only small AGENTS-eligible validated changes; "
+            "never self-merge runtime, benchmark, permission, production, destructive "
+            "git, or public evidence-policy changes that need primary review. For a "
+            f"self-merge, complete with `{self_merge_command}`. Otherwise complete "
+            f"with a primary review todo, for example `{completion_command}`."
         )
     return f"""Agent identity and scope:
 

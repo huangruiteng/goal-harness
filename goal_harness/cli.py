@@ -5494,6 +5494,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     todo_parser.add_argument(
+        "--side-agent-self-merged",
+        action="store_true",
+        help=(
+            "For todo complete by a side agent, explicitly record that a small validated "
+            "side-agent change was self-merged; requires --evidence and bypasses the "
+            "default primary review successor todo."
+        ),
+    )
+    todo_parser.add_argument(
         "--next-task-class",
         choices=["advancement_task", "continuous_monitor", "user_gate", "blocker"],
         help="Task class for --next-agent-todo. Defaults to advancement_task.",
@@ -9654,6 +9663,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("todo add accepts --claimed-by but not --clear-claim")
                 if args.next_claimed_by:
                     raise ValueError("todo add does not support --next-claimed-by")
+                if args.side_agent_self_merged:
+                    raise ValueError("todo add does not support --side-agent-self-merged")
                 payload = add_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9690,6 +9701,7 @@ def main(argv: list[str] | None = None) -> int:
                         ("--next-claimed-by", args.next_claimed_by),
                         ("--next-task-class", args.next_task_class),
                         ("--next-action-kind", args.next_action_kind),
+                        ("--side-agent-self-merged", args.side_agent_self_merged),
                     )
                     if value
                 ]
@@ -9730,6 +9742,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, --required-write-scope, --claimed-by, or --clear-claim")
                 if args.next_claimed_by:
                     raise ValueError("todo update does not support --next-claimed-by")
+                if args.side_agent_self_merged:
+                    raise ValueError("todo update does not support --side-agent-self-merged")
                 payload = update_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9768,6 +9782,7 @@ def main(argv: list[str] | None = None) -> int:
                     next_claimed_by=args.next_claimed_by,
                     next_task_class=args.next_task_class,
                     next_action_kind=args.next_action_kind,
+                    side_agent_self_merged=bool(args.side_agent_self_merged),
                     project=Path(args.project).expanduser() if args.project else None,
                     state_file=Path(args.state_file).expanduser() if args.state_file else None,
                     dry_run=bool(args.dry_run),
@@ -9779,6 +9794,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("todo supersede does not support --claimed-by or --clear-claim")
                 if args.next_claimed_by:
                     raise ValueError("todo supersede does not support --next-claimed-by")
+                if args.side_agent_self_merged:
+                    raise ValueError("todo supersede does not support --side-agent-self-merged")
                 payload = supersede_goal_todo(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
@@ -9798,6 +9815,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("todo archive-completed does not support --claimed-by or --clear-claim")
                 if args.next_claimed_by:
                     raise ValueError("todo archive-completed does not support --next-claimed-by")
+                if args.side_agent_self_merged:
+                    raise ValueError("todo archive-completed does not support --side-agent-self-merged")
                 payload = archive_completed_todos(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
