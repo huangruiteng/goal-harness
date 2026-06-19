@@ -33,6 +33,7 @@ The first static frontstage prototype is generated from the catalog with
 | [0617 blocked P0 with safe P1/P2 rotation](cases/0617-blocked-p0-safe-rotation.md) | Blocked priority fallback, concrete user gate, quota discipline | Reproducible synthetic demo | `python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py` |
 | [0619 dynamic workflow for hardware-agent development](cases/0619-dynamic-workflow-hardware-agent.md) | Dynamic workflow, multi-agent convergence, shared control plane | Redacted stub pending contributor detail | Public-safe narrative only |
 | [0619 Goal Harness self-iteration loop](cases/0619-goal-harness-self-iteration.md) | Self-iteration, side-agent scope, evidence writeback | Public Git evidence case | Commit-backed narrative and workload signal |
+| [0620 creator-operator long-running agent case](cases/0620-creator-operator-case-spec.md) | Creator-operator workflow, user gate, feedback capture, material library | Synthetic product case spec | Public-safe narrative; fake-data demo pending |
 
 ## Case Lifecycle
 

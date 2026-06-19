@@ -198,6 +198,56 @@
           "public docs and smokes turn the experience into a reusable case"
         ]
       }
+    },
+    {
+      "id": "2026-06-20-creator-operator-case-spec",
+      "date": "2026-06-20",
+      "title": "Creator-operator long-running agent case",
+      "status": "public_safe_case_spec",
+      "case_page": "docs/showcases/cases/0620-creator-operator-case-spec.md",
+      "demo_command": null,
+      "domain": "creator-operations",
+      "audience": [
+        "non-technical-operator",
+        "creator-operator",
+        "product-builder",
+        "open-source-user"
+      ],
+      "pattern_tags": [
+        "creator_operator_workflow",
+        "gate_aware_continuation",
+        "feedback_capture",
+        "safe_side_path",
+        "material_library",
+        "synthetic_case"
+      ],
+      "headline": "A creator-operator needs a long-running agent loop that keeps research moving while publishing decisions stay gated.",
+      "problem": "Content research, preference mapping, insight extraction, draft queues, and material libraries can all blur together when the user only sees chat logs or raw agent traces.",
+      "goal_harness_behavior": [
+        "represent the creative objective as durable goal state",
+        "separate publishing decisions from safe research and organization work",
+        "turn feedback into preference hints, gate decisions, todo updates, or boundary corrections",
+        "keep synthetic/public material separate from private notes and unpublished drafts",
+        "show the next agent move before another automatic run spends compute"
+      ],
+      "user_value": "A non-technical operator can see what changed, what is blocked, what can safely continue, and how feedback changes the plan without reading prompts, logs, or raw traces.",
+      "evidence_boundary": "Synthetic case spec only; no real platform data, creator notes, screenshots, private drafts, raw browsing traces, local paths, credentials, or performance claims.",
+      "frontend_card": {
+        "visual_metaphor": "creator workspace with trend candidates, preference map, insight board, draft queue, material library, and a visible publishing gate",
+        "primary_metric_hint": "legibility: the user can distinguish safe research progress from publish-gated work",
+        "badges": [
+          "synthetic",
+          "creator-ops",
+          "user-gate"
+        ],
+        "story_beats": [
+          "creator-operator wants recurring trend research and content planning",
+          "agent proposes synthetic trend candidates and maps them to preference hints",
+          "Goal Harness keeps publishing gated while safe side work continues",
+          "user feedback becomes structured control-plane state",
+          "next run starts from visible goals, todos, boundaries, and feedback"
+        ]
+      }
     }
   ]
 }
