@@ -1,0 +1,116 @@
+{
+  "schema_version": "goal_harness_showcase_catalog_v0",
+  "updated_at": "2026-06-19",
+  "redaction_policy": {
+    "public_repo_may_include": [
+      "sanitized domain labels",
+      "reusable control-plane patterns",
+      "synthetic demos",
+      "explicit evidence boundaries"
+    ],
+    "public_repo_must_not_include": [
+      "private document links",
+      "internal screenshots",
+      "raw chats",
+      "raw benchmark task text",
+      "private repositories",
+      "local filesystem paths",
+      "credentials",
+      "unpublished domain artifacts"
+    ]
+  },
+  "cases": [
+    {
+      "id": "2026-06-17-blocked-p0-safe-rotation",
+      "date": "2026-06-17",
+      "title": "Blocked P0 with safe P1/P2 rotation",
+      "status": "reproducible_synthetic_demo",
+      "case_page": "docs/showcases/cases/0617-blocked-p0-safe-rotation.md",
+      "demo_command": "python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py",
+      "domain": "benchmark-rotation",
+      "audience": [
+        "operator",
+        "agent-platform-developer",
+        "benchmark-developer"
+      ],
+      "pattern_tags": [
+        "blocked_priority_fallback",
+        "concrete_user_gate",
+        "safe_fallback_work",
+        "quota_discipline",
+        "attention_reduction"
+      ],
+      "headline": "A gated P0 lane should not stall a whole long-running goal when safe fallback work exists.",
+      "problem": "A benchmark lane needed a large local dependency before it could continue, while other no-upload benchmark work remained safe.",
+      "goal_harness_behavior": [
+        "surface the P0 dependency as a concrete user gate",
+        "avoid spending on the gated lane",
+        "select a non-dependent fallback lane",
+        "record both the blocker and the fallback reason"
+      ],
+      "user_value": "The operator sees exactly what decision is needed while the agent can keep making bounded progress elsewhere.",
+      "evidence_boundary": "Synthetic public fixture only; no private screenshots, raw tasks, internal links, local image names, or raw run logs.",
+      "frontend_card": {
+        "visual_metaphor": "priority lanes with one gated lane and one active fallback lane",
+        "primary_metric_hint": "attention reduction: user sees one concrete decision instead of reading the whole run log",
+        "badges": [
+          "reproducible",
+          "user-gate",
+          "fallback"
+        ],
+        "story_beats": [
+          "P0 lane is blocked by a user decision",
+          "Goal Harness projects the decision as a user todo",
+          "agent continues safe fallback work",
+          "state records blocker, fallback, validation, and spend policy"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-19-dynamic-workflow-hardware-agent",
+      "date": "2026-06-19",
+      "title": "Dynamic workflow for hardware-agent development",
+      "status": "redacted_stub_pending_contributor_details",
+      "case_page": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.md",
+      "demo_command": null,
+      "domain": "hardware-agent-development",
+      "audience": [
+        "agent-platform-developer",
+        "technical-lead",
+        "open-source-user"
+      ],
+      "pattern_tags": [
+        "dynamic_workflow",
+        "multi_agent_coordination",
+        "shared_control_plane",
+        "long_unattended_goal",
+        "convergence"
+      ],
+      "headline": "A fuzzy long-running engineering goal needs a shared control plane when multiple worker agents participate.",
+      "problem": "Specialized engineering work can require multiple agents to split work and converge without losing ownership or state.",
+      "goal_harness_behavior": [
+        "keep durable goal state outside any one chat thread",
+        "make ownership and review handoff explicit",
+        "project evidence and convergence state for the operator",
+        "leave domain-specific artifacts private until sanitized"
+      ],
+      "user_value": "The public claim is limited to the observed control-plane pattern: shared state helps long-running multi-agent work converge.",
+      "evidence_boundary": "Redacted stub; no raw chats, screenshots, proprietary design details, internal tool names, repositories, paths, task ids, or unpublished hardware artifacts.",
+      "frontend_card": {
+        "visual_metaphor": "multiple worker lanes converging through one shared control plane",
+        "primary_metric_hint": "convergence under a fuzzy goal",
+        "badges": [
+          "redacted",
+          "multi-agent",
+          "pending-demo"
+        ],
+        "story_beats": [
+          "fuzzy engineering goal needs multiple workers",
+          "Goal Harness provides shared state and ownership",
+          "work converges through evidence and primary review",
+          "public demo waits for safe abstraction"
+        ]
+      }
+    }
+  ]
+}

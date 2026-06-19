@@ -11,6 +11,8 @@ incident report, or launch draft.
 - [Architecture](architecture.md): core concepts and control-plane shape.
 - [Integration guide](integration.md): how to connect a project to Goal
   Harness.
+- [Showcases](showcases/README.md): public-safe cases, reproducible demos, and
+  frontend-ready case metadata.
 - [Benchmark developer workflow](benchmark-developer-workflow.md): how to run,
   observe, and ingest benchmark slices as a developer-facing product workflow.
 - [State interaction model](state-interaction-model.md): user, agent, and state
@@ -66,6 +68,7 @@ incident report, or launch draft.
 
 ### Research And Evidence
 
+- [Showcases](showcases/README.md)
 - [Long-horizon agent benchmark research](research/long-horizon-agent-benchmarks/README.md)
 
 ### Outreach And Narrative Drafts
@@ -80,8 +83,10 @@ incident report, or launch draft.
 
 - Keep the `docs/` root for stable first-line product docs that contributors
   are expected to read or link from public surfaces.
-- Put benchmark dossiers, case studies, route packets, and publication planning
-  under `docs/research/`.
+- Put public-safe showcase cases, reproducible demos, and frontend-ready case
+  metadata under `docs/showcases/`.
+- Put benchmark dossiers, route packets, and publication planning under
+  `docs/research/`.
 - Put dated release-readiness packets, incident reports, and superseded
   decision records under `docs/archive/`.
 - Put public launch, narrative, demo, and PR copy drafts under `docs/outreach/`.

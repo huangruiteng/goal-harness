@@ -138,6 +138,14 @@ Do not use Goal Harness as an autonomous production controller. It is a local
 coordination substrate; project ownership and dangerous permissions stay with
 the human/operator.
 
+## Showcases
+
+The [showcase catalog](docs/showcases/README.md) collects public-safe cases
+that make these control-plane patterns concrete. Current entries include a
+reproducible synthetic demo for a blocked P0 benchmark lane that safely
+continues P1/P2 work, and a redacted stub for a dynamic multi-agent hardware
+development workflow awaiting contributor detail.
+
 ## Requirements
 
 - Python 3.11+
@@ -624,6 +632,7 @@ goal-harness upgrade-plan --format json
 Start here:
 
 - [Documentation index](docs/README.md)
+- [Showcase catalog](docs/showcases/README.md)
 - [State interaction model](docs/state-interaction-model.md)
 - [Interaction pattern catalog](docs/interaction-pattern-catalog.md)
 - [Integration guide](docs/integration.md)
