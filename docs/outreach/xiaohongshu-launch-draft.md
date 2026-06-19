@@ -4,9 +4,9 @@
 
 **Gate-aware human-in-the-loop control plane**
 
-**不绕过人，也不让 agent 空转。**
+**让人的判断成为控制面，而不是让 agent 在等待里空转。**
 
-Goal Harness 不是让 agent 绕过用户决策，而是让 user gate 变成可管理对象：该等人的地方明确等人，不该空等的地方继续推进安全侧路。
+Goal Harness 把用户决策、agent todo、safe fallback、run history 和 quota 放进同一层状态：该停的地方明确停，该继续的安全侧路继续走。
 
 ## Current Positioning
 

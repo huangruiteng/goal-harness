@@ -2,6 +2,13 @@
 
 **Long-running agent work, without losing the plot.**
 
+**Gate-aware human-in-the-loop control plane**
+
+**让人的判断成为控制面，而不是让 agent 在等待里空转。**
+
+Goal Harness 把用户决策、agent todo、safe fallback、run history 和 quota
+放进同一层状态：该停的地方明确停，该继续的安全侧路继续走。
+
 Goal Harness is a local control plane for AI agent projects: keep goals, gates,
 todos, run history, quota, side-agent ownership, and human decisions visible
 across many turns.

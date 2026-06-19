@@ -17,6 +17,15 @@ logs, or traces. They should be able to open a first screen and understand:
 - what the agent needs from the user;
 - how user feedback changes the plan.
 
+## First-Screen Copy
+
+**Gate-aware human-in-the-loop control plane**
+
+**让人的判断成为控制面，而不是让 agent 在等待里空转。**
+
+Goal Harness 把用户决策、agent todo、safe fallback、run history 和 quota
+放进同一层状态：该停的地方明确停，该继续的安全侧路继续走。
+
 ## Creator-Operator Case
 
 A useful medium-term case is a self-media or creator-operations user. The user
