@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -57,7 +58,7 @@ def init_repo(primary: Path, side: Path) -> None:
     run_git(primary, "worktree", "add", str(side), "-b", "side-fixture")
 
 
-def status_payload(repo: Path) -> dict:
+def status_payload(repo: Path, registry: Path) -> dict:
     quota = {
         "compute": 1.0,
         "window_hours": 24,
@@ -75,7 +76,6 @@ def status_payload(repo: Path) -> dict:
         "id": GOAL_ID,
         "registry_member": True,
         "status": "active",
-        "repo": str(repo),
         "adapter_kind": "harness_self_improvement",
         "adapter_status": "connected-read-only",
         "coordination": coordination,
@@ -99,7 +99,7 @@ def status_payload(repo: Path) -> dict:
     }
     return {
         "ok": True,
-        "registry": "./fixtures/registry.json",
+        "registry": str(registry),
         "runtime_root": "./fixtures/runtime",
         "goal_count": 1,
         "run_count": 1,
@@ -114,11 +114,25 @@ def main() -> int:
         primary = root / "primary"
         side = root / "side-worktree"
         foreign = root / "foreign"
+        registry = root / "registry.global.json"
         init_repo(primary, side)
+        registry.write_text(
+            json.dumps(
+                {
+                    "goals": [
+                        {
+                            "id": GOAL_ID,
+                            "repo": str(primary),
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
         foreign.mkdir(parents=True)
         run_git(foreign, "init")
 
-        payload = status_payload(primary)
+        payload = status_payload(primary, registry)
 
         with pushd(primary):
             guarded = build_quota_should_run(

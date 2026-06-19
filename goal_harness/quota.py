@@ -3750,6 +3750,13 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
         else {}
     )
     run_goals = run_history.get("goals") if isinstance(run_history.get("goals"), list) else []
+    status_goals = status_payload.get("goals") if isinstance(status_payload.get("goals"), list) else []
+    status_goal_by_id = {
+        str(goal.get("id") or ""): goal
+        for goal in status_goals
+        if isinstance(goal, dict) and goal.get("id")
+    }
+    registry_goal_by_id = _registry_goal_by_id(status_payload)
     groups: dict[str, list[dict[str, Any]]] = {state: [] for state in QUOTA_STATE_ORDER}
     groups["unknown"] = []
 
@@ -3757,6 +3764,7 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
         if not isinstance(goal, dict) or not goal.get("registry_member"):
             continue
         goal_id = str(goal.get("id") or "")
+        status_goal = status_goal_by_id.get(goal_id) or registry_goal_by_id.get(goal_id) or {}
         attention = queue_by_goal.get(goal_id, {})
         project_asset = (
             attention.get("project_asset")
@@ -3822,7 +3830,14 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             or latest.get("recommended_action"),
             "adapter_kind": goal.get("adapter_kind"),
             "adapter_status": goal.get("adapter_status"),
-            "repo": goal.get("repo") or goal.get("project") or goal.get("root"),
+            "repo": (
+                goal.get("repo")
+                or goal.get("project")
+                or goal.get("root")
+                or status_goal.get("repo")
+                or status_goal.get("project")
+                or status_goal.get("root")
+            ),
             "coordination": goal.get("coordination") if isinstance(goal.get("coordination"), dict) else None,
             "spawn_policy": goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else None,
             "guards": goal.get("guards") if isinstance(goal.get("guards"), list) else [],
@@ -3974,6 +3989,25 @@ def _promotion_readiness_warning(status_payload: dict[str, Any]) -> dict[str, An
         "message": (
             "promotion readiness evidence is missing, stale, or unknown; run canary readiness smoke"
         ),
+    }
+
+
+def _registry_goal_by_id(status_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    registry_value = status_payload.get("registry")
+    if not registry_value:
+        return {}
+    registry_path = Path(str(registry_value)).expanduser()
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    goals = payload.get("goals") if isinstance(payload, dict) else None
+    if not isinstance(goals, list):
+        return {}
+    return {
+        str(goal.get("id") or ""): goal
+        for goal in goals
+        if isinstance(goal, dict) and goal.get("id")
     }
 
 
