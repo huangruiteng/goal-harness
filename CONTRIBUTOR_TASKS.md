@@ -44,6 +44,19 @@ Start with **Starter** tasks if this is your first contribution. Choose
 tasks only when you are ready to touch shared state, adapters, or concurrency.
 Use **Design/RFC** tasks to shape direction before implementation.
 
+## Recent Maintainer Progress
+
+These public milestones changed which tasks are still useful contributor entry
+points:
+
+| Area | Landed | Contributor implication |
+| --- | --- | --- |
+| Benchmark workflow | `939b02c` added ECS bootstrap tooling, Terminal-Bench no-upload smoke tooling, and a compact compose-startup reducer. | Do not recreate the ECS substrate. Help by extending the same wrapper/reducer shape to ALE and SkillsBench, or by improving route labels and public-safe reducers. |
+| Autonomous replan | `d1f955a` made the autonomous-replan obligation smoke run in-process by default, with bounded subprocess coverage. | The broad smoke-performance cleanup is done. Future work should be a narrow regression or timeout guard, not another full rewrite. |
+| Product vision | `1813744` added `docs/product/vision.md` and moved the creator-operator case into the public product direction. | Creator/operator work is now a first-class public productization track, not only a local maintainer todo. |
+| Multi-agent coordination | `cb9f899`, `0f1ca9b`, `e73f9f1`, and `9acdaa2` landed soft todo claims, identity-aware heartbeat prompts, and side-agent self-merge policy. | Next public slices are agent profiles, side-agent worktree guardrails, and hard per-todo leases. |
+| Showcases and README | `a384f41` and `f521471` made the public showcase catalog and README landing clearer. | New narrative work should add cases, visuals, or demo surfaces, not rebuild the landing-page frame. |
+
 ### Starter / Good First
 
 Low setup, docs-first, or narrow fixture work. These should be good entry
@@ -70,15 +83,15 @@ for contributors who can run local CLI smokes and keep changes scoped.
 | GH-C05 | regression | Create the first `regression/` case for a previously observed control-plane stall, such as external-evidence waits, P0-blocked/P1 fallback, compact blocker writeback, or no-progress self-repair. | Focused regression command plus `python3 -m py_compile goal_harness/*.py` |
 | GH-C06 | cli | Start CLI modularization by defining a `goal_harness/cli_commands/` command-module contract and migrating one low-risk command group while preserving old invocations. | Old command smoke plus `python3 -m py_compile goal_harness/*.py` |
 | GH-C08 | status | Improve agent todo projection so `status` / `quota should-run` can expose a broader priority-sorted backlog without letting monitor items hide executable work. | `goal-harness --format json status` fixture or focused smoke |
-| GH-C11 | fresh clone | Harden the fresh-clone public user path: install wrapper, PATH, `doctor`, `demo`, `status`, dashboard status export, and project skill install/update. | Fresh checkout notes plus runnable smoke or checklist |
-| GH-C12 | dashboard | Add a first-screen status/dashboard acceptance smoke that verifies goal name, waiting owner, recommended action, safety boundary, first user todo, and highest-priority agent todo appear before raw run-history drilldown. | Dashboard/status smoke or fixture |
 | GH-C14 | protocol | Add a focused regression for protocol action packet output so future Codex CLI wrappers cannot accidentally invoke model APIs or runner adapters from the decision-only path. | `python3 examples/protocol-action-packet-smoke.py` or new focused smoke |
 | GH-C22 | benchmark | Add launch artifact observable handles: pid/process state, job basename, compact artifact refs, allowed poll command, and read-boundary flags so heartbeat observation does not depend on chat memory. | Focused fake launch artifact smoke |
-| GH-C40 | benchmark | Improve the benchmark developer workflow product path for the cloud Codex default route: keep the ECS bootstrap probe, Terminal-Bench no-upload smoke launcher, and compact startup reducer usable from a fresh checkout, then extend the same shape to ALE and SkillsBench. | `python3 examples/benchmark-developer-workflow-doc-smoke.py` and `python3 examples/benchmark-ecs-developer-tooling-smoke.py` |
+| GH-C40 | benchmark | Extend the benchmark developer workflow product path after the ECS tooling landed: add ALE and SkillsBench compact readiness/blocker commands or examples that follow the same wrapper/reducer shape without launching private benchmark jobs or copying raw artifacts. | `python3 examples/benchmark-developer-workflow-doc-smoke.py`, `python3 examples/benchmark-ecs-developer-tooling-smoke.py`, and a new focused smoke if code is added |
 | GH-C41 | benchmark | Add an explicit benchmark route label/policy that separates `cloud_codex_default`, `split_control_fallback`, and `upstream_adapter_branch`, so legacy bridge probes and benchmark-fork patches cannot be mistaken for clean product-path evidence. | Policy fixture plus `python3 examples/benchmark-developer-workflow-doc-smoke.py` |
 | GH-C42 | benchmark | Retire split-control from the main benchmark attention path after the first cloud-host smoke succeeds or reaches a concrete gate: keep durable contracts/reducers, move new local-Codex/remote-executor experiments to a labeled experimental branch, and delete or defer bridge code that the cloud route no longer needs. | Inventory note plus `python3 examples/benchmark-developer-workflow-doc-smoke.py` |
-| GH-C27 | planning | Add a contract regression separating autonomous replan from dreaming: autonomous replan is must-attempt bounded delivery/control-plane repair; dreaming is advisory, operator-gated, and must not emit `agent_command`. | Focused quota/status smoke |
 | GH-C28 | planning | Implement local-only dry-run proposal generation for dreaming: read public-safe run history/project state and emit proposal records without mutating project truth. | Dry-run smoke with fake project state |
+| GH-C43 | product docs | Turn `docs/product/vision.md` into a public-safe creator-operator showcase skeleton under `docs/showcases/`, using only synthetic/redacted evidence and no private platform data. | `python3 examples/showcase-catalog-smoke.py` plus `goal-harness check --scan-path docs/product --scan-path docs/showcases` |
+| GH-C44 | dashboard | Draft the non-technical operator status model: map Goal Harness status fields to plain-language cards such as "what happened", "what is blocked", "what comes next", and "what feedback would change". | `goal-harness check --scan-path docs/product --scan-path docs/status-data-contract.md --scan-path docs/dashboard-frontend-selection.md`; dashboard fixture if added |
+| GH-C45 | coordination | Add a side-agent worktree guard that warns or fails before repository edits when a side agent is not in an independent worktree/branch, while preserving the documented small self-merge path. | Focused CLI or prompt smoke plus `goal-harness check --scan-path README.md --scan-path docs/frontstage-channel-lease-roadmap.md` |
 
 ### Advanced Implementation
 
@@ -90,6 +103,8 @@ and keep the first PR as a narrow slice.
 | GH-C07 | state | Add structured-state write serialization for todo/refresh/history writers using a per-goal lock or optimistic revision guard. Include a concurrent todo add/update regression. | New concurrency regression plus `python3 -m py_compile goal_harness/*.py` |
 | GH-C15 | benchmark | Implement benchmark ledger drift warning: when compact run history has a benchmark result but `benchmark-run-ledger.json/md` lacks the row, status should warn or closeout should auto-upsert. Keep raw task/log/trajectory material out. | `python3 examples/benchmark-run-ledger-smoke.py` |
 | GH-C16 | benchmark | Add a public-safe trajectory-summary contract for non-SkillsBench adapters so Terminal-Bench/SWE/ALE can expose comparable counters without raw task text, logs, verifier output, or trajectory bodies. | New unit/fake fixture smoke |
+| GH-C46 | coordination | Define and implement `agent_profile_v0` / `agent_members` registry projection for registered id, primary/side role, default scope, worktree policy, and review handoff policy so heartbeat prompts can render identity without copying scope text into every automation. | Configure/heartbeat prompt smokes plus `python3 -m py_compile goal_harness/*.py` |
+| GH-C47 | state | Promote soft todo claims toward `task_lease_v0`: per-`(goal_id, todo_id)` lease key, TTL, idempotency key, write-scope conflict policy, renew/transfer semantics, and status/quota projection. | Concurrent todo/lease smoke plus `python3 -m py_compile goal_harness/*.py` |
 
 ### Design / RFC
 
@@ -98,23 +113,17 @@ before implementation.
 
 | ID | Area | Task | Validation |
 | --- | --- | --- | --- |
-| GH-C17 | benchmark | Design per-round artifact snapshot/restore for blind-loop benchmark runs so `best_score` can become an executable final-selection policy, not only an offline metric. | Design note with stop conditions and public/private boundary |
 | GH-C20 | benchmark | Define runner-agnostic benchmark lifecycle schema: `launch -> observe -> ingest -> classify -> ledger`, with stages such as process started, job materialized, trial started, worker started, result written, verifier scored. | Design doc plus one adapter-neutral fixture |
 | GH-C21 | benchmark | Split benchmark accounting into launcher attempt, case attempt, solver attempt, verifier attempt, and official-score attempt. Launcher/materialization failures must not count as case failures. | Design doc or focused ledger fixture |
 | GH-C23 | policy | Replace narrative benchmark authorization with `run_permission_policy_v0`: allowed local no-upload model/Docker/Harbor actions, forbidden upload/leaderboard/public claim/production/cloud actions, timeout budget, and compact-only observation. | Schema note plus projection smoke |
-| GH-C24 | adapters | Plan adapter lifecycle rollout from Terminal-Bench to SkillsBench, SWE, and ALE using the same lifecycle/failure schema while keeping benchmark-specific runner details inside adapters. | Design note accepted by maintainers |
 | GH-C25 | server | Implement the first server-roadmap slice from `docs/architecture.md`: file-backed per-goal writer serialization plus idempotency keys for one narrow write path, with CLI-only fallback preserved. | Concurrency regression plus `python3 -m py_compile goal_harness/*.py` |
-| GH-C26 | planning | Define server-managed dreaming/planning semantics: background planning may propose ranked todos and evidence probes but must not execute protected work or spend delivery quota. | Design note plus no-execution fixture |
-| GH-C29 | dashboard | Add dashboard/status design for a separate Dreaming lane or badge beside delivery and operator gates, so exploration proposals do not interrupt active project agents. | Dashboard design note or fixture |
-| GH-C31 | project intake | Prepare a read-only observer / authority-map intake for a complex open-source project. It should produce only a compact project map and missing-gate list before any write-control or private material access. | Design note plus dry-run map fixture |
 | GH-C32 | learning | Design public-safe reward-style learning for replanning: turn explicit reward/corrections into compact ranking hints without storing raw private chat or treating inferred preferences as hard gates. | Design note with privacy constraints |
 | GH-C33 | resource sync | After server/daemon design lands, define periodic Resource-to-Todo sync that compares repo docs, roadmap/status contracts, and authority commitments against active todos, then proposes updates through structured lifecycle APIs. | Design note; implementation blocked on server lane |
-| GH-C34 | orchestration | Design `task_graph_projection_v0` as an optional derived view over todos, gates, leases, run ids, and event-ledger state. It must help multi-stage repair/verification without making graph files a second truth source. | Design note plus one status/review-packet fixture |
 | GH-C35 | integration | Design a session-runtime control-plane adapter: read compact session/event/outcome/approval summaries from an external agent host, project Goal Harness attention items, and keep raw transcripts, credentials, billing, permissions, and product frontstage outside Goal Harness. | Design note with adapter-neutral smoke plan |
-| GH-C36 | narrative | Prepare a public-safe blocked-priority fallback demo: a fake benchmark rotation where one lane is user-gated and the harness continues a safe fallback while preserving the blocked gate, quota decision, and evidence boundary. Do not use private raw benchmark artifacts. | Demo fixture or doc plus `goal-harness check --scan-path README.md --scan-path docs/outreach/xiaohongshu-launch-draft.md` |
 | GH-C37 | interaction model | Curate the interaction pattern catalog with one new public-safe good/bad case, including trigger signals, user channel, agent channel, state contract, bad smell, and validation reference. Do not copy raw chat, private benchmark artifacts, or internal links. | `goal-harness check --scan-path docs/interaction-pattern-catalog.md` |
-| GH-C38 | narrative | Create a public-safe visual or short animated demo storyboard for one interaction pattern, starting with blocked-priority fallback. Use fake data, show user/agent/Goal Harness channels, and keep raw benchmark evidence out. | Storyboard, Mermaid/SVG, or video script plus `goal-harness check --scan-path docs/interaction-pattern-catalog.md` |
 | GH-C39 | interaction model | Design explicit `decision_scope` / `required_decision_scopes` metadata for user gates and agent todos so scoped fallback does not rely on prompt memory or text inference. | RFC update to `docs/interaction-pattern-catalog.md` plus one projection fixture |
+| GH-C48 | product | Design the creator-ops fake-data demo storyboard: trend discovery -> preference map -> insight board -> draft queue -> material library -> human feedback -> controlled replan. Use synthetic/public-safe data only. | Storyboard doc under `docs/product/` or `docs/showcases/` plus `goal-harness check --scan-path docs/product --scan-path docs/showcases` |
+| GH-C49 | policy | Define the creator-ops feedback and boundary contract: how non-technical user feedback becomes gates, preferences, todo updates, or product-improvement notes while preserving source attribution, platform terms, no-autopublish gates, and private creative-material boundaries. | Contract/RFC under `docs/product/` plus `goal-harness check --scan-path docs/product --scan-path docs/public-private-boundary.md` |
 
 ### Maintainer-Owned / Coordination Required
 
@@ -132,8 +141,8 @@ This board is maintained from public-safe projections of:
 
 - the local `goal-harness-meta` Agent Todo list;
 - public docs under `docs/`, especially the state interaction model, status
-  data contract, quota allocation, integration guide, and benchmark research
-  docs;
+  data contract, quota allocation, integration guide, product vision, and
+  benchmark research docs;
 - recent maintainer review of which work is externally claimable versus
   maintainer-owned live automation.
 
