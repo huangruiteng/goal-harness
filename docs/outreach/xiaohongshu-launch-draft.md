@@ -1,5 +1,13 @@
 # Xiaohongshu / Launch Narrative Draft
 
+## 首屏核心
+
+**Gate-aware human-in-the-loop control plane**
+
+**不绕过人，也不让 agent 空转。**
+
+Goal Harness 不是让 agent 绕过用户决策，而是让 user gate 变成可管理对象：该等人的地方明确等人，不该空等的地方继续推进安全侧路。
+
 ## Current Positioning
 
 Goal Harness 的发布重点不是“又做了一个 agent 框架”，而是一个更小、更真实的产品问题：

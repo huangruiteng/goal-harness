@@ -79,6 +79,15 @@ def main() -> int:
     root_markdown = sorted(DOCS.glob("*.md"))
     assert len(root_markdown) <= 27, [path.name for path in root_markdown]
 
+    xiaohongshu_draft = read("docs/outreach/xiaohongshu-launch-draft.md")
+    for required in [
+        "Gate-aware human-in-the-loop control plane",
+        "不绕过人，也不让 agent 空转。",
+        "Goal Harness 不是让 agent 绕过用户决策",
+        "不该空等的地方继续推进安全侧路",
+    ]:
+        assert required in xiaohongshu_draft, required
+
     for old_path, new_path in MOVED_PATHS.items():
         assert not (REPO_ROOT / old_path).exists(), old_path
         assert (REPO_ROOT / new_path).is_file(), new_path
