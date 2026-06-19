@@ -149,11 +149,15 @@ Frontstage consumers should treat this as an input snapshot:
   required capabilities, workspace guards, or task leases.
 
 The first product-path fixture lives in `goal_harness.frontstage` and is covered
-by `examples/goal-channel-projection-smoke.py`. It intentionally stays a pure
-read-only builder: callers pass already-compact status, quota, run-history,
+by `examples/goal-channel-projection-smoke.py` plus
+`examples/goal-channel-frontstage-fixture-smoke.py`. It intentionally stays
+read-only: callers pass already-compact status, quota, run-history,
 review-packet, artifact, and lease/claim payloads; the builder emits
 `source_warnings` when raw or private-looking fields appear instead of copying
-those values into the channel.
+those values into the channel. The static HTML fixture in
+`examples/goal-channel-frontstage-fixture.py` renders that projection into
+semantic panels with `data-panel` markers, no write controls, and a visible
+truth contract for future dashboard or CLI export work.
 
 ### `agent_member_v0`
 
@@ -221,8 +225,9 @@ P1:
   controller confusion, and it naturally extends the existing todo locking
   lane. The durable invariant is per-todo pending: one active pending lease per
   `(goal_id, todo_id)`, not one active lease per goal or project.
-- Add a compact channel projection contract to `status` or a new read-only CLI
-  command so UI can show a goal as a channel without becoming truth.
+- Wire `goal_channel_projection_v0` into a real dashboard data feed or a new
+  read-only CLI/status export so UI can show a goal as a channel without
+  becoming truth.
 
 P2:
 
