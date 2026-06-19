@@ -10,6 +10,9 @@ runtime contract, benchmark route, or launch draft.
   product model where the server owns durable state and governed planning
   lanes, the client acts as the user's intent proxy, and executor loops perform
   bounded work with evidence writeback.
+- [Non-technical operator status model](nontechnical-operator-status-model.md):
+  first-screen card model for people who need to understand agent progress,
+  blockers, next moves, and feedback paths without reading logs or CLI output.
 - [Naming decision packet](naming-decision-packet.md): why the project should
   keep `Goal Harness` as the brand while testing `lifetime-goal control plane`
   as category/tagline language.
