@@ -15,6 +15,10 @@ runtime contract, benchmark route, or launch draft.
   Harness loop, later automation tries to steer the same visible session, and
   headless `codex exec` remains an explicit fallback rather than the default
   user experience.
+- [Codex CLI automation driver audit](codex-cli-automation-driver.md): the
+  current Codex CLI scheduler/session surface audit, with a conservative local
+  driver shape that keeps TUI bootstrap primary and treats `codex exec` as an
+  explicit fallback.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
   identity/scope contract for primary and side agents, including worktree and
   review handoff policy, while keeping todo ownership in `claimed_by` and future
