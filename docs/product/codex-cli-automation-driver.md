@@ -120,6 +120,26 @@ The fixture is public-safe and boolean-only: user opt-in, quota guard, idle
 guard, visibility, interruptibility, private-data boundary, and compact
 writeback planning. It does not run Codex or inspect session state.
 
+The next v0 packet turns those dry-run pieces into one driver decision without
+executing anything:
+
+```bash
+goal-harness codex-cli-visible-driver-run --project . --goal-id <goal> --agent-id <agent>
+```
+
+This is still a run packet, not a Codex runner. It does not run Codex, read raw
+transcripts, inspect session files, mutate a Codex session, or spend Goal
+Harness quota. It only chooses the next safe boundary:
+
+- require a public-safe visible-session proof before any resume or
+  remote-control path is treated as same-session automation;
+- keep the TUI bootstrap as the default when no proof exists;
+- require `--allow-headless-fallback` before emitting a headless `codex exec`
+  fallback command;
+- mark a visible session as a candidate only when the proof fixture confirms
+  user opt-in, quota guard, idle guard, visibility, interruptibility, boundary,
+  and compact writeback planning.
+
 ## Next Build Slice
 
 Turn the dry-run planner into a real local driver only after the same-session

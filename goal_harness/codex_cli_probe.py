@@ -653,6 +653,139 @@ def build_codex_cli_local_driver_plan(
     }
 
 
+def build_codex_cli_visible_driver_run_packet(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    codex_bin: str,
+    probe_payload: dict[str, Any],
+    proof_payload: dict[str, Any] | None = None,
+    allow_headless_fallback: bool = False,
+) -> dict[str, Any]:
+    """Build the v0 runner packet for one visible Codex CLI driver turn.
+
+    The packet is deliberately not an executor. It converts the dry-run local
+    driver plan, optional visible-session proof, and explicit headless opt-in
+    into the next safe command boundary for a local scheduler or human operator.
+    """
+
+    local_plan = build_codex_cli_local_driver_plan(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        codex_bin=codex_bin,
+        probe_payload=probe_payload,
+    )
+    resolved_project = str(local_plan["project"])
+    resolved_goal_id = str(local_plan["goal_id"])
+    driver_mode = str(local_plan.get("driver_mode") or "tui_bootstrap_only")
+    commands = local_plan.get("commands") if isinstance(local_plan.get("commands"), dict) else {}
+    proof = build_codex_cli_visible_session_proof(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        proof_payload=proof_payload,
+    ) if proof_payload is not None else None
+    proof_approved = bool(proof and proof.get("approved_for_same_session_automation") is True)
+    proof_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-visible-session-proof "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}"
+        f"{' --agent-id ' + _shell_arg(agent_id) if agent_id else ''} "
+        "--proof-fixture <public-visible-proof.json>"
+    )
+
+    if proof_approved:
+        decision = "visible_session_turn_candidate"
+        next_driver_action = "run_visible_session_turn_after_quota_and_idle_guard"
+        recommended_command = proof_payload.get("recommended_command") if isinstance(proof_payload, dict) else None
+        if not recommended_command:
+            recommended_command = "use the proven visible Codex CLI surface; do not read transcripts or hidden session files"
+    elif driver_mode in {"session_attached_visible_turn", "visible_resume_or_remote_control_spike"}:
+        decision = "visible_session_proof_required"
+        next_driver_action = "capture_public_safe_visible_session_proof"
+        recommended_command = proof_command
+    elif driver_mode == "explicit_headless_fallback_after_tui_bootstrap" and allow_headless_fallback:
+        decision = "headless_fallback_command_ready"
+        next_driver_action = "run_explicit_headless_fallback_after_quota_guard"
+        recommended_command = commands.get("explicit_headless_fallback")
+    elif driver_mode == "explicit_headless_fallback_after_tui_bootstrap":
+        decision = "headless_fallback_requires_explicit_opt_in"
+        next_driver_action = "ask_user_before_headless_codex_exec"
+        recommended_command = commands.get("tui_bootstrap_message")
+    else:
+        decision = "tui_bootstrap_only"
+        next_driver_action = "ask_user_to_start_inside_codex_cli_tui"
+        recommended_command = commands.get("tui_bootstrap_message")
+
+    driver_steps = [
+        "run quota_guard and stop if user_channel.action_required=true",
+        "stop or relocate if workspace_guard blocks the current checkout",
+        "use a visible session only when proof_approved=true and an idle guard passes",
+        "use headless codex exec only when allow_headless_fallback=true and the goal boundary permits it",
+        "after the Codex turn, validate evidence or blocker before refresh-state",
+        "spend quota exactly once after validated writeback, never for this packet alone",
+    ]
+
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_visible_driver_run_packet_v0",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "codex_bin": codex_bin,
+        "driver_phase": "run_packet_no_execution",
+        "driver_mode": driver_mode,
+        "decision": decision,
+        "next_driver_action": next_driver_action,
+        "recommended_command": recommended_command,
+        "allow_headless_fallback": allow_headless_fallback,
+        "visible_session_proof": {
+            "supplied": proof is not None,
+            "approved": proof_approved,
+            "decision": proof.get("decision") if proof else None,
+            "failures": proof.get("failures") if proof else [],
+        },
+        "local_driver_plan": {
+            "schema_version": local_plan.get("schema_version"),
+            "driver_mode": local_plan.get("driver_mode"),
+            "decision": local_plan.get("decision"),
+            "operator_instruction": local_plan.get("operator_instruction"),
+        },
+        "commands": {
+            "quota_guard": commands.get("quota_guard"),
+            "tui_bootstrap_message": commands.get("tui_bootstrap_message"),
+            "visible_session_proof": proof_command,
+            "explicit_headless_fallback": commands.get("explicit_headless_fallback"),
+        },
+        "driver_steps": driver_steps,
+        "execution_policy": {
+            "tui_bootstrap_primary": True,
+            "same_session_attachment_requires_visible_proof": True,
+            "headless_fallback_requires_explicit_opt_in": True,
+            "quota_guard_required": True,
+            "idle_guard_required_before_visible_prompt": True,
+            "spend_after_validated_writeback_only": True,
+        },
+        "boundary": {
+            "run_packet_only": True,
+            "runs_codex": False,
+            "reads_raw_transcripts": False,
+            "reads_credentials": False,
+            "reads_session_files": False,
+            "mutates_codex_session": False,
+            "spends_goal_harness_quota": False,
+            "requires_user_gate_stop": True,
+            "requires_goal_boundary_before_headless": True,
+        },
+        "warnings": list(local_plan.get("warnings") or []),
+    }
+
+
 def render_codex_cli_session_probe_markdown(payload: dict[str, Any]) -> str:
     capabilities = payload.get("capabilities") or {}
     boundary = payload.get("boundary") or {}
@@ -778,6 +911,73 @@ def render_codex_cli_local_driver_plan_markdown(payload: dict[str, Any]) -> str:
 ## Boundary
 
 - dry_run_plan_only: `{boundary.get("dry_run_plan_only")}`
+- runs_codex: `{boundary.get("runs_codex")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
+
+## Warnings
+
+{warning_lines}
+"""
+
+
+def render_codex_cli_visible_driver_run_packet_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
+    steps = payload.get("driver_steps") if isinstance(payload.get("driver_steps"), list) else []
+    proof = payload.get("visible_session_proof") if isinstance(payload.get("visible_session_proof"), dict) else {}
+    policy = payload.get("execution_policy") if isinstance(payload.get("execution_policy"), dict) else {}
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    step_lines = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1))
+    warning_lines = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- none"
+    return f"""# Codex CLI Visible Driver Run Packet
+
+- driver_phase: `{payload.get("driver_phase")}`
+- driver_mode: `{payload.get("driver_mode")}`
+- decision: `{payload.get("decision")}`
+- next_driver_action: `{payload.get("next_driver_action")}`
+- allow_headless_fallback: `{payload.get("allow_headless_fallback")}`
+
+## Recommended Command
+
+```bash
+{payload.get("recommended_command")}
+```
+
+## Commands
+
+```bash
+{commands.get("quota_guard")}
+{commands.get("tui_bootstrap_message")}
+{commands.get("visible_session_proof")}
+{commands.get("explicit_headless_fallback")}
+```
+
+## Visible Session Proof
+
+- supplied: `{proof.get("supplied")}`
+- approved: `{proof.get("approved")}`
+- decision: `{proof.get("decision")}`
+- failures: `{proof.get("failures")}`
+
+## Driver Steps
+
+{step_lines}
+
+## Execution Policy
+
+- tui_bootstrap_primary: `{policy.get("tui_bootstrap_primary")}`
+- same_session_attachment_requires_visible_proof: `{policy.get("same_session_attachment_requires_visible_proof")}`
+- headless_fallback_requires_explicit_opt_in: `{policy.get("headless_fallback_requires_explicit_opt_in")}`
+- quota_guard_required: `{policy.get("quota_guard_required")}`
+- idle_guard_required_before_visible_prompt: `{policy.get("idle_guard_required_before_visible_prompt")}`
+- spend_after_validated_writeback_only: `{policy.get("spend_after_validated_writeback_only")}`
+
+## Boundary
+
+- run_packet_only: `{boundary.get("run_packet_only")}`
 - runs_codex: `{boundary.get("runs_codex")}`
 - reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
 - reads_session_files: `{boundary.get("reads_session_files")}`
