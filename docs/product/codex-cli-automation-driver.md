@@ -159,10 +159,49 @@ the product path honest: first make the scheduler decision visible and
 reviewable, then implement the actual external executor only after the proof
 and opt-in contract is stable.
 
+The next wrapper is the first explicit executor mode:
+
+```bash
+goal-harness codex-cli-local-scheduler-exec --project . --goal-id <goal> --agent-id <agent>
+```
+
+By default it still executes nothing. It builds the same scheduler tick and
+prints an executor packet. A local scheduler may opt into exactly one side
+effect:
+
+```bash
+goal-harness codex-cli-local-scheduler-exec \
+  --project . \
+  --goal-id <goal> \
+  --agent-id <agent> \
+  --guard-checked \
+  --execute-candidate \
+  --candidate-command-prefix "codex resume"
+```
+
+or:
+
+```bash
+goal-harness codex-cli-local-scheduler-exec \
+  --project . \
+  --goal-id <goal> \
+  --agent-id <agent> \
+  --guard-checked \
+  --execute-blocker-writeback
+```
+
+`--guard-checked` is an explicit assertion that the local scheduler just ran the
+fresh quota/user-gate guard. Candidate execution additionally requires an
+allowed command prefix, so a public-safe proof fixture cannot smuggle an
+arbitrary shell command into the scheduler. The wrapper discards command
+stdout/stderr, reports only return code and timeout, never reads transcripts or
+session files, never mutates hidden Codex session state, and never spends Goal
+Harness quota. Quota spend remains the responsibility of the validated
+post-turn writeback path.
+
 ## Next Build Slice
 
-Turn the scheduler tick into a real local driver only after the same-session
-path has a visible, idle-guarded proof. Until then, the user-facing happy path
-stays simple: start in Codex CLI TUI with one Goal Harness message, let the
-local tick explain the next safe boundary, and use headless `codex exec` only
-as an explicit opt-in fallback.
+Use the executor wrapper as the smallest local-driver bridge, then move toward
+the real product loop: one TUI message starts Goal Harness, recurring wakeups
+run the guard, a visible same-session turn is attempted only after proof and
+idle checks, and headless `codex exec` remains an explicit fallback.

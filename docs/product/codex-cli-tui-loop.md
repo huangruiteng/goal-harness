@@ -157,6 +157,28 @@ fallback command, and idle-guard requirement into a single dry-run packet. It
 does not run Codex, read transcripts, read session files, mutate a session, or
 spend quota.
 
+Current local-scheduler execution wrapper:
+
+```bash
+goal-harness codex-cli-local-scheduler-exec --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+Without explicit execution flags, this command is still a no-execution packet.
+With `--guard-checked`, a local scheduler may choose exactly one opt-in side
+effect:
+
+- `--execute-candidate --candidate-command-prefix <prefix>`: run a proven
+  visible or explicit fallback candidate whose command starts with an allowed
+  prefix.
+- `--execute-blocker-writeback`: run the precise Goal Harness blocker writeback
+  command when the tick says proof or opt-in is missing.
+
+The wrapper reports only whether it ran, return code, timeout, and the selected
+kind. It discards stdout/stderr, does not read transcripts, does not inspect
+session files, does not mutate hidden Codex state, and does not spend Goal
+Harness quota. This keeps the first executable bridge narrow enough to test
+without turning the user's TUI into an opaque background daemon.
+
 Current visible-session proof harness:
 
 ```bash
@@ -267,11 +289,16 @@ projects runnable candidates; it should not over-specify the model's local plan.
    one-shot packet. It emits either an external command candidate or a precise
    blocker writeback command, but does not run Codex, read session files, or
    write Goal Harness state itself.
-10. **Local driver executor**: prototype a scheduler that runs quota, checks
-   session idle state, and either attaches visibly or falls back explicitly.
-11. **Validation harness**: add a public-safe fixture that proves the driver
+10. **Local scheduler executor wrapper**: add
+   `goal-harness codex-cli-local-scheduler-exec` as the explicit opt-in bridge
+   that can run one tick result only after guard confirmation and, for
+   candidates, an allowed command prefix.
+11. **Visible local driver**: prototype the scheduler loop that runs quota,
+   checks session idle state, and either attaches visibly or falls back
+   explicitly.
+12. **Validation harness**: add a public-safe fixture that proves the driver
    never stores raw transcript text and never spends quota before writeback.
-12. **Claude Code follow-up**: port the same product contract only after the
+13. **Claude Code follow-up**: port the same product contract only after the
    Codex CLI path is credible.
 
 ## Success Criteria
