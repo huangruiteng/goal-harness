@@ -137,6 +137,7 @@ from .configure_goal import configure_goal, render_configure_goal_markdown
 from .delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from .cli_commands import (
     handle_check_command,
+    handle_codex_cli_bootstrap_message_command,
     handle_diagnose_command,
     handle_demo_command,
     handle_doctor_command,
@@ -5927,7 +5928,16 @@ def main(argv: list[str] | None = None) -> int:
     registry_path = Path(args.registry).expanduser()
     if (
         args.command
-        not in {"bootstrap", "connect", "demo", "doctor", "new-project-prompt", "heartbeat-prompt", "sync-global"}
+        not in {
+            "bootstrap",
+            "connect",
+            "codex-cli-bootstrap-message",
+            "demo",
+            "doctor",
+            "new-project-prompt",
+            "heartbeat-prompt",
+            "sync-global",
+        }
         and not user_supplied_registry(argv)
         and not registry_path.exists()
     ):
@@ -5988,6 +5998,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "new-project-prompt":
         return handle_new_project_prompt_command(args, print_payload)
+
+    if args.command == "codex-cli-bootstrap-message":
+        return handle_codex_cli_bootstrap_message_command(args, print_payload)
 
     if args.command == "heartbeat-prompt":
         try:

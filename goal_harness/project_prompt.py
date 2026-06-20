@@ -175,6 +175,145 @@ def build_new_project_prompt(
     }
 
 
+def render_codex_cli_bootstrap_connect_command(
+    *,
+    project: str,
+    goal_id: str,
+    cli_bin: str,
+) -> str:
+    return "\n".join(
+        [
+            f"cd {shell_arg(project)}",
+            f"{shell_arg(cli_bin)} bootstrap \\",
+            "  --project . \\",
+            f"  --goal-id {shell_arg(goal_id)} \\",
+            f"  --adapter-kind {shell_arg(DEFAULT_HANDOFF_ADAPTER_KIND)} \\",
+            f"  --adapter-status {shell_arg(DEFAULT_HANDOFF_ADAPTER_STATUS)}",
+        ]
+    )
+
+
+def build_codex_cli_bootstrap_message(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+) -> dict[str, Any]:
+    resolved_project = str(project.expanduser())
+    resolved_goal_id = goal_id or default_goal_id(project)
+    connect_command = render_codex_cli_bootstrap_connect_command(
+        project=resolved_project,
+        goal_id=resolved_goal_id,
+        cli_bin=cli_bin,
+    )
+    quota_guard_command = render_quota_guard_command(
+        resolved_goal_id,
+        cli_bin=cli_bin,
+        agent_id=agent_id,
+    )
+    quota_spend_command = render_quota_spend_command(
+        resolved_goal_id,
+        source="controller",
+        cli_bin=cli_bin,
+        agent_id=agent_id,
+    )
+    refresh_command = f"{shell_arg(cli_bin)} refresh-state --goal-id {shell_arg(resolved_goal_id)}"
+    message = render_codex_cli_bootstrap_message_text(
+        project=resolved_project,
+        goal_id=resolved_goal_id,
+        agent_id=agent_id,
+        cli_preflight=render_cli_preflight(cli_bin=cli_bin),
+        connect_command=connect_command,
+        quota_guard_command=quota_guard_command,
+        refresh_command=refresh_command,
+        quota_spend_command=quota_spend_command,
+    )
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_bootstrap_message_v0",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "connect_command": connect_command,
+        "quota_guard_command": quota_guard_command,
+        "refresh_command": refresh_command,
+        "quota_spend_command": quota_spend_command,
+        "message": message,
+    }
+
+
+def render_codex_cli_bootstrap_message_text(
+    *,
+    project: str,
+    goal_id: str,
+    agent_id: str | None,
+    cli_preflight: str,
+    connect_command: str,
+    quota_guard_command: str,
+    refresh_command: str,
+    quota_spend_command: str,
+) -> str:
+    agent_line = f"Use registered Goal Harness agent id `{agent_id}` when claiming or spending." if agent_id else (
+        "If this project has registered agents, inspect the registry and use the correct registered agent id before claiming todos."
+    )
+    return f"""Start the Goal Harness loop for this repo from this same Codex CLI TUI session.
+
+Goal: one-message TUI bootstrap. Keep this TUI as the visible place where I can
+watch, steer, review, and take over. Do not switch to hidden headless `codex exec`
+as the primary path; use headless only as an explicit fallback after Goal Harness
+or the user allows it.
+
+Project: `{project}`
+Goal id: `{goal_id}`
+{agent_line}
+
+1. Ensure the Goal Harness CLI works:
+
+```bash
+{cli_preflight}
+```
+
+2. If this repo is not connected to Goal Harness yet, connect it conservatively:
+
+```bash
+{connect_command}
+```
+
+If the connect output includes onboarding candidate todos, summarize them in
+this TUI and ask me which ones to accept before starting autonomous delivery.
+
+3. Before any delivery work, run the quota/status guard:
+
+```bash
+{quota_guard_command}
+```
+
+Follow `interaction_contract` exactly:
+- If `user_channel.action_required=true` or open user todos exist, ask only the
+  concrete user gate or todo payload.
+- If `workspace_guard` blocks delivery, move to an independent worktree and
+  rerun the same guard before editing.
+- If delivery is allowed, choose one runnable agent todo after a short steering
+  audit, preferably a current-agent claimed advancement todo.
+
+4. Execute one bounded segment in this TUI-visible session. Validate the result.
+Do not store raw Codex transcripts, credentials, private paths, raw logs, or
+production artifacts in public docs or Goal Harness state.
+
+5. After validated writeback, refresh state and spend quota once:
+
+```bash
+{refresh_command}
+{quota_spend_command}
+```
+
+End with the changed files, validation result, current gate/todo state, and the
+next safe action.
+"""
+
+
 def render_prompt_text(
     *,
     project: str,
@@ -380,4 +519,22 @@ Copy the block below into the Codex session that can access the target project.
 - goal_id: `{payload.get("goal_id")}`
 - domain: `{payload.get("domain")}`
 - adapter: `{payload.get("adapter_kind")}:{payload.get("adapter_status")}`
+"""
+
+
+def render_codex_cli_bootstrap_message_markdown(payload: dict[str, Any]) -> str:
+    return f"""# Codex CLI Goal Harness Bootstrap Message
+
+Copy the block below into Codex CLI TUI from the project repo.
+
+````text
+{payload.get("message", "")}
+````
+
+## Generator Inputs
+
+- project: `{payload.get("project")}`
+- goal_id: `{payload.get("goal_id")}`
+- agent_id: `{payload.get("agent_id") or "(not provided)"}`
+- cli_bin: `{payload.get("cli_bin")}`
 """

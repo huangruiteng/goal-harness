@@ -60,6 +60,17 @@ same conversation.
 This mode preserves the TUI completely because the human explicitly starts the
 loop there.
 
+Current prototype:
+
+```bash
+goal-harness codex-cli-bootstrap-message --project . --goal-id <goal-id>
+```
+
+Copy the generated message into Codex CLI TUI. The message tells the agent to
+repair/install Goal Harness if needed, connect the repo conservatively, run the
+quota/status guard, obey `interaction_contract`, preserve the visible TUI, and
+spend quota only after validated writeback.
+
 ### 2. Session-Attached Automation
 
 This is the preferred automation target. A scheduler wakes up, runs

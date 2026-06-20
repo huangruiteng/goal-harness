@@ -16,7 +16,9 @@ from ..demo import (
 from ..project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_KIND,
     DEFAULT_HANDOFF_ADAPTER_STATUS,
+    build_codex_cli_bootstrap_message,
     build_new_project_prompt,
+    render_codex_cli_bootstrap_message_markdown,
     render_new_project_prompt_markdown,
 )
 
@@ -43,6 +45,22 @@ def register_starter_commands(subparsers: argparse._SubParsersAction) -> None:
     prompt_parser.add_argument("--spawn-allowed", action="store_true", help="Include controller/sub-agent flags.")
     prompt_parser.add_argument("--allowed-domain", action="append", default=[], help="Allowed child work domain. Repeatable.")
     prompt_parser.add_argument("--write-scope", action="append", default=[], help="Allowed write scope such as docs/**. Repeatable.")
+
+    codex_cli_bootstrap_parser = subparsers.add_parser(
+        "codex-cli-bootstrap-message",
+        help="Generate a one-message Codex CLI TUI bootstrap prompt for a Goal Harness loop.",
+    )
+    codex_cli_bootstrap_parser.add_argument("--project", default=".", help="Project directory to start from.")
+    codex_cli_bootstrap_parser.add_argument("--goal-id", help="Goal id. Defaults to <project-name>-goal.")
+    codex_cli_bootstrap_parser.add_argument(
+        "--agent-id",
+        help="Registered Goal Harness agent id to include in quota/claim instructions.",
+    )
+    codex_cli_bootstrap_parser.add_argument(
+        "--cli-bin",
+        default="goal-harness",
+        help="Goal Harness CLI binary name embedded in generated commands.",
+    )
 
     demo_parser = subparsers.add_parser(
         "demo",
@@ -77,6 +95,20 @@ def handle_new_project_prompt_command(
         write_scope=args.write_scope,
     )
     print_payload(payload, args.format, render_new_project_prompt_markdown)
+    return 0
+
+
+def handle_codex_cli_bootstrap_message_command(
+    args: argparse.Namespace,
+    print_payload: PrintPayload,
+) -> int:
+    payload = build_codex_cli_bootstrap_message(
+        project=Path(args.project),
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        cli_bin=args.cli_bin,
+    )
+    print_payload(payload, args.format, render_codex_cli_bootstrap_message_markdown)
     return 0
 
 
