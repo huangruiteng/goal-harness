@@ -2304,6 +2304,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
     state = str(payload.get("state") or "")
     if payload.get("scoped_user_gate_fallback"):
         return "scoped_user_gate_fallback"
+    if effective_action == "automation_prompt_upgrade_required":
+        return "automation_prompt_upgrade"
     if payload.get("requires_user_action"):
         if (
             bool(execution_obligation.get("must_attempt_work"))
@@ -2392,6 +2394,8 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
         return "repair or materialize the missing bridge capability, rewrite the todo, or write a compact blocker"
     if mode == "side_agent_workspace_repair":
         return "create or switch to an independent worktree/branch, then rerun quota guard before file edits"
+    if mode == "automation_prompt_upgrade":
+        return "regenerate the installed automation prompt with a registered agent id and scope, then rerun quota guard"
     if mode == "control_plane_self_repair":
         return "repair the bounded control-plane/status projection fault exposed by quota"
     if mode == "boundary_projection_repair":
@@ -2407,6 +2411,19 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
 
 def _interaction_next_cli_actions(payload: dict[str, Any], *, mode: str) -> list[str]:
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
+    if mode == "automation_prompt_upgrade":
+        automation_prompt_upgrade = (
+            payload.get("automation_prompt_upgrade")
+            if isinstance(payload.get("automation_prompt_upgrade"), dict)
+            else {}
+        )
+        actions = [
+            str(automation_prompt_upgrade.get("primary_example_command") or "").strip(),
+            str(automation_prompt_upgrade.get("side_agent_example_command") or "").strip(),
+        ]
+        return [action for action in actions if action] or [
+            f"goal-harness heartbeat-prompt --thin --goal-id {goal_id} --agent-id <registered-agent> --agent-scope '<scope>'",
+        ]
     if mode == "monitor_quiet_skip":
         return [
             f"goal-harness quota monitor-poll --goal-id {goal_id} --source heartbeat --execute",
@@ -2470,6 +2487,8 @@ def _interaction_spend_policy(
         return "no spend for unchanged monitor poll"
     if mode == "side_agent_workspace_repair":
         return "no spend for moving side-agent work into an independent worktree"
+    if mode == "automation_prompt_upgrade":
+        return "no spend until the automation reruns quota guard with --agent-id"
     if spend_after_validation:
         return "spend once after validated writeback"
     raw_policy = execution_obligation.get("spend_policy") or heartbeat_recommendation.get(
@@ -2635,6 +2654,16 @@ def _automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
                 "autonomous_replan_required"
             ),
             "spend_policy": "no quota spend for unchanged monitor-only polls",
+        }
+    if effective_action == "automation_prompt_upgrade_required":
+        return {
+            **base,
+            "automation_action": "repair_automation_prompt_identity",
+            "reason": (
+                "the installed automation is stale or unscoped; keep the automation "
+                "active but block delivery until it reruns with a registered agent id"
+            ),
+            "spend_policy": "no quota spend for identity prompt upgrade preflight",
         }
     if must_attempt_work or recommended_mode == "autonomous_replan_required":
         return {
@@ -2915,7 +2944,7 @@ def _automation_prompt_upgrade(
     return {
         "contract": "identity_aware_heartbeat_prompt_v1",
         "required": True,
-        "blocks_should_run": False,
+        "blocks_should_run": True,
         "reason": (
             "coordination.registered_agents is configured, but quota should-run "
             "was called without --agent-id; the installed automation prompt is "
@@ -2924,8 +2953,9 @@ def _automation_prompt_upgrade(
         "registered_agents": registered_agents,
         "primary_agent": primary_agent,
         "recommended_action": (
-            "Regenerate the Codex App heartbeat prompt with a registered "
-            "--agent-id and at least one --agent-scope."
+            "Regenerate the installed heartbeat automation prompt with a "
+            "registered --agent-id and at least one --agent-scope, then rerun "
+            "quota should-run with the same --agent-id."
         ),
         "primary_example_command": (
             f"goal-harness heartbeat-prompt --thin --goal-id {goal_id} "
@@ -4404,6 +4434,10 @@ def build_quota_should_run(
             goal_id=safe_goal_id,
             agent_identity=agent_identity,
         )
+        automation_prompt_upgrade_required = bool(
+            automation_prompt_upgrade
+            and automation_prompt_upgrade.get("blocks_should_run") is True
+        )
         blocked_priority_fallback = _blocked_priority_fallback(agent_todo_summary)
         stall_self_repair = _stall_self_repair_hint(
             item,
@@ -4465,6 +4499,16 @@ def build_quota_should_run(
             capability_repair_allowed = False
             workspace_repair_allowed = True
             reason = str(workspace_guard.get("reason") or "side-agent workspace guard blocks delivery")
+        if automation_prompt_upgrade_required:
+            normal_delivery_allowed = False
+            recovery_allowed = False
+            self_repair_allowed = False
+            capability_repair_allowed = False
+            workspace_repair_allowed = False
+            reason = str(
+                automation_prompt_upgrade.get("reason")
+                or "identity-aware automation prompt upgrade is required"
+            )
         should_run = bool(
             normal_delivery_allowed
             or recovery_allowed
@@ -4482,6 +4526,9 @@ def build_quota_should_run(
             state=state,
             quota=quota,
         )
+        if automation_prompt_upgrade_required:
+            should_run = False
+            effective_action = "automation_prompt_upgrade_required"
         recommendation_item = {**item, "quota": quota}
         heartbeat_recommendation = _heartbeat_recommendation(
             recommendation_item,
@@ -4529,6 +4576,18 @@ def build_quota_should_run(
                 "spend_policy": (
                     "do not append quota spend for workspace relocation; rerun quota "
                     "from the independent worktree before delivery"
+                ),
+            }
+        if automation_prompt_upgrade_required:
+            heartbeat_recommendation = {
+                **heartbeat_recommendation,
+                "recommended_mode": "automation_prompt_upgrade",
+                "notify": "DONT_NOTIFY",
+                "reason": automation_prompt_upgrade.get("reason")
+                or heartbeat_recommendation.get("reason"),
+                "spend_policy": (
+                    "do not append quota spend for stale/unscoped automation; "
+                    "rerun quota should-run from an identity-scoped prompt"
                 ),
             }
         if blocked_priority_fallback and should_run:
@@ -4597,6 +4656,12 @@ def build_quota_should_run(
                 or workspace_guard.get("reason")
                 or selected_recommended_action
             )
+        if automation_prompt_upgrade_required:
+            selected_recommended_action = (
+                automation_prompt_upgrade.get("recommended_action")
+                or automation_prompt_upgrade.get("reason")
+                or selected_recommended_action
+            )
         state_action_projection_warning = _state_action_projection_warning(
             item,
             agent_todo_summary=agent_todo_summary,
@@ -4621,6 +4686,8 @@ def build_quota_should_run(
                 if capability_repair_allowed
                 else "workspace_guard"
                 if workspace_repair_allowed
+                else "automation_prompt_upgrade"
+                if automation_prompt_upgrade_required
                 else "skip"
             ),
             "should_run": should_run,

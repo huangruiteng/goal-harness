@@ -978,10 +978,14 @@ into a silent skip.
 When a goal has `coordination.registered_agents`, identity-aware heartbeat
 prompts should call `quota should-run --agent-id <registered-agent>`. If an
 old installed prompt omits that flag, the quota payload should include
-`automation_prompt_upgrade.required=true`, `blocks_should_run=false`, and
+`decision=automation_prompt_upgrade`,
+`effective_action=automation_prompt_upgrade_required`,
+`automation_prompt_upgrade.required=true`, `blocks_should_run=true`, and
 example `heartbeat-prompt --agent-id ... --agent-scope ...` commands. Executors
-should treat this as a prompt-upgrade action, not as delivery permission or a
-new operator gate.
+should treat this as a prompt-upgrade action, not as delivery permission, a
+quiet no-op, or a new operator gate. `should_run`, `normal_delivery_allowed`,
+and `interaction_contract.agent_channel.delivery_allowed` must stay `false`
+until the automation reruns `quota should-run` with a registered `--agent-id`.
 When the resolved `agent_identity.role` is `side-agent`, `quota should-run`
 also enforces the workspace boundary. If the guard is being run from the
 registered primary checkout, from a non-git directory, or from an unrelated git
