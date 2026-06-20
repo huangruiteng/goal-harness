@@ -137,7 +137,13 @@ def _compact_quota(quota_payload: Mapping[str, Any], project_asset: Mapping[str,
 
 
 def _todo_candidates(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
-    for key in ("first_open_items", "first_executable_items", "open_items", "backlog_items"):
+    for key in (
+        "first_open_items",
+        "first_executable_items",
+        "open_items",
+        "backlog_items",
+        "items",
+    ):
         values = summary.get(key)
         if isinstance(values, list) and values:
             return [dict(item) for item in values if isinstance(item, Mapping)]
