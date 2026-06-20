@@ -248,6 +248,7 @@ goals must stay out of the eligible lane even when they have a high
     "needs_controller": 0,
     "needs_codex": 1,
     "watching_external_evidence": 0,
+    "watching_monitor": 0,
     "autonomous_backlog_candidates": {
       "source": "attention_queue.agent_todos",
       "open_count": 1,
@@ -584,6 +585,8 @@ Counters:
 - `needs_codex`: items ready for a Codex action.
 - `watching_external_evidence`: items that should be monitored but not acted on
   until outside evidence changes.
+- `watching_monitor`: monitor-only items that remain visible without implying
+  immediate Codex work.
 
 Item shape:
 
@@ -674,8 +677,8 @@ Item fields:
 - `lifecycle_phase`: derived state-interaction phase for first-screen
   visualization.
 - `lifecycle_flags`: all compact phases that apply to the latest state.
-- `waiting_on`: `user_or_controller`, `controller`, `codex`, or
-  `external_evidence`.
+- `waiting_on`: `user_or_controller`, `controller`, `codex`,
+  `external_evidence`, or `monitor_signal`.
 - `severity`: `high`, `action`, or `watch`.
 - `recommended_action`: exactly one next action.
 - `project_asset`: a compact control-plane projection derived from the same
@@ -911,8 +914,9 @@ unfinished `advancement_task` agent todos from current queue items where
 intentionally excluded from this backlog so dependency/readiness observation
 cannot crowd out implementation, planning, or blocker-writeback candidates.
 `attention_queue.autonomous_monitor_candidates` may separately expose compact
-`continuous_monitor` todos so heartbeat dispatchers still see the current
-watch surfaces without treating them as primary advancement work.
+`continuous_monitor` todos from `waiting_on=codex` or
+`waiting_on=monitor_signal` queue items so heartbeat dispatchers still see the
+current watch surfaces without treating them as primary advancement work.
 Both candidate surfaces preserve `action_kind` when the agent registered one
 with the todo CLI.
 
@@ -2017,7 +2021,8 @@ A first useful UI can be built from the export alone:
   watched goal is not ready yet without opening the full run payload.
 - User lane: items with `waiting_on=user_or_controller` or `controller`.
 - Codex lane: items with `waiting_on=codex`.
-- Watch lane: items with `waiting_on=external_evidence`.
+- Watch lane: items with `waiting_on=external_evidence` or
+  `waiting_on=monitor_signal`.
 - Dreaming lane/badge: items with
   `project_asset.dreaming_lane_badge.schema_version=dreaming_lane_badge_v0`.
   These items are advisory review surfaces; delivery lanes continue to follow
@@ -2067,7 +2072,8 @@ Suggested badge mapping:
 
 - `severity=high`: blocking.
 - `severity=action`: needs a decision or bounded work segment.
-- `severity=watch`: no immediate action; wait for evidence.
+- `severity=watch`: no immediate action; wait for evidence or a material
+  monitor transition.
 
 ## Static Dashboard Demo
 

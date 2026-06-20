@@ -101,6 +101,15 @@ REGISTRY_WAITING_ON_OVERRIDES = {
     "external_evidence",
 }
 WATCH_CLASSIFICATION_PREFIXES = ("await_", "monitor_", "external_evidence_observation_")
+MONITOR_SIGNAL_WAITING_ON = "monitor_signal"
+MONITOR_DISPLAY_SCHEMA_VERSION = "monitor_quiet_display_v0"
+MONITOR_DISPLAY_STOP_CONDITION = (
+    "stop until a material monitor transition, regression, or concrete blocker appears"
+)
+MONITOR_DISPLAY_FALLBACK_ACTION = (
+    "No immediate agent work; keep the monitor quiet until a material monitor "
+    "transition, regression, or concrete blocker appears."
+)
 BLOCKING_CLASSIFICATIONS = {
     "blocked_by_safety",
 }
@@ -4282,6 +4291,8 @@ def project_asset_owner(waiting_on: str) -> str:
         return "codex"
     if waiting_on == "external_evidence":
         return "external_evidence"
+    if waiting_on == MONITOR_SIGNAL_WAITING_ON:
+        return MONITOR_SIGNAL_WAITING_ON
     if waiting_on == "controller":
         return "controller"
     if waiting_on == "user_or_controller":
@@ -4304,6 +4315,8 @@ def project_asset_gate(
         return status or waiting_on
     if waiting_on == "external_evidence":
         return "external_evidence"
+    if waiting_on == MONITOR_SIGNAL_WAITING_ON:
+        return "none"
     return "none"
 
 
@@ -4321,6 +4334,8 @@ def project_asset_stop_condition(
         return "stop until the controller or owner resolves this gate"
     if waiting_on == "external_evidence":
         return "stop until external evidence changes"
+    if waiting_on == MONITOR_SIGNAL_WAITING_ON:
+        return MONITOR_DISPLAY_STOP_CONDITION
     if agent_command:
         return "stop if the command fails or needs write, production, or additional approval"
     return "stop if the next action needs reward, gate approval, write control, or production access"
@@ -4343,7 +4358,7 @@ def project_asset_support_mode(
         return "reward_capture"
     if operator_question or missing_gates or waiting_on in {"user_or_controller", "controller"}:
         return "decision_support"
-    if waiting_on == "external_evidence":
+    if waiting_on in {"external_evidence", MONITOR_SIGNAL_WAITING_ON}:
         return "read_only_observer"
     if agent_command or waiting_on == "codex":
         return "selective_assist"
@@ -4597,11 +4612,13 @@ def autonomous_todo_candidates(
     items: list[dict[str, Any]],
     *,
     task_class: str,
+    allowed_waiting_on: set[str] | None = None,
     limit: int = MAX_AUTONOMOUS_BACKLOG_CANDIDATES,
 ) -> dict[str, Any] | None:
+    allowed_waiting_on = allowed_waiting_on or {"codex"}
     candidates: list[dict[str, Any]] = []
     for item in items:
-        if not isinstance(item, dict) or item.get("waiting_on") != "codex":
+        if not isinstance(item, dict) or item.get("waiting_on") not in allowed_waiting_on:
             continue
         quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
         if quota.get("state") != "eligible":
@@ -4674,6 +4691,7 @@ def autonomous_monitor_candidates(
     return autonomous_todo_candidates(
         items,
         task_class=TODO_TASK_CLASS_MONITOR,
+        allowed_waiting_on={"codex", MONITOR_SIGNAL_WAITING_ON},
         limit=limit,
     )
 
@@ -5412,6 +5430,106 @@ def sync_connected_attention_action_from_todos(item: dict[str, Any]) -> None:
     project_asset = item.get("project_asset")
     if isinstance(project_asset, dict):
         project_asset["next_action"] = agent_action
+
+
+def todo_summary_open_count(summary: dict[str, Any] | None) -> int:
+    if not isinstance(summary, dict):
+        return 0
+    for key in ("open_count", "open"):
+        value = summary.get(key)
+        if isinstance(value, int):
+            return max(0, value)
+    return len(
+        [
+            item
+            for item in open_todo_items(summary, limit=MAX_STATUS_TODOS_PER_ROLE)
+            if todo_item_is_actionable_open(item)
+        ]
+    )
+
+
+def todo_summary_lane_items(summary: dict[str, Any] | None, lane: str) -> list[dict[str, Any]]:
+    if not isinstance(summary, dict):
+        return []
+    raw_items = summary.get(lane)
+    if not isinstance(raw_items, list):
+        return []
+    return [item for item in raw_items if isinstance(item, dict)]
+
+
+def attention_item_is_monitor_quiet_display_candidate(item: dict[str, Any]) -> bool:
+    if item.get("waiting_on") != "codex" or item.get("severity") != "action":
+        return False
+    agent_todos = item.get("agent_todos") if isinstance(item.get("agent_todos"), dict) else None
+    if not agent_todos:
+        return False
+    user_todos = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else None
+    if todo_summary_open_count(user_todos) > 0:
+        return False
+    open_count = todo_summary_open_count(agent_todos)
+    if open_count <= 0:
+        return False
+    monitor_items = [
+        item
+        for item in todo_summary_lane_items(agent_todos, "monitor_open_items")
+        if todo_item_is_actionable_open(item)
+    ]
+    executable_items = [
+        *todo_summary_lane_items(agent_todos, "first_executable_items"),
+        *todo_summary_lane_items(agent_todos, "executable_backlog_items"),
+        *todo_summary_lane_items(agent_todos, "claimed_advancement_open_items"),
+    ]
+    if any(todo_item_is_actionable_open(todo) for todo in executable_items):
+        return False
+    return len(monitor_items) == open_count
+
+
+def quiet_monitor_display_action(raw_action: str | None) -> str:
+    action = str(raw_action or "").strip()
+    if not action:
+        return MONITOR_DISPLAY_FALLBACK_ACTION
+    lowered = action.lower()
+    if lowered.startswith("no immediate agent work"):
+        return action
+    if lowered.startswith("quiet monitor only until "):
+        suffix = action[len("Quiet monitor only until ") :].strip()
+        if suffix:
+            return f"No immediate agent work; keep the monitor quiet until {suffix}"
+    if lowered.startswith("wait quietly"):
+        return f"No immediate agent work; {action[0].lower()}{action[1:]}"
+    return f"No immediate agent work; monitor quietly. Context: {action}"
+
+
+def normalize_monitor_quiet_attention_display(item: dict[str, Any]) -> None:
+    if not attention_item_is_monitor_quiet_display_candidate(item):
+        return
+    old_waiting_on = str(item.get("waiting_on") or "")
+    old_severity = str(item.get("severity") or "")
+    display_action = quiet_monitor_display_action(str(item.get("recommended_action") or ""))
+    item["execution_waiting_on"] = old_waiting_on
+    item["waiting_on"] = MONITOR_SIGNAL_WAITING_ON
+    item["severity"] = "watch"
+    item["recommended_action"] = display_action
+    item["monitor_display"] = {
+        "schema_version": MONITOR_DISPLAY_SCHEMA_VERSION,
+        "mode": "monitor_quiet",
+        "no_immediate_agent_work": True,
+        "execution_waiting_on": old_waiting_on,
+        "execution_severity": old_severity,
+        "waiting_on": MONITOR_SIGNAL_WAITING_ON,
+        "severity": "watch",
+        "material_transition": (
+            "write back only a material monitor transition, regression, or concrete blocker"
+        ),
+    }
+    project_asset = item.get("project_asset")
+    if isinstance(project_asset, dict):
+        project_asset["owner"] = MONITOR_SIGNAL_WAITING_ON
+        project_asset["gate"] = "none"
+        project_asset["support_mode"] = "read_only_observer"
+        project_asset["next_action"] = display_action
+        project_asset["stop_condition"] = MONITOR_DISPLAY_STOP_CONDITION
+        project_asset["monitor_display"] = dict(item["monitor_display"])
 
 
 def compact_global_registry_shadow_finding(finding: dict[str, Any]) -> dict[str, Any]:
@@ -6299,6 +6417,7 @@ def build_attention_queue(
                         subagent_activity=subagent_activity,
                         interface_budget_cadence=interface_budget_cadence,
                     )
+                normalize_monitor_quiet_attention_display(item)
             attach_goal_channel_projection(
                 item,
                 goal=goal,
@@ -6347,6 +6466,7 @@ def build_attention_queue(
         "needs_controller": sum(1 for item in items if item["waiting_on"] == "controller"),
         "needs_codex": sum(1 for item in items if item["waiting_on"] == "codex"),
         "watching_external_evidence": sum(1 for item in items if item["waiting_on"] == "external_evidence"),
+        "watching_monitor": sum(1 for item in items if item["waiting_on"] == MONITOR_SIGNAL_WAITING_ON),
         "items": items,
     }
     if backlog_candidates:
@@ -7408,7 +7528,8 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             f"needs_user_or_controller={queue.get('needs_user_or_controller')}, "
             f"needs_controller={queue.get('needs_controller')}, "
             f"needs_codex={queue.get('needs_codex')}, "
-            f"watching_external_evidence={queue.get('watching_external_evidence')}",
+            f"watching_external_evidence={queue.get('watching_external_evidence')}, "
+            f"watching_monitor={queue.get('watching_monitor')}",
         ]
     )
     items = queue.get("items") if isinstance(queue.get("items"), list) else []

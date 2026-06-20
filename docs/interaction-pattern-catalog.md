@@ -508,6 +508,11 @@ The agent may append at most one no-spend monitor poll, rerun the guard, and
 then stay quiet. The automation remains alive; monitor-only quiet skips are not
 completion or deletion signals.
 
+Status and diagnose should display unchanged monitor-only work as
+`waiting_on=monitor_signal` with `severity=watch`, while retaining the quota
+decision `effective_action=monitor_quiet_skip`. This keeps the monitor visible
+without making it look like immediate Codex work or a user/controller gate.
+
 **Visual Model**
 
 ```mermaid
