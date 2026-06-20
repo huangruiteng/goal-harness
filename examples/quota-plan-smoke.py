@@ -1595,11 +1595,17 @@ def assert_goal_boundary_in_should_run() -> None:
     )
     side_agent_markdown = render_quota_should_run_markdown(side_agent_decision)
 
-    assert decision["should_run"] is True, decision
+    assert decision["decision"] == "automation_prompt_upgrade", decision
+    assert decision["should_run"] is False, decision
+    assert decision["normal_delivery_allowed"] is False, decision
+    assert decision["effective_action"] == "automation_prompt_upgrade_required", decision
+    assert decision["interaction_contract"]["mode"] == "automation_prompt_upgrade", decision
+    assert decision["interaction_contract"]["user_channel"]["action_required"] is False, decision
+    assert decision["interaction_contract"]["agent_channel"]["delivery_allowed"] is False, decision
     assert decision["automation_prompt_upgrade"]["required"] is True, decision
-    assert decision["automation_prompt_upgrade"]["blocks_should_run"] is False, decision
+    assert decision["automation_prompt_upgrade"]["blocks_should_run"] is True, decision
     assert "--agent-id codex-main-control" in decision["automation_prompt_upgrade"]["primary_example_command"], decision
-    assert "- automation_prompt_upgrade: required=True blocks_should_run=False" in markdown, markdown
+    assert "- automation_prompt_upgrade: required=True blocks_should_run=True" in markdown, markdown
     assert side_agent_decision["agent_identity"]["agent_id"] == "codex-side-bypass", side_agent_decision
     assert side_agent_decision["agent_identity"]["role"] == "side-agent", side_agent_decision
     assert "automation_prompt_upgrade" not in side_agent_decision, side_agent_decision

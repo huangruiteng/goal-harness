@@ -139,6 +139,9 @@ Once a goal has `coordination.registered_agents`, prompt generation without
 `--agent-id` fails closed. That is the lightweight migration signal for stale
 Codex App automations: the next refresh attempt surfaces a concrete
 identity/scope upgrade command instead of returning a legacy unscoped prompt.
+`quota should-run` follows the same rule for executor safety: an unscoped call
+returns `automation_prompt_upgrade.required=true`,
+`blocks_should_run=true`, and `should_run=false` instead of allowing delivery.
 For an old goal registry that does not yet define
 `coordination.registered_agents`, or a scoped registry that has agents but no
 `coordination.primary_agent`, scoped prompt generation fails closed and prints
