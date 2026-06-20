@@ -68,9 +68,41 @@ Success looks like this:
 For Codex CLI users, the product target is even simpler: start in the Codex
 TUI, send one Goal Harness bootstrap message, and keep later automation visible
 and interruptible in that TUI whenever the CLI exposes a safe session-attachment
-primitive. See the
-[Codex CLI TUI-first loop](../product/codex-cli-tui-loop.md) contract for the
-bootstrap, session-attached automation, and headless fallback split.
+primitive.
+
+First-run path:
+
+```text
+Start Goal Harness for this repo. Install or repair it if needed, connect this
+project, show me the first user gate if one exists, then run the first safe
+agent todo only after quota says it should run.
+```
+
+Once `goal-harness` is installed, generate a repo-specific paste message:
+
+```bash
+goal-harness codex-cli-bootstrap-message --project . --goal-id <goal-id>
+```
+
+Keep that as the preferred interactive path: the human watches and steers in
+Codex CLI TUI, while Goal Harness owns quota/status/todos/gates/writeback. To
+evaluate future same-session automation support without touching transcripts or
+session files, run:
+
+```bash
+goal-harness codex-cli-session-probe
+```
+
+If same-session steering is unavailable and the user explicitly accepts a
+headless fallback, generate the fallback handoff instead of pretending the open
+TUI is preserved:
+
+```bash
+goal-harness codex-cli-exec-handoff --project . --goal-id <goal-id>
+```
+
+See the [Codex CLI TUI-first loop](../product/codex-cli-tui-loop.md) contract
+for the bootstrap, session-attached automation, and headless fallback split.
 
 Maintainers can validate the public fresh-clone path with:
 

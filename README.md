@@ -153,8 +153,31 @@ the human/operator.
 Requirements: Python 3.11+, Git, macOS or Linux shell. The Python package has
 no runtime dependencies outside the standard library.
 
-The recommended start is agent-first. Paste this into Codex, Claude Code,
-Cursor, or another terminal agent from the project repo:
+The recommended start is agent-first. For Codex CLI users, stay in the TUI:
+
+1. Open Codex CLI from your project repo.
+2. Ask it to generate or use this Goal Harness bootstrap:
+
+   ```text
+   Start Goal Harness for this repo. Install or repair it if needed, connect this
+   project, show me the first user gate if one exists, then run the first safe
+   agent todo only after quota says it should run.
+   ```
+
+3. After Goal Harness is installed, you can generate a tailored one-message
+   bootstrap and paste it into the same Codex CLI TUI:
+
+   ```bash
+   goal-harness codex-cli-bootstrap-message --project . --goal-id <goal-id>
+   ```
+
+This is the primary Codex CLI path: the user keeps the visible TUI for steering,
+review, and takeover; Goal Harness supplies goal state, todo ownership, quota,
+gates, writeback, and the next safe action. Headless `codex exec` is an explicit
+fallback, not the default experience.
+
+For Codex App, Claude Code, Cursor, or another terminal agent, paste this from
+the project repo:
 
 ```text
 Install and connect Goal Harness for this project end to end. Do not stop at a
