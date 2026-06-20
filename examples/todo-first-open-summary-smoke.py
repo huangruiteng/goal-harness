@@ -14,6 +14,9 @@ if str(REPO_ROOT) not in sys.path:
 from goal_harness.quota import build_quota_should_run, render_quota_should_run_markdown  # noqa: E402
 from goal_harness.review_packet import build_review_packet  # noqa: E402
 from goal_harness.status import (  # noqa: E402
+    MAX_PROJECT_ASSET_TODO_ITEMS,
+    TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
+    TODO_PROJECTION_VIEW_SCHEMA_VERSION,
     compact_todo_group,
     parse_active_state_todos,
     project_asset_todo_summary,
@@ -129,7 +132,7 @@ def build_blocked_priority_fallback_status_payload() -> dict:
     assert agent_todos is not None, agent_todos
     assert agent_todos["first_open_items"][0]["status"] == "blocked", agent_todos
     assert agent_todos["first_executable_items"][0]["text"] == FALLBACK_TODO, agent_todos
-    asset_summary = project_asset_todo_summary(agent_todos)
+    asset_summary = project_asset_todo_summary(agent_todos, role="agent")
     assert asset_summary is not None, agent_todos
     attention_item = {
         "goal_id": GOAL_ID,
@@ -247,12 +250,15 @@ def assert_claimed_frontstage_lanes_visible() -> None:
     assert agent_todos["claimed_advancement_open_count"] == 1, agent_todos
     assert agent_todos["claimed_monitor_open_count"] == 1, agent_todos
 
-    asset_summary = project_asset_todo_summary(agent_todos)
+    asset_summary = project_asset_todo_summary(agent_todos, role="agent")
     assert asset_summary is not None, agent_todos
-    assert [item["index"] for item in asset_summary["unclaimed_priority_open_items"]] == list(range(1, 9)), asset_summary
-    assert [item["index"] for item in asset_summary["claimed_open_items"]] == [40, 41], asset_summary
-    assert [item["index"] for item in asset_summary["claimed_advancement_open_items"]] == [40], asset_summary
-    assert [item["index"] for item in asset_summary["claimed_monitor_open_items"]] == [41], asset_summary
+    assert asset_summary["projection_view"]["view"] == "project_asset_overview", asset_summary
+    assert asset_summary["projection_view"]["truth"] == "derived", asset_summary
+    assert asset_summary["detail_pointer"]["full_list_included"] is False, asset_summary
+    assert "unclaimed_priority_open_items" not in asset_summary, asset_summary
+    assert "claimed_open_items" not in asset_summary, asset_summary
+    assert "claimed_advancement_open_items" not in asset_summary, asset_summary
+    assert "claimed_monitor_open_items" not in asset_summary, asset_summary
 
     attention_item = {
         "goal_id": GOAL_ID,
@@ -325,14 +331,28 @@ def main() -> int:
     agent_todos = build_truncated_todo_group()
     parsed_agent_todos = parse_multiline_deep_open_todo()
     assert parsed_agent_todos["first_open_items"] == agent_todos["first_open_items"], parsed_agent_todos
-    asset_summary = project_asset_todo_summary(agent_todos)
+    asset_summary = project_asset_todo_summary(agent_todos, role="agent")
     assert asset_summary is not None, agent_todos
     assert asset_summary["open"] == 4, asset_summary
     assert asset_summary["next"] == APPENDED_P0_TODO, asset_summary
     assert asset_summary["next_index"] == 17, asset_summary
-    assert [item["index"] for item in asset_summary["items"]] == [17, 14, 15, 16], asset_summary
-    assert [item["index"] for item in asset_summary["backlog_items"]] == [17, 14, 15, 16], asset_summary
-    assert [item["index"] for item in asset_summary["executable_backlog_items"]] == [17, 14, 15, 16], asset_summary
+    assert asset_summary["projection_view"] == {
+        "schema_version": TODO_PROJECTION_VIEW_SCHEMA_VERSION,
+        "view": "project_asset_overview",
+        "truth": "derived",
+        "canonical_source": "attention_queue.items[].agent_todos",
+        "item_limit": MAX_PROJECT_ASSET_TODO_ITEMS,
+    }, asset_summary
+    assert asset_summary["detail_pointer"] == {
+        "schema_version": TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
+        "cold_path": "goal-harness status --format json",
+        "active_state_source": "registry goal state_file",
+        "full_list_included": False,
+    }, asset_summary
+    assert [item["index"] for item in asset_summary["items"]] == [17, 14, 15], asset_summary
+    assert [item["index"] for item in asset_summary["first_executable_items"]] == [17, 14, 15], asset_summary
+    assert "backlog_items" not in asset_summary, asset_summary
+    assert "executable_backlog_items" not in asset_summary, asset_summary
     assert asset_summary["items"][0]["priority"] == "P0", asset_summary
     assert asset_summary["items"][0]["status"] == "open", asset_summary
     assert asset_summary["items"][0]["todo_id"] == agent_todos["first_open_items"][0]["todo_id"], asset_summary
