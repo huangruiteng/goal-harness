@@ -1322,6 +1322,27 @@ replan obligation, but they stay a side lane: they can inform review or repair,
 not enter promotion/execution until the blocking replan obligation is absent or
 resolved. The two lanes must not collapse into each other.
 
+Replan closeout is explicit. A normal validated progress refresh may record
+useful work, but it must not silently close the
+`autonomous_replan_obligation_v0`. After the agent performs the bounded replan
+slice and writes back the selected todo/guidance changes, it must append a
+structured ACK:
+
+```bash
+goal-harness refresh-state \
+  --goal-id <goal-id> \
+  --classification autonomous_replan_recorded \
+  --autonomous-replan-recorded \
+  --delivery-batch-scale <scale> \
+  --delivery-outcome <outcome>
+```
+
+The resulting run carries `autonomous_replan_ack_v0`. Classification remains a
+human-readable history label; the structured ACK is the control-plane signal
+that lets status/quota stop projecting the replan obligation. This keeps agents
+responsible for actively closing the loop instead of relying on loose
+classification wording such as `autonomous_replan_validated_*`.
+
 **Visual Model**
 
 ```mermaid
@@ -1332,7 +1353,8 @@ flowchart TD
   D -->|"no"| Z["no dreaming side lane"]
   R -->|"yes"| A["execute bounded replan repair"]
   A --> T["update todos / guidance"]
-  T --> Q["rerun quota guard"]
+  T --> C["append structured replan ACK"]
+  C --> Q["rerun quota guard"]
   V -. "may inform repair; no delivery spend while blocked" .-> A
   R -->|"no"| G{"dreaming proposal eligible for promotion?"}
   G -->|"yes"| U["ask/promote through user or controller gate"]
@@ -1347,7 +1369,10 @@ flowchart TD
 A proposal from the dreaming/planning lane carries an `agent_command` or spends
 delivery quota before promotion. The opposite failure is also costly: repeated
 no-progress evidence is treated as optional brainstorming instead of a required
-state repair.
+state repair. A subtler failure is treating
+`autonomous_replan_validated_*` or another progress classification as equivalent
+to a replan ACK; that hides whether the agent actually split/retired/added the
+needed control-plane work and closed the obligation.
 
 **Validation**
 
