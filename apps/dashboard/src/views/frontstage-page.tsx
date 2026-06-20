@@ -31,6 +31,7 @@ import { cn } from "../lib/utils";
 type BadgeTone = "neutral" | "success" | "warning" | "info" | "danger";
 type FrontstageSource = { kind: "demo"; label: string } | { kind: "url"; label: string };
 type FrontstageMode = "showcase" | "ops";
+type TodoLaneFilter = "all" | "user" | "agent";
 type NumberRange = { low?: number; high?: number };
 type ShowcaseFrontstageCase = {
   id: string;
@@ -143,6 +144,28 @@ function countClaimedTodos(todos: GoalChannelTodo[]) {
   return todos.filter((todo) => Boolean(todo.claimed_by)).length;
 }
 
+function todoSearchText(todo: GoalChannelTodo) {
+  return [
+    todo.todo_id,
+    todo.priority,
+    todo.status,
+    todo.title,
+    todo.claimed_by,
+    todo.task_class,
+    todo.action_kind,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function filterTodosByQuery(todos: GoalChannelTodo[], normalizedQuery: string) {
+  if (!normalizedQuery) {
+    return todos;
+  }
+  return todos.filter((todo) => todoSearchText(todo).includes(normalizedQuery));
+}
+
 function countShowcaseStoryBeats() {
   return frontstageShowcases.reduce(
     (total, item) => total + (item.frontend_card?.story_beats?.length ?? 0),
@@ -232,6 +255,14 @@ function TodoRow({ todo }: { todo: GoalChannelTodo }) {
           <Badge variant="neutral">unclaimed</Badge>
         )}
       </div>
+    </div>
+  );
+}
+
+function TodoLaneEmpty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-4 py-4 text-sm font-medium leading-6 text-slate-500">
+      {children}
     </div>
   );
 }
@@ -852,11 +883,15 @@ function FrontstageRoute({
   onGoalChange,
   onLoadStatusUrl,
   onResetDemo,
+  onTodoLaneChange,
+  onTodoQueryChange,
   projection,
   selectedGoalId,
   source,
   statusUrl,
   setStatusUrl,
+  todoLane,
+  todoQuery,
 }: {
   goalOptions: ProjectionOption[];
   hasIgnoredStatusUrl: boolean;
@@ -866,11 +901,15 @@ function FrontstageRoute({
   onGoalChange: (goalId: string) => void;
   onLoadStatusUrl: () => void;
   onResetDemo: () => void;
+  onTodoLaneChange: (value: TodoLaneFilter) => void;
+  onTodoQueryChange: (value: string) => void;
   projection: GoalChannelProjection;
   selectedGoalId: string;
   source: FrontstageSource;
   statusUrl: string;
   setStatusUrl: (value: string) => void;
+  todoLane: TodoLaneFilter;
+  todoQuery: string;
 }) {
   const quotaUsed = `${stringifyScalar(projection.quota.spent_slots)} / ${stringifyScalar(projection.quota.allowed_slots ?? "?")}`;
   const openUserTodos = countOpenTodos(projection.user_todos);
@@ -945,6 +984,16 @@ function FrontstageRoute({
       tone: claimOwners.length ? "info" : "neutral",
     },
   ] satisfies Array<{ label: string; value: string; helper: string; tone: BadgeTone }>;
+  const normalizedTodoQuery = todoQuery.trim().toLowerCase();
+  const filteredUserTodos = todoLane === "agent"
+    ? []
+    : filterTodosByQuery(projection.user_todos, normalizedTodoQuery);
+  const filteredAgentTodos = todoLane === "user"
+    ? []
+    : filterTodosByQuery(projection.agent_todos, normalizedTodoQuery);
+  const visibleTodoCount = filteredUserTodos.length + filteredAgentTodos.length;
+  const totalTodoCount = projection.user_todos.length + projection.agent_todos.length;
+
   return (
     <main
       className="min-h-screen bg-[#f7f7f4] px-4 py-4 text-slate-950 sm:px-5"
@@ -1142,18 +1191,65 @@ function FrontstageRoute({
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
+                <div
+                  className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
+                  data-testid="frontstage-todo-discovery"
+                >
+                  <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_180px_auto]">
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">Search todo projection</span>
+                      <span className="relative mt-1 block">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          aria-label="Search projected todos"
+                          className="h-9 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400"
+                          data-testid="frontstage-todo-search"
+                          onChange={(event) => onTodoQueryChange(event.target.value)}
+                          placeholder="Search title, claim, action kind..."
+                          value={todoQuery}
+                        />
+                      </span>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">Lane</span>
+                      <Select
+                        aria-label="Todo lane filter"
+                        className="mt-1 w-full text-sm"
+                        data-testid="frontstage-todo-lane-filter"
+                        onChange={(event) => onTodoLaneChange(event.target.value as TodoLaneFilter)}
+                        value={todoLane}
+                      >
+                        <option value="all">All lanes</option>
+                        <option value="user">User todos</option>
+                        <option value="agent">Agent todos</option>
+                      </Select>
+                    </label>
+                    <div
+                      className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-semibold leading-5 text-slate-600 lg:self-end"
+                      data-testid="frontstage-todo-result-count"
+                    >
+                      Showing {visibleTodoCount} of {totalTodoCount} projected todos
+                    </div>
+                  </div>
+                </div>
                 <Panel icon={Users} title="User Todo Lane">
                   <div data-testid="frontstage-user-todos">
-                    {projection.user_todos.map((todo) => (
+                    {filteredUserTodos.map((todo) => (
                       <TodoRow key={todo.todo_id ?? todo.title} todo={todo} />
                     ))}
+                    {!filteredUserTodos.length ? (
+                      <TodoLaneEmpty>No user todos match the current filters.</TodoLaneEmpty>
+                    ) : null}
                   </div>
                 </Panel>
                 <Panel icon={Bot} title="Agent Todo Lane">
                   <div data-testid="frontstage-agent-todos">
-                    {projection.agent_todos.map((todo) => (
+                    {filteredAgentTodos.map((todo) => (
                       <TodoRow key={todo.todo_id ?? todo.title} todo={todo} />
                     ))}
+                    {!filteredAgentTodos.length ? (
+                      <TodoLaneEmpty>No agent todos match the current filters.</TodoLaneEmpty>
+                    ) : null}
                   </div>
                 </Panel>
               </div>
@@ -1300,6 +1396,10 @@ export function FrontstagePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const mode: FrontstageMode = search.mode === "ops" ? "ops" : "showcase";
+  const todoLane: TodoLaneFilter = search.todoLane === "user" || search.todoLane === "agent"
+    ? search.todoLane
+    : "all";
+  const todoQuery = search.todoQuery ?? "";
   const liveMode = mode === "ops";
   const hasIgnoredStatusUrl = !liveMode && Boolean(search.statusUrl);
 
@@ -1314,7 +1414,13 @@ export function FrontstagePage() {
   const selectedProjection = goalOptions.find((option) => option.goalId === selectedGoalId)?.projection
     ?? sampleGoalChannelProjection;
 
-  async function updateSearch(next: { goalId?: string; mode?: FrontstageMode; statusUrl?: string }) {
+  async function updateSearch(next: {
+    goalId?: string;
+    mode?: FrontstageMode;
+    statusUrl?: string;
+    todoLane?: TodoLaneFilter;
+    todoQuery?: string;
+  }) {
     await navigate({
       search: (current) => ({
         ...current,
@@ -1367,11 +1473,19 @@ export function FrontstagePage() {
     setSource({ kind: "demo", label: "bundled fixture" });
     setStatusUrl("");
     setLoadError(null);
-    void updateSearch({ goalId: "", mode: "showcase", statusUrl: "" });
+    void updateSearch({ goalId: "", mode: "showcase", statusUrl: "", todoLane: "all", todoQuery: "" });
   }
 
   function changeGoal(goalId: string) {
     void updateSearch({ goalId });
+  }
+
+  function changeTodoLane(value: TodoLaneFilter) {
+    void updateSearch({ todoLane: value });
+  }
+
+  function changeTodoQuery(value: string) {
+    void updateSearch({ todoQuery: value });
   }
 
   useEffect(() => {
@@ -1397,11 +1511,15 @@ export function FrontstagePage() {
       onGoalChange={changeGoal}
       onLoadStatusUrl={() => void loadFromUrl(statusUrl)}
       onResetDemo={resetToDemo}
+      onTodoLaneChange={changeTodoLane}
+      onTodoQueryChange={changeTodoQuery}
       projection={selectedProjection}
       selectedGoalId={selectedGoalId}
       setStatusUrl={setStatusUrl}
       source={source}
       statusUrl={statusUrl}
+      todoLane={todoLane}
+      todoQuery={todoQuery}
     />
   );
 }

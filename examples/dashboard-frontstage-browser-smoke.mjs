@@ -43,15 +43,40 @@ function projectionFor(goalId, displayName, claimedBy, todoTitle) {
       spent_slots: 3,
       state: "eligible",
     },
-    user_todos: [],
+    user_todos: [
+      {
+        todo_id: `${goalId}_user_gate`,
+        priority: "P0",
+        status: "open",
+        task_class: "user_gate",
+        title: `Review live handoff gate before delivery for ${displayName}.`,
+      },
+      {
+        todo_id: `${goalId}_user_evidence`,
+        priority: "P1",
+        status: "open",
+        task_class: "evidence_review",
+        title: `Confirm external evidence packet for ${displayName}.`,
+      },
+    ],
     agent_todos: [
       {
         todo_id: `${goalId}_todo`,
         priority: "P1",
         status: "open",
         claimed_by: claimedBy,
+        action_kind: "frontstage_render",
         task_class: "advancement_task",
         title: `${todoTitle} FAKE_PRIVATE_TODO_GAMMA`,
+      },
+      {
+        todo_id: `${goalId}_todo_filter`,
+        priority: "P2",
+        status: "open",
+        claimed_by: claimedBy,
+        action_kind: "frontstage_filter",
+        task_class: "productization_task",
+        title: `Document filtered ops route for ${displayName}.`,
       },
     ],
     open_gates: [
@@ -468,11 +493,44 @@ async function main() {
           "Truth Contract",
           "CLAIMED LANES",
           "EVIDENCE LOOP",
+          "SEARCH TODO PROJECTION",
+          "Showing 4 of 4 projected todos",
+          "Review live handoff gate before delivery",
+          "Document filtered ops route",
           "live-goal-a_gate",
           "browser smoke statusUrl",
           "browser_smoke_public_fixture",
         ],
       );
+      await desktopPage.locator('[data-testid="frontstage-todo-search"]').fill("filtered ops");
+      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 1 of 4 projected todos"));
+      const filteredTodoText = await desktopPage.locator('[data-testid="frontstage-agent-todos"]').innerText();
+      if (!filteredTodoText.includes("Document filtered ops route")) {
+        throw new Error("Todo search did not keep the matching agent todo visible");
+      }
+      const filteredUserTodoText = await desktopPage.locator('[data-testid="frontstage-user-todos"]').innerText();
+      if (!filteredUserTodoText.includes("No user todos match the current filters.")) {
+        throw new Error("Todo search did not show the user-lane empty state");
+      }
+      const filteredTodoUrl = new URL(desktopPage.url());
+      if (filteredTodoUrl.searchParams.get("todoQuery") !== "filtered ops") {
+        throw new Error(`Todo search did not update URL: ${desktopPage.url()}`);
+      }
+      await desktopPage.locator('[data-testid="frontstage-todo-search"]').fill("");
+      await desktopPage.locator('[data-testid="frontstage-todo-lane-filter"]').selectOption("user");
+      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 2 of 4 projected todos"));
+      const userLaneText = await desktopPage.locator('[data-testid="frontstage-user-todos"]').innerText();
+      const agentLaneText = await desktopPage.locator('[data-testid="frontstage-agent-todos"]').innerText();
+      if (!userLaneText.includes("Review live handoff gate before delivery")) {
+        throw new Error("User lane filter did not keep user todos visible");
+      }
+      if (!agentLaneText.includes("No agent todos match the current filters.")) {
+        throw new Error("User lane filter did not hide agent todos");
+      }
+      const filteredLaneUrl = new URL(desktopPage.url());
+      if (filteredLaneUrl.searchParams.get("todoLane") !== "user") {
+        throw new Error(`Todo lane filter did not update URL: ${desktopPage.url()}`);
+      }
       await desktopPage.locator('[data-testid="frontstage-goal-select"]').selectOption("live-goal-b");
       await desktopPage.waitForFunction(() => document.body.innerText.includes("Second Live Channel"));
       const selectedUrl = new URL(desktopPage.url());
