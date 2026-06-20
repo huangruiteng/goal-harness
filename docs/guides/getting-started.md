@@ -100,6 +100,17 @@ session, run:
 goal-harness codex-cli-visible-driver-plan --project . --goal-id <goal-id>
 ```
 
+To see the full local automation setup plan in one packet, including quota
+guard, visible-driver decision, TUI bootstrap command, explicit headless
+fallback command, and idle-guard requirement, run:
+
+```bash
+goal-harness codex-cli-local-driver-plan --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+This is still dry-run-only. It does not run Codex, read transcripts, read
+session files, mutate a session, or spend quota.
+
 If same-session steering is unavailable and the user explicitly accepts a
 headless fallback, generate the fallback handoff instead of pretending the open
 TUI is preserved:

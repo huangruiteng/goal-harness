@@ -333,6 +333,137 @@ def build_codex_cli_visible_driver_plan(
     }
 
 
+def build_codex_cli_local_driver_plan(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    codex_bin: str,
+    probe_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a dry-run-first local driver plan for Codex CLI.
+
+    This does not launch Codex or mutate any session. It composes the existing
+    one-message TUI bootstrap, visible-driver plan, quota guard, and explicit
+    headless fallback into one operator-facing decision packet.
+    """
+
+    visible_plan = build_codex_cli_visible_driver_plan(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        codex_bin=codex_bin,
+        probe_payload=probe_payload,
+    )
+    resolved_project = visible_plan["project"]
+    resolved_goal_id = visible_plan["goal_id"]
+    agent_arg = f" --agent-id {_shell_arg(agent_id)}" if agent_id else ""
+    visible_driver_plan_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-visible-driver-plan "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}{agent_arg} "
+        f"--codex-bin {_shell_arg(codex_bin)}"
+    )
+    quota_guard_command = (
+        f"{_shell_arg(cli_bin)} --format json "
+        "--registry \"$HOME/.codex/goal-harness/registry.global.json\" "
+        f"quota should-run --goal-id {_shell_arg(resolved_goal_id)}{agent_arg}"
+    )
+    bootstrap_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-bootstrap-message "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}{agent_arg}"
+    )
+    exec_fallback_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-exec-handoff "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}{agent_arg} "
+        f"--codex-bin {_shell_arg(codex_bin)}"
+    )
+    driver_mode = str(visible_plan.get("driver_mode") or "tui_bootstrap_only")
+
+    if driver_mode == "session_attached_visible_turn":
+        decision = "attempt_visible_session_attach_after_idle_guard"
+        operator_instruction = (
+            "Run quota guard, verify idle guard, then attempt only the detected visible attach primitive."
+        )
+    elif driver_mode == "visible_resume_or_remote_control_spike":
+        decision = "run_visible_resume_or_remote_control_proof"
+        operator_instruction = (
+            "Treat resume or remote-control as a proof target, not production session attachment, until the turn is visible and interruptible."
+        )
+    elif driver_mode == "explicit_headless_fallback_after_tui_bootstrap":
+        decision = "keep_tui_primary_offer_explicit_exec_fallback"
+        operator_instruction = (
+            "Keep one-message Codex CLI TUI bootstrap as the default; use codex exec only after explicit opt-in."
+        )
+    else:
+        decision = "ask_user_to_start_from_tui"
+        operator_instruction = "Ask the user to start inside Codex CLI TUI and paste the bootstrap message."
+
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_local_driver_plan_v0",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "codex_bin": codex_bin,
+        "driver_phase": "dry_run_plan",
+        "driver_mode": driver_mode,
+        "decision": decision,
+        "operator_instruction": operator_instruction,
+        "visible_driver_plan": {
+            "schema_version": visible_plan.get("schema_version"),
+            "driver_mode": visible_plan.get("driver_mode"),
+            "automation_action": visible_plan.get("automation_action"),
+            "next_step": visible_plan.get("next_step"),
+        },
+        "commands": {
+            "quota_guard": quota_guard_command,
+            "local_driver_plan": (
+                f"{_shell_arg(cli_bin)} codex-cli-local-driver-plan "
+                f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}{agent_arg} "
+                f"--codex-bin {_shell_arg(codex_bin)}"
+            ),
+            "visible_driver_plan": visible_driver_plan_command,
+            "tui_bootstrap_message": bootstrap_command,
+            "explicit_headless_fallback": exec_fallback_command,
+        },
+        "driver_steps": [
+            "run quota_guard and stop when user_channel.action_required=true",
+            "run visible_driver_plan to classify TUI, resume, remote-control, or exec fallback mode",
+            "verify idle_guard before any visible resume or remote-control prompt",
+            "prefer one-message TUI bootstrap until visible attach is proven",
+            "offer explicit_headless_fallback only after opt-in and goal_boundary approval",
+            "write back compact evidence or a precise blocker before quota spend",
+        ],
+        "idle_guard": {
+            "required": True,
+            "implemented": False,
+            "placeholder": "future driver must prove no active human typing and no running turn before visible resume or remote-control prompt",
+        },
+        "execution_policy": {
+            "tui_bootstrap_primary": True,
+            "headless_fallback_requires_user_opt_in": True,
+            "same_session_attachment_requires_visible_proof": True,
+            "quota_guard_required": True,
+            "spend_after_validated_writeback_only": True,
+        },
+        "boundary": {
+            "dry_run_plan_only": True,
+            "runs_codex": False,
+            "reads_raw_transcripts": False,
+            "reads_credentials": False,
+            "reads_session_files": False,
+            "mutates_codex_session": False,
+            "spends_goal_harness_quota": False,
+            "requires_idle_guard_before_visible_prompt": True,
+            "requires_user_gate_stop": True,
+        },
+        "warnings": list(visible_plan.get("warnings") or []),
+    }
+
+
 def render_codex_cli_session_probe_markdown(payload: dict[str, Any]) -> str:
     capabilities = payload.get("capabilities") or {}
     boundary = payload.get("boundary") or {}
@@ -405,6 +536,64 @@ def render_codex_cli_visible_driver_plan_markdown(payload: dict[str, Any]) -> st
 - spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
 - requires_idle_guard_before_visible_prompt: `{boundary.get("requires_idle_guard_before_visible_prompt")}`
 - requires_user_gate_stop: `{boundary.get("requires_user_gate_stop")}`
+
+## Warnings
+
+{warning_lines}
+"""
+
+
+def render_codex_cli_local_driver_plan_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
+    steps = payload.get("driver_steps") if isinstance(payload.get("driver_steps"), list) else []
+    idle_guard = payload.get("idle_guard") if isinstance(payload.get("idle_guard"), dict) else {}
+    policy = payload.get("execution_policy") if isinstance(payload.get("execution_policy"), dict) else {}
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    step_lines = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1))
+    warning_lines = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- none"
+    return f"""# Codex CLI Local Driver Plan
+
+- driver_phase: `{payload.get("driver_phase")}`
+- driver_mode: `{payload.get("driver_mode")}`
+- decision: `{payload.get("decision")}`
+- operator_instruction: {payload.get("operator_instruction")}
+
+## Commands
+
+```bash
+{commands.get("quota_guard")}
+{commands.get("visible_driver_plan")}
+{commands.get("tui_bootstrap_message")}
+{commands.get("explicit_headless_fallback")}
+```
+
+## Driver Steps
+
+{step_lines}
+
+## Idle Guard
+
+- required: `{idle_guard.get("required")}`
+- implemented: `{idle_guard.get("implemented")}`
+- placeholder: {idle_guard.get("placeholder")}
+
+## Execution Policy
+
+- tui_bootstrap_primary: `{policy.get("tui_bootstrap_primary")}`
+- headless_fallback_requires_user_opt_in: `{policy.get("headless_fallback_requires_user_opt_in")}`
+- same_session_attachment_requires_visible_proof: `{policy.get("same_session_attachment_requires_visible_proof")}`
+- quota_guard_required: `{policy.get("quota_guard_required")}`
+- spend_after_validated_writeback_only: `{policy.get("spend_after_validated_writeback_only")}`
+
+## Boundary
+
+- dry_run_plan_only: `{boundary.get("dry_run_plan_only")}`
+- runs_codex: `{boundary.get("runs_codex")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
 
 ## Warnings
 

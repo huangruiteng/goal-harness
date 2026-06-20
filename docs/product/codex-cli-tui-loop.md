@@ -127,6 +127,18 @@ spend Goal Harness quota. Its job is to choose one of four next modes:
   accepts a headless fallback.
 - `tui_bootstrap_only`: ask the user to start inside Codex CLI TUI.
 
+Current local-driver planner:
+
+```bash
+goal-harness codex-cli-local-driver-plan --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+This command is the conservative MVP for automation setup. It composes the
+quota guard, visible-driver plan, TUI bootstrap command, explicit headless
+fallback command, and idle-guard requirement into a single dry-run packet. It
+does not run Codex, read transcripts, read session files, mutate a session, or
+spend quota.
+
 ### 3. Headless Fallback
 
 `codex exec` remains useful for scheduled or CI-like work, but it is not the
@@ -201,11 +213,15 @@ projects runnable candidates; it should not over-specify the model's local plan.
    `goal-harness codex-cli-visible-driver-plan` so the next local driver knows
    whether to attempt visible attach, run a resume/remote-control proof, or
    fall back explicitly.
-5. **Local driver**: prototype a scheduler that runs quota, checks session
-   idle state, and either attaches visibly or falls back explicitly.
-6. **Validation harness**: add a public-safe fixture that proves the driver
+5. **Local driver planner**: ship
+   `goal-harness codex-cli-local-driver-plan` as the dry-run command that
+   composes quota, visible-driver, TUI bootstrap, explicit fallback, and
+   idle-guard requirements.
+6. **Local driver executor**: prototype a scheduler that runs quota, checks
+   session idle state, and either attaches visibly or falls back explicitly.
+7. **Validation harness**: add a public-safe fixture that proves the driver
    never stores raw transcript text and never spends quota before writeback.
-7. **Claude Code follow-up**: port the same product contract only after the
+8. **Claude Code follow-up**: port the same product contract only after the
    Codex CLI path is credible.
 
 ## Success Criteria
