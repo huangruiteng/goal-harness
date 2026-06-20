@@ -17,8 +17,10 @@ from ..project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_KIND,
     DEFAULT_HANDOFF_ADAPTER_STATUS,
     build_codex_cli_bootstrap_message,
+    build_codex_cli_exec_handoff,
     build_new_project_prompt,
     render_codex_cli_bootstrap_message_markdown,
+    render_codex_cli_exec_handoff_markdown,
     render_new_project_prompt_markdown,
 )
 from ..codex_cli_probe import (
@@ -88,6 +90,27 @@ def register_starter_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Public-safe JSON fixture with command_outputs, used instead of invoking Codex CLI.",
     )
 
+    codex_cli_exec_parser = subparsers.add_parser(
+        "codex-cli-exec-handoff",
+        help="Generate an explicit one-shot codex exec fallback for Goal Harness onboarding.",
+    )
+    codex_cli_exec_parser.add_argument("--project", default=".", help="Project directory to start from.")
+    codex_cli_exec_parser.add_argument("--goal-id", help="Goal id. Defaults to <project-name>-goal.")
+    codex_cli_exec_parser.add_argument(
+        "--agent-id",
+        help="Registered Goal Harness agent id to include in quota/claim instructions.",
+    )
+    codex_cli_exec_parser.add_argument(
+        "--cli-bin",
+        default="goal-harness",
+        help="Goal Harness CLI binary name embedded in generated commands.",
+    )
+    codex_cli_exec_parser.add_argument(
+        "--codex-bin",
+        default=DEFAULT_CODEX_BIN,
+        help="Codex CLI executable name embedded in the generated handoff command.",
+    )
+
     demo_parser = subparsers.add_parser(
         "demo",
         help="Create a disposable local demo goal and show status/quota output.",
@@ -148,6 +171,21 @@ def handle_codex_cli_session_probe_command(
         fixture=Path(args.fixture).expanduser() if args.fixture else None,
     )
     print_payload(payload, args.format, render_codex_cli_session_probe_markdown)
+    return 0 if payload.get("ok") else 1
+
+
+def handle_codex_cli_exec_handoff_command(
+    args: argparse.Namespace,
+    print_payload: PrintPayload,
+) -> int:
+    payload = build_codex_cli_exec_handoff(
+        project=Path(args.project),
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        cli_bin=args.cli_bin,
+        codex_bin=args.codex_bin,
+    )
+    print_payload(payload, args.format, render_codex_cli_exec_handoff_markdown)
     return 0 if payload.get("ok") else 1
 
 

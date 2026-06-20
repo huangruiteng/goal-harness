@@ -120,6 +120,19 @@ when:
 
 Headless fallback should never be the only way to start Goal Harness.
 
+Current explicit fallback generator:
+
+```bash
+goal-harness codex-cli-exec-handoff --project . --goal-id <goal-id>
+```
+
+This command prints a `codex exec` handoff script that embeds the same
+Goal-Harness-aware bootstrap message. It does not run Codex, read transcripts,
+read credentials, read session files, mutate a session, or spend quota. Use it
+only when the user knowingly chooses a headless fallback or when a future
+driver decides that same-session attachment is unavailable and the goal
+boundary permits background execution.
+
 ## Session-Attached Turn Algorithm
 
 ```text

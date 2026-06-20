@@ -244,6 +244,69 @@ def build_codex_cli_bootstrap_message(
     }
 
 
+def render_codex_cli_exec_handoff_command(
+    *,
+    project: str,
+    codex_bin: str,
+    prompt: str,
+) -> str:
+    return "\n".join(
+        [
+            f"cd {shell_arg(project)}",
+            "cat <<'GOAL_HARNESS_CODEX_PROMPT' | " f"{shell_arg(codex_bin)} exec",
+            prompt,
+            "GOAL_HARNESS_CODEX_PROMPT",
+        ]
+    )
+
+
+def build_codex_cli_exec_handoff(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    codex_bin: str,
+) -> dict[str, Any]:
+    bootstrap = build_codex_cli_bootstrap_message(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+    )
+    resolved_project = str(project.expanduser())
+    resolved_goal_id = str(bootstrap["goal_id"])
+    prompt = str(bootstrap["message"])
+    handoff_command = render_codex_cli_exec_handoff_command(
+        project=resolved_project,
+        codex_bin=codex_bin,
+        prompt=prompt,
+    )
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_exec_handoff_v0",
+        "mode": "explicit_headless_fallback",
+        "primary_experience": "codex_cli_tui_bootstrap",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "codex_bin": codex_bin,
+        "session_probe_command": f"{shell_arg(cli_bin)} codex-cli-session-probe --codex-bin {shell_arg(codex_bin)}",
+        "quota_guard_command": bootstrap["quota_guard_command"],
+        "quota_spend_command": bootstrap["quota_spend_command"],
+        "handoff_command": handoff_command,
+        "boundary": {
+            "runs_codex": False,
+            "reads_raw_transcripts": False,
+            "reads_credentials": False,
+            "reads_session_files": False,
+            "mutates_codex_session": False,
+            "spends_goal_harness_quota": False,
+        },
+    }
+
+
 def render_codex_cli_bootstrap_message_text(
     *,
     project: str,
@@ -537,4 +600,33 @@ Copy the block below into Codex CLI TUI from the project repo.
 - goal_id: `{payload.get("goal_id")}`
 - agent_id: `{payload.get("agent_id") or "(not provided)"}`
 - cli_bin: `{payload.get("cli_bin")}`
+"""
+
+
+def render_codex_cli_exec_handoff_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") or {}
+    return f"""# Codex CLI Exec Handoff
+
+This is an explicit headless fallback, not the primary TUI experience.
+Prefer `goal-harness codex-cli-bootstrap-message` when a user can start from
+the Codex CLI TUI.
+
+````bash
+{payload.get("handoff_command", "")}
+````
+
+## Guard Commands
+
+- session_probe: `{payload.get("session_probe_command")}`
+- quota_guard: `{payload.get("quota_guard_command")}`
+- quota_spend: `{payload.get("quota_spend_command")}`
+
+## Boundary
+
+- runs_codex: `{boundary.get("runs_codex")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_credentials: `{boundary.get("reads_credentials")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
 """

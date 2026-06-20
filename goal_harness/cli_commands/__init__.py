@@ -12,6 +12,7 @@ from .doctor import handle_doctor_command, register_doctor_command
 from .dreaming import handle_dreaming_command, register_dreaming_commands
 from .starter import (
     handle_codex_cli_bootstrap_message_command,
+    handle_codex_cli_exec_handoff_command,
     handle_codex_cli_session_probe_command,
     handle_demo_command,
     handle_new_project_prompt_command,
@@ -28,6 +29,7 @@ from .status import (
 __all__ = [
     "handle_check_command",
     "handle_codex_cli_bootstrap_message_command",
+    "handle_codex_cli_exec_handoff_command",
     "handle_codex_cli_session_probe_command",
     "handle_diagnose_command",
     "handle_demo_command",
