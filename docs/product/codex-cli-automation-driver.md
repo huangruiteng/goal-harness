@@ -84,18 +84,30 @@ The local driver must never read or publish:
 - Every automatic turn writes compact evidence or a precise blocker before
   quota spend.
 
-## Next Build Slice
+## Current MVP
 
-Implement a dry-run-first local driver command that composes the existing
-pieces:
+The dry-run-first local driver planner composes the existing quota, TUI,
+visible-driver, and explicit fallback pieces into one operator-facing packet:
 
 ```bash
-goal-harness codex-cli-visible-driver-plan --project . --goal-id <goal> --agent-id <agent>
-goal-harness codex-cli-bootstrap-message --project . --goal-id <goal> --agent-id <agent>
-goal-harness codex-cli-exec-handoff --project . --goal-id <goal> --agent-id <agent>
+goal-harness codex-cli-local-driver-plan --project . --goal-id <goal> --agent-id <agent>
 ```
 
-The first runnable milestone should not try to be clever. It should emit the
-exact driver decision, explain whether the user keeps the TUI path or has opted
-into headless fallback, and include an idle-guard placeholder before any
-visible resume / remote-control experiment.
+It is intentionally not a scheduler yet. It does not run Codex, read raw
+transcripts, inspect session files, mutate a Codex session, or spend Goal
+Harness quota. It emits:
+
+- the quota guard command that must run before work;
+- the visible-driver decision for TUI bootstrap, visible attach proof,
+  resume/remote-control spike, or explicit headless fallback;
+- the repo-specific TUI bootstrap message command;
+- the explicit `codex exec` fallback generator;
+- the idle-guard placeholder that must exist before any same-session attach is
+  treated as production automation.
+
+## Next Build Slice
+
+Turn the dry-run planner into a real local driver only after the same-session
+path has a visible, idle-guarded proof. Until then, the user-facing happy path
+stays simple: start in Codex CLI TUI with one Goal Harness message, and use
+headless `codex exec` only as an explicit opt-in fallback.
