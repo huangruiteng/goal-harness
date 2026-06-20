@@ -4,13 +4,14 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .bootstrap import default_goal_id
 
 
 DEFAULT_CODEX_BIN = "codex"
 DEFAULT_TIMEOUT_SECONDS = 2.0
+DEFAULT_EXECUTOR_TIMEOUT_SECONDS = 30.0
 
 
 HELP_COMMANDS = {
@@ -940,6 +941,258 @@ def build_codex_cli_local_scheduler_tick(
     }
 
 
+def _command_matches_allowed_prefix(command: str | None, prefixes: list[str]) -> bool:
+    if not command or not prefixes:
+        return False
+    try:
+        command_parts = shlex.split(command)
+    except ValueError:
+        command_parts = []
+    for raw_prefix in prefixes:
+        prefix = (raw_prefix or "").strip()
+        if not prefix:
+            continue
+        try:
+            prefix_parts = shlex.split(prefix)
+        except ValueError:
+            prefix_parts = []
+        if prefix_parts and command_parts[: len(prefix_parts)] == prefix_parts:
+            return True
+        if command.strip() == prefix or command.strip().startswith(f"{prefix} "):
+            return True
+    return False
+
+
+def _run_scheduler_executor_shell_command(
+    command: str,
+    *,
+    timeout_seconds: float,
+    capture_output: bool = False,
+) -> dict[str, Any]:
+    stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
+    stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
+    try:
+        argv = shlex.split(command)
+    except ValueError as exc:
+        return {
+            "attempted": False,
+            "returncode": None,
+            "timed_out": False,
+            "output_captured": capture_output,
+            "error": f"invalid_command: {exc}",
+        }
+    if not argv:
+        return {
+            "attempted": False,
+            "returncode": None,
+            "timed_out": False,
+            "output_captured": capture_output,
+            "error": "empty_command",
+        }
+    try:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            text=True,
+            timeout=timeout_seconds,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "attempted": True,
+            "returncode": None,
+            "timed_out": True,
+            "output_captured": capture_output,
+        }
+    return {
+        "attempted": True,
+        "returncode": completed.returncode,
+        "timed_out": False,
+        "output_captured": capture_output,
+    }
+
+
+SchedulerCommandRunner = Callable[..., dict[str, Any]]
+
+
+def execute_codex_cli_local_scheduler_tick_result(
+    tick_payload: dict[str, Any],
+    *,
+    execute_candidate: bool = False,
+    execute_blocker_writeback: bool = False,
+    guard_checked: bool = False,
+    candidate_command_prefixes: list[str] | None = None,
+    executor_timeout_seconds: float = DEFAULT_EXECUTOR_TIMEOUT_SECONDS,
+    runner: SchedulerCommandRunner | None = None,
+) -> dict[str, Any]:
+    """Optionally execute one scheduler tick result behind explicit opt-in gates."""
+
+    candidate_command_prefixes = list(candidate_command_prefixes or [])
+    runner = runner or _run_scheduler_executor_shell_command
+    scheduler_action = str(tick_payload.get("scheduler_action") or "")
+    candidate_command = tick_payload.get("candidate_command")
+    blocker_writeback_command = tick_payload.get("blocker_writeback_command")
+    candidate_command = candidate_command if isinstance(candidate_command, str) else None
+    blocker_writeback_command = (
+        blocker_writeback_command if isinstance(blocker_writeback_command, str) else None
+    )
+    commands = tick_payload.get("commands") if isinstance(tick_payload.get("commands"), dict) else {}
+
+    execution: dict[str, Any] = {
+        "attempted": False,
+        "executed": False,
+        "kind": None,
+        "reason": "no_execute_flag",
+        "returncode": None,
+        "timed_out": False,
+        "output_captured": False,
+        "candidate_prefix_matched": None,
+    }
+
+    if execute_candidate and execute_blocker_writeback:
+        execution["reason"] = "choose_one_execute_mode"
+    elif (execute_candidate or execute_blocker_writeback) and not guard_checked:
+        execution["reason"] = "fresh_quota_guard_confirmation_required"
+    elif execute_candidate:
+        if scheduler_action not in {
+            "external_visible_command_candidate",
+            "external_headless_fallback_candidate",
+        }:
+            execution["reason"] = "scheduler_action_not_candidate"
+        elif not candidate_command:
+            execution["reason"] = "candidate_command_missing"
+        elif not candidate_command_prefixes:
+            execution["reason"] = "candidate_command_prefix_required"
+        elif not _command_matches_allowed_prefix(candidate_command, candidate_command_prefixes):
+            execution["reason"] = "candidate_command_prefix_mismatch"
+            execution["candidate_prefix_matched"] = False
+        else:
+            execution["candidate_prefix_matched"] = True
+            result = runner(
+                candidate_command,
+                timeout_seconds=executor_timeout_seconds,
+                capture_output=False,
+            )
+            execution.update(result)
+            execution["executed"] = True
+            execution["kind"] = "candidate_command"
+            execution["reason"] = "candidate_command_executed"
+    elif execute_blocker_writeback:
+        if scheduler_action != "write_precise_blocker":
+            execution["reason"] = "scheduler_action_not_blocker_writeback"
+        elif not blocker_writeback_command:
+            execution["reason"] = "blocker_writeback_command_missing"
+        else:
+            result = runner(
+                blocker_writeback_command,
+                timeout_seconds=executor_timeout_seconds,
+                capture_output=False,
+            )
+            execution.update(result)
+            execution["executed"] = True
+            execution["kind"] = "blocker_writeback"
+            execution["reason"] = "blocker_writeback_executed"
+
+    executed = bool(execution.get("executed"))
+    command_failed = executed and (
+        bool(execution.get("timed_out")) or execution.get("returncode") not in {0, None}
+    )
+    return {
+        "ok": not command_failed,
+        "schema_version": "codex_cli_local_scheduler_executor_v0",
+        "project": tick_payload.get("project"),
+        "goal_id": tick_payload.get("goal_id"),
+        "agent_id": tick_payload.get("agent_id"),
+        "cli_bin": tick_payload.get("cli_bin"),
+        "codex_bin": tick_payload.get("codex_bin"),
+        "executor_phase": "explicit_opt_in_executor",
+        "scheduler_action": scheduler_action,
+        "decision": tick_payload.get("decision"),
+        "next_safe_step": tick_payload.get("next_safe_step"),
+        "execution_request": {
+            "execute_candidate": execute_candidate,
+            "execute_blocker_writeback": execute_blocker_writeback,
+            "guard_checked": guard_checked,
+            "candidate_command_prefixes": candidate_command_prefixes,
+            "executor_timeout_seconds": executor_timeout_seconds,
+        },
+        "execution": execution,
+        "commands": {
+            "scheduler_tick": commands.get("scheduler_tick"),
+            "candidate_command": candidate_command,
+            "blocker_writeback": blocker_writeback_command,
+        },
+        "scheduler_tick": {
+            "schema_version": tick_payload.get("schema_version"),
+            "scheduler_phase": tick_payload.get("scheduler_phase"),
+            "scheduler_action": scheduler_action,
+            "decision": tick_payload.get("decision"),
+            "precise_blocker": tick_payload.get("precise_blocker"),
+            "visible_session_proof": (
+                (tick_payload.get("visible_driver_run_packet") or {}).get("visible_session_proof")
+                if isinstance(tick_payload.get("visible_driver_run_packet"), dict)
+                else None
+            ),
+        },
+        "boundary": {
+            "executor_wrapper": True,
+            "requires_explicit_execute_flag": True,
+            "requires_fresh_quota_guard_confirmation": True,
+            "candidate_prefix_required": True,
+            "runs_external_candidate": executed and execution.get("kind") == "candidate_command",
+            "runs_codex_candidate_possible": executed and execution.get("kind") == "candidate_command",
+            "reads_raw_transcripts": False,
+            "reads_credentials": False,
+            "reads_session_files": False,
+            "mutates_codex_session": False,
+            "candidate_output_captured": False,
+            "blocker_output_captured": False,
+            "spends_goal_harness_quota": False,
+            "writes_goal_harness_state": executed and execution.get("kind") == "blocker_writeback",
+        },
+        "warnings": list(tick_payload.get("warnings") or []),
+    }
+
+
+def build_codex_cli_local_scheduler_executor(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    codex_bin: str,
+    probe_payload: dict[str, Any],
+    proof_payload: dict[str, Any] | None = None,
+    allow_headless_fallback: bool = False,
+    execute_candidate: bool = False,
+    execute_blocker_writeback: bool = False,
+    guard_checked: bool = False,
+    candidate_command_prefixes: list[str] | None = None,
+    executor_timeout_seconds: float = DEFAULT_EXECUTOR_TIMEOUT_SECONDS,
+    runner: SchedulerCommandRunner | None = None,
+) -> dict[str, Any]:
+    tick_payload = build_codex_cli_local_scheduler_tick(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        codex_bin=codex_bin,
+        probe_payload=probe_payload,
+        proof_payload=proof_payload,
+        allow_headless_fallback=allow_headless_fallback,
+    )
+    return execute_codex_cli_local_scheduler_tick_result(
+        tick_payload,
+        execute_candidate=execute_candidate,
+        execute_blocker_writeback=execute_blocker_writeback,
+        guard_checked=guard_checked,
+        candidate_command_prefixes=candidate_command_prefixes,
+        executor_timeout_seconds=executor_timeout_seconds,
+        runner=runner,
+    )
+
+
 def render_codex_cli_session_probe_markdown(payload: dict[str, Any]) -> str:
     capabilities = payload.get("capabilities") or {}
     boundary = payload.get("boundary") or {}
@@ -1188,6 +1441,68 @@ def render_codex_cli_local_scheduler_tick_markdown(payload: dict[str, Any]) -> s
 - reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
 - reads_session_files: `{boundary.get("reads_session_files")}`
 - mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
+- writes_goal_harness_state: `{boundary.get("writes_goal_harness_state")}`
+
+## Warnings
+
+{warning_lines}
+"""
+
+
+def render_codex_cli_local_scheduler_executor_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
+    execution = payload.get("execution") if isinstance(payload.get("execution"), dict) else {}
+    request = payload.get("execution_request") if isinstance(payload.get("execution_request"), dict) else {}
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    warning_lines = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- none"
+    return f"""# Codex CLI Local Scheduler Executor
+
+- executor_phase: `{payload.get("executor_phase")}`
+- scheduler_action: `{payload.get("scheduler_action")}`
+- decision: `{payload.get("decision")}`
+- next_safe_step: {payload.get("next_safe_step")}
+
+## Execution Request
+
+- execute_candidate: `{request.get("execute_candidate")}`
+- execute_blocker_writeback: `{request.get("execute_blocker_writeback")}`
+- guard_checked: `{request.get("guard_checked")}`
+- candidate_command_prefixes: `{request.get("candidate_command_prefixes")}`
+- executor_timeout_seconds: `{request.get("executor_timeout_seconds")}`
+
+## Execution Result
+
+- attempted: `{execution.get("attempted")}`
+- executed: `{execution.get("executed")}`
+- kind: `{execution.get("kind")}`
+- reason: `{execution.get("reason")}`
+- returncode: `{execution.get("returncode")}`
+- timed_out: `{execution.get("timed_out")}`
+- output_captured: `{execution.get("output_captured")}`
+- candidate_prefix_matched: `{execution.get("candidate_prefix_matched")}`
+
+## Commands
+
+```bash
+{commands.get("scheduler_tick")}
+{commands.get("candidate_command") or "# no candidate command"}
+{commands.get("blocker_writeback") or "# no blocker writeback command"}
+```
+
+## Boundary
+
+- executor_wrapper: `{boundary.get("executor_wrapper")}`
+- requires_explicit_execute_flag: `{boundary.get("requires_explicit_execute_flag")}`
+- requires_fresh_quota_guard_confirmation: `{boundary.get("requires_fresh_quota_guard_confirmation")}`
+- candidate_prefix_required: `{boundary.get("candidate_prefix_required")}`
+- runs_external_candidate: `{boundary.get("runs_external_candidate")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- candidate_output_captured: `{boundary.get("candidate_output_captured")}`
+- blocker_output_captured: `{boundary.get("blocker_output_captured")}`
 - spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
 - writes_goal_harness_state: `{boundary.get("writes_goal_harness_state")}`
 
