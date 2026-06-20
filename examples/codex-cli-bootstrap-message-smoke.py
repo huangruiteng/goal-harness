@@ -68,6 +68,22 @@ def run_cli(*extra_args: str) -> str:
     return result.stdout
 
 
+def assert_docs_surface_codex_cli_quickstart() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    getting_started = (REPO_ROOT / "docs/guides/getting-started.md").read_text(encoding="utf-8")
+    product_contract = (REPO_ROOT / "docs/product/codex-cli-tui-loop.md").read_text(encoding="utf-8")
+
+    for text in (readme, getting_started, product_contract):
+        assert "Codex CLI TUI" in text, text[:500]
+        assert "Start Goal Harness for this repo" in text, text[:500]
+        assert "goal-harness codex-cli-bootstrap-message --project . --goal-id <goal-id>" in text, text[:500]
+
+    normalized_readme = " ".join(readme.split())
+    assert "Headless `codex exec` is an explicit fallback" in normalized_readme, readme
+    assert "goal-harness codex-cli-session-probe" in getting_started, getting_started
+    assert "goal-harness codex-cli-exec-handoff --project . --goal-id <goal-id>" in getting_started, getting_started
+
+
 def main() -> int:
     payload = build_codex_cli_bootstrap_message(
         project=PROJECT,
@@ -104,6 +120,7 @@ def main() -> int:
     assert "# Codex CLI Goal Harness Bootstrap Message" in cli_markdown, cli_markdown
     assert "Copy the block below into Codex CLI TUI" in cli_markdown, cli_markdown
     assert "one-message TUI bootstrap" in cli_markdown, cli_markdown
+    assert_docs_surface_codex_cli_quickstart()
 
     print("codex-cli-bootstrap-message-smoke ok")
     return 0
