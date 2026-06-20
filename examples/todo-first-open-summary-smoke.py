@@ -327,6 +327,114 @@ def assert_claimed_frontstage_lanes_visible() -> None:
     assert decision["agent_identity"]["agent_id"] == "codex-side-bypass", decision
 
 
+def assert_claimed_markdown_todos_survive_visibility_lanes() -> None:
+    unclaimed_lines = "\n".join(
+        f"- [ ] [P1] Unclaimed priority backlog item {index}."
+        for index in range(1, 14)
+    )
+    state_text = (
+        "## Agent Todo\n\n"
+        f"{unclaimed_lines}\n"
+        f" - [ ] {FRONTSTAGE_CLAIMED_TODO}\n"
+        "   <!-- goal-harness:todo todo_id=todo_claimed_markdown status=open "
+        "task_class=advancement_task action_kind=frontstage_dashboard_route_mvp "
+        "claimed_by=codex-side-bypass -->\n"
+        f"- [ ] {FRONTSTAGE_MONITOR_TODO}\n"
+        "  <!-- goal-harness:todo todo_id=todo_claimed_monitor status=open "
+        "task_class=continuous_monitor action_kind=repository_quality_monitor "
+        "claimed_by=codex-side-bypass -->\n"
+    )
+    agent_todos = parse_active_state_todos(state_text)["agent_todos"]
+    assert all(
+        item["todo_id"] != "todo_claimed_markdown"
+        for item in agent_todos["first_open_items"]
+    ), agent_todos
+    assert all(
+        item["todo_id"] != "todo_claimed_markdown"
+        for item in agent_todos["backlog_items"]
+    ), agent_todos
+    assert [item["todo_id"] for item in agent_todos["claimed_open_items"]] == [
+        "todo_claimed_markdown",
+        "todo_claimed_monitor",
+    ], agent_todos
+    assert [item["todo_id"] for item in agent_todos["claimed_advancement_open_items"]] == [
+        "todo_claimed_markdown",
+    ], agent_todos
+    assert [item["todo_id"] for item in agent_todos["claimed_monitor_open_items"]] == [
+        "todo_claimed_monitor",
+    ], agent_todos
+
+    asset_summary = project_asset_todo_summary(agent_todos, role="agent")
+    assert asset_summary is not None, agent_todos
+    status_payload = {
+        "ok": True,
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": GOAL_ID,
+                    "status": "eligible_with_claimed_markdown_backlog",
+                    "waiting_on": "codex",
+                    "severity": "action",
+                    "source": "latest_run",
+                    "recommended_action": "Keep claimed markdown todos visible outside scheduler top-N.",
+                    "coordination": {
+                        "primary_agent": "codex-main-control",
+                        "registered_agents": ["codex-main-control", "codex-side-bypass"],
+                    },
+                    "quota": {
+                        "compute": 1.0,
+                        "slot_minutes": 1,
+                        "allowed_slots": 1440,
+                        "spent_slots": 0,
+                        "state": "eligible",
+                        "reason": "eligible fixture",
+                    },
+                    "project_asset": {
+                        "owner": "codex",
+                        "next_action": "Keep claimed markdown todos visible outside scheduler top-N.",
+                        "stop_condition": "stop on fixture boundary",
+                        "agent_todos": asset_summary,
+                    },
+                    "agent_todos": agent_todos,
+                }
+            ]
+        },
+        "run_history": {
+            "goals": [
+                {
+                    "id": GOAL_ID,
+                    "registry_member": True,
+                    "status": "active",
+                    "coordination": {
+                        "primary_agent": "codex-main-control",
+                        "registered_agents": ["codex-main-control", "codex-side-bypass"],
+                    },
+                    "quota": {"compute": 1.0, "window_hours": 24},
+                    "latest_runs": [],
+                }
+            ]
+        },
+    }
+    decision = build_quota_should_run(
+        status_payload,
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    summary = decision["agent_todo_summary"]
+    assert [item["todo_id"] for item in summary["current_agent_claimed_open_items"]] == [
+        "todo_claimed_markdown",
+        "todo_claimed_monitor",
+    ], summary
+    assert [item["todo_id"] for item in summary["current_agent_claimed_advancement_items"]] == [
+        "todo_claimed_markdown",
+    ], summary
+    assert [item["todo_id"] for item in summary["current_agent_claimed_monitor_items"]] == [
+        "todo_claimed_monitor",
+    ], summary
+    assert summary["current_agent_claimed_advancement_count"] == 1, summary
+    assert summary["current_agent_claimed_monitor_count"] == 1, summary
+
+
 def main() -> int:
     agent_todos = build_truncated_todo_group()
     parsed_agent_todos = parse_multiline_deep_open_todo()
@@ -430,6 +538,7 @@ def main() -> int:
     assert f"Agent 待办候选 2：{OPEN_TODO}" in packet["project_agent_handoff"], packet
     assert_blocked_priority_fallback_visible()
     assert_claimed_frontstage_lanes_visible()
+    assert_claimed_markdown_todos_survive_visibility_lanes()
     print("todo-first-open-summary-smoke ok")
     return 0
 
