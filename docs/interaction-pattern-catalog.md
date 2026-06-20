@@ -527,12 +527,15 @@ flowchart TD
 **Bad smell**
 
 The heartbeat stops itself because nothing changed, or spends quota on a
-no-op status repetition.
+no-op status repetition. Another failure mode is presenting monitor-only work
+as an immediate Codex action; the agent then keeps trying to deliver from a
+watch lane instead of staying quiet or writing a concrete blocker.
 
 **Validation**
 
 - `examples/heartbeat-quota-flow-smoke.py`
 - `docs/heartbeat-automation-prompt.md`
+- `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
 
 ### Human Decision
 
@@ -1348,6 +1351,12 @@ that lets status/quota stop projecting the replan obligation. This keeps agents
 responsible for actively closing the loop instead of relying on loose
 classification wording such as `autonomous_replan_validated_*`.
 
+A replan ACK should also change the work frontier. It should add, split,
+supersede, complete-with-successor, or block a todo, or else record an explicit
+watch-lane continuation. If the runnable todo set, user gate, blocker state,
+monitor target, or `effective_action` does not change, the replan is likely a
+no-op and should not hide the stall.
+
 **Visual Model**
 
 ```mermaid
@@ -1377,12 +1386,15 @@ no-progress evidence is treated as optional brainstorming instead of a required
 state repair. A subtler failure is treating
 `autonomous_replan_validated_*` or another progress classification as equivalent
 to a replan ACK; that hides whether the agent actually split/retired/added the
-needed control-plane work and closed the obligation.
+needed control-plane work and closed the obligation. A related bad case is a
+replan ACK that records effort but leaves the exact same monitor/action
+recommendation as the next machine-visible route.
 
 **Validation**
 
 - `examples/autonomous-replan-obligation-smoke.py`
 - `regression/autonomous-replan-vs-dreaming-contract.py`
+- `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
 
 #### IP-010 Cadence Widening
 

@@ -6,3 +6,4 @@ contracts they motivated. They are evidence, not current operating manuals.
 Current records:
 
 - [Outcome floor safe-bypass incident, 2026-06-06](outcome-floor-safe-bypass-incident-20260606.md)
+- [Monitor-only replan stall incident, 2026-06-21](monitor-only-replan-stall-incident-20260621.md)
