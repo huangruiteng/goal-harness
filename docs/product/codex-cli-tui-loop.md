@@ -258,11 +258,15 @@ projects runnable candidates; it should not over-specify the model's local plan.
 7. **Visible-session proof harness**: validate public-safe observations with
    `goal-harness codex-cli-visible-session-proof` before promoting
    resume/remote-control into any same-session automation path.
-8. **Local driver executor**: prototype a scheduler that runs quota, checks
+8. **Visible driver run packet**: add
+   `goal-harness codex-cli-visible-driver-run` as the no-execution packet that
+   decides whether the next turn needs visible proof, TUI bootstrap, explicit
+   headless opt-in, or a proven visible-session candidate.
+9. **Local driver executor**: prototype a scheduler that runs quota, checks
    session idle state, and either attaches visibly or falls back explicitly.
-9. **Validation harness**: add a public-safe fixture that proves the driver
+10. **Validation harness**: add a public-safe fixture that proves the driver
    never stores raw transcript text and never spends quota before writeback.
-10. **Claude Code follow-up**: port the same product contract only after the
+11. **Claude Code follow-up**: port the same product contract only after the
    Codex CLI path is credible.
 
 ## Success Criteria
