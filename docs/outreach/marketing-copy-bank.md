@@ -13,23 +13,40 @@ showcase catalog.
 
 ## Core Positioning
 
+**Always-on agent teams, governed by human judgment**
+
 **Gate-aware human-in-the-loop control plane**
 
-**让人的判断成为控制面，而不是让 agent 在等待里空转。**
+**让多个 agent 昼夜接力，把人的判断留在控制面。**
 
-Goal Harness keeps user decisions, agent todos, safe fallback, run history,
-quota, and public/private boundaries in one shared state layer. The gated
-route waits clearly; independent safe side work can continue with evidence.
+Goal Harness keeps goals, user decisions, agent todos, claims, scopes, safe
+fallback, run history, quota, evidence, and public/private boundaries in one
+shared state layer. The gated route waits clearly; independent safe side work
+can continue with evidence.
 
 Short form:
 
-> Long-running agent work, without losing the plot.
+> Your agents keep the night shift. You keep the judgment.
+
+Product angle:
+
+> Let a user's primary and side agents keep a long-running goal moving across
+> tools, turns, and off-hours, while the user sees what happened, what is
+> blocked, who owns which todo, and where judgment is needed.
+
+Technical angle:
+
+> The always-on promise is backed by agent identity, `claimed_by`, scope,
+> capability gates, quota, run history, evidence writeback, and public/private
+> boundary checks. Goal Harness is not "run agents forever"; it is governed
+> continuity.
 
 Plain Chinese form:
 
 > Goal Harness 不是新的 agent runtime。它是给 Codex、Claude Code、Cursor 这类
-> agent loop 加的一层长程控制面：目标、用户决策、agent todo、fallback、证据和
-> quota 不再散落在聊天里。
+> agent loop 加的一层长程控制面：目标、用户决策、agent todo、认领、scope、
+> fallback、证据和 quota 不再散落在聊天里。人的多个 agent 可以持续接力，但
+> 每一次接力都要受 gate、scope、quota 和证据约束。
 
 ## What To Say First
 
@@ -102,6 +119,9 @@ without turning into uncontrolled autonomy.
 
 Good copy:
 
+- "Your agents keep the night shift. You keep the judgment."
+- "Always-on agent work only makes sense when gates, scope, quota, and evidence
+  are explicit."
 - "Off-hours progress is valuable only when the agent knows what counts as a
   safe side path."
 - "Quota spend should follow validated writeback, not a vague feeling that the
@@ -231,9 +251,9 @@ Keep the first screen direct:
 ```text
 # Goal Harness
 
-Gate-aware human-in-the-loop control plane.
+Always-on agent teams, governed by human judgment.
 
-Long-running agent work, without losing the plot.
+Gate-aware human-in-the-loop control plane.
 ```
 
 Then explain the relationship:
@@ -241,7 +261,7 @@ Then explain the relationship:
 ```text
 Codex, Claude Code, Cursor, and scheduled terminal agents execute work.
 Goal Harness keeps the lifetime-goal control plane visible across those loops:
-goals, gates, todos, ownership, run history, quota, and evidence.
+goals, gates, todos, claims, scopes, run history, quota, and evidence.
 ```
 
 ### Lark / Internal Intro
@@ -249,12 +269,13 @@ goals, gates, todos, ownership, run history, quota, and evidence.
 Lead with the bilingual punchline, then use Chinese for the explanation:
 
 ```text
+Always-on agent teams, governed by human judgment
 Gate-aware human-in-the-loop control plane
-让人的判断成为控制面，而不是让 agent 在等待里空转。
+让多个 agent 昼夜接力，把人的判断留在控制面。
 
 Goal Harness 不是替代 Codex goal/automation，而是给这些 agent loop
-提供长期控制面：用户决策、agent todo、safe fallback、run history 和 quota
-能在同一层状态里被看见、继承、验证。
+提供长期控制面：目标、用户决策、agent todo、认领、scope、safe fallback、
+run history 和 quota 能在同一层状态里被看见、继承、验证。
 ```
 
 ### Social Post

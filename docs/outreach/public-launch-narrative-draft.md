@@ -13,13 +13,15 @@ agent framework.
 
 Its strongest public position is:
 
-> Long-running agents need a human-in-the-loop control plane that can keep
-> working safely when one high-priority lane is gated by a human decision.
+> Always-on agent teams need a human-in-the-loop control plane: human-gated
+> work waits explicitly, while independent safe lanes keep moving with
+> evidence.
 
 The important product detail is not that the harness stores more state. It is
 that the state becomes actionable:
 
 - the blocked human decision remains visible as a concrete user todo;
+- primary and side agents can see who owns which todo and scope;
 - safe fallback work can continue without pretending the fallback is now the
   main lane;
 - quota, validation, public/private boundaries, and run evidence remain tied to

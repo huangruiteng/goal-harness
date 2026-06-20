@@ -1,15 +1,19 @@
 # Goal Harness
 
+**Always-on agent teams, governed by human judgment**
+
 **Gate-aware human-in-the-loop control plane**
 
-**让人的判断成为控制面，而不是让 agent 在等待里空转。**
+**让多个 agent 昼夜接力，把人的判断留在控制面。**
 
-Goal Harness 把用户决策、agent todo、safe fallback、run history 和 quota
-放进同一层状态：该停的地方明确停，该继续的安全侧路继续走。
+Goal Harness 把目标、用户决策、agent todo、认领关系、scope、safe fallback、
+run history 和 quota 放进同一层状态：该等人的地方明确等人，不该空等的
+安全侧路继续推进。
 
-Goal Harness 是一个面向长期 agent 工作的本地控制面。它让目标、用户
-gate、todo、运行历史、quota、旁路 agent 归属、人类反馈和项目边界在多轮
-工作中保持可见、可恢复、可交接。
+Goal Harness 是一个面向长期 agent 工作的本地控制面。它让 Codex、Claude Code、
+Cursor、automation 和旁路 agent 共享同一份长期目标状态：目标、gate、todo、
+认领、scope、运行历史、quota、证据和项目边界在多轮工作中保持可见、可恢复、
+可交接。
 
 [English](README.md) · [快速开始](#快速开始) · [Showcases](docs/showcases/README.md) ·
 [产品愿景](docs/product/vision.md) · [架构](docs/architecture.md)
@@ -42,6 +46,10 @@ state drift：
 
 Goal Harness 的产品判断是：强能力 agent-loop 已经存在，问题在于如何把它变成
 长期可用、可控、可解释的协作系统。
+
+换句话说，Goal Harness 想让人的多个 agent 可以持续接力，包括夜间和用户离开
+后的安全工作；但接力的前提不是绕过人，而是把人类判断、scope、能力门、quota
+和证据写成下一轮 agent 也能读懂的控制面。
 
 ## 它如何工作
 
@@ -179,4 +187,3 @@ benchmark 证据边界。
 - 稳定 CLI/runtime 行为的 focused smoke；
 - 控制面协议、架构说明、贡献者任务；
 - 明确标注 evidence boundary 的展示材料。
-

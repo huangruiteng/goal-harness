@@ -13,7 +13,13 @@ Keep the repository and product name:
 Goal Harness
 ```
 
-Use this category line near the first screen:
+Use this hero promise near the first screen:
+
+```text
+Always-on agent teams, governed by human judgment
+```
+
+Use this control-plane category line next to it:
 
 ```text
 Gate-aware human-in-the-loop control plane
@@ -29,7 +35,7 @@ The public story should be:
 
 > Goal Harness is the lifetime-goal control plane around agent loops. Codex,
 > Claude Code, Cursor, terminal agents, and benchmark runners execute bounded
-> work; Goal Harness keeps the long-running goal, gates, todos, ownership,
+> work; Goal Harness keeps the long-running goal, gates, todos, claims, scopes,
 > quota, evidence, and handoffs visible across those loops.
 
 Do not rename the repo to `lifetime-goal-harness` now. Use "lifetime-goal" as
@@ -75,8 +81,9 @@ comprehension.
 Use three layers:
 
 1. **Brand**: `Goal Harness`
-2. **Category**: `Gate-aware human-in-the-loop control plane`
-3. **Support phrase**: `lifetime-goal control plane`
+2. **Hero promise**: `Always-on agent teams, governed by human judgment`
+3. **Category**: `Gate-aware human-in-the-loop control plane`
+4. **Support phrase**: `lifetime-goal control plane`
 
 This lets the project keep a stable name while still sharpening the product
 category.
@@ -86,9 +93,9 @@ Example first-screen stack:
 ```text
 Goal Harness
 
-Gate-aware human-in-the-loop control plane.
+Always-on agent teams, governed by human judgment.
 
-Long-running agent work, without losing the plot.
+Gate-aware human-in-the-loop control plane.
 ```
 
 Chinese-first stack:
@@ -96,8 +103,9 @@ Chinese-first stack:
 ```text
 Goal Harness
 
+Always-on agent teams, governed by human judgment
 Gate-aware human-in-the-loop control plane
-让人的判断成为控制面，而不是让 agent 在等待里空转。
+让多个 agent 昼夜接力，把人的判断留在控制面。
 
 Goal Harness 不是替代 Codex goal/automation，而是给这些 executor loop
 提供 lifetime-goal 控制面。
@@ -108,14 +116,18 @@ Goal Harness 不是替代 Codex goal/automation，而是给这些 executor loop
 Use `Goal Harness` when naming the product, repository, CLI, examples, and
 showcase cases.
 
+Use `Always-on agent teams, governed by human judgment` when the first-contact
+surface needs a stronger product promise than "state management" without
+overclaiming autonomous production control.
+
 Use `Gate-aware human-in-the-loop control plane` when a first-contact reader
-needs the product category immediately.
+needs the technical category immediately.
 
 Use `lifetime-goal control plane` when explaining why this is larger than one
 agent session, one terminal command, or one benchmark run.
 
-Use `long-running agent work, without losing the plot` as a human tagline, not
-as a formal architecture term.
+Use `Your agents keep the night shift. You keep the judgment.` as a social or
+demo tagline, not as a formal architecture term.
 
 Avoid `agent teammate`, `agent framework`, `autonomous platform`, or `agent OS`
 unless a future product surface actually owns those capabilities.
@@ -145,7 +157,8 @@ changing the brand.
 ## Practical Copy Rules
 
 - Pair the brand with the category on first mention:
-  `Goal Harness, a gate-aware human-in-the-loop control plane`.
+  `Goal Harness, an always-on control plane for agent teams governed by human
+  judgment`.
 - When users confuse it with Codex goal mode, answer with the executor-loop
   split: Codex does bounded work; Goal Harness preserves lifetime-goal state.
 - Use "lifetime-goal" in explanatory paragraphs, not every headline.

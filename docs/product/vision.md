@@ -8,7 +8,8 @@ lifetime goals: long-running agent work that has to stay understandable and
 recoverable across many turns.
 
 The long-term product should help humans who do not want to inspect prompts,
-logs, or traces. They should be able to open a first screen and understand:
+logs, or traces. A user should be able to run multiple agents across tools and
+off-hours, then open a first screen and understand:
 
 - what the agent has done;
 - what the agent is doing now;
@@ -19,12 +20,19 @@ logs, or traces. They should be able to open a first screen and understand:
 
 ## First-Screen Copy
 
+**Always-on agent teams, governed by human judgment**
+
 **Gate-aware human-in-the-loop control plane**
 
-**让人的判断成为控制面，而不是让 agent 在等待里空转。**
+**让多个 agent 昼夜接力，把人的判断留在控制面。**
 
-Goal Harness 把用户决策、agent todo、safe fallback、run history 和 quota
-放进同一层状态：该停的地方明确停，该继续的安全侧路继续走。
+Goal Harness 把目标、用户决策、agent todo、认领关系、scope、safe fallback、
+run history 和 quota 放进同一层状态：该等人的地方明确等人，不该空等的
+安全侧路继续推进。
+
+The product promise is always-on progress without uncontrolled autonomy:
+primary and side agents can continue bounded work, while human gates,
+capability gates, quota, evidence, and project boundaries remain explicit.
 
 ## Creator-Operator Case
 

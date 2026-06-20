@@ -54,16 +54,17 @@ Use a compact comparison block:
 Recommended headline stack for Chinese-first material:
 
 ```text
+Always-on agent teams, governed by human judgment
 Gate-aware human-in-the-loop control plane
-让人的判断成为控制面，而不是让 agent 在等待里空转。
+让多个 agent 昼夜接力，把人的判断留在控制面。
 ```
 
 Recommended English explanation:
 
 ```text
-Goal Harness keeps user decisions, agent todos, safe fallback, run history,
-and quota in one shared state layer: the gated route waits clearly, while
-independent safe side work can keep moving with evidence.
+Goal Harness keeps goals, gates, todos, claims, scopes, safe fallback, run
+history, quota, and evidence in one shared state layer: the gated route waits
+clearly, while independent safe side work can keep moving with evidence.
 ```
 
 ## Case Card Model

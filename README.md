@@ -1,25 +1,26 @@
 # Goal Harness
 
-**Long-running agent work, without losing the plot.**
+**Always-on agent teams, governed by human judgment.**
 
 **Gate-aware human-in-the-loop control plane**
 
-**让人的判断成为控制面，而不是让 agent 在等待里空转。**
+**让多个 agent 昼夜接力，把人的判断留在控制面。**
 
-Goal Harness 把用户决策、agent todo、safe fallback、run history 和 quota
-放进同一层状态：该停的地方明确停，该继续的安全侧路继续走。
+Goal Harness 把目标、用户决策、agent todo、认领关系、scope、safe fallback、
+run history 和 quota 放进同一层状态：该等人的地方明确等人，不该空等的
+安全侧路继续推进。
 
-Goal Harness is a local control plane for AI agent projects. It keeps goals,
-gates, todos, run history, quota, side-agent ownership, and human decisions
-visible across many turns.
+Goal Harness is a local control plane for long-running AI agent projects. It
+keeps goals, gates, todos, claims, scopes, run history, quota, evidence, and
+human decisions visible across many turns, so primary and side agents can keep
+working on safe lanes while gated work waits for the person.
 
 [Quick Start](#quick-start) · [Getting Started](docs/guides/getting-started.md) ·
 [Showcases](docs/showcases/README.md) · [Product Vision](docs/product/vision.md) ·
 [Architecture](docs/architecture.md) · [Dashboard](apps/dashboard/README.md) ·
 [简体中文](README.zh-CN.md)
 
-> Long-running agent work should be recoverable, reviewable, handoffable, and
-> safe by default.
+> Your agents keep the night shift. You keep the judgment.
 
 ## What Is It?
 
@@ -42,6 +43,12 @@ The product promise is not "more todo lists." It is a better
 human-in-the-loop control surface: keep human judgment at high-value decision
 points, keep safe fallback work moving when one lane is gated, and stop compute
 spend when a turn cannot produce a verified transition.
+
+Put differently: Goal Harness lets a user's agent team keep working across
+tools, turns, and off-hours without losing the goal boundary. The technical
+contract underneath that promise is explicit: agent identity, todo ownership,
+scope, capability gates, quota, evidence writeback, and public/private
+boundaries stay visible to the next turn.
 
 ![Goal Harness control-plane board](docs/assets/control-plane-board.svg)
 
