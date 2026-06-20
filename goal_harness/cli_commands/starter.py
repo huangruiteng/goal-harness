@@ -21,6 +21,12 @@ from ..project_prompt import (
     render_codex_cli_bootstrap_message_markdown,
     render_new_project_prompt_markdown,
 )
+from ..codex_cli_probe import (
+    DEFAULT_CODEX_BIN,
+    DEFAULT_TIMEOUT_SECONDS,
+    render_codex_cli_session_probe_markdown,
+    run_codex_cli_session_probe,
+)
 
 
 PrintPayload = Callable[
@@ -60,6 +66,26 @@ def register_starter_commands(subparsers: argparse._SubParsersAction) -> None:
         "--cli-bin",
         default="goal-harness",
         help="Goal Harness CLI binary name embedded in generated commands.",
+    )
+
+    codex_cli_probe_parser = subparsers.add_parser(
+        "codex-cli-session-probe",
+        help="Probe Codex CLI help surfaces for same-session Goal Harness automation support.",
+    )
+    codex_cli_probe_parser.add_argument(
+        "--codex-bin",
+        default=DEFAULT_CODEX_BIN,
+        help="Codex CLI executable to probe with help-only commands.",
+    )
+    codex_cli_probe_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help="Per-command timeout for help-only Codex CLI probes.",
+    )
+    codex_cli_probe_parser.add_argument(
+        "--fixture",
+        help="Public-safe JSON fixture with command_outputs, used instead of invoking Codex CLI.",
     )
 
     demo_parser = subparsers.add_parser(
@@ -110,6 +136,19 @@ def handle_codex_cli_bootstrap_message_command(
     )
     print_payload(payload, args.format, render_codex_cli_bootstrap_message_markdown)
     return 0
+
+
+def handle_codex_cli_session_probe_command(
+    args: argparse.Namespace,
+    print_payload: PrintPayload,
+) -> int:
+    payload = run_codex_cli_session_probe(
+        codex_bin=args.codex_bin,
+        timeout_seconds=args.timeout_seconds,
+        fixture=Path(args.fixture).expanduser() if args.fixture else None,
+    )
+    print_payload(payload, args.format, render_codex_cli_session_probe_markdown)
+    return 0 if payload.get("ok") else 1
 
 
 def handle_demo_command(args: argparse.Namespace, print_payload: PrintPayload) -> int:

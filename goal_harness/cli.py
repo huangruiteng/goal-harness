@@ -138,6 +138,7 @@ from .delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from .cli_commands import (
     handle_check_command,
     handle_codex_cli_bootstrap_message_command,
+    handle_codex_cli_session_probe_command,
     handle_diagnose_command,
     handle_demo_command,
     handle_doctor_command,
@@ -5932,6 +5933,7 @@ def main(argv: list[str] | None = None) -> int:
             "bootstrap",
             "connect",
             "codex-cli-bootstrap-message",
+            "codex-cli-session-probe",
             "demo",
             "doctor",
             "new-project-prompt",
@@ -6001,6 +6003,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "codex-cli-bootstrap-message":
         return handle_codex_cli_bootstrap_message_command(args, print_payload)
+
+    if args.command == "codex-cli-session-probe":
+        return handle_codex_cli_session_probe_command(args, print_payload)
 
     if args.command == "heartbeat-prompt":
         try:

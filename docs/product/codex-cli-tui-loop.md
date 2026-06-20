@@ -89,6 +89,24 @@ If Codex CLI cannot expose a safe session attachment primitive, Goal Harness
 should not fake it by writing hidden state. It should fall back to a transparent
 mode.
 
+Current probe:
+
+```bash
+goal-harness codex-cli-session-probe
+```
+
+The probe is help-only by default: it checks public Codex CLI command surfaces
+such as `codex --help`, `codex exec --help`, and `codex resume --help`. It does
+not read raw transcripts, credentials, local session files, or mutate a Codex
+session. The key distinction is deliberate: `exec` or `resume` support can be a
+useful fallback, but it is not evidence that Goal Harness can inject a visible
+turn into the same open TUI. Same-session automation requires an explicit
+visible attach/inject primitive plus an idle guard. A visible `resume [PROMPT]`
+or experimental `remote-control` surface is stronger than plain headless
+fallback, but it still belongs in a separate spike until Goal Harness proves the
+turn is visible, idle-guarded, interruptible, and not racing a human-typed TUI
+message.
+
 ### 3. Headless Fallback
 
 `codex exec` remains useful for scheduled or CI-like work, but it is not the
@@ -142,7 +160,10 @@ projects runnable candidates; it should not over-specify the model's local plan.
 2. **Bootstrap command**: add a Goal Harness command that prints a tailored
    Codex CLI bootstrap message for the current repo.
 3. **Session probe**: document whether current Codex CLI exposes a stable
-   session id, resume handle, or safe injection primitive.
+   session id, resume handle, or safe injection primitive. The current
+   implementation is `goal-harness codex-cli-session-probe`; it separates
+   `exec` fallback support, visible resume / remote-control spike surfaces, and
+   true same-open-TUI visible injection.
 4. **Local driver**: prototype a scheduler that runs quota, checks session
    idle state, and either attaches visibly or falls back explicitly.
 5. **Validation harness**: add a public-safe fixture that proves the driver
