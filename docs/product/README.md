@@ -10,6 +10,10 @@ runtime contract, benchmark route, or launch draft.
   product model where the server owns durable state, delivery/planning queue
   boundaries, and governed proposal promotion, the client acts as the user's
   intent proxy, and executor loops perform bounded work with evidence writeback.
+- [Agent profile contract](agent-profile-contract.md): the registry-owned
+  identity/scope contract for primary and side agents, including worktree and
+  review handoff policy, while keeping todo ownership in `claimed_by` and future
+  leases.
 - [Non-technical operator status model](nontechnical-operator-status-model.md):
   first-screen card model for people who need to understand agent progress,
   blockers, next moves, and feedback paths without reading logs or CLI output.

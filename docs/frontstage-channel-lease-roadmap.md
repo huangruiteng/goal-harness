@@ -159,7 +159,13 @@ those values into the channel. The static HTML fixture in
 semantic panels with `data-panel` markers, no write controls, and a visible
 truth contract for future dashboard or CLI export work.
 
-### `agent_member_v0`
+### `agent_profile_v0` And `agent_member_v0`
+
+The registry-owned `agent_profile_v0` contract is defined in
+[`docs/product/agent-profile-contract.md`](product/agent-profile-contract.md).
+Use it as the source of truth for registered agent id, primary/side role,
+default scope, worktree policy, and review handoff policy. The channel roadmap
+only needs the read-only member projection.
 
 This is an identity and permission projection for an actor participating in a
 goal:
