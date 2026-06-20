@@ -146,6 +146,7 @@ Projection, authority, write scope, and lease integrity.
 | P1 | IP-019 | Side-Agent Scoped Continuation | Primary plus side agent | no interruption unless scope/review is ambiguous | side agent claims scoped todo, uses independent worktree, then self-merges small validated work or hands review to primary |
 | P1 | IP-020 | Todo Claim / Supersede / Successor Lifecycle | Agent plus controller | no interruption unless successor is a user todo or conflict needs decision | claim before delivery; supersede stale work; complete slices with successor or no-follow-up rationale |
 | P1 | IP-022 | Claimed Todo Visibility Lanes | Status/quota/frontstage | no interruption | keep scheduler candidates separate from claimed-work visibility lanes |
+| P1 | IP-023 | Status Neutral Run Window | Status/quota/history | no interruption | ignore neutral run noise for state authority while retaining it as stall evidence |
 
 ### Evidence Lifecycle
 
@@ -163,6 +164,7 @@ Replanning, dreaming, cadence, and future-work writeback.
 | Importance | ID | Name | Primary Owner | User Channel | Agent Channel |
 | --- | --- | --- | --- | --- | --- |
 | P0 | IP-013 | Autonomous Replan Vs Advisory Dreaming | Agent/controller plus user when promoted | ask only for promotion/decision | repair stalled delivery; keep dreaming proposal non-executable |
+| P1 | IP-024 | Repair Delta Contract | Agent/controller | no interruption unless repair creates a user todo | self-repair/replan must change the machine-visible frontier or record a no-op/blocker |
 | P1 | IP-010 | Cadence Widening | Agent/controller | no interruption by default | widen next work segment when turns become too small |
 | P1 | IP-018 | Plan To Todo Writeback | Agent plus Goal Harness | no interruption unless a user todo is created | write user-facing plans into todos, Next Action, or refresh-state |
 
@@ -1213,6 +1215,61 @@ monitor work to crowd out the selected advancement lane.
 - PR #262 / commit `292a2c8`: additive status/quota visibility lanes with a
   16-item agent-facing cap.
 
+#### IP-023 Status Neutral Run Window
+
+**Trigger**
+
+- `quota should-run` reports no user action or quiet monitor behavior, but
+  `status` / `diagnose --limit N` falls back to a stale registry state,
+  controller gate, or older connected-without-run state;
+- recent history is dominated by status-neutral entries such as quota monitor
+  polls, slot-spend records, readiness pings, or display-only refreshes;
+- a short UI/history limit hides the latest meaningful state transition just
+  behind the visible window.
+
+**Expected behavior**
+
+Status, diagnose, quota, and history should share the same neutral-run
+classification contract. Neutral runs are real evidence for cadence and stall
+analysis, but they are not authoritative state transitions by themselves. When
+computing the current control-plane state, the implementation should reason
+over an internal window wide enough to skip neutral noise and find the latest
+meaningful state run before trimming the run list for UI display.
+
+UI display limit must not become the control-plane reasoning window. A user can
+ask for `--limit 5` to keep output compact, but state selection should still
+look far enough back to avoid projecting a fake controller/user gate. If no
+meaningful state run exists inside the internal reasoning window, status should
+say that explicitly instead of inventing a gate.
+
+**Visual Model**
+
+```mermaid
+flowchart LR
+  H["recent run history"] --> N["classify neutral vs meaningful runs"]
+  N --> W["reason over internal state window"]
+  W --> M{"meaningful state run found?"}
+  M -->|"yes"| S["project current status from that run"]
+  M -->|"no"| U["report unknown/no signal without fake gate"]
+  S --> D["trim displayed rows to UI limit"]
+  N --> E["retain neutral rows as stall/cadence evidence"]
+```
+
+**Bad smell**
+
+A monitor-only loop fills the most recent five history rows, so `status --limit
+5` claims the agent needs a controller connection or user decision even though
+quota says `monitor_quiet_skip` and no user todo is open. The bad state is not
+that monitor rows exist; it is that a presentation limit changed the meaning of
+the control plane.
+
+**Validation**
+
+- `docs/status-data-contract.md`
+- `skills/goal-harness-self-repair/references/repair-patterns.md`
+- future regression where the latest N runs are neutral and the N+1 run is the
+  authoritative state transition.
+
 ### Evidence Lifecycle
 
 #### IP-012 External Evidence Observation
@@ -1395,6 +1452,65 @@ recommendation as the next machine-visible route.
 - `examples/autonomous-replan-obligation-smoke.py`
 - `regression/autonomous-replan-vs-dreaming-contract.py`
 - `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
+
+#### IP-024 Repair Delta Contract
+
+**Trigger**
+
+- self-repair, replan, or no-progress handling records activity, but the next
+  quota/status packet returns the same monitor/action recommendation;
+- repeated monitor-only, replan, or repair-adjacent runs do not create a new
+  runnable todo, blocker, successor, supersede record, user gate, capability
+  change, workspace guard change, or monitor-target change;
+- an agent says it repaired the state, but the machine-visible work frontier is
+  identical before and after the repair.
+
+**Expected behavior**
+
+A successful repair/replan must change the machine-visible frontier. At least
+one of these surfaces should change:
+
+- selected `effective_action` or interaction contract;
+- runnable todo set, claimed work lane, successor, or supersede relationship;
+- concrete user question/todo or blocker;
+- capability/workspace guard outcome;
+- monitor target, expiry, watch-lane rationale, or evidence handle;
+- active-state Next Action or goal-boundary projection.
+
+If none of those change, the repair should be recorded as a no-op or unresolved
+blocker, not as progress. The next safe action should then be to create the
+missing successor/blocker/supersede/watch-lane record, or to stop with a clear
+reason that the current monitor is intentionally quiet. This is separate from
+IP-013's replan ACK: the ACK closes the obligation, while the delta contract
+proves that closing it did not hide the same stuck route.
+
+**Visual Model**
+
+```mermaid
+flowchart TD
+  R["self-repair or replan run"] --> B["snapshot before/after frontier"]
+  B --> C{"any machine-visible delta?"}
+  C -->|"yes"| P["record progress and rerun quota"]
+  C -->|"no"| N["classify repair_noop / replan_noop"]
+  N --> D{"why no delta?"}
+  D -->|"stale route"| S["supersede or create successor todo"]
+  D -->|"real blocker"| K["record blocker or user todo"]
+  D -->|"intentional watch"| W["record monitor target + expiry"]
+```
+
+**Bad smell**
+
+The agent performs a replan, appends a history row, and reports that the loop
+was handled. The next heartbeat still receives the same recommended action,
+same monitor target, same todo set, and same lack of blocker. That is not a
+resolved repair; it is an unclosed control-plane loop with better narration.
+
+**Validation**
+
+- `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
+- `skills/goal-harness-self-repair/references/repair-patterns.md`
+- future regression that compares before/after frontier fields for repair and
+  replan closeout runs.
 
 #### IP-010 Cadence Widening
 
