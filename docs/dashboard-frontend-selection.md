@@ -161,7 +161,7 @@ The dashboard should be dense, calm, and operational:
 - light and dark modes from the beginning;
 - no raw private evidence in public demo data.
 
-## Next Implementation Segment
+## Current Implementation Segment
 
 The first dashboard scaffold lives in `apps/dashboard`. It uses the selected
 stack and renders a real screen from `examples/status.example.json`:
@@ -174,15 +174,19 @@ stack and renders a real screen from `examples/status.example.json`:
 - responsive desktop and mobile layout,
 - `npm run build` verification.
 
-Keep `examples/render-status-dashboard.py` as a low-friction fallback until the
-React dashboard can be built and opened in one command.
+Keep `examples/render-status-dashboard.py` as a low-friction fallback for
+environments that cannot build the React app.
 
-The next product-path slice is `/frontstage`: a read-only
-`goal_channel_projection_v0` channel board that makes a single goal feel like a
-managed workspace lane. It should show the decision frame, quota guard, user
-todo lane, agent todo lane, active claims, timeline, source warnings, and truth
-contract. This route is where Multica-style agent board density belongs; the
-existing Python/HTML renderer should stay a no-build diagnostic fallback.
+The first product-path `/frontstage` slice now exists in `apps/dashboard`: it
+renders `attention_queue.items[].goal_channel_projection` as a read-only
+channel board that makes a single goal feel like a managed workspace lane. It
+shows the decision frame, quota guard, user todo lane, agent todo lane, active
+claims, open gates, compact timeline, source warnings, URL-backed
+selection/filter/search, and truth contract. This route is where Multica-style
+agent-board density belongs; the existing Python/HTML renderer should stay a
+no-build diagnostic fallback. The next slices should be quality work: visual
+acceptance, richer public-safe fixtures, and operator onboarding details rather
+than another base renderer.
 
 ## Sources Checked
 

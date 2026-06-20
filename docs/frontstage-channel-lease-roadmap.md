@@ -234,9 +234,11 @@ P1:
   controller confusion, and it naturally extends the existing todo locking
   lane. The durable invariant is per-todo pending: one active pending lease per
   `(goal_id, todo_id)`, not one active lease per goal or project.
-- Teach the React dashboard to render `goal_channel_projection_v0` cards from
-  the existing status feed while keeping the CLI/status export as the source
-  and avoiding browser write authority.
+- Treat the shipped React `/frontstage` route as the baseline
+  `goal_channel_projection_v0` reader. Future work should polish visual
+  acceptance, operator onboarding, and local fixture realism while preserving
+  the invariant that the CLI/status export is the source and the browser has no
+  write authority.
 
 P2:
 
