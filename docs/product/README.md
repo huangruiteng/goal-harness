@@ -10,6 +10,11 @@ runtime contract, benchmark route, or launch draft.
   product model where the server owns durable state, delivery/planning queue
   boundaries, and governed proposal promotion, the client acts as the user's
   intent proxy, and executor loops perform bounded work with evidence writeback.
+- [Codex CLI TUI-first Goal Harness loop](codex-cli-tui-loop.md): the
+  first-class Codex CLI product contract where one TUI message starts the Goal
+  Harness loop, later automation tries to steer the same visible session, and
+  headless `codex exec` remains an explicit fallback rather than the default
+  user experience.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
   identity/scope contract for primary and side agents, including worktree and
   review handoff policy, while keeping todo ownership in `claimed_by` and future

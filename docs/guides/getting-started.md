@@ -65,6 +65,13 @@ Success looks like this:
 - `goal-harness status` shows the goal and who should act next;
 - local runtime state is ignored, not committed.
 
+For Codex CLI users, the product target is even simpler: start in the Codex
+TUI, send one Goal Harness bootstrap message, and keep later automation visible
+and interruptible in that TUI whenever the CLI exposes a safe session-attachment
+primitive. See the
+[Codex CLI TUI-first loop](../product/codex-cli-tui-loop.md) contract for the
+bootstrap, session-attached automation, and headless fallback split.
+
 Maintainers can validate the public fresh-clone path with:
 
 ```bash

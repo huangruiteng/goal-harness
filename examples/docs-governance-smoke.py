@@ -56,8 +56,10 @@ def compact(text: str) -> str:
 
 def main() -> int:
     docs_index = read("docs/README.md")
+    codex_cli_tui_loop = read("docs/product/codex-cli-tui-loop.md")
     project_agent_contract = read("docs/project-agent-todo-contract.md")
     status_contract = read("docs/status-data-contract.md")
+    compact_codex_cli_tui_loop = compact(codex_cli_tui_loop)
     compact_project_agent_contract = compact(project_agent_contract)
     compact_status_contract = compact(status_contract)
 
@@ -71,6 +73,7 @@ def main() -> int:
         "docs/product/",
         "docs/reference/",
         "docs/showcases/",
+        "product/codex-cli-tui-loop.md",
     ]:
         assert required in docs_index, required
 
@@ -84,6 +87,7 @@ def main() -> int:
         "docs/reference/protocols/README.md",
         "docs/research/long-horizon-agent-benchmarks/README.md",
         "docs/showcases/README.md",
+        "docs/product/codex-cli-tui-loop.md",
     ]:
         assert (REPO_ROOT / path).is_file(), path
 
@@ -122,6 +126,13 @@ def main() -> int:
         "--delivery-outcome outcome_progress",
     ]:
         assert required in compact_project_agent_contract, required
+
+    for required in [
+        "The best first-run experience is one TUI message",
+        "Session-Attached Automation",
+        "Headless fallback should never be the only way to start Goal Harness",
+    ]:
+        assert required in compact_codex_cli_tui_loop, required
 
     for required in [
         "A later `surface_only` project-level sync will become the latest non-agent-lane run",

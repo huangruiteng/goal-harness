@@ -13,6 +13,9 @@ incident report, or launch draft.
   dashboard, development, and command reference.
 - [Product vision](product/vision.md): long-term product direction and the
   creator-operator medium-term case.
+- [Codex CLI TUI-first loop](product/codex-cli-tui-loop.md): first-class
+  Codex CLI onboarding target where one visible TUI message starts Goal
+  Harness, with session-attached automation as the preferred follow-up.
 - [Architecture](architecture.md): core concepts and control-plane shape.
 - [Integration guide](integration.md): how to connect a project to Goal
   Harness.
@@ -65,6 +68,7 @@ incident report, or launch draft.
 ### Product Direction
 
 - [Product vision](product/vision.md)
+- [Codex CLI TUI-first loop](product/codex-cli-tui-loop.md)
 - [Reward-style replanning hints](product/reward-style-replanning.md)
 - [Frontstage channel and lease roadmap](frontstage-channel-lease-roadmap.md)
 - [Long-task cadence policy](long-task-cadence-policy.md)
