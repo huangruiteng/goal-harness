@@ -19,8 +19,13 @@ from goal_harness.status import collect_status  # noqa: E402
 
 GOAL_ID = "neutral-window-connected-delivery"
 REAL_CLASSIFICATION = "autonomous_replan_recorded_stable_monitor"
-REAL_ACTION = "continue the stable monitor lane without asking the user"
-AGENT_TODO = "[P1] Continue the stable monitor lane and write back compact evidence."
+REAL_ACTION = "Quiet monitor only until a material stable monitor transition appears."
+DISPLAY_ACTION = (
+    "No immediate agent work; keep the monitor quiet until a material stable monitor transition appears."
+)
+AGENT_TODO = (
+    "[P1] Monitor the stable signal; write back only a material transition, regression, or blocker."
+)
 
 
 def write_registry(root: Path) -> Path:
@@ -37,7 +42,9 @@ def write_registry(root: Path) -> Path:
         "---\n\n"
         "# Neutral Window Fixture\n\n"
         "## Agent Todo\n\n"
-        f"- [ ] {AGENT_TODO}\n",
+        f"- [ ] {AGENT_TODO}\n"
+        "  <!-- goal-harness:todo todo_id=todo_monitor_fixture status=open "
+        "task_class=continuous_monitor action_kind=stable_signal_monitor -->\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,9 +146,20 @@ def main() -> int:
         item = status["attention_queue"]["items"][0]
         assert item["goal_id"] == GOAL_ID, item
         assert item["status"] == REAL_CLASSIFICATION, item
-        assert item["waiting_on"] == "codex", item
+        assert item["waiting_on"] == "monitor_signal", item
+        assert item["severity"] == "watch", item
+        assert item["execution_waiting_on"] == "codex", item
         assert item["source"] == "latest_run", item
-        assert item["recommended_action"] == REAL_ACTION, item
+        assert item["recommended_action"] == DISPLAY_ACTION, item
+        assert item["monitor_display"]["no_immediate_agent_work"] is True, item
+        project_asset = item["project_asset"]
+        assert project_asset["owner"] == "monitor_signal", project_asset
+        assert project_asset["support_mode"] == "read_only_observer", project_asset
+        assert status["attention_queue"]["needs_codex"] == 0, status["attention_queue"]
+        assert status["attention_queue"]["watching_monitor"] == 1, status["attention_queue"]
+        assert status["attention_queue"]["autonomous_monitor_candidates"]["open_count"] == 1, (
+            status["attention_queue"]
+        )
         assert "connect an adapter" not in item["recommended_action"], item
 
         run_goal = status["run_history"]["goals"][0]
@@ -157,11 +175,15 @@ def main() -> int:
 
         quota = build_quota_should_run(status, goal_id=GOAL_ID)
         assert quota["state"] != "operator_gate", quota
+        assert quota["effective_action"] == "monitor_quiet_skip", quota
+        assert quota["actionable_by_codex"] is False, quota
         assert quota["requires_user_action"] is False, quota
         user_todo_summary = quota.get("user_todo_summary") if isinstance(quota.get("user_todo_summary"), dict) else {}
         assert user_todo_summary.get("open_count", 0) == 0, quota
         assert quota["status"] == REAL_CLASSIFICATION, quota
+        assert quota["waiting_on"] == "monitor_signal", quota
         assert "connect an adapter" not in quota["recommended_action"], quota
+        assert quota["recommended_action"] == DISPLAY_ACTION, quota
         assert (
             quota["handoff_readiness"]["post_handoff_latest_run"]["classification"]
             == REAL_CLASSIFICATION
@@ -176,11 +198,10 @@ def main() -> int:
         )
         selected = diagnosis["selected"]
         assert selected["status"] == REAL_CLASSIFICATION, selected
-        assert selected["waiting_on"] == "codex", selected
-        assert selected["machine_signal"] in {
-            "agent_work_attention",
-            "no_immediate_agent_delivery_signal",
-        }, selected
+        assert selected["waiting_on"] == "monitor_signal", selected
+        assert selected["severity"] == "watch", selected
+        assert selected["machine_signal"] == "no_immediate_agent_delivery_signal", selected
+        assert selected["quota_signals"]["effective_action"] == "monitor_quiet_skip", selected
         assert selected["todo_evidence"]["user_open_count"] == 0, selected
 
     print("status-neutral-run-window-smoke ok")

@@ -61,8 +61,8 @@ Fields:
 - `status`: classification or derived state.
 - `lifecycle_phase`: derived state-interaction phase for dashboard grouping.
 - `lifecycle_flags`: all compact phases that apply to the latest goal state.
-- `waiting_on`: one of `user_or_controller`, `codex`, `external_evidence`, or
-  `controller`.
+- `waiting_on`: one of `user_or_controller`, `codex`, `external_evidence`,
+  `monitor_signal`, or `controller`.
 - `severity`: `high`, `action`, or `watch`.
 - `recommended_action`: exactly one user-facing next action from the adapter or
   status layer.
@@ -93,6 +93,8 @@ The queue summary keeps controller handoff visible:
 - `needs_codex`: counts goals ready for Codex action.
 - `watching_external_evidence`: counts goals waiting on outside evidence or
   metrics.
+- `watching_monitor`: counts monitor-only goals that should stay visible but
+  do not require immediate Codex work.
 
 ## Classification Mapping
 
