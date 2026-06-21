@@ -52,15 +52,15 @@ body:
       placeholder: |
         - README.md
         - examples/demo-cli-smoke.py
-        - goal-harness check --scan-root .
+        - loopx check --scan-root .
   - type: textarea
     id: validation
     attributes:
       label: Validation plan
       description: What command or review will prove the task is done?
       placeholder: |
-        - python3 -m py_compile goal_harness/*.py
-        - goal-harness check --scan-root .
+        - python3 -m py_compile loopx/*.py
+        - loopx check --scan-root .
     validations:
       required: true
   - type: checkboxes
