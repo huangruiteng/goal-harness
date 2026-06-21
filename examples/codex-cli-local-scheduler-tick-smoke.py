@@ -88,6 +88,28 @@ VISIBLE_PROOF_FIXTURE = {
 }
 
 
+RUNTIME_IDLE_FIXTURE = {
+    "observed_surface": "visible_resume_prompt",
+    "idle_guard": {
+        "no_active_human_typing": True,
+        "no_running_turn": True,
+        "checked_before_prompt": True,
+    },
+    "turn_visibility": {"visible_to_user": True},
+    "interruptibility": {
+        "user_can_interrupt": True,
+        "manual_takeover_available": True,
+    },
+    "boundary": {
+        "reads_raw_transcripts": False,
+        "reads_session_files": False,
+        "reads_stdout_stderr": False,
+        "reads_credentials": False,
+        "mutates_hidden_session_state": False,
+    },
+}
+
+
 def assert_boundary(payload: dict[str, object]) -> None:
     assert payload["ok"] is True, payload
     assert payload["schema_version"] == "codex_cli_local_scheduler_tick_v0", payload
@@ -101,12 +123,14 @@ def assert_boundary(payload: dict[str, object]) -> None:
     assert boundary["mutates_codex_session"] is False, payload
     assert boundary["spends_goal_harness_quota"] is False, payload
     assert boundary["writes_goal_harness_state"] is False, payload
+    assert boundary["visible_candidate_requires_runtime_idle_detector"] is True, payload
 
 
 def build_tick(
     command_outputs: dict[str, str],
     *,
     proof_payload: dict[str, object] | None = None,
+    idle_payload: dict[str, object] | None = None,
     allow_headless_fallback: bool = False,
 ) -> dict[str, object]:
     return build_codex_cli_local_scheduler_tick(
@@ -117,6 +141,7 @@ def build_tick(
         codex_bin="codex",
         probe_payload=classify_codex_cli_session_surface(command_outputs=command_outputs),
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
         allow_headless_fallback=allow_headless_fallback,
     )
 
@@ -151,10 +176,22 @@ def main() -> int:
     assert "codex-cli-exec-handoff" in fallback_candidate["candidate_command"], fallback_candidate
     assert fallback_candidate["blocker_writeback_command"] is None, fallback_candidate
 
-    visible_candidate = build_tick(REMOTE_RESUME_HELP_FIXTURE, proof_payload=VISIBLE_PROOF_FIXTURE)
+    visible_idle_missing = build_tick(REMOTE_RESUME_HELP_FIXTURE, proof_payload=VISIBLE_PROOF_FIXTURE)
+    assert_boundary(visible_idle_missing)
+    assert visible_idle_missing["scheduler_action"] == "write_precise_blocker", visible_idle_missing
+    assert visible_idle_missing["precise_blocker"]["reason"] == "runtime_idle_evidence_missing", visible_idle_missing
+    assert visible_idle_missing["runtime_idle_detector"]["approved"] is False, visible_idle_missing
+    assert visible_idle_missing["candidate_command"] is None, visible_idle_missing
+
+    visible_candidate = build_tick(
+        REMOTE_RESUME_HELP_FIXTURE,
+        proof_payload=VISIBLE_PROOF_FIXTURE,
+        idle_payload=RUNTIME_IDLE_FIXTURE,
+    )
     assert_boundary(visible_candidate)
     assert visible_candidate["scheduler_action"] == "external_visible_command_candidate", visible_candidate
     assert "codex resume public-session-id" in visible_candidate["candidate_command"], visible_candidate
+    assert visible_candidate["runtime_idle_detector"]["approved"] is True, visible_candidate
 
     with tempfile.TemporaryDirectory(prefix="goal-harness-codex-cli-scheduler-tick-") as tmp:
         tmp_path = Path(tmp)
@@ -162,6 +199,8 @@ def main() -> int:
         help_fixture.write_text(json.dumps({"command_outputs": REMOTE_RESUME_HELP_FIXTURE}))
         proof_fixture = tmp_path / "visible-proof.json"
         proof_fixture.write_text(json.dumps(VISIBLE_PROOF_FIXTURE))
+        idle_fixture = tmp_path / "runtime-idle.json"
+        idle_fixture.write_text(json.dumps(RUNTIME_IDLE_FIXTURE))
         missing_registry = tmp_path / "missing-registry.json"
         runtime_root = tmp_path / "runtime"
 
@@ -205,7 +244,31 @@ def main() -> int:
             )
         )
         assert_boundary(cli_proof_json)
-        assert cli_proof_json["scheduler_action"] == "external_visible_command_candidate", cli_proof_json
+        assert cli_proof_json["scheduler_action"] == "write_precise_blocker", cli_proof_json
+        assert cli_proof_json["precise_blocker"]["reason"] == "runtime_idle_evidence_missing", cli_proof_json
+
+        cli_proof_idle_json = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "codex-cli-local-scheduler-tick",
+                "--project",
+                str(PROJECT),
+                "--goal-id",
+                GOAL_ID,
+                "--agent-id",
+                AGENT_ID,
+                "--fixture",
+                str(help_fixture),
+                "--proof-fixture",
+                str(proof_fixture),
+                "--idle-fixture",
+                str(idle_fixture),
+            )
+        )
+        assert_boundary(cli_proof_idle_json)
+        assert cli_proof_idle_json["scheduler_action"] == "external_visible_command_candidate", cli_proof_idle_json
+        assert cli_proof_idle_json["runtime_idle_detector"]["approved"] is True, cli_proof_idle_json
 
         cli_markdown = run_cli(
             "codex-cli-local-scheduler-tick",

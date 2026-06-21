@@ -1083,6 +1083,7 @@ def build_codex_cli_local_scheduler_tick(
     codex_bin: str,
     probe_payload: dict[str, Any],
     proof_payload: dict[str, Any] | None = None,
+    idle_payload: dict[str, Any] | None = None,
     allow_headless_fallback: bool = False,
 ) -> dict[str, Any]:
     """Build a local scheduler tick packet without executing Codex.
@@ -1103,6 +1104,14 @@ def build_codex_cli_local_scheduler_tick(
         proof_payload=proof_payload,
         allow_headless_fallback=allow_headless_fallback,
     )
+    idle_detector = build_codex_cli_runtime_idle_detector(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        idle_payload=idle_payload,
+    )
+    idle_approved = bool(idle_detector.get("approved_for_visible_later_turn") is True)
     resolved_project = str(run_packet["project"])
     resolved_goal_id = str(run_packet["goal_id"])
     decision = str(run_packet.get("decision") or "tui_bootstrap_only")
@@ -1115,16 +1124,55 @@ def build_codex_cli_local_scheduler_tick(
     visible_driver_run_command = (
         f"{_shell_arg(cli_bin)} codex-cli-visible-driver-run {common_args}"
     )
+    runtime_idle_detector_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-runtime-idle-detector "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}"
+        f"{agent_arg} --observe-local-runtime --observed-surface visible_resume_prompt "
+        "--turn-state idle --probe-human-input-idle --checked-before-prompt "
+        "--visible-to-user --user-can-interrupt --manual-takeover-available"
+    )
+    runtime_idle_fixture_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-runtime-idle-detector "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}"
+        f"{agent_arg} --idle-fixture <public-runtime-idle.json>"
+    )
     scheduler_tick_command = (
-        f"{_shell_arg(cli_bin)} codex-cli-local-scheduler-tick {common_args}"
+        f"{_shell_arg(cli_bin)} codex-cli-local-scheduler-tick {common_args} "
+        "--observe-local-runtime --observed-surface visible_resume_prompt "
+        "--turn-state idle --probe-human-input-idle --checked-before-prompt "
+        "--visible-to-user --user-can-interrupt --manual-takeover-available"
     )
 
     candidate_command = None
     precise_blocker: dict[str, str] | None = None
     if decision == "visible_session_turn_candidate":
-        scheduler_action = "external_visible_command_candidate"
-        candidate_command = run_packet.get("recommended_command")
-        next_safe_step = "external scheduler may run the visible command only after a fresh quota guard and idle guard"
+        if idle_approved:
+            scheduler_action = "external_visible_command_candidate"
+            candidate_command = run_packet.get("recommended_command")
+            next_safe_step = (
+                "external scheduler may run the visible command only after a fresh quota guard, "
+                "runtime idle observation, guard_checked, and an allowed command prefix"
+            )
+        else:
+            scheduler_action = "write_precise_blocker"
+            reason = (
+                "runtime_idle_evidence_missing"
+                if idle_payload is None
+                else "runtime_idle_detector_incomplete"
+            )
+            failures = idle_detector.get("failures") if isinstance(idle_detector.get("failures"), list) else []
+            precise_blocker = {
+                "reason": reason,
+                "message": (
+                    "Codex CLI visible automation is blocked until a public-safe runtime idle "
+                    "observation proves no active human typing, no running visible turn, user "
+                    f"visibility, and interruptibility. failures={failures}"
+                ),
+            }
+            next_safe_step = (
+                "capture a public-safe runtime idle observation, keep the one-message TUI path visible, "
+                "and do not run Codex from the scheduler"
+            )
     elif decision == "headless_fallback_command_ready":
         scheduler_action = "external_headless_fallback_candidate"
         candidate_command = run_packet.get("recommended_command")
@@ -1194,6 +1242,8 @@ def build_codex_cli_local_scheduler_tick(
         },
         "commands": {
             "visible_driver_run": visible_driver_run_command,
+            "runtime_idle_detector": runtime_idle_detector_command,
+            "runtime_idle_detector_fixture": runtime_idle_fixture_command,
             "scheduler_tick": scheduler_tick_command,
             "candidate_codex_command": candidate_command,
             "blocker_writeback": blocker_writeback_command,
@@ -1206,6 +1256,13 @@ def build_codex_cli_local_scheduler_tick(
             "allow_headless_fallback": run_packet.get("allow_headless_fallback"),
             "visible_session_proof": run_packet.get("visible_session_proof"),
         },
+        "runtime_idle_detector": {
+            "supplied": idle_payload is not None,
+            "approved": idle_approved,
+            "decision": idle_detector.get("decision"),
+            "failures": idle_detector.get("failures") or [],
+            "source": idle_detector.get("source"),
+        },
         "boundary": {
             "tick_packet_only": True,
             "runs_codex": False,
@@ -1216,6 +1273,8 @@ def build_codex_cli_local_scheduler_tick(
             "spends_goal_harness_quota": False,
             "writes_goal_harness_state": False,
             "blocker_writeback_requires_external_execution": True,
+            "visible_candidate_requires_runtime_idle_detector": True,
+            "headless_fallback_requires_runtime_idle_detector": False,
         },
         "warnings": list(run_packet.get("warnings") or []),
     }
@@ -1318,6 +1377,12 @@ def execute_codex_cli_local_scheduler_tick_result(
         blocker_writeback_command if isinstance(blocker_writeback_command, str) else None
     )
     commands = tick_payload.get("commands") if isinstance(tick_payload.get("commands"), dict) else {}
+    runtime_idle = (
+        tick_payload.get("runtime_idle_detector")
+        if isinstance(tick_payload.get("runtime_idle_detector"), dict)
+        else {}
+    )
+    runtime_idle_approved = bool(runtime_idle.get("approved") is True)
 
     execution: dict[str, Any] = {
         "attempted": False,
@@ -1340,6 +1405,8 @@ def execute_codex_cli_local_scheduler_tick_result(
             "external_headless_fallback_candidate",
         }:
             execution["reason"] = "scheduler_action_not_candidate"
+        elif scheduler_action == "external_visible_command_candidate" and not runtime_idle_approved:
+            execution["reason"] = "runtime_idle_detector_required"
         elif not candidate_command:
             execution["reason"] = "candidate_command_missing"
         elif not candidate_command_prefixes:
@@ -1396,6 +1463,7 @@ def execute_codex_cli_local_scheduler_tick_result(
             "guard_checked": guard_checked,
             "candidate_command_prefixes": candidate_command_prefixes,
             "executor_timeout_seconds": executor_timeout_seconds,
+            "runtime_idle_detector_required_for_visible_candidate": True,
         },
         "execution": execution,
         "commands": {
@@ -1414,12 +1482,14 @@ def execute_codex_cli_local_scheduler_tick_result(
                 if isinstance(tick_payload.get("visible_driver_run_packet"), dict)
                 else None
             ),
+            "runtime_idle_detector": runtime_idle,
         },
         "boundary": {
             "executor_wrapper": True,
             "requires_explicit_execute_flag": True,
             "requires_fresh_quota_guard_confirmation": True,
             "candidate_prefix_required": True,
+            "runtime_idle_detector_required_for_visible_candidate": True,
             "runs_external_candidate": executed and execution.get("kind") == "candidate_command",
             "runs_codex_candidate_possible": executed and execution.get("kind") == "candidate_command",
             "reads_raw_transcripts": False,
@@ -1444,6 +1514,7 @@ def build_codex_cli_local_scheduler_executor(
     codex_bin: str,
     probe_payload: dict[str, Any],
     proof_payload: dict[str, Any] | None = None,
+    idle_payload: dict[str, Any] | None = None,
     allow_headless_fallback: bool = False,
     execute_candidate: bool = False,
     execute_blocker_writeback: bool = False,
@@ -1460,6 +1531,7 @@ def build_codex_cli_local_scheduler_executor(
         codex_bin=codex_bin,
         probe_payload=probe_payload,
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
         allow_headless_fallback=allow_headless_fallback,
     )
     return execute_codex_cli_local_scheduler_tick_result(
@@ -1482,6 +1554,7 @@ def build_codex_cli_one_message_loop_pilot(
     codex_bin: str,
     probe_payload: dict[str, Any],
     proof_payload: dict[str, Any] | None = None,
+    idle_payload: dict[str, Any] | None = None,
     allow_headless_fallback: bool = False,
 ) -> dict[str, Any]:
     """Compose the first-message TUI path with the safe scheduler bridge."""
@@ -1508,14 +1581,31 @@ def build_codex_cli_one_message_loop_pilot(
         codex_bin=codex_bin,
         probe_payload=probe_payload,
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
         allow_headless_fallback=allow_headless_fallback,
         execute_candidate=False,
         execute_blocker_writeback=False,
     )
     scheduler_action = str(scheduler_executor.get("scheduler_action") or "")
+    scheduler_tick = (
+        scheduler_executor.get("scheduler_tick")
+        if isinstance(scheduler_executor.get("scheduler_tick"), dict)
+        else {}
+    )
+    scheduler_blocker = (
+        scheduler_tick.get("precise_blocker")
+        if isinstance(scheduler_tick.get("precise_blocker"), dict)
+        else {}
+    )
+    scheduler_blocker_reason = str(scheduler_blocker.get("reason") or "")
     if scheduler_action in {"external_visible_command_candidate", "external_headless_fallback_candidate"}:
         pilot_decision = "first_message_then_candidate_available"
         followup_mode = "local scheduler can show the candidate, but execution still requires guard and prefix opt-in"
+    elif scheduler_action == "write_precise_blocker" and scheduler_blocker_reason.startswith("runtime_idle_"):
+        pilot_decision = "first_message_then_runtime_idle_required"
+        followup_mode = (
+            "local scheduler must capture public-safe runtime idle observation before later visible automation"
+        )
     elif scheduler_action == "write_precise_blocker":
         pilot_decision = "first_message_then_visible_blocker_writeback"
         followup_mode = "local scheduler can write the precise blocker after explicit guard-checked opt-in"
@@ -1529,6 +1619,9 @@ def build_codex_cli_one_message_loop_pilot(
     )
     scheduler_exec_dry_run_command = (
         f"{_shell_arg(cli_bin)} codex-cli-local-scheduler-exec {common_args}"
+        " --observe-local-runtime --observed-surface visible_resume_prompt "
+        "--turn-state idle --probe-human-input-idle --checked-before-prompt "
+        "--visible-to-user --user-can-interrupt --manual-takeover-available"
         f"{' --allow-headless-fallback' if allow_headless_fallback else ''}"
     )
     candidate_execute_template = (
@@ -1627,6 +1720,7 @@ def build_codex_cli_visible_local_driver_pilot(
         codex_bin=codex_bin,
         probe_payload=probe_payload,
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
         allow_headless_fallback=allow_headless_fallback,
     )
     scheduler_executor = (
@@ -1647,6 +1741,12 @@ def build_codex_cli_visible_local_driver_pilot(
     resolved_project = str(one_message["project"])
     resolved_goal_id = str(one_message["goal_id"])
     scheduler_action = str(scheduler_executor.get("scheduler_action") or "")
+    scheduler_blocker = (
+        scheduler_tick.get("precise_blocker")
+        if isinstance(scheduler_tick.get("precise_blocker"), dict)
+        else {}
+    )
+    scheduler_blocker_reason = str(scheduler_blocker.get("reason") or "")
     proof = (
         scheduler_tick.get("visible_session_proof")
         if isinstance(scheduler_tick.get("visible_session_proof"), dict)
@@ -1679,7 +1779,10 @@ def build_codex_cli_visible_local_driver_pilot(
     if proof_approved and scheduler_action == "external_visible_command_candidate" and idle_approved:
         loop_decision = "visible_candidate_ready_for_guarded_execution"
         next_driver_action = "run_scheduler_exec_candidate_after_fresh_guard_and_prefix"
-    elif proof_approved and scheduler_action == "external_visible_command_candidate":
+    elif proof_approved and (
+        scheduler_action == "external_visible_command_candidate"
+        or scheduler_blocker_reason.startswith("runtime_idle_")
+    ):
         loop_decision = "runtime_idle_detector_required"
         next_driver_action = "capture_public_safe_runtime_idle_observation"
     elif scheduler_action == "write_precise_blocker":
@@ -2020,6 +2123,11 @@ def render_codex_cli_local_scheduler_tick_markdown(payload: dict[str, Any]) -> s
     commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
     launchd = payload.get("launchd") if isinstance(payload.get("launchd"), dict) else {}
     blocker = payload.get("precise_blocker") if isinstance(payload.get("precise_blocker"), dict) else None
+    runtime_idle = (
+        payload.get("runtime_idle_detector")
+        if isinstance(payload.get("runtime_idle_detector"), dict)
+        else {}
+    )
     warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
     warning_lines = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- none"
     blocker_lines = "- none"
@@ -2036,6 +2144,8 @@ def render_codex_cli_local_scheduler_tick_markdown(payload: dict[str, Any]) -> s
 
 ```bash
 {commands.get("visible_driver_run")}
+{commands.get("runtime_idle_detector")}
+{commands.get("runtime_idle_detector_fixture")}
 {commands.get("scheduler_tick")}
 {commands.get("candidate_codex_command") or "# no Codex command candidate"}
 {commands.get("blocker_writeback") or "# no blocker writeback command"}
@@ -2044,6 +2154,13 @@ def render_codex_cli_local_scheduler_tick_markdown(payload: dict[str, Any]) -> s
 ## Precise Blocker
 
 {blocker_lines}
+
+## Runtime Idle Detector
+
+- supplied: `{runtime_idle.get("supplied")}`
+- approved: `{runtime_idle.get("approved")}`
+- decision: `{runtime_idle.get("decision")}`
+- failures: `{runtime_idle.get("failures")}`
 
 ## Launchd Shape
 
@@ -2061,6 +2178,7 @@ def render_codex_cli_local_scheduler_tick_markdown(payload: dict[str, Any]) -> s
 - mutates_codex_session: `{boundary.get("mutates_codex_session")}`
 - spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
 - writes_goal_harness_state: `{boundary.get("writes_goal_harness_state")}`
+- visible_candidate_requires_runtime_idle_detector: `{boundary.get("visible_candidate_requires_runtime_idle_detector")}`
 
 ## Warnings
 
@@ -2073,6 +2191,12 @@ def render_codex_cli_local_scheduler_executor_markdown(payload: dict[str, Any]) 
     commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
     execution = payload.get("execution") if isinstance(payload.get("execution"), dict) else {}
     request = payload.get("execution_request") if isinstance(payload.get("execution_request"), dict) else {}
+    scheduler_tick = payload.get("scheduler_tick") if isinstance(payload.get("scheduler_tick"), dict) else {}
+    runtime_idle = (
+        scheduler_tick.get("runtime_idle_detector")
+        if isinstance(scheduler_tick.get("runtime_idle_detector"), dict)
+        else {}
+    )
     warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
     warning_lines = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- none"
     return f"""# Codex CLI Local Scheduler Executor
@@ -2089,6 +2213,7 @@ def render_codex_cli_local_scheduler_executor_markdown(payload: dict[str, Any]) 
 - guard_checked: `{request.get("guard_checked")}`
 - candidate_command_prefixes: `{request.get("candidate_command_prefixes")}`
 - executor_timeout_seconds: `{request.get("executor_timeout_seconds")}`
+- runtime_idle_detector_required_for_visible_candidate: `{request.get("runtime_idle_detector_required_for_visible_candidate")}`
 
 ## Execution Result
 
@@ -2100,6 +2225,13 @@ def render_codex_cli_local_scheduler_executor_markdown(payload: dict[str, Any]) 
 - timed_out: `{execution.get("timed_out")}`
 - output_captured: `{execution.get("output_captured")}`
 - candidate_prefix_matched: `{execution.get("candidate_prefix_matched")}`
+
+## Runtime Idle Detector
+
+- supplied: `{runtime_idle.get("supplied")}`
+- approved: `{runtime_idle.get("approved")}`
+- decision: `{runtime_idle.get("decision")}`
+- failures: `{runtime_idle.get("failures")}`
 
 ## Commands
 
@@ -2115,6 +2247,7 @@ def render_codex_cli_local_scheduler_executor_markdown(payload: dict[str, Any]) 
 - requires_explicit_execute_flag: `{boundary.get("requires_explicit_execute_flag")}`
 - requires_fresh_quota_guard_confirmation: `{boundary.get("requires_fresh_quota_guard_confirmation")}`
 - candidate_prefix_required: `{boundary.get("candidate_prefix_required")}`
+- runtime_idle_detector_required_for_visible_candidate: `{boundary.get("runtime_idle_detector_required_for_visible_candidate")}`
 - runs_external_candidate: `{boundary.get("runs_external_candidate")}`
 - reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
 - reads_session_files: `{boundary.get("reads_session_files")}`

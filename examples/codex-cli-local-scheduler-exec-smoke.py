@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 from goal_harness.codex_cli_probe import (  # noqa: E402
     build_codex_cli_local_scheduler_executor,
     classify_codex_cli_session_surface,
+    execute_codex_cli_local_scheduler_tick_result,
 )
 
 
@@ -76,6 +77,28 @@ VISIBLE_PROOF_FIXTURE = {
 }
 
 
+RUNTIME_IDLE_FIXTURE = {
+    "observed_surface": "visible_resume_prompt",
+    "idle_guard": {
+        "no_active_human_typing": True,
+        "no_running_turn": True,
+        "checked_before_prompt": True,
+    },
+    "turn_visibility": {"visible_to_user": True},
+    "interruptibility": {
+        "user_can_interrupt": True,
+        "manual_takeover_available": True,
+    },
+    "boundary": {
+        "reads_raw_transcripts": False,
+        "reads_session_files": False,
+        "reads_stdout_stderr": False,
+        "reads_credentials": False,
+        "mutates_hidden_session_state": False,
+    },
+}
+
+
 def fake_runner_calls() -> tuple[list[dict[str, object]], object]:
     calls: list[dict[str, object]] = []
 
@@ -100,6 +123,7 @@ def fake_runner_calls() -> tuple[list[dict[str, object]], object]:
 def build_exec(
     *,
     proof_payload: dict[str, object] | None = VISIBLE_PROOF_FIXTURE,
+    idle_payload: dict[str, object] | None = RUNTIME_IDLE_FIXTURE,
     execute_candidate: bool = False,
     execute_blocker_writeback: bool = False,
     guard_checked: bool = False,
@@ -114,6 +138,7 @@ def build_exec(
         codex_bin="codex",
         probe_payload=classify_codex_cli_session_surface(command_outputs=REMOTE_RESUME_HELP_FIXTURE),
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
         execute_candidate=execute_candidate,
         execute_blocker_writeback=execute_blocker_writeback,
         guard_checked=guard_checked,
@@ -129,6 +154,7 @@ def assert_executor_boundary(payload: dict[str, object]) -> None:
     assert boundary["requires_explicit_execute_flag"] is True, payload
     assert boundary["requires_fresh_quota_guard_confirmation"] is True, payload
     assert boundary["candidate_prefix_required"] is True, payload
+    assert boundary["runtime_idle_detector_required_for_visible_candidate"] is True, payload
     assert boundary["reads_raw_transcripts"] is False, payload
     assert boundary["reads_credentials"] is False, payload
     assert boundary["reads_session_files"] is False, payload
@@ -165,6 +191,46 @@ def main() -> int:
         runner=runner,
     )
     assert guard_missing["execution"]["reason"] == "fresh_quota_guard_confirmation_required", guard_missing
+    assert calls == [], calls
+
+    idle_missing = build_exec(
+        idle_payload=None,
+        execute_candidate=True,
+        guard_checked=True,
+        prefixes=[sys.executable],
+        runner=runner,
+    )
+    assert idle_missing["scheduler_action"] == "write_precise_blocker", idle_missing
+    assert idle_missing["scheduler_tick"]["precise_blocker"]["reason"] == "runtime_idle_evidence_missing", idle_missing
+    assert idle_missing["execution"]["reason"] == "scheduler_action_not_candidate", idle_missing
+    assert calls == [], calls
+
+    tampered_tick = {
+        "schema_version": "codex_cli_local_scheduler_tick_v0",
+        "project": str(PROJECT),
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "cli_bin": "goal-harness",
+        "codex_bin": "codex",
+        "scheduler_phase": "tick_packet_no_execution",
+        "scheduler_action": "external_visible_command_candidate",
+        "decision": "visible_session_turn_candidate",
+        "next_safe_step": "tampered visible candidate",
+        "candidate_command": f"{shlex.quote(sys.executable)} -c 'pass'",
+        "commands": {"scheduler_tick": "goal-harness codex-cli-local-scheduler-tick"},
+        "visible_driver_run_packet": {
+            "visible_session_proof": {"supplied": True, "approved": True}
+        },
+        "runtime_idle_detector": {"supplied": False, "approved": False},
+    }
+    tampered_reject = execute_codex_cli_local_scheduler_tick_result(
+        tampered_tick,
+        execute_candidate=True,
+        guard_checked=True,
+        candidate_command_prefixes=[sys.executable],
+        runner=runner,
+    )
+    assert tampered_reject["execution"]["reason"] == "runtime_idle_detector_required", tampered_reject
     assert calls == [], calls
 
     prefix_missing = build_exec(
@@ -216,6 +282,8 @@ def main() -> int:
         help_fixture.write_text(json.dumps({"command_outputs": REMOTE_RESUME_HELP_FIXTURE}))
         proof_fixture = tmp_path / "visible-proof.json"
         proof_fixture.write_text(json.dumps(VISIBLE_PROOF_FIXTURE))
+        idle_fixture = tmp_path / "runtime-idle.json"
+        idle_fixture.write_text(json.dumps(RUNTIME_IDLE_FIXTURE))
         missing_registry = tmp_path / "missing-registry.json"
         runtime_root = tmp_path / "runtime"
 
@@ -256,6 +324,8 @@ def main() -> int:
                 str(help_fixture),
                 "--proof-fixture",
                 str(proof_fixture),
+                "--idle-fixture",
+                str(idle_fixture),
                 "--execute-candidate",
                 "--guard-checked",
                 "--candidate-command-prefix",

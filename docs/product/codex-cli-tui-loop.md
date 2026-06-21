@@ -185,8 +185,15 @@ goal-harness codex-cli-local-scheduler-exec --project . --goal-id <goal-id> --ag
 ```
 
 Without explicit execution flags, this command is still a no-execution packet.
-With `--guard-checked`, a local scheduler may choose exactly one opt-in side
-effect:
+For a later visible Codex CLI turn, it must also receive public-safe runtime
+idle evidence through `--observe-local-runtime ...` or `--idle-fixture
+<public-runtime-idle.json>`. A visible-session proof says the route is visible
+and interruptible; the runtime-idle detector says this exact later turn is not
+racing human typing or an already-running Codex turn. Missing runtime-idle
+evidence produces a precise blocker instead of a candidate command.
+
+With runtime-idle evidence and `--guard-checked`, a local scheduler may choose
+exactly one opt-in side effect:
 
 - `--execute-candidate --candidate-command-prefix <prefix>`: run a proven
   visible or explicit fallback candidate whose command starts with an allowed
@@ -370,11 +377,13 @@ projects runnable candidates; it should not over-specify the model's local plan.
    `goal-harness codex-cli-local-scheduler-tick` as the first executor-facing
    one-shot packet. It emits either an external command candidate or a precise
    blocker writeback command, but does not run Codex, read session files, or
-   write Goal Harness state itself.
+   write Goal Harness state itself. Visible candidates require both
+   visible-session proof and runtime-idle detector approval; headless fallback
+   remains explicit opt-in.
 11. **Local scheduler executor wrapper**: add
    `goal-harness codex-cli-local-scheduler-exec` as the explicit opt-in bridge
-   that can run one tick result only after guard confirmation and, for
-   candidates, an allowed command prefix.
+   that can run one tick result only after guard confirmation, runtime-idle
+   approval for visible candidates, and an allowed command prefix.
 12. **Visible local driver pilot**: ship
    `goal-harness codex-cli-visible-local-driver-pilot` to bind the one-message
    TUI start, scheduler executor, visible proof, idle guard, and no-transcript
