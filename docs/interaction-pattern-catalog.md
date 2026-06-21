@@ -1008,6 +1008,17 @@ is to create or switch to an independent worktree/branch and rerun the guard
 before editing repository files. Moving workspaces is a preflight repair and
 does not get quota spend.
 
+The same scoped identity must be carried through the whole successful turn.
+If `quota should-run` was evaluated with `--agent-id <side-agent-id>`, follow-up
+commands that interpret the same turn's control-plane state, especially
+`refresh-state` and `quota spend-slot`, should use that same registered
+`--agent-id` when the subcommand supports it. Otherwise the spend/accounting
+preview can be evaluated as an unscoped automation and report
+`automation_prompt_upgrade_required` even though the delivery decision was
+made under a valid side-agent scope. The fix is not to ignore that warning; the
+fix is to preserve the identity envelope across guard, writeback, accounting,
+and rollout evidence.
+
 **Visual Model**
 
 ```mermaid
@@ -1018,7 +1029,8 @@ flowchart TD
   C --> W["work in independent worktree / branch"]
   W --> V{"validated and AGENTS self-merge eligible?"}
   V -->|"yes"| M["self-merge small change with evidence"]
-  M --> K{"same-scope continuation?"}
+  M --> I["refresh/spend with same --agent-id"]
+  I --> K{"same-scope continuation?"}
   K -->|"yes"| N["complete + add successor claimed_by same side agent"]
   K -->|"no"| X["complete with no successor or no-follow-up rationale"]
   V -->|"no"| R["complete with primary review successor"]
@@ -1032,7 +1044,10 @@ of the shared todo list, encodes scope into todo metadata, self-merges broad or
 runtime-sensitive work, or creates a review successor and claims it back to
 itself without the explicit self-merge path. A related bad smell is treating
 "the prompt said use a worktree" as sufficient product protection; the guard
-must be machine-visible before the first file edit.
+must be machine-visible before the first file edit. Another bad smell is a
+scoped side-agent run that passes `quota should-run --agent-id ...` but later
+spends without `--agent-id`, producing an unscoped accounting snapshot that
+looks like a stale automation prompt instead of the completed scoped turn.
 
 **Validation**
 
