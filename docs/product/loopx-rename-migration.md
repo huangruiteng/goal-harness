@@ -34,22 +34,25 @@ missed migration work.
    Pages URLs, external docs, and any release notes that cannot be validated
    until the canonical code rename has landed.
 6. P1 GitHub rename gate: rename `huangruiteng/goal-harness` to
-   `huangruiteng/loopx` only after the canonical rename PR lands and the
-   maintainer accepts the public URL migration plan. The no-clone installer
-   points at the new repo URL, so the GitHub rename is a merge/release gate,
-   not an optional cleanup.
+   `huangruiteng/loopx` after the canonical rename PR lands, the maintainer
+   accepts the public URL migration plan, and the Pages/issue-template cutover
+   PR is merged. The no-clone installer already points at the new repo URL, so
+   the GitHub rename is a controlled release cutover, not a compatibility
+   alias.
 
 ## GitHub Rename Gate
 
 The current authenticated GitHub user has admin permission on the existing
-`huangruiteng/goal-harness` repository. Codex should perform the final rename
-to `huangruiteng/loopx` only after an explicit maintainer gate.
+`huangruiteng/goal-harness` repository. Codex may perform the final rename to
+`huangruiteng/loopx` after the maintainer explicitly approves the repo rename
+gate and the cutover checklist below is complete.
 
 Do not rename the repository as part of an ordinary code PR. Before the rename:
 
 - merge the LoopX canonical rename PR;
 - confirm the no-clone installer works from the new URL;
 - decide the hosted Pages URL strategy;
+- update Pages base paths and public GitHub links to `/loopx/`;
 - update repository description/topics;
 - update local remotes after rename with `git remote set-url origin`;
 - keep the old repository name unused so GitHub redirects are not invalidated.
