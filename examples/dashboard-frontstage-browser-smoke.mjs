@@ -336,8 +336,6 @@ async function captureFrontstage(page, url, label, requiredText = [], options = 
   const body = await page.locator("body").innerText();
   const frontstageRequired = [
     "LoopX",
-    "Frontstage channel",
-    "Projection is read-only",
     "Efficiency Evidence",
     "AI-ASSISTED BASELINE",
     "SINGLE-ENGINEER COMPRESSION",
@@ -352,8 +350,7 @@ async function captureFrontstage(page, url, label, requiredText = [], options = 
     "Public-safe case pack",
     "Blocked P0 with safe P1/P2 rotation",
     "LoopX self-iteration loop",
-    "Creator-operator long-running agent case",
-    "Boundary Warnings",
+    "Dynamic workflow for hardware-agent development",
   ];
   const required = options.includeFrontstageRequired === false
     ? requiredText
@@ -458,8 +455,11 @@ async function main() {
     desktopPage.on("pageerror", (error) => pageErrors.push(error.message));
     try {
       await captureFrontstage(desktopPage, `${baseUrl}/frontstage`, "desktop-frontstage", [
-        "LoopX Showcase Frontstage",
-        "Async agent teams, governed by human judgment",
+        "Loop engineering for long-running AI agents",
+        "Public cases first. Live registry state stays behind explicit ops mode.",
+        "Explore cases",
+        "Quick Start",
+        "Share feedback",
         "public cases",
         "story beats",
         "showcase mode",
@@ -470,11 +470,17 @@ async function main() {
         "ASYNCHRONOUS AGENT RHYTHM",
         "Agent teams work across turns and off-hours",
         "SEARCH PUBLIC SHOWCASES",
-        "Showing 4 of 4 public-safe cases",
+        "Showing 3 of 3 public-safe cases",
         "Public Boundary",
         "Ops live only",
         "None in browser",
       ]);
+      const publicShellSidebars = await desktopPage
+        .locator('[data-testid="frontstage-live-source-panel"], [data-testid="frontstage-source-warnings"]')
+        .count();
+      if (publicShellSidebars !== 0) {
+        throw new Error(`Showcase homepage rendered ops side panels: ${publicShellSidebars}`);
+      }
       const stateFlowTrackCount = await desktopPage.locator('[data-testid="frontstage-state-flow-track"]').count();
       const stateFlowBeamBox = await desktopPage.locator('[data-testid="frontstage-state-flow-beam"]').boundingBox();
       if (stateFlowTrackCount !== 1 || !stateFlowBeamBox || stateFlowBeamBox.width < 20) {
@@ -493,16 +499,16 @@ async function main() {
       }
       await desktopPage
         .locator('[data-testid="frontstage-showcase-motion-card"]')
-        .filter({ hasText: "Creator-operator long-running agent case" })
+        .filter({ hasText: "Dynamic workflow for hardware-agent development" })
         .click();
       await desktopPage.waitForFunction(() =>
         document
           .querySelector('[data-testid="frontstage-showcase-spotlight"]')
-          ?.textContent?.includes("Creator-operator long-running agent case"),
+          ?.textContent?.includes("Dynamic workflow for hardware-agent development"),
       );
-      const creatorSpotlightText = await spotlight.innerText();
-      if (!creatorSpotlightText.includes("Synthetic case spec only")) {
-        throw new Error("Showcase spotlight did not expose the selected case evidence boundary");
+      const hardwareSpotlightText = await spotlight.innerText();
+      if (!hardwareSpotlightText.includes("Redacted stub")) {
+        throw new Error("Showcase spotlight did not expose the selected hardware-agent evidence boundary");
       }
       const spotlightCaseHref = await desktopPage
         .locator('[data-testid="frontstage-showcase-spotlight-case-page"]')
@@ -511,7 +517,7 @@ async function main() {
         throw new Error(`Showcase spotlight case link points outside public showcases: ${spotlightCaseHref}`);
       }
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("self-iteration");
-      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 1 of 4 public-safe cases"));
+      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 1 of 3 public-safe cases"));
       const filteredCaseText = await desktopPage.locator('[data-testid="frontstage-showcase-cases"]').innerText();
       if (!filteredCaseText.includes("LoopX self-iteration loop")) {
         throw new Error("Showcase search did not keep the self-iteration case visible");
@@ -522,13 +528,13 @@ async function main() {
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("no-matching-showcase");
       await desktopPage.waitForFunction(() => document.body.innerText.includes("No public showcase matched the current filters."));
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("");
-      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 4 of 4 public-safe cases"));
+      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 3 of 3 public-safe cases"));
       await captureFrontstage(
         desktopPage,
         `${baseUrl}/frontstage?statusUrl=/${fixtureName}&goalId=live-goal-a`,
         "desktop-frontstage-showcase-ignores-status-url",
         [
-          "LoopX Showcase Frontstage",
+          "Loop engineering for long-running AI agents",
           "showcase mode",
           "Showcase mode ignores statusUrl",
           "statusUrl ignored",
@@ -560,7 +566,7 @@ async function main() {
         `${baseUrl}/frontstage?statusUrl=/${privateTrapFixtureName}&goalId=fake-private-trap-goal`,
         "desktop-frontstage-showcase-private-trap-ignored",
         [
-          "LoopX Showcase Frontstage",
+          "Loop engineering for long-running AI agents",
           "showcase mode",
           "Showcase mode ignores statusUrl",
           "statusUrl ignored",
@@ -703,7 +709,7 @@ async function main() {
       }
       await desktopPage.locator('[data-testid="frontstage-reset-demo"]').click();
       await captureFrontstage(desktopPage, `${baseUrl}/frontstage`, "desktop-frontstage-after-ops-reset", [
-        "LoopX Showcase Frontstage",
+        "Loop engineering for long-running AI agents",
         "showcase mode",
         "Showcase mode ignores statusUrl",
         "Public Boundary",
@@ -733,8 +739,8 @@ async function main() {
     mobilePage.on("pageerror", (error) => pageErrors.push(`mobile: ${error.message}`));
     try {
       await captureFrontstage(mobilePage, `${baseUrl}/frontstage`, "mobile-frontstage", [
-        "LoopX Showcase Frontstage",
-        "Async agent teams, governed by human judgment",
+        "Loop engineering for long-running AI agents",
+        "Public cases first. Live registry state stays behind explicit ops mode.",
         "showcase mode",
         "Showcase mode ignores statusUrl",
         "Public Boundary",
