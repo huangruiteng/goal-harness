@@ -362,7 +362,7 @@ def main() -> int:
         "If false/0: 无用户待办/无需通知 or quiet",
         "具体 user todo 未投影，需修复 LoopX 状态投影",
         "Do bounded validated batch or quiet no-op; spend after writeback",
-        "Plans/done -> GH todo or rationale",
+        "Plans/done -> LoopX todo or rationale",
         "After 2 no-progress, self-repair",
         "If P0 is blocked but CLI contract permits safe work",
         "monitor-only quiet skips stay active/no-spend",
