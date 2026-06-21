@@ -75,7 +75,32 @@ VISIBLE_PROOF_FIXTURE = {
 }
 
 
-def build_pilot(proof_payload: dict[str, object] | None = None) -> dict[str, object]:
+RUNTIME_IDLE_FIXTURE = {
+    "observed_surface": "visible_resume_prompt",
+    "idle_guard": {
+        "no_active_human_typing": True,
+        "no_running_turn": True,
+        "checked_before_prompt": True,
+    },
+    "turn_visibility": {"visible_to_user": True},
+    "interruptibility": {
+        "user_can_interrupt": True,
+        "manual_takeover_available": True,
+    },
+    "boundary": {
+        "reads_raw_transcripts": False,
+        "reads_session_files": False,
+        "reads_stdout_stderr": False,
+        "reads_credentials": False,
+        "mutates_hidden_session_state": False,
+    },
+}
+
+
+def build_pilot(
+    proof_payload: dict[str, object] | None = None,
+    idle_payload: dict[str, object] | None = None,
+) -> dict[str, object]:
     return build_codex_cli_one_message_loop_pilot(
         project=PROJECT,
         goal_id=GOAL_ID,
@@ -84,6 +109,7 @@ def build_pilot(proof_payload: dict[str, object] | None = None) -> dict[str, obj
         codex_bin="codex",
         probe_payload=classify_codex_cli_session_surface(command_outputs=REMOTE_RESUME_HELP_FIXTURE),
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
     )
 
 
@@ -131,9 +157,15 @@ def main() -> int:
 
     with_proof = build_pilot(VISIBLE_PROOF_FIXTURE)
     assert_pilot_boundary(with_proof)
-    assert with_proof["pilot_decision"] == "first_message_then_candidate_available", with_proof
-    assert with_proof["automation_bridge"]["scheduler_action"] == "external_visible_command_candidate", with_proof
+    assert with_proof["pilot_decision"] == "first_message_then_runtime_idle_required", with_proof
+    assert with_proof["automation_bridge"]["scheduler_action"] == "write_precise_blocker", with_proof
     assert with_proof["scheduler_executor"]["execution"]["executed"] is False, with_proof
+
+    with_proof_and_idle = build_pilot(VISIBLE_PROOF_FIXTURE, RUNTIME_IDLE_FIXTURE)
+    assert_pilot_boundary(with_proof_and_idle)
+    assert with_proof_and_idle["pilot_decision"] == "first_message_then_candidate_available", with_proof_and_idle
+    assert with_proof_and_idle["automation_bridge"]["scheduler_action"] == "external_visible_command_candidate", with_proof_and_idle
+    assert with_proof_and_idle["scheduler_executor"]["scheduler_tick"]["runtime_idle_detector"]["approved"] is True, with_proof_and_idle
 
     with tempfile.TemporaryDirectory(prefix="goal-harness-codex-cli-one-message-") as tmp:
         tmp_path = Path(tmp)
@@ -141,6 +173,8 @@ def main() -> int:
         help_fixture.write_text(json.dumps({"command_outputs": REMOTE_RESUME_HELP_FIXTURE}))
         proof_fixture = tmp_path / "visible-proof.json"
         proof_fixture.write_text(json.dumps(VISIBLE_PROOF_FIXTURE))
+        idle_fixture = tmp_path / "runtime-idle.json"
+        idle_fixture.write_text(json.dumps(RUNTIME_IDLE_FIXTURE))
         missing_registry = tmp_path / "missing-registry.json"
         runtime_root = tmp_path / "runtime"
 
@@ -184,7 +218,29 @@ def main() -> int:
             )
         )
         assert_pilot_boundary(cli_proof_json)
-        assert cli_proof_json["pilot_decision"] == "first_message_then_candidate_available", cli_proof_json
+        assert cli_proof_json["pilot_decision"] == "first_message_then_runtime_idle_required", cli_proof_json
+
+        cli_proof_idle_json = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "codex-cli-one-message-loop-pilot",
+                "--project",
+                str(PROJECT),
+                "--goal-id",
+                GOAL_ID,
+                "--agent-id",
+                AGENT_ID,
+                "--fixture",
+                str(help_fixture),
+                "--proof-fixture",
+                str(proof_fixture),
+                "--idle-fixture",
+                str(idle_fixture),
+            )
+        )
+        assert_pilot_boundary(cli_proof_idle_json)
+        assert cli_proof_idle_json["pilot_decision"] == "first_message_then_candidate_available", cli_proof_idle_json
 
         cli_markdown = run_cli(
             "codex-cli-one-message-loop-pilot",

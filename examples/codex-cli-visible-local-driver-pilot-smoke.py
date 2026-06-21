@@ -172,7 +172,7 @@ def main() -> int:
     assert_pilot_boundary(with_proof)
     assert with_proof["loop_decision"] == "runtime_idle_detector_required", with_proof
     assert with_proof["next_driver_action"] == "capture_public_safe_runtime_idle_observation", with_proof
-    assert with_proof["scheduler_executor"]["scheduler_action"] == "external_visible_command_candidate", with_proof
+    assert with_proof["scheduler_executor"]["scheduler_action"] == "write_precise_blocker", with_proof
     assert with_proof["visible_session_proof"]["supplied"] is True, with_proof
     assert with_proof["visible_session_proof"]["approved"] is True, with_proof
     assert with_proof["runtime_idle_detector"]["supplied"] is False, with_proof
