@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from . import __version__
 from .authority import (
     AUTHORITY_SOURCE_BOUNDARIES,
     import_doc_registry_authority,
@@ -313,6 +314,19 @@ def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> No
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(markdown_renderer(payload))
+
+
+def build_version_payload() -> dict[str, object]:
+    return {
+        "ok": True,
+        "schema_version": "loopx_version_v0",
+        "name": "loopx",
+        "version": __version__,
+    }
+
+
+def render_version_markdown(payload: dict[str, object]) -> str:
+    return f"{payload.get('name')} {payload.get('version')}\n"
 
 
 def render_benchmark_artifact_path_filter_markdown(payload: dict[str, object]) -> str:
@@ -2195,10 +2209,13 @@ def default_public_scan_root() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="LoopX control-plane helper.")
+    parser.add_argument("--version", action="version", version=f"loopx {__version__}")
     parser.add_argument("--registry", default=str(default_registry_path()), help="Path to a project-local registry.")
     parser.add_argument("--runtime-root", help="Override registry common_runtime_root.")
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("version", help="Print the installed LoopX version.")
 
     bootstrap_parser = sub.add_parser(
         "bootstrap",
@@ -6121,6 +6138,7 @@ def main(argv: list[str] | None = None) -> int:
             "new-project-prompt",
             "heartbeat-prompt",
             "sync-global",
+            "version",
         }
         and not user_supplied_registry(argv)
         and not registry_path.exists()
@@ -6129,6 +6147,10 @@ def main(argv: list[str] | None = None) -> int:
         fallback_registry = global_registry_path(runtime_root)
         if fallback_registry.exists():
             registry_path = fallback_registry
+
+    if args.command == "version":
+        print_payload(build_version_payload(), args.format, render_version_markdown)
+        return 0
 
     if args.command in {"bootstrap", "connect"}:
         try:
