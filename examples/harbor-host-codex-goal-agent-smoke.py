@@ -96,6 +96,37 @@ def main() -> int:
     assert "route: goal-harness-prompt-polling-test" in polling_packet
     assert "strict_goal_harness_treatment_claim_allowed: false" in polling_packet
     assert "controller_trace_absent" in polling_packet
+    init_payload = module.build_case_goal_state_init_payload(
+        benchmark_id="swe-marathon",
+        case_id="find-network-alignments",
+        arm_id="goal_harness_prompt_polling_test",
+        route="goal-harness-prompt-polling-test",
+        max_rounds=5,
+    )
+    assert init_payload["schema_version"] == "goal_harness_benchmark_case_active_state_v1", init_payload
+    assert (
+        init_payload["benchmark_case_goal_id"]
+        == "swe-marathon-find-network-alignments-goal-harness-prompt-polling-test-case"
+    ), init_payload
+    assert init_payload["case_state_path"].startswith("/app/.codex/goals/"), init_payload
+    assert init_payload["case_state_path"].endswith("/ACTIVE_GOAL_STATE.md"), init_payload
+    init_command = init_payload["command"]
+    assert "mkdir -p" in init_command, init_command
+    assert "mv \"$tmp\"" in init_command, init_command
+    assert "## Agent Todo" in init_command, init_command
+    assert "goal-harness-prompt-polling-test" in init_command, init_command
+    assert "find-network-alignments" in init_command, init_command
+    assert "/Users/" not in init_command, init_command
+    init_compact = module._case_goal_state_init_compact(
+        init_payload,
+        status="initialized",
+        initialized_before_agent=True,
+    )
+    assert init_compact["case_goal_state_init_required"] is True, init_compact
+    assert init_compact["case_goal_state_initialized_before_agent"] is True, init_compact
+    assert init_compact["case_goal_state_init_status"] == "initialized", init_compact
+    assert init_compact["case_goal_state_path"] == init_payload["case_state_path"], init_compact
+    assert init_compact["case_goal_state_raw_output_recorded"] is False, init_compact
 
     treatment_prompt = module.build_host_goal_prompt(
         instruction="Synthetic Harbor instruction placeholder.",

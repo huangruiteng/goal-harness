@@ -35,6 +35,9 @@ from codex_app_server_goal_driver import (
     start_codex_app_server_goal_turn,
 )
 from goal_harness.benchmark_case_state import (
+    BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
+    benchmark_case_active_state_seed_text,
+    benchmark_case_active_state_write_command,
     benchmark_case_lifecycle_contract,
     render_benchmark_case_lifecycle_contract_lines,
 )
@@ -283,6 +286,65 @@ def build_goal_harness_access_packet(
     return "\n".join(lines)
 
 
+def build_case_goal_state_init_payload(
+    *,
+    benchmark_id: str,
+    case_id: str,
+    arm_id: str,
+    route: str,
+    max_rounds: int,
+) -> dict[str, Any]:
+    """Build the public-safe case active-state init payload for Harbor/SWE."""
+
+    contract = benchmark_case_lifecycle_contract(
+        benchmark_id=benchmark_id,
+        case_id=case_id,
+        arm_id=arm_id,
+        max_rounds=max_rounds,
+    )
+    goal_id = str(contract["benchmark_case_goal_id"])
+    case_state_path = str(contract["case_state_path"])
+    seed = benchmark_case_active_state_seed_text(
+        benchmark_name=benchmark_id,
+        goal_id=goal_id,
+        task_id=case_id,
+        route=route,
+        max_rounds=max_rounds,
+        case_state_path=case_state_path,
+    )
+    return {
+        "schema_version": BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
+        "benchmark_case_goal_id": goal_id,
+        "case_state_path": case_state_path,
+        "command": benchmark_case_active_state_write_command(
+            case_state_path=case_state_path,
+            content=seed,
+        ),
+        "raw_task_text_required_for_init": False,
+        "local_paths_recorded": False,
+    }
+
+
+def _case_goal_state_init_compact(
+    payload: dict[str, Any] | None,
+    *,
+    status: str,
+    initialized_before_agent: bool,
+) -> dict[str, Any]:
+    payload = payload or {}
+    required = bool(payload)
+    return {
+        "case_goal_state_init_required": required,
+        "case_goal_state_initialized_before_agent": bool(initialized_before_agent),
+        "case_goal_state_init_status": status if required else "not_required",
+        "case_goal_state_schema_version": (
+            payload.get("schema_version") or BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION
+        ),
+        "case_goal_state_path": payload.get("case_state_path") or "",
+        "case_goal_state_raw_output_recorded": False,
+    }
+
+
 class HarborHostCodexGoalAgent(BaseAgent):
     @staticmethod
     def name() -> str:
@@ -475,6 +537,12 @@ class HarborHostCodexGoalAgent(BaseAgent):
             case_id=self.goal_harness_case_id,
             arm_id=self.goal_harness_arm_id,
         )
+        case_state_init_payload: dict[str, Any] = {}
+        case_state_init_compact = _case_goal_state_init_compact(
+            None,
+            status="not_required",
+            initialized_before_agent=False,
+        )
         loop_contract: dict[str, Any] = {}
         treatment_claim: dict[str, Any] = {}
         if goal_harness_access_packet:
@@ -495,6 +563,56 @@ class HarborHostCodexGoalAgent(BaseAgent):
                 max_rounds=self.goal_harness_max_rounds,
                 protocol_id=self.goal_harness_experiment_protocol,
             )
+            case_state_init_payload = build_case_goal_state_init_payload(
+                benchmark_id=self.goal_harness_benchmark_id,
+                case_id=self.goal_harness_case_id,
+                arm_id=self.goal_harness_arm_id,
+                route=loop_route,
+                max_rounds=self.goal_harness_max_rounds,
+            )
+            init_result = await environment.exec(
+                command=str(case_state_init_payload["command"]),
+                cwd=self.task_workdir,
+                timeout_sec=30,
+            )
+            init_ok = int(getattr(init_result, "return_code", 1) or 0) == 0
+            case_state_init_compact = _case_goal_state_init_compact(
+                case_state_init_payload,
+                status="initialized" if init_ok else "init_failed",
+                initialized_before_agent=init_ok,
+            )
+            (work_dir / "case_goal_state_init.compact.json").write_text(
+                json.dumps(case_state_init_compact, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            if not init_ok:
+                blocker_payload = {
+                    "schema_version": "harbor_host_codex_goal_agent_v0",
+                    "goal_surface": self.goal_surface,
+                    "ok": False,
+                    "first_blocker": "harbor_case_goal_state_init_failed",
+                    "raw_output_recorded": False,
+                    "goal_harness_mode": self.goal_harness_mode,
+                    "goal_harness_access_packet_injected": True,
+                    "benchmark_loop_contract": loop_contract,
+                    "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                    **case_state_init_compact,
+                }
+                (work_dir / "app_server_goal_turn.compact.json").write_text(
+                    json.dumps(blocker_payload, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                context.metadata = {
+                    "goal_harness_agent": self.name(),
+                    "completion_marker_observed": False,
+                    "first_blocker": "harbor_case_goal_state_init_failed",
+                    "goal_harness_mode": self.goal_harness_mode,
+                    "goal_harness_access_packet_injected": True,
+                    "benchmark_loop_contract": loop_contract,
+                    "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                    **case_state_init_compact,
+                }
+                return
             treatment_claim = classify_goal_harness_treatment_claim(
                 {"benchmark_loop_contract": loop_contract}
             )
@@ -538,6 +656,13 @@ class HarborHostCodexGoalAgent(BaseAgent):
                             "first_blocker": "codex_app_server_goal_turn_failed",
                             "error_type": type(exc).__name__,
                             "raw_transcript_recorded": False,
+                            "goal_harness_mode": self.goal_harness_mode,
+                            "goal_harness_access_packet_injected": bool(
+                                goal_harness_access_packet
+                            ),
+                            "benchmark_loop_contract": loop_contract,
+                            "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                            **case_state_init_compact,
                         },
                         sort_keys=True,
                     )
@@ -549,6 +674,13 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     "completion_marker_observed": False,
                     "bridge_request_count": self._served_request_count,
                     "first_blocker": "codex_app_server_goal_turn_failed",
+                    "goal_harness_mode": self.goal_harness_mode,
+                    "goal_harness_access_packet_injected": bool(
+                        goal_harness_access_packet
+                    ),
+                    "benchmark_loop_contract": loop_contract,
+                    "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                    **case_state_init_compact,
                 }
                 return
             await self._serve_bridge_requests(environment, request_dir)
@@ -599,6 +731,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
                         ),
                         "benchmark_loop_contract": loop_contract,
                         "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                        **case_state_init_compact,
                         **treatment_claim,
                     }
                 )
@@ -715,6 +848,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     "prompt_polling_rounds_completed": current_round,
                     "benchmark_loop_contract": loop_contract,
                     "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                    **case_state_init_compact,
                     **treatment_claim,
                 }
                 return
@@ -743,6 +877,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
                             ),
                             "benchmark_loop_contract": loop_contract,
                             "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                            **case_state_init_compact,
                             **treatment_claim,
                         }
                         return
@@ -764,6 +899,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
                 ),
                 "benchmark_loop_contract": loop_contract,
                 "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                **case_state_init_compact,
                 **treatment_claim,
             }
             return
@@ -820,6 +956,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     ),
                     "benchmark_loop_contract": loop_contract,
                     "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                    **case_state_init_compact,
                     **treatment_claim,
                 }
                 return
@@ -836,5 +973,6 @@ class HarborHostCodexGoalAgent(BaseAgent):
             "goal_harness_access_packet_injected": bool(goal_harness_access_packet),
             "benchmark_loop_contract": loop_contract,
             "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+            **case_state_init_compact,
             **treatment_claim,
         }
