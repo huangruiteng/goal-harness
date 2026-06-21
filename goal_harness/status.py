@@ -3807,6 +3807,40 @@ def todo_projection_sort_key(item: dict[str, Any]) -> tuple[int, int]:
     )
 
 
+def claimed_visibility_items(items: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0 or len(items) <= limit:
+        return items[:limit]
+    claim_order: list[str] = []
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+        if not claimed_by:
+            continue
+        if claimed_by not in buckets:
+            buckets[claimed_by] = []
+            claim_order.append(claimed_by)
+        buckets[claimed_by].append(item)
+    if not buckets:
+        return items[:limit]
+
+    selected: list[dict[str, Any]] = []
+    round_index = 0
+    while len(selected) < limit:
+        added = False
+        for claimed_by in claim_order:
+            bucket = buckets[claimed_by]
+            if round_index >= len(bucket):
+                continue
+            selected.append(bucket[round_index])
+            added = True
+            if len(selected) >= limit:
+                break
+        if not added:
+            break
+        round_index += 1
+    return selected
+
+
 def compact_todo_group(
     items: list[dict[str, Any]],
     *,
@@ -3872,15 +3906,24 @@ def compact_todo_group(
         ],
         "claimed_open_items": [
             compact_todo_item(item)
-            for item in claimed_open_items[:MAX_TODO_VISIBILITY_LANE_ITEMS]
+            for item in claimed_visibility_items(
+                claimed_open_items,
+                limit=MAX_TODO_VISIBILITY_LANE_ITEMS,
+            )
         ],
         "claimed_advancement_open_items": [
             compact_todo_item(item)
-            for item in claimed_advancement_items[:MAX_TODO_VISIBILITY_LANE_ITEMS]
+            for item in claimed_visibility_items(
+                claimed_advancement_items,
+                limit=MAX_TODO_VISIBILITY_LANE_ITEMS,
+            )
         ],
         "claimed_monitor_open_items": [
             compact_todo_item(item)
-            for item in claimed_monitor_items[:MAX_TODO_VISIBILITY_LANE_ITEMS]
+            for item in claimed_visibility_items(
+                claimed_monitor_items,
+                limit=MAX_TODO_VISIBILITY_LANE_ITEMS,
+            )
         ],
         "backlog_items": [
             compact_todo_item(item)

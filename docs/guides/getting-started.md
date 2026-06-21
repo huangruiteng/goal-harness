@@ -191,6 +191,10 @@ for the bootstrap, session-attached automation, and headless fallback split.
 The [Codex CLI first-run rehearsal](../product/codex-cli-first-run-rehearsal.md)
 keeps the shortest user-facing route in one place: no-clone install,
 one-message TUI bootstrap, and proof-capture fixtures for later automation.
+For current product scheduling, the
+[Codex CLI TUI continuation priority](../product/codex-cli-tui-continuation-priority.md)
+keeps same-open-TUI continuation ahead of frontstage or showcase polish when
+both are runnable.
 
 Maintainers can validate the public fresh-clone path with:
 

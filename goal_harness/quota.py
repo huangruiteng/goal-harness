@@ -1142,6 +1142,40 @@ def _todo_projection_sort_key(item: dict[str, Any]) -> tuple[int, int]:
     return (_todo_priority_rank(item), _todo_index_rank(item))
 
 
+def _claimed_visibility_items(items: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0 or len(items) <= limit:
+        return items[:limit]
+    claim_order: list[str] = []
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+        if not claimed_by:
+            continue
+        if claimed_by not in buckets:
+            buckets[claimed_by] = []
+            claim_order.append(claimed_by)
+        buckets[claimed_by].append(item)
+    if not buckets:
+        return items[:limit]
+
+    selected: list[dict[str, Any]] = []
+    round_index = 0
+    while len(selected) < limit:
+        added = False
+        for claimed_by in claim_order:
+            bucket = buckets[claimed_by]
+            if round_index >= len(bucket):
+                continue
+            selected.append(bucket[round_index])
+            added = True
+            if len(selected) >= limit:
+                break
+        if not added:
+            break
+        round_index += 1
+    return selected
+
+
 def _side_agent_claim_scoped_open_items(
     open_items: list[dict[str, Any]],
     *,
@@ -1213,13 +1247,22 @@ def _todo_summary_visibility_lanes(
 
     lanes: dict[str, Any] = {
         "unclaimed_priority_open_items": compact_items(unclaimed_items),
-        "claimed_open_items": compact_items(claimed_items, limit=TODO_VISIBILITY_LANE_LIMIT),
+        "claimed_open_items": compact_items(
+            _claimed_visibility_items(claimed_items, limit=TODO_VISIBILITY_LANE_LIMIT),
+            limit=TODO_VISIBILITY_LANE_LIMIT,
+        ),
         "claimed_advancement_open_items": compact_items(
-            claimed_advancement_items,
+            _claimed_visibility_items(
+                claimed_advancement_items,
+                limit=TODO_VISIBILITY_LANE_LIMIT,
+            ),
             limit=TODO_VISIBILITY_LANE_LIMIT,
         ),
         "claimed_monitor_open_items": compact_items(
-            claimed_monitor_items,
+            _claimed_visibility_items(
+                claimed_monitor_items,
+                limit=TODO_VISIBILITY_LANE_LIMIT,
+            ),
             limit=TODO_VISIBILITY_LANE_LIMIT,
         ),
     }

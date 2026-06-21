@@ -51,6 +51,9 @@ runtime contract, benchmark route, or launch draft.
 - [Codex CLI proof-capture demo](codex-cli-proof-capture-demo.md): public-safe
   sample fixtures and acceptance decisions for rehearsing the visible proof
   path without running Codex or reading session material.
+- [Codex CLI TUI continuation priority](codex-cli-tui-continuation-priority.md):
+  the current scheduling guard that keeps same-open-TUI continuation ahead of
+  frontstage/showcase polish when both are runnable.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
   identity/scope contract for primary and side agents, including worktree and
   review handoff policy, while keeping todo ownership in `claimed_by` and future
