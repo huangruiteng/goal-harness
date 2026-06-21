@@ -16,6 +16,9 @@ incident report, or launch draft.
 - [Codex CLI TUI-first loop](product/codex-cli-tui-loop.md): first-class
   Codex CLI onboarding target where one visible TUI message starts Goal
   Harness, with session-attached automation as the preferred follow-up.
+- [Codex CLI first-run rehearsal](product/codex-cli-first-run-rehearsal.md):
+  shortest public route from no-clone install to one-message TUI bootstrap and
+  proof-capture fixtures.
 - [Architecture](architecture.md): core concepts and control-plane shape.
 - [Integration guide](integration.md): how to connect a project to Goal
   Harness.

@@ -18,6 +18,10 @@ runtime contract, benchmark route, or launch draft.
 - [Codex CLI packaged install path](codex-cli-packaged-install.md): the
   no-clone install/update/start route for Codex CLI users, with clone-plus-canary
   reserved for contributors.
+- [Codex CLI first-run rehearsal](codex-cli-first-run-rehearsal.md): the concise
+  fresh-user route that connects no-clone install, one-message TUI bootstrap,
+  and proof-capture fixtures while keeping later same-TUI automation optional
+  until visible proof passes.
 - [Codex CLI automation driver audit](codex-cli-automation-driver.md): the
   current Codex CLI scheduler/session surface audit, with a conservative local
   driver planner that keeps TUI bootstrap primary, composes quota/idle/fallback
