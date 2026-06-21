@@ -65,7 +65,7 @@ jobs:
 
       - name: Export Pages frontstage artifact
         working-directory: apps/dashboard
-        run: npm run export:frontstage-share -- --base /goal-harness/ --out-dir ../../output/frontstage-pages
+        run: npm run export:frontstage-share -- --base /loopx/ --out-dir ../../output/frontstage-pages
 
       - name: Configure Pages
         if: github.event_name != 'pull_request'
