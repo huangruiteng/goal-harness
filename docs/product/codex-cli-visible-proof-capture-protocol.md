@@ -27,6 +27,9 @@ path and record a blocker instead of attempting a later visible turn.
 ## Capture Packet
 
 The durable packet is two public-safe fixtures plus the acceptance result.
+The public demo bundle in
+[Codex CLI Proof-Capture Demo](codex-cli-proof-capture-demo.md) provides sample
+fixtures for both a visible `resume` spike and a future same-TUI attach proof.
 
 ### Visible-Session Proof Fixture
 
