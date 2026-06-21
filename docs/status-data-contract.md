@@ -996,6 +996,13 @@ should treat this as a prompt-upgrade action, not as delivery permission, a
 quiet no-op, or a new operator gate. `should_run`, `normal_delivery_allowed`,
 and `interaction_contract.agent_channel.delivery_allowed` must stay `false`
 until the automation reruns `quota should-run` with a registered `--agent-id`.
+The selected identity is part of the turn envelope. Follow-up lifecycle
+commands that interpret or account for the same turn, including scoped
+`refresh-state` and `quota spend-slot`, should preserve the same `--agent-id`
+when the subcommand supports it. A spend preview that drops the identity may
+correctly show `automation_prompt_upgrade_required` for an unscoped automation,
+but that is an accounting/projection mismatch for the scoped turn, not evidence
+that the earlier side-agent guard was invalid.
 When the resolved `agent_identity.role` is `side-agent`, `quota should-run`
 also enforces the workspace boundary. If the guard is being run from the
 registered primary checkout, from a non-git directory, or from an unrelated git
