@@ -18,9 +18,11 @@ from ..project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_STATUS,
     build_codex_cli_bootstrap_message,
     build_codex_cli_exec_handoff,
+    build_codex_cli_tui_bootstrap_smoke_bundle,
     build_new_project_prompt,
     render_codex_cli_bootstrap_message_markdown,
     render_codex_cli_exec_handoff_markdown,
+    render_codex_cli_tui_bootstrap_smoke_bundle_markdown,
     render_new_project_prompt_markdown,
 )
 from ..codex_cli_probe import (
@@ -195,6 +197,29 @@ def register_starter_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="message_only",
         action="store_true",
         help="Print only the Codex CLI TUI paste message, without the Markdown review packet.",
+    )
+
+    codex_cli_tui_bootstrap_smoke_parser = subparsers.add_parser(
+        "codex-cli-tui-bootstrap-smoke-bundle",
+        help="Generate a transcript-free first-run smoke packet for the Codex CLI TUI bootstrap path.",
+    )
+    codex_cli_tui_bootstrap_smoke_parser.add_argument(
+        "--project",
+        default=".",
+        help="Project directory to model as the fresh repo.",
+    )
+    codex_cli_tui_bootstrap_smoke_parser.add_argument(
+        "--goal-id",
+        help="Goal id. Defaults to <project-name>-goal.",
+    )
+    codex_cli_tui_bootstrap_smoke_parser.add_argument(
+        "--agent-id",
+        help="Registered Goal Harness agent id to include in quota/claim instructions.",
+    )
+    codex_cli_tui_bootstrap_smoke_parser.add_argument(
+        "--cli-bin",
+        default="goal-harness",
+        help="Goal Harness CLI binary name embedded in generated commands.",
     )
 
     codex_cli_one_message_loop_parser = subparsers.add_parser(
@@ -686,6 +711,20 @@ def handle_codex_cli_bootstrap_message_command(
         print(str(payload.get("message") or ""))
         return 0
     print_payload(payload, args.format, render_codex_cli_bootstrap_message_markdown)
+    return 0
+
+
+def handle_codex_cli_tui_bootstrap_smoke_bundle_command(
+    args: argparse.Namespace,
+    print_payload: PrintPayload,
+) -> int:
+    payload = build_codex_cli_tui_bootstrap_smoke_bundle(
+        project=Path(args.project),
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        cli_bin=args.cli_bin,
+    )
+    print_payload(payload, args.format, render_codex_cli_tui_bootstrap_smoke_bundle_markdown)
     return 0
 
 
