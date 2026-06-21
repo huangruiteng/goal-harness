@@ -23,6 +23,10 @@ runtime contract, benchmark route, or launch draft.
   driver planner that keeps TUI bootstrap primary, composes quota/idle/fallback
   checks, validates visible-session proof fixtures, and treats `codex exec` as
   an explicit fallback.
+- [Codex CLI visible proof capture protocol](codex-cli-visible-proof-capture-protocol.md):
+  the opt-in public-safe procedure for turning `resume` / `remote-control`
+  signals into evidence, with stop conditions that keep one-message TUI
+  bootstrap primary until same-TUI visibility is proven.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
   identity/scope contract for primary and side agents, including worktree and
   review handoff policy, while keeping todo ownership in `claimed_by` and future
