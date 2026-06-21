@@ -201,6 +201,10 @@ session, use:
 goal-harness codex-cli-visible-local-driver-pilot --project . --goal-id <goal-id> --agent-id <agent-id>
 ```
 
+Later-turn automation stays conservative: `codex-cli-runtime-idle-detector`
+must validate a public-safe idle fixture before a visible resume or
+remote-control candidate can run.
+
 For Codex App, Claude Code, Cursor, or another terminal agent, paste this from
 the project repo:
 

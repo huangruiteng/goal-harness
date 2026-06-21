@@ -35,7 +35,9 @@ from ..codex_cli_probe import (
     build_codex_cli_visible_driver_run_packet,
     build_codex_cli_visible_driver_plan,
     build_codex_cli_visible_session_proof,
+    build_codex_cli_runtime_idle_detector,
     load_codex_cli_visible_session_proof_fixture,
+    load_codex_cli_runtime_idle_fixture,
     render_codex_cli_one_message_loop_pilot_markdown,
     render_codex_cli_visible_local_driver_pilot_markdown,
     render_codex_cli_local_scheduler_executor_markdown,
@@ -45,6 +47,7 @@ from ..codex_cli_probe import (
     render_codex_cli_visible_driver_run_packet_markdown,
     render_codex_cli_visible_driver_plan_markdown,
     render_codex_cli_visible_session_proof_markdown,
+    render_codex_cli_runtime_idle_detector_markdown,
     run_codex_cli_session_probe,
 )
 
@@ -161,6 +164,10 @@ def register_starter_commands(subparsers: argparse._SubParsersAction) -> None:
     codex_cli_visible_local_driver_parser.add_argument(
         "--proof-fixture",
         help="Optional public-safe visible-session proof fixture. Without it, later visible turns remain blocked.",
+    )
+    codex_cli_visible_local_driver_parser.add_argument(
+        "--idle-fixture",
+        help="Optional public-safe runtime idle fixture. Without it, later visible turn candidates remain blocked.",
     )
     codex_cli_visible_local_driver_parser.add_argument(
         "--allow-headless-fallback",
@@ -417,6 +424,26 @@ def register_starter_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Public-safe JSON proof fixture. When omitted, prints the required fixture shape.",
     )
 
+    codex_cli_runtime_idle_parser = subparsers.add_parser(
+        "codex-cli-runtime-idle-detector",
+        help="Validate a public-safe runtime idle fixture before a later visible Codex CLI turn.",
+    )
+    codex_cli_runtime_idle_parser.add_argument("--project", default=".", help="Project directory to start from.")
+    codex_cli_runtime_idle_parser.add_argument("--goal-id", help="Goal id. Defaults to <project-name>-goal.")
+    codex_cli_runtime_idle_parser.add_argument(
+        "--agent-id",
+        help="Registered Goal Harness agent id to include in the idle packet.",
+    )
+    codex_cli_runtime_idle_parser.add_argument(
+        "--cli-bin",
+        default="goal-harness",
+        help="Goal Harness CLI binary name embedded in idle detector metadata.",
+    )
+    codex_cli_runtime_idle_parser.add_argument(
+        "--idle-fixture",
+        help="Public-safe JSON idle fixture. When omitted, prints the required fixture shape.",
+    )
+
     codex_cli_exec_parser = subparsers.add_parser(
         "codex-cli-exec-handoff",
         help="Generate an explicit one-shot codex exec fallback for Goal Harness onboarding.",
@@ -530,6 +557,11 @@ def handle_codex_cli_visible_local_driver_pilot_command(
         if args.proof_fixture
         else None
     )
+    idle_payload = (
+        load_codex_cli_runtime_idle_fixture(Path(args.idle_fixture).expanduser())
+        if args.idle_fixture
+        else None
+    )
     payload = build_codex_cli_visible_local_driver_pilot(
         project=Path(args.project),
         goal_id=args.goal_id,
@@ -538,6 +570,7 @@ def handle_codex_cli_visible_local_driver_pilot_command(
         codex_bin=args.codex_bin,
         probe_payload=probe_payload,
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
         allow_headless_fallback=bool(args.allow_headless_fallback),
     )
     print_payload(payload, args.format, render_codex_cli_visible_local_driver_pilot_markdown)
@@ -705,6 +738,26 @@ def handle_codex_cli_visible_session_proof_command(
         proof_payload=proof_payload,
     )
     print_payload(payload, args.format, render_codex_cli_visible_session_proof_markdown)
+    return 0 if payload.get("ok") else 1
+
+
+def handle_codex_cli_runtime_idle_detector_command(
+    args: argparse.Namespace,
+    print_payload: PrintPayload,
+) -> int:
+    idle_payload = (
+        load_codex_cli_runtime_idle_fixture(Path(args.idle_fixture).expanduser())
+        if args.idle_fixture
+        else None
+    )
+    payload = build_codex_cli_runtime_idle_detector(
+        project=Path(args.project),
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        cli_bin=args.cli_bin,
+        idle_payload=idle_payload,
+    )
+    print_payload(payload, args.format, render_codex_cli_runtime_idle_detector_markdown)
     return 0 if payload.get("ok") else 1
 
 

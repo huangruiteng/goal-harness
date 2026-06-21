@@ -181,6 +181,13 @@ def load_codex_cli_visible_session_proof_fixture(path: Path) -> dict[str, Any]:
     return data
 
 
+def load_codex_cli_runtime_idle_fixture(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError("Codex CLI runtime idle fixture must be a JSON object")
+    return data
+
+
 def run_codex_cli_session_probe(
     *,
     codex_bin: str = DEFAULT_CODEX_BIN,
@@ -274,6 +281,165 @@ VISIBLE_SESSION_PROOF_REQUIRED_FALSE_CHECKS: tuple[tuple[str, tuple[str, ...], s
     ("no_hidden_session_mutation", ("boundary", "mutates_hidden_session_state"), "hidden session state was not mutated"),
     ("no_quota_spend_before_writeback", ("boundary", "spends_quota_before_writeback"), "quota was not spent before writeback"),
 )
+
+
+RUNTIME_IDLE_REQUIRED_TRUE_CHECKS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("idle_no_human_typing", ("idle_guard", "no_active_human_typing"), "no active human typing was observed"),
+    ("idle_no_running_turn", ("idle_guard", "no_running_turn"), "no running Codex turn was observed"),
+    ("idle_checked_before_prompt", ("idle_guard", "checked_before_prompt"), "idle check ran before any visible prompt"),
+    ("visible_to_user", ("turn_visibility", "visible_to_user"), "the target turn remains visible to the user"),
+    ("user_can_interrupt", ("interruptibility", "user_can_interrupt"), "the user can interrupt the turn"),
+    ("manual_takeover_available", ("interruptibility", "manual_takeover_available"), "manual takeover remains available"),
+)
+
+
+RUNTIME_IDLE_REQUIRED_FALSE_CHECKS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("no_raw_transcript_read", ("boundary", "reads_raw_transcripts"), "raw transcripts were not read"),
+    ("no_session_files_read", ("boundary", "reads_session_files"), "session files were not read"),
+    ("no_stdout_stderr_read", ("boundary", "reads_stdout_stderr"), "stdout/stderr streams were not read"),
+    ("no_credentials_read", ("boundary", "reads_credentials"), "credentials were not read"),
+    ("no_hidden_session_mutation", ("boundary", "mutates_hidden_session_state"), "hidden session state was not mutated"),
+)
+
+
+def build_codex_cli_runtime_idle_detector(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    idle_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate public-safe runtime idle evidence before a visible later turn.
+
+    This is a fixture-backed contract, not a real Codex session inspector. It
+    lets a local driver prove the two product-critical facts for later visible
+    turns: the user is not typing, and Codex is not already running a turn. The
+    detector intentionally does not read transcripts, session files,
+    stdout/stderr, credentials, or hidden runtime state.
+    """
+
+    resolved_project = str(project.expanduser())
+    resolved_goal_id = goal_id or default_goal_id(project)
+    required_fixture_shape = {
+        "observed_surface": "visible_resume_prompt | remote_control_visible_prompt | same_tui_visible_attach | codex_cli_tui_visible_window",
+        "idle_guard": {
+            "no_active_human_typing": True,
+            "no_running_turn": True,
+            "checked_before_prompt": True,
+        },
+        "turn_visibility": {"visible_to_user": True},
+        "interruptibility": {
+            "user_can_interrupt": True,
+            "manual_takeover_available": True,
+        },
+        "boundary": {
+            "reads_raw_transcripts": False,
+            "reads_session_files": False,
+            "reads_stdout_stderr": False,
+            "reads_credentials": False,
+            "mutates_hidden_session_state": False,
+        },
+    }
+    if idle_payload is None:
+        return {
+            "ok": False,
+            "schema_version": "codex_cli_runtime_idle_detector_v0",
+            "project": resolved_project,
+            "goal_id": resolved_goal_id,
+            "agent_id": agent_id,
+            "cli_bin": cli_bin,
+            "source": "fixture_required",
+            "decision": "runtime_idle_fixture_required",
+            "approved_for_visible_later_turn": False,
+            "recommended_action": "capture a public-safe runtime idle fixture before steering a later visible Codex CLI turn",
+            "required_fixture_shape": required_fixture_shape,
+            "checks": [],
+            "failures": ["missing_runtime_idle_fixture"],
+            "boundary": {
+                "fixture_only": True,
+                "runs_codex": False,
+                "reads_raw_transcripts": False,
+                "reads_session_files": False,
+                "reads_stdout_stderr": False,
+                "reads_credentials": False,
+                "mutates_codex_session": False,
+                "spends_goal_harness_quota": False,
+            },
+        }
+
+    checks: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for key, path, description in RUNTIME_IDLE_REQUIRED_TRUE_CHECKS:
+        passed = _nested_bool(idle_payload, path)
+        checks.append({"key": key, "required": True, "passed": passed, "description": description})
+        if not passed:
+            failures.append(key)
+    for key, path, description in RUNTIME_IDLE_REQUIRED_FALSE_CHECKS:
+        passed = _nested_false(idle_payload, path)
+        checks.append({"key": key, "required": False, "passed": passed, "description": description})
+        if not passed:
+            failures.append(key)
+
+    observed_surface = str(idle_payload.get("observed_surface") or "unknown")
+    supported_surface = observed_surface in {
+        "visible_resume_prompt",
+        "remote_control_visible_prompt",
+        "same_tui_visible_attach",
+        "codex_cli_tui_visible_window",
+    }
+    checks.append(
+        {
+            "key": "supported_observed_surface",
+            "required": sorted(
+                [
+                    "codex_cli_tui_visible_window",
+                    "remote_control_visible_prompt",
+                    "same_tui_visible_attach",
+                    "visible_resume_prompt",
+                ]
+            ),
+            "actual": observed_surface,
+            "passed": supported_surface,
+            "description": "idle evidence was captured from a visible Codex CLI surface",
+        }
+    )
+    if not supported_surface:
+        failures.append("unsupported_observed_surface")
+
+    approved = not failures
+    if approved:
+        decision = "runtime_idle_detector_passed"
+        recommended_action = "allow a later visible Codex CLI turn only after a fresh quota guard"
+    else:
+        decision = "runtime_idle_detector_incomplete"
+        recommended_action = "keep the TUI bootstrap path visible and do not steer a later turn yet"
+
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_runtime_idle_detector_v0",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "source": "idle_fixture",
+        "observed_surface": observed_surface,
+        "decision": decision,
+        "approved_for_visible_later_turn": approved,
+        "recommended_action": recommended_action,
+        "checks": checks,
+        "failures": failures,
+        "boundary": {
+            "fixture_only": True,
+            "runs_codex": False,
+            "reads_raw_transcripts": False,
+            "reads_session_files": False,
+            "reads_stdout_stderr": False,
+            "reads_credentials": False,
+            "mutates_codex_session": False,
+            "spends_goal_harness_quota": False,
+        },
+    }
 
 
 def build_codex_cli_visible_session_proof(
@@ -1330,6 +1496,7 @@ def build_codex_cli_visible_local_driver_pilot(
     codex_bin: str,
     probe_payload: dict[str, Any],
     proof_payload: dict[str, Any] | None = None,
+    idle_payload: dict[str, Any] | None = None,
     allow_headless_fallback: bool = False,
 ) -> dict[str, Any]:
     """Prototype the visible local driver loop without executing Codex.
@@ -1373,10 +1540,27 @@ def build_codex_cli_visible_local_driver_pilot(
         else {}
     )
     proof_approved = bool(proof.get("approved") is True)
+    idle_detector = build_codex_cli_runtime_idle_detector(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        idle_payload=idle_payload,
+    )
+    idle_approved = bool(idle_detector.get("approved_for_visible_later_turn") is True)
+    idle_detector_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-runtime-idle-detector "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}"
+        f"{' --agent-id ' + _shell_arg(agent_id) if agent_id else ''} "
+        "--idle-fixture <public-runtime-idle.json>"
+    )
 
-    if proof_approved and scheduler_action == "external_visible_command_candidate":
+    if proof_approved and scheduler_action == "external_visible_command_candidate" and idle_approved:
         loop_decision = "visible_candidate_ready_for_guarded_execution"
         next_driver_action = "run_scheduler_exec_candidate_after_fresh_guard_and_prefix"
+    elif proof_approved and scheduler_action == "external_visible_command_candidate":
+        loop_decision = "runtime_idle_detector_required"
+        next_driver_action = "capture_public_safe_runtime_idle_fixture"
     elif scheduler_action == "write_precise_blocker":
         loop_decision = "visible_loop_blocker_writeback_ready"
         next_driver_action = "write_precise_blocker_after_fresh_guard"
@@ -1435,6 +1619,13 @@ def build_codex_cli_visible_local_driver_pilot(
             "decision": proof.get("decision"),
             "failures": proof.get("failures") or [],
         },
+        "runtime_idle_detector": {
+            "supplied": idle_payload is not None,
+            "approved": idle_approved,
+            "decision": idle_detector.get("decision"),
+            "failures": idle_detector.get("failures") or [],
+            "command": idle_detector_command,
+        },
         "idle_guard_contract": {
             "required_before_visible_prompt": True,
             "fixture_keys": [
@@ -1446,6 +1637,8 @@ def build_codex_cli_visible_local_driver_pilot(
                 "interruptibility.manual_takeover_available",
             ],
             "current_pilot_implements_runtime_idle_detection": False,
+            "fixture_backed_runtime_idle_detector": True,
+            "runtime_sensor_implemented": False,
             "public_safe_fixture_supported": True,
         },
         "visible_loop_steps": visible_loop_steps,
@@ -1457,6 +1650,7 @@ def build_codex_cli_visible_local_driver_pilot(
             "scheduler_tick": scheduler_commands.get("scheduler_tick"),
             "candidate_command": scheduler_commands.get("candidate_command"),
             "blocker_writeback": scheduler_commands.get("blocker_writeback"),
+            "runtime_idle_detector": idle_detector_command,
         },
         "execution_policy": {
             "tui_bootstrap_primary": True,
@@ -1482,7 +1676,14 @@ def build_codex_cli_visible_local_driver_pilot(
             "candidate_execution_requires_guard_and_prefix": True,
             "blocker_writeback_requires_guard_checked": True,
         },
-        "warnings": list(one_message.get("warnings") or []),
+        "warnings": [
+            *list(one_message.get("warnings") or []),
+            *(
+                ["Runtime idle detector must pass before a later visible Codex CLI turn can run."]
+                if proof_approved and not idle_approved
+                else []
+            ),
+        ],
     }
 
 
@@ -1873,6 +2074,11 @@ def render_codex_cli_visible_local_driver_pilot_markdown(payload: dict[str, Any]
     boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
     commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
     proof = payload.get("visible_session_proof") if isinstance(payload.get("visible_session_proof"), dict) else {}
+    runtime_idle = (
+        payload.get("runtime_idle_detector")
+        if isinstance(payload.get("runtime_idle_detector"), dict)
+        else {}
+    )
     idle_guard = payload.get("idle_guard_contract") if isinstance(payload.get("idle_guard_contract"), dict) else {}
     scheduler = payload.get("scheduler_executor") if isinstance(payload.get("scheduler_executor"), dict) else {}
     policy = payload.get("execution_policy") if isinstance(payload.get("execution_policy"), dict) else {}
@@ -1903,10 +2109,19 @@ def render_codex_cli_visible_local_driver_pilot_markdown(payload: dict[str, Any]
 - decision: `{proof.get("decision")}`
 - failures: `{proof.get("failures")}`
 
+## Runtime Idle Detector
+
+- supplied: `{runtime_idle.get("supplied")}`
+- approved: `{runtime_idle.get("approved")}`
+- decision: `{runtime_idle.get("decision")}`
+- failures: `{runtime_idle.get("failures")}`
+
 ## Idle Guard Contract
 
 - required_before_visible_prompt: `{idle_guard.get("required_before_visible_prompt")}`
 - current_pilot_implements_runtime_idle_detection: `{idle_guard.get("current_pilot_implements_runtime_idle_detection")}`
+- fixture_backed_runtime_idle_detector: `{idle_guard.get("fixture_backed_runtime_idle_detector")}`
+- runtime_sensor_implemented: `{idle_guard.get("runtime_sensor_implemented")}`
 - public_safe_fixture_supported: `{idle_guard.get("public_safe_fixture_supported")}`
 
 {fixture_key_lines}
@@ -1922,6 +2137,7 @@ def render_codex_cli_visible_local_driver_pilot_markdown(payload: dict[str, Any]
 {commands.get("scheduler_exec_dry_run")}
 {commands.get("scheduler_exec_candidate_template")}
 {commands.get("scheduler_exec_blocker_template")}
+{commands.get("runtime_idle_detector")}
 ```
 
 ## Execution Policy
@@ -1951,6 +2167,56 @@ def render_codex_cli_visible_local_driver_pilot_markdown(payload: dict[str, Any]
 ## Warnings
 
 {warning_lines}
+"""
+
+
+def render_codex_cli_runtime_idle_detector_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
+    failures = payload.get("failures") if isinstance(payload.get("failures"), list) else []
+    required_shape = payload.get("required_fixture_shape")
+    check_lines = "\n".join(
+        f"- [{'x' if check.get('passed') else ' '}] {check.get('key')}: {check.get('description')}"
+        for check in checks
+        if isinstance(check, dict)
+    )
+    if not check_lines:
+        check_lines = "- no runtime idle fixture supplied"
+    failure_lines = "\n".join(f"- {failure}" for failure in failures) if failures else "- none"
+    required_shape_block = ""
+    if isinstance(required_shape, dict):
+        required_shape_block = f"""
+## Required Fixture Shape
+
+```json
+{json.dumps(required_shape, indent=2, ensure_ascii=False)}
+```
+"""
+    return f"""# Codex CLI Runtime Idle Detector
+
+- decision: `{payload.get("decision")}`
+- approved_for_visible_later_turn: `{payload.get("approved_for_visible_later_turn")}`
+- observed_surface: `{payload.get("observed_surface")}`
+- recommended_action: {payload.get("recommended_action")}
+
+## Checks
+
+{check_lines}
+
+## Failures
+
+{failure_lines}
+
+## Boundary
+
+- fixture_only: `{boundary.get("fixture_only")}`
+- runs_codex: `{boundary.get("runs_codex")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- reads_stdout_stderr: `{boundary.get("reads_stdout_stderr")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
+{required_shape_block}
 """
 
 
