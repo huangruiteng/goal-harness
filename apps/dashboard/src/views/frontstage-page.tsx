@@ -1027,12 +1027,19 @@ function FrontstageRoute({
 
   return (
     <main
-      className="min-h-screen bg-[#f7f7f4] px-4 py-4 text-slate-950 sm:px-5"
+      className={cn(
+        "min-h-screen bg-[#f7f7f4] px-4 py-4 text-slate-950 sm:px-5",
+        isOpsMode ? "frontstage-ops-workspace" : "frontstage-showcase-workspace",
+      )}
+      data-frontstage-surface={isOpsMode ? "ops-control-plane" : "showcase-homepage"}
       data-mode={projection.mode}
       data-schema={projection.schema_version}
       data-testid="goal-channel-frontstage-route"
     >
-      <div className="mx-auto grid max-w-[1500px] gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+      <div
+        className="frontstage-workspace-shell mx-auto grid max-w-[1500px] gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]"
+        data-testid={isOpsMode ? "frontstage-ops-workspace-shell" : "frontstage-showcase-workspace-shell"}
+      >
         <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start">
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-950 text-white">
@@ -1137,7 +1144,7 @@ function FrontstageRoute({
           </div>
         </aside>
 
-        <section className="space-y-4">
+        <section className={cn("space-y-4", isOpsMode ? "frontstage-ops-main-pane" : "frontstage-showcase-main-pane")}>
           <div className="rounded-lg border border-slate-200 bg-white px-5 py-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
@@ -1226,10 +1233,10 @@ function FrontstageRoute({
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <div
-                  className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
-                  data-testid="frontstage-todo-discovery"
+                  className="frontstage-ops-command-strip rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
+                  data-testid="frontstage-ops-command-strip"
                 >
-                  <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_180px_auto]">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_180px_auto]" data-testid="frontstage-todo-discovery">
                     <label className="block">
                       <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">Search todo projection</span>
                       <span className="relative mt-1 block">

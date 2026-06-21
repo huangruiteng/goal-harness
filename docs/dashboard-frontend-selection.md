@@ -187,6 +187,9 @@ agent-board density belongs; the existing Python/HTML renderer should stay a
 no-build diagnostic fallback. The next slices should be quality work: visual
 acceptance, richer public-safe fixtures, and operator onboarding details rather
 than another base renderer.
+The durable interaction baseline is tracked in
+`docs/product/frontstage-dashboard-interaction-baseline.md`, including the
+showcase/homepage versus ops/control-plane split.
 
 ## Sources Checked
 

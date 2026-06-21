@@ -39,6 +39,10 @@ runtime contract, benchmark route, or launch draft.
   the compact release note and smoke contract that prove the packaged installer,
   fresh-project bootstrap message, bootstrap bundle, and proof fixtures stay
   aligned before no-clone install is advertised as the default user path.
+- [Frontstage dashboard interaction baseline](frontstage-dashboard-interaction-baseline.md):
+  the two-surface frontend rule for keeping public showcase/homepage work fancy
+  and case-driven while the real ops control-plane route stays dense, calm,
+  read-only, and reviewable.
 - [Codex CLI automation driver audit](codex-cli-automation-driver.md): the
   current Codex CLI scheduler/session surface audit, with a conservative local
   driver planner that keeps TUI bootstrap primary, composes quota/idle/fallback

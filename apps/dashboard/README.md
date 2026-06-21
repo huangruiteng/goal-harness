@@ -37,6 +37,10 @@ decision, quota, user todo, agent todo, active-claim, open-gate, artifact,
 timeline, and truth contract lanes. Treat it as the product-path replacement for expanding the
 no-dependency static HTML renderer; the Python renderer remains the fallback
 demo/diagnostic surface.
+The product interaction baseline lives in
+`docs/product/frontstage-dashboard-interaction-baseline.md`: showcase mode is
+the public case-driven homepage surface, while `mode=ops` is the dense,
+read-only control-plane workspace.
 
 The frontstage first screen is meant to teach the control-plane model before a
 developer reads raw status JSON. The top operations strip answers whether the

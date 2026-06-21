@@ -55,6 +55,8 @@ includes(dataSource, "raw_or_private_material_omitted", "source warning fixture"
 includes(statusSource, "goal_channel_projection: goalChannelProjectionSchema", "status projection parser");
 
 includes(frontstageSource, 'data-testid="goal-channel-frontstage-route"', "route test id");
+includes(frontstageSource, 'data-frontstage-surface={isOpsMode ? "ops-control-plane" : "showcase-homepage"}', "frontstage surface split marker");
+includes(frontstageSource, 'data-testid={isOpsMode ? "frontstage-ops-workspace-shell" : "frontstage-showcase-workspace-shell"}', "frontstage workspace shell marker");
 includes(frontstageSource, 'data-testid="frontstage-live-source-panel"', "live source panel");
 includes(frontstageSource, 'data-testid="frontstage-public-boundary-note"', "public boundary note");
 includes(frontstageSource, "Showcase mode ignores statusUrl", "public mode statusUrl guard copy");
@@ -69,6 +71,7 @@ includes(frontstageSource, "Ops statusUrl accepts only relative or loopback sour
 includes(frontstageSource, 'data-testid="frontstage-user-todos"', "user todo lane");
 includes(frontstageSource, 'data-testid="frontstage-agent-todos"', "agent todo lane");
 includes(frontstageSource, 'data-testid="frontstage-todo-discovery"', "todo discovery controls");
+includes(frontstageSource, 'data-testid="frontstage-ops-command-strip"', "ops command strip");
 includes(frontstageSource, 'data-testid="frontstage-todo-search"', "todo search control");
 includes(frontstageSource, 'data-testid="frontstage-todo-lane-filter"', "todo lane filter control");
 includes(frontstageSource, 'data-testid="frontstage-todo-result-count"', "todo filter result count");
