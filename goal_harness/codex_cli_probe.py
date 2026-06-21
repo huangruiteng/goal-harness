@@ -1644,7 +1644,15 @@ def build_codex_cli_one_message_loop_pilot(
         "start_surface": "codex_cli_tui_one_message",
         "first_turn": {
             "user_action": "paste_bootstrap_message_into_codex_cli_tui",
+            "autostarts_goal_harness_loop": True,
             "preserve_tui": True,
+            "stop_only_for": [
+                "concrete_user_gate",
+                "workspace_guard",
+                "missing_capability",
+                "missing_installation_primitive",
+                "unsafe_boundary",
+            ],
             "message": bootstrap.get("message"),
             "snapshot_required": [
                 "current goal id",
@@ -1653,6 +1661,17 @@ def build_codex_cli_one_message_loop_pilot(
                 "top agent todo",
                 "next safe action",
             ],
+        },
+        "later_turn_contract": {
+            "preserve_visible_tui": True,
+            "visible_steering_requires": [
+                "public_safe_visible_session_proof",
+                "runtime_idle_evidence",
+                "fresh_quota_guard",
+                "guard_checked",
+                "explicit_execution_bounds",
+            ],
+            "default_without_proof": "write_blocker_or_keep_tui_bootstrap_primary",
         },
         "automation_bridge": {
             "command": "codex-cli-local-scheduler-exec",

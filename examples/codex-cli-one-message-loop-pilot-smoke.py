@@ -145,8 +145,14 @@ def main() -> int:
     assert_pilot_boundary(no_proof)
     assert no_proof["start_surface"] == "codex_cli_tui_one_message", no_proof
     assert no_proof["pilot_decision"] == "first_message_then_visible_blocker_writeback", no_proof
+    assert no_proof["first_turn"]["autostarts_goal_harness_loop"] is True, no_proof
+    assert no_proof["first_turn"]["preserve_tui"] is True, no_proof
+    assert "workspace_guard" in no_proof["first_turn"]["stop_only_for"], no_proof
     assert "Start the Goal Harness loop" in no_proof["first_turn"]["message"], no_proof
+    assert "begin the Goal Harness loop automatically" in no_proof["first_turn"]["message"], no_proof
     assert "same Codex CLI TUI" in no_proof["first_turn"]["message"], no_proof
+    assert "runtime_idle_evidence" in no_proof["later_turn_contract"]["visible_steering_requires"], no_proof
+    assert no_proof["later_turn_contract"]["default_without_proof"] == "write_blocker_or_keep_tui_bootstrap_primary", no_proof
     assert no_proof["automation_bridge"]["command"] == "codex-cli-local-scheduler-exec", no_proof
     assert no_proof["automation_bridge"]["default_executes"] is False, no_proof
     assert no_proof["automation_bridge"]["scheduler_action"] == "write_precise_blocker", no_proof
