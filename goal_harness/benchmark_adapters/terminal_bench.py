@@ -351,6 +351,7 @@ TERMINAL_BENCH_WORKER_BENCHMARK_RUN_FILE = "goal-harness-worker-benchmark-run.js
 TERMINAL_BENCH_PROMPT_DRIVEN_TRACE_FILE = (
     "goal_harness_prompt_driven_trace.public.json"
 )
+TERMINAL_BENCH_CONTROLLER_TRACE_FILE = "goal_harness_controller_trace.public.json"
 TERMINAL_BENCH_APP_SERVER_GOAL_TURN_COMPACT_FILE = (
     "app_server_goal_turn.compact.json"
 )
@@ -4096,6 +4097,7 @@ def _terminal_bench_prompt_driven_goal_harness_observation(
         else job_path.parent
     )
     trace_paths: list[Path] = []
+    controller_paths: list[Path] = []
     compact_paths: list[Path] = []
     seen_paths: set[Path] = set()
     for path in sorted(job_path.rglob(TERMINAL_BENCH_PROMPT_DRIVEN_TRACE_FILE)):
@@ -4106,6 +4108,15 @@ def _terminal_bench_prompt_driven_goal_harness_observation(
     if direct_trace.is_file() and direct_trace not in seen_paths:
         trace_paths.append(direct_trace)
         seen_paths.add(direct_trace)
+    seen_paths.clear()
+    for path in sorted(job_path.rglob(TERMINAL_BENCH_CONTROLLER_TRACE_FILE)):
+        if path.is_file() and path not in seen_paths:
+            controller_paths.append(path)
+            seen_paths.add(path)
+    direct_controller = run_root / TERMINAL_BENCH_CONTROLLER_TRACE_FILE
+    if direct_controller.is_file() and direct_controller not in seen_paths:
+        controller_paths.append(direct_controller)
+        seen_paths.add(direct_controller)
     seen_paths.clear()
     for path in sorted(job_path.rglob(TERMINAL_BENCH_APP_SERVER_GOAL_TURN_COMPACT_FILE)):
         if path.is_file() and path not in seen_paths:
@@ -4124,6 +4135,76 @@ def _terminal_bench_prompt_driven_goal_harness_observation(
     first_blocker = "none"
     treatment_claim_blocker = "none"
     strict_claim_allowed = False
+    controller_trace_observed = False
+    controller_trace_public_safe = False
+    controller_max_round_observed = -1
+    controller_max_rounds_budget = 0
+    controller_initial_prompt_count = 0
+    controller_followup_prompt_count = 0
+    controller_action_decisions = 0
+    controller_completion_marker_observed_count = 0
+    controller_round_timeout_sec: float | None = None
+    controller_last_decision = "none"
+    controller_turn_completed_observed = False
+
+    def observe_controller_trace(payload: Any) -> None:
+        nonlocal controller_trace_observed
+        nonlocal controller_trace_public_safe
+        nonlocal controller_max_round_observed
+        nonlocal controller_max_rounds_budget
+        nonlocal controller_initial_prompt_count
+        nonlocal controller_followup_prompt_count
+        nonlocal controller_action_decisions
+        nonlocal controller_completion_marker_observed_count
+        nonlocal controller_round_timeout_sec
+        nonlocal controller_last_decision
+        if not isinstance(payload, dict):
+            return
+        controller_trace_observed = True
+        publicness = str(payload.get("trace_publicness") or "")
+        controller_trace_public_safe = controller_trace_public_safe or (
+            "public" in publicness
+            and payload.get("raw_task_text_recorded") is not True
+            and payload.get("raw_verifier_output_recorded") is not True
+            and payload.get("raw_agent_trajectory_recorded") is not True
+        )
+        for field, current in (
+            ("max_round_observed", controller_max_round_observed),
+            ("max_rounds_budget", controller_max_rounds_budget),
+            ("initial_prompt_count", controller_initial_prompt_count),
+            ("followup_prompt_count", controller_followup_prompt_count),
+            ("controller_action_decisions", controller_action_decisions),
+            (
+                "completion_marker_observed_count",
+                controller_completion_marker_observed_count,
+            ),
+        ):
+            raw = payload.get(field)
+            if not isinstance(raw, int) or isinstance(raw, bool):
+                continue
+            value = max(current, raw)
+            if field == "max_round_observed":
+                controller_max_round_observed = value
+            elif field == "max_rounds_budget":
+                controller_max_rounds_budget = value
+            elif field == "initial_prompt_count":
+                controller_initial_prompt_count = value
+            elif field == "followup_prompt_count":
+                controller_followup_prompt_count = value
+            elif field == "controller_action_decisions":
+                controller_action_decisions = value
+            elif field == "completion_marker_observed_count":
+                controller_completion_marker_observed_count = value
+        timeout_raw = payload.get("round_timeout_sec")
+        if isinstance(timeout_raw, (int, float)) and not isinstance(timeout_raw, bool):
+            controller_round_timeout_sec = max(
+                float(controller_round_timeout_sec or 0.0),
+                float(timeout_raw),
+            )
+        decision = _public_safe_benchmark_label(payload.get("last_decision"))
+        if decision and decision != "none":
+            controller_last_decision = decision
+
     for path in trace_paths:
         payload = _load_json_object(path)
         counts = _compact_numeric_int_map(payload.get("event_kind_counts"))
@@ -4135,6 +4216,8 @@ def _terminal_bench_prompt_driven_goal_harness_observation(
         lifecycle_observed = lifecycle_observed or payload.get(
             "lifecycle_observed"
         ) is True
+    for path in controller_paths:
+        observe_controller_trace(_load_json_object(path))
     for path in compact_paths:
         payload = _load_json_object(path)
         counts = _compact_numeric_int_map(
@@ -4165,6 +4248,14 @@ def _terminal_bench_prompt_driven_goal_harness_observation(
         strict_claim_allowed = strict_claim_allowed or payload.get(
             "strict_goal_harness_treatment_claim_allowed"
         ) is True
+        observe_controller_trace(payload.get("goal_harness_controller_trace"))
+        controller_trace_observed = controller_trace_observed or payload.get(
+            "goal_harness_controller_trace_present"
+        ) is True
+        controller_turn_completed_observed = (
+            controller_turn_completed_observed
+            or payload.get("turn_completed_observed") is True
+        )
 
     event_counts = trace_event_counts if trace_event_counts else compact_event_counts
     command_count = max(
@@ -4199,6 +4290,19 @@ def _terminal_bench_prompt_driven_goal_harness_observation(
         "first_blocker": first_blocker,
         "strict_goal_harness_treatment_claim_allowed": strict_claim_allowed,
         "goal_harness_treatment_claim_blocker": treatment_claim_blocker,
+        "controller_trace_observed": controller_trace_observed,
+        "controller_trace_public_safe": controller_trace_public_safe,
+        "controller_max_round_observed": controller_max_round_observed,
+        "controller_max_rounds_budget": controller_max_rounds_budget,
+        "controller_initial_prompt_count": controller_initial_prompt_count,
+        "controller_followup_prompt_count": controller_followup_prompt_count,
+        "controller_action_decisions": controller_action_decisions,
+        "controller_completion_marker_observed_count": (
+            controller_completion_marker_observed_count
+        ),
+        "controller_round_timeout_sec": controller_round_timeout_sec,
+        "controller_last_decision": controller_last_decision,
+        "controller_turn_completed_observed": controller_turn_completed_observed,
     }
 
 def _total_from_counter_map(value: Any) -> int:
@@ -4819,6 +4923,12 @@ def build_terminal_bench_harbor_result_benchmark_run(
     prompt_driven_lifecycle_observed = bool(
         prompt_driven_goal_harness.get("lifecycle_observed")
     )
+    prompt_driven_controller_trace_observed = bool(
+        prompt_driven_goal_harness.get("controller_trace_observed")
+    )
+    prompt_driven_controller_trace_public_safe = bool(
+        prompt_driven_goal_harness.get("controller_trace_public_safe")
+    )
     if prompt_driven_cli_total:
         prompt_driven_calls = (
             prompt_driven_goal_harness.get("event_counts")
@@ -4885,6 +4995,24 @@ def build_terminal_bench_harbor_result_benchmark_run(
         interaction_counters["prompt_driven_goal_harness_cli_call_total"] = (
             prompt_driven_cli_total
         )
+        if prompt_driven_controller_trace_observed:
+            interaction_counters["controller_trace_present"] = True
+            interaction_counters["controller_max_rounds_budget"] = _non_negative_int(
+                prompt_driven_goal_harness.get("controller_max_rounds_budget")
+            )
+            interaction_counters["controller_followup_prompt_count"] = (
+                _non_negative_int(
+                    prompt_driven_goal_harness.get("controller_followup_prompt_count")
+                )
+            )
+            interaction_counters["controller_initial_prompt_count"] = (
+                _non_negative_int(
+                    prompt_driven_goal_harness.get("controller_initial_prompt_count")
+                )
+            )
+            interaction_counters["controller_action_decisions"] = _non_negative_int(
+                prompt_driven_goal_harness.get("controller_action_decisions")
+            )
     worker_cli_total = 0
     if interaction_counters:
         interaction_counters["worker_counter_trace_trial_count"] = (
@@ -5238,6 +5366,13 @@ def build_terminal_bench_harbor_result_benchmark_run(
         ),
         "pre_worker_agent_setup_failures_classified": True,
         "environment_setup_failures_before_worker_classified": True,
+        "goal_harness_controller_trace_present": (
+            prompt_driven_controller_trace_observed
+        ),
+        "goal_harness_controller_trace_public_safe": (
+            (not prompt_driven_controller_trace_observed)
+            or prompt_driven_controller_trace_public_safe
+        ),
         "verifier_failure_attribution_public_safe": True,
         "verifier_dependency_failures_classified": True,
         "worker_checkpoint_not_expected_before_agent_setup": True,
@@ -5270,8 +5405,10 @@ def build_terminal_bench_harbor_result_benchmark_run(
         "trial:agent/goal-harness-worker-benchmark-run.json",
         "trial:agent/goal-harness-worker-setup-diagnostic.json",
         "trial:agent/goal_harness_prompt_driven_trace.public.json",
+        "trial:agent/goal_harness_controller_trace.public.json",
         "trial:agent/app_server_goal_turn.compact.json",
         "run:goal_harness_prompt_driven_trace.public.json",
+        "run:goal_harness_controller_trace.public.json",
         "run:app_server_goal_turn.compact.json",
         "trial:verifier/reward.txt",
         "trial:artifacts/manifest.json",
@@ -5446,6 +5583,50 @@ def build_terminal_bench_harbor_result_benchmark_run(
         "goal_harness_prompt_driven_compact_file_count": _non_negative_int(
             prompt_driven_goal_harness.get("compact_file_count")
         ),
+        "goal_harness_controller_trace_present": (
+            prompt_driven_controller_trace_observed
+        ),
+        "goal_harness_controller_trace_public_safe": (
+            prompt_driven_controller_trace_public_safe
+        ),
+        "controller_max_round_observed": _non_negative_int(
+            prompt_driven_goal_harness.get("controller_max_round_observed")
+        ),
+        "controller_max_rounds_budget": _non_negative_int(
+            prompt_driven_goal_harness.get("controller_max_rounds_budget")
+        ),
+        "controller_initial_prompt_count": _non_negative_int(
+            prompt_driven_goal_harness.get("controller_initial_prompt_count")
+        ),
+        "controller_followup_prompt_count": _non_negative_int(
+            prompt_driven_goal_harness.get("controller_followup_prompt_count")
+        ),
+        "controller_action_decisions": _non_negative_int(
+            prompt_driven_goal_harness.get("controller_action_decisions")
+        ),
+        "controller_completion_marker_observed_count": _non_negative_int(
+            prompt_driven_goal_harness.get(
+                "controller_completion_marker_observed_count"
+            )
+        ),
+        "controller_round_timeout_sec": (
+            prompt_driven_goal_harness.get("controller_round_timeout_sec")
+            if isinstance(
+                prompt_driven_goal_harness.get("controller_round_timeout_sec"),
+                (int, float),
+            )
+            and not isinstance(
+                prompt_driven_goal_harness.get("controller_round_timeout_sec"),
+                bool,
+            )
+            else None
+        ),
+        "controller_last_decision": (
+            prompt_driven_goal_harness.get("controller_last_decision") or "none"
+        ),
+        "controller_turn_completed_observed": bool(
+            prompt_driven_goal_harness.get("controller_turn_completed_observed")
+        ),
         "strict_goal_harness_treatment_claim_allowed": (
             strict_goal_harness_treatment_claim_allowed
         ),
@@ -5593,6 +5774,39 @@ def build_terminal_bench_harbor_result_benchmark_run(
             ),
             "goal_harness_prompt_driven_case_cli_call_count": (
                 prompt_driven_cli_total
+            ),
+            "goal_harness_controller_trace_present": (
+                prompt_driven_controller_trace_observed
+            ),
+            "goal_harness_controller_trace_public_safe": (
+                prompt_driven_controller_trace_public_safe
+            ),
+            "controller_max_round_observed": _non_negative_int(
+                prompt_driven_goal_harness.get("controller_max_round_observed")
+            ),
+            "controller_max_rounds_budget": _non_negative_int(
+                prompt_driven_goal_harness.get("controller_max_rounds_budget")
+            ),
+            "controller_followup_prompt_count": _non_negative_int(
+                prompt_driven_goal_harness.get("controller_followup_prompt_count")
+            ),
+            "controller_round_timeout_sec": (
+                prompt_driven_goal_harness.get("controller_round_timeout_sec")
+                if isinstance(
+                    prompt_driven_goal_harness.get("controller_round_timeout_sec"),
+                    (int, float),
+                )
+                and not isinstance(
+                    prompt_driven_goal_harness.get("controller_round_timeout_sec"),
+                    bool,
+                )
+                else None
+            ),
+            "controller_last_decision": (
+                prompt_driven_goal_harness.get("controller_last_decision") or "none"
+            ),
+            "controller_turn_completed_observed": bool(
+                prompt_driven_goal_harness.get("controller_turn_completed_observed")
             ),
             "worker_materialization_probe_only": worker_materialization_probe_only,
             "worker_materialization_probe_contract_present": (

@@ -134,6 +134,7 @@ def main() -> int:
         app_server_wait_for_completion="false",
     )
     assert no_wait_agent.app_server_wait_for_completion is False
+    assert no_wait_agent.goal_timeout_sec == 10800.0
 
     print("terminal-bench host Codex Goal agent smoke passed")
     return 0

@@ -1626,6 +1626,7 @@ def _compact_worker_bridge_outcome(value: Any) -> dict[str, Any]:
         "worker_bridge_materialization_blocker",
         "worker_bridge_failure_attribution",
         "prompt_driven_first_blocker",
+        "controller_last_decision",
         "repeat_blocked_by",
         "pre_worker_startup_blocker",
     ):
@@ -1646,6 +1647,9 @@ def _compact_worker_bridge_outcome(value: Any) -> dict[str, Any]:
         "runner_side_writeback_guaranteed",
         "worker_submit_eligible_mismatch_observed",
         "worker_bridge_writeback_loss_observed",
+        "goal_harness_controller_trace_present",
+        "goal_harness_controller_trace_public_safe",
+        "controller_turn_completed_observed",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -1666,9 +1670,15 @@ def _compact_worker_bridge_outcome(value: Any) -> dict[str, Any]:
         "worker_runtime_exception_before_checkpoint_count",
         "verifier_failure_attribution_count",
         "verifier_dependency_failure_count",
+        "controller_max_round_observed",
+        "controller_max_rounds_budget",
+        "controller_followup_prompt_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
+    round_timeout = value.get("controller_round_timeout_sec")
+    if isinstance(round_timeout, (int, float)) and not isinstance(round_timeout, bool):
+        compact["controller_round_timeout_sec"] = round_timeout
     score = value.get("official_score_value")
     if isinstance(score, (int, float)) and not isinstance(score, bool):
         compact["official_score_value"] = score
@@ -1911,6 +1921,9 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         "goal_harness_worker_cli_bridge_trace_observed",
         "goal_harness_prompt_driven_trace_observed",
         "goal_harness_prompt_driven_lifecycle_observed",
+        "goal_harness_controller_trace_present",
+        "goal_harness_controller_trace_public_safe",
+        "controller_turn_completed_observed",
         "assisted_collaboration_claim_allowed",
         "official_score_claim_allowed",
         "bridge_connectivity_claim_allowed",
@@ -1970,11 +1983,26 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         "native_goal_worker_turn_start_count",
         "native_goal_worker_turn_completed_observed_count",
         "native_goal_worker_assistant_message_present_count",
+        "controller_max_round_observed",
+        "controller_max_rounds_budget",
+        "controller_initial_prompt_count",
+        "controller_followup_prompt_count",
+        "controller_action_decisions",
+        "controller_completion_marker_observed_count",
         "max_rounds_budget",
         "round_reward_count",
     ):
         if isinstance(source.get(field), int) and not isinstance(source.get(field), bool):
             compact[field] = source.get(field)
+    for field in ("controller_round_timeout_sec",):
+        if isinstance(source.get(field), (int, float)) and not isinstance(
+            source.get(field), bool
+        ):
+            compact[field] = source.get(field)
+    for field in ("controller_last_decision",):
+        value = public_safe_compact_text(source.get(field), limit=120)
+        if value:
+            compact[field] = value
     for field in ("goal_harness_prompt_driven_event_counts",):
         calls = _compact_numeric_map(source.get(field))
         if calls:

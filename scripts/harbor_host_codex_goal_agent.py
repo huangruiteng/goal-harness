@@ -59,6 +59,8 @@ from goal_harness.benchmark_core.loop_protocol import (
     render_loop_contract_packet_lines,
 )
 
+LONG_RUN_DEFAULT_GOAL_TIMEOUT_SEC = 10800.0
+
 
 try:  # pragma: no cover - exercised on the benchmark host.
     from harbor.agents.base import BaseAgent
@@ -638,7 +640,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
         self,
         logs_dir: Path,
         model_name: str | None = None,
-        goal_timeout_sec: str | int | float = 300,
+        goal_timeout_sec: str | int | float = LONG_RUN_DEFAULT_GOAL_TIMEOUT_SEC,
         codex_bin: str = "codex",
         task_workdir: str = "/app",
         goal_surface: str = "tui",
@@ -704,13 +706,9 @@ class HarborHostCodexGoalAgent(BaseAgent):
                 int(goal_harness_prompt_polling_rounds),
             )
         if str(goal_harness_prompt_polling_round_timeout_sec).strip().lower() == "auto":
-            self.goal_harness_prompt_polling_round_timeout_sec = min(
+            self.goal_harness_prompt_polling_round_timeout_sec = max(
+                30.0,
                 self.goal_timeout_sec,
-                900.0,
-                max(
-                    300.0,
-                    self.goal_timeout_sec / max(1, self.goal_harness_prompt_polling_rounds),
-                ),
             )
         else:
             self.goal_harness_prompt_polling_round_timeout_sec = max(

@@ -110,6 +110,21 @@ def write_prompt_driven_fixture(root: Path) -> Path:
         "refresh_state": 1,
         "quota_spend": 1,
     }
+    controller_trace = {
+        "schema_version": "harbor_host_prompt_polling_controller_trace_v0",
+        "trace_publicness": "public_counts_only_no_task_text_no_verifier_output",
+        "raw_task_text_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "raw_agent_trajectory_recorded": False,
+        "max_rounds_budget": 5,
+        "max_round_observed": 1,
+        "initial_prompt_count": 1,
+        "followup_prompt_count": 0,
+        "controller_action_decisions": 1,
+        "completion_marker_observed_count": 0,
+        "round_timeout_sec": 900.0,
+        "last_decision": "harbor_prompt_polling_round_timeout_before_completion",
+    }
     work_dir = trial_dir / "agent" / "host-codex-goal-fixture"
     write_json(
         work_dir / "goal_harness_prompt_driven_trace.public.json",
@@ -123,10 +138,17 @@ def write_prompt_driven_fixture(root: Path) -> Path:
         },
     )
     write_json(
+        work_dir / "goal_harness_controller_trace.public.json",
+        controller_trace,
+    )
+    write_json(
         work_dir / "app_server_goal_turn.compact.json",
         {
             "schema_version": "codex_app_server_goal_turn_driver_v0",
             "first_blocker": "harbor_prompt_polling_round_timeout_before_completion",
+            "turn_completed_observed": False,
+            "goal_harness_controller_trace_present": True,
+            "goal_harness_controller_trace": controller_trace,
             "goal_harness_prompt_driven_case_cli_call_count": sum(prompt_counts.values()),
             "goal_harness_prompt_driven_event_counts": prompt_counts,
             "goal_harness_prompt_driven_lifecycle_observed": True,
@@ -143,6 +165,17 @@ def assert_prompt_driven_result(payload: dict) -> None:
     assert payload["goal_harness_worker_cli_bridge_trace_observed"] is True, payload
     assert payload["goal_harness_prompt_driven_lifecycle_observed"] is True, payload
     assert payload["goal_harness_prompt_driven_case_cli_call_count"] == 6, payload
+    assert payload["goal_harness_controller_trace_present"] is True, payload
+    assert payload["goal_harness_controller_trace_public_safe"] is True, payload
+    assert payload["controller_max_rounds_budget"] == 5, payload
+    assert payload["controller_max_round_observed"] == 1, payload
+    assert payload["controller_followup_prompt_count"] == 0, payload
+    assert payload["controller_round_timeout_sec"] == 900.0, payload
+    assert payload["controller_turn_completed_observed"] is False, payload
+    assert (
+        payload["controller_last_decision"]
+        == "harbor_prompt_polling_round_timeout_before_completion"
+    ), payload
     assert payload["worker_goal_harness_cli_call_total"] == 6, payload
     assert (
         payload["first_blocker"]
@@ -155,6 +188,8 @@ def assert_prompt_driven_result(payload: dict) -> None:
     assert validation["worker_benchmark_run_file_present"] is True, validation
     assert validation["worker_benchmark_run_schema_ok"] is True, validation
     assert validation["worker_bridge_materialized_when_required"] is True, validation
+    assert validation["goal_harness_controller_trace_present"] is True, validation
+    assert validation["goal_harness_controller_trace_public_safe"] is True, validation
     overhead = payload["overhead_attribution_counters"]
     assert (
         overhead["attribution_granularity"]
@@ -175,6 +210,14 @@ def main() -> int:
         assert compact is not None
         assert compact["worker_bridge_materialization_status"] == "verified", compact
         assert compact["goal_harness_prompt_driven_lifecycle_observed"] is True, compact
+        assert compact["goal_harness_controller_trace_present"] is True, compact
+        assert compact["controller_max_round_observed"] == 1, compact
+        assert compact["controller_followup_prompt_count"] == 0, compact
+        assert compact["controller_round_timeout_sec"] == 900.0, compact
+        assert (
+            compact["controller_last_decision"]
+            == "harbor_prompt_polling_round_timeout_before_completion"
+        ), compact
         output_path = Path(tmp) / "harbor_job_result.compact.json"
         subprocess.run(
             [
@@ -205,6 +248,16 @@ def main() -> int:
         assert (
             reduced_compact["goal_harness_prompt_driven_case_cli_call_count"] == 6
         ), reduced_compact
+        assert reduced_compact["goal_harness_controller_trace_present"] is True, (
+            reduced_compact
+        )
+        assert reduced_compact["controller_max_round_observed"] == 1, reduced_compact
+        assert reduced_compact["controller_followup_prompt_count"] == 0, (
+            reduced_compact
+        )
+        assert reduced_compact["controller_round_timeout_sec"] == 900.0, (
+            reduced_compact
+        )
     print("terminal-bench harbor prompt-driven reducer smoke passed")
     return 0
 

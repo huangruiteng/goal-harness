@@ -376,6 +376,7 @@ def main() -> int:
             app_server_wait_for_completion="false",
         )
         assert no_wait_agent.app_server_wait_for_completion is False
+        assert no_wait_agent.goal_timeout_sec == 10800.0
 
         treatment_agent = module.HarborHostCodexGoalAgent(
             logs_dir=Path(tmp) / "treatment-logs",
@@ -402,7 +403,7 @@ def main() -> int:
             goal_harness_case_id="find-network-alignments",
         )
         assert polling_agent.goal_harness_prompt_polling_rounds == 5
-        assert polling_agent.goal_harness_prompt_polling_round_timeout_sec == 300.0
+        assert polling_agent.goal_harness_prompt_polling_round_timeout_sec == 10800.0
         assert polling_agent.goal_harness_case_id == "find-network-alignments"
         long_polling_agent = module.HarborHostCodexGoalAgent(
             logs_dir=Path(tmp) / "long-polling-logs",
@@ -413,7 +414,7 @@ def main() -> int:
             goal_harness_experiment_protocol="max5_blind_loop_no_feedback",
             goal_harness_max_rounds=5,
         )
-        assert long_polling_agent.goal_harness_prompt_polling_round_timeout_sec == 900.0
+        assert long_polling_agent.goal_harness_prompt_polling_round_timeout_sec == 18000.0
         explicit_timeout_agent = module.HarborHostCodexGoalAgent(
             logs_dir=Path(tmp) / "explicit-timeout-logs",
             goal_surface="app_server",

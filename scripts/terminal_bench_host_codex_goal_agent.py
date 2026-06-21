@@ -37,6 +37,8 @@ from goal_harness.benchmark_case_state import (
     render_benchmark_case_lifecycle_contract_lines,
 )
 
+LONG_RUN_DEFAULT_GOAL_TIMEOUT_SEC = 10800.0
+
 
 try:  # pragma: no cover - exercised on the benchmark host.
     from terminal_bench.agents.base_agent import AgentResult, BaseAgent
@@ -162,7 +164,7 @@ class HostCodexGoalAgent(BaseAgent):
     def __init__(
         self,
         model_name: str | None = None,
-        goal_timeout_sec: str | int | float = 300,
+        goal_timeout_sec: str | int | float = LONG_RUN_DEFAULT_GOAL_TIMEOUT_SEC,
         work_root: str = "/tmp/goal-harness-terminal-bench",
         network_bootstrap_script: str = "",
         task_workdir: str = "/app",

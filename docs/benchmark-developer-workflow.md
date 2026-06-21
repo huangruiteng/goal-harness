@@ -390,11 +390,19 @@ export PYTHONPATH=<goal-harness-checkout>:<goal-harness-checkout>/scripts:${PYTH
 UV_LINK_MODE=copy uv run --no-default-groups harbor run \
   --env docker \
   --agent-import-path harbor_host_codex_goal_agent:HarborHostCodexGoalAgent \
-  --agent-kwarg goal_timeout_sec=1200 \
+  --agent-kwarg goal_timeout_sec=10800 \
   --agent-kwarg task_workdir=/app \
   --jobs-dir <run-dir>/jobs \
   -p <task-dir>
 ```
+
+Use the same long timeout envelope for base and treatment arms while measuring
+capability ceilings. The host Goal agents default to `10800` seconds; pass an
+explicit shorter value only for a timeout-cost experiment and record that tier
+in the compact result. Goal Harness prompt-polling treatments use the same
+envelope for each observed round by default, so the controller does not cut off
+a still-running Codex Goal turn at the older `900s` official timeout before
+continuation evidence exists.
 
 When wrapping that launch in `tmux`, `launchd`, or a generated `run.sh`, put the
 same `PYTHONPATH` export inside the wrapper script, not only in the interactive
@@ -795,7 +803,7 @@ tb run \
   --no-rebuild \
   --agent-import-path terminal_bench_host_codex_goal_agent:HostCodexGoalAgent \
   --agent-kwarg goal_surface=app_server \
-  --agent-kwarg goal_timeout_sec=1200
+  --agent-kwarg goal_timeout_sec=10800
 ```
 
 This uses Codex native Goal mode on the host through the app-server Goal API
@@ -814,7 +822,7 @@ tb run \
   ... \
   --agent-import-path terminal_bench_host_codex_goal_agent:HostCodexGoalAgent \
   --agent-kwarg goal_surface=app_server \
-  --agent-kwarg goal_timeout_sec=1200 \
+  --agent-kwarg goal_timeout_sec=10800 \
   --agent-kwarg goal_harness_mode=codex_goal_harness \
   --agent-kwarg goal_harness_access_packet_mode=compact \
   --agent-kwarg goal_harness_case_id=<task-id> \
