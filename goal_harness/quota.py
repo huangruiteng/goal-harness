@@ -138,7 +138,8 @@ PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 AUTOMATION_LIVENESS_SCHEMA_VERSION = "automation_liveness_v0"
 CAPABILITY_GATE_SCHEMA_VERSION = "capability_gate_v0"
 SIDE_AGENT_WORKSPACE_GUARD_SCHEMA_VERSION = "side_agent_workspace_guard_v0"
-SIDE_AGENT_CLAIM_SCOPE_SCHEMA_VERSION = "side_agent_claim_scope_v0"
+AGENT_CLAIM_SCOPE_SCHEMA_VERSION = "agent_claim_scope_v0"
+SIDE_AGENT_CLAIM_SCOPE_SCHEMA_VERSION = AGENT_CLAIM_SCOPE_SCHEMA_VERSION
 DEFAULT_AVAILABLE_CAPABILITIES = (
     "shell",
     "filesystem_read",
@@ -1187,12 +1188,12 @@ def _claimed_visibility_items(items: list[dict[str, Any]], *, limit: int) -> lis
     return sorted(selected, key=lambda item: original_index.get(id(item), 999999))[:limit]
 
 
-def _side_agent_claim_scoped_open_items(
+def _agent_claim_scoped_open_items(
     open_items: list[dict[str, Any]],
     *,
     agent_identity: dict[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    if not isinstance(agent_identity, dict) or agent_identity.get("role") != "side-agent":
+    if not isinstance(agent_identity, dict):
         return open_items, None
     agent_id = normalize_todo_claimed_by(agent_identity.get("agent_id"))
     if not agent_id:
@@ -1214,8 +1215,9 @@ def _side_agent_claim_scoped_open_items(
         key=lambda item: (claim_bucket(item), *_todo_projection_sort_key(item)),
     )
     claim_scope = {
-        "schema_version": SIDE_AGENT_CLAIM_SCOPE_SCHEMA_VERSION,
+        "schema_version": AGENT_CLAIM_SCOPE_SCHEMA_VERSION,
         "agent_id": agent_id,
+        "agent_role": str(agent_identity.get("role") or ""),
         "primary_agent": normalize_todo_claimed_by(agent_identity.get("primary_agent")),
         "selection_order": "current_agent_claimed_then_unclaimed_then_other_agent_claimed_low_weight",
         "selectable_open_count": len(selectable_items),
@@ -1394,7 +1396,7 @@ def _summarize_user_todos(
         _todo_summary_source_items(value),
         key=_todo_projection_sort_key,
     )
-    open_items, claim_scope = _side_agent_claim_scoped_open_items(
+    open_items, claim_scope = _agent_claim_scoped_open_items(
         all_open_items,
         agent_identity=agent_identity,
     )
@@ -1472,7 +1474,7 @@ def _summarize_project_asset_todos(
         next_claimed_by = str(value.get("next_claimed_by") or "").strip()
         if all_open_items and next_claimed_by:
             all_open_items[0]["claimed_by"] = next_claimed_by
-    open_items, claim_scope = _side_agent_claim_scoped_open_items(
+    open_items, claim_scope = _agent_claim_scoped_open_items(
         all_open_items,
         agent_identity=agent_identity,
     )

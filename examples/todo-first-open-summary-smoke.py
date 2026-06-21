@@ -525,6 +525,18 @@ def assert_claimed_advancement_lanes_preserve_claimants() -> None:
             ]
         },
     }
+    primary_decision = build_quota_should_run(
+        status_payload,
+        goal_id=GOAL_ID,
+        agent_id="codex-main-control",
+    )
+    primary_summary = primary_decision["agent_todo_summary"]
+    assert primary_summary["first_executable_items"][0]["todo_id"] == "todo_primary_1", primary_summary
+    assert primary_summary["claim_scope"]["agent_role"] == "primary-agent", primary_summary
+    assert primary_summary["claim_scope"]["other_agent_claimed_items"][0]["todo_id"] == "todo_side_tui", primary_summary
+    assert "Primary claimed advancement item 1" in primary_decision["recommended_action"], primary_decision
+    assert "state_action_projection_warning" not in primary_decision, primary_decision
+
     decision = build_quota_should_run(
         status_payload,
         goal_id=GOAL_ID,
