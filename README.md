@@ -185,6 +185,15 @@ gates, writeback, and the next safe action. Headless `codex exec` is an explicit
 fallback, not the default experience. Local driver and visible-session proof
 commands are follow-up automation checks, not first-run requirements.
 
+For contributors validating the full Codex CLI path without running Codex, use:
+
+```bash
+goal-harness codex-cli-one-message-loop-pilot --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+It packages the first visible TUI message and the later scheduler/executor
+bridge into one dry-run packet.
+
 For Codex App, Claude Code, Cursor, or another terminal agent, paste this from
 the project repo:
 
