@@ -38,6 +38,7 @@ LEAK_PATTERNS = {
 DEFAULT_SCAN_SUFFIXES = {".md", ".py", ".toml", ".json", ".yaml", ".yml", ".sh"}
 DEFAULT_SKIP_DIRS = {
     ".git",
+    ".goal-harness",
     ".loopx",
     ".goal-wrapper.local",
     ".local",

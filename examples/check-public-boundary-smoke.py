@@ -64,7 +64,7 @@ def main() -> int:
         project = root / "project"
         project.mkdir()
         (project / "README.md").write_text("public docs stay clean\n", encoding="utf-8")
-        for dirname in [".local", ".loopx", ".goal-wrapper.local", "runtime"]:
+        for dirname in [".local", ".loopx", ".goal-harness", ".goal-wrapper.local", "runtime"]:
             local_dir = project / dirname
             local_dir.mkdir(parents=True)
             (local_dir / "private.md").write_text(PRIVATE_DOC_MARKER, encoding="utf-8")
