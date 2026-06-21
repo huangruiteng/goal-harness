@@ -123,6 +123,11 @@ from .benchmark_ledger import (
     load_benchmark_run_ledger,
     update_benchmark_run_ledger,
 )
+from .benchmark_case_analysis import (
+    build_case_analysis_candidate_report,
+    load_json as load_benchmark_case_analysis_json,
+    render_case_analysis_candidate_report_markdown,
+)
 from .benchmark_core import (
     build_benchmark_candidate_source_boundary,
     build_codex_app_parity_posthoc_check,
@@ -634,6 +639,35 @@ def render_benchmark_run_ledger_upsert_markdown(payload: dict[str, object]) -> s
         f"- compact only: `{read_boundary.get('compact_only')}`",
         f"- raw logs read: `{read_boundary.get('raw_logs_read')}`",
         f"- task text read: `{read_boundary.get('task_text_read')}`",
+    ]
+    if payload.get("error"):
+        lines.append(f"- error: {payload.get('error')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_case_analysis_candidates_markdown(
+    payload: dict[str, object],
+) -> str:
+    if payload.get("ok") and isinstance(payload.get("report"), dict):
+        report = payload["report"]
+        text = render_case_analysis_candidate_report_markdown(report)
+        read_boundary = (
+            payload.get("read_boundary")
+            if isinstance(payload.get("read_boundary"), dict)
+            else {}
+        )
+        return (
+            text
+            + "\n## Read Boundary\n\n"
+            + f"- compact only: `{read_boundary.get('compact_only')}`\n"
+            + f"- raw logs read: `{read_boundary.get('raw_logs_read')}`\n"
+            + f"- task text read: `{read_boundary.get('task_text_read')}`\n"
+            + f"- trajectory read: `{read_boundary.get('trajectory_read')}`\n"
+        )
+    lines = [
+        "# Benchmark Case-Analysis Candidates",
+        "",
+        f"- ok: `{payload.get('ok')}`",
     ]
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
@@ -3332,6 +3366,27 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=20,
         help="Maximum missing rows to include in output.",
+    )
+    benchmark_case_analysis_candidates_parser = benchmark_sub.add_parser(
+        "case-analysis-candidates",
+        help=(
+            "Find public-safe benchmark case-analysis candidates from the compact "
+            "benchmark run ledger and existing case-analysis keys."
+        ),
+    )
+    benchmark_case_analysis_candidates_parser.add_argument(
+        "--run-ledger-path",
+        default=str(BENCHMARK_RUN_LEDGER_DEFAULT_PATH),
+        help="Path to benchmark_run_ledger_v0 JSON.",
+    )
+    benchmark_case_analysis_candidates_parser.add_argument(
+        "--case-analysis-path",
+        default=str(
+            BENCHMARK_RUN_LEDGER_DEFAULT_PATH.with_name(
+                "benchmark-case-analysis.json"
+            )
+        ),
+        help="Path to benchmark_case_analysis_v0 JSON.",
     )
 
     agentissue_runner_flow_parser = benchmark_sub.add_parser(
@@ -8757,6 +8812,53 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 args.format,
                 render_benchmark_run_ledger_check_markdown,
+            )
+            return 0 if payload.get("ok") else 1
+        if args.benchmark_command == "case-analysis-candidates":
+            try:
+                ledger = load_benchmark_case_analysis_json(args.run_ledger_path)
+                analysis = load_benchmark_case_analysis_json(
+                    args.case_analysis_path
+                )
+                report = build_case_analysis_candidate_report(
+                    ledger=ledger,
+                    analysis=analysis,
+                )
+                payload = {
+                    "ok": True,
+                    "report": report,
+                    "run_ledger_path": str(args.run_ledger_path),
+                    "case_analysis_path": str(args.case_analysis_path),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                }
+            except Exception as exc:
+                payload = {
+                    "ok": False,
+                    "run_ledger_path": str(args.run_ledger_path),
+                    "case_analysis_path": str(args.case_analysis_path),
+                    "read_boundary": {
+                        "compact_only": True,
+                        "raw_logs_read": False,
+                        "task_text_read": False,
+                        "trajectory_read": False,
+                        "docker_invoked": False,
+                        "model_api_invoked": False,
+                        "upload_invoked": False,
+                    },
+                    "error": str(exc),
+                }
+            print_payload(
+                payload,
+                args.format,
+                render_benchmark_case_analysis_candidates_markdown,
             )
             return 0 if payload.get("ok") else 1
         if args.benchmark_command == "run-ledger-upsert":

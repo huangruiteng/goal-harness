@@ -151,6 +151,54 @@ def test_candidate_cli_on_fixture() -> None:
         assert_public_safe(markdown)
 
 
+def test_goal_harness_benchmark_cli_on_fixture() -> None:
+    with tempfile.TemporaryDirectory(prefix="case-analysis-candidates-gh-cli-") as tmp:
+        root = Path(tmp)
+        ledger_path = root / "ledger.json"
+        analysis_path = root / "analysis.json"
+        ledger_path.write_text(json.dumps(fixture_ledger()), encoding="utf-8")
+        analysis_path.write_text(json.dumps(fixture_analysis()), encoding="utf-8")
+        output = subprocess.check_output(
+            [
+                str(REPO_ROOT / "scripts" / "goal-harness"),
+                "--format",
+                "json",
+                "benchmark",
+                "case-analysis-candidates",
+                "--run-ledger-path",
+                str(ledger_path),
+                "--case-analysis-path",
+                str(analysis_path),
+            ],
+            text=True,
+        )
+        payload = json.loads(output)
+        assert payload["ok"] is True, payload
+        assert payload["report"]["candidate_count"] == 2, payload
+        assert payload["read_boundary"]["compact_only"] is True, payload
+        assert payload["read_boundary"]["raw_logs_read"] is False, payload
+        assert payload["read_boundary"]["task_text_read"] is False, payload
+        assert payload["read_boundary"]["trajectory_read"] is False, payload
+        assert_public_safe(output)
+        markdown = subprocess.check_output(
+            [
+                str(REPO_ROOT / "scripts" / "goal-harness"),
+                "benchmark",
+                "case-analysis-candidates",
+                "--run-ledger-path",
+                str(ledger_path),
+                "--case-analysis-path",
+                str(analysis_path),
+            ],
+            text=True,
+        )
+        assert "# Benchmark Case-Analysis Candidates" in markdown, markdown
+        assert "Read Boundary" in markdown, markdown
+        assert "new-no-uplift" in markdown, markdown
+        assert "existing-case" not in markdown, markdown
+        assert_public_safe(markdown)
+
+
 def test_default_assets_have_public_safe_candidates() -> None:
     output = subprocess.check_output(
         [
@@ -173,6 +221,7 @@ def test_default_assets_have_public_safe_candidates() -> None:
 def main() -> None:
     test_candidate_report_from_fixture()
     test_candidate_cli_on_fixture()
+    test_goal_harness_benchmark_cli_on_fixture()
     test_default_assets_have_public_safe_candidates()
     print("benchmark-case-analysis-candidates-smoke ok")
 
