@@ -75,7 +75,32 @@ VISIBLE_PROOF_FIXTURE = {
 }
 
 
-def build_pilot(proof_payload: dict[str, object] | None = None) -> dict[str, object]:
+RUNTIME_IDLE_FIXTURE = {
+    "observed_surface": "visible_resume_prompt",
+    "idle_guard": {
+        "no_active_human_typing": True,
+        "no_running_turn": True,
+        "checked_before_prompt": True,
+    },
+    "turn_visibility": {"visible_to_user": True},
+    "interruptibility": {
+        "user_can_interrupt": True,
+        "manual_takeover_available": True,
+    },
+    "boundary": {
+        "reads_raw_transcripts": False,
+        "reads_session_files": False,
+        "reads_stdout_stderr": False,
+        "reads_credentials": False,
+        "mutates_hidden_session_state": False,
+    },
+}
+
+
+def build_pilot(
+    proof_payload: dict[str, object] | None = None,
+    idle_payload: dict[str, object] | None = None,
+) -> dict[str, object]:
     return build_codex_cli_visible_local_driver_pilot(
         project=PROJECT,
         goal_id=GOAL_ID,
@@ -84,6 +109,7 @@ def build_pilot(proof_payload: dict[str, object] | None = None) -> dict[str, obj
         codex_bin="codex",
         probe_payload=classify_codex_cli_session_surface(command_outputs=REMOTE_RESUME_HELP_FIXTURE),
         proof_payload=proof_payload,
+        idle_payload=idle_payload,
     )
 
 
@@ -127,17 +153,32 @@ def main() -> int:
     assert no_proof["scheduler_executor"]["executor_reason"] == "no_execute_flag", no_proof
     assert no_proof["scheduler_executor"]["executed"] is False, no_proof
     assert no_proof["visible_session_proof"]["approved"] is False, no_proof
+    assert no_proof["runtime_idle_detector"]["approved"] is False, no_proof
+    assert no_proof["runtime_idle_detector"]["decision"] == "runtime_idle_fixture_required", no_proof
     assert no_proof["idle_guard_contract"]["required_before_visible_prompt"] is True, no_proof
+    assert no_proof["idle_guard_contract"]["fixture_backed_runtime_idle_detector"] is True, no_proof
     assert "codex-cli-local-scheduler-exec" in no_proof["commands"]["scheduler_exec_dry_run"], no_proof
+    assert "codex-cli-runtime-idle-detector" in no_proof["commands"]["runtime_idle_detector"], no_proof
     assert "--execute-blocker-writeback" in no_proof["commands"]["scheduler_exec_blocker_template"], no_proof
 
     with_proof = build_pilot(VISIBLE_PROOF_FIXTURE)
     assert_pilot_boundary(with_proof)
-    assert with_proof["loop_decision"] == "visible_candidate_ready_for_guarded_execution", with_proof
-    assert with_proof["next_driver_action"] == "run_scheduler_exec_candidate_after_fresh_guard_and_prefix", with_proof
+    assert with_proof["loop_decision"] == "runtime_idle_detector_required", with_proof
+    assert with_proof["next_driver_action"] == "capture_public_safe_runtime_idle_fixture", with_proof
     assert with_proof["scheduler_executor"]["scheduler_action"] == "external_visible_command_candidate", with_proof
     assert with_proof["visible_session_proof"]["supplied"] is True, with_proof
     assert with_proof["visible_session_proof"]["approved"] is True, with_proof
+    assert with_proof["runtime_idle_detector"]["supplied"] is False, with_proof
+    assert with_proof["runtime_idle_detector"]["approved"] is False, with_proof
+
+    with_proof_and_idle = build_pilot(VISIBLE_PROOF_FIXTURE, RUNTIME_IDLE_FIXTURE)
+    assert_pilot_boundary(with_proof_and_idle)
+    assert with_proof_and_idle["loop_decision"] == "visible_candidate_ready_for_guarded_execution", with_proof_and_idle
+    assert with_proof_and_idle["next_driver_action"] == "run_scheduler_exec_candidate_after_fresh_guard_and_prefix", with_proof_and_idle
+    assert with_proof_and_idle["scheduler_executor"]["scheduler_action"] == "external_visible_command_candidate", with_proof_and_idle
+    assert with_proof_and_idle["visible_session_proof"]["approved"] is True, with_proof_and_idle
+    assert with_proof_and_idle["runtime_idle_detector"]["supplied"] is True, with_proof_and_idle
+    assert with_proof_and_idle["runtime_idle_detector"]["approved"] is True, with_proof_and_idle
     assert with_proof["execution_policy"]["later_turns_visible_to_user"] is True, with_proof
     assert with_proof["execution_policy"]["user_can_interrupt_or_take_over"] is True, with_proof
 
@@ -147,6 +188,8 @@ def main() -> int:
         help_fixture.write_text(json.dumps({"command_outputs": REMOTE_RESUME_HELP_FIXTURE}))
         proof_fixture = tmp_path / "visible-proof.json"
         proof_fixture.write_text(json.dumps(VISIBLE_PROOF_FIXTURE))
+        idle_fixture = tmp_path / "runtime-idle.json"
+        idle_fixture.write_text(json.dumps(RUNTIME_IDLE_FIXTURE))
         missing_registry = tmp_path / "missing-registry.json"
         runtime_root = tmp_path / "runtime"
 
@@ -190,7 +233,30 @@ def main() -> int:
             )
         )
         assert_pilot_boundary(cli_proof_json)
-        assert cli_proof_json["loop_decision"] == "visible_candidate_ready_for_guarded_execution", cli_proof_json
+        assert cli_proof_json["loop_decision"] == "runtime_idle_detector_required", cli_proof_json
+
+        cli_proof_idle_json = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "codex-cli-visible-local-driver-pilot",
+                "--project",
+                str(PROJECT),
+                "--goal-id",
+                GOAL_ID,
+                "--agent-id",
+                AGENT_ID,
+                "--fixture",
+                str(help_fixture),
+                "--proof-fixture",
+                str(proof_fixture),
+                "--idle-fixture",
+                str(idle_fixture),
+            )
+        )
+        assert_pilot_boundary(cli_proof_idle_json)
+        assert cli_proof_idle_json["loop_decision"] == "visible_candidate_ready_for_guarded_execution", cli_proof_idle_json
+        assert cli_proof_idle_json["runtime_idle_detector"]["approved"] is True, cli_proof_idle_json
 
         cli_markdown = run_cli(
             "codex-cli-visible-local-driver-pilot",
@@ -205,6 +271,7 @@ def main() -> int:
         )
         assert "# Codex CLI Visible Local Driver Pilot" in cli_markdown, cli_markdown
         assert "loop_decision: `visible_loop_blocker_writeback_ready`" in cli_markdown, cli_markdown
+        assert "## Runtime Idle Detector" in cli_markdown, cli_markdown
         assert "reads_raw_transcripts: `False`" in cli_markdown, cli_markdown
         assert "user_can_interrupt_or_take_over: `True`" in cli_markdown, cli_markdown
 

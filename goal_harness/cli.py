@@ -143,6 +143,7 @@ from .cli_commands import (
     handle_codex_cli_local_scheduler_exec_command,
     handle_codex_cli_local_scheduler_tick_command,
     handle_codex_cli_one_message_loop_pilot_command,
+    handle_codex_cli_runtime_idle_detector_command,
     handle_codex_cli_session_probe_command,
     handle_codex_cli_visible_local_driver_pilot_command,
     handle_codex_cli_visible_driver_run_command,
@@ -5947,6 +5948,7 @@ def main(argv: list[str] | None = None) -> int:
             "codex-cli-local-scheduler-exec",
             "codex-cli-local-scheduler-tick",
             "codex-cli-one-message-loop-pilot",
+            "codex-cli-runtime-idle-detector",
             "codex-cli-session-probe",
             "codex-cli-visible-local-driver-pilot",
             "codex-cli-visible-driver-run",
@@ -6051,6 +6053,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "codex-cli-visible-session-proof":
         return handle_codex_cli_visible_session_proof_command(args, print_payload)
+
+    if args.command == "codex-cli-runtime-idle-detector":
+        return handle_codex_cli_runtime_idle_detector_command(args, print_payload)
 
     if args.command == "heartbeat-prompt":
         try:
