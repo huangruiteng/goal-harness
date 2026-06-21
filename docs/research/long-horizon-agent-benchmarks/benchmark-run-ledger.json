@@ -2626,10 +2626,9 @@
         "llm-prefix-cache-replay": {
           "case_id": "llm-prefix-cache-replay",
           "latest_decision": {
-            "baseline_failure_scope": "runner_or_setup",
-            "baseline_run_id": "b7fdd71e481b",
-            "decision": "paired_baseline_runner_or_setup_repair_required",
-            "failure_class": "skillsbench_runner_error",
+            "baseline_failure_scope": "case_or_solution",
+            "baseline_run_id": "6e0b342a7481",
+            "decision": "paired_no_score_uplift",
             "official_score_delta": 0.0,
             "treatment_failure_scope": "case_or_solution",
             "treatment_run_id": "5bfbc9e250f5"
@@ -3878,6 +3877,63 @@
               "source_event_schema": "benchmark_run_v0",
               "status": "completed",
               "submit_eligible": false
+            },
+            {
+              "actual_model_verified": false,
+              "agent_declared_done": false,
+              "agent_model": "gpt-5.5",
+              "arm_id": "skillsbench_codex_app_server_goal_baseline",
+              "artifact_refs": {
+                "compact_artifact_ref": "cloud-ecs/parallel-benchmark-20260621T134151-markerfix/skillsbench-llm-prefix-native-goal-markerfix-r1/jobs/gh-skillsbench-llm-prefix-native-goal-markerfix-r1-20260621T134151/llm-prefix-cache-replay__codex_app_server_goal/benchmark_run.compact.json"
+              },
+              "benchmark_id": "skillsbench@1.1",
+              "case_id": "llm-prefix-cache-replay",
+              "case_ids": [
+                "llm-prefix-cache-replay"
+              ],
+              "codex_acp_runtime_preflight_passed": true,
+              "failure_class": "official_score_zero_case_failure",
+              "failure_labels": [
+                "skillsbench_runner_error",
+                "official_score_zero_case_failure"
+              ],
+              "failure_scope": "case_or_solution",
+              "goal_harness_inside_case": false,
+              "job_name": "skillsbench_1_1_llm_prefix_cache_replay_codex_app_server_goal_baseline",
+              "leaderboard_evidence": false,
+              "max_rounds_budget": 5,
+              "mode": "skillsbench_codex_app_server_goal_baseline",
+              "model_control_status": "reported_model_from_result_metadata",
+              "notes": "native SkillsBench app-server Goal marker completion handoff reached official closeout; compact result only; no raw task/log/trajectory/verifier output read into public state",
+              "official_feedback_blinded": true,
+              "official_passed": false,
+              "official_score": 0.0,
+              "recorded_at": "2026-06-21T13:48:46+08:00",
+              "reward_feedback_forwarded": false,
+              "round_reward_count": 0,
+              "round_success_observed": false,
+              "run_group_id": "parallel-benchmark-20260621T134151-markerfix",
+              "run_id": "6e0b342a7481",
+              "score_status": "failed",
+              "source_event_schema": "benchmark_run_v0",
+              "status": "completed",
+              "submit_eligible": false,
+              "task_staging": {
+                "app_skills_mount_patch_applied": true,
+                "apt_retry_patch_applied": false,
+                "apt_retry_patch_required": false,
+                "apt_risk_preflight_blocked": false,
+                "apt_setup_risk_detected": false,
+                "codex_acp_runtime_tools_patch_applied": true,
+                "include_task_skills": false,
+                "original_task_mutated": false,
+                "resource_cap_patch": {
+                  "applied": false,
+                  "host_cpus": 32.0
+                },
+                "staged": true,
+                "task_skills_removed": true
+              }
             }
           ]
         },
@@ -6771,7 +6827,7 @@
           ]
         }
       },
-      "run_count": 121
+      "run_count": 122
     },
     "swe-marathon": {
       "benchmark_id": "swe-marathon",
@@ -10618,5 +10674,5 @@
     "source_of_truth": "benchmark_run_v0 compact run events",
     "update_rule": "upsert one run entry when a benchmark case is ingested or closed"
   },
-  "updated_at": "2026-06-21T08:54:16+08:00"
+  "updated_at": "2026-06-21T13:48:46+08:00"
 }

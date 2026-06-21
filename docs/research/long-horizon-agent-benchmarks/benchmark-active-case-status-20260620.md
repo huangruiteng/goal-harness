@@ -39,13 +39,14 @@ Public boundary:
 
 ## Active Cloud Batch
 
-Latest batch id: `parallel-benchmark-20260620T235333Z`.
+Latest batch id: `parallel-benchmark-20260621T134151-markerfix`.
 
 | Benchmark | Case | Route / Arm | Compact Status | Current Status | Next Action |
 | --- | --- | --- | --- | --- | --- |
 | `terminal-bench@2.0` | `multi-source-data-merger` | host Codex app-server Goal baseline observation | compact official score `0.0`; ledger upserted under `terminal-bench-multi-source-data-merger-app-server-goal-20260620T235333Z` as `codex_app_server_goal_observation`; raw transcript not recorded | completed: the cloud app-server Goal rerun reached official scoring and failed verification | Treat as a current-route baseline observation for this historical pass/control case, not a paired comparison. Do not infer runner breakage from score alone; compare against the previous current-protocol pass rows before selecting a treatment or alternate pass-control case. |
 | `terminal-bench@2.0` | `nginx-request-logging` | host Codex app-server Goal alternate pass/control observation | compact official score `1.0`; ledger upserted under `terminal-bench-nginx-request-logging-app-server-goal-20260621T001123Z` as `codex_app_server_goal_observation`; raw transcript not recorded | completed: the cloud app-server Goal route reached official scoring and passed | Treat as a route sanity pass: current app-server Goal can solve at least one historical pass/control case. Next Terminal-Bench work should avoid another identical observation-only pass and instead choose treatment or a case with unresolved route/debug value. |
 | `skillsbench@1.1` | `react-performance-debugging` | native app-server Goal baseline, high reasoning | compact official score `0.0`; ledger upserted under `skillsbench-react-performance-native-goal-20260620T235333Z`; failure attribution `skillsbench_runner_error`; public compact shows host worker connected but no public worker turn trace | completed as route/runner observation, not solver-quality evidence | Repair or explain native worker trace materialization before treating this as a SkillsBench quality baseline; do not launch more native SkillsBench cases through this route until the worker trace reaches turn-start/turn-complete evidence or writes a precise blocker. |
+| `skillsbench@1.1` | `llm-prefix-cache-replay` | native app-server Goal baseline, marker-completion handoff | compact official score `0.0`; ledger upserted under `parallel-benchmark-20260621T134151-markerfix`; failure attribution `official_score_zero_case_failure`; worker completion marker observed and deleted; no raw transcript recorded | completed: the native SkillsBench route now reaches official closeout instead of stopping at worker handoff | Treat as handoff repair evidence, not a model-quality pass. Next SkillsBench work should add public-safe solution-phase counters or run a matched treatment/next canary through the same marker route. |
 | `swe-marathon` | `rust-c-compiler` | host Codex app-server Goal completion-aware, prewarmed/larger-budget r2 | compact official score `0.0`; ledger upserted under `swe-marathon-rust-c-compiler-app-server-r2-20260621T004146Z`; setup, agent execution, and official verifier completed; raw logs, task text, and trajectories not read | completed: the earlier setup blocker is superseded by a real native Goal zero-score closeout | Treat as the second SWE-Marathon native Goal baseline failure with `official_verifier_solution_failure`; next SWE work should add solution-phase counters or run a matched treatment/alternate small case under the same no-upload boundary. |
 | `terminal-bench@2.0` | `build-cython-ext` | host Codex app-server Goal, marker/official-verifier gated | latest observe-only compact official score `1.0`; ledger upserted under `terminal-bench-build-cython-ext-app-server-observe-pr346-r1-20260621T203200Z`; earlier completion-aware r2 scored `0.0`; raw transcript not recorded | completed: the observe-only native Goal closeout recovered the historical pass-case result while preserving public compact boundaries | Treat as a pass-case route canary. Do not spend another primary slot retrying the same route; next Terminal-Bench work should launch a treatment arm or move to a different historical pass/control case. |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | BenchFlow ACP blind-loop baseline | compact official score `0.0`; ledger upserted under `gh-skillsbench-llm-prefix-cloud-pair-r1-20260620` | completed | Treat as no-uplift runtime-refactor sanity, not as native Codex Goal baseline evidence. |
@@ -77,16 +78,21 @@ Failure-attribution update:
   official verifier, and job closeout, then scored `0.0` with
   `official_verifier_solution_failure`. Treat it as native Goal solution
   evidence needing phase attribution, not as Docker capacity evidence.
-- `react-performance-debugging` now has a native app-server Goal compact
+- `react-performance-debugging` has a native app-server Goal compact
   closeout at `0.0` with `skillsbench_runner_error`. The public compact proves
   host worker connection but not turn-start/turn-complete worker trace
   materialization, so classify it as route/runner evidence rather than model
   solving evidence.
+- `llm-prefix-cache-replay` under the marker-completion native app-server Goal
+  worker now reaches official SkillsBench closeout at `0.0` with
+  `official_score_zero_case_failure`. This supersedes the worker-handoff
+  blocker for that route; the next missing signal is public-safe solution-phase
+  attribution, not another connectivity retry.
 - both SkillsBench pairs are classified as
   `paired_zero_acp_blind_loop_non_native_goal_no_uplift`; the next primary
-  SkillsBench engineering slice is no longer "build the worker" but
-  "repair or explain public worker trace materialization" for the native
-  app-server Goal worker.
+  SkillsBench engineering slice is to compare native marker-route case behavior
+  against treatment or phase counters instead of repeating ACP blind-loop
+  evidence.
 
 ## Rerun Queue After App-Server Sync
 
@@ -101,7 +107,7 @@ or blocker.
 | P0 | `terminal-bench@2.0` | `nginx-request-logging` | latest cloud app-server Goal observation reached official score `1.0` | complete for route sanity; do not rerun immediately unless a future regression needs a fast pass/control guard. |
 | P0 | `swe-marathon` | `find-network-alignments` | first active SWE-Marathon cloud case completed at official score `0.0` | completed baseline; next slot should be a second small case or matching treatment arm. |
 | P0 | `swe-marathon` | `rust-c-compiler` | official README example and CPU-oriented case; r2 setup/agent/verifier completed at official score `0.0` | do not rerun the same baseline immediately; add public-safe solution-phase counters, compare treatment, or choose the next small SWE case under the same no-upload boundary. |
-| P0 | `skillsbench@1.1` | `llm-prefix-cache-replay` | runtime-refactor pair completed at `0.0/0.0`; native Goal post-PR-353 canary connected but produced no public worker trace | no immediate same-policy rerun; repair native worker trace or choose a new canary through the repaired trace path. |
+| P0 | `skillsbench@1.1` | `llm-prefix-cache-replay` | runtime-refactor pair completed at `0.0/0.0`; marker-completion native Goal rerun reached official closeout at `0.0` | do not rerun solely for handoff; add public-safe solution-phase counters, run matched treatment, or choose a new canary through the repaired marker route. |
 | P0 | `skillsbench@1.1` | `react-performance-debugging` | native app-server Goal canary closed at `0.0` with `skillsbench_runner_error`; host worker connected but no public worker turn trace materialized | repair or explicitly gate native worker trace materialization before launching additional SkillsBench native Goal cases. |
 | P1 | `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | previously setup-blocked; useful verifier/runtime canary | compact closeout produced `0.0/0.0`; do not spend another primary slot here unless using it as a duplicate stability check. |
 | P1 | `terminal-bench@2.0` | `make-doom-for-mips` | timeout/continuation attribution candidate | timeout phase attribution and app-server route canary complete. |

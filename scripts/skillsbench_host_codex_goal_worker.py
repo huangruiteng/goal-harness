@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from goal_harness.benchmark_adapters.skillsbench import (  # noqa: E402
 from goal_harness.codex_goal_baseline import stable_text_digest  # noqa: E402
 from scripts.codex_app_server_goal_driver import (  # noqa: E402
     compact_turn_metadata,
+    observe_codex_app_server_goal_turn,
     start_codex_app_server_goal_turn,
 )
 
@@ -55,6 +57,53 @@ def build_contract_payload(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _completion_marker_path(work_dir: Path, prompt: str) -> Path:
+    digest = stable_text_digest(prompt)[:12]
+    return work_dir / f".goal_harness_app_server_goal_worker_response_{digest}.txt"
+
+
+def _prompt_with_completion_marker(prompt: str, marker_name: str) -> str:
+    return (
+        prompt.rstrip()
+        + "\n\n"
+        + "Goal Harness worker coordination: after you have completed the task, "
+        + f"write a concise final status message to ./{marker_name} and then stop. "
+        + "This hidden file is a temporary harness marker and will be removed before "
+        + "verification; do not include raw task text or credential material in it."
+    )
+
+
+def _wait_for_worker_completion_marker(
+    turn: Any,
+    marker_path: Path,
+    *,
+    timeout_sec: float,
+    poll_interval_sec: float = 1.0,
+) -> tuple[bool, str, bool]:
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    marker_text = ""
+    while time.monotonic() < deadline:
+        observe_codex_app_server_goal_turn(turn, timeout_sec=0.0, raise_on_error=False)
+        if marker_path.exists():
+            marker_text = marker_path.read_text(encoding="utf-8").strip()
+            try:
+                marker_path.unlink()
+                marker_deleted = True
+            except OSError:
+                marker_deleted = False
+            observe_codex_app_server_goal_turn(
+                turn,
+                timeout_sec=min(2.0, max(0.0, poll_interval_sec)),
+                raise_on_error=False,
+            )
+            return True, marker_text, marker_deleted
+        if turn.turn_completed_observed:
+            return False, "", False
+        time.sleep(max(0.1, poll_interval_sec))
+    observe_codex_app_server_goal_turn(turn, timeout_sec=0.0, raise_on_error=False)
+    return False, "", False
+
+
 def run_worker(args: argparse.Namespace) -> dict[str, Any]:
     prompt_path = Path(args.prompt_file).expanduser()
     work_dir = Path(args.work_dir).expanduser()
@@ -63,21 +112,47 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("prompt file is empty")
 
     objective = args.objective or f"Complete SkillsBench task {args.task_id}"
+    marker_path = _completion_marker_path(work_dir, prompt)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    if marker_path.exists():
+        marker_path.unlink()
+    with_marker_prompt = _prompt_with_completion_marker(prompt, marker_path.name)
+    marker_observed = False
+    marker_deleted = False
     turn = start_codex_app_server_goal_turn(
         codex_bin=args.codex_bin,
         work_dir=work_dir,
         objective=objective,
-        prompt=prompt,
+        prompt=with_marker_prompt,
         model_name=args.model,
         reasoning_effort=args.reasoning_effort,
         approval_policy=args.approval_policy,
         sandbox=args.sandbox,
         response_timeout_sec=args.response_timeout_sec,
-        wait_for_completion=not args.no_wait_for_completion,
-        turn_timeout_sec=args.turn_timeout_sec,
+        wait_for_completion=False,
     )
     try:
+        if not args.no_wait_for_completion:
+            marker_observed, marker_text, marker_deleted = _wait_for_worker_completion_marker(
+                turn,
+                marker_path,
+                timeout_sec=args.turn_timeout_sec,
+            )
+            if marker_text:
+                turn.assistant_message = marker_text
+            if not marker_observed and not turn.turn_completed_observed:
+                raise TimeoutError(
+                    "timed out waiting for app-server worker marker or turn completion"
+                )
         compact = compact_turn_metadata(turn)
+        compact.update(
+            {
+                "completion_hard_gate": False,
+                "completion_marker_requested": True,
+                "completion_marker_observed": marker_observed,
+                "completion_marker_deleted": marker_deleted,
+            }
+        )
         private_response_written = False
         if args.response_text_file and turn.assistant_message:
             response_path = Path(args.response_text_file).expanduser()
@@ -87,7 +162,9 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         turn.terminate()
     ok = bool(compact.get("turn_id_present")) and (
-        args.no_wait_for_completion or compact.get("turn_completed_observed") is True
+        args.no_wait_for_completion
+        or compact.get("turn_completed_observed") is True
+        or marker_observed
     )
     return {
         "schema_version": "skillsbench_host_codex_goal_worker_result_v0",
@@ -144,9 +221,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--no-wait-for-completion",
         action="store_true",
         help=(
-            "Return after turn/start instead of waiting for turn/completed. "
-            "Use only for external pollers; SkillsBench scored workers should "
-            "wait and write a private response text file."
+            "Return after turn/start instead of waiting for the temporary "
+            "worker marker or turn/completed. Use only for external pollers; "
+            "SkillsBench scored workers should wait and write a private "
+            "response text file."
         ),
     )
     parser.add_argument(

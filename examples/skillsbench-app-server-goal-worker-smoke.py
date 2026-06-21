@@ -77,6 +77,49 @@ for line in sys.stdin:
     print(json.dumps({"id": mid, "result": result}), flush=True)
 """
 
+FAKE_CODEX_MARKER_NO_COMPLETION = """#!/usr/bin/env python3
+import json
+import re
+import sys
+from pathlib import Path
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    mid = msg.get("id")
+    method = msg.get("method")
+    if method == "initialized":
+        continue
+    if method == "initialize":
+        result = {"serverInfo": {"name": "fake-codex"}}
+    elif method == "thread/start":
+        result = {"thread": {"id": "thread-skillsbench"}}
+    elif method == "thread/goal/set":
+        result = {"goal": {"threadId": "thread-skillsbench", "status": "active"}}
+    elif method == "thread/goal/get":
+        result = {"goal": {"threadId": "thread-skillsbench", "status": "active"}}
+    elif method == "turn/start":
+        prompt = "\\n".join(
+            block.get("text", "")
+            for block in msg.get("params", {}).get("input", [])
+            if isinstance(block, dict)
+        )
+        match = re.search(
+            r"\\./(?P<name>\\.goal_harness_app_server_goal_worker_response_[0-9a-f]+\\.txt)",
+            prompt,
+        )
+        if match:
+            Path(match.group("name")).write_text(
+                "private marker answer",
+                encoding="utf-8",
+            )
+        result = {"turn": {"id": "turn-skillsbench", "status": "running"}}
+        print(json.dumps({"id": mid, "result": result}), flush=True)
+        continue
+    else:
+        result = {}
+    print(json.dumps({"id": mid, "result": result}), flush=True)
+"""
+
 
 def assert_plan_prerequisites(plan: dict[str, Any]) -> None:
     prereq = plan["runner_prerequisites"]
@@ -304,6 +347,62 @@ def test_host_worker_waits_for_completion_and_keeps_public_json_compact() -> Non
         assert private_response.read_text(encoding="utf-8") == "private worker answer"
         public_json = json.dumps(payload)
         assert "private worker answer" not in public_json, payload
+        assert "Private task instruction placeholder" not in public_json, payload
+
+
+def test_host_worker_marker_completion_when_turn_completed_is_missing() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-app-goal-worker-marker-") as tmp:
+        root = Path(tmp)
+        fake = root / "codex"
+        prompt = root / "prompt.txt"
+        output = root / "worker.compact.json"
+        private_response = root / "private-response.txt"
+        work = root / "work"
+        fake.write_text(FAKE_CODEX_MARKER_NO_COMPLETION, encoding="utf-8")
+        fake.chmod(0o755)
+        prompt.write_text("Private task instruction placeholder.", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "skillsbench_host_codex_goal_worker.py"),
+                "--task-id",
+                "llm-prefix-cache-replay",
+                "--codex-bin",
+                str(fake),
+                "--work-dir",
+                str(work),
+                "--prompt-file",
+                str(prompt),
+                "--output-json",
+                str(output),
+                "--response-text-file",
+                str(private_response),
+                "--response-timeout-sec",
+                "5",
+                "--turn-timeout-sec",
+                "5",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        assert result.stdout == "", result
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["ok"] is True, payload
+        turn = payload["turn"]
+        assert turn["turn_id_present"] is True, payload
+        assert turn["turn_completed_observed"] is False, payload
+        assert turn["completion_hard_gate"] is False, payload
+        assert turn["completion_marker_requested"] is True, payload
+        assert turn["completion_marker_observed"] is True, payload
+        assert turn["completion_marker_deleted"] is True, payload
+        assert turn["assistant_message_present"] is True, payload
+        assert payload["private_response_text"]["written"] is True, payload
+        assert private_response.read_text(encoding="utf-8") == "private marker answer"
+        assert not list(work.glob(".goal_harness_app_server_goal_worker_response_*.txt"))
+        public_json = json.dumps(payload)
+        assert "private marker answer" not in public_json, payload
         assert "Private task instruction placeholder" not in public_json, payload
 
 
@@ -927,6 +1026,7 @@ if __name__ == "__main__":
     test_launcher_plan_only_marks_runner_ready_with_host_acp_launch()
     test_host_worker_contract_only_cli()
     test_host_worker_waits_for_completion_and_keeps_public_json_compact()
+    test_host_worker_marker_completion_when_turn_completed_is_missing()
     test_acp_relay_delegates_to_app_server_goal_worker()
     test_acp_relay_materializes_lifecycle_trace_before_prompt()
     test_acp_relay_streams_public_keepalive_while_worker_runs()

@@ -61,6 +61,21 @@ def main() -> None:
         (case["benchmark_id"], case["case_id"]): case
         for case in payload["case_attributions"]
     }
+    case_entries = payload["case_attributions"]
+
+    def find_case(
+        benchmark_id: str,
+        case_id: str,
+        refined_attribution: str,
+    ) -> dict[str, object]:
+        for case in case_entries:
+            if (
+                case["benchmark_id"] == benchmark_id
+                and case["case_id"] == case_id
+                and case["refined_attribution"] == refined_attribution
+            ):
+                return case
+        raise AssertionError((benchmark_id, case_id, refined_attribution))
     expected = {
         ("terminal-bench@2.0", "build-cython-ext"),
         ("terminal-bench@2.0", "multi-source-data-merger"),
@@ -112,6 +127,15 @@ def main() -> None:
         == "native_goal_worker_connected_trace_dir_missing_not_solver_quality_evidence"
     )
 
+    skills_marker = find_case(
+        "skillsbench@1.1",
+        "llm-prefix-cache-replay",
+        "native_goal_worker_marker_handoff_repaired_official_zero_needs_solution_phase_attribution",
+    )
+    assert skills_marker["native_codex_goal_evidence"] is True
+    assert skills_marker["ledger_failure_class"] == "official_score_zero_case_failure"
+    assert "marker route" in skills_marker["next_obligation"]
+
     for key in [
         ("skillsbench@1.1", "llm-prefix-cache-replay"),
         ("skillsbench@1.1", "tictoc-unnecessary-abort-detection"),
@@ -125,7 +149,10 @@ def main() -> None:
         assert "native SkillsBench app-server Goal worker" in case["next_obligation"]
 
     decisions = {entry["route"]: entry for entry in payload["route_decisions"]}
-    assert decisions["skillsbench"]["decision"] == "repair_native_app_server_goal_worker_trace"
+    assert (
+        decisions["skillsbench"]["decision"]
+        == "native_marker_handoff_repaired_add_solution_phase_attribution"
+    )
 
     rendered = json.dumps(payload, sort_keys=True) + "\n" + ATTRIBUTION_MD.read_text(
         encoding="utf-8"

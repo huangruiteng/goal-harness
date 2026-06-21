@@ -5,7 +5,7 @@ benchmark case outcomes and artifact references; it must not contain raw
 logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 
 - schema_version: `benchmark_run_ledger_v0`
-- updated_at: `2026-06-21T08:54:16+08:00`
+- updated_at: `2026-06-21T13:48:46+08:00`
 
 ## Case Decisions
 
@@ -22,7 +22,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `skillsbench@1.1` | `dapt-intrusion-detection` | `paired_baseline_setup_preflight_selection_required` | - | `5` |
 | `skillsbench@1.1` | `debug-trl-grpo` | `paired_baseline_runner_or_setup_repair_required` | - | `9` |
 | `skillsbench@1.1` | `fix-build-agentops` | `baseline_runner_or_setup_repair_required` | - | `2` |
-| `skillsbench@1.1` | `llm-prefix-cache-replay` | `paired_baseline_runner_or_setup_repair_required` | - | `24` |
+| `skillsbench@1.1` | `llm-prefix-cache-replay` | `paired_no_score_uplift` | - | `25` |
 | `skillsbench@1.1` | `manufacturing-codebook-normalization` | `paired_no_score_uplift` | - | `4` |
 | `skillsbench@1.1` | `organize-messy-files` | `paired_baseline_solved_treatment_preserved` | - | `3` |
 | `skillsbench@1.1` | `paratransit-routing` | `paired_treatment_improved` | - | `9` |
@@ -147,6 +147,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | `skillsbench_goal_harness_blind_loop_treatment` | `` | `0.0` | `` | `1:0,2:0,3:0,4:0,5:missing` | `official_score_zero_case_failure` | `cloud-ecs/parallel-benchmark-20260620T131254Z/skillsbench-llm-prefix-treatment-r1/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | `skillsbench_codex_app_server_goal_baseline` | `` | `0.0` | `` | `` | `skillsbench_runner_error` | `cloud-ecs/parallel-benchmark-20260621T194222Z/skillsbench-llm-prefix-native-goal-keepalive-r3/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | `skillsbench_codex_app_server_goal_baseline` | `` | `0.0` | `` | `` | `skillsbench_runner_error` | `cloud-ecs/parallel-benchmark-20260620T220003Z/skillsbench-llm-prefix-cache-replay-native-goal-post353-r1/jobs/gh-skillsbench-llm-prefix-cache-replay-native-goal-post353-r1/llm-prefix-cache-replay__codex_app_server_goal/benchmark_run.compact.json` |
+| `skillsbench@1.1` | `llm-prefix-cache-replay` | `skillsbench_codex_app_server_goal_baseline` | `` | `0.0` | `` | `` | `official_score_zero_case_failure` | `cloud-ecs/parallel-benchmark-20260621T134151-markerfix/skillsbench-llm-prefix-native-goal-markerfix-r1/jobs/gh-skillsbench-llm-prefix-native-goal-markerfix-r1-20260621T134151/llm-prefix-cache-replay__codex_app_server_goal/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `manufacturing-codebook-normalization` | `codex_goal_mode_baseline` | `` | `0.0` | `` | `` | `official_verifier_solution_failure` | `` |
 | `skillsbench@1.1` | `manufacturing-codebook-normalization` | `goal_harness_automation_loop_treatment` | `` | `0.0` | `` | `` | `official_verifier_solution_failure` | `` |
 | `skillsbench@1.1` | `manufacturing-codebook-normalization` | `baseline` | `` | `0.0` | `` | `1:0,2:0` | `official_verifier_solution_failure` | `.local/private-benchmark-jobs/skillsbench-manufacturing-codebook-normalization-blind-baseline-v0/manufacturing-codebook-normalization__codex_acp_blind_loop_v0/benchmark_run.compact.json` |
