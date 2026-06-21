@@ -165,12 +165,15 @@ paste one message:
    with the official no-clone GitHub installer, then connect this project. Show
    me the current goal, concrete user gate if any, top todos, and next safe
    action before running longer work. Keep me in this Codex CLI TUI unless I
-   explicitly accept a headless fallback.
+   explicitly accept a headless fallback. After I paste this, begin the Goal
+   Harness loop; do not stop after only explaining what Goal Harness is.
    ```
 
    The agent should install or repair Goal Harness, connect the repo, run the
    quota/status guard, then show the current goal, user gate, top todos, and
-   next safe action before longer work.
+   next safe action before longer work. If the guard permits work, it should
+   claim or choose one runnable agent todo and complete one bounded validated
+   segment in the same visible TUI turn.
 
 3. After Goal Harness is installed, generate a tailored one-message bootstrap
    when you want the stricter reusable prompt:
@@ -184,6 +187,9 @@ review, and takeover; Goal Harness supplies goal state, todo ownership, quota,
 gates, writeback, and the next safe action. Headless `codex exec` is an explicit
 fallback, not the default experience. Local driver and visible-session proof
 commands are follow-up automation checks, not first-run requirements.
+Later automation must preserve that visible-control promise: a scheduler can
+return to the TUI only with public-safe visible proof, runtime idle evidence, a
+fresh guard, and explicit execution bounds.
 
 For contributors validating the full Codex CLI path without running Codex, use:
 

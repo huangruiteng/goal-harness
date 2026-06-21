@@ -11,7 +11,9 @@ daemon instead of Codex." The target is:
 3. Codex discovers or installs Goal Harness without requiring a manual repo
    clone, connects the repo, reads quota and todo state, and enters the Goal
    Harness loop.
-4. Later automation can steer the same visible session when safe, while the
+4. If the guard permits work, that first TUI turn claims or chooses one runnable
+   agent todo and completes one bounded validated segment.
+5. Later automation can steer the same visible session when safe, while the
    user can still watch, interrupt, review, or take over.
 
 ## Product Goal
@@ -23,7 +25,8 @@ Start Goal Harness for this repo. If `goal-harness` is missing, install it with
 the official no-clone GitHub installer, then connect this project. Show me the
 current goal, concrete user gate if any, top todos, and next safe action before
 running longer work. Keep me in this Codex CLI TUI unless I explicitly accept a
-headless fallback.
+headless fallback. After I paste this, begin the Goal Harness loop; do not stop
+after only explaining what Goal Harness is.
 ```
 
 That message should be enough for a terminal agent to:
@@ -59,7 +62,9 @@ and the user's live console.
 This is the first supported path. The user starts in Codex CLI TUI and pastes a
 single Goal Harness bootstrap request. The agent performs install/connect,
 surfaces onboarding decisions, and starts a bounded Goal Harness turn in the
-same conversation.
+same conversation. It should not stop after describing the product; once the
+quota/status guard permits work, the first TUI turn should perform one bounded,
+validated segment.
 
 This mode preserves the TUI completely because the human explicitly starts the
 loop there.
@@ -101,6 +106,9 @@ the safe scheduler/executor bridge into one reviewable packet:
 - first turn: paste one Goal Harness message into the visible Codex CLI TUI;
 - first response: show goal id, concrete user gate or none, top user todo or
   none, top agent todo, and next safe action;
+- first work segment: if the guard permits work, claim or choose one runnable
+  agent todo and complete one bounded validated segment in that same visible
+  TUI turn;
 - later scheduler: use `codex-cli-local-scheduler-exec` in dry-run mode by
   default;
 - bridge side effects: require a fresh guard plus explicit candidate prefix or

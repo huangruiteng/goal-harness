@@ -78,12 +78,15 @@ Start Goal Harness for this repo. If `goal-harness` is missing, install it with
 the official no-clone GitHub installer, then connect this project. Show me the
 current goal, concrete user gate if any, top todos, and next safe action before
 running longer work. Keep me in this Codex CLI TUI unless I explicitly accept a
-headless fallback.
+headless fallback. After I paste this, begin the Goal Harness loop; do not stop
+after only explaining what Goal Harness is.
 ```
 
 The first useful response should show the current goal id, concrete user gate
 if one exists, top user todo if any, top agent todo, and next safe action before
-longer delivery work.
+longer delivery work. When the guard permits work, the same TUI turn should
+claim or choose one runnable agent todo and finish one bounded validated
+segment, rather than asking the user to run a separate setup flow.
 
 Once `goal-harness` is installed, generate a stricter repo-specific paste
 message:
@@ -117,6 +120,12 @@ goal-harness codex-cli-visible-local-driver-pilot --project . --goal-id <goal-id
 This keeps the first-message TUI start primary, then models later scheduler
 ticks, visible proof, idle guard, guarded execution, blocker writeback, and
 no-transcript boundaries as public-safe metadata.
+
+The later-turn rule is intentionally stricter than the first message: Goal
+Harness may add a visible steering turn only after public-safe visible proof,
+runtime idle evidence, a fresh guard, and explicit execution bounds. Without
+that proof, the driver should write a compact blocker or keep the one-message
+TUI bootstrap as the product path.
 
 The commands below are optional automation checks after the one-message path
 works. To evaluate future same-session automation support without touching

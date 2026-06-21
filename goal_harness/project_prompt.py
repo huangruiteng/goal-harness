@@ -328,6 +328,11 @@ watch, steer, review, and take over. Do not switch to hidden headless `codex exe
 as the primary path; use headless only as an explicit fallback after Goal Harness
 or the user allows it.
 
+After I paste this message, begin the Goal Harness loop automatically. Do not
+stop after explaining what Goal Harness is. Stop only for a concrete user gate,
+workspace guard, missing capability, missing installation primitive, or unsafe
+boundary.
+
 Project: `{project}`
 Goal id: `{goal_id}`
 {agent_line}
@@ -339,6 +344,8 @@ Success criteria for this first TUI turn:
   if any, top user todo if any, top agent todo, and next safe action.
 - If no user gate or user todo exists, say that explicitly and continue only
   after the quota/status guard permits work.
+- If the guard permits work, claim or choose one runnable agent todo and do one
+  bounded validated segment in this same visible TUI turn.
 
 1. Ensure the Goal Harness CLI works:
 
@@ -382,8 +389,11 @@ production artifacts in public docs or Goal Harness state.
 ```
 
 End with changed files, validation result, current gate/todo state, and next
-safe action. Keep optional automation checks such as local-driver-plan or
-visible-session-proof as follow-up diagnostics, not first-run prerequisites.
+safe action. Later automation may add visible steering turns to this session
+only after public-safe visible proof, runtime idle evidence, a fresh guard, and
+explicit execution bounds. Keep optional automation checks such as
+local-driver-plan or visible-session-proof as follow-up diagnostics, not
+first-run prerequisites.
 """
 
 
