@@ -29,7 +29,7 @@ leaderboard paths.
 When `loopx_mode=codex_loopx`, the custom agent injects:
 
 ```text
------ GOAL-HARNESS ACCESS PACKET -----
+----- LOOPX ACCESS PACKET -----
 LoopX Access Packet V0
 mode: codex_loopx
 loopx_interface_surface: prompt_packet_only_no_cli_bridge
@@ -39,7 +39,7 @@ declared_loopx_interface_commands: status, quota_should_run, todo_list, history,
 count_codex_runtime_goal_tools_separately_from_loopx_calls: true
 do_not_claim_loopx_cli_calls_without_bridge_or_trace: true
 report_interaction_counters_after_the_case: true
------ END GOAL-HARNESS ACCESS PACKET -----
+----- END LOOPX ACCESS PACKET -----
 ```
 
 The raw prompt is not recorded in public artifacts. The adapter records only

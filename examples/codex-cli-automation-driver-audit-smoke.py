@@ -16,7 +16,7 @@ def main() -> int:
     index = PRODUCT_INDEX.read_text()
 
     required_contracts = [
-        "one Goal-Harness-generated message",
+        "one LoopX-generated message",
         "does not expose a mature native recurring scheduler",
         "recurrence as a LoopX local-driver concern",
         "codex resume [SESSION_ID] [PROMPT]",

@@ -254,9 +254,9 @@ def build_managed_terminal_bench_instruction(
         )
         access_packet = (
             "\nLoopX access packet for this case:\n\n"
-            "----- GOAL-HARNESS ACCESS PACKET -----\n"
+            "----- LOOPX ACCESS PACKET -----\n"
             f"{access_packet_body}\n"
-            "----- END GOAL-HARNESS ACCESS PACKET -----\n\n"
+            "----- END LOOPX ACCESS PACKET -----\n\n"
         )
     active_user_observe_instruction = build_private_active_user_observe_instruction(
         enabled=(
