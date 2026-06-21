@@ -22,6 +22,10 @@ runtime contract, benchmark route, or launch draft.
   fresh-user route that connects no-clone install, one-message TUI bootstrap,
   and proof-capture fixtures while keeping later same-TUI automation optional
   until visible proof passes.
+- [Codex CLI no-clone release verification](codex-cli-no-clone-release-verification.md):
+  the compact release note and smoke contract that prove the packaged installer,
+  fresh-project bootstrap message, bootstrap bundle, and proof fixtures stay
+  aligned before no-clone install is advertised as the default user path.
 - [Codex CLI automation driver audit](codex-cli-automation-driver.md): the
   current Codex CLI scheduler/session surface audit, with a conservative local
   driver planner that keeps TUI bootstrap primary, composes quota/idle/fallback
