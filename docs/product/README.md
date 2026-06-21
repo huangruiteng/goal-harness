@@ -54,6 +54,10 @@ runtime contract, benchmark route, or launch draft.
 - [Codex CLI TUI continuation priority](codex-cli-tui-continuation-priority.md):
   the current scheduling guard that keeps same-open-TUI continuation ahead of
   frontstage/showcase polish when both are runnable.
+- [Codex CLI same-open-TUI continuation observation](codex-cli-same-open-tui-continuation-observation.md):
+  the live-session observation that one-message TUI bootstrap can continue
+  visibly through the first guard and steering decision, while scheduled
+  same-TUI attach stays blocked until proof and idle evidence pass.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
   identity/scope contract for primary and side agents, including worktree and
   review handoff policy, while keeping todo ownership in `claimed_by` and future
