@@ -4,7 +4,7 @@ Status: product contract and implementation target.
 
 LoopX should make Codex CLI feel easy before it feels automated. The
 primary path is still the Codex TUI: the user starts from a project repo, sends
-one Goal-Harness-generated message, and can keep watching, steering, reviewing,
+one LoopX-generated message, and can keep watching, steering, reviewing,
 or taking over. Automation is allowed only when it preserves that visible
 control surface. The default `/goal` product path does not offer headless
 fallback.

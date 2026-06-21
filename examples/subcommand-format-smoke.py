@@ -14,6 +14,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 GOAL_ID = "subcommand-format-goal"
 
 
+def package_version() -> str:
+    namespace: dict[str, object] = {}
+    exec((REPO_ROOT / "loopx" / "__init__.py").read_text(encoding="utf-8"), namespace)
+    version = namespace.get("__version__")
+    assert isinstance(version, str), version
+    return version
+
+
 def write_fixture(root: Path) -> Path:
     project = root / "project"
     runtime = root / "runtime"
@@ -86,6 +94,35 @@ def cli_json(registry_path: Path, *args: str) -> dict:
 
 
 def main() -> int:
+    expected_version = package_version()
+    version_text = subprocess.run(
+        [sys.executable, "-m", "loopx.cli", "--version"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert version_text.returncode == 0, (
+        version_text.returncode,
+        version_text.stdout,
+        version_text.stderr,
+    )
+    assert version_text.stdout.strip() == f"loopx {expected_version}", version_text.stdout
+
+    version_json = subprocess.run(
+        [sys.executable, "-m", "loopx.cli", "--format", "json", "version"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert version_json.returncode == 0, (
+        version_json.returncode,
+        version_json.stdout,
+        version_json.stderr,
+    )
+    version_payload = json.loads(version_json.stdout)
+    assert version_payload["ok"] is True, version_payload
+    assert version_payload["version"] == expected_version, version_payload
+
     with tempfile.TemporaryDirectory(prefix="loopx-subcommand-format-smoke-") as raw_tmp:
         registry_path = write_fixture(Path(raw_tmp))
 
@@ -110,7 +147,16 @@ def main() -> int:
         assert promotion["ok"] is True, promotion
         assert promotion["gate"] == "promotion_readiness", promotion
 
-        status = cli_json(registry_path, "status", "--format", "json", "--limit", "1")
+        status = cli_json(
+            registry_path,
+            "status",
+            "--format",
+            "json",
+            "--limit",
+            "1",
+            "--scan-root",
+            str(registry_path.parent.parent),
+        )
         assert status["ok"] is True, status
         assert "attention_queue" in status, status
 
