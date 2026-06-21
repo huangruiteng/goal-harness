@@ -5,7 +5,7 @@ benchmark case outcomes and artifact references; it must not contain raw
 logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 
 - schema_version: `benchmark_run_ledger_v0`
-- updated_at: `2026-06-21T08:14:52+08:00`
+- updated_at: `2026-06-21T08:34:13+08:00`
 
 ## Case Decisions
 
@@ -27,7 +27,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `skillsbench@1.1` | `organize-messy-files` | `paired_baseline_solved_treatment_preserved` | - | `3` |
 | `skillsbench@1.1` | `paratransit-routing` | `paired_treatment_improved` | - | `9` |
 | `skillsbench@1.1` | `pddl-airport-planning` | `paired_no_score_uplift` | - | `9` |
-| `skillsbench@1.1` | `react-performance-debugging` | `paired_no_score_uplift` | - | `4` |
+| `skillsbench@1.1` | `react-performance-debugging` | `paired_baseline_runner_or_setup_repair_required` | - | `5` |
 | `skillsbench@1.1` | `setup-fuzzing-py` | `baseline_runner_or_setup_repair_required` | - | `3` |
 | `skillsbench@1.1` | `software-dependency-audit` | `paired_no_score_uplift` | - | `6` |
 | `skillsbench@1.1` | `suricata-custom-exfil` | `paired_treatment_codex_acp_runtime_preflight_required` | - | `5` |
@@ -175,6 +175,7 @@ logs, task prompts, trajectories, credentials, uploads, or absolute paths.
 | `skillsbench@1.1` | `react-performance-debugging` | `goal_harness_automation_loop_treatment` | `` | `0.0` | `` | `` | `official_verifier_solution_failure` | `` |
 | `skillsbench@1.1` | `react-performance-debugging` | `baseline` | `` | `0.0` | `` | `1:0,2:0` | `official_verifier_solution_failure` | `.local/private-benchmark-jobs/skillsbench-react-performance-debugging-blind-baseline-v0/react-performance-debugging__codex_acp_blind_loop_v0/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `react-performance-debugging` | `codex_goal_harness_treatment` | `` | `0.0` | `` | `1:0,2:0` | `official_verifier_solution_failure` | `.local/private-benchmark-jobs/skillsbench-react-performance-debugging-blind-treatment-v0/react-performance-debugging__goal_harness_blind_loop_v0/benchmark_run.compact.json` |
+| `skillsbench@1.1` | `react-performance-debugging` | `skillsbench_codex_app_server_goal_baseline` | `` | `0.0` | `` | `` | `skillsbench_runner_error` | `cloud-ecs/parallel-benchmark-20260620T235333Z/skillsbench-react-performance-native-goal-r1/jobs/gh-skillsbench-react-performance-native-goal-r1/react-performance-debugging__codex_app_server_goal/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `setup-fuzzing-py` | `codex_goal_mode_baseline` | `` | `missing` | `` | `` | `skillsbench_codex_acp_runtime_libssl_missing` | `` |
 | `skillsbench@1.1` | `setup-fuzzing-py` | `baseline` | `` | `missing` | `` | `` | `skillsbench_docker_compose_apt_repository_failure` | `.local/private-benchmark-jobs/setup-fuzzing-py__codex_acp_blind_loop_baseline_20260616T092819CST/setup-fuzzing-py__codex_acp_blind_loop/benchmark_run.compact.json` |
 | `skillsbench@1.1` | `setup-fuzzing-py` | `baseline` | `` | `missing` | `` | `` | `skillsbench_docker_compose_apt_repository_failure` | `.local/private-benchmark-jobs/setup-fuzzing-py__codex_acp_blind_loop_baseline_aptrepair_20260616T0941CST/setup-fuzzing-py__codex_acp_blind_loop/benchmark_run.compact.json` |

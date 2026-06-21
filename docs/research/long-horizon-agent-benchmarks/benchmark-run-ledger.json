@@ -5262,9 +5262,10 @@
         "react-performance-debugging": {
           "case_id": "react-performance-debugging",
           "latest_decision": {
-            "baseline_failure_scope": "case_or_solution",
-            "baseline_run_id": "851ca794f780",
-            "decision": "paired_no_score_uplift",
+            "baseline_failure_scope": "runner_or_setup",
+            "baseline_run_id": "6728f831e28f",
+            "decision": "paired_baseline_runner_or_setup_repair_required",
+            "failure_class": "skillsbench_runner_error",
             "official_score_delta": 0.0,
             "treatment_failure_scope": "case_or_solution",
             "treatment_run_id": "8efed51d81e5"
@@ -5434,6 +5435,46 @@
               "round_success_observed": false,
               "run_group_id": "skillsbench-react-performance-debugging-blind-loop-v0",
               "run_id": "8efed51d81e5",
+              "score_status": "failed",
+              "source_event_schema": "benchmark_run_v0",
+              "status": "completed",
+              "submit_eligible": false
+            },
+            {
+              "actual_model_verified": false,
+              "agent_declared_done": false,
+              "agent_model": "gpt-5.5",
+              "arm_id": "skillsbench_codex_app_server_goal_baseline",
+              "artifact_refs": {
+                "compact_artifact_ref": "cloud-ecs/parallel-benchmark-20260620T235333Z/skillsbench-react-performance-native-goal-r1/jobs/gh-skillsbench-react-performance-native-goal-r1/react-performance-debugging__codex_app_server_goal/benchmark_run.compact.json"
+              },
+              "benchmark_id": "skillsbench@1.1",
+              "case_id": "react-performance-debugging",
+              "case_ids": [
+                "react-performance-debugging"
+              ],
+              "codex_acp_runtime_preflight_passed": true,
+              "failure_class": "skillsbench_runner_error",
+              "failure_labels": [
+                "skillsbench_runner_error"
+              ],
+              "failure_scope": "runner_or_setup",
+              "goal_harness_inside_case": false,
+              "job_name": "skillsbench_1_1_react_performance_debugging_codex_app_server_goal_baseline",
+              "leaderboard_evidence": false,
+              "max_rounds_budget": 5,
+              "mode": "skillsbench_codex_app_server_goal_baseline",
+              "model_control_status": "reported_model_from_result_metadata",
+              "notes": "Native app-server Goal baseline connected the host worker and produced an official SkillsBench compact result at 0.0 with skillsbench_runner_error; public compact only, no raw task/log/trajectory material.",
+              "official_feedback_blinded": true,
+              "official_passed": false,
+              "official_score": 0.0,
+              "recorded_at": "2026-06-21T08:34:13+08:00",
+              "reward_feedback_forwarded": false,
+              "round_reward_count": 0,
+              "round_success_observed": false,
+              "run_group_id": "skillsbench-react-performance-native-goal-20260620T235333Z",
+              "run_id": "6728f831e28f",
               "score_status": "failed",
               "source_event_schema": "benchmark_run_v0",
               "status": "completed",
@@ -6730,7 +6771,7 @@
           ]
         }
       },
-      "run_count": 120
+      "run_count": 121
     },
     "swe-marathon": {
       "benchmark_id": "swe-marathon",
@@ -10533,5 +10574,5 @@
     "source_of_truth": "benchmark_run_v0 compact run events",
     "update_rule": "upsert one run entry when a benchmark case is ingested or closed"
   },
-  "updated_at": "2026-06-21T08:14:52+08:00"
+  "updated_at": "2026-06-21T08:34:13+08:00"
 }
