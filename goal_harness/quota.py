@@ -1827,6 +1827,7 @@ def _agent_lane_next_action(
     agent_identity: dict[str, Any] | None,
     agent_todo_summary: dict[str, Any] | None,
     capability_gate: dict[str, Any] | None,
+    active_next_action: Any = None,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
         return None
@@ -1861,11 +1862,21 @@ def _agent_lane_next_action(
         )
     )
 
-    def lane_candidate_sort_key(raw_item: dict[str, Any]) -> tuple[int, int, int, int]:
+    preferred_todo_ids = _todo_ids_from_action(active_next_action)
+
+    def lane_candidate_sort_key(raw_item: dict[str, Any]) -> tuple[int, int, int, int, int]:
+        todo_id = str(raw_item.get("todo_id") or "").strip()
+        active_next_rank = 0 if todo_id and todo_id in preferred_todo_ids else 1
         claimed_by = normalize_todo_claimed_by(raw_item.get("claimed_by"))
         claim_rank = 0 if claimed_by == agent_id else 1
         repair_rank = 0 if raw_item.get("capability_repair_mode") is True else 1
-        return (claim_rank, repair_rank, _todo_priority_rank(raw_item), _todo_index_rank(raw_item))
+        return (
+            active_next_rank,
+            claim_rank,
+            repair_rank,
+            _todo_priority_rank(raw_item),
+            _todo_index_rank(raw_item),
+        )
 
     seen: set[tuple[str, str]] = set()
     for source, raw_items in candidate_sources:
@@ -1891,7 +1902,11 @@ def _agent_lane_next_action(
         for raw_item in sorted(source_candidates, key=lane_candidate_sort_key):
             text = _protocol_action_text(raw_item.get("text"), limit=500)
             claimed_by = normalize_todo_claimed_by(raw_item.get("claimed_by"))
+            todo_id = str(raw_item.get("todo_id") or "").strip()
             selected_by = (
+                "active_next_action_todo"
+                if todo_id and todo_id in preferred_todo_ids
+                else
                 "current_agent_claimed_todo"
                 if claimed_by == agent_id
                 else "unclaimed_todo"
@@ -1916,7 +1931,8 @@ def _agent_lane_next_action(
                     "selected_by": selected_by,
                     "confidence": (
                         "selected"
-                        if selected_by == "current_agent_claimed_todo"
+                        if selected_by
+                        in {"active_next_action_todo", "current_agent_claimed_todo"}
                         else "candidate"
                     ),
                     "preserves_goal_next_action": True,
@@ -1924,6 +1940,13 @@ def _agent_lane_next_action(
             )
             return payload
     return None
+
+
+def _todo_ids_from_action(value: Any) -> set[str]:
+    text = str(value or "")
+    if not text:
+        return set()
+    return set(re.findall(r"\btodo_[A-Za-z0-9_]+\b", text))
 
 
 def _selected_recommended_action(
@@ -1956,7 +1979,8 @@ def _selected_action_with_agent_lane(
     if (
         agent_lane_next_action.get("source") != "capability_gate.runnable_candidates"
         or agent_lane_next_action.get("confidence") != "selected"
-        or agent_lane_next_action.get("selected_by") != "current_agent_claimed_todo"
+        or agent_lane_next_action.get("selected_by")
+        not in {"active_next_action_todo", "current_agent_claimed_todo"}
     ):
         return selected_action
     lane_text = str(agent_lane_next_action.get("text") or "").strip()
@@ -4933,6 +4957,14 @@ def build_quota_should_run(
             agent_identity=agent_identity,
             agent_todo_summary=agent_todo_summary,
             capability_gate=capability_gate,
+            active_next_action=(
+                item.get("active_state_next_action")
+                or (
+                    item.get("project_asset", {}).get("next_action")
+                    if isinstance(item.get("project_asset"), dict)
+                    else None
+                )
+            ),
         )
         selected_recommended_action = _selected_action_with_agent_lane(
             selected_recommended_action,

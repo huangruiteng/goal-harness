@@ -1138,6 +1138,61 @@ def assert_agent_lane_next_action_prefers_capability_repair_candidate() -> None:
     assert "agent_lane_next_action: todo_id=todo_bridge_repair" in markdown, markdown
 
 
+def assert_agent_lane_next_action_prefers_explicit_next_action_todo_id() -> None:
+    ordinary_action = (
+        "[P0] Run SWE-Marathon full-suite polling and record compact results."
+    )
+    parity_action = (
+        "[P0] Repair benchmark treatment product-path parity before claiming uplift."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="next_action_todo_id_projection",
+            next_action=(
+                "[P0] Continue todo_parity_slice: repair treatment parity before "
+                "another full-suite polling slice."
+            ),
+            coordination={
+                "primary_agent": "codex-main-control",
+                "registered_agents": ["codex-main-control"],
+            },
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": ordinary_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "claimed_by": "codex-main-control",
+                    "todo_id": "todo_full_suite",
+                    "required_capabilities": ["shell"],
+                },
+                {
+                    "index": 2,
+                    "text": parity_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "claimed_by": "codex-main-control",
+                    "todo_id": "todo_parity_slice",
+                    "required_capabilities": ["shell"],
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id="codex-main-control",
+    )
+    next_action = guard["agent_lane_next_action"]
+    assert next_action["todo_id"] == "todo_parity_slice", guard
+    assert next_action["selected_by"] == "active_next_action_todo", guard
+    assert next_action["confidence"] == "selected", guard
+    assert guard["recommended_action"] == parity_action, guard
+    markdown = render_quota_should_run_markdown(guard)
+    assert "agent_lane_next_action: todo_id=todo_parity_slice" in markdown, markdown
+
+
 def main() -> int:
     assert_dependency_monitor_requires_advancement()
     assert_primary_status_stays_advancement_lane()
@@ -1162,6 +1217,7 @@ def main() -> int:
     assert_launch_then_poll_todo_without_handle_routes_to_advancement()
     assert_side_agent_next_action_projects_without_stealing_goal_next_action()
     assert_agent_lane_next_action_prefers_capability_repair_candidate()
+    assert_agent_lane_next_action_prefers_explicit_next_action_todo_id()
     print("work-lane-contract-smoke ok")
     return 0
 
