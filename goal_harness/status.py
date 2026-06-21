@@ -3823,22 +3823,33 @@ def claimed_visibility_items(items: list[dict[str, Any]], *, limit: int) -> list
     if not buckets:
         return items[:limit]
 
+    original_index = {id(item): index for index, item in enumerate(items)}
+    per_claimant_cap = max(1, limit // len(buckets))
     selected: list[dict[str, Any]] = []
-    round_index = 0
-    while len(selected) < limit:
-        added = False
-        for claimed_by in claim_order:
-            bucket = buckets[claimed_by]
-            if round_index >= len(bucket):
-                continue
-            selected.append(bucket[round_index])
-            added = True
+    selected_ids: set[int] = set()
+    for claimed_by in claim_order:
+        taken = 0
+        for item in buckets[claimed_by]:
+            if taken >= per_claimant_cap:
+                break
             if len(selected) >= limit:
                 break
-        if not added:
+            selected.append(item)
+            selected_ids.add(id(item))
+            taken += 1
+        if len(selected) >= limit:
             break
-        round_index += 1
-    return selected
+
+    if len(selected) < limit:
+        for item in items:
+            if id(item) in selected_ids:
+                continue
+            selected.append(item)
+            selected_ids.add(id(item))
+            if len(selected) >= limit:
+                break
+
+    return sorted(selected, key=lambda item: original_index.get(id(item), 999999))[:limit]
 
 
 def compact_todo_group(
