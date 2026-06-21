@@ -537,6 +537,18 @@ does not expose official reward, pass/fail status, verifier errors, or verifier
 output to the worker. If these controller fields are missing from compact
 evidence, classify the run as packet-only observation.
 
+The treatment path must also install a case-local Goal Harness surface before
+the worker starts. Harbor's host agent seeds
+`/app/.codex/goals/<benchmark-case-goal-id>/ACTIVE_GOAL_STATE.md`, installs a
+task-environment CLI at `/app/.local/bin/goal-harness`, seeds
+`todo_benchmark_case_main`, and writes public-safe lifecycle events to the
+case-local `rollout-event-log.jsonl`. The generated prompt tells the worker to
+call the case-local CLI through `harbor-env-exec` for `quota should-run` and
+`todo claim` before substantive work. Global Goal Harness commands are optional
+context only; they must not select todos for the benchmark case. This keeps
+parallel cases isolated and prevents the main project goal or side-agent lane
+from leaking into benchmark treatment control.
+
 This is not a submit/upload path and should still be reduced to compact public
 evidence before ledger ingestion.
 

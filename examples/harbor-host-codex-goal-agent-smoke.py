@@ -71,8 +71,14 @@ def main() -> int:
     assert "benchmark_family: harbor" in treatment_packet
     assert "mode: codex_goal_harness" in treatment_packet
     assert "goal_harness_cli_bridge_available: true" in treatment_packet
-    assert "goal_harness_command_check:" in treatment_packet
-    assert "quota should-run" in treatment_packet
+    assert "goal_harness_product_path_primary_route: prompt_driven_case_local_goal_harness_cli" in treatment_packet
+    assert "goal_harness_case_local_cli_installed_before_agent: true" in treatment_packet
+    assert "goal_harness_case_cli_path: /app/.local/bin/goal-harness" in treatment_packet
+    assert "goal_harness_case_todo_id: todo_benchmark_case_main" in treatment_packet
+    assert "goal_harness_case_command_quota_should_run:" in treatment_packet
+    assert "/app/.local/bin/goal-harness --format json quota should-run" in treatment_packet
+    assert "goal_harness_case_command_claim_todo:" in treatment_packet
+    assert "goal_harness_global_command_check_optional_context:" in treatment_packet
     assert "do_not_upload_or_submit_to_leaderboard: true" in treatment_packet
     assert "benchmark_loop_contract:" in treatment_packet
     assert "protocol_id: packet_only_observation" in treatment_packet
@@ -110,12 +116,22 @@ def main() -> int:
     ), init_payload
     assert init_payload["case_state_path"].startswith("/app/.codex/goals/"), init_payload
     assert init_payload["case_state_path"].endswith("/ACTIVE_GOAL_STATE.md"), init_payload
+    assert init_payload["install_flow_schema_version"] == "goal_harness_benchmark_case_install_flow_v0", init_payload
+    assert init_payload["case_cli_path"] == "/app/.local/bin/goal-harness", init_payload
+    assert init_payload["case_todo_id"] == "todo_benchmark_case_main", init_payload
+    assert init_payload["case_agent_id"] == "codex-benchmark-agent", init_payload
+    assert init_payload["product_path_primary_route"] == "prompt_driven_case_local_goal_harness_cli", init_payload
+    assert init_payload["prompt_driven_route_required"] is True, init_payload
     init_command = init_payload["command"]
     assert "mkdir -p" in init_command, init_command
     assert "mv \"$tmp\"" in init_command, init_command
     assert "## Agent Todo" in init_command, init_command
     assert "goal-harness-prompt-polling-test" in init_command, init_command
     assert "find-network-alignments" in init_command, init_command
+    assert "/app/.local/bin/goal-harness" in init_command, init_command
+    assert "quota_should_run" in init_command, init_command
+    assert "todo_claim" in init_command, init_command
+    assert "rollout-event-log.jsonl" in init_command, init_command
     assert "/Users/" not in init_command, init_command
     init_compact = module._case_goal_state_init_compact(
         init_payload,
@@ -126,6 +142,13 @@ def main() -> int:
     assert init_compact["case_goal_state_initialized_before_agent"] is True, init_compact
     assert init_compact["case_goal_state_init_status"] == "initialized", init_compact
     assert init_compact["case_goal_state_path"] == init_payload["case_state_path"], init_compact
+    assert init_compact["goal_harness_install_flow_required"] is True, init_compact
+    assert init_compact["goal_harness_install_flow_status"] == "initialized", init_compact
+    assert init_compact["goal_harness_case_cli_installed_before_agent"] is True, init_compact
+    assert init_compact["goal_harness_case_cli_path"] == "/app/.local/bin/goal-harness", init_compact
+    assert init_compact["goal_harness_case_todo_id"] == "todo_benchmark_case_main", init_compact
+    assert init_compact["goal_harness_product_path_primary_route"] == "prompt_driven_case_local_goal_harness_cli", init_compact
+    assert init_compact["goal_harness_prompt_driven_route_required"] is True, init_compact
     assert init_compact["case_goal_state_raw_output_recorded"] is False, init_compact
 
     treatment_prompt = module.build_host_goal_prompt(
@@ -136,6 +159,7 @@ def main() -> int:
         goal_harness_access_packet=treatment_packet,
     )
     assert "Goal Harness treatment access packet:" in treatment_prompt
+    assert "case-local Goal Harness CLI" in treatment_prompt
     assert "mode: codex_goal_harness" in treatment_prompt
 
     with tempfile.TemporaryDirectory(prefix="gh-harbor-host-agent-") as tmp:

@@ -36,8 +36,12 @@ from codex_app_server_goal_driver import (
 )
 from goal_harness.benchmark_case_state import (
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
-    benchmark_case_active_state_seed_text,
-    benchmark_case_active_state_write_command,
+    BENCHMARK_CASE_GOAL_HARNESS_AGENT_ID,
+    BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH,
+    BENCHMARK_CASE_GOAL_HARNESS_PRODUCT_PATH_PRIMARY_ROUTE,
+    BENCHMARK_CASE_GOAL_HARNESS_TODO_ID,
+    benchmark_case_goal_harness_event_log_path,
+    benchmark_case_goal_harness_install_payload,
     benchmark_case_lifecycle_contract,
     render_benchmark_case_lifecycle_contract_lines,
 )
@@ -168,7 +172,12 @@ def build_host_goal_prompt(
     task_workdir_arg = shlex.quote(task_workdir)
     access_packet = goal_harness_access_packet.strip()
     access_packet_section = (
-        f"\n\nGoal Harness treatment access packet:\n{access_packet}"
+        "\n\nGoal Harness treatment access packet:\n"
+        "After the bridge check and before substantive work, use the "
+        "case-local Goal Harness CLI listed below to run quota should-run and "
+        "claim the case todo through the same task-environment bridge. Keep "
+        "case-local state isolated to the listed benchmark_case_goal_id.\n"
+        f"{access_packet}"
         if access_packet
         else ""
     )
@@ -243,6 +252,8 @@ def build_goal_harness_access_packet(
         arm_id=arm_id,
         max_rounds=max_rounds,
     )
+    case_goal_id = str(case_lifecycle["benchmark_case_goal_id"])
+    case_event_log_path = benchmark_case_goal_harness_event_log_path(case_goal_id)
 
     lines = [
         "Goal Harness Access Packet V0",
@@ -256,8 +267,16 @@ def build_goal_harness_access_packet(
         "do_not_modify_tests: true",
         "do_not_upload_or_submit_to_leaderboard: true",
         "do_not_record_raw_task_text_logs_trajectories_or_credentials: true",
-        "use_goal_harness_for_planning_checkpoints_and_boundary_awareness_only: true",
+        "use_goal_harness_for_planning_checkpoints_and_boundary_awareness_only: false",
         "task_environment_commands_still_must_use_harbor_env_exec_bridge: true",
+        f"goal_harness_product_path_primary_route: {BENCHMARK_CASE_GOAL_HARNESS_PRODUCT_PATH_PRIMARY_ROUTE}",
+        "goal_harness_prompt_driven_loop_required: true",
+        "goal_harness_scheduler_route_supported_for_smoke_or_fallback: true",
+        "goal_harness_case_local_cli_installed_before_agent: true",
+        f"goal_harness_case_cli_path: {BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH}",
+        f"goal_harness_case_rollout_event_log_path: {case_event_log_path}",
+        f"goal_harness_case_agent_id: {BENCHMARK_CASE_GOAL_HARNESS_AGENT_ID}",
+        f"goal_harness_case_todo_id: {BENCHMARK_CASE_GOAL_HARNESS_TODO_ID}",
         f"goal_harness_treatment_evidence_tier: {claim['goal_harness_treatment_evidence_tier']}",
         f"strict_goal_harness_treatment_claim_allowed: {str(claim['strict_goal_harness_treatment_claim_allowed']).lower()}",
         f"goal_harness_treatment_claim_blocker: {claim['goal_harness_treatment_claim_blocker']}",
@@ -267,13 +286,19 @@ def build_goal_harness_access_packet(
     if cli_enabled:
         lines.extend(
             [
-                f"goal_harness_command_check: {base} check --scan-path {scan_path_arg}",
-                f"goal_harness_command_status: {base} status --limit 5",
-                f"goal_harness_command_quota_should_run: {base} quota should-run --goal-id {goal_id_arg}",
-                f"goal_harness_command_history: {base} history --goal-id {goal_id_arg} --limit 5",
-                "before_long_actions_call_goal_harness_check_once: true",
-                "before_final_marker_review_goal_harness_status_or_history_once: true",
-                "goal_harness_cli_calls_are_observational_unless_an_explicit_write_command_is_provided: true",
+                "primary_goal_harness_cli_surface: task_environment_case_local_cli",
+                f"goal_harness_case_command_quota_should_run: {BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH} --format json quota should-run --goal-id {shlex.quote(case_goal_id)} --agent-id {BENCHMARK_CASE_GOAL_HARNESS_AGENT_ID}",
+                f"goal_harness_case_command_claim_todo: {BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH} --format json todo claim --goal-id {shlex.quote(case_goal_id)} --todo-id {BENCHMARK_CASE_GOAL_HARNESS_TODO_ID} --claimed-by {BENCHMARK_CASE_GOAL_HARNESS_AGENT_ID}",
+                f"goal_harness_case_command_status: {BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH} --format json status --goal-id {shlex.quote(case_goal_id)} --limit 5",
+                f"goal_harness_case_command_refresh_state: {BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH} --format json refresh-state --goal-id {shlex.quote(case_goal_id)}",
+                f"goal_harness_case_command_spend_quota: {BENCHMARK_CASE_GOAL_HARNESS_CLI_PATH} --format json quota spend-slot --goal-id {shlex.quote(case_goal_id)}",
+                "before_planning_call_goal_harness_case_quota_should_run_once: true",
+                "before_planning_claim_goal_harness_case_todo_once: true",
+                "before_final_marker_review_goal_harness_case_status_or_history_once: true",
+                f"goal_harness_global_command_check_optional_context: {base} check --scan-path {scan_path_arg}",
+                f"goal_harness_global_command_status_optional_context: {base} status --limit 5",
+                f"goal_harness_global_command_history_optional_context: {base} history --goal-id {goal_id_arg} --limit 5",
+                "goal_harness_case_cli_calls_are_part_of_the_treatment_flow: true",
             ]
         )
     else:
@@ -294,35 +319,17 @@ def build_case_goal_state_init_payload(
     route: str,
     max_rounds: int,
 ) -> dict[str, Any]:
-    """Build the public-safe case active-state init payload for Harbor/SWE."""
+    """Build the public-safe case-local GH install/state/todo payload."""
 
-    contract = benchmark_case_lifecycle_contract(
-        benchmark_id=benchmark_id,
-        case_id=case_id,
-        arm_id=arm_id,
-        max_rounds=max_rounds,
+    return dict(
+        benchmark_case_goal_harness_install_payload(
+            benchmark_id=benchmark_id,
+            case_id=case_id,
+            arm_id=arm_id,
+            route=route,
+            max_rounds=max_rounds,
+        )
     )
-    goal_id = str(contract["benchmark_case_goal_id"])
-    case_state_path = str(contract["case_state_path"])
-    seed = benchmark_case_active_state_seed_text(
-        benchmark_name=benchmark_id,
-        goal_id=goal_id,
-        task_id=case_id,
-        route=route,
-        max_rounds=max_rounds,
-        case_state_path=case_state_path,
-    )
-    return {
-        "schema_version": BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
-        "benchmark_case_goal_id": goal_id,
-        "case_state_path": case_state_path,
-        "command": benchmark_case_active_state_write_command(
-            case_state_path=case_state_path,
-            content=seed,
-        ),
-        "raw_task_text_required_for_init": False,
-        "local_paths_recorded": False,
-    }
 
 
 def _case_goal_state_init_compact(
@@ -341,6 +348,29 @@ def _case_goal_state_init_compact(
             payload.get("schema_version") or BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION
         ),
         "case_goal_state_path": payload.get("case_state_path") or "",
+        "goal_harness_install_flow_required": bool(
+            payload.get("install_flow_required") if required else False
+        ),
+        "goal_harness_install_flow_status": status if required else "not_required",
+        "goal_harness_case_cli_installed_before_agent": bool(
+            payload.get("case_cli_path") and initialized_before_agent
+        ),
+        "goal_harness_case_cli_path": payload.get("case_cli_path") or "",
+        "goal_harness_case_rollout_event_log_path": (
+            payload.get("case_rollout_event_log_path") or ""
+        ),
+        "goal_harness_case_agent_id": payload.get("case_agent_id") or "",
+        "goal_harness_case_todo_id": payload.get("case_todo_id") or "",
+        "goal_harness_case_todo_seeded": bool(payload.get("case_todo_seeded")),
+        "goal_harness_product_path_primary_route": (
+            payload.get("product_path_primary_route") or ""
+        ),
+        "goal_harness_prompt_driven_route_required": bool(
+            payload.get("prompt_driven_route_required")
+        ),
+        "goal_harness_scheduler_route_supported": bool(
+            payload.get("scheduler_route_supported")
+        ),
         "case_goal_state_raw_output_recorded": False,
     }
 

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +35,9 @@ from goal_harness.benchmark_case_state import (  # noqa: E402
     benchmark_case_active_state_write_command,
     benchmark_case_arm_goal_id,
     benchmark_case_goal_id,
+    benchmark_case_goal_harness_event_log_path,
+    benchmark_case_goal_harness_install_command,
+    benchmark_case_goal_harness_install_payload,
     benchmark_case_lifecycle_contract,
     render_benchmark_case_lifecycle_contract_lines,
 )
@@ -125,6 +130,91 @@ def test_seed_write_command_uses_canonical_path() -> None:
     assert "/Users/" not in command
 
 
+def test_case_goal_harness_install_payload_adds_case_local_cli_surface() -> None:
+    payload = benchmark_case_goal_harness_install_payload(
+        benchmark_id="swe-marathon",
+        case_id="zstd-decoder",
+        arm_id="goal_harness_prompt_polling_test",
+        route="goal-harness-prompt-polling-test",
+        max_rounds=5,
+    )
+    goal_id = "swe-marathon-zstd-decoder-goal-harness-prompt-polling-test-case"
+    assert payload["benchmark_case_goal_id"] == goal_id
+    assert payload["case_state_path"] == benchmark_case_active_state_path(goal_id)
+    assert payload["case_cli_path"] == "/app/.local/bin/goal-harness"
+    assert payload["case_rollout_event_log_path"] == benchmark_case_goal_harness_event_log_path(goal_id)
+    assert payload["case_todo_id"] == "todo_benchmark_case_main"
+    assert payload["case_agent_id"] == "codex-benchmark-agent"
+    assert payload["case_todo_seeded"] is True
+    assert payload["install_flow_required"] is True
+    assert payload["prompt_driven_route_required"] is True
+    assert payload["product_path_primary_route"] == "prompt_driven_case_local_goal_harness_cli"
+    command = str(payload["command"])
+    assert "/app/.local/bin/goal-harness" in command
+    assert "quota_should_run" in command
+    assert "todo_claim" in command
+    assert "rollout-event-log.jsonl" in command
+    assert "raw_task_text_recorded\":false" in command
+    assert "/Users/" not in command
+
+
+def test_case_goal_harness_install_command_installs_callable_cli() -> None:
+    with tempfile.TemporaryDirectory(prefix="gh-case-install-") as tmp:
+        root = Path(tmp)
+        state_path = root / "goals" / "demo-case" / "ACTIVE_GOAL_STATE.md"
+        cli_path = root / "bin" / "goal-harness"
+        event_log_path = root / "goals" / "demo-case" / "rollout-event-log.jsonl"
+        command = benchmark_case_goal_harness_install_command(
+            goal_id="demo-case",
+            case_state_path=str(state_path),
+            content="---\nstatus: active\n---\n\n## Agent Todo\n\n- [ ] demo\n",
+            case_cli_path=str(cli_path),
+            case_rollout_event_log_path=str(event_log_path),
+        )
+        subprocess.run(["sh", "-c", command], check=True)
+        assert state_path.exists()
+        assert cli_path.exists()
+        quota = subprocess.run(
+            [
+                str(cli_path),
+                "--format",
+                "json",
+                "quota",
+                "should-run",
+                "--goal-id",
+                "demo-case",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        quota_payload = json.loads(quota.stdout)
+        assert quota_payload["should_run"] is True
+        assert quota_payload["agent_lane_next_action"]["todo_id"] == "todo_benchmark_case_main"
+        claim = subprocess.run(
+            [
+                str(cli_path),
+                "--format",
+                "json",
+                "todo",
+                "claim",
+                "--goal-id",
+                "demo-case",
+                "--todo-id",
+                "todo_benchmark_case_main",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert json.loads(claim.stdout)["status"] == "claimed"
+        event_lines = event_log_path.read_text(encoding="utf-8").strip().splitlines()
+        assert any('"event_kind":"install"' in line for line in event_lines)
+        assert any('"event_kind":"quota_should_run"' in line for line in event_lines)
+        assert any('"event_kind":"todo_claim"' in line for line in event_lines)
+        assert all("raw_task_text_recorded\":false" in line for line in event_lines)
+
+
 def test_case_lifecycle_contract_is_per_case_arm() -> None:
     contract = benchmark_case_lifecycle_contract(
         benchmark_id="swe-marathon",
@@ -192,6 +282,8 @@ if __name__ == "__main__":
     test_shared_contract_for_current_benchmark_routes()
     test_seed_text_uses_real_goal_harness_active_state_shape()
     test_seed_write_command_uses_canonical_path()
+    test_case_goal_harness_install_payload_adds_case_local_cli_surface()
+    test_case_goal_harness_install_command_installs_callable_cli()
     test_case_lifecycle_contract_is_per_case_arm()
     test_ale_launch_packet_reuses_shared_contract()
     test_terminal_bench_access_packet_fixture_reuses_shared_contract()
