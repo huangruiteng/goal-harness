@@ -67,6 +67,9 @@ goal-harness codex-cli-tui-bootstrap-smoke-bundle \
 
 That bundle checks the install-repair command, paste block, quota guard,
 bounded writeback, and spend command shape. It is not a first-time user step.
+Use the [no-clone release verification](codex-cli-no-clone-release-verification.md)
+when validating that the packaged installer and fresh-project command surface
+match this route before promotion.
 
 ## Later Automation Gate
 
