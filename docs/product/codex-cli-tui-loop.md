@@ -89,6 +89,27 @@ clone/canary setup, and visible-session proof fixtures are follow-up
 diagnostics. They should not be required before a first-time user sees the
 current goal/gate/todo state.
 
+Current pilot packet:
+
+```bash
+goal-harness codex-cli-one-message-loop-pilot --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+This command does not run Codex. It packages the first TUI paste message and
+the safe scheduler/executor bridge into one reviewable packet:
+
+- first turn: paste one Goal Harness message into the visible Codex CLI TUI;
+- first response: show goal id, concrete user gate or none, top user todo or
+  none, top agent todo, and next safe action;
+- later scheduler: use `codex-cli-local-scheduler-exec` in dry-run mode by
+  default;
+- bridge side effects: require a fresh guard plus explicit candidate prefix or
+  blocker-writeback opt-in.
+
+The pilot is a contract check for the user experience. It is not a prerequisite
+for a first-time user; the first-time path remains "paste one message and watch
+the TUI."
+
 ### 2. Session-Attached Automation
 
 This is the preferred automation target. A scheduler wakes up, runs
@@ -264,41 +285,44 @@ projects runnable candidates; it should not over-specify the model's local plan.
    clone-plus-canary setup for contributors.
 3. **Bootstrap command**: add a Goal Harness command that prints a tailored
    Codex CLI bootstrap message for the current repo.
-4. **Session probe**: document whether current Codex CLI exposes a stable
+4. **One-message loop pilot**: ship
+   `goal-harness codex-cli-one-message-loop-pilot` to bind the first TUI paste
+   message and the later scheduler/executor bridge into one public-safe packet.
+5. **Session probe**: document whether current Codex CLI exposes a stable
    session id, resume handle, or safe injection primitive. The current
    implementation is `goal-harness codex-cli-session-probe`; it separates
    `exec` fallback support, visible resume / remote-control spike surfaces, and
    true same-open-TUI visible injection.
-5. **Visible driver plan**: generate a dry-run plan with
+6. **Visible driver plan**: generate a dry-run plan with
    `goal-harness codex-cli-visible-driver-plan` so the next local driver knows
    whether to attempt visible attach, run a resume/remote-control proof, or
    fall back explicitly.
-6. **Local driver planner**: ship
+7. **Local driver planner**: ship
    `goal-harness codex-cli-local-driver-plan` as the dry-run command that
    composes quota, visible-driver, TUI bootstrap, explicit fallback, and
    idle-guard requirements.
-7. **Visible-session proof harness**: validate public-safe observations with
+8. **Visible-session proof harness**: validate public-safe observations with
    `goal-harness codex-cli-visible-session-proof` before promoting
    resume/remote-control into any same-session automation path.
-8. **Visible driver run packet**: add
+9. **Visible driver run packet**: add
    `goal-harness codex-cli-visible-driver-run` as the no-execution packet that
    decides whether the next turn needs visible proof, TUI bootstrap, explicit
    headless opt-in, or a proven visible-session candidate.
-9. **Local scheduler tick**: add
+10. **Local scheduler tick**: add
    `goal-harness codex-cli-local-scheduler-tick` as the first executor-facing
    one-shot packet. It emits either an external command candidate or a precise
    blocker writeback command, but does not run Codex, read session files, or
    write Goal Harness state itself.
-10. **Local scheduler executor wrapper**: add
+11. **Local scheduler executor wrapper**: add
    `goal-harness codex-cli-local-scheduler-exec` as the explicit opt-in bridge
    that can run one tick result only after guard confirmation and, for
    candidates, an allowed command prefix.
-11. **Visible local driver**: prototype the scheduler loop that runs quota,
+12. **Visible local driver**: prototype the scheduler loop that runs quota,
    checks session idle state, and either attaches visibly or falls back
    explicitly.
-12. **Validation harness**: add a public-safe fixture that proves the driver
+13. **Validation harness**: add a public-safe fixture that proves the driver
    never stores raw transcript text and never spends quota before writeback.
-13. **Claude Code follow-up**: port the same product contract only after the
+14. **Claude Code follow-up**: port the same product contract only after the
    Codex CLI path is credible.
 
 ## Success Criteria

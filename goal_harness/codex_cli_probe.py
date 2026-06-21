@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .bootstrap import default_goal_id
+from .project_prompt import build_codex_cli_bootstrap_message
 
 
 DEFAULT_CODEX_BIN = "codex"
@@ -1193,6 +1194,133 @@ def build_codex_cli_local_scheduler_executor(
     )
 
 
+def build_codex_cli_one_message_loop_pilot(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    codex_bin: str,
+    probe_payload: dict[str, Any],
+    proof_payload: dict[str, Any] | None = None,
+    allow_headless_fallback: bool = False,
+) -> dict[str, Any]:
+    """Compose the first-message TUI path with the safe scheduler bridge."""
+
+    bootstrap = build_codex_cli_bootstrap_message(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+    )
+    resolved_project = str(bootstrap["project"])
+    resolved_goal_id = str(bootstrap["goal_id"])
+    agent_arg = f" --agent-id {_shell_arg(agent_id)}" if agent_id else ""
+    common_args = (
+        f"--project {_shell_arg(resolved_project)} "
+        f"--goal-id {_shell_arg(resolved_goal_id)}{agent_arg} "
+        f"--codex-bin {_shell_arg(codex_bin)}"
+    )
+    scheduler_executor = build_codex_cli_local_scheduler_executor(
+        project=project,
+        goal_id=resolved_goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        codex_bin=codex_bin,
+        probe_payload=probe_payload,
+        proof_payload=proof_payload,
+        allow_headless_fallback=allow_headless_fallback,
+        execute_candidate=False,
+        execute_blocker_writeback=False,
+    )
+    scheduler_action = str(scheduler_executor.get("scheduler_action") or "")
+    if scheduler_action in {"external_visible_command_candidate", "external_headless_fallback_candidate"}:
+        pilot_decision = "first_message_then_candidate_available"
+        followup_mode = "local scheduler can show the candidate, but execution still requires guard and prefix opt-in"
+    elif scheduler_action == "write_precise_blocker":
+        pilot_decision = "first_message_then_visible_blocker_writeback"
+        followup_mode = "local scheduler can write the precise blocker after explicit guard-checked opt-in"
+    else:
+        pilot_decision = "first_message_tui_bootstrap_only"
+        followup_mode = "keep the TUI bootstrap as the product path until a proof or opt-in exists"
+
+    bootstrap_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-bootstrap-message "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}{agent_arg}"
+    )
+    scheduler_exec_dry_run_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-local-scheduler-exec {common_args}"
+        f"{' --allow-headless-fallback' if allow_headless_fallback else ''}"
+    )
+    candidate_execute_template = (
+        f"{scheduler_exec_dry_run_command} --guard-checked --execute-candidate "
+        "--candidate-command-prefix <allowed-prefix>"
+    )
+    blocker_execute_template = (
+        f"{scheduler_exec_dry_run_command} --guard-checked --execute-blocker-writeback"
+    )
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_one_message_loop_pilot_v0",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "codex_bin": codex_bin,
+        "pilot_decision": pilot_decision,
+        "followup_mode": followup_mode,
+        "start_surface": "codex_cli_tui_one_message",
+        "first_turn": {
+            "user_action": "paste_bootstrap_message_into_codex_cli_tui",
+            "preserve_tui": True,
+            "message": bootstrap.get("message"),
+            "snapshot_required": [
+                "current goal id",
+                "concrete user gate or none",
+                "top user todo or none",
+                "top agent todo",
+                "next safe action",
+            ],
+        },
+        "automation_bridge": {
+            "command": "codex-cli-local-scheduler-exec",
+            "default_executes": False,
+            "scheduler_action": scheduler_action,
+            "executor_reason": (scheduler_executor.get("execution") or {}).get("reason")
+            if isinstance(scheduler_executor.get("execution"), dict)
+            else None,
+            "followup_mode": followup_mode,
+        },
+        "commands": {
+            "bootstrap_message": bootstrap_command,
+            "scheduler_exec_dry_run": scheduler_exec_dry_run_command,
+            "scheduler_exec_candidate_template": candidate_execute_template,
+            "scheduler_exec_blocker_template": blocker_execute_template,
+        },
+        "bootstrap_message": {
+            "schema_version": bootstrap.get("schema_version"),
+            "quota_guard_command": bootstrap.get("quota_guard_command"),
+            "refresh_command": bootstrap.get("refresh_command"),
+            "quota_spend_command": bootstrap.get("quota_spend_command"),
+        },
+        "scheduler_executor": scheduler_executor,
+        "boundary": {
+            "pilot_packet_only": True,
+            "runs_codex": False,
+            "runs_scheduler_result": False,
+            "reads_raw_transcripts": False,
+            "reads_credentials": False,
+            "reads_session_files": False,
+            "mutates_codex_session": False,
+            "spends_goal_harness_quota": False,
+            "requires_user_visible_start": True,
+            "headless_fallback_explicit_only": True,
+            "candidate_execution_requires_guard_and_prefix": True,
+        },
+        "warnings": list(scheduler_executor.get("warnings") or []),
+    }
+
+
 def render_codex_cli_session_probe_markdown(payload: dict[str, Any]) -> str:
     capabilities = payload.get("capabilities") or {}
     boundary = payload.get("boundary") or {}
@@ -1505,6 +1633,70 @@ def render_codex_cli_local_scheduler_executor_markdown(payload: dict[str, Any]) 
 - blocker_output_captured: `{boundary.get("blocker_output_captured")}`
 - spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
 - writes_goal_harness_state: `{boundary.get("writes_goal_harness_state")}`
+
+## Warnings
+
+{warning_lines}
+"""
+
+
+def render_codex_cli_one_message_loop_pilot_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") if isinstance(payload.get("boundary"), dict) else {}
+    commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
+    first_turn = payload.get("first_turn") if isinstance(payload.get("first_turn"), dict) else {}
+    bridge = payload.get("automation_bridge") if isinstance(payload.get("automation_bridge"), dict) else {}
+    snapshot_required = first_turn.get("snapshot_required") if isinstance(first_turn.get("snapshot_required"), list) else []
+    snapshot_lines = "\n".join(f"- {item}" for item in snapshot_required)
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    warning_lines = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- none"
+    return f"""# Codex CLI One-Message Loop Pilot
+
+- start_surface: `{payload.get("start_surface")}`
+- pilot_decision: `{payload.get("pilot_decision")}`
+- followup_mode: {payload.get("followup_mode")}
+
+## First TUI Turn
+
+- user_action: `{first_turn.get("user_action")}`
+- preserve_tui: `{first_turn.get("preserve_tui")}`
+
+The first response should show:
+
+{snapshot_lines}
+
+````text
+{first_turn.get("message") or ""}
+````
+
+## Automation Bridge
+
+- command: `{bridge.get("command")}`
+- default_executes: `{bridge.get("default_executes")}`
+- scheduler_action: `{bridge.get("scheduler_action")}`
+- executor_reason: `{bridge.get("executor_reason")}`
+- followup_mode: {bridge.get("followup_mode")}
+
+## Commands
+
+```bash
+{commands.get("bootstrap_message")}
+{commands.get("scheduler_exec_dry_run")}
+{commands.get("scheduler_exec_candidate_template")}
+{commands.get("scheduler_exec_blocker_template")}
+```
+
+## Boundary
+
+- pilot_packet_only: `{boundary.get("pilot_packet_only")}`
+- runs_codex: `{boundary.get("runs_codex")}`
+- runs_scheduler_result: `{boundary.get("runs_scheduler_result")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
+- requires_user_visible_start: `{boundary.get("requires_user_visible_start")}`
+- headless_fallback_explicit_only: `{boundary.get("headless_fallback_explicit_only")}`
+- candidate_execution_requires_guard_and_prefix: `{boundary.get("candidate_execution_requires_guard_and_prefix")}`
 
 ## Warnings
 

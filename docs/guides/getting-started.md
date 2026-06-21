@@ -95,6 +95,18 @@ goal-harness codex-cli-bootstrap-message --project . --goal-id <goal-id>
 Keep that as the preferred interactive path: the human watches and steers in
 Codex CLI TUI, while Goal Harness owns quota/status/todos/gates/writeback.
 
+To review the whole one-message loop contract without running Codex, generate a
+pilot packet:
+
+```bash
+goal-harness codex-cli-one-message-loop-pilot --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+The pilot ties the first TUI paste message to the later
+`codex-cli-local-scheduler-exec` bridge. It stays dry-run by default and is for
+operators/contributors validating the path, not a prerequisite for first-time
+users.
+
 The commands below are optional automation checks after the one-message path
 works. To evaluate future same-session automation support without touching
 transcripts or session files, run:
