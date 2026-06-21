@@ -771,6 +771,28 @@ case container while the container remains responsible for task files and
 official tests. The TUI `/goal` surface is a manual fallback only; do not count
 it as the default baseline when app-server `thread/goal/set`,
 `thread/goal/get`, and `turn/start` are available.
+
+For a Goal Harness prompt-polling treatment arm, keep the same host agent and
+explicitly request the case lifecycle packet:
+
+```bash
+tb run \
+  ... \
+  --agent-import-path terminal_bench_host_codex_goal_agent:HostCodexGoalAgent \
+  --agent-kwarg goal_surface=app_server \
+  --agent-kwarg goal_timeout_sec=1200 \
+  --agent-kwarg goal_harness_mode=codex_goal_harness \
+  --agent-kwarg goal_harness_access_packet_mode=compact \
+  --agent-kwarg goal_harness_case_id=<task-id> \
+  --agent-kwarg goal_harness_arm_id=goal_harness_prompt_polling_test \
+  --agent-kwarg goal_harness_max_rounds=5
+```
+
+This injects the shared `benchmark_case_lifecycle_contract` into the worker
+prompt and compact app-server metadata. A Terminal-Bench treatment run remains
+incomplete evidence until the per-case Goal Harness lifecycle can be observed:
+`quota_should_run`, `todo_claim_or_update`, bounded work/continuation, official
+case result or validation, `refresh_state`, and `quota_spend`.
 The app-server host agent treats the benchmark completion marker and official
 verifier as the success path. It drains app-server events opportunistically and
 writes a compact turn file with `turn_completed_observed`,

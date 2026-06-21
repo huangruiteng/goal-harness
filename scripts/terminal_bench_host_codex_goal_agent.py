@@ -21,14 +21,20 @@ from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+REPO_ROOT = SCRIPT_DIR.parent
+for _path in (SCRIPT_DIR, REPO_ROOT):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from codex_app_server_goal_driver import (
     CodexAppServerGoalDriverError,
     compact_turn_metadata,
     observe_codex_app_server_goal_turn,
     start_codex_app_server_goal_turn,
+)
+from goal_harness.benchmark_case_state import (
+    benchmark_case_lifecycle_contract,
+    render_benchmark_case_lifecycle_contract_lines,
 )
 
 
@@ -83,13 +89,14 @@ def build_host_goal_prompt(
     instruction: str,
     marker_path: Path,
     task_workdir: str = "/app",
+    goal_harness_case_lifecycle_packet: str = "",
 ) -> str:
     marker_cmd = f"touch {shlex.quote(str(marker_path))}"
     docker_exec = (
         f"docker exec {shlex.quote(container_name)} "
         f"bash -lc 'cd {shlex.quote(task_workdir)} && <command>'"
     )
-    return f"""
+    prompt = f"""
 You are solving a Terminal-Bench task on this host using native Codex Goal mode.
 
 Task container name: {container_name}
@@ -108,6 +115,43 @@ Task instruction:
 When and only when the task is complete, run this exact host command so the harness can observe completion:
 {marker_cmd}
 """.strip()
+    packet = goal_harness_case_lifecycle_packet.strip()
+    if packet:
+        prompt += (
+            "\n\nGoal Harness case lifecycle packet:\n"
+            f"{packet}\n\n"
+            "Use this packet as observational control-plane context. Keep the official "
+            "Terminal-Bench scorer authoritative, do not expose reward or verifier output "
+            "during the agent loop, and do not rely on runner-internal polling alone when "
+            "claiming Goal Harness treatment evidence."
+        )
+    return prompt
+
+
+def build_goal_harness_case_lifecycle_packet(
+    *,
+    mode: str = "codex_goal_mode_baseline",
+    packet_mode: str = "none",
+    benchmark_id: str = "terminal-bench",
+    case_id: str = "current-case",
+    arm_id: str = "codex_goal_harness_treatment",
+    max_rounds: int = 5,
+) -> tuple[str, dict[str, object] | None]:
+    if mode != "codex_goal_harness" or packet_mode == "none":
+        return "", None
+    contract = benchmark_case_lifecycle_contract(
+        benchmark_id=benchmark_id,
+        case_id=case_id,
+        arm_id=arm_id,
+        max_rounds=max_rounds,
+    )
+    lines = [
+        "terminal_bench_goal_harness_case_lifecycle_packet_v0:",
+        f"  packet_mode: {packet_mode}",
+        "  benchmark_family: harbor",
+    ]
+    lines.extend(render_benchmark_case_lifecycle_contract_lines(contract))
+    return "\n".join(lines), contract
 
 
 class HostCodexGoalAgent(BaseAgent):
@@ -129,6 +173,12 @@ class HostCodexGoalAgent(BaseAgent):
         app_server_response_timeout_sec: str | int | float = 30,
         startup_delay_sec: str | int | float = 5,
         poll_interval_sec: str | int | float = 5,
+        goal_harness_mode: str = "codex_goal_mode_baseline",
+        goal_harness_access_packet_mode: str = "none",
+        goal_harness_benchmark_id: str = "terminal-bench",
+        goal_harness_case_id: str = "current-case",
+        goal_harness_arm_id: str = "codex_goal_harness_treatment",
+        goal_harness_max_rounds: str | int = 5,
         *args: Any,
         **kwargs: Any,
     ):
@@ -149,6 +199,12 @@ class HostCodexGoalAgent(BaseAgent):
         self.app_server_response_timeout_sec = float(app_server_response_timeout_sec)
         self.startup_delay_sec = float(startup_delay_sec)
         self.poll_interval_sec = float(poll_interval_sec)
+        self.goal_harness_mode = goal_harness_mode
+        self.goal_harness_access_packet_mode = goal_harness_access_packet_mode
+        self.goal_harness_benchmark_id = goal_harness_benchmark_id
+        self.goal_harness_case_id = goal_harness_case_id
+        self.goal_harness_arm_id = goal_harness_arm_id
+        self.goal_harness_max_rounds = int(goal_harness_max_rounds)
 
     def _tmux(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -193,12 +249,21 @@ class HostCodexGoalAgent(BaseAgent):
         capture_path = work_dir / "tmux_capture.txt"
         prompt_path = work_dir / "prompt.txt"
         tmux_name = f"gh_tb_goal_{run_id}"
+        goal_harness_packet, case_lifecycle_contract = build_goal_harness_case_lifecycle_packet(
+            mode=self.goal_harness_mode,
+            packet_mode=self.goal_harness_access_packet_mode,
+            benchmark_id=self.goal_harness_benchmark_id,
+            case_id=self.goal_harness_case_id,
+            arm_id=self.goal_harness_arm_id,
+            max_rounds=self.goal_harness_max_rounds,
+        )
 
         prompt = build_host_goal_prompt(
             container_name=container_name,
             instruction=instruction,
             marker_path=marker,
             task_workdir=self.task_workdir,
+            goal_harness_case_lifecycle_packet=goal_harness_packet,
         )
         prompt_path.write_text(prompt, encoding="utf-8")
 
@@ -245,6 +310,12 @@ class HostCodexGoalAgent(BaseAgent):
                         "app_server_completion_hard_gate": False,
                         "completion_marker_observed": marker.exists(),
                         "first_blocker": first_blocker,
+                        "goal_harness_mode": self.goal_harness_mode,
+                        "goal_harness_access_packet_mode": self.goal_harness_access_packet_mode,
+                        "goal_harness_case_lifecycle_packet_injected": bool(
+                            goal_harness_packet
+                        ),
+                        "benchmark_case_lifecycle_contract": case_lifecycle_contract,
                     }
                 )
                 (work_dir / "app_server_goal_turn.compact.json").write_text(
