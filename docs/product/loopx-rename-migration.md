@@ -26,10 +26,14 @@ missed migration work.
    installers, and install smokes.
 3. P0 public docs migration: move the root README, getting-started path, and
    packaged install docs to LoopX language.
-4. P1 external surface release gate: update package publish metadata, hosted
+4. P0 state migration SOP: ship the explicit one-shot
+   [`migrate-state`](./loopx-state-migration-sop.md) path for existing local
+   users. This is not a legacy CLI compatibility alias; it is an auditable
+   dry-run-first import into `.loopx` and `~/.codex/loopx`.
+5. P1 external surface release gate: update package publish metadata, hosted
    Pages URLs, external docs, and any release notes that cannot be validated
    until the canonical code rename has landed.
-5. P1 GitHub rename gate: rename `huangruiteng/goal-harness` to
+6. P1 GitHub rename gate: rename `huangruiteng/goal-harness` to
    `huangruiteng/loopx` only after the canonical rename PR lands and the
    maintainer accepts the public URL migration plan. The no-clone installer
    points at the new repo URL, so the GitHub rename is a merge/release gate,
@@ -63,6 +67,7 @@ Required before the rename PR is considered ready:
 - `python3 examples/install-local-smoke.py`
 - `python3 examples/codex-cli-packaged-install-smoke.py`
 - `python3 examples/fresh-clone-quickstart-smoke.py`
+- `python3 examples/state-migration-smoke.py`
 - `python3 examples/docs-governance-smoke.py`
 - `loopx check --scan-root .`
 - `git diff --check`

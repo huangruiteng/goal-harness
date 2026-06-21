@@ -240,6 +240,14 @@ from .state_refresh import (
     refresh_state_run,
     render_state_refresh_markdown,
 )
+from .state_migration import (
+    LEGACY_GLOBAL_REGISTRY,
+    LEGACY_RUNTIME_ROOT,
+    legacy_registry_goal_ids,
+    migrate_legacy_state,
+    parse_key_value_map,
+    render_state_migration_markdown,
+)
 from .status import (
     AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
     collect_status,
@@ -5563,6 +5571,70 @@ def main(argv: list[str] | None = None) -> int:
     sync_global_parser.add_argument("--goal-id", help="Only sync one goal id from the source registry.")
     sync_global_parser.add_argument("--dry-run", action="store_true", help="Preview the global registry merge.")
 
+    migrate_state_parser = sub.add_parser(
+        "migrate-state",
+        help="One-shot migration from a legacy Goal Harness registry/runtime into LoopX state.",
+    )
+    migrate_state_parser.add_argument(
+        "--legacy-registry",
+        default=str(LEGACY_GLOBAL_REGISTRY),
+        help="Legacy registry JSON to import from. Defaults to ~/.codex/goal-harness/registry.global.json.",
+    )
+    migrate_state_parser.add_argument(
+        "--legacy-runtime-root",
+        default=str(LEGACY_RUNTIME_ROOT),
+        help="Legacy runtime root. Defaults to ~/.codex/goal-harness.",
+    )
+    migrate_state_parser.add_argument(
+        "--target-runtime-root",
+        help="LoopX runtime root. Defaults to --runtime-root or ~/.codex/loopx.",
+    )
+    migrate_goal_selector = migrate_state_parser.add_mutually_exclusive_group(required=True)
+    migrate_goal_selector.add_argument(
+        "--goal-id",
+        action="append",
+        help="Legacy goal id to migrate. Repeat for multiple explicit goals.",
+    )
+    migrate_goal_selector.add_argument(
+        "--all-goals",
+        action="store_true",
+        help="Migrate every goal listed in the explicit legacy registry. Still dry-run by default.",
+    )
+    migrate_state_parser.add_argument(
+        "--goal-id-map",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="Rename a goal id during migration, for example goal-harness-meta=loopx-meta.",
+    )
+    migrate_state_parser.add_argument(
+        "--path-map",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="Rewrite local path prefixes during migration.",
+    )
+    migrate_state_parser.add_argument(
+        "--copy-active-state",
+        action="store_true",
+        help="Copy and rewrite selected goals' active-state files into their migrated target paths.",
+    )
+    migrate_state_parser.add_argument(
+        "--copy-runtime",
+        action="store_true",
+        help="Copy and rewrite selected runtime goal directories from the legacy runtime root.",
+    )
+    migrate_state_parser.add_argument(
+        "--no-global-sync",
+        action="store_true",
+        help="Do not sync the migrated project registry into the LoopX global registry after --execute.",
+    )
+    migrate_state_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Write migrated state. Without this flag the command is a dry-run preview.",
+    )
+
     refresh_state_parser = sub.add_parser(
         "refresh-state",
         help="Append a read-only run from active goal state after state-only updates.",
@@ -9976,6 +10048,68 @@ def main(argv: list[str] | None = None) -> int:
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_global_sync_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "migrate-state":
+        try:
+            target_runtime_root = (
+                Path(args.target_runtime_root).expanduser()
+                if args.target_runtime_root
+                else (Path(args.runtime_root).expanduser() if args.runtime_root else DEFAULT_RUNTIME_ROOT)
+            )
+            selected_goal_ids = (
+                legacy_registry_goal_ids(Path(args.legacy_registry))
+                if args.all_goals
+                else (args.goal_id or [])
+            )
+            payload = migrate_legacy_state(
+                legacy_registry_path=Path(args.legacy_registry),
+                target_registry_path=registry_path,
+                legacy_runtime_root=Path(args.legacy_runtime_root),
+                target_runtime_root=target_runtime_root,
+                goal_ids=selected_goal_ids,
+                goal_id_map=parse_key_value_map(args.goal_id_map, flag_name="--goal-id-map"),
+                path_map=parse_key_value_map(args.path_map, flag_name="--path-map"),
+                copy_active_state=bool(args.copy_active_state),
+                copy_runtime=bool(args.copy_runtime),
+                execute=bool(args.execute),
+            )
+            if payload.get("ok") and args.execute and not args.no_global_sync:
+                sync_results = []
+                for migrated_goal_id in payload.get("migrated_goal_ids") or []:
+                    sync_results.append(
+                        sync_project_registry_to_global(
+                            registry_path=registry_path,
+                            runtime_root_override=str(target_runtime_root),
+                            goal_id=str(migrated_goal_id),
+                            dry_run=False,
+                        )
+                    )
+                payload["global_sync"] = {
+                    "ok": all(result.get("ok") for result in sync_results),
+                    "dry_run": False,
+                    "wrote": bool(sync_results),
+                    "results": sync_results,
+                    "synced_goal_ids": [
+                        goal_id
+                        for result in sync_results
+                        for goal_id in (result.get("synced_goal_ids") or [])
+                    ],
+                }
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "loopx_state_migration_v0",
+                "dry_run": not bool(args.execute),
+                "execute": bool(args.execute),
+                "legacy_registry": args.legacy_registry,
+                "target_registry": str(registry_path),
+                "legacy_runtime_root": args.legacy_runtime_root,
+                "target_runtime_root": args.target_runtime_root or args.runtime_root or str(DEFAULT_RUNTIME_ROOT),
+                "selected_goal_ids": args.goal_id or ([] if not getattr(args, "all_goals", False) else ["<all-goals>"]),
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_state_migration_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "refresh-state":
