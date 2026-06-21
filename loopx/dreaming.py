@@ -1,19 +1,31 @@
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
+from .feedback import validate_public_safe_text
+from .global_registry import sync_project_registry_to_global
+from .history import collect_history, load_registry, write_reserved_run_artifacts
+from .paths import resolve_runtime_root
+from .registry import registry_goals
+from .runtime import validate_goal_id_path_segment
 from .status import (
     DREAMING_ADVISORY_CLASSIFICATIONS,
     STATUS_NEUTRAL_CLASSIFICATIONS,
     public_safe_compact_text,
 )
+from .state_refresh import now_local
+from .todos import add_goal_todo, update_goal_todo
 
 
 DREAMING_DRY_RUN_SCHEMA_VERSION = "dreaming_dry_run_proposal_v0"
 DREAMING_PROPOSAL_SCHEMA_VERSION = "dreaming_proposal_v0"
+DREAMING_PROPOSAL_DECISION_SCHEMA_VERSION = "dreaming_proposal_decision_v0"
 SERVER_PLANNING_CONTRACT_SCHEMA_VERSION = "server_managed_planning_contract_v0"
 MAX_DREAMING_EVIDENCE_ITEMS = 5
+DREAMING_PROPOSAL_DECISIONS = {"approve", "defer", "reject"}
 
 
 def _compact_run(run: dict[str, Any]) -> dict[str, Any]:
@@ -131,6 +143,59 @@ def _proposal_summary(runs: list[dict[str, Any]], proposal_type: str) -> str:
     return f"Recent run history suggests an exploration option for operator review: {top}."
 
 
+def _proposal_id(
+    *,
+    goal_id: str,
+    proposal_type: str,
+    evidence_window: str,
+    runs: list[dict[str, Any]],
+) -> str:
+    seed_parts = [goal_id, proposal_type, evidence_window]
+    for run in runs[:MAX_DREAMING_EVIDENCE_ITEMS]:
+        seed_parts.append(str(run.get("generated_at") or ""))
+        seed_parts.append(str(run.get("classification") or ""))
+    digest = hashlib.sha256("\n".join(seed_parts).encode("utf-8")).hexdigest()[:12]
+    return f"dreaming_{digest}"
+
+
+def _registry_goal(registry: dict[str, Any], goal_id: str) -> dict[str, Any] | None:
+    for goal in registry_goals(registry):
+        if str(goal.get("id") or "") == goal_id:
+            return goal
+    return None
+
+
+def _compact_source_proposal(run: dict[str, Any]) -> dict[str, Any]:
+    dreaming = run.get("dreaming") if isinstance(run.get("dreaming"), dict) else {}
+    return {
+        "generated_at": public_safe_compact_text(run.get("generated_at"), limit=120),
+        "classification": public_safe_compact_text(run.get("classification"), limit=120),
+        "proposal_id": public_safe_compact_text(dreaming.get("proposal_id"), limit=120),
+        "proposal_type": public_safe_compact_text(dreaming.get("proposal_type"), limit=120),
+        "evidence_window": public_safe_compact_text(dreaming.get("evidence_window"), limit=160),
+        "summary": public_safe_compact_text(run.get("summary") or run.get("recommended_action"), limit=260),
+    }
+
+
+def _find_source_proposal(
+    history_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    proposal_id: str,
+) -> dict[str, Any] | None:
+    goal = _goal_record(history_payload, goal_id)
+    if not goal:
+        return None
+    latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
+    for run in latest_runs:
+        if not isinstance(run, dict):
+            continue
+        dreaming = run.get("dreaming") if isinstance(run.get("dreaming"), dict) else {}
+        if str(dreaming.get("proposal_id") or "") == proposal_id:
+            return run
+    return None
+
+
 def build_server_managed_planning_contract() -> dict[str, Any]:
     """Return the default contract for server-managed planning proposals."""
 
@@ -202,10 +267,17 @@ def build_dreaming_dry_run_proposal(
     proposal_type = _proposal_type(runs)
     classification = _classification_for_proposal_type(proposal_type)
     evidence_window = f"last_{len(runs)}_non_neutral_runs" if runs else "no_recent_non_neutral_runs"
+    proposal_id = _proposal_id(
+        goal_id=goal_id,
+        proposal_type=proposal_type,
+        evidence_window=evidence_window,
+        runs=runs,
+    )
     question = _operator_question(goal_id, proposal_type)
     server_planning_contract = build_server_managed_planning_contract()
     dreaming = {
         "schema_version": DREAMING_PROPOSAL_SCHEMA_VERSION,
+        "proposal_id": proposal_id,
         "lane": "exploration",
         "evidence_window": evidence_window,
         "proposal_type": proposal_type,
@@ -233,6 +305,7 @@ def build_dreaming_dry_run_proposal(
         "schema_version": DREAMING_DRY_RUN_SCHEMA_VERSION,
         "goal_id": goal_id,
         "dry_run": True,
+        "proposal_id": proposal_id,
         "classification": classification,
         "proposal_type": proposal_type,
         "summary": _proposal_summary(runs, proposal_type),
@@ -257,6 +330,249 @@ def build_dreaming_dry_run_proposal(
     }
 
 
+def classification_for_dreaming_decision(decision: str) -> str:
+    if decision == "approve":
+        return "dreaming_proposal_approved"
+    if decision == "defer":
+        return "dreaming_proposal_deferred"
+    if decision == "reject":
+        return "dreaming_proposal_rejected"
+    raise ValueError(f"decision must be one of: {', '.join(sorted(DREAMING_PROPOSAL_DECISIONS))}")
+
+
+def _recommended_action_for_decision(decision: str, promoted_todo_id: str | None) -> str:
+    if decision == "approve":
+        if promoted_todo_id:
+            return (
+                f"Approved dreaming proposal was promoted into Agent Todo {promoted_todo_id}; "
+                "run quota should-run before executing it."
+            )
+        return (
+            "Approved dreaming proposal matched an existing Agent Todo; run quota "
+            "should-run before executing the promoted work."
+        )
+    if decision == "defer":
+        return "Deferred dreaming proposal; no delivery todo was created and no quota was spent."
+    return "Rejected dreaming proposal; no delivery todo was created and no quota was spent."
+
+
+def build_dreaming_decision_record(
+    *,
+    goal_id: str,
+    registry_goal: dict[str, Any] | None,
+    generated_at: str,
+    classification: str,
+    recommended_action: str,
+    source_proposal: dict[str, Any],
+    decision_payload: dict[str, Any],
+) -> dict[str, Any]:
+    adapter = (
+        registry_goal.get("adapter")
+        if isinstance(registry_goal, dict) and isinstance(registry_goal.get("adapter"), dict)
+        else {}
+    )
+    promoted_todo_id = decision_payload.get("promoted_todo_id")
+    health_check = (
+        f"dreaming_decision decision={decision_payload.get('decision')}; "
+        "source_proposal 1/1; "
+        f"promoted_todo {1 if promoted_todo_id else 0}/1; "
+        "quota_spent 0/1"
+    )
+    return {
+        "generated_at": generated_at,
+        "goal_id": goal_id,
+        "classification": classification,
+        "recommended_action": recommended_action,
+        "health_check": health_check,
+        "delivery_batch_scale": "single_surface",
+        "delivery_outcome": "outcome_progress",
+        "dreaming_decision": decision_payload,
+        "source_dreaming_proposal": source_proposal,
+        "registry_goal": {
+            "present": bool(registry_goal),
+            "domain": registry_goal.get("domain") if registry_goal else None,
+            "status": registry_goal.get("status") if registry_goal else None,
+            "adapter": {
+                "kind": adapter.get("kind"),
+                "status": adapter.get("status"),
+            },
+        },
+    }
+
+
+def record_dreaming_proposal_decision(
+    *,
+    registry_path: Path,
+    runtime_root_override: str | None,
+    goal_id: str,
+    proposal_id: str,
+    decision: str,
+    reason_summary: str,
+    todo_text: str | None,
+    claimed_by: str | None,
+    dry_run: bool,
+    sync_global: bool = True,
+) -> dict[str, Any]:
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
+    validate_public_safe_text("proposal_id", proposal_id)
+    validate_public_safe_text("reason_summary", reason_summary)
+    validate_public_safe_text("todo_text", todo_text)
+    if decision not in DREAMING_PROPOSAL_DECISIONS:
+        raise ValueError(f"decision must be one of: {', '.join(sorted(DREAMING_PROPOSAL_DECISIONS))}")
+    if decision == "approve" and not todo_text:
+        raise ValueError("--todo-text is required when --decision approve")
+    if decision != "approve" and todo_text:
+        raise ValueError("--todo-text is only valid when --decision approve")
+
+    registry = load_registry(registry_path)
+    runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    history_payload = collect_history(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=safe_goal_id,
+        limit=50,
+        include_runtime_goals=False,
+    )
+    source_run = _find_source_proposal(history_payload, goal_id=safe_goal_id, proposal_id=proposal_id)
+    if not source_run:
+        raise ValueError(f"dreaming proposal not found for goal_id={safe_goal_id} proposal_id={proposal_id}")
+
+    source_proposal = _compact_source_proposal(source_run)
+    promoted_todo_id: str | None = None
+    todo_result: dict[str, Any] | None = None
+    todo_evidence_result: dict[str, Any] | None = None
+    active_state_mutated = False
+    if decision == "approve":
+        if not dry_run:
+            todo_result = add_goal_todo(
+                registry_path=registry_path,
+                goal_id=safe_goal_id,
+                role="agent",
+                text=str(todo_text or ""),
+                task_class="advancement_task",
+                action_kind="dreaming_proposal_promotion",
+                claimed_by=claimed_by,
+                dry_run=False,
+            )
+            promoted_todo_id = str(todo_result.get("todo_id") or "") or None
+            if promoted_todo_id:
+                todo_evidence_result = update_goal_todo(
+                    registry_path=registry_path,
+                    goal_id=safe_goal_id,
+                    role="agent",
+                    todo_id=promoted_todo_id,
+                    evidence=f"dreaming_proposal:{proposal_id}",
+                    note="Approved dreaming proposal promoted to normal Agent Todo.",
+                    dry_run=False,
+                )
+            active_state_mutated = bool(
+                todo_result
+                and (todo_result.get("added") or todo_result.get("metadata_updated"))
+                or todo_evidence_result
+                and todo_evidence_result.get("changed")
+            )
+
+    classification = classification_for_dreaming_decision(decision)
+    generated_at = now_local()
+    decision_payload = {
+        "schema_version": DREAMING_PROPOSAL_DECISION_SCHEMA_VERSION,
+        "proposal_id": proposal_id,
+        "decision": decision,
+        "reason_summary": public_safe_compact_text(reason_summary, limit=260),
+        "promoted_to_delivery": decision == "approve",
+        "promoted_todo_id": promoted_todo_id,
+        "created_todo_id": promoted_todo_id if todo_result and todo_result.get("added") else None,
+        "todo_added": bool(todo_result and todo_result.get("added")),
+        "delivery_spend_allowed": False,
+        "quota_spent": False,
+    }
+    if claimed_by and decision == "approve":
+        decision_payload["claimed_by"] = claimed_by
+    recommended_action = _recommended_action_for_decision(decision, promoted_todo_id)
+    validate_public_safe_text("recommended_action", recommended_action)
+    registry_goal = _registry_goal(registry, safe_goal_id)
+    record = build_dreaming_decision_record(
+        goal_id=safe_goal_id,
+        registry_goal=registry_goal,
+        generated_at=generated_at,
+        classification=classification,
+        recommended_action=recommended_action,
+        source_proposal=source_proposal,
+        decision_payload=decision_payload,
+    )
+
+    runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
+    index_record = {
+        "generated_at": generated_at,
+        "goal_id": safe_goal_id,
+        "classification": classification,
+        "recommended_action": recommended_action,
+        "health_check": record["health_check"],
+        "dreaming_decision": decision_payload,
+        "source_dreaming_proposal": source_proposal,
+    }
+    runtime_history_appended = not dry_run
+    payload: dict[str, Any] = {
+        "ok": True,
+        "schema_version": DREAMING_PROPOSAL_DECISION_SCHEMA_VERSION,
+        "dry_run": dry_run,
+        "appended": not dry_run,
+        "registry": str(registry_path),
+        "runtime_root": str(runtime_root),
+        "goal_id": safe_goal_id,
+        "proposal_id": proposal_id,
+        "classification": classification,
+        "recommended_action": recommended_action,
+        "generated_at": generated_at,
+        "health_check": record["health_check"],
+        "decision": decision,
+        "dreaming_decision": decision_payload,
+        "source_dreaming_proposal": source_proposal,
+        "todo_result": todo_result,
+        "todo_evidence_result": todo_evidence_result,
+        "side_effects": {
+            "project_files_mutated": bool(runtime_history_appended or active_state_mutated),
+            "active_state_mutated": bool(active_state_mutated),
+            "runtime_history_appended": runtime_history_appended,
+            "todo_added": bool(todo_result and todo_result.get("added")),
+            "quota_spent": False,
+        },
+        "write_policy": {
+            "append_runtime_history": True,
+            "mutate_active_state": decision == "approve",
+            "grant_agent_command": False,
+            "spend_quota": False,
+        },
+    }
+    if dry_run:
+        payload.update(
+            {
+                "json_path": None,
+                "markdown_path": None,
+                "index_path": str(runs_dir / "index.jsonl"),
+            }
+        )
+    else:
+        write_reserved_run_artifacts(
+            runs_dir=runs_dir,
+            generated_at=generated_at,
+            record=record,
+            index_record=index_record,
+            payload=payload,
+            render_markdown=render_dreaming_decision_markdown,
+        )
+    if sync_global:
+        payload["global_sync"] = sync_project_registry_to_global(
+            registry_path=registry_path,
+            runtime_root_override=str(runtime_root),
+            goal_id=safe_goal_id,
+            dry_run=dry_run,
+        )
+    else:
+        payload["global_sync"] = {"enabled": False}
+    return payload
+
+
 def render_dreaming_dry_run_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Dreaming Dry-Run Proposal",
@@ -278,6 +594,7 @@ def render_dreaming_dry_run_markdown(payload: dict[str, Any]) -> str:
     lines.extend(
         [
             f"- Classification: `{payload.get('classification')}`",
+            f"- Proposal id: `{payload.get('proposal_id')}`",
             f"- Proposal type: `{payload.get('proposal_type')}`",
             f"- Summary: {payload.get('summary')}",
             f"- Operator question: {payload.get('operator_question')}",
@@ -310,3 +627,51 @@ def render_dreaming_dry_run_markdown(payload: dict[str, Any]) -> str:
             f"{item.get('recommended_action') or item.get('delivery_outcome') or ''}"
         )
     return "\n".join(lines) + "\n"
+
+
+def render_dreaming_decision_markdown(payload: dict[str, Any]) -> str:
+    decision = (
+        payload.get("dreaming_decision")
+        if isinstance(payload.get("dreaming_decision"), dict)
+        else {}
+    )
+    source = (
+        payload.get("source_dreaming_proposal")
+        if isinstance(payload.get("source_dreaming_proposal"), dict)
+        else {}
+    )
+    side_effects = payload.get("side_effects") if isinstance(payload.get("side_effects"), dict) else {}
+    lines = [
+        "# Dreaming Proposal Decision",
+        "",
+        f"- Goal: `{payload.get('goal_id')}`",
+        f"- OK: `{payload.get('ok')}`",
+        f"- Dry run: `{payload.get('dry_run')}`",
+        f"- Appended: `{payload.get('appended')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Proposal id: `{payload.get('proposal_id')}`",
+        f"- Decision: `{payload.get('decision')}`",
+        f"- Promoted to delivery: `{decision.get('promoted_to_delivery')}`",
+        f"- Promoted todo: `{decision.get('promoted_todo_id')}`",
+        f"- Created todo: `{decision.get('created_todo_id')}`",
+        f"- Runtime history appended: `{side_effects.get('runtime_history_appended')}`",
+        f"- Active state mutated: `{side_effects.get('active_state_mutated')}`",
+        f"- Quota spent: `{side_effects.get('quota_spent')}`",
+        f"- Recommended action: {payload.get('recommended_action')}",
+        "",
+        "## Source Proposal",
+        "",
+        f"- Generated at: `{source.get('generated_at')}`",
+        f"- Classification: `{source.get('classification')}`",
+        f"- Proposal type: `{source.get('proposal_type')}`",
+        f"- Evidence window: `{source.get('evidence_window')}`",
+    ]
+    if source.get("summary"):
+        lines.append(f"- Summary: {source.get('summary')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_dreaming_markdown(payload: dict[str, Any]) -> str:
+    if payload.get("schema_version") == DREAMING_PROPOSAL_DECISION_SCHEMA_VERSION:
+        return render_dreaming_decision_markdown(payload)
+    return render_dreaming_dry_run_markdown(payload)

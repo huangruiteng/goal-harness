@@ -103,6 +103,7 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         "operator_question": "Should this project open a delivery todo for duplicate state handling?",
         "agent_command": "python should-not-run.py",
         "dreaming": {
+            "proposal_id": "dreaming_contract_fixture",
             "lane": "exploration",
             "evidence_window": "last_20_runs",
             "proposal_type": "refactor_warning",
@@ -150,6 +151,7 @@ def main() -> int:
         assert "next_safe_command" not in item["project_asset"], item
         proposal = item["project_asset"]["dreaming_proposal"]
         assert proposal["schema_version"] == "dreaming_proposal_v0", proposal
+        assert proposal["proposal_id"] == "dreaming_contract_fixture", proposal
         assert proposal["advisory"] is True, proposal
         assert proposal["promoted_to_delivery"] is False, proposal
         assert proposal["execution_allowed"] is False, proposal
@@ -172,6 +174,7 @@ def main() -> int:
         assert lane_badge["lane"] == "dreaming", lane_badge
         assert lane_badge["label"] == "Dreaming", lane_badge
         assert lane_badge["status"] == "dreaming_exploration_proposal", lane_badge
+        assert lane_badge["proposal_id"] == "dreaming_contract_fixture", lane_badge
         assert lane_badge["proposal_type"] == "refactor_warning", lane_badge
         assert lane_badge["advisory"] is True, lane_badge
         assert lane_badge["review_required"] is True, lane_badge
