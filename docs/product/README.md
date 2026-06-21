@@ -27,6 +27,9 @@ runtime contract, benchmark route, or launch draft.
   the opt-in public-safe procedure for turning `resume` / `remote-control`
   signals into evidence, with stop conditions that keep one-message TUI
   bootstrap primary until same-TUI visibility is proven.
+- [Codex CLI proof-capture demo](codex-cli-proof-capture-demo.md): public-safe
+  sample fixtures and acceptance decisions for rehearsing the visible proof
+  path without running Codex or reading session material.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
   identity/scope contract for primary and side agents, including worktree and
   review handoff policy, while keeping todo ownership in `claimed_by` and future
