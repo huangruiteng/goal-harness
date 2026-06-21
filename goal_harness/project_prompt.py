@@ -272,6 +272,66 @@ def build_codex_cli_bootstrap_message(
     }
 
 
+def build_codex_cli_tui_bootstrap_smoke_bundle(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+) -> dict[str, Any]:
+    bootstrap = build_codex_cli_bootstrap_message(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+    )
+    resolved_project = str(bootstrap["project"])
+    resolved_goal_id = str(bootstrap["goal_id"])
+    agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
+    message_only_command = (
+        f"{shell_arg(cli_bin)} codex-cli-bootstrap-message "
+        f"--project {shell_arg(resolved_project)} "
+        f"--goal-id {shell_arg(resolved_goal_id)}{agent_arg} --message-only"
+    )
+    review_packet_command = (
+        f"{shell_arg(cli_bin)} codex-cli-bootstrap-message "
+        f"--project {shell_arg(resolved_project)} "
+        f"--goal-id {shell_arg(resolved_goal_id)}{agent_arg}"
+    )
+    boundary = {
+        "runs_codex": False,
+        "reads_raw_transcripts": False,
+        "reads_session_files": False,
+        "reads_credentials": False,
+        "mutates_codex_session": False,
+        "spends_goal_harness_quota": False,
+        "requires_goal_harness_repo_clone": False,
+    }
+    validation_checklist = [
+        "archive installer works from a temporary GitHub-style tarball or existing install",
+        "message-only command prints only the TUI paste block, not the Markdown review packet",
+        "paste block includes no-clone install repair, quota guard, and bounded writeback commands",
+        "quota spend remains a post-validation command inside the paste block, not a smoke side effect",
+        "no raw Codex transcripts, session files, credentials, stdout, stderr, or private paths are read",
+    ]
+    return {
+        "ok": True,
+        "schema_version": "codex_cli_tui_bootstrap_smoke_bundle_v0",
+        "project": resolved_project,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "cli_bin": cli_bin,
+        "install_repair_command": bootstrap["install_repair_command"],
+        "review_packet_command": review_packet_command,
+        "message_only_command": message_only_command,
+        "quota_guard_command": bootstrap["quota_guard_command"],
+        "refresh_command": bootstrap["refresh_command"],
+        "quota_spend_command": bootstrap["quota_spend_command"],
+        "validation_checklist": validation_checklist,
+        "boundary": boundary,
+    }
+
+
 def render_codex_cli_exec_handoff_command(
     *,
     project: str,
@@ -672,6 +732,47 @@ for a contributor clone:
 - goal_id: `{payload.get("goal_id")}`
 - agent_id: `{payload.get("agent_id") or "(not provided)"}`
 - cli_bin: `{payload.get("cli_bin")}`
+"""
+
+
+def render_codex_cli_tui_bootstrap_smoke_bundle_markdown(payload: dict[str, Any]) -> str:
+    boundary = payload.get("boundary") or {}
+    checklist = "\n".join(f"- {item}" for item in payload.get("validation_checklist", []))
+    return f"""# Codex CLI TUI Bootstrap Smoke Bundle
+
+This packet is for validating the first-run Codex CLI path without launching or
+mutating a real Codex session.
+
+## Commands
+
+```bash
+{payload.get("message_only_command", "")}
+```
+
+- review_packet: `{payload.get("review_packet_command")}`
+- quota_guard: `{payload.get("quota_guard_command")}`
+- refresh_state: `{payload.get("refresh_command")}`
+- quota_spend_after_validation: `{payload.get("quota_spend_command")}`
+
+## Fresh Repo Install Repair
+
+```bash
+{payload.get("install_repair_command", "")}
+```
+
+## Transcript-Free Boundary
+
+- runs_codex: `{boundary.get("runs_codex")}`
+- reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
+- reads_session_files: `{boundary.get("reads_session_files")}`
+- reads_credentials: `{boundary.get("reads_credentials")}`
+- mutates_codex_session: `{boundary.get("mutates_codex_session")}`
+- spends_goal_harness_quota: `{boundary.get("spends_goal_harness_quota")}`
+- requires_goal_harness_repo_clone: `{boundary.get("requires_goal_harness_repo_clone")}`
+
+## Validation Checklist
+
+{checklist}
 """
 
 

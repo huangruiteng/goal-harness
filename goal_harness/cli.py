@@ -145,6 +145,7 @@ from .cli_commands import (
     handle_codex_cli_one_message_loop_pilot_command,
     handle_codex_cli_runtime_idle_detector_command,
     handle_codex_cli_session_probe_command,
+    handle_codex_cli_tui_bootstrap_smoke_bundle_command,
     handle_codex_cli_visible_local_driver_pilot_command,
     handle_codex_cli_visible_driver_run_command,
     handle_codex_cli_visible_driver_plan_command,
@@ -6023,6 +6024,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "codex-cli-bootstrap-message":
         return handle_codex_cli_bootstrap_message_command(args, print_payload)
+
+    if args.command == "codex-cli-tui-bootstrap-smoke-bundle":
+        return handle_codex_cli_tui_bootstrap_smoke_bundle_command(args, print_payload)
 
     if args.command == "codex-cli-one-message-loop-pilot":
         return handle_codex_cli_one_message_loop_pilot_command(args, print_payload)

@@ -52,6 +52,9 @@ This keeps the product hierarchy clear:
   and transcript-free validation checklist;
 - copy-only mode: `codex-cli-bootstrap-message --message-only` prints just the
   pasteable TUI block, while the default output remains the review packet;
+- smoke bundle: `codex-cli-tui-bootstrap-smoke-bundle` verifies the fresh-repo
+  installer, paste block, quota guard, and bounded writeback commands without
+  launching Codex or reading transcripts;
 - recurring automation: separate driver work;
 - contributor development: clone plus canary remains available.
 

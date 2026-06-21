@@ -80,6 +80,18 @@ repair/install Goal Harness if needed, connect the repo conservatively, run the
 quota/status guard, obey `interaction_contract`, preserve the visible TUI, and
 spend quota only after validated writeback.
 
+Transcript-free first-run smoke packet:
+
+```bash
+goal-harness codex-cli-tui-bootstrap-smoke-bundle --project . --goal-id <goal-id> --agent-id <agent-id>
+```
+
+This packet is for product and release validation, not an extra user step. It
+checks the no-clone install repair path, the copy-only paste block, the quota
+guard command, and the bounded writeback/spend commands without launching
+Codex, reading transcripts, inspecting session files, mutating a session, or
+spending quota.
+
 The first useful TUI response should be a control-plane snapshot, not a lecture
 about internals:
 
