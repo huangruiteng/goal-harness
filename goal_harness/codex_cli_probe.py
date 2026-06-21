@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import shlex
 import subprocess
 from pathlib import Path
@@ -13,6 +14,7 @@ from .project_prompt import build_codex_cli_bootstrap_message
 DEFAULT_CODEX_BIN = "codex"
 DEFAULT_TIMEOUT_SECONDS = 2.0
 DEFAULT_EXECUTOR_TIMEOUT_SECONDS = 30.0
+DEFAULT_MIN_HUMAN_INPUT_IDLE_SECONDS = 5.0
 
 
 HELP_COMMANDS = {
@@ -188,6 +190,57 @@ def load_codex_cli_runtime_idle_fixture(path: Path) -> dict[str, Any]:
     return data
 
 
+def probe_human_input_idle_seconds(*, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    """Read a coarse local human-input idle metric without touching Codex state.
+
+    On macOS this reads IOHIDSystem's HIDIdleTime counter. The value says only
+    how long the machine has been idle since the last keyboard/mouse event; it
+    does not read typed text, terminal buffers, Codex transcripts, session
+    files, stdout/stderr, or credentials.
+    """
+
+    system = platform.system().lower()
+    if system != "darwin":
+        return {
+            "ok": False,
+            "source": "unsupported_platform",
+            "platform": system or "unknown",
+            "error": "human_input_idle_probe_only_implemented_for_macos",
+        }
+    try:
+        result = subprocess.run(
+            ["ioreg", "-c", "IOHIDSystem"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "source": "macos_hid_idle_time", "error": "ioreg_not_found"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "source": "macos_hid_idle_time", "error": "timeout"}
+    if result.returncode != 0:
+        return {"ok": False, "source": "macos_hid_idle_time", "error": f"exit_{result.returncode}"}
+    for line in result.stdout.splitlines():
+        if "HIDIdleTime" not in line:
+            continue
+        raw_value = line.split("=", 1)[-1].strip()
+        try:
+            return {
+                "ok": True,
+                "source": "macos_hid_idle_time",
+                "platform": "darwin",
+                "human_input_idle_seconds": int(raw_value) / 1_000_000_000,
+            }
+        except ValueError:
+            return {
+                "ok": False,
+                "source": "macos_hid_idle_time",
+                "error": "unparseable_hid_idle_time",
+            }
+    return {"ok": False, "source": "macos_hid_idle_time", "error": "hid_idle_time_not_found"}
+
+
 def run_codex_cli_session_probe(
     *,
     codex_bin: str = DEFAULT_CODEX_BIN,
@@ -302,6 +355,58 @@ RUNTIME_IDLE_REQUIRED_FALSE_CHECKS: tuple[tuple[str, tuple[str, ...], str], ...]
 )
 
 
+def build_codex_cli_runtime_idle_observation_payload(
+    *,
+    observed_surface: str,
+    turn_state: str,
+    human_input_idle_seconds: float | None,
+    min_human_input_idle_seconds: float,
+    checked_before_prompt: bool,
+    visible_to_user: bool,
+    user_can_interrupt: bool,
+    manual_takeover_available: bool,
+    probe_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Convert public-safe local idle observations into detector input."""
+
+    idle_seconds_known = human_input_idle_seconds is not None
+    no_active_human_typing = bool(
+        idle_seconds_known and human_input_idle_seconds >= min_human_input_idle_seconds
+    )
+    no_running_turn = turn_state == "idle"
+    return {
+        "observed_surface": observed_surface,
+        "source": "local_runtime_observation",
+        "runtime_observation": {
+            "schema_version": "codex_cli_runtime_idle_observation_v0",
+            "human_input_idle_seconds": human_input_idle_seconds,
+            "min_human_input_idle_seconds": min_human_input_idle_seconds,
+            "human_input_idle_source": (probe_result or {}).get("source") or "provided",
+            "human_input_idle_probe_ok": (probe_result or {}).get("ok"),
+            "turn_state": turn_state,
+            "turn_state_source": "public_safe_local_observation",
+            "cannot_prove_unknown_turn_state": turn_state == "unknown",
+        },
+        "idle_guard": {
+            "no_active_human_typing": no_active_human_typing,
+            "no_running_turn": no_running_turn,
+            "checked_before_prompt": checked_before_prompt,
+        },
+        "turn_visibility": {"visible_to_user": visible_to_user},
+        "interruptibility": {
+            "user_can_interrupt": user_can_interrupt,
+            "manual_takeover_available": manual_takeover_available,
+        },
+        "boundary": {
+            "reads_raw_transcripts": False,
+            "reads_session_files": False,
+            "reads_stdout_stderr": False,
+            "reads_credentials": False,
+            "mutates_hidden_session_state": False,
+        },
+    }
+
+
 def build_codex_cli_runtime_idle_detector(
     *,
     project: Path,
@@ -312,11 +417,12 @@ def build_codex_cli_runtime_idle_detector(
 ) -> dict[str, Any]:
     """Validate public-safe runtime idle evidence before a visible later turn.
 
-    This is a fixture-backed contract, not a real Codex session inspector. It
-    lets a local driver prove the two product-critical facts for later visible
-    turns: the user is not typing, and Codex is not already running a turn. The
-    detector intentionally does not read transcripts, session files,
-    stdout/stderr, credentials, or hidden runtime state.
+    This is not a Codex session inspector. It accepts either a reproducible
+    public-safe fixture or a narrow local observation payload. Both paths prove
+    the two product-critical facts for later visible turns: the user is not
+    typing, and Codex is not already running a turn. The detector intentionally
+    does not read transcripts, session files, stdout/stderr, credentials, or
+    hidden runtime state.
     """
 
     resolved_project = str(project.expanduser())
@@ -349,15 +455,17 @@ def build_codex_cli_runtime_idle_detector(
             "goal_id": resolved_goal_id,
             "agent_id": agent_id,
             "cli_bin": cli_bin,
-            "source": "fixture_required",
-            "decision": "runtime_idle_fixture_required",
+            "source": "idle_evidence_required",
+            "decision": "runtime_idle_evidence_required",
             "approved_for_visible_later_turn": False,
-            "recommended_action": "capture a public-safe runtime idle fixture before steering a later visible Codex CLI turn",
+            "recommended_action": "capture public-safe runtime idle evidence before steering a later visible Codex CLI turn",
             "required_fixture_shape": required_fixture_shape,
             "checks": [],
-            "failures": ["missing_runtime_idle_fixture"],
+            "failures": ["missing_runtime_idle_evidence"],
             "boundary": {
-                "fixture_only": True,
+                "fixture_only": False,
+                "public_safe_fixture_supported": True,
+                "local_observation_adapter_supported": True,
                 "runs_codex": False,
                 "reads_raw_transcripts": False,
                 "reads_session_files": False,
@@ -415,6 +523,8 @@ def build_codex_cli_runtime_idle_detector(
         decision = "runtime_idle_detector_incomplete"
         recommended_action = "keep the TUI bootstrap path visible and do not steer a later turn yet"
 
+    source = str(idle_payload.get("source") or "idle_fixture")
+    local_observation = source == "local_runtime_observation"
     return {
         "ok": True,
         "schema_version": "codex_cli_runtime_idle_detector_v0",
@@ -422,15 +532,18 @@ def build_codex_cli_runtime_idle_detector(
         "goal_id": resolved_goal_id,
         "agent_id": agent_id,
         "cli_bin": cli_bin,
-        "source": "idle_fixture",
+        "source": source,
         "observed_surface": observed_surface,
+        "runtime_observation": idle_payload.get("runtime_observation"),
         "decision": decision,
         "approved_for_visible_later_turn": approved,
         "recommended_action": recommended_action,
         "checks": checks,
         "failures": failures,
         "boundary": {
-            "fixture_only": True,
+            "fixture_only": not local_observation,
+            "public_safe_fixture_supported": True,
+            "local_observation_adapter_supported": True,
             "runs_codex": False,
             "reads_raw_transcripts": False,
             "reads_session_files": False,
@@ -1552,6 +1665,14 @@ def build_codex_cli_visible_local_driver_pilot(
         f"{_shell_arg(cli_bin)} codex-cli-runtime-idle-detector "
         f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}"
         f"{' --agent-id ' + _shell_arg(agent_id) if agent_id else ''} "
+        "--observe-local-runtime --observed-surface visible_resume_prompt "
+        "--turn-state idle --probe-human-input-idle --checked-before-prompt "
+        "--visible-to-user --user-can-interrupt --manual-takeover-available"
+    )
+    idle_fixture_detector_command = (
+        f"{_shell_arg(cli_bin)} codex-cli-runtime-idle-detector "
+        f"--project {_shell_arg(resolved_project)} --goal-id {_shell_arg(resolved_goal_id)}"
+        f"{' --agent-id ' + _shell_arg(agent_id) if agent_id else ''} "
         "--idle-fixture <public-runtime-idle.json>"
     )
 
@@ -1560,7 +1681,7 @@ def build_codex_cli_visible_local_driver_pilot(
         next_driver_action = "run_scheduler_exec_candidate_after_fresh_guard_and_prefix"
     elif proof_approved and scheduler_action == "external_visible_command_candidate":
         loop_decision = "runtime_idle_detector_required"
-        next_driver_action = "capture_public_safe_runtime_idle_fixture"
+        next_driver_action = "capture_public_safe_runtime_idle_observation"
     elif scheduler_action == "write_precise_blocker":
         loop_decision = "visible_loop_blocker_writeback_ready"
         next_driver_action = "write_precise_blocker_after_fresh_guard"
@@ -1581,7 +1702,7 @@ def build_codex_cli_visible_local_driver_pilot(
         "start from the visible Codex CLI TUI with the one-message bootstrap",
         "run quota should-run with the registered agent id before each scheduler tick",
         "stop on interaction_contract.user_channel.action_required=true and show the concrete user todo",
-        "require idle guard before any visible resume, remote-control, or same-TUI prompt",
+        "require public-safe local idle observation or a fixture before any visible resume, remote-control, or same-TUI prompt",
         "run codex-cli-local-scheduler-exec as dry-run unless guard and explicit execution flags are present",
         "for a visible candidate, require guard_checked plus an allowed candidate command prefix",
         "for a blocker, write compact Goal Harness state only after guard_checked",
@@ -1636,10 +1757,12 @@ def build_codex_cli_visible_local_driver_pilot(
                 "interruptibility.user_can_interrupt",
                 "interruptibility.manual_takeover_available",
             ],
-            "current_pilot_implements_runtime_idle_detection": False,
+            "current_pilot_implements_runtime_idle_detection": True,
             "fixture_backed_runtime_idle_detector": True,
-            "runtime_sensor_implemented": False,
+            "runtime_sensor_implemented": True,
             "public_safe_fixture_supported": True,
+            "local_observation_adapter_supported": True,
+            "no_private_state_observation": True,
         },
         "visible_loop_steps": visible_loop_steps,
         "commands": {
@@ -1651,6 +1774,7 @@ def build_codex_cli_visible_local_driver_pilot(
             "candidate_command": scheduler_commands.get("candidate_command"),
             "blocker_writeback": scheduler_commands.get("blocker_writeback"),
             "runtime_idle_detector": idle_detector_command,
+            "runtime_idle_detector_fixture": idle_fixture_detector_command,
         },
         "execution_policy": {
             "tui_bootstrap_primary": True,
@@ -2123,6 +2247,8 @@ def render_codex_cli_visible_local_driver_pilot_markdown(payload: dict[str, Any]
 - fixture_backed_runtime_idle_detector: `{idle_guard.get("fixture_backed_runtime_idle_detector")}`
 - runtime_sensor_implemented: `{idle_guard.get("runtime_sensor_implemented")}`
 - public_safe_fixture_supported: `{idle_guard.get("public_safe_fixture_supported")}`
+- local_observation_adapter_supported: `{idle_guard.get("local_observation_adapter_supported")}`
+- no_private_state_observation: `{idle_guard.get("no_private_state_observation")}`
 
 {fixture_key_lines}
 
@@ -2138,6 +2264,7 @@ def render_codex_cli_visible_local_driver_pilot_markdown(payload: dict[str, Any]
 {commands.get("scheduler_exec_candidate_template")}
 {commands.get("scheduler_exec_blocker_template")}
 {commands.get("runtime_idle_detector")}
+{commands.get("runtime_idle_detector_fixture")}
 ```
 
 ## Execution Policy
@@ -2181,12 +2308,12 @@ def render_codex_cli_runtime_idle_detector_markdown(payload: dict[str, Any]) -> 
         if isinstance(check, dict)
     )
     if not check_lines:
-        check_lines = "- no runtime idle fixture supplied"
+        check_lines = "- no runtime idle evidence supplied"
     failure_lines = "\n".join(f"- {failure}" for failure in failures) if failures else "- none"
     required_shape_block = ""
     if isinstance(required_shape, dict):
         required_shape_block = f"""
-## Required Fixture Shape
+## Required Evidence Shape
 
 ```json
 {json.dumps(required_shape, indent=2, ensure_ascii=False)}
@@ -2196,6 +2323,7 @@ def render_codex_cli_runtime_idle_detector_markdown(payload: dict[str, Any]) -> 
 
 - decision: `{payload.get("decision")}`
 - approved_for_visible_later_turn: `{payload.get("approved_for_visible_later_turn")}`
+- source: `{payload.get("source")}`
 - observed_surface: `{payload.get("observed_surface")}`
 - recommended_action: {payload.get("recommended_action")}
 
@@ -2210,6 +2338,8 @@ def render_codex_cli_runtime_idle_detector_markdown(payload: dict[str, Any]) -> 
 ## Boundary
 
 - fixture_only: `{boundary.get("fixture_only")}`
+- public_safe_fixture_supported: `{boundary.get("public_safe_fixture_supported")}`
+- local_observation_adapter_supported: `{boundary.get("local_observation_adapter_supported")}`
 - runs_codex: `{boundary.get("runs_codex")}`
 - reads_raw_transcripts: `{boundary.get("reads_raw_transcripts")}`
 - reads_session_files: `{boundary.get("reads_session_files")}`
