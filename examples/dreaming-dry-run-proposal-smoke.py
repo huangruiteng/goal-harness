@@ -19,7 +19,7 @@ def run_cli(*args: str, registry_path: Path, runtime: Path) -> dict:
         [
             sys.executable,
             "-m",
-            "goal_harness.cli",
+            "loopx.cli",
             "--registry",
             str(registry_path),
             "--runtime-root",
@@ -60,7 +60,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
     runtime = root / "runtime"
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     state_path = project / state_file
-    registry_path = project / ".goal-harness" / "registry.json"
+    registry_path = project / ".loopx" / "registry.json"
     runs_dir = runtime / "goals" / GOAL_ID / "runs"
 
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +116,15 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
     )
     append_run(
         runs_dir,
+        generated_at="2026-01-01T00:02:30+00:00",
+        classification="loopx_rename_validation_worktree_smoke_passed",
+        action=(
+            "Validation ran from " + "/" + "tmp/loopx-private-evidence; this "
+            "local path must be dropped from public-safe dreaming evidence."
+        ),
+    )
+    append_run(
+        runs_dir,
         generated_at="2026-01-01T00:02:00+00:00",
         classification="quota_slot_spent",
         action="Spend accounting should not be evidence for dreaming proposals.",
@@ -136,7 +145,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="goal-harness-dreaming-dry-run-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="loopx-dreaming-dry-run-") as tmp:
         registry_path, runtime, state_path, index_path = write_fixture(Path(tmp))
         before_state = state_path.read_text(encoding="utf-8")
         before_index = index_path.read_text(encoding="utf-8")
@@ -156,7 +165,9 @@ def main() -> int:
         assert payload["dry_run"] is True, payload
         assert payload["classification"] == "dreaming_refactor_warning", payload
         assert payload["proposal_type"] == "refactor_warning", payload
-        assert len(payload["recent_evidence"]) == 3, payload
+        assert len(payload["recent_evidence"]) == 4, payload
+        evidence_text = json.dumps(payload["recent_evidence"], ensure_ascii=False)
+        assert "/" + "tmp/loopx-private-evidence" not in evidence_text, payload
         preview = payload["run_record_preview"]
         assert preview["agent_command"] is None, preview
         assert preview["dreaming"]["advisory"] is True, preview

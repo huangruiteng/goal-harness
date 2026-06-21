@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from goal_harness.quota import build_quota_should_run, build_quota_slot_preview  # noqa: E402
+from loopx.quota import build_quota_should_run, build_quota_slot_preview  # noqa: E402
 
 
 GOAL_ID = "capability-gate-goal"
@@ -153,7 +153,7 @@ def main() -> int:
         for item in p0_fallback["capability_gate"]["runnable_candidates"]
     ] == ["todo_capability_2", "todo_capability_5"], p0_fallback
     assert p0_fallback["capability_gate"]["blocked_candidates"][0]["todo_id"] == "todo_capability_1", p0_fallback
-    assert "Run the benchmark runner once" in p0_fallback["recommended_action"], p0_fallback
+    assert p0_fallback["recommended_action"] == p0_validate["text"], p0_fallback
     assert "choose one of 2 capability-runnable todo(s)" in p0_fallback["protocol_action_packet"]["summary"], p0_fallback
 
     fallback = build_quota_should_run(
@@ -175,7 +175,7 @@ def main() -> int:
     assert fallback["capability_gate"]["blocked_candidates"][0]["missing_capabilities"] == ["benchmark_runner"], fallback
     assert fallback["capability_gate"]["blocked_candidates"][1]["missing_capabilities"] == ["network"], fallback
     assert fallback["capability_gate"]["blocked_candidates"][2]["missing_capabilities"] == ["gpu_runner"], fallback
-    assert "Run the benchmark runner once" in fallback["recommended_action"], fallback
+    assert fallback["recommended_action"] == p1_docs["text"], fallback
     assert "choose one of 1 capability-runnable todo(s)" in fallback["protocol_action_packet"]["summary"], fallback
 
     repair_candidate = build_quota_should_run(
