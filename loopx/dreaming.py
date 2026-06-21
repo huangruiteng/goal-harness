@@ -61,8 +61,9 @@ def _signal_runs(goal: dict[str, Any], limit: int) -> list[dict[str, Any]]:
 
 
 def _proposal_type(runs: list[dict[str, Any]]) -> str:
-    combined = " ".join(
-        public_safe_compact_text(
+    compact_signals: list[str] = []
+    for run in runs:
+        compact = public_safe_compact_text(
             " ".join(
                 str(run.get(field) or "")
                 for field in (
@@ -74,8 +75,9 @@ def _proposal_type(runs: list[dict[str, Any]]) -> str:
             ),
             limit=500,
         )
-        for run in runs
-    ).lower()
+        if compact:
+            compact_signals.append(compact)
+    combined = " ".join(compact_signals).lower()
     if any(token in combined for token in ("refactor", "duplicate", "bloat", "large", "monolith", "drift")):
         return "refactor_warning"
     if any(token in combined for token in ("lesson", "memory", "playbook", "skill", "docs", "documentation")):
