@@ -43,6 +43,7 @@ solution, a weak worker policy, or a bad canary.
 | `swe-marathon` | `find-network-alignments` | Harbor host Codex app-server Goal | `0.0`, `official_verifier_solution_failure` | `official_zero_native_goal_first_closeout_needs_solution_phase_counters` | Teach the Harbor/SWE-Marathon reducer to preserve public-safe edit/test/verify phase counters before treating this as model-capability evidence. |
 | `swe-marathon` | `rust-c-compiler` | Harbor host Codex app-server Goal, prewarmed/larger-budget r2 | `0.0`, `official_verifier_solution_failure`; setup, agent execution, official verifier, and job closeout completed | `official_zero_native_goal_second_closeout_setup_cleared_needs_solution_phase_counters` | Stop treating this case as an environment blocker; add public-safe edit/test/verify counters or run a matched treatment/alternate small SWE case before making model-quality claims. |
 | `skillsbench@1.1` | `react-performance-debugging` | native app-server Goal baseline, high reasoning | `0.0`, `skillsbench_runner_error`; public compact shows worker connection but no worker trace directory or turn-start evidence | `native_goal_worker_connected_trace_dir_missing_not_solver_quality_evidence` | Repair the native worker public trace materialization path before using this or any new SkillsBench native Goal row as solver-quality baseline evidence. |
+| `skillsbench@1.1` | `llm-prefix-cache-replay` | native app-server Goal baseline, marker-completion handoff | `0.0`, `official_score_zero_case_failure`; worker marker observed/deleted and compact official closeout reached | `native_goal_worker_marker_handoff_repaired_official_zero_needs_solution_phase_attribution` | Stop treating this route as a worker handoff blocker. Add public-safe solution-phase counters, run a matched treatment, or rotate a new canary through the repaired marker route. |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | BenchFlow ACP blind-loop baseline/treatment | `0.0/0.0`, `paired_no_score_uplift` | `paired_zero_acp_blind_loop_non_native_goal_no_uplift` | Stop using more ACP blind-loop repeats as primary Codex Goal evidence; implement a native SkillsBench app-server Goal worker first. |
 | `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | BenchFlow ACP blind-loop baseline/treatment | `0.0/0.0`, `paired_no_score_uplift` | `paired_zero_acp_blind_loop_non_native_goal_no_uplift` | Keep as a stability canary only until the native SkillsBench app-server Goal worker exists. |
 
@@ -57,11 +58,13 @@ r2 also clears the previous SWE-Marathon setup blocker. These current failures
 are no longer setup blockers; the next missing piece is solution-phase
 attribution.
 
-SkillsBench is different. The ACP rows prove that setup, prewarm, rounds, and
-official scoring can complete. The native app-server Goal canary proves host
-worker connection, but it still lacks public worker turn trace materialization.
-The next engineering slice should therefore be the native worker trace path,
-not another same-policy repeat.
+SkillsBench has now crossed the worker-handoff line for one native
+app-server Goal case. The ACP rows still prove only setup/prewarm/round/scoring
+under a non-native blind-loop policy, while the marker-completion native
+`llm-prefix-cache-replay` rerun proves the host worker can return to BenchFlow
+and reach official closeout. Its `0.0` is therefore no longer a runner-handoff
+blocker; the next engineering slice is solution-phase attribution or a matched
+treatment/native canary through the repaired marker route.
 
 ## Durable Rule
 
