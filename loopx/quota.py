@@ -1976,15 +1976,48 @@ def _selected_action_with_agent_lane(
 ) -> Any:
     if not isinstance(agent_lane_next_action, dict):
         return selected_action
-    if (
-        agent_lane_next_action.get("source") != "capability_gate.runnable_candidates"
-        or agent_lane_next_action.get("confidence") != "selected"
-        or agent_lane_next_action.get("selected_by")
-        not in {"active_next_action_todo", "current_agent_claimed_todo"}
-    ):
+    if agent_lane_next_action.get("source") != "capability_gate.runnable_candidates":
+        return selected_action
+    selected_by = agent_lane_next_action.get("selected_by")
+    confidence = agent_lane_next_action.get("confidence")
+    if selected_by not in {"active_next_action_todo", "current_agent_claimed_todo", "unclaimed_todo"}:
+        return selected_action
+    if confidence not in {"selected", "candidate"}:
         return selected_action
     lane_text = str(agent_lane_next_action.get("text") or "").strip()
     return lane_text or selected_action
+
+
+def _selected_action_with_capability_gate(
+    selected_action: Any,
+    *,
+    capability_gate: dict[str, Any] | None,
+) -> Any:
+    if not isinstance(capability_gate, dict) or capability_gate.get("action") != "run":
+        return selected_action
+    blocked = (
+        capability_gate.get("blocked_candidates")
+        if isinstance(capability_gate.get("blocked_candidates"), list)
+        else []
+    )
+    if not any(
+        isinstance(item, dict)
+        and _actions_are_projection_aligned(selected_action, item.get("text"))
+        for item in blocked
+    ):
+        return selected_action
+    runnable = (
+        capability_gate.get("runnable_candidates")
+        if isinstance(capability_gate.get("runnable_candidates"), list)
+        else []
+    )
+    for item in runnable:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            return text
+    return selected_action
 
 
 def _normalize_action_for_compare(value: Any) -> str:
@@ -4940,6 +4973,11 @@ def build_quota_should_run(
                     capability_gate.get("owner_action")
                     or capability_gate.get("reason")
                     or selected_recommended_action
+                )
+            else:
+                selected_recommended_action = _selected_action_with_capability_gate(
+                    selected_recommended_action,
+                    capability_gate=capability_gate,
                 )
         if workspace_guard:
             selected_recommended_action = (
