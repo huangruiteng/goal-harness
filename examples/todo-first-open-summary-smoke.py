@@ -190,6 +190,7 @@ def assert_blocked_priority_fallback_visible() -> None:
     decision = build_quota_should_run(
         build_blocked_priority_fallback_status_payload(),
         goal_id=GOAL_ID,
+        agent_id="codex-main-control",
     )
     assert decision["should_run"] is True, decision
     fallback = decision["blocked_priority_fallback"]
@@ -435,6 +436,107 @@ def assert_claimed_markdown_todos_survive_visibility_lanes() -> None:
     assert summary["current_agent_claimed_monitor_count"] == 1, summary
 
 
+def assert_claimed_advancement_lanes_preserve_claimants() -> None:
+    primary_claimed_lines = "\n".join(
+        (
+            f"- [ ] [P1] Primary claimed advancement item {index}.\n"
+            f"  <!-- goal-harness:todo todo_id=todo_primary_{index} status=open "
+            "task_class=advancement_task action_kind=primary_backlog "
+            "claimed_by=codex-main-control -->"
+        )
+        for index in range(1, 21)
+    )
+    stale_side_lines = "\n".join(
+        (
+            f"- [ ] [P1] Stale side claimed advancement item {index}.\n"
+            f"  <!-- goal-harness:todo todo_id=todo_side_stale_{index} status=open "
+            "task_class=advancement_task action_kind=frontstage_stale_backlog "
+            "claimed_by=codex-side-bypass -->"
+        )
+        for index in range(1, 6)
+    )
+    state_text = (
+        "## Agent Todo\n\n"
+        f"{primary_claimed_lines}\n"
+        f"{stale_side_lines}\n"
+        "- [ ] [P0] Side claimed TUI continuation item.\n"
+        "  <!-- goal-harness:todo todo_id=todo_side_tui status=open "
+        "task_class=advancement_task action_kind=codex_cli_tui_continuation "
+        "claimed_by=codex-side-bypass -->\n"
+    )
+    agent_todos = parse_active_state_todos(state_text)["agent_todos"]
+    assert agent_todos["claimed_advancement_open_count"] == 26, agent_todos
+    assert agent_todos["first_open_items"][0]["todo_id"] == "todo_side_tui", agent_todos
+    assert "todo_side_tui" in {
+        item["todo_id"] for item in agent_todos["claimed_advancement_open_items"]
+    }, agent_todos
+
+    asset_summary = project_asset_todo_summary(agent_todos, role="agent")
+    assert asset_summary is not None, agent_todos
+    status_payload = {
+        "ok": True,
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": GOAL_ID,
+                    "status": "eligible_with_many_claimed_advancement_items",
+                    "waiting_on": "codex",
+                    "severity": "action",
+                    "source": "latest_run",
+                    "recommended_action": "Use claimed advancement lanes without losing side agents.",
+                    "coordination": {
+                        "primary_agent": "codex-main-control",
+                        "registered_agents": ["codex-main-control", "codex-side-bypass"],
+                    },
+                    "quota": {
+                        "compute": 1.0,
+                        "slot_minutes": 1,
+                        "allowed_slots": 1440,
+                        "spent_slots": 0,
+                        "state": "eligible",
+                        "reason": "eligible fixture",
+                    },
+                    "project_asset": {
+                        "owner": "codex",
+                        "next_action": "Use claimed advancement lanes without losing side agents.",
+                        "stop_condition": "stop on fixture boundary",
+                        "agent_todos": asset_summary,
+                    },
+                    "agent_todos": agent_todos,
+                }
+            ]
+        },
+        "run_history": {
+            "goals": [
+                {
+                    "id": GOAL_ID,
+                    "registry_member": True,
+                    "status": "active",
+                    "coordination": {
+                        "primary_agent": "codex-main-control",
+                        "registered_agents": ["codex-main-control", "codex-side-bypass"],
+                    },
+                    "quota": {"compute": 1.0, "window_hours": 24},
+                    "latest_runs": [],
+                }
+            ]
+        },
+    }
+    decision = build_quota_should_run(
+        status_payload,
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    summary = decision["agent_todo_summary"]
+    current_agent_advancement_ids = [
+        item["todo_id"] for item in summary["current_agent_claimed_advancement_items"]
+    ]
+    assert current_agent_advancement_ids[0] == "todo_side_tui", summary
+    assert "todo_side_tui" in current_agent_advancement_ids, summary
+    assert summary["first_executable_items"][0]["todo_id"] == "todo_side_tui", summary
+    assert summary["current_agent_claimed_advancement_count"] == 6, summary
+
+
 def main() -> int:
     agent_todos = build_truncated_todo_group()
     parsed_agent_todos = parse_multiline_deep_open_todo()
@@ -539,6 +641,7 @@ def main() -> int:
     assert_blocked_priority_fallback_visible()
     assert_claimed_frontstage_lanes_visible()
     assert_claimed_markdown_todos_survive_visibility_lanes()
+    assert_claimed_advancement_lanes_preserve_claimants()
     print("todo-first-open-summary-smoke ok")
     return 0
 
