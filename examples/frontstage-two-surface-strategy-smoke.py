@@ -42,6 +42,8 @@ def main() -> int:
         "The ops surface should still default to read-only",
         "Public visual experiments must not depend on live state",
         "showcase mode ignores `statusUrl`",
+        "frontstage-private-status-trap.public.json",
+        "`GH_FAKE_*` markers",
         "Phase 1, public showcase polish",
         "Phase 2, local ops data layer",
         "Phase 3, controlled local write affordances",
@@ -66,6 +68,8 @@ def main() -> int:
         "relative or loopback URLs",
         "Do not use ops-mode URLs as public links",
         "Neither surface is browser write authority",
+        "frontstage-private-status-trap.public.json",
+        "synthetic `GH_FAKE_*` trap markers",
     ]:
         assert_contains(compact_dashboard_readme, existing_contract)
 

@@ -59,6 +59,10 @@ showcase metadata. Neither surface is browser write authority.
 The default frontstage route is public showcase mode. It ignores `statusUrl`
 and renders only bundled showcase/demo material, so a copied or hosted URL does
 not accidentally project local registry state.
+`examples/fixtures/frontstage-private-status-trap.public.json` is the synthetic
+negative fixture for that boundary: browser smokes prove its `GH_FAKE_*` live
+status markers stay out of showcase URLs and appear only after an explicit
+`mode=ops` load.
 
 For live local control-plane inspection, explicitly enter ops mode:
 `/frontstage?mode=ops&statusUrl=http://127.0.0.1:8766/status.json`. The route
@@ -81,6 +85,8 @@ compiled dashboard, `status.frontstage-share.json`, a direct `/frontstage/`
 static route, a manifest, and a README with the local serve URL. The exporter
 rejects local paths, private registry state, internal document hosts, raw-key
 leaks, token assignments, and private key material before reporting success.
+The share-bundle smoke also scans generated files for the synthetic `GH_FAKE_*`
+trap markers so public exports cannot accidentally carry a live-status payload.
 For repository Pages hosting later, rerun the same exporter with
 `-- --base /goal-harness/ --out-dir <artifact-dir>` and publish only that
 generated site artifact.

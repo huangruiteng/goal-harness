@@ -80,6 +80,17 @@ async function copyIndexForFrontstage(siteDir) {
   await writeFile(resolve(frontstageDir, "index.html"), html);
 }
 
+async function removeCopiedLiveStatusFiles(siteDir) {
+  for (const entry of await readdir(siteDir, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (/^status\..*\.json$/i.test(entry.name) && entry.name !== statusFileName) {
+      await rm(resolve(siteDir, entry.name), { force: true });
+    }
+  }
+}
+
 function sanitizeProjectionForShare(projection) {
   return {
     ...projection,
@@ -283,6 +294,7 @@ async function main() {
     "--emptyOutDir",
   ], { cwd: dashboardDir });
 
+  await removeCopiedLiveStatusFiles(siteDir);
   await copyIndexForFrontstage(siteDir);
 
   const projectionOutput = run("python3", [resolve(repoRoot, "examples/goal-channel-frontstage-fixture.py"), "--format", "json"], {

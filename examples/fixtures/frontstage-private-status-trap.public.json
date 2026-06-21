@@ -1,0 +1,116 @@
+{
+  "ok": true,
+  "registry": "GH_FAKE_PRIVATE_REGISTRY_SUMMARY_GAMMA",
+  "runtime_root": "GH_FAKE_PRIVATE_RUNTIME_ROOT_THETA",
+  "goal_count": 1,
+  "run_count": 1,
+  "status_contract": {
+    "schema_version": 2,
+    "minimum_dashboard_schema_version": 2,
+    "producer": "frontstage-private-status-trap.public.json",
+    "reload_hint": "GH_FAKE_LIVE_STATUS_FEED_BETA"
+  },
+  "contract": {
+    "ok": true,
+    "summary": {
+      "errors": 0,
+      "warnings": 0,
+      "checks": 1
+    },
+    "errors": [],
+    "warnings": [],
+    "checks": [
+      "synthetic fake-private status trap for frontstage boundary smokes"
+    ]
+  },
+  "attention_queue": {
+    "available": true,
+    "item_count": 1,
+    "needs_user_or_controller": 0,
+    "needs_controller": 0,
+    "needs_codex": 1,
+    "watching_external_evidence": 0,
+    "items": [
+      {
+        "goal_id": "fake-private-trap-goal",
+        "status": "GH_FAKE_PRIVATE_STATUS_ALPHA",
+        "waiting_on": "codex",
+        "severity": "action",
+        "recommended_action": "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA should appear only in explicit ops mode.",
+        "source": "synthetic-public-boundary-trap",
+        "goal_channel_projection": {
+          "schema_version": "goal_channel_projection_v0",
+          "mode": "read_only",
+          "goal_id": "fake-private-trap-goal",
+          "display_name": "Fake Private Trap Goal",
+          "generated_at": "2026-06-21T10:00:00Z",
+          "latest_status": "GH_FAKE_PRIVATE_STATUS_ALPHA",
+          "waiting_on": "codex",
+          "next_action": "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA visible only after mode=ops statusUrl load.",
+          "source_refs": {
+            "status_generated_at": "2026-06-21T10:00:00Z",
+            "event_ledger_source": "GH_FAKE_PRIVATE_LEDGER_SOURCE_EPSILON",
+            "live_status_feed": "GH_FAKE_LIVE_STATUS_FEED_BETA"
+          },
+          "decision_frame": {
+            "user_action_required": false,
+            "agent_action_required": true,
+            "quiet_noop_allowed": false
+          },
+          "quota": {
+            "allowed_slots": 10,
+            "spent_slots": 1,
+            "state": "eligible",
+            "spend_policy": "GH_FAKE_PRIVATE_SPEND_POLICY_ZETA"
+          },
+          "user_todos": [],
+          "agent_todos": [
+            {
+              "todo_id": "fake_private_trap_todo",
+              "priority": "P2",
+              "status": "open",
+              "claimed_by": "codex-side-bypass",
+              "task_class": "advancement_task",
+              "action_kind": "frontstage_public_boundary_trap",
+              "title": "GH_FAKE_PRIVATE_TODO_GAMMA should not render on public showcase URLs."
+            }
+          ],
+          "open_gates": [],
+          "active_leases": [
+            {
+              "todo_id": "fake_private_trap_todo",
+              "owner_agent": "codex-side-bypass",
+              "status": "soft_claim"
+            }
+          ],
+          "artifacts": [
+            {
+              "kind": "trap",
+              "label": "GH_FAKE_PRIVATE_ARTIFACT_ETA",
+              "path": "GH_FAKE_PRIVATE_ARTIFACT_PATH_IOTA"
+            }
+          ],
+          "recent_events": [
+            {
+              "generated_at": "2026-06-21T10:01:00Z",
+              "classification": "frontstage_public_boundary_trap",
+              "summary": "GH_FAKE_PRIVATE_EVENT_DELTA should require explicit ops mode."
+            }
+          ],
+          "source_warnings": [
+            {
+              "kind": "fake_private_status_trap",
+              "message": "Synthetic fake-private fixture: public showcase and exported bundles must not render GH_FAKE_* markers."
+            }
+          ],
+          "truth_contract": {
+            "event_ledger_is_source_of_truth": true,
+            "projection_is_writable": false,
+            "recompute_rule": "reload explicit ops statusUrl only",
+            "write_authority": "none"
+          }
+        }
+      }
+    ]
+  }
+}

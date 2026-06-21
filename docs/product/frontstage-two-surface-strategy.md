@@ -107,7 +107,11 @@ Ops control-plane changes should validate:
 Cross-surface changes must prove both sides when they touch shared code. The
 minimum check is that showcase mode ignores `statusUrl`, ops mode accepts only
 relative or loopback feeds, and exported public bundles do not carry live
-registry state.
+registry state. Use
+`examples/fixtures/frontstage-private-status-trap.public.json` as the
+synthetic negative fixture: public showcase URLs and share bundles must not
+render its `GH_FAKE_*` markers, while explicit ops-mode statusUrl loading may
+render them during local inspection.
 
 ## Phased Roadmap
 

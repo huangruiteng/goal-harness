@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = resolve("/tmp", "goal-harness-frontstage-share-bundle-smoke");
+const privateTrapFixturePath = resolve(repoRoot, "examples/fixtures/frontstage-private-status-trap.public.json");
 
 function run(command, args, cwd = repoRoot) {
   const result = spawnSync(command, args, {
@@ -47,6 +48,10 @@ function assertNoLeak(text, label) {
   if (hit) {
     throw new Error(`${label} leaked forbidden pattern: ${hit}`);
   }
+}
+
+function collectFakePrivateMarkers(text) {
+  return Array.from(new Set(text.match(/GH_FAKE_[A-Z0-9_]+/g) ?? [])).sort();
 }
 
 async function collectGeneratedTextFiles(rootDir) {
@@ -114,8 +119,18 @@ if (manifest.content_sources?.live_status_feed !== false) {
   throw new Error("public share bundle must not declare a live status feed content source");
 }
 
+const fakePrivateTrapFixture = await readFile(privateTrapFixturePath, "utf8");
+const fakePrivateTrapMarkers = collectFakePrivateMarkers(fakePrivateTrapFixture);
+if (fakePrivateTrapMarkers.length < 6) {
+  throw new Error("fake-private frontstage trap fixture is too weak");
+}
 for (const path of await collectGeneratedTextFiles(outDir)) {
-  assertNoLeak(await readFile(path, "utf8"), path);
+  const text = await readFile(path, "utf8");
+  assertNoLeak(text, path);
+  const leakedTrapMarkers = fakePrivateTrapMarkers.filter((marker) => text.includes(marker));
+  if (leakedTrapMarkers.length) {
+    throw new Error(`${path} leaked fake-private frontstage trap markers: ${leakedTrapMarkers.join(", ")}`);
+  }
 }
 
 const readmeText = await readFile(resolve(outDir, "README.md"), "utf8");

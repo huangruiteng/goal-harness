@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,8 +14,24 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/dashboard");
 const fixtureName = "status.frontstage.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
+const privateTrapFixtureName = "status.frontstage.private-trap.json";
+const privateTrapFixturePath = resolve(dashboardDir, "public", privateTrapFixtureName);
+const privateTrapSourcePath = resolve(repoRoot, "examples/fixtures/frontstage-private-status-trap.public.json");
 const visualOutputDir = resolve(repoRoot, "output/playwright/dashboard-frontstage-visual-acceptance");
 const port = Number(process.env.GOAL_HARNESS_DASHBOARD_FRONTSTAGE_SMOKE_PORT ?? "5197");
+const fakePrivateTrapMarkers = [
+  "GH_FAKE_PRIVATE_STATUS_ALPHA",
+  "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA",
+  "GH_FAKE_LIVE_STATUS_FEED_BETA",
+  "GH_FAKE_PRIVATE_REGISTRY_SUMMARY_GAMMA",
+  "GH_FAKE_PRIVATE_TODO_GAMMA",
+  "GH_FAKE_PRIVATE_EVENT_DELTA",
+  "GH_FAKE_PRIVATE_LEDGER_SOURCE_EPSILON",
+  "GH_FAKE_PRIVATE_SPEND_POLICY_ZETA",
+  "GH_FAKE_PRIVATE_ARTIFACT_ETA",
+  "GH_FAKE_PRIVATE_RUNTIME_ROOT_THETA",
+  "GH_FAKE_PRIVATE_ARTIFACT_PATH_IOTA",
+];
 
 function projectionFor(goalId, displayName, claimedBy, todoTitle) {
   return {
@@ -363,6 +379,7 @@ async function captureFrontstage(page, url, label, requiredText = []) {
 async function main() {
   const { chromium } = loadPlaywright();
   await writeFile(fixturePath, JSON.stringify(statusFixture, null, 2) + "\n", "utf-8");
+  await writeFile(privateTrapFixturePath, await readFile(privateTrapSourcePath, "utf8"), "utf-8");
   await mkdir(visualOutputDir, { recursive: true });
 
   const server = startDashboardServer();
@@ -468,6 +485,47 @@ async function main() {
       const publicModePresent = publicModeForbidden.filter((text) => publicModeText.includes(text));
       if (publicModePresent.length) {
         throw new Error(`Showcase frontstage loaded live statusUrl text: ${publicModePresent.join(", ")}`);
+      }
+      await captureFrontstage(
+        desktopPage,
+        `${baseUrl}/frontstage?statusUrl=/${privateTrapFixtureName}&goalId=fake-private-trap-goal`,
+        "desktop-frontstage-showcase-private-trap-ignored",
+        [
+          "Goal Harness Showcase Frontstage",
+          "showcase mode",
+          "Showcase mode ignores statusUrl",
+          "statusUrl ignored",
+          "Public Boundary",
+          "docs/showcases",
+        ],
+      );
+      const privateTrapPublicText = await desktopPage.locator("body").innerText();
+      const leakedTrapMarkers = fakePrivateTrapMarkers.filter((text) => privateTrapPublicText.includes(text));
+      if (leakedTrapMarkers.length) {
+        throw new Error(`Showcase mode rendered fake-private status trap markers: ${leakedTrapMarkers.join(", ")}`);
+      }
+      await captureFrontstage(
+        desktopPage,
+        `${baseUrl}/frontstage?mode=ops&statusUrl=/${privateTrapFixtureName}&goalId=fake-private-trap-goal`,
+        "desktop-frontstage-ops-private-trap-explicit",
+        [
+          "ops live",
+          "live status feed",
+          "Fake Private Trap Goal",
+          "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA",
+          "GH_FAKE_PRIVATE_TODO_GAMMA",
+          "GH_FAKE_PRIVATE_EVENT_DELTA",
+        ],
+      );
+      const privateTrapOpsText = await desktopPage.locator("body").innerText();
+      for (const marker of [
+        "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA",
+        "GH_FAKE_PRIVATE_TODO_GAMMA",
+        "GH_FAKE_PRIVATE_EVENT_DELTA",
+      ]) {
+        if (!privateTrapOpsText.includes(marker)) {
+          throw new Error(`Explicit ops mode did not render fake-private status trap marker: ${marker}`);
+        }
       }
       await captureFrontstage(
         desktopPage,
@@ -598,6 +656,7 @@ async function main() {
     }
     server.kill("SIGTERM");
     await rm(fixturePath, { force: true });
+    await rm(privateTrapFixturePath, { force: true });
   }
 }
 

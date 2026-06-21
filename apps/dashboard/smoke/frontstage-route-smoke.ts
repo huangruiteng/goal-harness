@@ -28,6 +28,7 @@ const stylesSource = readFileSync("src/styles.css", "utf8");
 const dataSource = readFileSync("src/data/goal-channel-frontstage.ts", "utf8");
 const statusSource = readFileSync("src/data/status.ts", "utf8");
 const catalogSource = readFileSync("../../docs/showcases/showcase-catalog.json", "utf8");
+const privateTrapFixtureSource = readFileSync("../../examples/fixtures/frontstage-private-status-trap.public.json", "utf8");
 const readmeSource = readFileSync("README.md", "utf8");
 const selectionSource = readFileSync("../../docs/dashboard-frontend-selection.md", "utf8");
 const packageSource = readFileSync("package.json", "utf8");
@@ -42,6 +43,9 @@ includes(routerSource, "basepath:", "router basepath option");
 includes(routerSource, "import.meta.env.BASE_URL", "Vite base URL router source");
 includes(packageSource, '"smoke:frontstage-browser"', "frontstage browser smoke script");
 includes(packageSource, '"smoke:frontstage-route"', "frontstage smoke script");
+includes(privateTrapFixtureSource, "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA", "fake-private status trap plan marker");
+includes(privateTrapFixtureSource, "GH_FAKE_LIVE_STATUS_FEED_BETA", "fake-private live status trap marker");
+includes(privateTrapFixtureSource, "GH_FAKE_PRIVATE_TODO_GAMMA", "fake-private todo trap marker");
 
 includes(dataSource, 'schema_version: "goal_channel_projection_v0"', "goal channel schema");
 includes(dataSource, "goalChannelProjectionSchema", "goal channel zod schema");
