@@ -244,16 +244,36 @@ goal-harness codex-cli-runtime-idle-detector \
   --project . \
   --goal-id <goal-id> \
   --agent-id <agent-id> \
-  --idle-fixture runtime-idle.public.json
+  --observe-local-runtime \
+  --observed-surface visible_resume_prompt \
+  --turn-state idle \
+  --probe-human-input-idle \
+  --checked-before-prompt \
+  --visible-to-user \
+  --user-can-interrupt \
+  --manual-takeover-available
 ```
 
-This detector is fixture-backed in v0. It is deliberately separate from the
-visible-session proof: the proof says "this route can create a visible,
-interruptible turn"; the idle detector says "this exact later turn is not
-racing human typing or an already-running Codex turn." The fixture must be
-public-safe and boolean-only. It must prove no active human typing, no running
-turn, and no transcript/session/stdout/stderr/credential reads before Goal
-Harness treats a later visible prompt as executable.
+This detector accepts either a public-safe fixture or a narrow local
+observation adapter. The local adapter may probe a coarse platform idle counter
+for "no recent human input" and requires an explicit visible `--turn-state
+idle`; unknown or running turn state fails closed. It is deliberately separate
+from the visible-session proof: the proof says "this route can create a
+visible, interruptible turn"; the idle detector says "this exact later turn is
+not racing human typing or an already-running Codex turn." It must prove no
+active human typing, no running turn, and no
+transcript/session/stdout/stderr/credential reads before Goal Harness treats a
+later visible prompt as executable.
+
+For reproducible tests or external sensors, the fixture path remains:
+
+```bash
+goal-harness codex-cli-runtime-idle-detector \
+  --project . \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --idle-fixture runtime-idle.public.json
+```
 
 ### 3. Headless Fallback
 
@@ -359,11 +379,12 @@ projects runnable candidates; it should not over-specify the model's local plan.
    `goal-harness codex-cli-visible-local-driver-pilot` to bind the one-message
    TUI start, scheduler executor, visible proof, idle guard, and no-transcript
    boundary into one public-safe packet.
-13. **Runtime idle detector**: validate a public-safe fixture with
+13. **Runtime idle detector**: validate public-safe idle evidence with
    `goal-harness codex-cli-runtime-idle-detector` before a visible later turn;
-   the follow-up is an actual local idle sensor that can observe no active
-   human typing and no running turn without reading transcripts, stdout/stderr,
-   credentials, or hidden session files.
+   the command now supports fixture replay and a narrow local observation
+   adapter that can prove coarse human-input idle plus explicit visible
+   turn-state without reading transcripts, stdout/stderr, credentials, or
+   hidden session files.
 14. **Validation harness**: add a public-safe fixture that proves the driver
    never stores raw transcript text and never spends quota before writeback.
 15. **Claude Code follow-up**: port the same product contract only after the

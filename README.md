@@ -202,8 +202,10 @@ goal-harness codex-cli-visible-local-driver-pilot --project . --goal-id <goal-id
 ```
 
 Later-turn automation stays conservative: `codex-cli-runtime-idle-detector`
-must validate a public-safe idle fixture before a visible resume or
-remote-control candidate can run.
+must validate public-safe idle evidence before a visible resume or
+remote-control candidate can run. It can use a reproducible fixture or a
+local observation adapter that only checks coarse human-input idle seconds plus
+an explicit visible turn-state.
 
 For Codex App, Claude Code, Cursor, or another terminal agent, paste this from
 the project repo:

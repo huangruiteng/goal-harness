@@ -154,17 +154,24 @@ def main() -> int:
     assert no_proof["scheduler_executor"]["executed"] is False, no_proof
     assert no_proof["visible_session_proof"]["approved"] is False, no_proof
     assert no_proof["runtime_idle_detector"]["approved"] is False, no_proof
-    assert no_proof["runtime_idle_detector"]["decision"] == "runtime_idle_fixture_required", no_proof
+    assert no_proof["runtime_idle_detector"]["decision"] == "runtime_idle_evidence_required", no_proof
     assert no_proof["idle_guard_contract"]["required_before_visible_prompt"] is True, no_proof
+    assert no_proof["idle_guard_contract"]["current_pilot_implements_runtime_idle_detection"] is True, no_proof
     assert no_proof["idle_guard_contract"]["fixture_backed_runtime_idle_detector"] is True, no_proof
+    assert no_proof["idle_guard_contract"]["runtime_sensor_implemented"] is True, no_proof
+    assert no_proof["idle_guard_contract"]["local_observation_adapter_supported"] is True, no_proof
+    assert no_proof["idle_guard_contract"]["no_private_state_observation"] is True, no_proof
     assert "codex-cli-local-scheduler-exec" in no_proof["commands"]["scheduler_exec_dry_run"], no_proof
     assert "codex-cli-runtime-idle-detector" in no_proof["commands"]["runtime_idle_detector"], no_proof
+    assert "--observe-local-runtime" in no_proof["commands"]["runtime_idle_detector"], no_proof
+    assert "runtime_idle_detector_fixture" in no_proof["commands"], no_proof
+    assert "--idle-fixture" in no_proof["commands"]["runtime_idle_detector_fixture"], no_proof
     assert "--execute-blocker-writeback" in no_proof["commands"]["scheduler_exec_blocker_template"], no_proof
 
     with_proof = build_pilot(VISIBLE_PROOF_FIXTURE)
     assert_pilot_boundary(with_proof)
     assert with_proof["loop_decision"] == "runtime_idle_detector_required", with_proof
-    assert with_proof["next_driver_action"] == "capture_public_safe_runtime_idle_fixture", with_proof
+    assert with_proof["next_driver_action"] == "capture_public_safe_runtime_idle_observation", with_proof
     assert with_proof["scheduler_executor"]["scheduler_action"] == "external_visible_command_candidate", with_proof
     assert with_proof["visible_session_proof"]["supplied"] is True, with_proof
     assert with_proof["visible_session_proof"]["approved"] is True, with_proof
