@@ -227,13 +227,18 @@ def assert_advancement_packet_keeps_user_todo_pending() -> None:
         goal_id=GOAL_ID,
     )
     packet = guard["protocol_action_packet"]
-    assert "actor=agent" in packet["summary"], packet
-    assert "user_action_required=false" in packet["summary"], packet
+    contract = guard["interaction_contract"]
+    assert "actor=agent_with_user_gate" in packet["summary"], packet
+    assert "user_action_required=true" in packet["summary"], packet
     assert "agent_action_required=true" in packet["summary"], packet
     assert "user_action_pending=true" in packet["summary"], packet
     assert f"user_action={USER_TODO}" in packet["summary"], packet
     assert "agent_action=[P1] LLM-assisted protocol simplification research spike" in packet["summary"], packet
     assert f"agent_action={USER_TODO}" not in packet["summary"], packet
+    assert contract["mode"] == "bounded_delivery_with_user_notice", contract
+    assert contract["user_channel"]["action_required"] is True, contract
+    assert contract["user_channel"]["notify"] == "NOTIFY", contract
+    assert contract["agent_channel"]["must_attempt"] is True, contract
 
 
 def assert_explicit_user_gate_still_allows_independent_agent_action() -> None:
@@ -290,13 +295,48 @@ def assert_monitor_only_packet_keeps_user_todo_pending() -> None:
         goal_id=GOAL_ID,
     )
     packet = guard["protocol_action_packet"]
+    contract = guard["interaction_contract"]
+    assert "actor=user" in packet["summary"], packet
+    assert "user_action_required=true" in packet["summary"], packet
+    assert "agent_action_required=false" in packet["summary"], packet
+    assert "quiet_noop_allowed=false" in packet["summary"], packet
+    assert "user_action_pending=true" not in packet["summary"], packet
+    assert f"user_action={USER_TODO}" in packet["summary"], packet
+    assert USER_TODO in packet["summary"], packet
+    assert guard.get("notify_user_on_open_todo") is None, guard
+    assert contract["mode"] == "user_action_required", contract
+    assert contract["user_channel"]["action_required"] is True, contract
+    assert contract["user_channel"]["notify"] == "NOTIFY", contract
+    assert contract["agent_channel"]["quiet_noop_allowed"] is False, contract
+
+
+def assert_explicit_non_gating_user_todo_stays_quiet() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            status="monitor_fixture",
+            agent_todos=[
+                todo(1, MONITOR_TODO, priority="P2", task_class="continuous_monitor"),
+            ],
+            user_todos=[
+                user_todo(
+                    1,
+                    "[P2] Watch the benchmark dashboard for a material transition.",
+                    task_class="continuous_monitor",
+                    action_kind="monitor",
+                )
+            ],
+        ),
+        goal_id=GOAL_ID,
+    )
+    packet = guard["protocol_action_packet"]
+    contract = guard["interaction_contract"]
     assert "actor=agent" in packet["summary"], packet
     assert "user_action_required=false" in packet["summary"], packet
     assert "agent_action_required=false" in packet["summary"], packet
     assert "quiet_noop_allowed=true" in packet["summary"], packet
     assert "user_action_pending=true" in packet["summary"], packet
-    assert USER_TODO in packet["summary"], packet
-    assert guard.get("notify_user_on_open_todo") is None, guard
+    assert contract["mode"] == "monitor_quiet_skip", contract
+    assert contract["user_channel"]["action_required"] is False, contract
 
 
 def assert_monitor_only_packet_allows_quiet_noop() -> None:
@@ -391,6 +431,7 @@ def main() -> None:
     assert_advancement_packet_keeps_user_todo_pending()
     assert_explicit_user_gate_still_allows_independent_agent_action()
     assert_monitor_only_packet_keeps_user_todo_pending()
+    assert_explicit_non_gating_user_todo_stays_quiet()
     assert_monitor_only_packet_allows_quiet_noop()
     assert_executable_recommended_action_overrides_monitor_todo()
     assert_goal_scoped_primary_action_ignores_foreign_backlog()

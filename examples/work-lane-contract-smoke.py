@@ -243,7 +243,7 @@ def assert_monitor_only_todo_waits_quietly() -> None:
     assert "obligation=quiet_until_material_monitor_transition" in markdown, markdown
 
 
-def assert_monitor_only_with_user_todo_stays_quiet_without_transition() -> None:
+def assert_monitor_only_with_user_todo_surfaces_user_action_without_transition() -> None:
     user_todo = (
         "[P1] Decide whether to approve a no-submit Terminal-Bench setup check "
         "or provide public official-runner output."
@@ -295,15 +295,17 @@ def assert_monitor_only_with_user_todo_stays_quiet_without_transition() -> None:
     assert guard["requires_user_action"] is False, guard
     assert guard["execution_obligation"]["must_attempt_work"] is False, guard
     interaction = guard["interaction_contract"]
-    assert interaction["mode"] == "monitor_quiet_skip", interaction
-    assert interaction["user_channel"]["action_required"] is False, interaction
+    assert interaction["mode"] == "user_action_required", interaction
+    assert interaction["user_channel"]["action_required"] is True, interaction
+    assert interaction["user_channel"]["notify"] == "NOTIFY", interaction
     assert interaction["agent_channel"]["must_attempt"] is False, interaction
-    assert interaction["agent_channel"]["quiet_noop_allowed"] is True, interaction
+    assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
     packet = guard["protocol_action_packet"]
-    assert "actor=agent" in packet["summary"], packet
-    assert "user_action_required=false" in packet["summary"], packet
+    assert "actor=user" in packet["summary"], packet
+    assert "user_action_required=true" in packet["summary"], packet
     assert "agent_action_required=false" in packet["summary"], packet
-    assert "quiet_noop_allowed=true" in packet["summary"], packet
+    assert "quiet_noop_allowed=false" in packet["summary"], packet
+    assert "user_action=[P1] Decide whether to approve a no-submit Terminal-Bench" in packet["summary"], packet
     markdown = render_quota_should_run_markdown(guard)
     assert "monitor_quiet_until_material_transition" in markdown, markdown
     assert "heartbeat_repeat_notification_required" not in markdown, markdown
@@ -1006,7 +1008,7 @@ def main() -> int:
     assert_structured_surface_only_run_requires_outcome_followthrough()
     assert_contract_word_alone_does_not_trigger_outcome_followthrough()
     assert_monitor_only_todo_waits_quietly()
-    assert_monitor_only_with_user_todo_stays_quiet_without_transition()
+    assert_monitor_only_with_user_todo_surfaces_user_action_without_transition()
     assert_blocked_agent_todo_with_user_gate_notifies_without_execution()
     assert_monitor_only_with_planning_next_action_materializes_advancement()
     assert_monitor_only_with_adapter_next_action_materializes_advancement()

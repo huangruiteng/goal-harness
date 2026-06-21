@@ -2039,6 +2039,49 @@ def _protocol_todo_actions(summary: Any, *, limit: int = 3) -> list[str]:
     return actions
 
 
+def _user_todo_item_is_explicitly_non_gating(item: dict[str, Any]) -> bool:
+    if item.get("gating") is False or item.get("non_gating") is True:
+        return True
+    if _todo_task_class(item) == TODO_TASK_CLASS_MONITOR:
+        return True
+    action_kind = str(item.get("action_kind") or "").strip().lower()
+    return action_kind in {
+        "monitor",
+        "observe",
+        "watch",
+        "fyi",
+        "informational",
+        "non_gating",
+    }
+
+
+def _user_channel_action_todo_actions(summary: Any, *, limit: int = 3) -> list[str]:
+    if not isinstance(summary, dict):
+        return []
+    first_open_items = summary.get("first_open_items")
+    if not isinstance(first_open_items, list):
+        return []
+    actions: list[str] = []
+    for item in first_open_items:
+        if not isinstance(item, dict):
+            continue
+        if _user_todo_item_is_explicitly_non_gating(item):
+            continue
+        text = _protocol_action_label(item.get("text"))
+        if not text:
+            continue
+        actions.append(text)
+        if len(actions) >= limit:
+            break
+    return actions
+
+
+def _user_channel_action_required(payload: dict[str, Any]) -> bool:
+    return bool(payload.get("requires_user_action")) or bool(
+        _user_channel_action_todo_actions(payload.get("user_todo_summary"))
+    )
+
+
 def _protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
     goal_id = str(payload.get("goal_id") or "")
     capability_gate = (
@@ -2172,7 +2215,7 @@ def _protocol_action_packet(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(payload.get("automation_liveness"), dict)
         else {}
     )
-    requires_user_action = bool(payload.get("requires_user_action"))
+    requires_user_action = _user_channel_action_required(payload)
     must_attempt_work = bool(execution_obligation.get("must_attempt_work"))
     scoped_user_gate_fallback = isinstance(payload.get("scoped_user_gate_fallback"), dict)
     bounded_delivery_with_user_notice = (
@@ -2306,7 +2349,7 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return "scoped_user_gate_fallback"
     if effective_action == "automation_prompt_upgrade_required":
         return "automation_prompt_upgrade"
-    if payload.get("requires_user_action"):
+    if _user_channel_action_required(payload):
         if (
             bool(execution_obligation.get("must_attempt_work"))
             and bool(
@@ -2511,7 +2554,7 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         else {}
     )
     mode = _interaction_mode(payload)
-    user_required = bool(payload.get("requires_user_action"))
+    user_required = _user_channel_action_required(payload)
     scoped_user_gate_fallback = mode == "scoped_user_gate_fallback"
     bounded_delivery_with_user_notice = mode == "bounded_delivery_with_user_notice"
     must_attempt = bool(execution_obligation.get("must_attempt_work")) if (
@@ -2572,6 +2615,12 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         or (
             payload.get("scoped_user_gate_fallback", {}).get("reason")
             if isinstance(payload.get("scoped_user_gate_fallback"), dict)
+            else None
+        )
+        or (
+            "open user todo requires user-visible follow-up while independent "
+            "agent work may continue"
+            if _user_channel_action_todo_actions(payload.get("user_todo_summary"))
             else None
         )
         or (
