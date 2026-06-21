@@ -327,6 +327,12 @@ The first public-safe proof pilot is recorded in
 current `resume` / `remote-control` evidence is promising, but still blocked
 until a visible same-TUI proof and runtime-idle evidence exist.
 
+The repeatable capture path is defined in
+[Codex CLI Visible Proof Capture Protocol](codex-cli-visible-proof-capture-protocol.md).
+It treats `resume` / `remote-control` as proof targets, keeps fixtures
+public-safe, and records blocker-first stop conditions before any later visible
+turn is promoted.
+
 ### 3. Headless Fallback
 
 `codex exec` remains useful for scheduled or CI-like work, but it is not the
