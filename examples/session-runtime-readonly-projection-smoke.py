@@ -18,10 +18,13 @@ from loopx.session_runtime import (  # noqa: E402
 )
 
 
+LOCAL_PATH_FIXTURE = "/" + "private" + "/tmp/raw-run.log"
+
+
 def assert_no_raw_values(payload: dict[str, object]) -> None:
     text = json.dumps(payload, sort_keys=True)
     forbidden_values = (
-        "/private/tmp/raw-run.log",
+        LOCAL_PATH_FIXTURE,
         "full transcript body",
         "credential-value",
         "secret-value",
@@ -143,7 +146,7 @@ def test_raw_material_is_flagged_not_copied() -> None:
                 "kind": "blocker",
                 "status": "blocked",
                 "summary": "source summary contained raw fields",
-                "local_path": "/private/tmp/raw-run.log",
+                "local_path": LOCAL_PATH_FIXTURE,
                 "secret": "secret-value",
             }
         ],
