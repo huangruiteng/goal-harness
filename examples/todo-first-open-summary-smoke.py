@@ -467,9 +467,12 @@ def assert_claimed_advancement_lanes_preserve_claimants() -> None:
     agent_todos = parse_active_state_todos(state_text)["agent_todos"]
     assert agent_todos["claimed_advancement_open_count"] == 26, agent_todos
     assert agent_todos["first_open_items"][0]["todo_id"] == "todo_side_tui", agent_todos
-    assert "todo_side_tui" in {
+    claimed_advancement_ids = [
         item["todo_id"] for item in agent_todos["claimed_advancement_open_items"]
-    }, agent_todos
+    ]
+    assert "todo_side_tui" in claimed_advancement_ids, agent_todos
+    assert "todo_side_stale_5" in claimed_advancement_ids, agent_todos
+    assert "todo_primary_20" not in claimed_advancement_ids, agent_todos
 
     asset_summary = project_asset_todo_summary(agent_todos, role="agent")
     assert asset_summary is not None, agent_todos
@@ -534,6 +537,12 @@ def assert_claimed_advancement_lanes_preserve_claimants() -> None:
     assert current_agent_advancement_ids[0] == "todo_side_tui", summary
     assert "todo_side_tui" in current_agent_advancement_ids, summary
     assert summary["first_executable_items"][0]["todo_id"] == "todo_side_tui", summary
+    assert summary["claim_scope"]["selection_order"] == (
+        "current_agent_claimed_then_unclaimed_then_other_agent_claimed_low_weight"
+    ), summary
+    assert summary["claim_scope"]["other_agent_claimed_open_count"] == 12, summary
+    assert summary["claim_scope"]["other_agent_claimed_items"][0]["todo_id"] == "todo_primary_1", summary
+    assert summary["claim_scope"]["blocked_claimed_items"][0]["todo_id"] == "todo_primary_1", summary
     assert summary["current_agent_claimed_advancement_count"] == 6, summary
 
 

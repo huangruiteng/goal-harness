@@ -1158,22 +1158,33 @@ def _claimed_visibility_items(items: list[dict[str, Any]], *, limit: int) -> lis
     if not buckets:
         return items[:limit]
 
+    original_index = {id(item): index for index, item in enumerate(items)}
+    per_claimant_cap = max(1, limit // len(buckets))
     selected: list[dict[str, Any]] = []
-    round_index = 0
-    while len(selected) < limit:
-        added = False
-        for claimed_by in claim_order:
-            bucket = buckets[claimed_by]
-            if round_index >= len(bucket):
-                continue
-            selected.append(bucket[round_index])
-            added = True
+    selected_ids: set[int] = set()
+    for claimed_by in claim_order:
+        taken = 0
+        for item in buckets[claimed_by]:
+            if taken >= per_claimant_cap:
+                break
             if len(selected) >= limit:
                 break
-        if not added:
+            selected.append(item)
+            selected_ids.add(id(item))
+            taken += 1
+        if len(selected) >= limit:
             break
-        round_index += 1
-    return selected
+
+    if len(selected) < limit:
+        for item in items:
+            if id(item) in selected_ids:
+                continue
+            selected.append(item)
+            selected_ids.add(id(item))
+            if len(selected) >= limit:
+                break
+
+    return sorted(selected, key=lambda item: original_index.get(id(item), 999999))[:limit]
 
 
 def _side_agent_claim_scoped_open_items(
@@ -1197,23 +1208,29 @@ def _side_agent_claim_scoped_open_items(
 
     current_agent_items = [item for item in open_items if claim_bucket(item) == 0]
     unclaimed_items = [item for item in open_items if claim_bucket(item) == 1]
-    blocked_claimed_items = [item for item in open_items if claim_bucket(item) == 2]
+    other_agent_claimed_items = [item for item in open_items if claim_bucket(item) == 2]
     selectable_items = sorted(
-        [*current_agent_items, *unclaimed_items],
+        [*current_agent_items, *unclaimed_items, *other_agent_claimed_items],
         key=lambda item: (claim_bucket(item), *_todo_projection_sort_key(item)),
     )
     claim_scope = {
         "schema_version": SIDE_AGENT_CLAIM_SCOPE_SCHEMA_VERSION,
         "agent_id": agent_id,
         "primary_agent": normalize_todo_claimed_by(agent_identity.get("primary_agent")),
-        "selection_order": "current_agent_claimed_then_unclaimed",
+        "selection_order": "current_agent_claimed_then_unclaimed_then_other_agent_claimed_low_weight",
         "selectable_open_count": len(selectable_items),
         "current_agent_claimed_open_count": len(current_agent_items),
         "unclaimed_open_count": len(unclaimed_items),
-        "blocked_claimed_open_count": len(blocked_claimed_items),
+        "other_agent_claimed_open_count": len(other_agent_claimed_items),
+        "other_agent_claimed_weight": "lower_than_current_claimed_and_unclaimed",
+        "other_agent_claimed_items": [
+            _compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
+            for item in _claimed_visibility_items(other_agent_claimed_items, limit=3)
+        ],
+        "blocked_claimed_open_count": len(other_agent_claimed_items),
         "blocked_claimed_items": [
             _compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
-            for item in blocked_claimed_items[:3]
+            for item in _claimed_visibility_items(other_agent_claimed_items, limit=3)
         ],
     }
     return selectable_items, claim_scope

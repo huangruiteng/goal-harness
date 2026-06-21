@@ -1184,17 +1184,33 @@ inflating every heartbeat/quota payload. Monitor lanes remain visibility
 context unless they record a material transition or blocker; they should not
 steal the advancement slot simply because they are claimed.
 
+When a claimed visibility lane has more items than the lane cap, truncation
+should be claimant-balanced rather than raw top-N. First sort claimed items by
+priority and source position, then group them by `claimed_by`, take a fair
+per-claimant slice within the cap, and fill any remaining slots from the
+priority-ordered remainder. The goal is not strict round-robin display order;
+it is to keep one agent's long queue from hiding another agent's claimed work.
+
+Agent-scoped quota then applies focus ordering after visibility balancing:
+current-agent claimed items first, unclaimed items second, and other-agent
+claimed items last with lower weight. Other-agent claims remain visible and may
+be inspected when nothing better is available, but they should not crowd out
+the current agent's own claimed advancement or genuinely unclaimed work.
+`claimed_by` remains a soft ownership signal, not a lock, lease, capability
+grant, or gate bypass.
+
 **Visual Model**
 
 ```mermaid
 flowchart TD
   T["parsed todo set"] --> S["scheduler lanes: first/open/executable candidates"]
-  T --> V["visibility lanes: claimed, unclaimed, monitor"]
+  T --> B["claimed lane claimant-balanced truncation"]
+  B --> V["visibility lanes: claimed, unclaimed, monitor"]
   S --> Q["quota/capability guard chooses runnable candidate set"]
   Q --> A["agent steering audit chooses actual todo"]
   V --> F["dashboard/frontstage/review packet shows ownership"]
   V --> C{"agent identity present?"}
-  C -->|"yes"| M["current-agent claimed advancement + monitor lanes"]
+  C -->|"yes"| M["current-agent claimed > unclaimed > other-agent claimed"]
   C -->|"no"| G["global claimed/unclaimed ownership view"]
   F --> H["human sees who owns what without changing scheduler result"]
 ```
