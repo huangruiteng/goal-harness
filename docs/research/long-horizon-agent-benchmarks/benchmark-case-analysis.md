@@ -7,7 +7,7 @@ It is intentionally separate from `benchmark-run-ledger.md`. The run ledger
 records compact attempts and scores; this file records why a result matters.
 
 - schema_version: `benchmark_case_analysis_v0`
-- updated_at: `2026-06-22T06:08:33+08:00`
+- updated_at: `2026-06-22T15:01:06+08:00`
 - machine_source: `benchmark-case-analysis.json`
 - ledger-only migration audit:
   `benchmark-case-analysis-ledger-only-migration-audit-20260618.md`
@@ -28,6 +28,12 @@ current-protocol coverage rows; the remainder are setup/probe/defer rows that
 should not be promoted into main case analysis until compact score or blocker
 evidence becomes useful.
 
+The 2026-06-22 generated-safe upsert promoted eight compact-ledger records into
+the machine JSON and human table: one Terminal-Bench no-uplift row and seven
+baseline-solved control rows. It still leaves infrastructure-alignment,
+baseline-failure, setup, and single-arm candidates outside automatic promotion
+until matched treatment or manual attribution exists.
+
 | Benchmark | Case | Class | Baseline | Treatment | Delta | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
 | `terminal-bench@2.0` | `multi-source-data-merger` | current-protocol baseline-solved / legacy positive asset | `1.0` | `1.0` | `0.0` | `paired_baseline_solved_treatment_preserved` |
@@ -36,6 +42,14 @@ evidence becomes useful.
 | `terminal-bench@2.0` | `mteb-retrieve` | setup probe asset | `0.0` | `0.0` | `0.0` | `environment_setup_probe_materialized_with_exception_repeat_blocked` |
 | `terminal-bench@2.0` | `pytorch-model-recovery` | exception attribution asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift_exception_research_required` |
 | `terminal-bench@2.0` | `train-fasttext` | single-arm managed-Codex failure asset | n/a | `0.0` | n/a | `single_arm_recorded` |
+| `terminal-bench@2.0` | `headless-terminal` | generated no-uplift asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
+| `terminal-bench@2.0` | `build-cython-ext` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
+| `terminal-bench@2.0` | `compile-compcert` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
+| `terminal-bench@2.0` | `financial-document-processor` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
+| `terminal-bench@2.0` | `fix-code-vulnerability` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
+| `terminal-bench@2.0` | `merge-diff-arc-agi-task` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
+| `terminal-bench@2.0` | `path-tracing` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
+| `terminal-bench@2.0` | `sqlite-db-truncate` | generated baseline-solved control asset | `1.0` | n/a | n/a | `baseline_passed_not_current_treatment_priority` |
 | `swe-marathon` | `zstd-decoder` | extended-round product-path negative asset | `1.0` | `0.0` | `-1.0` | `paired_treatment_regressed` |
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
 | `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | native Goal connected-no-trace runner-error asset | `0.0` | n/a | n/a | `baseline_runner_or_setup_repair_required` |
