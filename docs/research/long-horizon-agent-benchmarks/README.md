@@ -116,6 +116,11 @@ work still belongs in the existing code, examples, and contract documents:
   artifact-reduction rules, and Docker/capacity stop gates without reading
   task bodies, tests, solution files, trajectories, screenshots, credentials,
   hidden refs, or starting a benchmark run.
+- `swe-marathon-vliw-kernel-optimization-launch-packet-v0.md`: no-execution
+  launch packet for the next fresh SWE-Marathon CPU/no-CUA case. It records
+  the matched baseline/treatment launch shape, case-local LoopX active-todo
+  completion rule, long-timeout envelope, no-upload boundary, and phase-counter
+  evidence requirements before any scored run.
 - `swe-marathon-rust-c-compiler-provider-capacity-preflight-v0.md`:
   no-execution Docker/Colima provider-capacity preflight for the
   `rust-c-compiler` packet. It finds the local benchmark Colima profile
