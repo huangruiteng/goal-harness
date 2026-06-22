@@ -4794,6 +4794,7 @@ if __name__ == "__main__":
     test_skillsbench_no_skill_route_removes_staged_task_skills()
     test_skillsbench_docker_task_staging_adds_apt_retry_patch()
     test_skillsbench_runtime_tools_patch_has_own_apt_retry_defaults()
+    test_skillsbench_apt_risk_preflight_blocks_full_run_without_benchflow()
     test_skillsbench_docker_task_staging_caps_local_cpu_request()
     test_skillsbench_volume_mount_failure_attribution()
     test_skillsbench_runner_plan_supports_baseline_route()
