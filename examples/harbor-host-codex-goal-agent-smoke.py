@@ -408,6 +408,7 @@ def main() -> int:
         }
     )
     done_exit_state = module._case_scheduler_active_todo_exit_state(done_trace)
+    done_trace["active_todo_exit_state"] = done_exit_state
     assert done_exit_state["no_active_todo"] is True, done_exit_state
     assert done_exit_state["exit_condition"] == "no_active_loopx_todo", (
         done_exit_state
@@ -467,6 +468,10 @@ def main() -> int:
                     "--todo-id todo_benchmark_case_main "
                     "--claimed-by codex-benchmark-agent"
                 ),
+                "python3 - <<'PY'\nopen('solution.py', 'w').write('ok')\nPY",
+                "make",
+                "python -m pytest tests",
+                "ruff check .",
             ]
         ):
             (request_dir / f"case-loopx-{index}.request.json").write_text(
@@ -495,6 +500,34 @@ def main() -> int:
         assert prompt_trace["lifecycle_observed"] is True, prompt_trace
         assert prompt_trace["raw_commands_recorded"] is False, prompt_trace
         assert prompt_trace["raw_output_recorded"] is False, prompt_trace
+        assert agent._bridge_phase_counts == {
+            "build": 1,
+            "edit": 1,
+            "loopx_cli": 2,
+            "test": 1,
+            "verify": 1,
+        }, agent._bridge_phase_counts
+        phase_counters = module._build_solution_phase_counters(
+            bridge_phase_counts=agent._bridge_phase_counts,
+            bridge_request_count=agent._served_request_count,
+            turn_completed_observed=True,
+            case_scheduler_trace=done_trace,
+            result_kind="case_result",
+            first_blocker="",
+        )
+        assert phase_counters["schema_version"] == (
+            "harbor_public_safe_solution_phase_counters_v0"
+        ), phase_counters
+        assert phase_counters["edit_command_count"] == 1, phase_counters
+        assert phase_counters["build_command_count"] == 1, phase_counters
+        assert phase_counters["test_command_count"] == 1, phase_counters
+        assert phase_counters["verify_command_count"] == 1, phase_counters
+        assert phase_counters["loopx_cli_command_count"] == 2, phase_counters
+        assert phase_counters["task_bridge_command_count"] == 4, phase_counters
+        assert phase_counters["self_declared_done_count"] == 1, phase_counters
+        assert phase_counters["final_active_todo_count"] == 0, phase_counters
+        assert phase_counters["raw_commands_recorded"] is False, phase_counters
+        assert phase_counters["raw_diffs_recorded"] is False, phase_counters
         assert agent.version() == "0.5.0"
         assert agent.goal_timeout_sec == 9.0
         assert agent.poll_interval_sec == 0.5
@@ -722,9 +755,22 @@ def main() -> int:
         assert no_active_compact["loopx_case_closeout_summary"][
             "case_todo_status"
         ] == "done", no_active_compact
+        no_active_phase = no_active_compact["loopx_solution_phase_counters"]
+        assert no_active_phase["result_kind"] == "case_result", no_active_phase
+        assert no_active_phase["self_declared_done_count"] == 1, no_active_phase
+        assert no_active_phase["final_active_todo_count"] == 0, no_active_phase
+        assert no_active_phase["final_no_active_todo"] is True, no_active_phase
+        assert no_active_phase["raw_commands_recorded"] is False, no_active_phase
+        assert no_active_phase["raw_verifier_output_recorded"] is False, no_active_phase
         assert no_active_context.metadata["first_blocker"] == "", (
             no_active_context.metadata
         )
+        assert (
+            no_active_context.metadata["loopx_solution_phase_counters"][
+                "final_active_todo_count"
+            ]
+            == 0
+        ), no_active_context.metadata
 
         module.start_codex_app_server_goal_turn = _fake_start
         module.start_codex_app_server_goal_followup_turn = _fake_followup
@@ -784,6 +830,14 @@ def main() -> int:
         assert followup_compact["loopx_case_closeout_summary"][
             "timeout_preserves_open_todo"
         ] is False
+        followup_phase = followup_compact["loopx_solution_phase_counters"]
+        assert followup_phase["result_kind"] == "runtime_exception_blocker", (
+            followup_phase
+        )
+        assert followup_phase["first_blocker_present"] is True, followup_phase
+        assert followup_phase["raw_agent_trajectory_recorded"] is False, (
+            followup_phase
+        )
         assert context.metadata["first_blocker"] == (
             "codex_app_server_goal_followup_turn_failed"
         )

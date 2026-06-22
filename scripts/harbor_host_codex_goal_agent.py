@@ -481,6 +481,166 @@ def _case_loopx_action_from_command(
     }
 
 
+def _bridge_task_phase_from_command(command: str, *, payload: dict[str, Any]) -> str:
+    case_command = _case_loopx_action_from_command(command, payload=payload)
+    if case_command.get("case_loopx_cli_call"):
+        return "loopx_cli"
+
+    text = " ".join(command.strip().lower().split())
+    if not text:
+        return "unknown"
+
+    test_markers = (
+        "pytest",
+        "python -m pytest",
+        "go test",
+        "cargo test",
+        "npm test",
+        "npm run test",
+        "yarn test",
+        "pnpm test",
+        "make test",
+        "ctest",
+        "tox",
+        "nox",
+        "unittest",
+        "rspec",
+    )
+    verify_markers = (
+        "cargo check",
+        "go vet",
+        "npm run lint",
+        "yarn lint",
+        "pnpm lint",
+        "ruff",
+        "flake8",
+        "mypy",
+        "eslint",
+        "lint",
+        "verify",
+    )
+    build_markers = (
+        "cargo build",
+        "go build",
+        "npm run build",
+        "yarn build",
+        "pnpm build",
+        "python -m build",
+        "cmake",
+        "ninja",
+        "make",
+        "gcc",
+        "g++",
+        "clang",
+        "javac",
+        "mvn package",
+        "gradle build",
+    )
+    edit_markers = (
+        "apply_patch",
+        "sed -i",
+        "perl -pi",
+        "cat >",
+        "cat <<",
+        "tee ",
+        "touch ",
+        "mv ",
+        "cp ",
+        "rm ",
+        "mkdir ",
+        "chmod ",
+        "python - <<",
+        "python3 - <<",
+        ".write_text",
+        "open(",
+    )
+    if any(marker in text for marker in test_markers):
+        return "test"
+    if any(marker in text for marker in verify_markers):
+        return "verify"
+    if any(marker in text for marker in build_markers):
+        return "build"
+    if any(marker in text for marker in edit_markers) or ">" in text:
+        return "edit"
+    return "unknown"
+
+
+def _build_solution_phase_counters(
+    *,
+    bridge_phase_counts: dict[str, int],
+    bridge_request_count: int,
+    turn_completed_observed: bool,
+    case_scheduler_trace: dict[str, Any],
+    result_kind: str,
+    first_blocker: str,
+) -> dict[str, Any]:
+    active_todo = (
+        case_scheduler_trace.get("active_todo_exit_state")
+        if isinstance(case_scheduler_trace.get("active_todo_exit_state"), dict)
+        else {}
+    )
+    closeout = (
+        case_scheduler_trace.get("closeout_summary")
+        if isinstance(case_scheduler_trace.get("closeout_summary"), dict)
+        else {}
+    )
+    agent_open_count = active_todo.get("agent_open_count")
+    if agent_open_count is None:
+        agent_open_count = closeout.get("agent_open_count")
+    user_open_count = active_todo.get("user_open_count")
+    if user_open_count is None:
+        user_open_count = closeout.get("user_open_count")
+    final_active_todo_count = None
+    if isinstance(agent_open_count, int) and isinstance(user_open_count, int):
+        final_active_todo_count = max(0, agent_open_count) + max(0, user_open_count)
+
+    case_todo_status = str(
+        active_todo.get("case_todo_status")
+        or closeout.get("case_todo_status")
+        or ""
+    )
+    self_declared_done_count = 1 if case_todo_status.lower() in {
+        "done",
+        "completed",
+        "closed",
+        "archived",
+    } else 0
+    loopx_cli_count = bridge_phase_counts.get("loopx_cli", 0)
+    task_command_count = sum(
+        count
+        for phase, count in bridge_phase_counts.items()
+        if phase != "loopx_cli" and isinstance(count, int)
+    )
+    return {
+        "schema_version": "harbor_public_safe_solution_phase_counters_v0",
+        "source": "host_bridge_command_phase_counts_and_case_loopx_status",
+        "counter_granularity": "coarse_command_phase_counts_no_raw_commands",
+        "bridge_request_count": bridge_request_count,
+        "task_bridge_command_count": task_command_count,
+        "loopx_cli_command_count": loopx_cli_count,
+        "edit_command_count": bridge_phase_counts.get("edit", 0),
+        "build_command_count": bridge_phase_counts.get("build", 0),
+        "test_command_count": bridge_phase_counts.get("test", 0),
+        "verify_command_count": bridge_phase_counts.get("verify", 0),
+        "unknown_task_command_count": bridge_phase_counts.get("unknown", 0),
+        "self_declared_done_count": self_declared_done_count,
+        "final_agent_open_count": agent_open_count,
+        "final_user_open_count": user_open_count,
+        "final_active_todo_count": final_active_todo_count,
+        "final_no_active_todo": active_todo.get("no_active_todo"),
+        "final_case_todo_status": case_todo_status,
+        "turn_completed_observed": turn_completed_observed,
+        "result_kind": result_kind,
+        "first_blocker_present": bool(first_blocker),
+        "raw_commands_recorded": False,
+        "raw_diffs_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "raw_agent_trajectory_recorded": False,
+    }
+
+
 def _new_prompt_driven_case_trace(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "harbor_prompt_driven_loopx_trace_v0",
@@ -973,6 +1133,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
         self._served_request_count = 0
         self._case_state_init_payload: dict[str, Any] = {}
         self._prompt_driven_loopx_commands: list[dict[str, Any]] = []
+        self._bridge_phase_counts: dict[str, int] = {}
 
     def version(self) -> str:
         return "0.5.0"
@@ -1020,6 +1181,13 @@ class HarborHostCodexGoalAgent(BaseAgent):
                 payload = json.loads(running.read_text(encoding="utf-8"))
                 timeout_sec = int(float(payload.get("timeout_sec") or 600))
                 cwd = payload.get("cwd") or None
+                phase = _bridge_task_phase_from_command(
+                    str(payload["command"]),
+                    payload=self._case_state_init_payload,
+                )
+                self._bridge_phase_counts[phase] = (
+                    self._bridge_phase_counts.get(phase, 0) + 1
+                )
                 result = await environment.exec(
                     command=str(payload["command"]),
                     cwd=cwd,
@@ -1084,6 +1252,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
         bin_dir.mkdir(parents=True, exist_ok=True)
         self._case_state_init_payload = {}
         self._prompt_driven_loopx_commands = []
+        self._bridge_phase_counts = {}
 
         bridge = bin_dir / "harbor-env-exec"
         prompt_path = work_dir / "prompt.txt"
@@ -1371,7 +1540,11 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     }
                 )
 
-            def write_compact(first_blocker: str = "") -> None:
+            def write_compact(
+                first_blocker: str = "",
+                *,
+                result_kind: str = "case_result",
+            ) -> dict[str, Any]:
                 compact = compact_turn_metadata(turn)
                 case_scheduler_command_count = len(
                     case_scheduler_trace.get("commands") or []
@@ -1445,6 +1618,18 @@ class HarborHostCodexGoalAgent(BaseAgent):
                         "loopx_case_closeout_summary": (
                             case_scheduler_trace.get("closeout_summary") or {}
                         ),
+                        "loopx_solution_phase_counters": (
+                            _build_solution_phase_counters(
+                                bridge_phase_counts=self._bridge_phase_counts,
+                                bridge_request_count=self._served_request_count,
+                                turn_completed_observed=bool(
+                                    turn.turn_completed_observed
+                                ),
+                                case_scheduler_trace=case_scheduler_trace,
+                                result_kind=result_kind,
+                                first_blocker=first_blocker,
+                            )
+                        ),
                         "loopx_prompt_driven_trace_present": bool(
                             prompt_driven_trace.get("command_count")
                         ),
@@ -1484,6 +1669,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     json.dumps(compact, sort_keys=True) + "\n",
                     encoding="utf-8",
                 )
+                return compact
 
             async def run_case_scheduler_round(
                 *,
@@ -1763,19 +1949,17 @@ class HarborHostCodexGoalAgent(BaseAgent):
                         current_round = next_round
                     observe_codex_app_server_goal_turn(turn)
                     await self._serve_bridge_requests(environment, request_dir)
-                    await run_case_scheduler_closeout(
-                        result_kind=(
-                            "runtime_exception_blocker"
-                            if runtime_blocker
-                            else (
-                                "timeout_blocker"
-                                if timeout_blocker
-                                else "case_result"
-                            )
-                        )
+                    result_kind = (
+                        "runtime_exception_blocker"
+                        if runtime_blocker
+                        else ("timeout_blocker" if timeout_blocker else "case_result")
                     )
+                    await run_case_scheduler_closeout(result_kind=result_kind)
                     first_blocker = runtime_blocker or timeout_blocker
-                    write_compact(first_blocker)
+                    written_compact = write_compact(
+                        first_blocker,
+                        result_kind=result_kind,
+                    )
                 finally:
                     turn.terminate()
                 context.metadata = {
@@ -1796,6 +1980,9 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     ),
                     "benchmark_loop_contract": loop_contract,
                     "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                    "loopx_solution_phase_counters": written_compact.get(
+                        "loopx_solution_phase_counters", {}
+                    ),
                     **case_state_init_compact,
                     **treatment_claim,
                 }
@@ -1810,7 +1997,9 @@ class HarborHostCodexGoalAgent(BaseAgent):
                         await run_case_scheduler_closeout(
                             result_kind="turn_completed"
                         )
-                        write_compact()
+                        written_compact = write_compact(
+                            result_kind="turn_completed"
+                        )
                         turn.terminate()
                         context.metadata = {
                             "loopx_agent": self.name(),
@@ -1828,6 +2017,9 @@ class HarborHostCodexGoalAgent(BaseAgent):
                             ),
                             "benchmark_loop_contract": loop_contract,
                             "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                            "loopx_solution_phase_counters": written_compact.get(
+                                "loopx_solution_phase_counters", {}
+                            ),
                             **case_state_init_compact,
                             **treatment_claim,
                         }
@@ -1835,7 +2027,10 @@ class HarborHostCodexGoalAgent(BaseAgent):
                     await asyncio.sleep(self.poll_interval_sec)
                 observe_codex_app_server_goal_turn(turn)
                 await run_case_scheduler_closeout(result_kind="timeout_blocker")
-                write_compact("harbor_app_server_turn_incomplete_before_timeout")
+                written_compact = write_compact(
+                    "harbor_app_server_turn_incomplete_before_timeout",
+                    result_kind="timeout_blocker",
+                )
             finally:
                 turn.terminate()
             context.metadata = {
@@ -1855,6 +2050,9 @@ class HarborHostCodexGoalAgent(BaseAgent):
                 ),
                 "benchmark_loop_contract": loop_contract,
                 "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                "loopx_solution_phase_counters": written_compact.get(
+                    "loopx_solution_phase_counters", {}
+                ),
                 **case_state_init_compact,
                 **treatment_claim,
             }
