@@ -455,12 +455,13 @@ benchmark environment remains the task/scoring surface while Codex login, model
 access, tmux, and runtime state stay on the stable host layer.
 The Harbor app-server agent drains app-server turn events while the async
 runner loop continues to serve `harbor-env-exec` bridge requests. Its compact
-turn file records bridge request count, marker observation, `turn/completed`
-observation, and assistant-message counters without raw task text, raw logs, or
-raw trajectories. Do not make `turn/completed` the benchmark success gate for
-Harbor-family runs: the official environment result and the host completion
-marker are the scoring path, while app-server completion events are diagnostic
-only.
+turn file records bridge request count, active-todo exit state,
+`turn/completed` observation, and public-safe solution phase counters without
+raw task text, raw logs, raw commands, raw diffs, or raw trajectories. Do not
+make `turn/completed` the benchmark success gate for Harbor-family runs: the
+official environment result is the scoring path, the case-local LoopX todo state
+is the host exit/closeout source, and app-server completion events are
+diagnostic only.
 
 For the current SWE-Marathon experiment axis, keep the same task, model,
 timeout, environment, jobs directory shape, and no-upload boundary across arms:
@@ -574,6 +575,10 @@ Compact evidence must distinguish both surfaces:
 `loopx_case_rollout_trace.public.json` for controller fallback. If the
 prompt-driven lifecycle is absent, classify the run with
 `prompt_driven_loopx_lifecycle_absent` instead of claiming uplift.
+SWE-Marathon closeouts should also expose `loopx_solution_phase_counters`:
+coarse edit/build/test/verify command counts, self-declared-done count, and
+final active-todo count only, never raw commands, diffs, logs, task text, or
+verifier output.
 Global LoopX commands are optional context only; they must not select
 todos for the benchmark case. This keeps parallel cases isolated and prevents
 the main project goal or side-agent lane from leaking into benchmark treatment
