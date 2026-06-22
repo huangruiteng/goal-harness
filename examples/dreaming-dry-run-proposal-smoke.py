@@ -164,12 +164,14 @@ def main() -> int:
         assert payload["ok"] is True, payload
         assert payload["dry_run"] is True, payload
         assert payload["classification"] == "dreaming_refactor_warning", payload
+        assert payload["proposal_id"].startswith("dreaming_"), payload
         assert payload["proposal_type"] == "refactor_warning", payload
         assert len(payload["recent_evidence"]) == 4, payload
         evidence_text = json.dumps(payload["recent_evidence"], ensure_ascii=False)
         assert "/" + "tmp/loopx-private-evidence" not in evidence_text, payload
         preview = payload["run_record_preview"]
         assert preview["agent_command"] is None, preview
+        assert preview["dreaming"]["proposal_id"] == payload["proposal_id"], preview
         assert preview["dreaming"]["advisory"] is True, preview
         assert preview["dreaming"]["execution_allowed"] is False, preview
         assert preview["dreaming"]["delivery_spend_allowed"] is False, preview

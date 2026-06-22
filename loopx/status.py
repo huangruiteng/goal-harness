@@ -6199,7 +6199,7 @@ def compact_dreaming_proposal(run: dict[str, Any] | None) -> dict[str, Any] | No
         "execution_allowed": False,
         "delivery_spend_allowed": False,
     }
-    for key in ("lane", "evidence_window", "proposal_type", "confidence"):
+    for key in ("proposal_id", "lane", "evidence_window", "proposal_type", "confidence"):
         value = public_safe_compact_text(raw.get(key), limit=80)
         if value:
             proposal[key] = value
@@ -6234,7 +6234,7 @@ def compact_dreaming_lane_badge(proposal: dict[str, Any] | None) -> dict[str, An
     }
     if classification:
         badge["status"] = classification
-    for field in ("proposal_type", "confidence", "evidence_window"):
+    for field in ("proposal_id", "proposal_type", "confidence", "evidence_window"):
         value = public_safe_compact_text(proposal.get(field), limit=80)
         if value:
             badge[field] = value
@@ -7891,6 +7891,7 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
                     "    - dreaming_lane_badge: "
                     f"lane={_markdown_scalar(dreaming_lane_badge.get('lane') or '')} "
                     f"status={_markdown_scalar(dreaming_lane_badge.get('status') or '')} "
+                    f"proposal_id={_markdown_scalar(dreaming_lane_badge.get('proposal_id') or '')} "
                     f"advisory={dreaming_lane_badge.get('advisory')} "
                     f"interrupts_delivery={dreaming_lane_badge.get('interrupts_delivery')} "
                     f"execution_allowed={dreaming_lane_badge.get('execution_allowed')}"
