@@ -54,9 +54,15 @@ The showcase surface can be fancy because it is not an operator cockpit.
 
 The ops surface should feel like a working console, not a landing page.
 
+- Map kernel state into the five user concepts from
+  [Frontend kernel-to-mental-model map](frontend-kernel-mental-model-map.md):
+  goal, next step, blocker/permission, evidence, and continue state.
 - Keep the first screen scannable: goal header, decision frame, quota guard,
   user todo lane, agent todo lane, claims, gates, artifacts, source warnings,
   and run timeline.
+- Avoid making `claim`, `scope`, `quota`, `run_history`, or `handoff` top-level
+  user vocabulary unless the user is searching, debugging, or resolving a live
+  decision.
 - Prefer rows, strips, filters, and compact panes over large hero sections.
 - Preserve URL-backed search and lane filters so a review can reproduce the
   exact projected slice.

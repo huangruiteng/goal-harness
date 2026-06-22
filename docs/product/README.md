@@ -43,6 +43,10 @@ runtime contract, benchmark route, or launch draft.
   the two-surface frontend rule for keeping public showcase/homepage work fancy
   and case-driven while the real ops control-plane route stays dense, calm,
   read-only, and reviewable.
+- [Frontend kernel-to-mental-model map](frontend-kernel-mental-model-map.md):
+  interaction contract for compressing kernel concepts such as goals, gates,
+  todos, claims, scope, evidence, run history, quota, and handoff into five
+  user-facing concepts on the ops surface.
 - [Codex CLI automation driver audit](codex-cli-automation-driver.md): the
   current Codex CLI scheduler/session surface audit, with a conservative local
   driver planner that keeps TUI bootstrap primary, composes quota/idle/fallback
