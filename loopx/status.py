@@ -930,6 +930,49 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
     return compact
 
 
+def _compact_benchmark_task_staging(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    compact: dict[str, Any] = {}
+    for field in ("schema_version",):
+        text = public_safe_compact_text(value.get(field), limit=180)
+        if text:
+            compact[field] = text
+    for field in (
+        "staged",
+        "include_task_skills",
+        "apt_setup_risk_detected",
+        "apt_retry_patch_required",
+        "apt_retry_patch_applied",
+        "apt_risk_preflight_blocked",
+        "app_skills_mount_patch_applied",
+        "codex_acp_runtime_tools_patch_applied",
+        "task_skills_removed",
+        "original_task_mutated",
+    ):
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+
+    resource_cap = value.get("resource_cap_patch")
+    if isinstance(resource_cap, dict):
+        compact_resource_cap: dict[str, Any] = {}
+        for field in ("schema_version", "reason"):
+            text = public_safe_compact_text(resource_cap.get(field), limit=180)
+            if text:
+                compact_resource_cap[field] = text
+        for field in ("applied", "original_task_mutated"):
+            if isinstance(resource_cap.get(field), bool):
+                compact_resource_cap[field] = resource_cap[field]
+        for field in ("host_cpus", "requested_cpus", "effective_cpus"):
+            raw = resource_cap.get(field)
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                compact_resource_cap[field] = raw
+        if compact_resource_cap:
+            compact["resource_cap_patch"] = compact_resource_cap
+    return compact
+
+
 def _compact_benchmark_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -2080,6 +2123,9 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     )
     if runner_prerequisites:
         compact["runner_prerequisites"] = runner_prerequisites
+    task_staging = _compact_benchmark_task_staging(source.get("task_staging"))
+    if task_staging:
+        compact["task_staging"] = task_staging
 
     official = source.get("official_task_score") if isinstance(source.get("official_task_score"), dict) else {}
     if official:
@@ -2449,6 +2495,11 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
             "native_goal_worker_trace_dir_present",
             "native_goal_worker_public_trace_read",
             "native_goal_worker_trace_observed",
+            "runner_failure_compact_recorded",
+            "no_raw_logs_read",
+            "no_raw_task_text_read",
+            "no_raw_trajectory_read",
+            "no_leaderboard_upload_requested",
         ):
             if isinstance(validation.get(field), bool):
                 compact_validation[field] = validation[field]
