@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from enum import Enum
 import fnmatch
 import json
 import re
@@ -142,6 +143,15 @@ SIDE_AGENT_WORKSPACE_GUARD_SCHEMA_VERSION = "side_agent_workspace_guard_v0"
 AGENT_CLAIM_SCOPE_SCHEMA_VERSION = "agent_claim_scope_v0"
 SIDE_AGENT_CLAIM_SCOPE_SCHEMA_VERSION = AGENT_CLAIM_SCOPE_SCHEMA_VERSION
 AGENT_LANE_NEXT_ACTION_SCHEMA_VERSION = "agent_lane_next_action_v0"
+AGENT_SCOPE_FRONTIER_SCHEMA_VERSION = "agent_scope_frontier_v0"
+
+
+class AgentScopeFrontierAction(str, Enum):
+    AGENT_SCOPE_EXHAUSTED = "agent_scope_exhausted"
+    PRIMARY_REVIEW_WAIT = "primary_review_wait"
+    REASSIGNMENT_REQUIRED = "reassignment_required"
+
+
 DEFAULT_AVAILABLE_CAPABILITIES = (
     "shell",
     "filesystem_read",
@@ -1942,6 +1952,164 @@ def _agent_lane_next_action(
     return None
 
 
+def _count_advancement_items(items: Any, *, claimed_by: str | None = None) -> int:
+    if not isinstance(items, list):
+        return 0
+    count = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if not _todo_item_is_actionable_open(item):
+            continue
+        if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+            continue
+        item_claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+        if claimed_by == "__unclaimed__":
+            if item_claimed_by:
+                continue
+        elif claimed_by is not None and item_claimed_by != claimed_by:
+            continue
+        count += 1
+    return count
+
+
+def _agent_scope_frontier_action(value: Any) -> AgentScopeFrontierAction | None:
+    try:
+        return AgentScopeFrontierAction(str(value or ""))
+    except ValueError:
+        return None
+
+
+def _agent_scope_no_candidate_frontier(
+    *,
+    agent_identity: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None,
+    agent_lane_next_action: dict[str, Any] | None,
+    work_lane_contract: dict[str, Any] | None,
+    candidate_should_run: bool,
+) -> dict[str, Any] | None:
+    if not candidate_should_run:
+        return None
+    if not isinstance(agent_identity, dict) or agent_identity.get("role") != "side-agent":
+        return None
+    agent_id = normalize_todo_claimed_by(agent_identity.get("agent_id"))
+    if not agent_id or not isinstance(agent_todo_summary, dict):
+        return None
+    if isinstance(agent_lane_next_action, dict):
+        return None
+    if not isinstance(work_lane_contract, dict):
+        return None
+    if work_lane_contract.get("lane") != TODO_TASK_CLASS_ADVANCEMENT:
+        return None
+    if work_lane_contract.get("must_attempt_work") is not True:
+        return None
+
+    current_agent_count = int(agent_todo_summary.get("current_agent_claimed_advancement_count") or 0)
+    current_agent_count = max(
+        current_agent_count,
+        _count_advancement_items(
+            agent_todo_summary.get("current_agent_claimed_advancement_items"),
+            claimed_by=agent_id,
+        ),
+    )
+    unclaimed_count = _count_advancement_items(
+        agent_todo_summary.get("unclaimed_priority_open_items"),
+        claimed_by="__unclaimed__",
+    )
+    executable_items = agent_todo_summary.get("executable_backlog_items")
+    if isinstance(executable_items, list):
+        current_agent_count = max(
+            current_agent_count,
+            _count_advancement_items(executable_items, claimed_by=agent_id),
+        )
+        unclaimed_count = max(
+            unclaimed_count,
+            _count_advancement_items(executable_items, claimed_by="__unclaimed__"),
+        )
+    if current_agent_count > 0 or unclaimed_count > 0:
+        return None
+
+    claimed_advancement_items = (
+        agent_todo_summary.get("claimed_advancement_open_items")
+        if isinstance(agent_todo_summary.get("claimed_advancement_open_items"), list)
+        else []
+    )
+    other_advancement_items = [
+        item
+        for item in claimed_advancement_items
+        if isinstance(item, dict)
+        and _todo_item_is_actionable_open(item)
+        and _todo_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+        and normalize_todo_claimed_by(item.get("claimed_by")) not in {None, "", agent_id}
+    ]
+    other_claimants = sorted(
+        {
+            claimed_by
+            for item in other_advancement_items
+            for claimed_by in [normalize_todo_claimed_by(item.get("claimed_by"))]
+            if claimed_by
+        }
+    )
+    claim_scope = (
+        agent_todo_summary.get("claim_scope")
+        if isinstance(agent_todo_summary.get("claim_scope"), dict)
+        else {}
+    )
+    primary_agent = normalize_todo_claimed_by(agent_identity.get("primary_agent"))
+    if other_advancement_items:
+        action = (
+            AgentScopeFrontierAction.PRIMARY_REVIEW_WAIT
+            if primary_agent and primary_agent in other_claimants
+            else AgentScopeFrontierAction.REASSIGNMENT_REQUIRED
+        )
+        owner = primary_agent or ", ".join(other_claimants) or "the owning agent"
+        reason = (
+            f"current side-agent {agent_id} has no current/unclaimed advancement "
+            f"candidate; visible advancement work is claimed by {owner}"
+        )
+        recommended_action = (
+            f"Keep {agent_id} active but quiet: wait for {owner} to review, merge, "
+            "reassign, or create a concrete current-agent/unclaimed advancement todo "
+            "before delivery."
+        )
+    else:
+        action = AgentScopeFrontierAction.AGENT_SCOPE_EXHAUSTED
+        reason = (
+            f"current side-agent {agent_id} has no projected current/unclaimed "
+            "advancement candidate despite a goal-level advancement lane"
+        )
+        recommended_action = (
+            f"Keep {agent_id} active but quiet until LoopX projects a concrete "
+            "current-agent or unclaimed advancement todo, or the primary reassigns work."
+        )
+
+    return {
+        "schema_version": AGENT_SCOPE_FRONTIER_SCHEMA_VERSION,
+        "agent_id": agent_id,
+        "primary_agent": primary_agent,
+        "action": action.value,
+        "effective_action": action.value,
+        "blocks_delivery": True,
+        "quiet_noop_allowed": True,
+        "spend_policy": "no quota spend while the current agent has no in-scope runnable candidate",
+        "reason": reason,
+        "recommended_action": recommended_action,
+        "candidate_counts": {
+            "current_agent_claimed_advancement_count": current_agent_count,
+            "unclaimed_advancement_count": unclaimed_count,
+            "other_agent_claimed_advancement_count": len(other_advancement_items),
+            "other_agent_claimed_open_count": int(
+                claim_scope.get("other_agent_claimed_open_count") or 0
+            ),
+        },
+        "other_claimants": other_claimants,
+        "other_agent_claimed_items": [
+            _compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
+            for item in other_advancement_items[:3]
+        ],
+    }
+
+
 def _todo_ids_from_action(value: Any) -> set[str]:
     text = str(value or "")
     if not text:
@@ -2647,6 +2815,9 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return "external_evidence_observation"
     if kind == "autonomous_replan_required":
         return "autonomous_replan"
+    agent_scope_action = _agent_scope_frontier_action(effective_action)
+    if agent_scope_action is not None:
+        return agent_scope_action.value
     if effective_action == "monitor_quiet_skip":
         return "monitor_quiet_skip"
     if payload.get("recovery_delivery_allowed") or effective_action == "outcome_floor_recovery":
@@ -2698,6 +2869,14 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
         return "run one bounded self-repair or replan segment before another quiet no-op"
     if mode == "monitor_quiet_skip":
         return "record at most one no-spend monitor-poll event, rerun the guard, then stay quiet if unchanged"
+    if _agent_scope_frontier_action(mode) is not None:
+        agent_scope_frontier = (
+            payload.get("agent_scope_frontier")
+            if isinstance(payload.get("agent_scope_frontier"), dict)
+            else {}
+        )
+        action = _protocol_action_text(agent_scope_frontier.get("recommended_action"), limit=260)
+        return action or "stay quiet until this agent has a concrete in-scope runnable todo"
     if mode == "scoped_user_gate_fallback":
         return _protocol_first_candidate_action(payload) or (
             "surface the scoped user gate, then advance one non-gated fallback"
@@ -2746,6 +2925,21 @@ def _interaction_next_cli_actions(payload: dict[str, Any], *, mode: str) -> list
         return [
             f"loopx quota monitor-poll --goal-id {goal_id} --source heartbeat --execute",
             f"loopx --format json quota should-run --goal-id {goal_id}",
+        ]
+    if _agent_scope_frontier_action(mode) is not None:
+        agent_identity = (
+            payload.get("agent_identity")
+            if isinstance(payload.get("agent_identity"), dict)
+            else {}
+        )
+        agent_arg = (
+            f" --agent-id {agent_identity.get('agent_id')}"
+            if agent_identity.get("agent_id")
+            else ""
+        )
+        return [
+            "no quota spend while this agent has no in-scope runnable candidate",
+            f"loopx --format json quota should-run --goal-id {goal_id}{agent_arg}",
         ]
     if mode == "external_evidence_observation":
         return [
@@ -2803,6 +2997,8 @@ def _interaction_spend_policy(
         return "no spend for gate or blocker push"
     if mode == "monitor_quiet_skip":
         return "no spend for unchanged monitor poll"
+    if _agent_scope_frontier_action(mode) is not None:
+        return "no spend while the current agent has no in-scope runnable candidate"
     if mode == "side_agent_workspace_repair":
         return "no spend for moving side-agent work into an independent worktree"
     if mode == "automation_prompt_upgrade":
@@ -2851,14 +3047,17 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
     quiet_noop_allowed = (
         not user_required
         and not must_attempt
-        and mode
-        in {
-            "monitor_quiet_skip",
-            "mapped_noop_if_unchanged",
-            "quota_throttled",
-            "blocked_wait",
-            "skip",
-        }
+        and (
+            _agent_scope_frontier_action(mode) is not None
+            or mode
+            in {
+                "monitor_quiet_skip",
+                "mapped_noop_if_unchanged",
+                "quota_throttled",
+                "blocked_wait",
+                "skip",
+            }
+        )
     )
     spend_allowed_now = False
     spend_after_validation = mode in {
@@ -2896,6 +3095,11 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
             "open user todo requires user-visible follow-up while independent "
             "agent work may continue"
             if _user_channel_action_todo_actions(payload.get("user_todo_summary"))
+            else None
+        )
+        or (
+            payload.get("agent_scope_frontier", {}).get("reason")
+            if isinstance(payload.get("agent_scope_frontier"), dict)
             else None
         )
         or (
@@ -2988,6 +3192,20 @@ def _automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
                 "active but block delivery until it reruns with a registered agent id"
             ),
             "spend_policy": "no quota spend for identity prompt upgrade preflight",
+        }
+    if _agent_scope_frontier_action(effective_action) is not None:
+        return {
+            **base,
+            "automation_action": "keep_active_quiet",
+            "reason": (
+                "the current agent has no in-scope runnable candidate; this is a "
+                "liveness-preserving no-op until work is reassigned or projected"
+            ),
+            "next_trigger": (
+                "primary review, reassignment, or a current-agent/unclaimed "
+                "advancement todo"
+            ),
+            "spend_policy": "no quota spend for agent-scoped no-candidate checks",
         }
     if must_attempt_work or recommended_mode == "autonomous_replan_required":
         return {
@@ -5008,12 +5226,37 @@ def build_quota_should_run(
             selected_recommended_action,
             agent_lane_next_action=agent_lane_next_action,
         )
+        agent_scope_frontier = _agent_scope_no_candidate_frontier(
+            agent_identity=agent_identity,
+            agent_todo_summary=agent_todo_summary,
+            agent_lane_next_action=agent_lane_next_action,
+            work_lane_contract=work_lane_contract,
+            candidate_should_run=bool(should_run and normal_delivery_allowed),
+        )
+        if agent_scope_frontier:
+            normal_delivery_allowed = False
+            should_run = False
+            effective_action = str(agent_scope_frontier.get("effective_action") or "")
+            reason = str(agent_scope_frontier.get("reason") or reason)
+            selected_recommended_action = (
+                agent_scope_frontier.get("recommended_action")
+                or selected_recommended_action
+            )
+            heartbeat_recommendation = {
+                **heartbeat_recommendation,
+                "recommended_mode": effective_action,
+                "notify": "DONT_NOTIFY",
+                "reason": reason,
+                "spend_policy": agent_scope_frontier.get("spend_policy")
+                or "do not append quota spend while the current agent has no in-scope runnable candidate",
+            }
         state_action_projection_warning = _state_action_projection_warning(
             item,
             agent_todo_summary=agent_todo_summary,
             selected_action=selected_recommended_action,
             work_lane_contract=work_lane_contract,
         )
+        agent_scope_action = _agent_scope_frontier_action(effective_action)
         payload = {
             "ok": bool(plan.get("ok")) or self_repair_allowed or capability_repair_allowed or workspace_repair_allowed,
             "status_health_ok": bool(plan.get("ok")),
@@ -5034,6 +5277,8 @@ def build_quota_should_run(
                 if workspace_repair_allowed
                 else "automation_prompt_upgrade"
                 if automation_prompt_upgrade_required
+                else agent_scope_action.value
+                if agent_scope_action is not None
                 else "skip"
             ),
             "should_run": should_run,
@@ -5094,6 +5339,8 @@ def build_quota_should_run(
             payload["agent_identity"] = agent_identity
         if agent_lane_next_action:
             payload["agent_lane_next_action"] = agent_lane_next_action
+        if agent_scope_frontier:
+            payload["agent_scope_frontier"] = agent_scope_frontier
         if workspace_guard:
             payload["workspace_guard"] = workspace_guard
         if automation_prompt_upgrade:
@@ -6392,6 +6639,20 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if agent_lane_next_action.get("text"):
             lines.append(f"- agent_lane_next_action_text: {agent_lane_next_action.get('text')}")
+    agent_scope_frontier = (
+        payload.get("agent_scope_frontier")
+        if isinstance(payload.get("agent_scope_frontier"), dict)
+        else {}
+    )
+    if agent_scope_frontier:
+        lines.append(
+            "- agent_scope_frontier: "
+            f"action={agent_scope_frontier.get('action')} "
+            f"agent_id={agent_scope_frontier.get('agent_id')} "
+            f"quiet_noop_allowed={agent_scope_frontier.get('quiet_noop_allowed')}"
+        )
+        if agent_scope_frontier.get("reason"):
+            lines.append(f"- agent_scope_frontier_reason: {agent_scope_frontier.get('reason')}")
     automation_prompt_upgrade = (
         payload.get("automation_prompt_upgrade")
         if isinstance(payload.get("automation_prompt_upgrade"), dict)

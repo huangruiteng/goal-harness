@@ -1076,6 +1076,114 @@ def assert_side_agent_next_action_projects_without_stealing_goal_next_action() -
     assert primary_action not in guard["agent_lane_next_action"]["text"], guard
 
 
+def assert_side_agent_waits_when_only_other_agent_has_claimed_work() -> None:
+    primary_action = "[P0] Run SWE-Marathon full-suite polling and record compact results."
+    guard = build_quota_should_run(
+        status_payload(
+            status="side_agent_other_claimed_frontier",
+            next_action=primary_action,
+            coordination={
+                "primary_agent": "codex-main-control",
+                "registered_agents": ["codex-main-control", "codex-side-bypass"],
+            },
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": primary_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "claimed_by": "codex-main-control",
+                    "todo_id": "todo_primary_suite",
+                    "required_capabilities": ["shell"],
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    assert guard["decision"] == "primary_review_wait", guard
+    assert guard["should_run"] is False, guard
+    assert guard["normal_delivery_allowed"] is False, guard
+    assert guard["actionable_by_codex"] is False, guard
+    assert guard["effective_action"] == "primary_review_wait", guard
+    assert "agent_lane_next_action" not in guard, guard
+    frontier = guard["agent_scope_frontier"]
+    assert frontier["schema_version"] == "agent_scope_frontier_v0", frontier
+    assert frontier["action"] == "primary_review_wait", frontier
+    assert frontier["agent_id"] == "codex-side-bypass", frontier
+    assert frontier["primary_agent"] == "codex-main-control", frontier
+    assert frontier["candidate_counts"]["current_agent_claimed_advancement_count"] == 0, frontier
+    assert frontier["candidate_counts"]["unclaimed_advancement_count"] == 0, frontier
+    assert frontier["candidate_counts"]["other_agent_claimed_advancement_count"] == 1, frontier
+    assert frontier["other_claimants"] == ["codex-main-control"], frontier
+    assert "codex-side-bypass" in guard["recommended_action"], guard
+    assert "codex-main-control" in guard["recommended_action"], guard
+    assert "SWE-Marathon" not in guard["recommended_action"], guard
+    obligation = guard["execution_obligation"]
+    assert obligation["must_attempt_work"] is False, obligation
+    assert obligation["kind"] == "primary_review_wait", obligation
+    contract = guard["interaction_contract"]
+    assert contract["mode"] == "primary_review_wait", contract
+    assert contract["agent_channel"]["must_attempt"] is False, contract
+    assert contract["agent_channel"]["delivery_allowed"] is False, contract
+    assert contract["agent_channel"]["quiet_noop_allowed"] is True, contract
+    assert contract["cli_channel"]["spend_after_validation"] is False, contract
+    assert "no spend" in contract["cli_channel"]["spend_policy"], contract
+    assert "no quota spend" in contract["cli_channel"]["next_cli_actions"][0], contract
+    assert "codex-side-bypass has no current/unclaimed" in contract["user_channel"]["reason"], contract
+    markdown = render_quota_should_run_markdown(guard)
+    assert "agent_scope_frontier: action=primary_review_wait" in markdown, markdown
+    assert "quiet_noop_allowed=True" in markdown, markdown
+
+
+def assert_side_agent_can_take_unclaimed_work() -> None:
+    primary_action = "[P0] Run SWE-Marathon full-suite polling and record compact results."
+    unclaimed_action = "[P0] Validate hosted Frontstage screenshot and public CTA copy."
+    guard = build_quota_should_run(
+        status_payload(
+            status="side_agent_unclaimed_frontier",
+            next_action=primary_action,
+            coordination={
+                "primary_agent": "codex-main-control",
+                "registered_agents": ["codex-main-control", "codex-side-bypass"],
+            },
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": primary_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "claimed_by": "codex-main-control",
+                    "todo_id": "todo_primary_suite",
+                },
+                {
+                    "index": 2,
+                    "text": unclaimed_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "todo_id": "todo_unclaimed_frontstage",
+                    "required_capabilities": ["shell"],
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    assert guard["should_run"] is True, guard
+    assert guard["normal_delivery_allowed"] is True, guard
+    assert guard["recommended_action"] == unclaimed_action, guard
+    assert "agent_scope_frontier" not in guard, guard
+    next_action = guard["agent_lane_next_action"]
+    assert next_action["todo_id"] == "todo_unclaimed_frontstage", guard
+    assert next_action["selected_by"] == "unclaimed_todo", guard
+
+
 def assert_agent_lane_next_action_prefers_capability_repair_candidate() -> None:
     ordinary_action = (
         "[P0] Run the already-launched full-suite polling lane and record compact results."
@@ -1216,6 +1324,8 @@ def main() -> int:
     assert_launched_external_observation_does_not_preempt_advancement_backlog()
     assert_launch_then_poll_todo_without_handle_routes_to_advancement()
     assert_side_agent_next_action_projects_without_stealing_goal_next_action()
+    assert_side_agent_waits_when_only_other_agent_has_claimed_work()
+    assert_side_agent_can_take_unclaimed_work()
     assert_agent_lane_next_action_prefers_capability_repair_candidate()
     assert_agent_lane_next_action_prefers_explicit_next_action_todo_id()
     print("work-lane-contract-smoke ok")

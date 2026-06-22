@@ -121,6 +121,7 @@ Hot-path execution decisions: deliver, fallback, recover, or stay quiet.
 | P0 | IP-002 | Blocked Priority With Safe Fallback | Agent plus user-visible notification | notify without requiring an answer | continue safe fallback after exposing blocked higher-priority work |
 | P0 | IP-003 | Scoped Gate With Safe Fallback | User plus agent | notify concrete scoped gate | execute non-dependent fallback; no gated action |
 | P0 | IP-021 | Per-Todo Capability Gate | CLI projects, agent decides | ask only when missing capability is owner-held | expose runnable executable candidates; agent chooses one, otherwise repair bridge or skip |
+| P0 | IP-026 | Agent-Scoped No-Candidate Wait | CLI/controller | no notification | keep the side-agent active but quiet until current-agent or unclaimed work exists |
 | P0 | IP-007 | Outcome Floor Recovery | Agent | usually no interruption | produce missing outcome-scale evidence or blocker only |
 | P1 | IP-008 | Monitor Quiet Skip | CLI/controller | no notification | append at most one no-spend poll, then stay quiet |
 
@@ -555,6 +556,84 @@ watch lane instead of staying quiet or writing a concrete blocker.
 - `examples/heartbeat-quota-flow-smoke.py`
 - `docs/heartbeat-automation-prompt.md`
 - `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
+
+#### IP-026 Agent-Scoped No-Candidate Wait
+
+**Trigger**
+
+- `quota should-run --agent-id <side-agent>` sees a goal-level
+  `advancement_task` lane, but `agent_lane_next_action` is absent;
+- the current agent has no `current_agent_claimed_advancement_items`;
+- there is no unclaimed advancement candidate that the side-agent may adopt;
+- visible advancement work is claimed by another agent or otherwise outside
+  the current agent's scope.
+
+**User channel**
+
+Do not notify the user. This is a scheduling/projection boundary, not a user
+decision.
+
+**Agent channel**
+
+Return `agent_scope_frontier_v0` with one of:
+
+- `primary_review_wait`: visible work is owned by the primary agent;
+- `reassignment_required`: visible work is owned by another agent and needs an
+  explicit handoff or claim change;
+- `agent_scope_exhausted`: no current-agent or unclaimed advancement candidate
+  is projected.
+
+For all three, set `should_run=false`, `delivery_allowed=false`,
+`quiet_noop_allowed=true`, and no-spend CLI policy. If an unclaimed
+advancement candidate exists, the side-agent may take it as `unclaimed_todo`
+instead of waiting.
+
+**State contract**
+
+```text
+agent_scope_frontier = {
+  schema_version: agent_scope_frontier_v0,
+  agent_id,
+  primary_agent,
+  action: primary_review_wait | reassignment_required | agent_scope_exhausted,
+  candidate_counts: {
+    current_agent_claimed_advancement_count,
+    unclaimed_advancement_count,
+    other_agent_claimed_advancement_count
+  },
+  quiet_noop_allowed: true,
+  spend_policy: "no quota spend ..."
+}
+interaction_contract.agent_channel.delivery_allowed = false
+interaction_contract.agent_channel.quiet_noop_allowed = true
+```
+
+**Bad smell**
+
+`should_run=true` plus `delivery_allowed=true` while the same payload has no
+`agent_lane_next_action` and the recommendation points at another agent's todo.
+That makes a side-agent burn a heartbeat on stale global work or repeatedly
+explain why it cannot act.
+
+**Visual model**
+
+```mermaid
+flowchart LR
+  Q["quota should-run --agent-id side"] --> C{"current or unclaimed advancement?"}
+  C -->|yes| R["run selected current-agent/unclaimed todo"]
+  C -->|no| O{"only other-agent claimed work?"}
+  O -->|primary owns it| P["primary_review_wait"]
+  O -->|another owner| A["reassignment_required"]
+  O -->|none projected| E["agent_scope_exhausted"]
+  P --> N["quiet no-op, no spend"]
+  A --> N
+  E --> N
+```
+
+**Validation**
+
+- `examples/work-lane-contract-smoke.py`
+- `skills/loopx-self-repair/references/repair-patterns.md`
 
 ### Human Decision
 
