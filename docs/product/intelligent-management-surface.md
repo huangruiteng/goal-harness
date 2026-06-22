@@ -174,6 +174,7 @@ The surface should grow from explicit contracts rather than UI-only state.
 | `feedback_signal_v0` | A normalized effect: gate decision, preference hint, todo mutation, reward, or product note. |
 | `performance_review_v0` | Periodic lane-level review of output, quality, cost, attention, and next expectation. |
 | `management_projection_v0` | Read model joining goals, lanes, anchors, gates, todos, evidence, and review feed. |
+| `mental_model_projection_v0` | User-facing compression of kernel state into goal, next step, blocker/permission, evidence, and continue state. |
 
 The existing LoopX objects remain the source of truth for control: goal,
 gate, todo, quota, evidence, run history, handoff, and boundary. The management
