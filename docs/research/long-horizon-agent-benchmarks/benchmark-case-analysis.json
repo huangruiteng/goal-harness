@@ -2751,6 +2751,324 @@
         "product_path_claim": "verified",
         "solver_uplift_claim": "not_claimable_extended_round_negative"
       }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__headless-terminal__paired-no-uplift-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "headless-terminal",
+      "classification": "generated_no_uplift_asset",
+      "decision": "paired_no_score_uplift",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "82872b12d3ba",
+        "c87b8f22c0b0",
+        "d8853f13e62c"
+      ],
+      "source_run_count": 5,
+      "capability_signal": "terminal-bench@2.0/headless-terminal has compact paired no-uplift evidence (paired_no_score_uplift); use it to adjust routing or treatment policy, not as a positive uplift claim.",
+      "control_plane_signal": "Generated as a P1 proposal from compact ledger metadata only. Recommended handling: promote when the no-uplift result changes routing, prompt, or treatment policy.",
+      "routing_guidance": {
+        "repeat_policy": "promote when the no-uplift result changes routing, prompt, or treatment policy"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_no_uplift_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__build-cython-ext__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "build-cython-ext",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "84f5b6b69627",
+        "36cb8a6eabd8",
+        "80d729022ae6"
+      ],
+      "source_run_count": 11,
+      "capability_signal": "terminal-bench@2.0/build-cython-ext is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__compile-compcert__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "compile-compcert",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "1bbca3393341"
+      ],
+      "source_run_count": 1,
+      "capability_signal": "terminal-bench@2.0/compile-compcert is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__financial-document-processor__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "financial-document-processor",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "0e83bb674871",
+        "927c069179fe"
+      ],
+      "source_run_count": 2,
+      "capability_signal": "terminal-bench@2.0/financial-document-processor is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__fix-code-vulnerability__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "fix-code-vulnerability",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "f42efa143d52"
+      ],
+      "source_run_count": 1,
+      "capability_signal": "terminal-bench@2.0/fix-code-vulnerability is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__merge-diff-arc-agi-task__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "merge-diff-arc-agi-task",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "9ca514c170e6"
+      ],
+      "source_run_count": 1,
+      "capability_signal": "terminal-bench@2.0/merge-diff-arc-agi-task is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__path-tracing__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "path-tracing",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "7e22b45c6fac",
+        "e5f6ebd42244"
+      ],
+      "source_run_count": 2,
+      "capability_signal": "terminal-bench@2.0/path-tracing is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
+    },
+    {
+      "analysis_id": "terminal-bench-2-0__sqlite-db-truncate__baseline-solved-control-candidate",
+      "benchmark_id": "terminal-bench@2.0",
+      "case_id": "sqlite-db-truncate",
+      "classification": "generated_baseline_solved_control_asset",
+      "decision": "baseline_passed_not_current_treatment_priority",
+      "evidence_status": "generated_from_compact_benchmark_run_ledger",
+      "source_run_ids": [
+        "acee75707a05"
+      ],
+      "source_run_count": 1,
+      "capability_signal": "terminal-bench@2.0/sqlite-db-truncate is a compact baseline-solved control (baseline_passed_not_current_treatment_priority); promote selectively for coverage or routing balance.",
+      "control_plane_signal": "Generated as a P2 proposal from compact ledger metadata only. Recommended handling: promote selectively as a baseline-solved control when the case is needed for routing or coverage.",
+      "routing_guidance": {
+        "repeat_policy": "promote selectively as a baseline-solved control when the case is needed for routing or coverage"
+      },
+      "acceptance_policy": {
+        "schema_version": "benchmark_case_analysis_acceptance_policy_v0",
+        "policy": "generated-safe",
+        "accepted": true,
+        "status": "accepted_generated_not_applied",
+        "accepted_classification": "generated_baseline_solved_control_asset",
+        "requires_manual_review": false,
+        "reason_codes": [
+          "generated_safe_policy_matched"
+        ]
+      },
+      "source_boundary": {
+        "inputs": [
+          "compact benchmark-run-ledger candidate",
+          "benchmark-case-analysis existing keys"
+        ],
+        "raw_logs_recorded": false,
+        "raw_task_text_recorded": false,
+        "trajectory_recorded": false,
+        "absolute_paths_recorded": false,
+        "generated_case_analysis": true
+      }
     }
   ],
   "schema_version": "benchmark_case_analysis_v0",
@@ -3456,7 +3774,7 @@
     "trajectory_recorded": false,
     "update_rule": "add one case analysis record after compact result ingest and benchmark-run-ledger update"
   },
-  "updated_at": "2026-06-22T06:08:33+08:00",
+  "updated_at": "2026-06-22T15:01:06+08:00",
   "terminal_bench_current_protocol_coverage": {
     "schema_version": "terminal_bench_current_protocol_coverage_v0",
     "source_ledger": "benchmark-run-ledger.json",
