@@ -633,7 +633,7 @@ function ShowcaseCasePackPanel() {
 
   return (
     <Panel icon={ListChecks} title="Showcase Cases">
-      <div className="space-y-3 p-4" data-testid="frontstage-showcase-cases">
+      <div className="space-y-3 p-4" data-testid="frontstage-showcase-cases" id="frontstage-showcase-cases">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-slate-950">Public-safe case pack</h3>
@@ -1017,17 +1017,17 @@ function FrontstageRoute({
     ? projection.display_name
     : isDeveloperMode
       ? "Developer Onboarding Frontstage"
-      : "LoopX Showcase Frontstage";
+      : "Loop engineering for long-running AI agents";
   const heroSubtitle = isOpsMode
     ? "Always-on agent operations, with human judgment kept in the control plane."
     : isDeveloperMode
       ? "Start the loop from one TUI message, then keep every gate visible."
-    : "Async agent teams, governed by human judgment.";
+      : "Public cases first. Live registry state stays behind explicit ops mode.";
   const heroBody = isOpsMode
     ? projection.next_action
     : isDeveloperMode
       ? "A contributor-facing path for install, status health, todo claims, workspace repairs, local server checks, and safe writeback."
-    : "Public cases show the operating model: gates stay explicit, safe lanes keep moving, and evidence makes every handoff recoverable.";
+      : "See how human gates, scoped agent lanes, and evidence writeback keep long-running work moving without leaking private status feeds.";
   const heroStats = isOpsMode
     ? [
         { label: "open user todos", value: String(openUserTodos) },
@@ -1120,9 +1120,13 @@ function FrontstageRoute({
       data-testid="goal-channel-frontstage-route"
     >
       <div
-        className="frontstage-workspace-shell mx-auto grid max-w-[1500px] gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]"
+        className={cn(
+          "frontstage-workspace-shell mx-auto grid gap-4",
+          isOpsMode ? "max-w-[1500px] xl:grid-cols-[260px_minmax(0,1fr)_320px]" : "max-w-[1180px]",
+        )}
         data-testid={isOpsMode ? "frontstage-ops-workspace-shell" : "frontstage-showcase-workspace-shell"}
       >
+        {isOpsMode ? (
         <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start">
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-950 text-white">
@@ -1281,6 +1285,7 @@ function FrontstageRoute({
             ) : null}
           </div>
         </aside>
+        ) : null}
 
         <section className={cn("space-y-4", isOpsMode ? "frontstage-ops-main-pane" : "frontstage-showcase-main-pane")}>
           <div className="rounded-lg border border-slate-200 bg-white px-5 py-5 shadow-sm">
@@ -1304,6 +1309,45 @@ function FrontstageRoute({
                   {heroSubtitle}
                 </p>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{heroBody}</p>
+                {isShowcaseMode ? (
+                  <div className="mt-4 flex flex-wrap gap-2" data-testid="frontstage-public-cta-row">
+                    <a
+                      className="inline-flex items-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white shadow-sm"
+                      href="#frontstage-showcase-cases"
+                    >
+                      Explore cases
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                    <a
+                      className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm"
+                      href="https://github.com/huangruiteng/loopx#quick-start"
+                    >
+                      Quick Start
+                    </a>
+                    <a
+                      className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm"
+                      href="https://github.com/huangruiteng/loopx/issues"
+                    >
+                      Share feedback
+                    </a>
+                  </div>
+                ) : null}
+                {!isOpsMode ? (
+                  <div
+                    className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium leading-5 text-emerald-950"
+                    data-testid="frontstage-public-boundary-note"
+                  >
+                    <span>
+                      {isDeveloperMode
+                        ? "Developer mode ignores statusUrl and renders the public onboarding path only."
+                        : "Showcase mode ignores statusUrl by design and renders docs/showcases only."}
+                    </span>
+                    {hasIgnoredStatusUrl ? <Badge variant="warning">statusUrl ignored</Badge> : null}
+                    <span className="font-semibold text-emerald-800" data-testid="frontstage-ops-entry-hint">
+                      Use mode=ops with statusUrl.
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="grid min-w-[220px] grid-cols-2 gap-2 text-center">
                 {heroStats.map((stat) => (
@@ -1452,6 +1496,7 @@ function FrontstageRoute({
           )}
         </section>
 
+        {isOpsMode ? (
         <aside className="space-y-4">
           {isOpsMode ? (
             <Panel icon={Users} title="Role Map">
@@ -1563,6 +1608,7 @@ function FrontstageRoute({
             </div>
           </Panel>
         </aside>
+        ) : null}
       </div>
     </main>
   );
