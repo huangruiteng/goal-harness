@@ -18,7 +18,7 @@ INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-local.sh"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.doctor import add_promotion_readiness_freshness  # noqa: E402
+from loopx.doctor import add_promotion_readiness_freshness, build_install_freshness  # noqa: E402
 
 
 def run_install(env: dict[str, str], release_id: str) -> subprocess.CompletedProcess[str]:
@@ -212,6 +212,14 @@ def main() -> int:
         )
         doctor_payload = json.loads(doctor.stdout)
         assert doctor_payload["ok"] is True, doctor_payload
+        freshness = doctor_payload["install_freshness"]
+        assert freshness["schema_version"] == "loopx_install_freshness_v0", freshness
+        assert freshness["status"] == "unknown", freshness
+        assert freshness["requires_upgrade"] is False, freshness
+        assert freshness["current_version"], freshness
+        assert "install-from-github.sh" in freshness["upgrade_command"], freshness
+        assert "loopx doctor" in freshness["upgrade_command"], freshness
+        assert doctor_payload["upgrade_hint"] == freshness, doctor_payload
         assert doctor_payload["path"]["loopx"] == str(wrapper), doctor_payload
         assert doctor_payload["path"]["loopx_realpath"] == str(wrapper.resolve()), doctor_payload
         assert doctor_payload["path"]["loopx_canary"] == str(canary_wrapper), doctor_payload
@@ -272,6 +280,10 @@ def main() -> int:
         assert "loopx_canary_realpath:" in doctor_markdown, doctor_markdown
         assert "release_root:" in doctor_markdown, doctor_markdown
         assert "## Release Provenance" in doctor_markdown, doctor_markdown
+        assert "## Install Freshness" in doctor_markdown, doctor_markdown
+        assert "schema_version: `loopx_install_freshness_v0`" in doctor_markdown, doctor_markdown
+        assert "status: `unknown`" in doctor_markdown, doctor_markdown
+        assert "install-from-github.sh" in doctor_markdown, doctor_markdown
         assert "latest_promotion_readiness: available=`True`" in doctor_markdown, doctor_markdown
         assert "freshness=`fresh`" in doctor_markdown, doctor_markdown
         assert "requires_readiness_run=`False`" in doctor_markdown, doctor_markdown
@@ -288,6 +300,36 @@ def main() -> int:
         missing = add_promotion_readiness_freshness({"available": False})
         assert missing["freshness_status"] == "missing", missing
         assert missing["requires_readiness_run"] is True, missing
+
+        stale_install = build_install_freshness(
+            command_path=wrapper,
+            release_root=root / "releases" / "20260101T000000Z",
+            repo_root=REPO_ROOT,
+            skills={
+                "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-doc-registry": {"exists": True, "required_phrases": True},
+                "loopx-self-repair": {"exists": True, "required_phrases": True},
+            },
+            now=datetime(2026, 1, 9, tzinfo=timezone.utc),
+        )
+        assert stale_install["status"] == "stale", stale_install
+        assert stale_install["requires_upgrade"] is True, stale_install
+        assert stale_install["release_age_hours"] == 192.0, stale_install
+        assert "install-from-github.sh" in stale_install["no_clone_upgrade_command"], stale_install
+
+        fresh_install = build_install_freshness(
+            command_path=wrapper,
+            release_root=root / "releases" / "20260108T000000Z",
+            repo_root=REPO_ROOT,
+            skills={
+                "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-doc-registry": {"exists": True, "required_phrases": True},
+                "loopx-self-repair": {"exists": True, "required_phrases": True},
+            },
+            now=datetime(2026, 1, 9, tzinfo=timezone.utc),
+        )
+        assert fresh_install["status"] == "fresh", fresh_install
+        assert fresh_install["requires_upgrade"] is False, fresh_install
 
         cli = subprocess.run(
             [

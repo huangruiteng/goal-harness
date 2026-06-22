@@ -24,6 +24,12 @@ from .todos import add_todo_to_lines
 
 DEFAULT_OBJECTIVE = "Improve this project through bounded, verified goal segments."
 DEFAULT_DOMAIN = "project-goal-control-plane"
+NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
+NO_CLONE_INSTALL_REPAIR_COMMAND = (
+    f"curl -fsSL {NO_CLONE_INSTALL_URL} | bash\n"
+    'export PATH="$HOME/.local/bin:$PATH"\n'
+    "loopx doctor"
+)
 
 
 def slugify_goal_id(value: str) -> str:
@@ -663,6 +669,11 @@ def bootstrap_project(
             f"loopx --registry {runtime_root / 'registry.global.json'} status",
             f"loopx --registry {relative_state_file(project, registry_path)} history --goal-id {goal_id}",
         ],
+        "install_repair_command": NO_CLONE_INSTALL_REPAIR_COMMAND,
+        "install_repair_note": (
+            "If this local LoopX install is missing or stale, rerun the no-clone installer, "
+            "refresh PATH, and confirm with loopx doctor before continuing project delivery."
+        ),
         "private_boundary_note": "Add .loopx/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
     }
 
@@ -772,6 +783,18 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "## Next Commands"])
     for command in payload.get("next_commands") or []:
         lines.append(f"- `{command}`")
+
+    if payload.get("install_repair_command"):
+        lines.extend(
+            [
+                "",
+                "## Install / Update Hint",
+                str(payload.get("install_repair_note") or ""),
+                "```bash",
+                str(payload.get("install_repair_command")),
+                "```",
+            ]
+        )
 
     if payload.get("private_boundary_note"):
         lines.extend(["", "## Boundary Note", str(payload.get("private_boundary_note"))])

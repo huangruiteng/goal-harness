@@ -70,6 +70,8 @@ def main() -> None:
             capture_output=True,
         )
         assert "ok: `True`" in doctor.stdout, doctor.stdout
+        assert "## Install Freshness" in doctor.stdout, doctor.stdout
+        assert "install-from-github.sh" in doctor.stdout, doctor.stdout
 
         for skill in (
             "loopx-project",
