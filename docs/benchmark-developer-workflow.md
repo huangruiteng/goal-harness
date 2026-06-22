@@ -390,14 +390,14 @@ export PYTHONPATH=<loopx-checkout>:<loopx-checkout>/scripts:${PYTHONPATH:-}
 UV_LINK_MODE=copy uv run --no-default-groups harbor run \
   --env docker \
   --agent-import-path harbor_host_codex_goal_agent:HarborHostCodexGoalAgent \
-  --agent-kwarg goal_timeout_sec=10800 \
+  --agent-kwarg goal_timeout_sec=21600 \
   --agent-kwarg task_workdir=/app \
   --jobs-dir <run-dir>/jobs \
   -p <task-dir>
 ```
 
 Use the same long timeout envelope for base and treatment arms while measuring
-capability ceilings. The host Goal agents default to `10800` seconds; pass an
+capability ceilings. The host Goal agents default to `21600` seconds; pass an
 explicit shorter value only for a timeout-cost experiment and record that tier
 in the compact result. LoopX prompt-polling treatments use the same
 envelope for each observed round by default, so the controller does not cut off
@@ -537,7 +537,7 @@ experiment protocol is explicit:
 --agent-kwarg loopx_experiment_protocol=max5_blind_loop_no_feedback \
 --agent-kwarg loopx_max_rounds=5 \
 --agent-kwarg loopx_prompt_polling_rounds=5 \
---agent-kwarg loopx_prompt_polling_round_timeout_sec=900
+--agent-kwarg loopx_prompt_polling_round_timeout_sec=21600
 ```
 
 That path starts native Codex app-server Goal once, then uses follow-up
@@ -803,7 +803,7 @@ tb run \
   --no-rebuild \
   --agent-import-path terminal_bench_host_codex_goal_agent:HostCodexGoalAgent \
   --agent-kwarg goal_surface=app_server \
-  --agent-kwarg goal_timeout_sec=10800
+  --agent-kwarg goal_timeout_sec=21600
 ```
 
 This uses Codex native Goal mode on the host through the app-server Goal API
@@ -822,7 +822,7 @@ tb run \
   ... \
   --agent-import-path terminal_bench_host_codex_goal_agent:HostCodexGoalAgent \
   --agent-kwarg goal_surface=app_server \
-  --agent-kwarg goal_timeout_sec=10800 \
+  --agent-kwarg goal_timeout_sec=21600 \
   --agent-kwarg loopx_mode=codex_loopx \
   --agent-kwarg loopx_access_packet_mode=compact \
   --agent-kwarg loopx_case_id=<task-id> \
@@ -835,14 +835,14 @@ prompt and compact app-server metadata. A Terminal-Bench treatment run remains
 incomplete evidence until the per-case LoopX lifecycle can be observed:
 `quota_should_run`, `todo_claim_or_update`, bounded work/continuation, official
 case result or validation, `refresh_state`, and `quota_spend`.
-The app-server host agent treats the benchmark completion marker and official
-verifier as the success path. It drains app-server events opportunistically and
-writes a compact turn file with `turn_completed_observed`,
-assistant-message counters, and `completion_marker_observed`, but missing or
-late `turn/completed` is diagnostic only. Do not use `turn/completed` as a hard
-failure gate for Terminal-Bench: doing so can change execution semantics by
-terminating a still-running Goal turn before the marker or verifier has a chance
-to reflect the case outcome.
+The app-server host agent treats the case-local LoopX active todo state as the
+treatment completion source of truth. The agent should mark the case todo done
+when the task is complete; the host exits only after it confirms that no
+case-local active todo remains. It drains app-server events opportunistically
+and writes a compact turn file with `turn_completed_observed`,
+assistant-message counters, and `completion_source_of_truth`. The official
+verifier remains the score authority; do not add a second completion file or
+hidden marker for the agent to maintain.
 
 When a Terminal-Bench launch produces only startup or materialization state,
 reduce it before writing LoopX evidence:

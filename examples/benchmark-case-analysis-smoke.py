@@ -263,11 +263,17 @@ def test_case_analysis_json() -> None:
     assert dapt_blind_recheck["reward_feedback_forwarded"] is False, dapt_blind_recheck
     assert dapt_blind_recheck["official_feedback_blinded"] is True, dapt_blind_recheck
     assert dapt_blind_recheck["first_success_round"] is None, dapt_blind_recheck
-    assert paratransit_uplift["classification"] == "product_mode_no_uplift_asset", (
-        paratransit_uplift
-    )
+    assert paratransit_uplift["classification"] == (
+        "product_mode_invalid_shallow_loopx_asset"
+    ), paratransit_uplift
+    assert paratransit_uplift["decision"] == (
+        "product_mode_treatment_invalid_shallow_loopx_lifecycle"
+    ), paratransit_uplift
+    assert paratransit_uplift["current_protocol_claim_status"] == (
+        "product_mode_treatment_invalid_shallow_loopx_lifecycle"
+    ), paratransit_uplift
     assert paratransit_uplift["evidence_status"] == (
-        "compact_pair_complete_product_mode"
+        "compact_pair_complete_but_treatment_lifecycle_invalid"
     ), paratransit_uplift
     assert paratransit_uplift["scores"]["baseline_official_score"] == 0.0, (
         paratransit_uplift
@@ -296,6 +302,17 @@ def test_case_analysis_json() -> None:
     assert paratransit_uplift["arms"]["treatment"]["official_feedback_blinded"] is True, (
         paratransit_uplift
     )
+    product_recheck = paratransit_uplift["product_mode_recheck"]
+    assert product_recheck["product_mode_pair_complete"] is False, product_recheck
+    assert product_recheck["product_mode_treatment_valid"] is False, product_recheck
+    assert product_recheck["invalid_reason"] == (
+        "shallow_loopx_lifecycle_only_goal_discovery_no_state_read_write_or_replan"
+    ), product_recheck
+    depth_gate = paratransit_uplift["depth_gate_repair_result"]
+    assert depth_gate["run_id"] == "c9e2eebe7a8e", depth_gate
+    assert depth_gate["official_score"] == 1.0, depth_gate
+    assert depth_gate["first_success_round"] == 5, depth_gate
+    assert depth_gate["agent_declared_done"] is False, depth_gate
     legacy_paratransit = paratransit_uplift["legacy_blind_loop_positive_result"]
     assert_compact_legacy_result(legacy_paratransit)
     assert legacy_paratransit["classification"] == "positive_uplift_asset", (

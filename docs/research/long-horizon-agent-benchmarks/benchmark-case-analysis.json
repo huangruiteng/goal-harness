@@ -2442,7 +2442,7 @@
       }
     },
     {
-      "analysis_id": "skillsbench-1.1__paratransit-routing__product-mode-no-uplift",
+      "analysis_id": "skillsbench-1.1__paratransit-routing__product-mode-invalid-shallow-loopx",
       "arms": {
         "baseline": {
           "arm_id": "raw-codex-autonomous-max5",
@@ -2473,17 +2473,17 @@
         }
       },
       "benchmark_id": "skillsbench@1.1",
-      "capability_signal": "The blind-loop treatment remains a clean positive-control asset, but the main product-mode comparison is neutral at 0.0/0.0. Do not claim product-mode uplift from this case.",
+      "capability_signal": "The blind-loop treatment remains a clean positive-control asset, and the later depth-gate product-mode rerun recovered a 1.0 after continuing to round 5. The shallow docker-ready product-mode pair is no longer claimable as a main-table no-uplift result because treatment only performed a goal-discovery CLI call.",
       "case_id": "paratransit-routing",
-      "classification": "product_mode_no_uplift_asset",
-      "control_plane_signal": "Product-mode lost the blind-loop positive behavior despite Docker readiness and without reward leakage; the treatment stopped on agent_declared_done before substantive LoopX state/replan use.",
-      "decision": "paired_no_score_uplift",
-      "evidence_status": "compact_pair_complete_product_mode",
+      "classification": "product_mode_invalid_shallow_loopx_asset",
+      "control_plane_signal": "The old docker-ready product-mode treatment stopped on agent_declared_done before substantive LoopX state/replan use. A later depth-gate rerun kept the case alive through five rounds and reached official score 1.0, so the actionable root cause is stop/goal-state semantics and shallow lifecycle acceptance, not runner setup or task impossibility.",
+      "decision": "product_mode_treatment_invalid_shallow_loopx_lifecycle",
+      "evidence_status": "compact_pair_complete_but_treatment_lifecycle_invalid",
       "optimization_guidance": [
-        "Use paratransit-routing as the first clean primary blind-loop positive control when judging future prompt and round-policy changes.",
-        "Keep treatment stop-at-1 enabled; extra scheduled rounds would waste budget and risk damaging a successful artifact.",
+        "Use paratransit-routing as the first clean primary stop/goal-state regression guard when judging future prompt and round-policy changes.",
+        "Do not accept stop-at-1 for product-mode unless compact counters show stateful LoopX lifecycle and no remaining active todo/goal; otherwise continue through the depth gate.",
         "Compare against debug-trl-grpo before broad claims: paratransit shows treatment can help, while debug shows structured continuation can still regress partial credit.",
-        "Analyze compact/public controller counters before changing interaction count policy; this uplift used no follow-up prompt after failure and succeeded in round 1."
+        "Analyze compact/public controller counters before changing interaction count policy; shallow product-mode interactions such as only `loopx which goal` must not enter the main product-mode comparison."
       ],
       "public_boundary": {
         "absolute_paths_recorded": false,
@@ -2510,9 +2510,9 @@
         "treatment_round_rewards": "1:0"
       },
       "stability_assessment": {
-        "stable_current_protocol_conclusion": "product_mode_no_uplift",
+        "stable_current_protocol_conclusion": "product_mode_invalid_shallow_loopx_lifecycle",
         "legacy_blind_loop_positive_lesson": "preserved_compact_only",
-        "stable_conclusion": "Blind-loop can help this case, but current product-mode did not; use this as product-mode repair input, not product-mode uplift."
+        "stable_conclusion": "Blind-loop and depth-gated product-mode can help this case, but the old docker-ready product-mode sample was not a valid stateful treatment; use it as product-mode repair input, not no-uplift evidence."
       },
       "product_mode_recheck": {
         "baseline_run_group_id": "skillsbench-product-mode-paratransit-routing-main-dockerready-20260616T2156CST",
@@ -2530,16 +2530,18 @@
         "best_score_delta": 0.0,
         "final_score_delta": 0.0,
         "declared_done_score_delta": 0.0,
-        "decision": "paired_no_score_uplift",
+        "decision": "product_mode_treatment_invalid_shallow_loopx_lifecycle",
         "treatment_loopx_cli_call_count": 1,
         "treatment_loopx_cli_calls": [
           "loopx which goal"
         ],
         "docker_readiness_repaired": true,
         "host_blocker_superseded": "skillsbench_docker_daemon_unavailable",
-        "product_mode_pair_complete": true,
-        "claim_boundary": "This docker-ready product-mode pair is neutral at 0.0/0.0; do not mix it with the older blind-loop treatment for product-mode main-table claims.",
-        "next_action": "compare public-safe trajectory summaries for the blind-loop positive treatment and the product-mode neutral treatment to identify why product-mode lost the blind-loop positive behavior without reading raw task text, raw logs, verifier output, or raw trajectory bodies."
+        "product_mode_pair_complete": false,
+        "product_mode_treatment_valid": false,
+        "invalid_reason": "shallow_loopx_lifecycle_only_goal_discovery_no_state_read_write_or_replan",
+        "claim_boundary": "This docker-ready product-mode pair reached scoring, but the treatment is not a valid stateful product-mode attempt because compact counters show only `loopx which goal` and no state read/write/replan lifecycle.",
+        "next_action": "Use the depth-gate product-mode rerun and the parity posthoc lifecycle gate as the product-mode repair baseline; do not count the old shallow treatment as no-uplift."
       },
       "product_mode_attribution": {
         "evidence_boundary": "compact_public_safe_counters_only_no_raw_task_log_verifier_or_trajectory",
@@ -2574,8 +2576,19 @@
           "protected_path_edit_signal",
           "docker_readiness_or_runner_setup"
         ],
-        "next_design_implication": "Do not claim product-mode uplift from this pair. Either preserve the blind-loop successful initial-treatment semantics or add a public-safe replan and remaining-goals check before treating declared_done at 0.0 as a final product-mode stop.",
+        "next_design_implication": "Do not claim product-mode no-uplift from this pair. Preserve the depth-gate behavior: a product-mode treatment must show stateful LoopX lifecycle or continue instead of accepting declared_done at 0.0.",
         "content_level_limit": "A content-level root cause still requires a stronger redacted trajectory summarizer or an explicit raw-trace owner gate."
+      },
+      "depth_gate_repair_result": {
+        "schema_version": "skillsbench_product_mode_depth_gate_repair_v0",
+        "run_group_id": "skillsbench-product-mode-paratransit-depth-gate-20260617T1229CST",
+        "run_id": "c9e2eebe7a8e",
+        "route": "loopx-product-mode",
+        "official_score": 1.0,
+        "first_success_round": 5,
+        "final_round": 5,
+        "agent_declared_done": false,
+        "claim_boundary": "Depth-gate rerun is product-mode repair evidence for stop/goal-state semantics, not a broad route-wide uplift claim by itself."
       },
       "legacy_blind_loop_positive_result": {
         "schema_version": "compact_legacy_case_result_v0",
@@ -2622,9 +2635,9 @@
           "tool_call_count": 16,
           "treatment_run_group_id": "skillsbench-paratransit-routing-blind-loop-20260616T1304CST"
         },
-        "claim_boundary": "Blind-loop positive is preserved as a control asset only; current product-mode main-table recheck is 0.0->0.0."
+        "claim_boundary": "Blind-loop positive is preserved as a control asset; the old product-mode recheck is invalid due shallow lifecycle, while the later depth-gate rerun restored success."
       },
-      "current_protocol_claim_status": "product_mode_no_uplift"
+      "current_protocol_claim_status": "product_mode_treatment_invalid_shallow_loopx_lifecycle"
     },
     {
       "analysis_id": "swe-marathon__zstd-decoder__extended-round-product-path-negative",

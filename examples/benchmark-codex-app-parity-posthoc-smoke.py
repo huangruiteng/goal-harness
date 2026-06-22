@@ -42,8 +42,12 @@ def full_product_run() -> dict[str, object]:
                 "todo_list": 1,
                 "history": 1,
                 "check": 1,
-                "total": 5,
+                "todo_update": 1,
+                "refresh_state": 1,
+                "total": 7,
             },
+            "loopx_state_reads": 4,
+            "loopx_state_writes": 2,
             "private_trajectory_summary_present": True,
             "raw_task_text_recorded": False,
             "raw_verifier_output_recorded": False,
@@ -83,12 +87,30 @@ def leaky_run() -> dict[str, object]:
     return run
 
 
+def which_goal_only_run() -> dict[str, object]:
+    run = full_product_run()
+    interaction = dict(run["interaction_counters"])  # type: ignore[index]
+    interaction.update(
+        {
+            "loopx_cli_calls": ["loopx which goal"],
+            "loopx_state_reads": 0,
+            "loopx_state_writes": 0,
+            "loopx_cli_state_read_count": 0,
+            "loopx_cli_state_write_count": 0,
+        }
+    )
+    run["interaction_counters"] = interaction
+    return run
+
+
 def assert_direct_checks() -> None:
     good = build_codex_app_parity_posthoc_check(full_product_run())
     assert good["schema_version"] == CODEX_APP_PARITY_POSTHOC_CHECK_SCHEMA_VERSION
     assert good["full_product_claim_allowed"] is True, good
     assert good["missing_evidence"] == [], good
     assert good["safety_failures"] == [], good
+    assert good["stateful_lifecycle_counts"]["state_reads"] > 0, good
+    assert good["stateful_lifecycle_counts"]["state_writes"] > 0, good
 
     surrogate = build_codex_app_parity_posthoc_check(surrogate_run())
     assert surrogate["full_product_claim_allowed"] is False, surrogate
@@ -101,6 +123,15 @@ def assert_direct_checks() -> None:
     assert leaky["full_product_claim_allowed"] is False, leaky
     assert leaky["claim_level"] == "unsafe_or_leaky_artifact", leaky
     assert "raw_reward_feedback_absent" in leaky["safety_failures"], leaky
+
+    which_goal = build_codex_app_parity_posthoc_check(which_goal_only_run())
+    assert which_goal["full_product_claim_allowed"] is False, which_goal
+    assert which_goal["claim_level"] == "product_mode_surrogate_missing_posthoc_evidence"
+    assert "required_loopx_cli_calls_present" in which_goal["missing_evidence"]
+    assert "stateful_loopx_lifecycle_observed" in which_goal["missing_evidence"]
+    assert which_goal["loopx_cli_call_counts"]["total"] == 1, which_goal
+    assert which_goal["stateful_lifecycle_counts"]["state_reads"] == 0, which_goal
+    assert which_goal["stateful_lifecycle_counts"]["state_writes"] == 0, which_goal
 
 
 def assert_cli_check() -> None:
@@ -144,4 +175,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -16,6 +16,13 @@ CODEX_APP_PARITY_REQUIRED_CLI_CALLS = (
     "history",
     "check",
 )
+CODEX_APP_PARITY_STATE_WRITE_CLI_CALLS = (
+    "todo_claim",
+    "todo_update",
+    "refresh_state",
+    "quota_spend",
+    "case_result",
+)
 
 
 def _safe_label(value: object, *, limit: int = 120) -> str:
@@ -41,29 +48,63 @@ def _contains_command(text: object, command: str) -> bool:
 
 
 def _loopx_cli_call_counts(interaction: Mapping[str, Any]) -> dict[str, int]:
-    counts = {command: 0 for command in CODEX_APP_PARITY_REQUIRED_CLI_CALLS}
+    tracked_commands = (
+        CODEX_APP_PARITY_REQUIRED_CLI_CALLS
+        + CODEX_APP_PARITY_STATE_WRITE_CLI_CALLS
+    )
+    counts = {command: 0 for command in tracked_commands}
+    raw_call_list_count = 0
 
     raw_calls = interaction.get("loopx_cli_calls")
     if isinstance(raw_calls, Mapping):
-        for command in CODEX_APP_PARITY_REQUIRED_CLI_CALLS:
+        for command in tracked_commands:
             counts[command] = _positive_int(raw_calls.get(command))
     elif isinstance(raw_calls, list):
+        raw_call_list_count = len(raw_calls)
         for item in raw_calls:
-            for command in CODEX_APP_PARITY_REQUIRED_CLI_CALLS:
+            for command in tracked_commands:
                 if _contains_command(item, command):
                     counts[command] += 1
 
     usage_counts = interaction.get("loopx_cli_state_usage_counts")
     if isinstance(usage_counts, Mapping):
-        for command in CODEX_APP_PARITY_REQUIRED_CLI_CALLS:
-            counts[command] = max(counts[command], _positive_int(usage_counts.get(command)))
+        for command in tracked_commands:
+            counts[command] = max(
+                counts[command],
+                _positive_int(usage_counts.get(command)),
+            )
 
     total = _positive_int(
         interaction.get("loopx_cli_call_count")
         or _as_mapping(raw_calls).get("total")
     )
-    counts["total"] = max(total, sum(counts.values()))
+    counts["total"] = max(total, raw_call_list_count, sum(counts.values()))
     return counts
+
+
+def _stateful_lifecycle_counts(
+    interaction: Mapping[str, Any],
+    cli_counts: Mapping[str, int],
+) -> dict[str, int]:
+    read_count = max(
+        _positive_int(interaction.get("loopx_state_reads")),
+        _positive_int(interaction.get("loopx_case_state_reads")),
+        _positive_int(interaction.get("loopx_cli_state_read_count")),
+        sum(
+            cli_counts.get(command, 0)
+            for command in CODEX_APP_PARITY_REQUIRED_CLI_CALLS
+        ),
+    )
+    write_count = max(
+        _positive_int(interaction.get("loopx_state_writes")),
+        _positive_int(interaction.get("loopx_case_state_writes")),
+        _positive_int(interaction.get("loopx_cli_state_write_count")),
+        sum(
+            cli_counts.get(command, 0)
+            for command in CODEX_APP_PARITY_STATE_WRITE_CLI_CALLS
+        ),
+    )
+    return {"state_reads": read_count, "state_writes": write_count}
 
 
 def _product_mode(benchmark_run: Mapping[str, Any], interaction: Mapping[str, Any]) -> bool:
@@ -100,6 +141,7 @@ def build_codex_app_parity_posthoc_check(
     interaction = _as_mapping(benchmark_run.get("interaction_counters"))
     product_mode = _product_mode(benchmark_run, interaction)
     cli_counts = _loopx_cli_call_counts(interaction)
+    stateful_counts = _stateful_lifecycle_counts(interaction, cli_counts)
     missing_cli_calls = [
         command
         for command in CODEX_APP_PARITY_REQUIRED_CLI_CALLS
@@ -135,6 +177,10 @@ def build_codex_app_parity_posthoc_check(
         "case_active_state_initialized_before_agent": case_initialized,
         "loopx_cli_trace_present": cli_counts["total"] > 0,
         "required_loopx_cli_calls_present": not missing_cli_calls,
+        "stateful_loopx_lifecycle_observed": (
+            stateful_counts["state_reads"] > 0
+            and stateful_counts["state_writes"] > 0
+        ),
         "codex_cli_trajectory_summary_present": trajectory_summary_present,
     }
 
@@ -165,6 +211,7 @@ def build_codex_app_parity_posthoc_check(
         "evidence_checks": evidence_checks,
         "safety_checks": safety_checks,
         "loopx_cli_call_counts": cli_counts,
+        "stateful_lifecycle_counts": stateful_counts,
         "missing_required_cli_calls": missing_cli_calls,
         "case_goal_state": {
             "init_required": case_init_required,
@@ -207,4 +254,3 @@ def render_codex_app_parity_posthoc_check_markdown(payload: Mapping[str, Any]) -
             "- read_boundary: compact benchmark_run only; no raw logs, task text, trajectory, verifier output, credentials, or local private paths read.",
         ]
     )
-

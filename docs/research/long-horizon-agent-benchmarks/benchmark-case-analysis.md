@@ -40,7 +40,7 @@ evidence becomes useful.
 | `skillsbench@1.1` | `llm-prefix-cache-replay` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
 | `skillsbench@1.1` | `tictoc-unnecessary-abort-detection` | native Goal connected-no-trace runner-error asset | `0.0` | n/a | n/a | `baseline_runner_or_setup_repair_required` |
 | `skillsbench@1.1` | `dapt-intrusion-detection` | reward-feedback positive / blind-loop neutral asset | `0.0` | `0.0` | `0.0` | `reward_feedback_positive_primary_blind_loop_no_uplift` |
-| `skillsbench@1.1` | `paratransit-routing` | product-mode no-uplift / blind-loop positive asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
+| `skillsbench@1.1` | `paratransit-routing` | product-mode invalid shallow LoopX / blind-loop+depth-gate positive asset | `0.0` | `0.0` | `0.0` | `product_mode_treatment_invalid_shallow_loopx_lifecycle` |
 | `skillsbench@1.1` | `debug-trl-grpo` | regression asset | `0.25` | `0.0` | `-0.25` | `paired_treatment_regressed` |
 | `skillsbench@1.1` | `civ6-adjacency-optimizer` | no-uplift asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
 | `skillsbench@1.1` | `manufacturing-codebook-normalization` | no-uplift asset | `0.0` | `0.0` | `0.0` | `paired_no_score_uplift` |
@@ -160,7 +160,7 @@ Interaction-count assessment:
   and re-project durable round-1 controller constraints and protected paths.
 - Main-table comparison should collapse to one base+test pair: base is raw
   Codex autonomous max5, test is LoopX product-mode with state,
-  todos, replanning, and GH CLI. Both arms receive no official verifier
+  todos, replanning, and LoopX CLI. Both arms receive no official verifier
   feedback during execution and stop on reward `1.0` or agent-declared done/no
   remaining goals; all other prompt/loop variants are ablations or guards.
 - The controller still records scalar official reward after each completed agent
@@ -179,16 +179,22 @@ Interaction-count assessment:
   Codex autonomous max5 scoring `0.0` and declaring done in round 1. The
   matching `loopx-product-mode` treatment also reached agent round 1,
   verifier, and official result, but scored `0.0` and declared done in round 1.
-  Product-mode `paratransit-routing` is therefore a clean `paired_no_score_uplift`
-  under the current base+test definition. Keep the older blind-loop `0.0 -> 1.0`
-  positive asset separate from this product-mode recheck.
+  Compact counters show that treatment only ran `loopx which goal`, with no
+  state read/write/replan lifecycle, so this is not a valid main-table
+  product-mode no-uplift result. Keep the older blind-loop `0.0 -> 1.0`
+  positive asset separate from this shallow product-mode recheck.
   The public-safe attribution is now stable at the mechanism level: the
   blind-loop positive treatment succeeded in round 1 with zero LoopX CLI
   calls and stopped only after offline official success; the product-mode
   treatment failed in round 1, made only one non-substantive LoopX CLI
   call (`loopx which goal`), performed no state reads/writes, and stopped
   on `agent_declared_done` at score `0.0`. The product-mode miss is therefore
-  not explained by extra interactions, reward leakage, protected-path edits, or
+  a stop/goal-state semantics failure. The later depth-gate product-mode rerun
+  `skillsbench-product-mode-paratransit-depth-gate-20260617T1229CST`
+  continued through five rounds and reached official score `1.0`, so future
+  product-mode claims must require stateful LoopX lifecycle before accepting
+  declared done at `0.0`. It is not explained by extra interactions, reward
+  leakage, protected-path edits, or
   Docker readiness. It is currently best attributed to the changed product-mode
   prompt/stop contract failing to preserve the blind-loop treatment's successful
   first-round behavior; content-level root cause still requires a stronger
@@ -1805,8 +1811,8 @@ Follow-up guidance:
 | Docker capacity can masquerade as apt/signature failure. | `organize-messy-files` first hit `skillsbench_docker_compose_setup_failure`; after runner staging/resource repair, the primary blind-loop baseline and treatment both scored `1.0`. | Track Docker free space as runner readiness, and update setup-blocked cases after a clean rerun instead of leaving stale blocker classifications. |
 | Task staging can repair app-mount setup failures. | `citation-check` first hit `skillsbench_environment_app_mount_missing`; after staged task preparation, the primary blind-loop baseline and treatment both scored `1.0`. | Treat staging/setup blockers as infra facts until a clean comparable pair supersedes them. |
 | Apt retry/no-cache staging is not enough for every Docker apt setup. | `setup-fuzzing-py`, `adaptive-cruise-control`, and the product-mode `debug-trl-grpo` raw baseline rerun all recorded apt hardening metadata but still ended before agent rounds with `skillsbench_docker_compose_apt_repository_failure`. A setup-shape scan found only 8 of 87 local SkillsBench tasks are no-apt Docker candidates. | Add a task-selection filter for apt-risk Docker tasks or materially change the apt setup route before spending more full SkillsBench probes on the same blocker. |
-| Product-mode pair can stay neutral even when blind-loop treatment was positive. | After Docker readiness repair, `paratransit-routing` raw-Codex-autonomous-max5 baseline and `loopx-product-mode` treatment both reached agent round 1, verifier, and official result at `0.0`, with both agents declaring done in round 1. The treatment recorded one public-safe LoopX CLI interaction (`loopx which goal`) but no score gain. | Treat the host-readiness blocker as repaired and record this as `paired_no_score_uplift` for product-mode. Do not transfer the older blind-loop `0.0 -> 1.0` uplift claim into the product-mode main table; next analyze the public-safe trajectory summaries to understand why product-mode lost the blind-loop positive behavior. |
-| Compact counters can explain product-mode loss only at the mechanism layer. | `paratransit-routing` blind-loop treatment: score `1.0`, round `1`, `loopx_cli_call_count=0`, `last_decision=stop_after_blind_loop_official_success_observed_without_feedback`. Product-mode treatment: score `0.0`, round `1`, `loopx_cli_call_count=1` for `loopx which goal`, `loopx_state_reads=0`, `loopx_state_writes=0`, and `last_decision=stop_after_agent_declared_done`. | The loss is not from interaction count, reward leakage, protected-path editing, or runner setup. The likely mechanism is product-mode stop/goal-state semantics: the treatment declared done at `0.0` before any replan or substantive LoopX state use. For content-level root cause, add a stronger public-safe trajectory summarizer or request an explicit raw-trace gate. |
+| Shallow product-mode lifecycle is not a valid no-uplift claim. | After Docker readiness repair, `paratransit-routing` raw-Codex-autonomous-max5 baseline and the old `loopx-product-mode` treatment both reached agent round 1 and official result at `0.0`, but treatment only recorded `loopx which goal`, with `loopx_state_reads=0` and `loopx_state_writes=0`. | Treat host readiness as repaired but mark this product-mode treatment invalid: goal discovery is not stateful LoopX use. Require state read/write/replan lifecycle before a product-mode pair can enter the main table as no-uplift. |
+| Depth-gate stop semantics can recover the paratransit positive behavior. | `paratransit-routing` blind-loop treatment passed in round 1; the old product-mode treatment stopped on `agent_declared_done` at `0.0`; the later depth-gate product-mode rerun continued to round 5 and reached official score `1.0`. | Preserve the depth gate: do not accept declared done at `0.0` unless the case state has no active todo/goal and compact counters show substantive LoopX lifecycle. For content-level root cause, add a stronger public-safe trajectory summarizer or request an explicit raw-trace gate. |
 | Apt-risk preflight should happen before full case execution. | A plan-only probe for `setup-fuzzing-py` now emits `skillsbench_task_setup_preflight` with `apt_setup_risk_detected=true` and no raw task text, raw logs, or raw trajectory reads. | Use `--fail-fast-on-apt-risk` or select a non-apt-risk task before launching blind-loop baseline/treatment pairs. |
 | Docker capacity and runtime-tools setup are runner readiness, not case quality. | `azure-bgp-oscillation-route-leak` moved from runtime apt/cache and Docker capacity failures to a complete baseline/treatment pair only after staged Codex ACP runtime-tools setup plus bounded dangling-layer cleanup. | Record setup/capacity repairs separately and do not count pre-materialization failures as case attempts. |
 | Product-path verification does not prove causal regression. | `zstd-decoder` baseline passed at `1.0`; after PR #467 the LoopX prompt-driven treatment reached official scoring with verified case-local lifecycle, five controller rounds, four follow-ups, and 31 CLI calls, but still scored `0.0`. | Separate "LoopX path exercised" from "treatment improved outcome" and "LoopX caused regression"; add solution-phase counters or a redacted trajectory summarizer before repeating or claiming root cause. |
