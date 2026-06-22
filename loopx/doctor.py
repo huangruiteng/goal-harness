@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .paths import DEFAULT_RUNTIME_ROOT
 
 
@@ -15,6 +17,14 @@ PROMOTION_READINESS_CLASSIFICATIONS = {
     "canary_promotion_readiness_smoke_group",
 }
 PROMOTION_READINESS_FRESHNESS_HOURS = 24
+INSTALL_FRESHNESS_STALE_HOURS = 168
+NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
+NO_CLONE_UPGRADE_COMMAND = (
+    f"curl -fsSL {NO_CLONE_INSTALL_URL} | bash\n"
+    'export PATH="$HOME/.local/bin:$PATH"\n'
+    "loopx doctor"
+)
+RELEASE_ID_TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z$")
 REQUIRED_INSTALLED_SKILL_PHRASES = {
     "loopx-project": (
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
@@ -69,6 +79,76 @@ def command_root_summary(command_path: Path | None, command_realpath: Path | Non
         "root": str(root) if root else None,
         "release_id": root.name if is_release_snapshot(root) else None,
         "is_release_snapshot": is_release_snapshot(root),
+    }
+
+
+def parse_release_id_time(release_id: str | None) -> datetime | None:
+    if not release_id or not RELEASE_ID_TIMESTAMP_RE.match(release_id):
+        return None
+    try:
+        return datetime.strptime(release_id, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def build_install_freshness(
+    *,
+    command_path: Path | None,
+    release_root: Path | None,
+    repo_root: Path,
+    skills: dict[str, dict[str, Any]],
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    release_id = release_root.name if is_release_snapshot(release_root) else None
+    release_time = parse_release_id_time(release_id)
+    age_hours: float | None = None
+    if release_time:
+        age_hours = round(max(0, (reference - release_time.astimezone(timezone.utc)).total_seconds()) / 3600, 2)
+
+    skill_problem = any(
+        not skill.get("exists") or not skill.get("required_phrases")
+        for skill in skills.values()
+    )
+    if command_path is None:
+        status = "missing"
+        reason = "loopx is not on PATH"
+        requires_upgrade = True
+    elif skill_problem:
+        status = "repair_recommended"
+        reason = "installed LoopX skills are missing or stale"
+        requires_upgrade = True
+    elif release_id and age_hours is not None and age_hours > INSTALL_FRESHNESS_STALE_HOURS:
+        status = "stale"
+        reason = f"default release snapshot is older than {INSTALL_FRESHNESS_STALE_HOURS} hours"
+        requires_upgrade = True
+    elif release_id and age_hours is not None:
+        status = "fresh"
+        reason = "default release snapshot timestamp is within the freshness window"
+        requires_upgrade = False
+    elif is_release_snapshot(release_root):
+        status = "unknown"
+        reason = "default release snapshot has a non-timestamp release id"
+        requires_upgrade = False
+    else:
+        status = "live_checkout"
+        reason = "current command is not a timestamped release snapshot"
+        requires_upgrade = False
+
+    contributor_upgrade_command = f"{repo_root / 'scripts' / 'install-local.sh'}\nloopx doctor"
+    return {
+        "schema_version": "loopx_install_freshness_v0",
+        "status": status,
+        "requires_upgrade": requires_upgrade,
+        "reason": reason,
+        "current_version": __version__,
+        "stale_after_hours": INSTALL_FRESHNESS_STALE_HOURS,
+        "release_id": release_id,
+        "release_age_hours": age_hours,
+        "upgrade_command": NO_CLONE_UPGRADE_COMMAND,
+        "no_clone_upgrade_command": NO_CLONE_UPGRADE_COMMAND,
+        "contributor_upgrade_command": contributor_upgrade_command,
+        "doctor_after_upgrade": "loopx doctor",
     }
 
 
@@ -258,6 +338,12 @@ def collect_doctor() -> dict[str, Any]:
             latest_promotion_readiness_event(DEFAULT_RUNTIME_ROOT)
         ),
     }
+    install_freshness = build_install_freshness(
+        command_path=command_path,
+        release_root=release_root,
+        repo_root=repo_root,
+        skills=skills,
+    )
     checks = [
         {
             "id": "command_on_path",
@@ -363,6 +449,8 @@ def collect_doctor() -> dict[str, Any]:
             "wrapper_script": str(wrapper_script),
         },
         "release_provenance": release_provenance,
+        "install_freshness": install_freshness,
+        "upgrade_hint": install_freshness,
         "skill": {
             "path": str(skill_path),
             "exists": skill_path.exists(),
@@ -370,7 +458,11 @@ def collect_doctor() -> dict[str, Any]:
         },
         "skills": skills,
         "checks": checks,
-        "fix": f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, or export PATH=\"{local_bin}:$PATH\".",
+        "fix": (
+            f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, "
+            f"or export PATH=\"{local_bin}:$PATH\". For no-clone repair, run "
+            f"`curl -fsSL {NO_CLONE_INSTALL_URL} | bash`."
+        ),
     }
 
 
@@ -437,6 +529,25 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
                     f"age_hours=`{readiness.get('age_hours')}`, "
                     f"requires_readiness_run=`{readiness.get('requires_readiness_run')}`"
                 ),
+            ]
+        )
+    freshness = payload.get("install_freshness") if isinstance(payload.get("install_freshness"), dict) else {}
+    if freshness:
+        lines.extend(
+            [
+                "",
+                "## Install Freshness",
+                f"- schema_version: `{freshness.get('schema_version')}`",
+                f"- status: `{freshness.get('status')}`",
+                f"- requires_upgrade: `{freshness.get('requires_upgrade')}`",
+                f"- current_version: `{freshness.get('current_version')}`",
+                f"- release_id: `{freshness.get('release_id')}`",
+                f"- release_age_hours: `{freshness.get('release_age_hours')}`",
+                f"- reason: `{freshness.get('reason')}`",
+                "- upgrade_command:",
+                "```bash",
+                str(freshness.get("upgrade_command") or ""),
+                "```",
             ]
         )
     if not payload.get("ok"):

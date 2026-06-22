@@ -227,6 +227,10 @@ under `~/.local/share/loopx/releases/`, installs the CLI wrapper under
 `~/.local/bin`, and installs the reusable LoopX skills under
 `~/.codex/skills`.
 
+`loopx doctor` reports `install_freshness`. When it says
+`requires_upgrade=true`, rerun the no-clone installer printed in
+`upgrade_command`, then run `loopx doctor` again before continuing.
+
 This is the recommended install repair path for Codex CLI users because an
 agent can run it from inside the TUI without asking the user to clone this
 repository first.

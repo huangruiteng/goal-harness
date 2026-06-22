@@ -99,6 +99,9 @@ def main() -> int:
         assert doctor["path"]["loopx"] == str(wrapper), doctor
         assert doctor["path"]["loopx_canary"] == str(canary_wrapper), doctor
         assert doctor["package"]["release_root"] == str(release_root), doctor
+        assert doctor["install_freshness"]["schema_version"] == "loopx_install_freshness_v0", doctor
+        assert doctor["install_freshness"]["status"] == "unknown", doctor
+        assert "install-from-github.sh" in doctor["install_freshness"]["upgrade_command"], doctor
         assert doctor["skills"]["loopx-project"]["exists"] is True, doctor
         assert doctor["skills"]["loopx-self-repair"]["exists"] is True, doctor
 
@@ -128,6 +131,8 @@ def main() -> int:
         )
         assert bootstrap["ok"] is True, bootstrap
         assert bootstrap["goal_id"] == GOAL_ID, bootstrap
+        assert "install-from-github.sh" in bootstrap["install_repair_command"], bootstrap
+        assert "loopx doctor" in bootstrap["install_repair_command"], bootstrap
         assert (project / ".loopx" / "registry.json").is_file(), bootstrap
         assert (project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md").is_file(), bootstrap
 
