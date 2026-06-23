@@ -29,6 +29,7 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_PROOF_FIELDS,
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LIFECYCLE_SCHEMA_VERSION,
+    BENCHMARK_CASE_LOOPX_TODO_ID,
     benchmark_case_active_state_init_contract,
     benchmark_case_active_state_path,
     benchmark_case_active_state_seed_text,
@@ -130,7 +131,7 @@ def test_seed_write_command_uses_canonical_path() -> None:
     assert "/Users/" not in command
 
 
-def test_case_loopx_install_payload_adds_case_local_cli_surface() -> None:
+def test_case_loopx_install_payload_uses_official_product_lifecycle() -> None:
     payload = benchmark_case_loopx_install_payload(
         benchmark_id="swe-marathon",
         case_id="zstd-decoder",
@@ -142,47 +143,76 @@ def test_case_loopx_install_payload_adds_case_local_cli_surface() -> None:
     assert payload["benchmark_case_goal_id"] == goal_id
     assert payload["case_state_path"] == benchmark_case_active_state_path(goal_id)
     assert payload["case_cli_path"] == "/app/.local/bin/loopx"
+    assert payload["case_registry_path"] == "/app/.loopx/registry.json"
+    assert payload["case_runtime_root"] == "/app/.loopx/runtime"
     assert payload["case_rollout_event_log_path"] == benchmark_case_loopx_event_log_path(goal_id)
-    assert payload["case_todo_id"] == "todo_benchmark_case_main"
+    assert payload["case_todo_id"] == BENCHMARK_CASE_LOOPX_TODO_ID
     assert payload["case_agent_id"] == "codex-benchmark-agent"
     assert payload["case_todo_seeded"] is True
+    assert payload["case_todo_preclaimed"] is False
+    assert payload["canonical_product_mode_lifecycle_driver"] is True
+    assert payload["formal_treatment_semantics"] == "loopx-product-mode"
     assert payload["install_flow_required"] is True
     assert payload["prompt_driven_route_required"] is True
     assert payload["product_path_primary_route"] == "prompt_driven_case_local_loopx_cli"
     command = str(payload["command"])
     assert "/app/.local/bin/loopx" in command
-    assert "quota_should_run" in command
-    assert "todo_claim" in command
-    assert "rollout-event-log.jsonl" in command
-    assert "raw_task_text_recorded\":false" in command
+    assert "install-from-github.sh" in command
+    assert " bootstrap " in command
+    assert " configure-goal " in command
+    assert " todo add " in command
+    assert " quota should-run " in command
+    assert " todo claim " not in command
     assert "/Users/" not in command
 
 
-def test_case_loopx_install_command_installs_callable_cli() -> None:
-    with tempfile.TemporaryDirectory(prefix="gh-case-install-") as tmp:
+def test_case_loopx_install_command_uses_real_loopx_lifecycle() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-case-install-") as tmp:
         root = Path(tmp)
-        state_path = root / "goals" / "demo-case" / "ACTIVE_GOAL_STATE.md"
-        cli_path = root / "bin" / "loopx"
-        event_log_path = root / "goals" / "demo-case" / "rollout-event-log.jsonl"
+        state_path = root / ".codex" / "goals" / "demo-case" / "ACTIVE_GOAL_STATE.md"
+        cli_path = root / ".local" / "bin" / "loopx"
+        registry_path = root / ".loopx" / "registry.json"
+        runtime_root = root / ".loopx" / "runtime"
+        goal_doc_path = root / ".loopx" / "LOOPX_CASE_GOAL.md"
+        event_log_path = runtime_root / "goals" / "demo-case" / "rollout-event-log.jsonl"
         command = benchmark_case_loopx_install_command(
+            benchmark_id="skillsbench",
+            case_id="demo-case",
+            route="loopx-product-mode",
+            max_rounds=8,
             goal_id="demo-case",
             case_state_path=str(state_path),
-            content="---\nstatus: active\n---\n\n## Agent Todo\n\n- [ ] demo\n",
+            content="",
             case_cli_path=str(cli_path),
-            case_rollout_event_log_path=str(event_log_path),
+            case_registry_path=str(registry_path),
+            case_runtime_root=str(runtime_root),
+            case_goal_doc_path=str(goal_doc_path),
+            case_project_root=str(root),
+            case_home=str(root),
         )
-        subprocess.run(["sh", "-c", command], check=True)
+        subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         assert state_path.exists()
         assert cli_path.exists()
         quota = subprocess.run(
             [
                 str(cli_path),
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
                 "--format",
                 "json",
                 "quota",
                 "should-run",
                 "--goal-id",
                 "demo-case",
+                "--agent-id",
+                "codex-benchmark-agent",
             ],
             check=True,
             capture_output=True,
@@ -190,10 +220,14 @@ def test_case_loopx_install_command_installs_callable_cli() -> None:
         )
         quota_payload = json.loads(quota.stdout)
         assert quota_payload["should_run"] is True
-        assert quota_payload["agent_lane_next_action"]["todo_id"] == "todo_benchmark_case_main"
+        assert quota_payload["agent_lane_next_action"]["todo_id"] == BENCHMARK_CASE_LOOPX_TODO_ID
         claim = subprocess.run(
             [
                 str(cli_path),
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
                 "--format",
                 "json",
                 "todo",
@@ -201,18 +235,20 @@ def test_case_loopx_install_command_installs_callable_cli() -> None:
                 "--goal-id",
                 "demo-case",
                 "--todo-id",
-                "todo_benchmark_case_main",
+                BENCHMARK_CASE_LOOPX_TODO_ID,
+                "--claimed-by",
+                "codex-benchmark-agent",
             ],
             check=True,
             capture_output=True,
             text=True,
         )
-        assert json.loads(claim.stdout)["status"] == "claimed"
+        assert json.loads(claim.stdout)["status"] == "open"
         event_lines = event_log_path.read_text(encoding="utf-8").strip().splitlines()
-        assert any('"event_kind":"install"' in line for line in event_lines)
-        assert any('"event_kind":"quota_should_run"' in line for line in event_lines)
-        assert any('"event_kind":"todo_claim"' in line for line in event_lines)
-        assert all("raw_task_text_recorded\":false" in line for line in event_lines)
+        assert any('"event_kind": "todo_add"' in line or '"event_kind":"todo_add"' in line for line in event_lines)
+        assert any('"event_kind": "quota_should_run"' in line or '"event_kind":"quota_should_run"' in line for line in event_lines)
+        assert any('"event_kind": "todo_claim"' in line or '"event_kind":"todo_claim"' in line for line in event_lines)
+        assert all("raw_task_text" not in line or "false" in line for line in event_lines)
 
 
 def test_case_lifecycle_contract_is_per_case_arm() -> None:
@@ -282,8 +318,8 @@ if __name__ == "__main__":
     test_shared_contract_for_current_benchmark_routes()
     test_seed_text_uses_real_loopx_active_state_shape()
     test_seed_write_command_uses_canonical_path()
-    test_case_loopx_install_payload_adds_case_local_cli_surface()
-    test_case_loopx_install_command_installs_callable_cli()
+    test_case_loopx_install_payload_uses_official_product_lifecycle()
+    test_case_loopx_install_command_uses_real_loopx_lifecycle()
     test_case_lifecycle_contract_is_per_case_arm()
     test_ale_launch_packet_reuses_shared_contract()
     test_terminal_bench_access_packet_fixture_reuses_shared_contract()

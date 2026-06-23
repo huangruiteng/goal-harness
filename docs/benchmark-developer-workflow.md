@@ -568,20 +568,19 @@ must close out with a compact
 waiting for the whole job timeout. If these controller fields are missing from
 compact evidence, classify the run as packet-only observation.
 
-The treatment path must also install a case-local LoopX surface before
-the worker starts. Harbor's host agent seeds
-`/app/.codex/goals/<benchmark-case-goal-id>/ACTIVE_GOAL_STATE.md`, installs a
-task-environment CLI at `/app/.local/bin/loopx`, seeds
-`todo_benchmark_case_main`, and writes public-safe lifecycle events to the
-case-local `rollout-event-log.jsonl`. The product-path treatment proof is
-prompt-driven: before planning or editing, the worker should call the
-case-local CLI through `harbor-env-exec` for `quota should-run` and
-`todo claim`/`todo update`. The controller may still run the same case-local CLI
-as deterministic preflight, scheduler, and closeout fallback:
-`check`, `quota should-run`, and `todo claim` before the first agent turn;
-`quota should-run` and `todo update` around scheduled continuations; and
-`status`, `refresh-state`, and `quota spend-slot` during closeout. That
-scheduler route is not sufficient for a strict treatment claim by itself.
+The treatment path must also initialize the official case-local LoopX product
+lifecycle before the worker starts. Harbor's host agent installs or reuses the
+real `loopx` CLI at `/app/.local/bin/loopx`, bootstraps a case-local registry
+under `/app/.loopx/`, registers `codex-benchmark-agent`, seeds one open case
+todo through `loopx todo add`, and records public-safe rollout events. The
+host must not claim or complete the case todo for the worker. The product-path
+treatment proof is prompt-driven: before planning or editing, the worker should
+call the case-local CLI through `harbor-env-exec` for `quota should-run` and
+`todo claim`/`todo update`. The controller may still run the same case-local
+CLI as deterministic preflight, scheduler, and closeout fallback:
+`doctor`, `status`, `quota should-run`, `refresh-state`, and
+`quota spend-slot`. That scheduler route is not sufficient for a strict
+treatment claim by itself.
 Compact evidence must distinguish both surfaces:
 `loopx_prompt_driven_case_cli_call_count`,
 `loopx_prompt_driven_event_counts`,

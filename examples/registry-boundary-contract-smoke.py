@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import loopx.registry as registry_module  # noqa: E402
 from loopx.registry import inspect_registry_boundary  # noqa: E402
 
 DOC = REPO_ROOT / "docs" / "authority-source-registration.md"
@@ -126,6 +127,30 @@ def assert_doc_contract() -> None:
         assert marker in text, marker
 
 
+def assert_registry_boundary_degrades_without_git(root: Path, runtime: Path) -> None:
+    no_git_registry = root / "no-git-project" / ".loopx" / "registry.json"
+    write_json(no_git_registry, registry_payload(no_git_registry.parent.parent, runtime))
+    original_run = registry_module.subprocess.run
+
+    def run_without_git(command: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(command, list) and command and command[0] == "git":
+            raise FileNotFoundError("git")
+        return original_run(command, *args, **kwargs)
+
+    registry_module.subprocess.run = run_without_git
+    try:
+        payload = inspect_registry_boundary(no_git_registry)
+    finally:
+        registry_module.subprocess.run = original_run
+
+    assert payload["ok"] is True, payload
+    assert payload["classification"] == "project_local_private_registry", payload
+    assert payload["git"]["available"] is False, payload
+    assert payload["git"]["probe_status"] == "git_unavailable", payload
+    assert payload["git"]["inside_worktree"] is False, payload
+    assert payload["risks"] == [], payload
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-registry-boundary-") as tmp:
         root = Path(tmp) / "project"
@@ -231,6 +256,8 @@ def run() -> None:
         assert cli_payload["ok"] is True, cli_payload
         rendered = json.dumps(cli_payload, sort_keys=True)
         assert str(root) not in rendered, rendered
+
+        assert_registry_boundary_degrades_without_git(root, runtime)
 
     assert_doc_contract()
 
