@@ -45,7 +45,7 @@ them directly.
 | `operator_gate` | `loopx operator-gate`, `loopx/review_packet.py`, `loopx/status.py` | User/controller decision point with decision, reason, follow-up, and optional handoff command. |
 | `human_reward` | `loopx reward`, `loopx/history.py`, `loopx/status.py` | Run-bound human judgment overlay; not generic write-control. |
 | `delivery_outcome` | `loopx/delivery_outcome.py`, `loopx/history.py`, `loopx/status.py` | Machine-readable result tier: surface-only, outcome gap, outcome progress, or primary goal outcome. |
-| `rollback_packet_v0` | design only | Future compensating action record linking todo, commit, event, decision, external resource, and validation plan. |
+| `rollback_packet_v0` | `docs/reference/protocols/rollback-packet-v0.md` | Compensating action record linking todo, commit, event, decision, external resource, and validation plan. |
 
 ## Projection Protocol
 
@@ -208,6 +208,9 @@ Already aligned:
 - `examples/fixtures/long-horizon-self-iteration-rollout.public.json` gives
   frontend and protocol tests a compact public-safe fixture with gate, handoff,
   validation, deferred-resume, evidence, and inferred display-bridge coverage.
+- `rollback_packet_v0` defines how rollback, fix-forward, external cleanup,
+  support requests, and todo compensation are represented before any protected
+  action runs.
 
 Partially aligned:
 
@@ -222,7 +225,8 @@ Partially aligned:
 
 Not yet aligned:
 
-- `rollback_packet_v0` has no implementation.
+- `rollback_packet_v0` is specified and smoke-tested, but no command yet emits
+  or executes packets.
 - PR lifecycle resume conditions such as `pr_merged:#532` are not supported;
   only `resume_when=todo_done:<todo_id>` exists today.
 - Global manager slash commands have no host integration.
