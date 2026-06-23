@@ -114,6 +114,10 @@ runtime contract, benchmark route, or launch draft.
   opportunity should become a high-value anchor, including repo fit, allowed
   actions, owner routing, evidence boundary, stop conditions, and showcase
   consent.
+- [Issue/PR solver anchor coordination](issue-pr-solver-anchor-coordination.md):
+  follow-up protocol for selected public issue/PR anchors, covering owner split,
+  solver handoff, metric board, human gates, compact evidence, and showcase
+  graduation.
 - [content_ops_surface_v0](../reference/protocols/content-ops-surface-v0.md):
   compact creator/self-media operations state surface with source items,
   angle candidates, draft items, feedback signals, publish gates, material
