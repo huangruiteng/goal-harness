@@ -25,6 +25,7 @@ from .todo_contract import (
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
     normalize_todo_id,
+    normalize_todo_resume_when,
     normalize_todo_status,
     parse_todo_metadata_line,
     todo_done_for_status,
@@ -49,6 +50,7 @@ TODO_METADATA_FIELDS = (
     "claimed_by",
     "blocks_agent",
     "unblocks_todo_id",
+    "resume_when",
     "note",
     "evidence",
     "reason",
@@ -454,6 +456,7 @@ def add_todo_to_lines(
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
     unblocks_todo_id: str | None = None,
+    resume_when: str | None = None,
 ) -> dict[str, Any]:
     todo_text = normalize_new_todo(text)
     bounds = section_bounds(lines, role)
@@ -492,6 +495,7 @@ def add_todo_to_lines(
             claimed_by=claimed_by,
             blocks_agent=blocks_agent,
             unblocks_todo_id=unblocks_todo_id,
+            resume_when=resume_when,
         )
         todo_line = "\n".join([f"- [ ] {todo_text}", metadata_line] if metadata_line else [f"- [ ] {todo_text}"])
         if bounds:
@@ -520,6 +524,8 @@ def add_todo_to_lines(
             updates["blocks_agent"] = blocks_agent
         if unblocks_todo_id:
             updates["unblocks_todo_id"] = unblocks_todo_id
+        if resume_when:
+            updates["resume_when"] = resume_when
         metadata_line = metadata_line_for_block(block, updates)
         metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
         todo_id = str(block.get("todo_id") or "")
@@ -547,6 +553,7 @@ def add_todo_to_lines(
         "claimed_by": normalize_todo_claimed_by(effective_metadata.get("claimed_by")),
         "blocks_agent": normalize_todo_blocks_agent(effective_metadata.get("blocks_agent")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
+        "resume_when": normalize_todo_resume_when(effective_metadata.get("resume_when")),
     }
 
 
@@ -564,6 +571,7 @@ def add_goal_todo(
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
     unblocks_todo_id: str | None = None,
+    resume_when: str | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -604,6 +612,9 @@ def add_goal_todo(
         normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+        normalized_resume_when = normalize_todo_resume_when(resume_when) if resume_when else None
+        if resume_when and not normalized_resume_when:
+            raise ValueError("resume_when must be a public-safe token such as todo_done:todo_ab12cd34ef56")
         add_result = add_todo_to_lines(
             lines,
             role=role,
@@ -616,6 +627,7 @@ def add_goal_todo(
             claimed_by=effective_claimed_by,
             blocks_agent=effective_blocks_agent,
             unblocks_todo_id=normalized_unblocks_todo_id,
+            resume_when=normalized_resume_when,
         )
         added = bool(add_result["added"])
         metadata_updated = bool(add_result["metadata_updated"])
@@ -645,6 +657,7 @@ def add_goal_todo(
         "claimed_by": add_result.get("claimed_by"),
         "blocks_agent": add_result.get("blocks_agent"),
         "unblocks_todo_id": add_result.get("unblocks_todo_id"),
+        "resume_when": add_result.get("resume_when"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if added or metadata_updated else None,
@@ -686,6 +699,7 @@ def apply_todo_update_to_lines(
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
     unblocks_todo_id: str | None = None,
+    resume_when: str | None = None,
     clear_claim: bool = False,
     claim_only: bool = False,
     updated_at: str,
@@ -748,6 +762,8 @@ def apply_todo_update_to_lines(
         updates["blocks_agent"] = blocks_agent
     if unblocks_todo_id:
         updates["unblocks_todo_id"] = unblocks_todo_id
+    if resume_when:
+        updates["resume_when"] = resume_when
     metadata_line = metadata_line_for_block(block, updates)
     semantic_metadata_changed = todo_metadata_would_change(lines, block, metadata_line)
     if status_changed or text_changed or semantic_metadata_changed:
@@ -776,6 +792,7 @@ def apply_todo_update_to_lines(
         ),
         "blocks_agent": normalize_todo_blocks_agent(effective_metadata.get("blocks_agent")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
+        "resume_when": normalize_todo_resume_when(effective_metadata.get("resume_when")),
     }
 
 
@@ -798,6 +815,7 @@ def update_goal_todo(
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
     unblocks_todo_id: str | None = None,
+    resume_when: str | None = None,
     clear_claim: bool = False,
     claim_only: bool = False,
     project: Path | None = None,
@@ -836,6 +854,9 @@ def update_goal_todo(
         normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+        normalized_resume_when = normalize_todo_resume_when(resume_when) if resume_when else None
+        if resume_when and not normalized_resume_when:
+            raise ValueError("resume_when must be a public-safe token such as todo_done:todo_ab12cd34ef56")
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
@@ -853,6 +874,7 @@ def update_goal_todo(
             claimed_by=effective_claimed_by,
             blocks_agent=effective_blocks_agent,
             unblocks_todo_id=normalized_unblocks_todo_id,
+            resume_when=normalized_resume_when,
             clear_claim=clear_claim,
             claim_only=claim_only,
             updated_at=updated_at,
@@ -1265,6 +1287,7 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
                 f"- required_capabilities: `{payload.get('required_capabilities')}`",
                 f"- target_capabilities: `{payload.get('target_capabilities')}`",
                 f"- claimed_by: `{payload.get('claimed_by')}`",
+                f"- resume_when: `{payload.get('resume_when')}`",
             ]
         )
     if payload.get("error"):

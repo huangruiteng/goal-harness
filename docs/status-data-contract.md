@@ -881,6 +881,17 @@ Item fields:
   claimed items. Other-agent claims are visibility context and last-resort
   candidates; they are not a hard lock, but they also should not outrank the
   current agent's own claimed work or unclaimed work.
+  Deferred todos are projected after sorted open todo lanes through
+  `deferred_items` and, when a machine-readable resume condition is satisfied,
+  `deferred_resume_candidates`. The default deferred visibility cap is eight
+  items. Parsed deferred items may include `resume_when`,
+  `resume_condition`, and `resume_ready`; consumers should not merge these into
+  `first_open_items` or executable backlog until a lifecycle command reopens or
+  supersedes the todo. Agent-scoped quota may further split ready candidates
+  into `current_agent_deferred_resume_candidates`,
+  `unclaimed_deferred_resume_candidates`, and
+  `other_agent_deferred_resume_candidates`, where only the first two can wake
+  the current side agent.
   Optional future fields such as `created_at`, lease TTLs, dependencies, or
   evidence links should extend this item shape rather than inventing another
   todo surface.

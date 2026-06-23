@@ -58,6 +58,7 @@ from .todo_contract import (
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
     normalize_todo_id,
+    normalize_todo_resume_when,
     normalize_todo_status,
     normalize_todo_task_class,
     parse_todo_metadata_line,
@@ -358,6 +359,7 @@ MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE = MAX_STATUS_TODOS_PER_ROLE
 MAX_PROJECT_ASSET_TODO_ITEMS = 3
 MAX_PROJECT_ASSET_TODO_BACKLOG_ITEMS = 8
 MAX_TODO_VISIBILITY_LANE_ITEMS = 16
+MAX_DEFERRED_TODO_VISIBILITY_ITEMS = 8
 MAX_TODO_INDEX_ITEMS = 240
 MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL = 500
 TODO_PROJECTION_VIEW_SCHEMA_VERSION = "todo_projection_view_v0"
@@ -3948,6 +3950,9 @@ def structured_todo_item(
     unblocks_todo_id = normalize_todo_id(item.get("unblocks_todo_id"))
     if unblocks_todo_id:
         normalized["unblocks_todo_id"] = unblocks_todo_id
+    resume_when = normalize_todo_resume_when(item.get("resume_when"))
+    if resume_when:
+        normalized["resume_when"] = resume_when
     if priority:
         normalized["priority"] = priority
         normalized["title"] = normalize_todo_text(title)
@@ -3977,6 +3982,9 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "claimed_by",
         "blocks_agent",
         "unblocks_todo_id",
+        "resume_when",
+        "resume_condition",
+        "resume_ready",
         "note",
         "evidence",
         "reason",
@@ -4068,6 +4076,44 @@ def claimed_visibility_items(items: list[dict[str, Any]], *, limit: int) -> list
     return sorted(selected, key=lambda item: original_index.get(id(item), 999999))[:limit]
 
 
+def todo_item_is_deferred(item: dict[str, Any]) -> bool:
+    return (normalize_todo_status(item.get("status")) or TODO_STATUS_OPEN) == "deferred"
+
+
+def apply_resume_conditions(items: list[dict[str, Any]]) -> None:
+    by_id = {
+        str(item.get("todo_id") or ""): item
+        for item in items
+        if str(item.get("todo_id") or "")
+    }
+    for item in items:
+        resume_when = normalize_todo_resume_when(item.get("resume_when"))
+        if not resume_when:
+            continue
+        condition: dict[str, Any] = {
+            "schema_version": "todo_resume_condition_v0",
+            "resume_when": resume_when,
+            "satisfied": False,
+        }
+        kind, separator, target = resume_when.partition(":")
+        condition["kind"] = kind
+        if separator:
+            condition["target"] = target
+        if kind == "todo_done" and target:
+            target_item = by_id.get(target)
+            condition["target_todo_id"] = target
+            condition["target_status"] = (
+                normalize_todo_status(target_item.get("status"))
+                if isinstance(target_item, dict)
+                else None
+            )
+            condition["satisfied"] = condition["target_status"] == "done"
+        else:
+            condition["unsupported"] = True
+        item["resume_condition"] = condition
+        item["resume_ready"] = bool(condition.get("satisfied"))
+
+
 def compact_todo_group(
     items: list[dict[str, Any]],
     *,
@@ -4082,10 +4128,18 @@ def compact_todo_group(
         else item
         for item in items
     ]
+    apply_resume_conditions(items)
     open_items = [item for item in items if not item.get("done")]
-    done_items = [item for item in items if item.get("done")]
-    budgeted_items = [*open_items, *done_items]
+    terminal_items = [item for item in items if item.get("done")]
+    deferred_items = [item for item in terminal_items if todo_item_is_deferred(item)]
+    done_items = [item for item in terminal_items if not todo_item_is_deferred(item)]
     projected_open_items = sorted(open_items, key=todo_projection_sort_key)
+    projected_deferred_items = sorted(deferred_items, key=todo_projection_sort_key)
+    budgeted_items = [
+        *projected_open_items,
+        *projected_deferred_items,
+        *done_items,
+    ]
     claimed_open_items = [item for item in projected_open_items if item.get("claimed_by")]
     unclaimed_open_items = [item for item in projected_open_items if not item.get("claimed_by")]
     executable_items = [
@@ -4117,7 +4171,8 @@ def compact_todo_group(
         "source_section": source_section,
         "total_count": len(items),
         "open_count": len(open_items),
-        "done_count": len(done_items),
+        "done_count": len(terminal_items),
+        "deferred_count": len(deferred_items),
         "first_open_items": [
             compact_todo_item(item) for item in projected_open_items[:3]
         ],
@@ -4160,6 +4215,15 @@ def compact_todo_group(
             compact_todo_item(item)
             for item in executable_items[:MAX_PROJECT_ASSET_TODO_BACKLOG_ITEMS]
         ],
+        "deferred_items": [
+            compact_todo_item(item)
+            for item in projected_deferred_items[:MAX_DEFERRED_TODO_VISIBILITY_ITEMS]
+        ],
+        "deferred_resume_candidates": [
+            compact_todo_item(item)
+            for item in projected_deferred_items
+            if item.get("resume_ready") is True
+        ][:MAX_DEFERRED_TODO_VISIBILITY_ITEMS],
         "items": budgeted_items[:MAX_STATUS_TODOS_PER_ROLE],
     }
     if claimed_open_items:
@@ -4815,6 +4879,7 @@ def project_asset_todo_summary(
             "truth": "derived",
             "canonical_source": canonical_source,
             "item_limit": MAX_PROJECT_ASSET_TODO_ITEMS,
+            "deferred_item_limit": MAX_DEFERRED_TODO_VISIBILITY_ITEMS,
         },
         "detail_pointer": {
             "schema_version": TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
@@ -4838,6 +4903,23 @@ def project_asset_todo_summary(
             summary["next_index"] = open_items[0].get("index")
         if open_items[0].get("claimed_by"):
             summary["next_claimed_by"] = open_items[0].get("claimed_by")
+    deferred_items = [
+        compact_todo_item(item)
+        for item in todos.get("deferred_items", [])
+        if isinstance(item, dict)
+    ][:MAX_DEFERRED_TODO_VISIBILITY_ITEMS]
+    deferred_resume_candidates = [
+        compact_todo_item(item)
+        for item in todos.get("deferred_resume_candidates", [])
+        if isinstance(item, dict)
+    ][:MAX_DEFERRED_TODO_VISIBILITY_ITEMS]
+    if todos.get("deferred_count") is not None:
+        summary["deferred_count"] = todos.get("deferred_count")
+        summary["deferred_visibility_limit"] = MAX_DEFERRED_TODO_VISIBILITY_ITEMS
+    if deferred_items:
+        summary["deferred_items"] = deferred_items
+    if deferred_resume_candidates:
+        summary["deferred_resume_candidates"] = deferred_resume_candidates
     executable_items = [
         item
         for item in open_todo_items(

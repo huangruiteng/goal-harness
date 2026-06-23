@@ -142,6 +142,14 @@ next-action selection should prefer that repair-mode candidate over ordinary
 runnable work in the same claim/priority bucket so capability-building todos do
 not require fragile active-state reordering.
 
+Deferred todos may carry a machine-readable resume condition with
+`resume_when=<token>`. The first supported condition is
+`resume_when=todo_done:<todo_id>`, meaning the deferred todo should become a
+successor replan candidate after the referenced todo reaches `status=done`.
+Status and quota expose deferred todos as a visibility lane after sorted open
+todo lanes; they are not runnable work until an agent reopens, supersedes, or
+records a no-follow-up rationale for the deferred item.
+
 ```bash
 loopx configure-goal \
   --goal-id <goal-id> \
@@ -320,6 +328,18 @@ loopx todo update \
   --task-class blocker
 ```
 
+Use `--resume-when` when deferring a successor that should wake up after a
+machine-readable condition instead of living only in prose:
+
+```bash
+loopx todo update \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --status deferred \
+  --resume-when todo_done:<blocking_todo_id> \
+  --reason "<public-safe deferred rationale>"
+```
+
 Use `todo supersede` when the current open todo should be retired and replaced:
 
 ```bash
@@ -352,6 +372,9 @@ carry `schema_version=todo_summary_v0`; individual items carry
 optional `action_kind`, `claimed_by`, `required_capabilities`, and
 `target_capabilities`. Primary review handoffs may also carry
 `blocks_agent` and `unblocks_todo_id` to show which agent/todo they release.
+Deferred successors may carry `resume_when`, `resume_condition`, and
+`resume_ready`; `resume_ready=true` means the deferred item should be considered
+for a successor replan, not that normal delivery may skip the todo lifecycle.
 The `todo_id` is first-class when written by the CLI.
 `claimed_by` values are normalized public-safe agent ids and should correspond to
 `coordination.registered_agents`. Legacy Markdown without metadata still gets a

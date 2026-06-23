@@ -31,6 +31,7 @@ from .execution_profile import (
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .state_projection import is_user_wait_text, next_action_projection_warning
 from .todo_contract import (
+    TODO_STATUS_DEFERRED,
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
@@ -42,6 +43,7 @@ from .todo_contract import (
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
     normalize_todo_id,
+    normalize_todo_resume_when,
     normalize_required_write_scopes,
     normalize_todo_status,
     normalize_todo_task_class,
@@ -152,6 +154,7 @@ class AgentScopeFrontierAction(str, Enum):
     AGENT_SCOPE_EXHAUSTED = "agent_scope_exhausted"
     PRIMARY_REVIEW_WAIT = "primary_review_wait"
     REASSIGNMENT_REQUIRED = "reassignment_required"
+    SUCCESSOR_REPLAN_REQUIRED = "successor_replan_required"
 
 
 DEFAULT_AVAILABLE_CAPABILITIES = (
@@ -171,6 +174,7 @@ CAPABILITY_OWNER_GATE_HINTS = {
     "production_access",
 }
 TODO_BACKLOG_ITEM_LIMIT = 8
+TODO_DEFERRED_VISIBILITY_LIMIT = 8
 TODO_VISIBILITY_LANE_LIMIT = 16
 TODO_MISSING_PRIORITY_RANK = 50
 TODO_MISSING_INDEX = 999999
@@ -979,6 +983,9 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
         "claimed_by",
         "blocks_agent",
         "unblocks_todo_id",
+        "resume_when",
+        "resume_condition",
+        "resume_ready",
     ):
         if item.get(key) is not None:
             compact[key] = item.get(key)
@@ -1390,6 +1397,118 @@ def _todo_summary_visibility_lanes(
     return lanes
 
 
+def _todo_item_is_deferred(item: dict[str, Any]) -> bool:
+    return (normalize_todo_status(item.get("status")) or "") == TODO_STATUS_DEFERRED
+
+
+def _todo_summary_deferred_items(value: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return []
+    source_items = value.get(key) if isinstance(value.get(key), list) else []
+    if not source_items and key == "deferred_items":
+        source_items = [
+            item
+            for item in value.get("items", [])
+            if isinstance(item, dict) and _todo_item_is_deferred(item)
+        ]
+    items: list[dict[str, Any]] = []
+    for item in source_items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        compact = _compact_todo_summary_item(item, text=text)
+        resume_when = normalize_todo_resume_when(item.get("resume_when"))
+        if resume_when:
+            compact["resume_when"] = resume_when
+        if item.get("resume_condition") is not None:
+            compact["resume_condition"] = item.get("resume_condition")
+        if item.get("resume_ready") is not None:
+            compact["resume_ready"] = bool(item.get("resume_ready"))
+        if _todo_item_is_deferred(compact):
+            items.append(compact)
+    return sorted(items, key=_todo_projection_sort_key)
+
+
+def _agent_claim_filtered_deferred_items(
+    items: list[dict[str, Any]],
+    *,
+    agent_id: str | None,
+    claim: str,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for item in items:
+        claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+        if claim == "current" and claimed_by != agent_id:
+            continue
+        if claim == "unclaimed" and claimed_by:
+            continue
+        if claim == "other" and (not claimed_by or claimed_by == agent_id):
+            continue
+        selected.append(item)
+    return selected
+
+
+def _deferred_visibility_lanes(
+    value: dict[str, Any],
+    *,
+    agent_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    deferred_items = _todo_summary_deferred_items(value, "deferred_items")
+    deferred_resume_candidates = [
+        item
+        for item in _todo_summary_deferred_items(value, "deferred_resume_candidates")
+        if item.get("resume_ready") is True
+    ]
+    if not deferred_items and not deferred_resume_candidates and not value.get("deferred_count"):
+        return {}
+
+    lanes: dict[str, Any] = {
+        "deferred_count": value.get("deferred_count", len(deferred_items)),
+        "deferred_visibility_limit": TODO_DEFERRED_VISIBILITY_LIMIT,
+        "deferred_items": deferred_items[:TODO_DEFERRED_VISIBILITY_LIMIT],
+        "deferred_resume_candidates": deferred_resume_candidates[:TODO_DEFERRED_VISIBILITY_LIMIT],
+    }
+    agent_id = (
+        normalize_todo_claimed_by(agent_identity.get("agent_id"))
+        if isinstance(agent_identity, dict)
+        else None
+    )
+    if agent_id:
+        current_agent_candidates = _agent_claim_filtered_deferred_items(
+            deferred_resume_candidates,
+            agent_id=agent_id,
+            claim="current",
+        )
+        unclaimed_candidates = _agent_claim_filtered_deferred_items(
+            deferred_resume_candidates,
+            agent_id=agent_id,
+            claim="unclaimed",
+        )
+        other_agent_candidates = _agent_claim_filtered_deferred_items(
+            deferred_resume_candidates,
+            agent_id=agent_id,
+            claim="other",
+        )
+        lanes.update(
+            {
+                "current_agent_deferred_resume_candidates": current_agent_candidates[:TODO_DEFERRED_VISIBILITY_LIMIT],
+                "unclaimed_deferred_resume_candidates": unclaimed_candidates[:TODO_DEFERRED_VISIBILITY_LIMIT],
+                "other_agent_deferred_resume_candidates": other_agent_candidates[:TODO_DEFERRED_VISIBILITY_LIMIT],
+                "current_agent_deferred_resume_count": len(current_agent_candidates),
+                "unclaimed_deferred_resume_count": len(unclaimed_candidates),
+                "other_agent_deferred_resume_count": len(other_agent_candidates),
+                "deferred_resume_selection_policy": (
+                    "quota may wake the current side-agent only for ready deferred "
+                    "todos claimed by that agent or unclaimed; other-agent deferred "
+                    "todos remain diagnostic visibility"
+                ),
+            }
+        )
+    return lanes
+
+
 def _todo_summary_source_items(value: dict[str, Any]) -> list[dict[str, Any]]:
     source_keys = (
         "first_open_items",
@@ -1486,6 +1605,12 @@ def _summarize_user_todos(
             agent_identity=agent_identity,
         )
     )
+    summary.update(
+        _deferred_visibility_lanes(
+            value,
+            agent_identity=agent_identity,
+        )
+    )
     if claimed_open_items or value.get("claimed_open_count"):
         summary["claimed_open_count"] = value.get("claimed_open_count", len(claimed_open_items))
         summary["unclaimed_open_count"] = value.get(
@@ -1556,6 +1681,12 @@ def _summarize_project_asset_todos(
     summary.update(
         _todo_summary_visibility_lanes(
             all_open_items,
+            agent_identity=agent_identity,
+        )
+    )
+    summary.update(
+        _deferred_visibility_lanes(
+            value,
             agent_identity=agent_identity,
         )
     )
@@ -2016,6 +2147,45 @@ def _agent_scope_frontier_action(value: Any) -> AgentScopeFrontierAction | None:
         return None
 
 
+def _agent_scope_deferred_resume_candidates(
+    agent_todo_summary: dict[str, Any],
+    *,
+    agent_id: str,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for key in (
+        "current_agent_deferred_resume_candidates",
+        "unclaimed_deferred_resume_candidates",
+    ):
+        value = agent_todo_summary.get(key)
+        if isinstance(value, list):
+            candidates.extend(item for item in value if isinstance(item, dict))
+    if not candidates:
+        value = agent_todo_summary.get("deferred_resume_candidates")
+        if isinstance(value, list):
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+                if claimed_by and claimed_by != agent_id:
+                    continue
+                candidates.append(item)
+
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if item.get("resume_ready") is not True:
+            continue
+        if not _todo_item_is_deferred(item):
+            continue
+        identity = str(item.get("todo_id") or item.get("index") or item.get("text") or "")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(_compact_todo_summary_item(item, text=str(item.get("text") or "").strip()))
+    return sorted(unique, key=_todo_projection_sort_key)
+
+
 def _agent_scope_no_candidate_frontier(
     *,
     agent_identity: dict[str, Any] | None,
@@ -2033,12 +2203,11 @@ def _agent_scope_no_candidate_frontier(
         return None
     if isinstance(agent_lane_next_action, dict):
         return None
-    if not isinstance(work_lane_contract, dict):
-        return None
-    if work_lane_contract.get("lane") != TODO_TASK_CLASS_ADVANCEMENT:
-        return None
-    if work_lane_contract.get("must_attempt_work") is not True:
-        return None
+    has_advancement_contract = (
+        isinstance(work_lane_contract, dict)
+        and work_lane_contract.get("lane") == TODO_TASK_CLASS_ADVANCEMENT
+        and work_lane_contract.get("must_attempt_work") is True
+    )
 
     current_agent_count = int(agent_todo_summary.get("current_agent_claimed_advancement_count") or 0)
     current_agent_count = max(
@@ -2063,6 +2232,44 @@ def _agent_scope_no_candidate_frontier(
             _count_advancement_items(executable_items, claimed_by="__unclaimed__"),
         )
     if current_agent_count > 0 or unclaimed_count > 0:
+        return None
+
+    deferred_resume_candidates = _agent_scope_deferred_resume_candidates(
+        agent_todo_summary,
+        agent_id=agent_id,
+    )
+    if deferred_resume_candidates:
+        first_candidate = deferred_resume_candidates[0]
+        candidate_todo_id = str(first_candidate.get("todo_id") or "").strip() or "<todo_id>"
+        reason = (
+            f"current side-agent {agent_id} has no open current/unclaimed "
+            "advancement candidate, but a deferred successor resume condition is satisfied"
+        )
+        recommended_action = (
+            "Run a bounded successor replan before delivery: reopen, supersede, "
+            f"or record a no-follow-up rationale for {candidate_todo_id}."
+        )
+        return {
+            "schema_version": AGENT_SCOPE_FRONTIER_SCHEMA_VERSION,
+            "agent_id": agent_id,
+            "primary_agent": normalize_todo_claimed_by(agent_identity.get("primary_agent")),
+            "action": AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
+            "effective_action": AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
+            "blocks_delivery": True,
+            "requires_replan": True,
+            "quiet_noop_allowed": False,
+            "spend_policy": "spend once after validated successor replan/todo writeback",
+            "reason": reason,
+            "recommended_action": recommended_action,
+            "candidate_counts": {
+                "current_agent_claimed_advancement_count": current_agent_count,
+                "unclaimed_advancement_count": unclaimed_count,
+                "deferred_resume_candidate_count": len(deferred_resume_candidates),
+            },
+            "deferred_resume_candidates": deferred_resume_candidates[:3],
+        }
+
+    if not has_advancement_contract:
         return None
 
     claimed_advancement_items = (
@@ -2962,6 +3169,24 @@ def _interaction_next_cli_actions(payload: dict[str, Any], *, mode: str) -> list
             f"loopx quota monitor-poll --goal-id {goal_id} --source heartbeat --execute",
             f"loopx --format json quota should-run --goal-id {goal_id}",
         ]
+    if mode == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value:
+        agent_scope_frontier = (
+            payload.get("agent_scope_frontier")
+            if isinstance(payload.get("agent_scope_frontier"), dict)
+            else {}
+        )
+        candidates = (
+            agent_scope_frontier.get("deferred_resume_candidates")
+            if isinstance(agent_scope_frontier.get("deferred_resume_candidates"), list)
+            else []
+        )
+        first_candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
+        todo_id = str(first_candidate.get("todo_id") or "<todo_id>")
+        return [
+            f"loopx todo update --goal-id {goal_id} --todo-id {todo_id} --status open --note '<public-safe successor replan reason>'",
+            f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress",
+            f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute",
+        ]
     if _agent_scope_frontier_action(mode) is not None:
         agent_identity = (
             payload.get("agent_identity")
@@ -3033,6 +3258,8 @@ def _interaction_spend_policy(
         return "no spend for gate or blocker push"
     if mode == "monitor_quiet_skip":
         return "no spend for unchanged monitor poll"
+    if mode == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value:
+        return "spend once after validated successor replan/todo writeback"
     if _agent_scope_frontier_action(mode) is not None:
         return "no spend while the current agent has no in-scope runnable candidate"
     if mode == "side_agent_workspace_repair":
@@ -3104,6 +3331,7 @@ def _interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         "control_plane_self_repair",
         "boundary_projection_repair",
         "external_evidence_observation",
+        AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
         "scoped_user_gate_fallback",
         "bounded_delivery_with_user_notice",
     }
@@ -3228,6 +3456,17 @@ def _automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
                 "active but block delivery until it reruns with a registered agent id"
             ),
             "spend_policy": "no quota spend for identity prompt upgrade preflight",
+        }
+    if effective_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value:
+        return {
+            **base,
+            "automation_action": "execute_bounded_work",
+            "reason": (
+                "a ready deferred successor is visible to this agent; run a bounded "
+                "successor replan or write a no-follow-up rationale before another quiet no-op"
+            ),
+            "next_trigger": "deferred successor replan writeback or fresh quota guard",
+            "spend_policy": "spend once only after validated successor replan/todo writeback",
         }
     if _agent_scope_frontier_action(effective_action) is not None:
         return {
@@ -4528,6 +4767,24 @@ def _execution_obligation(
                 "quiet no-op is not allowed until the replan slice is validated or blocked"
             ),
         }
+    if should_run and recommended_mode == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value:
+        return {
+            "must_attempt_work": True,
+            "kind": AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
+            "minimum": "one_successor_replan_or_no_followup_writeback",
+            "delivery_allowed": False,
+            "notify_is_execution_gate": False,
+            "contract": "deferred_resume_projection",
+            "contract_obligation": (
+                "reopen or supersede the ready deferred successor, or record a "
+                "public-safe no-follow-up rationale before another quiet no-op"
+            ),
+            "spend_policy": heartbeat_recommendation.get("spend_policy"),
+            "reason": (
+                "a deferred successor resume condition is satisfied; the agent must "
+                "repair the todo projection before normal delivery"
+            ),
+        }
     if should_run and recommended_mode == "repair_state_projection_gap":
         return {
             "must_attempt_work": True,
@@ -5270,9 +5527,13 @@ def build_quota_should_run(
             candidate_should_run=bool(should_run and normal_delivery_allowed),
         )
         if agent_scope_frontier:
+            frontier_action = str(agent_scope_frontier.get("effective_action") or "")
+            successor_replan_required = (
+                frontier_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
+            )
             normal_delivery_allowed = False
-            should_run = False
-            effective_action = str(agent_scope_frontier.get("effective_action") or "")
+            should_run = bool(successor_replan_required)
+            effective_action = frontier_action
             reason = str(agent_scope_frontier.get("reason") or reason)
             selected_recommended_action = (
                 agent_scope_frontier.get("recommended_action")
@@ -6719,6 +6980,22 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if agent_scope_frontier.get("reason"):
             lines.append(f"- agent_scope_frontier_reason: {agent_scope_frontier.get('reason')}")
+        deferred_resume_candidates = (
+            agent_scope_frontier.get("deferred_resume_candidates")
+            if isinstance(agent_scope_frontier.get("deferred_resume_candidates"), list)
+            else []
+        )
+        if deferred_resume_candidates:
+            first_candidate = (
+                deferred_resume_candidates[0]
+                if isinstance(deferred_resume_candidates[0], dict)
+                else {}
+            )
+            lines.append(
+                "- agent_scope_deferred_resume_candidates: "
+                f"`{len(deferred_resume_candidates)}` "
+                f"top_todo_id={first_candidate.get('todo_id')}"
+            )
     automation_prompt_upgrade = (
         payload.get("automation_prompt_upgrade")
         if isinstance(payload.get("automation_prompt_upgrade"), dict)

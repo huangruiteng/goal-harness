@@ -119,6 +119,13 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     todo_parser.add_argument(
+        "--resume-when",
+        help=(
+            "For deferred todo add/update, declare a machine-readable resume condition "
+            "such as todo_done:todo_ab12cd34ef56."
+        ),
+    )
+    todo_parser.add_argument(
         "--clear-claim",
         action="store_true",
         help="For todo update, remove the soft claimed_by owner from the todo.",
@@ -194,6 +201,7 @@ def handle_todo_command(
                 claimed_by=args.claimed_by,
                 blocks_agent=args.blocks_agent,
                 unblocks_todo_id=args.unblocks_todo_id,
+                resume_when=args.resume_when,
                 project=Path(args.project).expanduser() if args.project else None,
                 state_file=Path(args.state_file).expanduser() if args.state_file else None,
                 dry_run=bool(args.dry_run),
@@ -220,6 +228,7 @@ def handle_todo_command(
                     ("--target-capability", args.target_capabilities),
                     ("--blocks-agent", args.blocks_agent),
                     ("--unblocks-todo-id", args.unblocks_todo_id),
+                    ("--resume-when", args.resume_when),
                     ("--next-agent-todo", args.next_agent_todo),
                     ("--next-user-todo", args.next_user_todo),
                     ("--next-claimed-by", args.next_claimed_by),
@@ -265,9 +274,10 @@ def handle_todo_command(
                 args.claimed_by,
                 args.blocks_agent,
                 args.unblocks_todo_id,
+                args.resume_when,
                 args.clear_claim,
             ]):
-                raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, --required-write-scope, --required-capability, --target-capability, --claimed-by, --blocks-agent, --unblocks-todo-id, or --clear-claim")
+                raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, --required-write-scope, --required-capability, --target-capability, --claimed-by, --blocks-agent, --unblocks-todo-id, --resume-when, or --clear-claim")
             if args.next_claimed_by:
                 raise ValueError("todo update does not support --next-claimed-by")
             if args.side_agent_self_merged:
@@ -290,6 +300,7 @@ def handle_todo_command(
                 claimed_by=args.claimed_by,
                 blocks_agent=args.blocks_agent,
                 unblocks_todo_id=args.unblocks_todo_id,
+                resume_when=args.resume_when,
                 clear_claim=bool(args.clear_claim),
                 project=Path(args.project).expanduser() if args.project else None,
                 state_file=Path(args.state_file).expanduser() if args.state_file else None,
@@ -300,8 +311,8 @@ def handle_todo_command(
                 raise ValueError("todo complete requires --todo-id")
             if args.claimed_by and args.clear_claim:
                 raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
-            if args.blocks_agent or args.unblocks_todo_id:
-                raise ValueError("todo complete does not support --blocks-agent or --unblocks-todo-id; use todo update before completion or side-agent review successor metadata")
+            if args.blocks_agent or args.unblocks_todo_id or args.resume_when:
+                raise ValueError("todo complete does not support --blocks-agent, --unblocks-todo-id, or --resume-when; use todo update before completion or side-agent review successor metadata")
             payload = complete_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -328,8 +339,8 @@ def handle_todo_command(
                 raise ValueError("todo supersede does not support --claimed-by or --clear-claim")
             if args.side_agent_self_merged:
                 raise ValueError("todo supersede does not support --side-agent-self-merged")
-            if args.blocks_agent or args.unblocks_todo_id:
-                raise ValueError("todo supersede does not support --blocks-agent or --unblocks-todo-id; update the source todo first so the successor can inherit dependency metadata")
+            if args.blocks_agent or args.unblocks_todo_id or args.resume_when:
+                raise ValueError("todo supersede does not support --blocks-agent, --unblocks-todo-id, or --resume-when; update the source todo first so the successor can inherit dependency metadata")
             payload = supersede_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
