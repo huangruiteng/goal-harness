@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import importlib
 import inspect
 import json
 import logging
@@ -61,9 +62,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +77,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
+    BENCHMARK_CASE_LOOPX_AGENT_ID,
+    BENCHMARK_CASE_LOOPX_TODO_ID,
+    BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
+    benchmark_case_loopx_command_prefix,
+    benchmark_case_loopx_install_payload,
     benchmark_case_active_state_path,
     benchmark_case_active_state_seed_text,
     benchmark_case_active_state_write_command,
@@ -114,7 +122,9 @@ DEFAULT_LEDGER = (
 DEFAULT_GOAL_ID = "loopx-meta"
 DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_TIMEOUT_SEC = 7200
-DEFAULT_MAX_ROUNDS = BLIND_LOOP_DEFAULT_MAX_ROUNDS
+DEFAULT_VERIFIER_PREP_TIMEOUT_SEC = 120
+DEFAULT_PRODUCT_MODE_SOFT_VERIFY_POLICY = "final-only"
+DEFAULT_MAX_ROUNDS = 8
 _MISSING = object()
 SUPPORTED_ROUTES = (
     CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE,
@@ -140,6 +150,15 @@ PRODUCT_MODE_CASE_STATE_PATH = benchmark_case_active_state_path(
     PRODUCT_MODE_CASE_GOAL_ID
 )
 PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION = BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION
+
+
+def product_mode_soft_verify_policy_for_route(
+    route: str,
+    requested_policy: str,
+) -> str:
+    if route in {"raw-codex-autonomous-max5", "loopx-product-mode"}:
+        return requested_policy
+    return "every-round"
 
 
 def _filter_kwargs_for_signature(
@@ -176,7 +195,12 @@ DOCKER_CODEX_ACP_RUNTIME_TOOLS_END = (
 )
 DOCKER_HOST_CPU_ENV = "LOOPX_SKILLSBENCH_DOCKER_CPUS"
 SANDBOX_PATH_RE = re.compile(r"/(?:app|root|workspace|tmp)/[A-Za-z0-9_./-]+")
-LOOPX_CLI_RE = re.compile(r"(?:^|\s)loopx(?:\s|$)")
+LOOPX_CLI_RE = re.compile(r"(?:^|\s|/)loopx(?:\s|$)")
+LOOPX_FLAG_VALUE_OPTIONS = {
+    "--format",
+    "--registry",
+    "--runtime-root",
+}
 SHELL_EDIT_RE = re.compile(
     r"(?i)(?:apply_patch|perl\b.*\s-[0-9a-z]*p|sed\b.*\s-i|"
     r"python\b.*(?:write_text|open\(.+['\"]w|Path\(.+\)\.write)|"
@@ -730,6 +754,59 @@ def _benchflow_agent_runtime_mounts(
     ]
 
 
+def _loopx_source_mount_contract(args: argparse.Namespace) -> dict[str, Any]:
+    source_arg = getattr(args, "loopx_source_dir", None)
+    source_dir = Path(str(source_arg)).expanduser() if source_arg else None
+    disabled = bool(getattr(args, "no_loopx_source_mount", False))
+    requested = (
+        args.route == LOOPX_PRODUCT_MODE_ROUTE
+        and args.sandbox == "docker"
+        and not disabled
+        and source_dir is not None
+    )
+    ready = bool(
+        requested
+        and source_dir is not None
+        and (source_dir / "scripts" / "install-local.sh").exists()
+        and (source_dir / "loopx" / "cli.py").exists()
+    )
+    status = "not_requested"
+    if requested:
+        status = "ready" if ready else "missing_local_source_files"
+    return {
+        "schema_version": "skillsbench_loopx_source_mount_contract_v0",
+        "requested": requested,
+        "ready": ready,
+        "status": status,
+        "source_path_recorded": False,
+        "mount_target": BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
+        "read_only": True,
+        "first_blocker": "" if ready or not requested else "missing_loopx_source_mount",
+    }
+
+
+def _loopx_source_mounts(args: argparse.Namespace) -> list[dict[str, Any]]:
+    contract = _loopx_source_mount_contract(args)
+    if not contract.get("requested"):
+        return []
+    source_dir = Path(str(args.loopx_source_dir)).expanduser()
+    return [
+        {
+            "type": "bind",
+            "source": str(source_dir),
+            "target": BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
+            "read_only": True,
+        }
+    ]
+
+
+def _loopx_case_source_path_for_container(args: argparse.Namespace) -> str | None:
+    contract = _loopx_source_mount_contract(args)
+    if contract.get("ready"):
+        return BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET
+    return None
+
+
 def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -738,6 +815,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
     for field in (
         "schema_version",
         "agent_execution_mode",
+        "benchflow_run_stage",
         "host_local_acp_launch_status",
         "host_local_acp_install_stage",
         "host_local_acp_install_failed_stage",
@@ -745,7 +823,13 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "codex_acp_runtime_launch_preflight_status",
         "benchflow_agent_runtime_layer_status",
         "benchflow_agent_runtime_layer_mount_target",
+        "loopx_source_mount_status",
+        "loopx_source_mount_target",
         "codex_app_server_goal_worker_plan_schema",
+        "benchflow_user_loop_recovery_exception_type",
+        "benchflow_user_loop_recovery_stage",
+        "benchflow_intermediate_soft_verify_policy",
+        "benchflow_setup_stall_cleanup_status",
     ):
         raw = value.get(field)
         if isinstance(raw, str) and raw:
@@ -765,17 +849,558 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_agent_runtime_mount_injected",
         "benchflow_agent_runtime_mount_read_only",
         "benchflow_agent_runtime_mount_source_recorded",
+        "loopx_source_mount_requested",
+        "loopx_source_mount_ready",
+        "loopx_source_mount_injected",
+        "loopx_source_mount_read_only",
+        "loopx_source_mount_source_recorded",
+        "benchflow_agent_timeout_overridden",
         "codex_app_server_goal_worker_adapter_present",
         "codex_app_server_goal_worker_turn_start_required",
         "codex_app_server_goal_worker_goal_get_required",
         "codex_app_server_goal_worker_runner_integration_ready",
+        "benchflow_user_loop_final_verify_recovery_enabled",
+        "benchflow_user_loop_final_verify_recovery_triggered",
+        "benchflow_user_loop_recovery_after_agent_activity",
+        "benchflow_user_loop_recovery_raw_error_recorded",
+        "benchflow_user_loop_recovery_preserved_final_verify",
+        "benchflow_intermediate_soft_verify_final_only",
+        "benchflow_intermediate_soft_verify_raw_output_recorded",
+        "benchflow_verifier_prep_timeout_override_enabled",
+        "benchflow_verifier_prep_timeout_raw_command_recorded",
+        "benchflow_setup_stall_timeout_enabled",
+        "benchflow_setup_stall_timeout_triggered",
+        "benchflow_setup_stall_raw_logs_read",
+        "benchflow_setup_stall_before_agent_lifecycle",
+        "benchflow_agent_install_started",
+        "benchflow_setup_stall_task_cancel_requested",
+        "benchflow_setup_stall_task_cancel_acknowledged",
+        "benchflow_setup_stall_task_cancel_timeout",
+        "benchflow_setup_stall_cleanup_requested",
+        "benchflow_setup_stall_cleanup_raw_logs_read",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
-    for field in ("codex_acp_runtime_launch_preflight_rc",):
+    for field in (
+        "codex_acp_runtime_launch_preflight_rc",
+        "benchflow_agent_timeout_original_sec",
+        "benchflow_agent_timeout_effective_sec",
+        "benchflow_user_loop_recovery_round",
+        "benchflow_user_loop_recovery_delta_events",
+        "benchflow_user_loop_recovery_delta_tool_calls",
+        "benchflow_intermediate_soft_verify_call_count",
+        "benchflow_intermediate_soft_verify_skipped_count",
+        "benchflow_verifier_prep_timeout_sec",
+        "benchflow_verifier_prep_timeout_override_count",
+        "benchflow_verify_prep_timeout_override_count",
+        "benchflow_soft_verify_prep_timeout_override_count",
+        "benchflow_setup_stall_timeout_sec",
+        "benchflow_setup_stall_cleanup_match_count",
+        "benchflow_setup_stall_cleanup_term_sent_count",
+        "benchflow_setup_stall_cleanup_kill_sent_count",
+        "benchflow_setup_stall_cleanup_alive_after_count",
+    ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
     return compact
+
+
+def cleanup_benchflow_setup_stall_children(
+    plan: dict[str, Any],
+    *,
+    grace_seconds: float = 5.0,
+) -> dict[str, Any]:
+    """Terminate docker compose/buildx processes scoped to this SkillsBench run."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    cleanup: dict[str, Any] = {
+        "schema_version": "skillsbench_setup_stall_process_cleanup_v0",
+        "requested": True,
+        "raw_logs_read": False,
+        "status": "not_attempted",
+        "match_count": 0,
+        "term_sent_count": 0,
+        "kill_sent_count": 0,
+        "alive_after_count": 0,
+    }
+
+    def publish() -> dict[str, Any]:
+        prerequisites["benchflow_setup_stall_cleanup_requested"] = True
+        prerequisites["benchflow_setup_stall_cleanup_raw_logs_read"] = False
+        prerequisites["benchflow_setup_stall_cleanup_status"] = str(
+            cleanup.get("status") or "unknown"
+        )
+        for source, target in (
+            ("match_count", "benchflow_setup_stall_cleanup_match_count"),
+            ("term_sent_count", "benchflow_setup_stall_cleanup_term_sent_count"),
+            ("kill_sent_count", "benchflow_setup_stall_cleanup_kill_sent_count"),
+            ("alive_after_count", "benchflow_setup_stall_cleanup_alive_after_count"),
+        ):
+            value = cleanup.get(source)
+            if isinstance(value, int):
+                prerequisites[target] = value
+        return cleanup
+
+    if os.name != "posix":
+        cleanup["status"] = "unsupported_platform"
+        return publish()
+
+    job_name = str(plan.get("job_name") or "").strip()
+    rollout_name = str(plan.get("rollout_name") or "").strip()
+    if not job_name or not rollout_name:
+        cleanup["status"] = "missing_run_identifiers"
+        return publish()
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-eo", "pid=,ppid=,command="],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        cleanup["status"] = "process_table_unavailable"
+        return publish()
+    if proc.returncode != 0:
+        cleanup["status"] = "process_table_unavailable"
+        return publish()
+
+    entries: dict[int, tuple[int, str]] = {}
+    children: dict[int, set[int]] = {}
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        command = parts[2]
+        entries[pid] = (ppid, command)
+        children.setdefault(ppid, set()).add(pid)
+
+    docker_tokens = (
+        "docker compose",
+        "docker-compose",
+        "docker-buildx",
+        "buildx bake",
+    )
+    root_matches = {
+        pid
+        for pid, (_ppid, command) in entries.items()
+        if pid != os.getpid()
+        and job_name in command
+        and rollout_name in command
+        and any(token in command for token in docker_tokens)
+    }
+    to_terminate = set(root_matches)
+    stack = list(root_matches)
+    while stack:
+        parent = stack.pop()
+        for child in children.get(parent, set()):
+            if child not in to_terminate and child != os.getpid():
+                to_terminate.add(child)
+                stack.append(child)
+
+    cleanup["match_count"] = len(to_terminate)
+    if not to_terminate:
+        cleanup["status"] = "no_matching_processes"
+        return publish()
+
+    def is_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    term_sent = 0
+    for pid in sorted(to_terminate, reverse=True):
+        try:
+            os.kill(pid, signal.SIGTERM)
+            term_sent += 1
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            continue
+    cleanup["term_sent_count"] = term_sent
+
+    deadline = time.monotonic() + max(0.0, grace_seconds)
+    alive = {pid for pid in to_terminate if is_alive(pid)}
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.1)
+        alive = {pid for pid in alive if is_alive(pid)}
+
+    kill_sent = 0
+    if alive:
+        for pid in sorted(alive, reverse=True):
+            try:
+                os.kill(pid, signal.SIGKILL)
+                kill_sent += 1
+            except ProcessLookupError:
+                continue
+            except PermissionError:
+                continue
+        cleanup["kill_sent_count"] = kill_sent
+        time.sleep(0.1)
+        alive = {pid for pid in alive if is_alive(pid)}
+    cleanup["alive_after_count"] = len(alive)
+    if alive:
+        cleanup["status"] = "cleanup_incomplete"
+    elif kill_sent:
+        cleanup["status"] = "killed"
+    else:
+        cleanup["status"] = "terminated"
+    return publish()
+
+
+def install_benchflow_verifier_prep_timeout_override(
+    rollout_cls: Any,
+    *,
+    timeout_sec: int,
+    plan: dict[str, Any],
+    trace: dict[str, Any] | None,
+) -> tuple[Any, Any]:
+    """Raise verifier-phase prep exec timeouts without changing scoring."""
+
+    original_verify = rollout_cls.verify
+    original_soft_verify = rollout_cls.soft_verify
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    enabled = timeout_sec > 10
+    prerequisites["benchflow_verifier_prep_timeout_override_enabled"] = enabled
+    prerequisites["benchflow_verifier_prep_timeout_raw_command_recorded"] = False
+    if enabled:
+        prerequisites["benchflow_verifier_prep_timeout_sec"] = timeout_sec
+    if isinstance(trace, dict):
+        trace["benchflow_verifier_prep_timeout_override_enabled"] = enabled
+        trace["benchflow_verifier_prep_timeout_raw_command_recorded"] = False
+        if enabled:
+            trace["benchflow_verifier_prep_timeout_sec"] = timeout_sec
+
+    async def _run_with_override(self: Any, phase: str, original: Any) -> Any:
+        if not enabled:
+            return await original(self)
+
+        env = getattr(self, "_env", None)
+        original_exec = getattr(env, "exec", None) if env is not None else None
+        if original_exec is None:
+            return await original(self)
+
+        override_count = 0
+
+        async def exec_with_verifier_prep_timeout(*args: Any, **kwargs: Any) -> Any:
+            nonlocal override_count
+            if kwargs.get("timeout_sec") == 10:
+                kwargs = dict(kwargs)
+                kwargs["timeout_sec"] = timeout_sec
+                override_count += 1
+            return await original_exec(*args, **kwargs)
+
+        try:
+            env.exec = exec_with_verifier_prep_timeout
+            return await original(self)
+        finally:
+            env.exec = original_exec
+            phase_key = f"benchflow_{phase}_prep_timeout_override_count"
+            total_key = "benchflow_verifier_prep_timeout_override_count"
+            prerequisites[phase_key] = (
+                int(prerequisites.get(phase_key) or 0) + override_count
+            )
+            prerequisites[total_key] = (
+                int(prerequisites.get(total_key) or 0) + override_count
+            )
+            if isinstance(trace, dict):
+                trace[phase_key] = int(trace.get(phase_key) or 0) + override_count
+                trace[total_key] = int(trace.get(total_key) or 0) + override_count
+
+    async def verify_with_prep_timeout_override(self: Any) -> Any:
+        return await _run_with_override(self, "verify", original_verify)
+
+    async def soft_verify_with_prep_timeout_override(self: Any) -> Any:
+        return await _run_with_override(self, "soft_verify", original_soft_verify)
+
+    rollout_cls.verify = verify_with_prep_timeout_override
+    rollout_cls.soft_verify = soft_verify_with_prep_timeout_override
+    return original_verify, original_soft_verify
+
+
+def _mark_user_loop_final_verify_recovery(
+    *,
+    plan: dict[str, Any],
+    trace: dict[str, Any] | None,
+    stage: str,
+    round_num: int,
+    exception: Exception,
+    delta_events: int,
+    delta_tool_calls: int,
+) -> None:
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    prerequisites["benchflow_user_loop_final_verify_recovery_enabled"] = True
+    prerequisites["benchflow_user_loop_final_verify_recovery_triggered"] = True
+    prerequisites["benchflow_user_loop_recovery_after_agent_activity"] = True
+    prerequisites["benchflow_user_loop_recovery_preserved_final_verify"] = True
+    prerequisites["benchflow_user_loop_recovery_raw_error_recorded"] = False
+    prerequisites["benchflow_user_loop_recovery_stage"] = stage
+    prerequisites["benchflow_user_loop_recovery_exception_type"] = type(
+        exception
+    ).__name__
+    prerequisites["benchflow_user_loop_recovery_round"] = round_num
+    prerequisites["benchflow_user_loop_recovery_delta_events"] = max(0, delta_events)
+    prerequisites["benchflow_user_loop_recovery_delta_tool_calls"] = max(
+        0,
+        delta_tool_calls,
+    )
+    if isinstance(trace, dict):
+        trace["benchflow_user_loop_final_verify_recovery_enabled"] = True
+        trace["benchflow_user_loop_final_verify_recovery_triggered"] = True
+        trace["benchflow_user_loop_recovery_after_agent_activity"] = True
+        trace["benchflow_user_loop_recovery_preserved_final_verify"] = True
+        trace["benchflow_user_loop_recovery_raw_error_recorded"] = False
+        trace["benchflow_user_loop_recovery_stage"] = stage
+        trace["benchflow_user_loop_recovery_exception_type"] = type(exception).__name__
+        trace["benchflow_user_loop_recovery_round"] = round_num
+        trace["benchflow_user_loop_recovery_delta_events"] = max(0, delta_events)
+        trace["benchflow_user_loop_recovery_delta_tool_calls"] = max(
+            0,
+            delta_tool_calls,
+        )
+        trace["last_decision"] = "break_after_agent_round_preserve_final_verify"
+
+
+def install_benchflow_user_loop_final_verify_recovery(
+    rollout_cls: Any,
+    *,
+    plan: dict[str, Any],
+    trace: dict[str, Any] | None,
+    intermediate_soft_verify_policy: str = "every-round",
+) -> Any:
+    """Keep final official verify reachable after post-agent loop failures."""
+
+    original_user_loop = rollout_cls._run_user_loop
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    prerequisites["benchflow_user_loop_final_verify_recovery_enabled"] = True
+    if intermediate_soft_verify_policy not in {"every-round", "final-only"}:
+        raise ValueError(
+            "intermediate_soft_verify_policy must be 'every-round' or 'final-only'"
+        )
+    final_only_soft_verify = intermediate_soft_verify_policy == "final-only"
+    for target in (prerequisites, trace if isinstance(trace, dict) else None):
+        if target is None:
+            continue
+        target["benchflow_intermediate_soft_verify_policy"] = (
+            intermediate_soft_verify_policy
+        )
+        target["benchflow_intermediate_soft_verify_final_only"] = (
+            final_only_soft_verify
+        )
+        target["benchflow_intermediate_soft_verify_raw_output_recorded"] = False
+        target.setdefault("benchflow_intermediate_soft_verify_call_count", 0)
+        target.setdefault("benchflow_intermediate_soft_verify_skipped_count", 0)
+
+    def record_soft_verify_counter(key: str) -> None:
+        _inc_counter(prerequisites, key)
+        if isinstance(trace, dict):
+            _inc_counter(trace, key)
+
+    async def run_user_loop_with_final_verify_recovery(self: Any) -> None:
+        from benchflow.sandbox.user import RoundResult
+
+        cfg = self._config
+        user = cfg.user
+        assert user is not None
+
+        if len(cfg.effective_scenes) > 1:
+            raise ValueError(
+                "User-driven loops operate on a single scene. "
+                f"Got {len(cfg.effective_scenes)} scenes."
+            )
+        scene = cfg.effective_scenes[0]
+        if len(scene.roles) != 1:
+            raise ValueError(
+                "User-driven loops require a single-role scene. "
+                f"Got {len(scene.roles)} roles."
+            )
+        role = scene.roles[0]
+
+        instruction = (
+            self._resolved_prompts[0]
+            if self._resolved_prompts
+            else ("Solve the task described in /app/instruction.md")
+        )
+
+        solution: str | None = None
+        if cfg.oracle_access:
+            cat = await self._env.exec(
+                "cat /solution/solve.sh 2>/dev/null || true",
+                user="root",
+                timeout_sec=10,
+            )
+            solution = (cat.stdout or "").strip() or None
+
+        await user.setup(instruction, solution)
+
+        if cfg.oracle_access:
+            await self._env.exec(
+                "mv /solution /solution_oracle_backup 2>/dev/null || true",
+                user="root",
+                timeout_sec=10,
+            )
+
+        round_result: Any | None = None
+        rounds_log: list[dict[str, Any]] = []
+
+        for round_num in range(cfg.max_user_rounds):
+            try:
+                prompt = await user.run(round_num, instruction, round_result)
+            except Exception as exc:
+                self._error = f"user.run() failed at round {round_num}: {exc}"
+                logging.getLogger(__name__).error(self._error, exc_info=True)
+                break
+
+            if prompt is None:
+                logging.getLogger(__name__).info(
+                    "[User] stopped at round %s",
+                    round_num,
+                )
+                break
+
+            logging.getLogger(__name__).info(
+                "[User] round %s: prompt=%r...",
+                round_num,
+                prompt[:80],
+            )
+
+            traj_before = len(self._trajectory)
+            connected = False
+            try:
+                await self.connect_as(role)
+                connected = True
+                await self.execute(prompts=[prompt])
+            except Exception as exc:
+                delta_events = max(0, len(self._trajectory) - traj_before)
+                round_trajectory = self._trajectory[traj_before:]
+                delta_tool_calls = sum(
+                    1
+                    for event in round_trajectory
+                    if isinstance(event, dict) and event.get("type") == "tool_call"
+                )
+                if (not connected) or delta_events <= 0:
+                    raise
+                _mark_user_loop_final_verify_recovery(
+                    plan=plan,
+                    trace=trace,
+                    stage="agent_execute",
+                    round_num=round_num,
+                    exception=exc,
+                    delta_events=delta_events,
+                    delta_tool_calls=delta_tool_calls,
+                )
+                rounds_log.append(
+                    {
+                        "round": round_num,
+                        "rewards": None,
+                        "verifier_error": "public_safe_agent_execute_exception_after_activity",
+                        "n_tool_calls": delta_tool_calls,
+                        "n_trajectory_events": delta_events,
+                    }
+                )
+                break
+            finally:
+                await self.disconnect()
+
+            round_trajectory = self._trajectory[traj_before:]
+            round_tools = sum(
+                1
+                for event in round_trajectory
+                if isinstance(event, dict) and event.get("type") == "tool_call"
+            )
+
+            if cfg.oracle_access:
+                await self._env.exec(
+                    "mv /solution_oracle_backup /solution 2>/dev/null || true",
+                    user="root",
+                    timeout_sec=10,
+                )
+            soft_verify_skipped = False
+            try:
+                if final_only_soft_verify:
+                    soft_verify_skipped = True
+                    record_soft_verify_counter(
+                        "benchflow_intermediate_soft_verify_skipped_count"
+                    )
+                    rewards = None
+                    verifier_output = None
+                    verifier_error = None
+                else:
+                    record_soft_verify_counter(
+                        "benchflow_intermediate_soft_verify_call_count"
+                    )
+                    rewards, verifier_output, verifier_error = await self.soft_verify()
+            except Exception as exc:
+                _mark_user_loop_final_verify_recovery(
+                    plan=plan,
+                    trace=trace,
+                    stage="soft_verify",
+                    round_num=round_num,
+                    exception=exc,
+                    delta_events=len(round_trajectory),
+                    delta_tool_calls=round_tools,
+                )
+                rounds_log.append(
+                    {
+                        "round": round_num,
+                        "rewards": None,
+                        "verifier_error": "public_safe_soft_verify_exception_after_agent_round",
+                        "soft_verify_policy": intermediate_soft_verify_policy,
+                        "soft_verify_skipped": False,
+                        "n_tool_calls": round_tools,
+                        "n_trajectory_events": len(round_trajectory),
+                    }
+                )
+                break
+            finally:
+                if cfg.oracle_access:
+                    await self._env.exec(
+                        "mv /solution /solution_oracle_backup 2>/dev/null || true",
+                        user="root",
+                        timeout_sec=10,
+                    )
+
+            round_result = RoundResult(
+                round=round_num,
+                trajectory=round_trajectory,
+                rewards=rewards,
+                verifier_output=verifier_output,
+                verifier_error=verifier_error,
+                n_tool_calls=round_tools,
+            )
+
+            rounds_log.append(
+                {
+                    "round": round_num,
+                    "prompt": prompt,
+                    "rewards": rewards,
+                    "verifier_error": verifier_error,
+                    "soft_verify_policy": intermediate_soft_verify_policy,
+                    "soft_verify_skipped": soft_verify_skipped,
+                    "n_tool_calls": round_tools,
+                    "n_trajectory_events": len(round_trajectory),
+                }
+            )
+
+        if rounds_log and self._rollout_dir:
+            log_path = self._rollout_dir / "user_rounds.jsonl"
+            with log_path.open("w") as handle:
+                for entry in rounds_log:
+                    handle.write(json.dumps(entry) + "\n")
+
+    rollout_cls._run_user_loop = run_user_loop_with_final_verify_recovery
+    return original_user_loop
 
 
 def _runner_prerequisite_failure_attribution(
@@ -785,6 +1410,17 @@ def _runner_prerequisite_failure_attribution(
 
     if not isinstance(value, dict):
         return None
+
+    if (
+        value.get("benchflow_setup_stall_timeout_triggered") is True
+        and value.get("benchflow_setup_stall_before_agent_lifecycle") is True
+    ):
+        label = "skillsbench_docker_compose_build_stall_timeout"
+        return label, label, [
+            label,
+            "skillsbench_docker_compose_setup_failure",
+            "skillsbench_environment_setup_error",
+        ]
 
     if (
         value.get("preinstalled_benchflow_agent_runtime_required") is True
@@ -831,6 +1467,77 @@ def _runner_prerequisite_failure_attribution(
         return label, label, [label, "skillsbench_runner_setup_error"]
 
     return None
+
+
+def _agent_lifecycle_observed_for_setup_stall(plan: dict[str, Any]) -> bool:
+    prerequisites = plan.get("runner_prerequisites")
+    if not isinstance(prerequisites, dict):
+        prerequisites = {}
+
+    if prerequisites.get("benchflow_agent_install_started") is True:
+        return True
+    launch_status = str(
+        prerequisites.get("codex_acp_runtime_launch_preflight_status") or ""
+    )
+    if launch_status not in {"", "pending", "not_requested"}:
+        return True
+    host_status = str(prerequisites.get("host_local_acp_launch_status") or "")
+    if host_status not in {"", "pending", "not_requested"}:
+        return True
+
+    controller_trace = plan.get("controller_trace")
+    if not isinstance(controller_trace, dict):
+        return False
+    return bool(
+        controller_trace.get("case_goal_state_initialized_before_agent")
+        or controller_trace.get("case_goal_state_init_rc") is not None
+        or int(controller_trace.get("initial_prompt_count") or 0) > 0
+        or int(controller_trace.get("heartbeat_count") or 0) > 0
+        or int(controller_trace.get("controller_action_decisions") or 0) > 0
+        or int(controller_trace.get("private_trajectory_round_count") or 0) > 0
+        or int(controller_trace.get("loopx_cli_call_count") or 0) > 0
+    )
+
+
+def _runner_exception_indicates_timeout(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "timeout" in text or "timed out" in text
+
+
+def _ensure_setup_stall_timeout_prerequisites(
+    args: argparse.Namespace,
+    plan: dict[str, Any],
+    exc: BaseException,
+    *,
+    cleanup_if_missing: bool,
+) -> None:
+    """Backfill public setup-stall evidence when BenchFlow times out pre-agent."""
+
+    build_stall_timeout_sec = int(args.build_stall_timeout_sec or 0)
+    if build_stall_timeout_sec <= 0:
+        return
+    if not _runner_exception_indicates_timeout(exc):
+        return
+    if _agent_lifecycle_observed_for_setup_stall(plan):
+        return
+
+    raw_prerequisites = plan.setdefault("runner_prerequisites", {})
+    raw_prerequisites.setdefault(
+        "benchflow_run_stage", "build_or_setup_stall_before_agent"
+    )
+    raw_prerequisites.setdefault("benchflow_setup_stall_timeout_enabled", True)
+    raw_prerequisites.setdefault(
+        "benchflow_setup_stall_timeout_sec", build_stall_timeout_sec
+    )
+    raw_prerequisites.setdefault("benchflow_setup_stall_timeout_triggered", True)
+    raw_prerequisites.setdefault(
+        "benchflow_setup_stall_before_agent_lifecycle", True
+    )
+    raw_prerequisites.setdefault("benchflow_setup_stall_raw_logs_read", False)
+    if cleanup_if_missing and not raw_prerequisites.get(
+        "benchflow_setup_stall_cleanup_requested"
+    ):
+        cleanup_benchflow_setup_stall_children(plan)
 
 
 def _apply_agent_message_only_no_tool_calls_attribution(
@@ -1605,6 +2312,10 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     task_id = args.task_id
     route = args.route
     route_slug = route.replace("-", "_")
+    intermediate_soft_verify_policy = product_mode_soft_verify_policy_for_route(
+        route,
+        args.product_mode_soft_verify_policy,
+    )
     job_name = args.job_name or (
         f"skillsbench-{task_id}-{route}-{_now_stamp()}"
     )
@@ -1638,6 +2349,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         sandbox=args.sandbox,
     )
     agent_runtime_layer = _benchflow_agent_runtime_layer_contract(args)
+    loopx_source_mount = _loopx_source_mount_contract(args)
     requires_preinstalled_runtime = bool(agent_runtime_layer.get("required"))
     is_app_server_goal_route = route == "codex-app-server-goal-baseline"
     app_server_goal_bridge_ready = bool(
@@ -1689,6 +2401,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             or args.remote_command_file_bridge_probe
         ),
         "benchflow_agent_runtime_layer": agent_runtime_layer,
+        "loopx_source_mount": loopx_source_mount,
         "skillsbench_root": str(Path(args.skillsbench_root).expanduser()),
         "jobs_dir": str(jobs_dir),
         "job_name": job_name,
@@ -1696,6 +2409,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "result_json": str(result_path),
         "compact_benchmark_run_json": str(compact_path),
         "controller_trace_json": str(controller_trace_path),
+        "build_stall_timeout_sec": int(args.build_stall_timeout_sec or 0),
         "app_server_goal_worker_trace_dir": (
             str(app_server_goal_worker_trace_dir)
             if is_app_server_goal_route
@@ -1718,6 +2432,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "runner_prerequisites": {
             "schema_version": "skillsbench_runner_prerequisites_v0",
+            "benchflow_setup_stall_timeout_enabled": (
+                int(args.build_stall_timeout_sec or 0) > 0
+            ),
+            "benchflow_setup_stall_timeout_sec": int(
+                args.build_stall_timeout_sec or 0
+            ),
+            "benchflow_setup_stall_raw_logs_read": False,
             "codex_acp_runtime_container_bootstrap": (
                 False
                 if is_app_server_goal_route
@@ -1787,6 +2508,22 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 requires_preinstalled_runtime
             ),
             "benchflow_agent_runtime_mount_source_recorded": False,
+            "loopx_source_mount_requested": bool(
+                loopx_source_mount.get("requested")
+            ),
+            "loopx_source_mount_ready": bool(loopx_source_mount.get("ready")),
+            "loopx_source_mount_status": str(
+                loopx_source_mount.get("status") or ""
+            ),
+            "loopx_source_mount_target": str(
+                loopx_source_mount.get("mount_target") or ""
+            ),
+            "loopx_source_mount_injected": False,
+            "loopx_source_mount_read_only": bool(loopx_source_mount.get("read_only")),
+            "loopx_source_mount_source_recorded": False,
+            "benchflow_agent_timeout_original_sec": 0,
+            "benchflow_agent_timeout_effective_sec": 0,
+            "benchflow_agent_timeout_overridden": False,
             "codex_app_server_goal_worker_plan_schema": (
                 app_server_goal_worker_contract["worker_plan"]["schema_version"]
                 if app_server_goal_worker_contract
@@ -1818,6 +2555,15 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 if app_server_goal_worker_contract
                 else False
             ),
+            "benchflow_intermediate_soft_verify_policy": (
+                intermediate_soft_verify_policy
+            ),
+            "benchflow_intermediate_soft_verify_final_only": (
+                intermediate_soft_verify_policy == "final-only"
+            ),
+            "benchflow_intermediate_soft_verify_call_count": 0,
+            "benchflow_intermediate_soft_verify_skipped_count": 0,
+            "benchflow_intermediate_soft_verify_raw_output_recorded": False,
         },
         "public_boundary": {
             "leaderboard_upload": False,
@@ -2030,6 +2776,13 @@ def _tail(text: str | None, *, limit: int) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[-limit:]
+
+
+def _last_loopx_case_init_phase(text: str | None) -> str:
+    if not text:
+        return ""
+    phases = re.findall(r"loopx_case_init_phase:([a-z0-9_:-]+)", text)
+    return phases[-1] if phases else ""
 
 
 def _inc_counter(payload: dict[str, Any], key: str, amount: int = 1) -> None:
@@ -2414,9 +3167,16 @@ def _normalized_loopx_cli_call(
     after = tokens[command_index + 1 :] if command_index >= 0 else []
     subcommands: list[str] = []
     flags: list[str] = []
+    skip_next = False
     for token in after:
+        if skip_next:
+            skip_next = False
+            continue
         if token.startswith("--"):
-            flags.append(token.split("=", 1)[0][:60])
+            flag = token.split("=", 1)[0][:60]
+            flags.append(flag)
+            if "=" not in token and flag in LOOPX_FLAG_VALUE_OPTIONS:
+                skip_next = True
             continue
         if token.startswith("-"):
             flags.append(token[:20])
@@ -2507,8 +3267,25 @@ def _record_declared_done(
 
 
 def _product_mode_depth_gate_satisfied(trace: dict[str, Any]) -> bool:
-    reads = trace.get("loopx_case_state_reads")
-    writes = trace.get("loopx_case_state_writes")
+    def count(*fields: str) -> int:
+        values = [
+            trace.get(field)
+            for field in fields
+            if isinstance(trace.get(field), int)
+            and not isinstance(trace.get(field), bool)
+        ]
+        return max(values, default=0)
+
+    reads = count(
+        "loopx_state_reads",
+        "loopx_cli_state_read_count",
+        "loopx_case_state_reads",
+    )
+    writes = count(
+        "loopx_state_writes",
+        "loopx_cli_state_write_count",
+        "loopx_case_state_writes",
+    )
     return (
         isinstance(reads, int)
         and not isinstance(reads, bool)
@@ -2530,6 +3307,22 @@ def _record_product_mode_depth_gate_gap(
     if not isinstance(current, int) or isinstance(current, bool):
         current = 0
     trace["product_mode_depth_gate_gap_count"] = current + 1
+
+
+def _record_product_mode_lifecycle_checkpoint_gap(
+    trace: dict[str, Any],
+    *,
+    agent_round: int,
+) -> None:
+    trace["product_mode_lifecycle_checkpoint_required"] = True
+    trace["product_mode_lifecycle_checkpoint_round"] = agent_round
+    trace["product_mode_lifecycle_checkpoint_missing_reason"] = (
+        "missing_case_local_loopx_state_read_or_write"
+    )
+    current = trace.get("product_mode_lifecycle_checkpoint_count")
+    if not isinstance(current, int) or isinstance(current, bool):
+        current = 0
+    trace["product_mode_lifecycle_checkpoint_count"] = current + 1
 
 
 def _trajectory_candidate_paths(plan: dict[str, Any]) -> list[Path]:
@@ -2799,26 +3592,81 @@ def _build_product_mode_user(
     max_rounds: int,
     trace: dict[str, Any],
     plan: dict[str, Any] | None = None,
+    case_payload: dict[str, Any] | None = None,
 ):
     from benchflow.sandbox.user import BaseUser, RoundResult
 
     treatment = route == "loopx-product-mode"
+    payload = case_payload or {}
+    case_state_path = str(
+        payload.get("case_state_path") or PRODUCT_MODE_CASE_STATE_PATH
+    )
+    case_goal_id = str(payload.get("benchmark_case_goal_id") or PRODUCT_MODE_CASE_GOAL_ID)
+    case_agent_id = str(payload.get("case_agent_id") or BENCHMARK_CASE_LOOPX_AGENT_ID)
+    case_todo_id = str(payload.get("case_todo_id") or BENCHMARK_CASE_LOOPX_TODO_ID)
+    case_cli_prefix = benchmark_case_loopx_command_prefix(
+        case_cli_path=str(payload.get("case_cli_path") or "/app/.local/bin/loopx"),
+        case_registry_path=str(payload.get("case_registry_path") or "/app/.loopx/registry.json"),
+        case_runtime_root=str(payload.get("case_runtime_root") or "/app/.loopx/runtime"),
+    )
 
     def treatment_state_contract() -> str:
         return (
-            "LoopX case-state contract: a canonical active-state "
-            f"skeleton is already initialized at `{PRODUCT_MODE_CASE_STATE_PATH}` "
-            "before the agent starts. This path intentionally mirrors the "
-            "normal LoopX active-state shape inside the benchmark "
-            "sandbox. Before substantive edits, read the file and keep its "
-            f"`schema_version: {PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION}`, "
-            "`## Agent Todo`, `## Done Todo`, `## Local Evidence`, "
-            "`## Replan Log`, and `## Remaining Goals` sections. Re-read it "
-            "before each continuation, update it after local evidence changes, "
-            "and before declaring done rewrite it so there are no open agent "
-            "todos and `## Remaining Goals` says none. If the real "
-            "LoopX CLI is available you may also use it, but this file "
-            "is the required per-case state surface. "
+            "LoopX product-mode lifecycle contract: official case-local "
+            f"LoopX is initialized before the agent starts. Active state: "
+            f"`{case_state_path}`. This is the only formal treatment "
+            "lifecycle; runner polling is only the outer transport. Before "
+            "planning, run "
+            f"`{case_cli_prefix} quota should-run --goal-id {case_goal_id} "
+            f"--agent-id {case_agent_id}` and claim the selected case todo "
+            f"with `{case_cli_prefix} todo claim --goal-id {case_goal_id} "
+            f"--todo-id {case_todo_id} --claimed-by {case_agent_id}`. "
+            "After meaningful local evidence or validation, update the todo "
+            "through LoopX CLI; when complete, use `todo complete`, then "
+            "`refresh-state`, then `quota spend-slot --execute`. Do not rely "
+            "on only reading or editing the Markdown state file, and do not "
+            "write a separate marker as the source of truth. "
+        )
+
+    def lifecycle_checkpoint_commands(round_number: int) -> str:
+        safe_round = max(1, round_number)
+        checkpoint_note = shlex.quote(
+            f"round {safe_round} product-mode lifecycle checkpoint"
+        )
+        checkpoint_evidence = shlex.quote(
+            "public-safe checkpoint: case-local LoopX lifecycle touched"
+        )
+        classification = shlex.quote("benchmark_case_lifecycle_checkpoint")
+        return (
+            "```bash\n"
+            f"{case_cli_prefix} quota should-run --goal-id {case_goal_id} "
+            f"--agent-id {case_agent_id}\n"
+            f"{case_cli_prefix} todo claim --goal-id {case_goal_id} "
+            f"--todo-id {case_todo_id} --claimed-by {case_agent_id}\n"
+            f"{case_cli_prefix} todo update --goal-id {case_goal_id} "
+            f"--todo-id {case_todo_id} --status open "
+            f"--note {checkpoint_note} --evidence {checkpoint_evidence}\n"
+            f"{case_cli_prefix} refresh-state --goal-id {case_goal_id} "
+            f"--classification {classification} "
+            "--delivery-batch-scale single_surface "
+            "--delivery-outcome surface_only --no-global-sync\n"
+            "```\n"
+        )
+
+    def lifecycle_checkpoint_prompt(round_number: int) -> str:
+        return (
+            f"Mandatory LoopX lifecycle checkpoint before round {round_number} "
+            "continues. The previous product-mode round did not produce public "
+            "evidence of case-local LoopX state read/write. This is not "
+            "official verifier feedback and says nothing about task success. "
+            "Before doing any more task work or declaring done, run these "
+            "case-local LoopX CLI commands exactly from the sandbox, then "
+            f"continue solving from the updated case state at `{case_state_path}`. "
+            "Do not answer with prose only.\n\n"
+            f"{lifecycle_checkpoint_commands(round_number)}"
+            "After meaningful local validation or completion, update the same "
+            "case todo again; only spend quota after validated work or final "
+            "closeout."
         )
 
     class ProductModeUser(BaseUser):
@@ -2851,6 +3699,10 @@ def _build_product_mode_user(
                                 trace,
                                 agent_round=round,
                             )
+                            _record_product_mode_lifecycle_checkpoint_gap(
+                                trace,
+                                agent_round=round,
+                            )
                             _inc_counter(trace, "controller_action_decisions")
                             if round >= max_rounds:
                                 _inc_counter(trace, "stop_decision_count")
@@ -2860,20 +3712,13 @@ def _build_product_mode_user(
                                 return None
                             _inc_counter(trace, "followup_prompt_count")
                             trace["last_decision"] = (
-                                "send_product_mode_depth_gate_continuation"
+                                "send_product_mode_lifecycle_checkpoint_continuation"
                             )
                             return (
-                                f"Scheduled product-mode continuation round "
-                                f"{round + 1} of {max_rounds}. This is part of "
-                                "the fixed autonomous budget and is not "
-                                "evidence that the official verifier passed "
-                                "or failed. You are not being shown official "
-                                "reward, pass/fail status, verifier error, or "
-                                "verifier output. You declared done, but the "
-                                "required LoopX case-state interaction "
-                                f"was not observed. Re-read "
-                                f"`{PRODUCT_MODE_CASE_STATE_PATH}`, update it "
-                                "with current todos/evidence/replan state, "
+                                lifecycle_checkpoint_prompt(round + 1)
+                                + "\n\nYou declared done, but the required "
+                                "LoopX case-state interaction was not "
+                                "observed. Re-read the updated case state, "
                                 "validate locally, and only end with "
                                 f"{DECLARED_DONE_MARKER} after it records no "
                                 "open agent todos and no remaining goals."
@@ -2921,12 +3766,20 @@ def _build_product_mode_user(
                         "Use ordinary Codex autonomous behavior. You may keep a "
                         "brief local plan or todo list, but do not use Goal "
                         "Harness state, todo, replan, ledger, CLI surfaces, or "
-                        f"`{PRODUCT_MODE_CASE_STATE_PATH}`. "
+                    f"`{case_state_path}`. "
                     )
                 return (
                     prefix
                     + "You are running inside the official SkillsBench sandbox. "
                     + control_clause
+                    + (
+                        "For this treatment, LoopX lifecycle evidence is a "
+                        "hard product-mode requirement: first run the "
+                        "case-local quota/todo commands above before "
+                        "substantive task work. "
+                        if treatment
+                        else ""
+                    )
                     + "No official reward, pass/fail status, verifier error, "
                     "verifier output, or verifier tail will be shown during this "
                     "run. If you believe the task is complete and there are no "
@@ -2938,11 +3791,22 @@ def _build_product_mode_user(
 
             _inc_counter(trace, "controller_action_decisions")
             _inc_counter(trace, "followup_prompt_count")
+            if treatment:
+                _merge_acp_trajectory_summary(plan or {}, trace)
+                if not _product_mode_depth_gate_satisfied(trace):
+                    _record_product_mode_lifecycle_checkpoint_gap(
+                        trace,
+                        agent_round=round,
+                    )
+                    trace["last_decision"] = (
+                        "send_product_mode_lifecycle_checkpoint_continuation"
+                    )
+                    return lifecycle_checkpoint_prompt(round + 1)
             trace["last_decision"] = "send_product_mode_scheduled_continuation"
             if treatment:
                 mode_clause = (
                     "Continue from your LoopX case state at "
-                    f"`{PRODUCT_MODE_CASE_STATE_PATH}` and todo/replan ledger; "
+                    f"`{case_state_path}` and todo/replan ledger; "
                     "re-read and update them if local evidence changed."
                 )
             else:
@@ -2969,6 +3833,12 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
     task_path = skillsbench_root / "tasks" / args.task_id
     if not task_path.exists():
         raise FileNotFoundError(f"SkillsBench task not found: {task_path}")
+    loopx_source_contract = _loopx_source_mount_contract(args)
+    if loopx_source_contract.get("requested") and not loopx_source_contract.get("ready"):
+        raise FileNotFoundError(
+            "LoopX source mount requested but local source files are missing; "
+            "use --no-loopx-source-mount to test the public GitHub installer instead"
+        )
     effective_task_path, staging_metadata = stage_task_for_sandbox(
         task_path=task_path,
         jobs_dir=Path(plan["jobs_dir"]),
@@ -2984,9 +3854,20 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
 
     import benchflow.acp.runtime as benchflow_acp_runtime
     import benchflow.rollout as benchflow_rollout_module
-    import benchflow.rollout_planes as benchflow_rollout_planes_module
+    import benchflow.sandbox.setup as benchflow_sandbox_setup_module
+    try:
+        benchflow_rollout_planes_module = importlib.import_module(
+            "benchflow.rollout_planes"
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name != "benchflow.rollout_planes":
+            raise
+        benchflow_rollout_planes_module = None
     from benchflow.rollout import Rollout, RolloutConfig
     from benchflow.runtime import run as benchflow_run
+    plan.setdefault("runner_prerequisites", {})[
+        "benchflow_rollout_planes_module_available"
+    ] = benchflow_rollout_planes_module is not None
 
     host_local_acp_command = _host_local_acp_launch_command(args, plan)
     runtime_mounts = (
@@ -2994,6 +3875,8 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         if args.require_preinstalled_benchflow_agent_runtime
         else []
     )
+    loopx_source_mounts = _loopx_source_mounts(args)
+    container_mounts = [*runtime_mounts, *loopx_source_mounts]
 
     async def connect_host_local_acp(
         env: Any,
@@ -3116,43 +3999,83 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
     async def seed_product_mode_case_state(env: Any) -> None:
         if args.route != "loopx-product-mode":
             return
-        trace = controller_trace if isinstance(controller_trace, dict) else {}
-        trace["case_goal_state_init_required"] = True
-        trace["case_goal_state_path"] = PRODUCT_MODE_CASE_STATE_PATH
-        trace["case_goal_state_schema_version"] = PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION
-        trace["case_goal_state_initialized_before_agent"] = False
-        content = product_mode_case_state_seed_text(
-            task_id=args.task_id,
+        payload = benchmark_case_loopx_install_payload(
+            benchmark_id="skillsbench",
+            case_id=args.task_id,
+            arm_id="loopx_product_mode",
             route=args.route,
             max_rounds=args.max_rounds,
+            case_loopx_source_path=_loopx_case_source_path_for_container(args),
         )
-        cmd = benchmark_case_active_state_write_command(
-            case_state_path=PRODUCT_MODE_CASE_STATE_PATH,
-            content=content,
+        trace = controller_trace if isinstance(controller_trace, dict) else {}
+        trace["case_goal_state_init_required"] = True
+        trace["case_goal_state_path"] = payload.get("case_state_path") or ""
+        trace["case_goal_state_schema_version"] = payload.get("schema_version") or ""
+        trace["loopx_lifecycle_driver_schema_version"] = (
+            payload.get("lifecycle_driver_schema_version") or ""
         )
-        result = await env.exec(cmd, timeout_sec=30)
+        trace["loopx_formal_treatment_semantics"] = (
+            payload.get("formal_treatment_semantics") or ""
+        )
+        trace["loopx_canonical_product_mode_lifecycle_driver"] = bool(
+            payload.get("canonical_product_mode_lifecycle_driver")
+        )
+        trace["loopx_execution_style"] = payload.get("execution_style") or ""
+        trace["loopx_case_cli_path"] = payload.get("case_cli_path") or ""
+        trace["loopx_case_source_install_requested"] = bool(
+            payload.get("case_loopx_source_install_requested")
+        )
+        trace["loopx_case_source_path_recorded"] = bool(
+            payload.get("case_loopx_source_path_recorded")
+        )
+        trace["loopx_case_registry_path"] = payload.get("case_registry_path") or ""
+        trace["loopx_case_runtime_root"] = payload.get("case_runtime_root") or ""
+        trace["loopx_case_agent_id"] = payload.get("case_agent_id") or ""
+        trace["loopx_case_todo_id"] = payload.get("case_todo_id") or ""
+        trace["loopx_case_todo_seeded"] = bool(payload.get("case_todo_seeded"))
+        trace["loopx_case_todo_preclaimed"] = bool(payload.get("case_todo_preclaimed"))
+        trace["case_goal_state_initialized_before_agent"] = False
+        result = await env.exec(str(payload["command"]), timeout_sec=180)
         trace["case_goal_state_init_rc"] = int(result.return_code)
         if result.return_code != 0:
             stderr = (getattr(result, "stderr", "") or "").strip()
             stdout = (getattr(result, "stdout", "") or "").strip()
             detail = stderr or stdout or "no output"
+            failed_phase = _last_loopx_case_init_phase(detail)
+            if failed_phase:
+                trace["case_goal_state_init_failed_phase"] = failed_phase
             trace["case_goal_state_init_status"] = "failed"
             raise RuntimeError(
-                "LoopX case active-state init failed: " + detail[:1000]
+                "LoopX official case lifecycle init failed: " + detail[:1000]
             )
         trace["case_goal_state_initialized_before_agent"] = True
         trace["case_goal_state_init_status"] = "passed"
+        trace["loopx_case_cli_installed_before_agent"] = True
 
     original_install_agent = Rollout.install_agent
     original_runtime_connect_acp = benchflow_acp_runtime.connect_acp
+    original_rollout_create_environment = getattr(
+        benchflow_rollout_module,
+        "_create_environment",
+        _MISSING,
+    )
+    original_setup_create_environment = getattr(
+        benchflow_sandbox_setup_module,
+        "_create_environment",
+        _MISSING,
+    )
     original_rollout_connect_acp = getattr(
         benchflow_rollout_module, "connect_acp", _MISSING
     )
-    original_rollout_planes_connect_acp = getattr(
-        benchflow_rollout_planes_module, "connect_acp", _MISSING
+    original_rollout_planes_connect_acp = (
+        getattr(benchflow_rollout_planes_module, "connect_acp", _MISSING)
+        if benchflow_rollout_planes_module is not None
+        else _MISSING
     )
-    rollout_planes_class = getattr(
-        benchflow_rollout_planes_module, "DefaultRolloutPlanes", None
+    rollout_planes_class = (
+        getattr(benchflow_rollout_planes_module, "DefaultRolloutPlanes", None)
+        if benchflow_rollout_planes_module is not None
+        else None
     )
     original_create_environment = (
         getattr(rollout_planes_class, "create_environment", None)
@@ -3166,21 +4089,65 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         env = original_create_environment(self, *call_args, **call_kwargs)
         prerequisites = plan.setdefault("runner_prerequisites", {})
         environment = str(call_args[0]) if call_args else ""
-        if (
-            runtime_mounts
-            and environment == "docker"
-            and hasattr(env, "_mounts_json")
-        ):
+        if container_mounts and environment == "docker":
             existing_mounts = getattr(env, "_mounts_json", None) or []
-            setattr(env, "_mounts_json", [*existing_mounts, *runtime_mounts])
-            prerequisites["benchflow_agent_runtime_mount_injected"] = True
-            prerequisites["benchflow_agent_runtime_mount_read_only"] = True
-            prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
-        elif runtime_mounts:
-            prerequisites["benchflow_agent_runtime_mount_injected"] = False
-            prerequisites["benchflow_agent_runtime_mount_read_only"] = True
-            prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
+            setattr(env, "_mounts_json", [*existing_mounts, *container_mounts])
+            if runtime_mounts:
+                prerequisites["benchflow_agent_runtime_mount_injected"] = True
+                prerequisites["benchflow_agent_runtime_mount_read_only"] = True
+                prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
+            if loopx_source_mounts:
+                prerequisites["loopx_source_mount_injected"] = True
+                prerequisites["loopx_source_mount_read_only"] = True
+                prerequisites["loopx_source_mount_source_recorded"] = False
+        elif container_mounts:
+            if runtime_mounts:
+                prerequisites["benchflow_agent_runtime_mount_injected"] = False
+                prerequisites["benchflow_agent_runtime_mount_read_only"] = True
+                prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
+            if loopx_source_mounts:
+                prerequisites["loopx_source_mount_injected"] = False
+                prerequisites["loopx_source_mount_read_only"] = True
+                prerequisites["loopx_source_mount_source_recorded"] = False
         return env
+
+    def _record_container_mount_injection(env: Any, environment: str) -> Any:
+        prerequisites = plan.setdefault("runner_prerequisites", {})
+        if container_mounts and environment == "docker":
+            existing_mounts = getattr(env, "_mounts_json", None) or []
+            setattr(env, "_mounts_json", [*existing_mounts, *container_mounts])
+            if runtime_mounts:
+                prerequisites["benchflow_agent_runtime_mount_injected"] = True
+                prerequisites["benchflow_agent_runtime_mount_read_only"] = True
+                prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
+            if loopx_source_mounts:
+                prerequisites["loopx_source_mount_injected"] = True
+                prerequisites["loopx_source_mount_read_only"] = True
+                prerequisites["loopx_source_mount_source_recorded"] = False
+        elif container_mounts:
+            if runtime_mounts:
+                prerequisites["benchflow_agent_runtime_mount_injected"] = False
+                prerequisites["benchflow_agent_runtime_mount_read_only"] = True
+                prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
+            if loopx_source_mounts:
+                prerequisites["loopx_source_mount_injected"] = False
+                prerequisites["loopx_source_mount_read_only"] = True
+                prerequisites["loopx_source_mount_source_recorded"] = False
+        return env
+
+    def create_environment_function_with_runtime_mount(
+        environment: str,
+        *call_args: Any,
+        **call_kwargs: Any,
+    ) -> Any:
+        if original_rollout_create_environment is _MISSING:
+            raise RuntimeError("BenchFlow rollout _create_environment missing")
+        env = original_rollout_create_environment(
+            environment,
+            *call_args,
+            **call_kwargs,
+        )
+        return _record_container_mount_injection(env, environment)
 
     async def install_agent_host_local_acp(self: Any) -> None:
         cfg = self._config
@@ -3262,10 +4229,26 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         self._phase = "installed"
 
     async def install_agent_with_launch_preflight(self: Any) -> Any:
+        prerequisites = plan.setdefault("runner_prerequisites", {})
+        prerequisites["benchflow_agent_install_started"] = True
+        prerequisites["benchflow_run_stage"] = "agent_install_started"
+        original_timeout = getattr(self, "_timeout", None)
+        requested_timeout = max(0, int(args.agent_idle_timeout or 0))
+        if (
+            isinstance(original_timeout, int)
+            and not isinstance(original_timeout, bool)
+            and requested_timeout > 0
+        ):
+            prerequisites["benchflow_agent_timeout_original_sec"] = original_timeout
+            effective_timeout = max(original_timeout, requested_timeout)
+            prerequisites["benchflow_agent_timeout_effective_sec"] = effective_timeout
+            prerequisites["benchflow_agent_timeout_overridden"] = (
+                effective_timeout != original_timeout
+            )
+            self._timeout = effective_timeout
         if args.host_local_acp_launch:
             return await install_agent_host_local_acp(self)
         result = await original_install_agent(self)
-        prerequisites = plan.setdefault("runner_prerequisites", {})
         if prerequisites.get("codex_acp_runtime_launch_preflight_status") != "passed":
             env = getattr(self, "_env", None)
             if env is None:
@@ -3279,6 +4262,16 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
 
     controller_user = None
     controller_trace: dict[str, Any] | None = None
+    product_mode_case_payload: dict[str, Any] | None = None
+    if args.route == "loopx-product-mode":
+        product_mode_case_payload = benchmark_case_loopx_install_payload(
+            benchmark_id="skillsbench",
+            case_id=args.task_id,
+            arm_id="loopx_product_mode",
+            route=args.route,
+            max_rounds=args.max_rounds,
+            case_loopx_source_path=_loopx_case_source_path_for_container(args),
+        )
     if args.route == "automation-loop-treatment":
         controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
         controller_user = _build_controller_user(
@@ -3307,6 +4300,7 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             max_rounds=args.max_rounds,
             trace=controller_trace,
             plan=plan,
+            case_payload=product_mode_case_payload,
         )
     elif args.route == "codex-goal-mode-baseline":
         controller_user = _build_codex_goal_mode_baseline_user()
@@ -3314,6 +4308,24 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
         controller_trace["native_goal_worker_route"] = True
         controller_trace["last_decision"] = "host_app_server_goal_worker_selected"
+
+    original_user_loop = install_benchflow_user_loop_final_verify_recovery(
+        Rollout,
+        plan=plan,
+        trace=controller_trace,
+        intermediate_soft_verify_policy=product_mode_soft_verify_policy_for_route(
+            args.route,
+            args.product_mode_soft_verify_policy,
+        ),
+    )
+    original_verify, original_soft_verify = (
+        install_benchflow_verifier_prep_timeout_override(
+            Rollout,
+            timeout_sec=args.verifier_prep_timeout_sec,
+            plan=plan,
+            trace=controller_trace,
+        )
+    )
 
     pre_agent_hooks = (
         []
@@ -3351,32 +4363,128 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         **_filter_kwargs_for_signature(RolloutConfig, rollout_config_kwargs)
     )
     result_path: Path | None = None
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    build_stall_timeout_sec = max(0, int(args.build_stall_timeout_sec or 0))
+    prerequisites["benchflow_setup_stall_timeout_enabled"] = (
+        build_stall_timeout_sec > 0
+    )
+    prerequisites["benchflow_setup_stall_timeout_sec"] = build_stall_timeout_sec
+    prerequisites["benchflow_setup_stall_raw_logs_read"] = False
+    prerequisites["benchflow_run_stage"] = "before_benchflow_run"
+
+    def agent_lifecycle_started() -> bool:
+        if prerequisites.get("benchflow_agent_install_started") is True:
+            return True
+        launch_status = str(
+            prerequisites.get("codex_acp_runtime_launch_preflight_status") or ""
+        )
+        if launch_status not in {"", "pending", "not_requested"}:
+            return True
+        host_status = str(prerequisites.get("host_local_acp_launch_status") or "")
+        if host_status not in {"", "pending", "not_requested"}:
+            return True
+        if isinstance(controller_trace, dict):
+            return bool(
+                controller_trace.get("case_goal_state_initialized_before_agent")
+                or controller_trace.get("case_goal_state_init_rc") is not None
+                or int(controller_trace.get("initial_prompt_count") or 0) > 0
+                or int(controller_trace.get("heartbeat_count") or 0) > 0
+                or int(controller_trace.get("controller_action_decisions") or 0) > 0
+                or int(controller_trace.get("private_trajectory_round_count") or 0) > 0
+                or int(controller_trace.get("loopx_cli_call_count") or 0) > 0
+            )
+        return False
+
+    async def run_benchflow_with_setup_stall_watchdog() -> None:
+        prerequisites["benchflow_run_stage"] = "benchflow_run_started"
+        task = asyncio.create_task(benchflow_run(config))
+        if build_stall_timeout_sec <= 0:
+            await task
+            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            return
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=build_stall_timeout_sec,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if done:
+            await task
+            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            return
+        if agent_lifecycle_started():
+            prerequisites["benchflow_run_stage"] = (
+                "benchflow_run_continues_after_agent_lifecycle_started"
+            )
+            await task
+            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            return
+        prerequisites["benchflow_setup_stall_timeout_triggered"] = True
+        prerequisites["benchflow_setup_stall_before_agent_lifecycle"] = True
+        prerequisites["benchflow_run_stage"] = "build_or_setup_stall_before_agent"
+        prerequisites["benchflow_setup_stall_task_cancel_requested"] = True
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except asyncio.CancelledError:
+            prerequisites["benchflow_setup_stall_task_cancel_acknowledged"] = True
+        except asyncio.TimeoutError:
+            prerequisites["benchflow_setup_stall_task_cancel_timeout"] = True
+        cleanup_benchflow_setup_stall_children(plan)
+        raise asyncio.TimeoutError(
+            "skillsbench docker compose build/setup stall timeout before agent lifecycle"
+        )
+
     Rollout.install_agent = install_agent_with_launch_preflight
-    if runtime_mounts and rollout_planes_class is not None:
+    if container_mounts and rollout_planes_class is not None:
         rollout_planes_class.create_environment = create_environment_with_runtime_mount
+    if container_mounts and original_rollout_create_environment is not _MISSING:
+        benchflow_rollout_module._create_environment = (
+            create_environment_function_with_runtime_mount
+        )
+    if container_mounts and original_setup_create_environment is not _MISSING:
+        benchflow_sandbox_setup_module._create_environment = (
+            create_environment_function_with_runtime_mount
+        )
     if args.host_local_acp_launch:
         benchflow_acp_runtime.connect_acp = connect_host_local_acp
         if original_rollout_connect_acp is not _MISSING:
             benchflow_rollout_module.connect_acp = connect_host_local_acp
-        if original_rollout_planes_connect_acp is not _MISSING:
+        if (
+            benchflow_rollout_planes_module is not None
+            and original_rollout_planes_connect_acp is not _MISSING
+        ):
             benchflow_rollout_planes_module.connect_acp = connect_host_local_acp
     try:
-        await benchflow_run(config)
+        await run_benchflow_with_setup_stall_watchdog()
         result_path = discover_benchflow_result_path(plan)
         if result_path.exists():
             _merge_final_result_round_reward(controller_trace, result_path)
     finally:
         Rollout.install_agent = original_install_agent
+        Rollout._run_user_loop = original_user_loop
+        Rollout.verify = original_verify
+        Rollout.soft_verify = original_soft_verify
         if (
-            runtime_mounts
+            container_mounts
             and rollout_planes_class is not None
             and original_create_environment is not None
         ):
             rollout_planes_class.create_environment = original_create_environment
+        if original_rollout_create_environment is not _MISSING:
+            benchflow_rollout_module._create_environment = (
+                original_rollout_create_environment
+            )
+        if original_setup_create_environment is not _MISSING:
+            benchflow_sandbox_setup_module._create_environment = (
+                original_setup_create_environment
+            )
         benchflow_acp_runtime.connect_acp = original_runtime_connect_acp
         if original_rollout_connect_acp is not _MISSING:
             benchflow_rollout_module.connect_acp = original_rollout_connect_acp
-        if original_rollout_planes_connect_acp is not _MISSING:
+        if (
+            benchflow_rollout_planes_module is not None
+            and original_rollout_planes_connect_acp is not _MISSING
+        ):
             benchflow_rollout_planes_module.connect_acp = (
                 original_rollout_planes_connect_acp
             )
@@ -3439,7 +4547,12 @@ def reduce_result(
     else:
         has_agent_message_only_evidence = False
     if compact.get("official_score_status") == "missing":
-        if prereq_failure is not None and not has_agent_message_only_evidence:
+        current_attribution = str(compact.get("score_failure_attribution") or "")
+        if (
+            prereq_failure is not None
+            and not has_agent_message_only_evidence
+            and current_attribution in {"", "none", "skillsbench_runner_error"}
+        ):
             _exception_type, score_failure_attribution, labels = prereq_failure
             compact["score_failure_attribution"] = score_failure_attribution
             compact.setdefault("first_blocker", score_failure_attribution)
@@ -3583,6 +4696,14 @@ def build_runner_failure_compact(
         skillsbench_runner_error_fingerprint,
     )
     from loopx.status import compact_benchmark_run
+
+    plan.setdefault("runner_prerequisites", {})
+    _ensure_setup_stall_timeout_prerequisites(
+        args,
+        plan,
+        exc,
+        cleanup_if_missing=True,
+    )
 
     exception_type, attribution, labels = skillsbench_runner_error_attribution(
         str(exc)
@@ -3850,7 +4971,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--outer-timeout-sec", type=int, default=DEFAULT_TIMEOUT_SEC)
     parser.add_argument("--sandbox-setup-timeout", type=int, default=DEFAULT_TIMEOUT_SEC)
+    parser.add_argument(
+        "--build-stall-timeout-sec",
+        type=int,
+        default=0,
+        help=(
+            "Optional public-safe watchdog for Docker build/setup before any "
+            "agent lifecycle starts. 0 keeps the historical behavior and relies "
+            "only on --outer-timeout-sec."
+        ),
+    )
     parser.add_argument("--agent-idle-timeout", type=int, default=900)
+    parser.add_argument(
+        "--verifier-prep-timeout-sec",
+        type=int,
+        default=DEFAULT_VERIFIER_PREP_TIMEOUT_SEC,
+        help=(
+            "Timeout for BenchFlow verifier-phase prep/hardening shell calls. "
+            "This does not change the task verifier scoring timeout."
+        ),
+    )
+    parser.add_argument(
+        "--product-mode-soft-verify-policy",
+        choices=("final-only", "every-round"),
+        default=DEFAULT_PRODUCT_MODE_SOFT_VERIFY_POLICY,
+        help=(
+            "Intermediate BenchFlow soft-verify policy for the main-table "
+            "product-mode routes. final-only preserves official final scoring "
+            "without per-round verifier reward/output observations."
+        ),
+    )
     parser.add_argument(
         "--app-server-acp-heartbeat-interval-sec",
         type=float,
@@ -3863,6 +5013,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--max-verifier-output-chars", type=int, default=0)
     parser.add_argument("--skillsbench-root", default=str(DEFAULT_SKILLSBENCH_ROOT))
+    parser.add_argument(
+        "--loopx-source-dir",
+        default=str(REPO_ROOT),
+        help=(
+            "Local LoopX checkout mounted read-only into docker product-mode "
+            "runs and installed with scripts/install-local.sh. Public compact "
+            "artifacts record only the mount target, not this host path."
+        ),
+    )
+    parser.add_argument(
+        "--no-loopx-source-mount",
+        action="store_true",
+        help=(
+            "Do not mount the local LoopX checkout for product-mode runs; the "
+            "case init falls back to the README GitHub installer."
+        ),
+    )
     parser.add_argument(
         "--jobs-dir",
         default=str(REPO_ROOT / ".local/private-benchmark-jobs"),

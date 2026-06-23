@@ -509,6 +509,7 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "case_goal_state_init_required",
         "case_goal_state_initialized_before_agent",
         "declared_done_requires_no_remaining_goals",
+        "product_mode_lifecycle_checkpoint_required",
         "agent_declared_done",
         "agent_declared_no_remaining_goals",
         "official_feedback_blinded",
@@ -516,6 +517,14 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "controller_official_feedback_forwarded",
         "controller_blind_loop",
         "controller_official_success_observed",
+        "controller_budget_cutoff_before_followup",
+        "benchflow_user_loop_final_verify_recovery_enabled",
+        "benchflow_user_loop_final_verify_recovery_triggered",
+        "benchflow_user_loop_recovery_after_agent_activity",
+        "benchflow_user_loop_recovery_preserved_final_verify",
+        "benchflow_user_loop_recovery_raw_error_recorded",
+        "benchflow_intermediate_soft_verify_final_only",
+        "benchflow_intermediate_soft_verify_raw_output_recorded",
         "private_trajectory_summary_present",
         "native_goal_worker_route",
         "native_goal_worker_connected",
@@ -540,9 +549,16 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "controller_official_success_observation_count",
         "controller_first_success_round",
         "declared_done_round",
+        "product_mode_lifecycle_checkpoint_count",
+        "product_mode_lifecycle_checkpoint_round",
         "controller_verifier_feedback_observation_count",
         "controller_official_feedback_blinded_count",
         "controller_max_rounds_budget",
+        "benchflow_user_loop_recovery_round",
+        "benchflow_user_loop_recovery_delta_events",
+        "benchflow_user_loop_recovery_delta_tool_calls",
+        "benchflow_intermediate_soft_verify_call_count",
+        "benchflow_intermediate_soft_verify_skipped_count",
         "private_trajectory_event_count",
         "private_trajectory_round_count",
         "private_trajectory_tool_call_count",
@@ -589,7 +605,13 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "controller_trace_schema_version",
         "controller_trace_publicness",
         "case_goal_state_init_status",
+        "case_goal_state_init_failed_phase",
         "case_goal_state_schema_version",
+        "product_mode_lifecycle_checkpoint_missing_reason",
+        "controller_budget_cutoff_reason",
+        "benchflow_user_loop_recovery_stage",
+        "benchflow_user_loop_recovery_exception_type",
+        "benchflow_intermediate_soft_verify_policy",
         "last_decision",
         "worker_submit_eligible_mismatch_reason",
         "worker_bridge_writeback_loss_reason",
@@ -903,9 +925,16 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "codex_acp_runtime_launch_preflight_stage",
         "codex_acp_runtime_launch_preflight_status",
         "agent_execution_mode",
+        "benchflow_run_stage",
         "benchflow_agent_runtime_layer_status",
         "benchflow_agent_runtime_layer_mount_target",
+        "loopx_source_mount_status",
+        "loopx_source_mount_target",
         "codex_app_server_goal_worker_plan_schema",
+        "benchflow_user_loop_recovery_exception_type",
+        "benchflow_user_loop_recovery_stage",
+        "benchflow_intermediate_soft_verify_policy",
+        "benchflow_setup_stall_cleanup_status",
     ):
         text = public_safe_compact_text(value.get(field), limit=180)
         if text:
@@ -929,10 +958,50 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "codex_app_server_goal_worker_turn_start_required",
         "codex_app_server_goal_worker_goal_get_required",
         "codex_app_server_goal_worker_runner_integration_ready",
+        "benchflow_user_loop_final_verify_recovery_enabled",
+        "benchflow_user_loop_final_verify_recovery_triggered",
+        "benchflow_user_loop_recovery_after_agent_activity",
+        "benchflow_user_loop_recovery_raw_error_recorded",
+        "benchflow_user_loop_recovery_preserved_final_verify",
+        "benchflow_intermediate_soft_verify_final_only",
+        "benchflow_intermediate_soft_verify_raw_output_recorded",
+        "benchflow_verifier_prep_timeout_override_enabled",
+        "benchflow_verifier_prep_timeout_raw_command_recorded",
+        "loopx_source_mount_requested",
+        "loopx_source_mount_ready",
+        "loopx_source_mount_injected",
+        "loopx_source_mount_read_only",
+        "loopx_source_mount_source_recorded",
+        "benchflow_setup_stall_timeout_enabled",
+        "benchflow_setup_stall_timeout_triggered",
+        "benchflow_setup_stall_raw_logs_read",
+        "benchflow_setup_stall_before_agent_lifecycle",
+        "benchflow_agent_install_started",
+        "benchflow_setup_stall_task_cancel_requested",
+        "benchflow_setup_stall_task_cancel_acknowledged",
+        "benchflow_setup_stall_task_cancel_timeout",
+        "benchflow_setup_stall_cleanup_requested",
+        "benchflow_setup_stall_cleanup_raw_logs_read",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
-    for field in ("codex_acp_runtime_launch_preflight_rc",):
+    for field in (
+        "codex_acp_runtime_launch_preflight_rc",
+        "benchflow_user_loop_recovery_round",
+        "benchflow_user_loop_recovery_delta_events",
+        "benchflow_user_loop_recovery_delta_tool_calls",
+        "benchflow_intermediate_soft_verify_call_count",
+        "benchflow_intermediate_soft_verify_skipped_count",
+        "benchflow_verifier_prep_timeout_sec",
+        "benchflow_verifier_prep_timeout_override_count",
+        "benchflow_verify_prep_timeout_override_count",
+        "benchflow_soft_verify_prep_timeout_override_count",
+        "benchflow_setup_stall_timeout_sec",
+        "benchflow_setup_stall_cleanup_match_count",
+        "benchflow_setup_stall_cleanup_term_sent_count",
+        "benchflow_setup_stall_cleanup_kill_sent_count",
+        "benchflow_setup_stall_cleanup_alive_after_count",
+    ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
     return compact
@@ -2284,6 +2353,54 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         ):
             if isinstance(runner_failure.get(field), bool):
                 compact_runner_failure[field] = runner_failure[field]
+        controller_cutoff = runner_failure.get("controller_cutoff")
+        if isinstance(controller_cutoff, dict):
+            compact_cutoff: dict[str, Any] = {}
+            for field in ("schema_version", "reason"):
+                value = public_safe_compact_text(
+                    controller_cutoff.get(field),
+                    limit=140,
+                )
+                if value:
+                    compact_cutoff[field] = value
+            if isinstance(controller_cutoff.get("cutoff_before_followup"), bool):
+                compact_cutoff["cutoff_before_followup"] = controller_cutoff[
+                    "cutoff_before_followup"
+                ]
+            for field in (
+                "max_rounds_budget",
+                "initial_prompt_count",
+                "followup_prompt_count",
+                "stop_decision_count",
+            ):
+                if isinstance(controller_cutoff.get(field), int) and not isinstance(
+                    controller_cutoff.get(field),
+                    bool,
+                ):
+                    compact_cutoff[field] = controller_cutoff[field]
+            if compact_cutoff:
+                compact_runner_failure["controller_cutoff"] = compact_cutoff
+        user_loop_recovery = runner_failure.get("user_loop_recovery")
+        if isinstance(user_loop_recovery, dict):
+            compact_recovery: dict[str, Any] = {}
+            for field in ("schema_version", "stage", "exception_type"):
+                value = public_safe_compact_text(
+                    user_loop_recovery.get(field),
+                    limit=140,
+                )
+                if value:
+                    compact_recovery[field] = value
+            for field in ("preserved_final_verify", "raw_error_recorded"):
+                if isinstance(user_loop_recovery.get(field), bool):
+                    compact_recovery[field] = user_loop_recovery[field]
+            for field in ("round", "delta_events", "delta_tool_calls"):
+                if isinstance(user_loop_recovery.get(field), int) and not isinstance(
+                    user_loop_recovery.get(field),
+                    bool,
+                ):
+                    compact_recovery[field] = user_loop_recovery[field]
+            if compact_recovery:
+                compact_runner_failure["user_loop_recovery"] = compact_recovery
         if compact_runner_failure:
             compact["runner_failure"] = compact_runner_failure
 

@@ -214,7 +214,7 @@ def skillsbench_route_contract(route: str) -> dict[str, Any]:
         return {
             "mode": "skillsbench_loopx_product_mode_treatment",
             "arm_id": "loopx_product_mode",
-            "source_runner": "loopx_skillsbench_product_mode_skeleton",
+            "source_runner": "loopx_skillsbench_canonical_product_lifecycle_driver",
             "inner_codex_goal_mode": False,
             "native_goal_mode_requested": False,
             "native_goal_mode_invoked": False,
@@ -231,10 +231,10 @@ def skillsbench_route_contract(route: str) -> dict[str, Any]:
             "case_semantics_changed_by_harness": True,
             "official_score_comparable_to_native_codex": True,
             "official_score_comparable_to_loopx_treatment": True,
-            "first_blocker": "skillsbench_adapter_skeleton_no_real_case",
+            "first_blocker": "none",
             "next_action": (
                 "run LoopX product-mode treatment with goal state, todos, "
-                "replan/status writeback, and GH CLI/ledger surfaces; do not "
+                "replan/status writeback, and LoopX CLI/ledger surfaces; do not "
                 "return official reward or verifier feedback during execution"
             ),
         }
@@ -1449,6 +1449,7 @@ def skillsbench_runner_error_fingerprint(error_text: str) -> dict[str, Any]:
         "image_build": r"failed to solve|failed to build|dockerfile|pull access denied|manifest unknown",
         "port_conflict": r"port is already allocated|address already in use|ports are not available|bind for",
         "apt_failure": r"apt-get|apt update|apt |gpg error|hash sum mismatch|failed to fetch",
+        "subprocess_command_timeout": r"command timed out after \d+ seconds",
         "timeout": r"timeout|timed out|deadline",
     }
     matched = [
@@ -1930,6 +1931,10 @@ def _skillsbench_controller_trace_counters(
             "declared_done_requires_no_remaining_goals"
         )
         is True,
+        "product_mode_lifecycle_checkpoint_required": controller_trace.get(
+            "product_mode_lifecycle_checkpoint_required"
+        )
+        is True,
         "agent_declared_done": controller_trace.get("agent_declared_done") is True,
         "agent_declared_no_remaining_goals": controller_trace.get(
             "agent_declared_no_remaining_goals"
@@ -1988,6 +1993,63 @@ def _skillsbench_controller_trace_counters(
             "raw_agent_trajectory_recorded"
         )
         is True,
+        "loopx_case_source_install_requested": controller_trace.get(
+            "loopx_case_source_install_requested"
+        )
+        is True,
+        "loopx_case_source_path_recorded": controller_trace.get(
+            "loopx_case_source_path_recorded"
+        )
+        is True,
+        "benchflow_user_loop_final_verify_recovery_enabled": controller_trace.get(
+            "benchflow_user_loop_final_verify_recovery_enabled"
+        )
+        is True,
+        "benchflow_user_loop_final_verify_recovery_triggered": controller_trace.get(
+            "benchflow_user_loop_final_verify_recovery_triggered"
+        )
+        is True,
+        "benchflow_user_loop_recovery_after_agent_activity": controller_trace.get(
+            "benchflow_user_loop_recovery_after_agent_activity"
+        )
+        is True,
+        "benchflow_user_loop_recovery_preserved_final_verify": controller_trace.get(
+            "benchflow_user_loop_recovery_preserved_final_verify"
+        )
+        is True,
+        "benchflow_user_loop_recovery_raw_error_recorded": controller_trace.get(
+            "benchflow_user_loop_recovery_raw_error_recorded"
+        )
+        is True,
+        "benchflow_user_loop_recovery_round": count(
+            "benchflow_user_loop_recovery_round"
+        ),
+        "benchflow_user_loop_recovery_delta_events": count(
+            "benchflow_user_loop_recovery_delta_events"
+        ),
+        "benchflow_user_loop_recovery_delta_tool_calls": count(
+            "benchflow_user_loop_recovery_delta_tool_calls"
+        ),
+        "benchflow_intermediate_soft_verify_final_only": controller_trace.get(
+            "benchflow_intermediate_soft_verify_final_only"
+        )
+        is True,
+        "benchflow_intermediate_soft_verify_raw_output_recorded": controller_trace.get(
+            "benchflow_intermediate_soft_verify_raw_output_recorded"
+        )
+        is True,
+        "benchflow_intermediate_soft_verify_call_count": count(
+            "benchflow_intermediate_soft_verify_call_count"
+        ),
+        "benchflow_intermediate_soft_verify_skipped_count": count(
+            "benchflow_intermediate_soft_verify_skipped_count"
+        ),
+        "product_mode_lifecycle_checkpoint_count": count(
+            "product_mode_lifecycle_checkpoint_count"
+        ),
+        "product_mode_lifecycle_checkpoint_round": count(
+            "product_mode_lifecycle_checkpoint_round"
+        ),
     }
     last_decision = _skillsbench_public_safe_label(
         controller_trace.get("last_decision") or ""
@@ -1999,11 +2061,41 @@ def _skillsbench_controller_trace_counters(
     )
     if init_status:
         counters["case_goal_state_init_status"] = init_status
+    init_failed_phase = _skillsbench_public_safe_label(
+        controller_trace.get("case_goal_state_init_failed_phase") or ""
+    )
+    if init_failed_phase:
+        counters["case_goal_state_init_failed_phase"] = init_failed_phase
     case_state_schema = _skillsbench_public_safe_label(
         controller_trace.get("case_goal_state_schema_version") or ""
     )
     if case_state_schema:
         counters["case_goal_state_schema_version"] = case_state_schema
+    recovery_stage = _skillsbench_public_safe_label(
+        controller_trace.get("benchflow_user_loop_recovery_stage") or ""
+    )
+    if recovery_stage:
+        counters["benchflow_user_loop_recovery_stage"] = recovery_stage
+    recovery_exception_type = _skillsbench_public_safe_label(
+        controller_trace.get("benchflow_user_loop_recovery_exception_type") or ""
+    )
+    if recovery_exception_type:
+        counters["benchflow_user_loop_recovery_exception_type"] = (
+            recovery_exception_type
+        )
+    soft_verify_policy = _skillsbench_public_safe_label(
+        controller_trace.get("benchflow_intermediate_soft_verify_policy") or ""
+    )
+    if soft_verify_policy:
+        counters["benchflow_intermediate_soft_verify_policy"] = soft_verify_policy
+    lifecycle_missing_reason = _skillsbench_public_safe_label(
+        controller_trace.get("product_mode_lifecycle_checkpoint_missing_reason")
+        or ""
+    )
+    if lifecycle_missing_reason:
+        counters["product_mode_lifecycle_checkpoint_missing_reason"] = (
+            lifecycle_missing_reason
+        )
     case_state_path = str(controller_trace.get("case_goal_state_path") or "")
     if (
         "/.codex/goals/" in case_state_path
@@ -2430,6 +2522,101 @@ def build_skillsbench_benchflow_result_benchmark_run(
         if isinstance(controller_counters.get("acp_trajectory_summary"), dict)
         else {}
     )
+    controller_initial_prompt_count = controller_counters.get("initial_prompt_count", 0)
+    if not isinstance(controller_initial_prompt_count, int) or isinstance(
+        controller_initial_prompt_count, bool
+    ):
+        controller_initial_prompt_count = 0
+    controller_followup_prompt_count = controller_counters.get("followup_prompt_count", 0)
+    if not isinstance(controller_followup_prompt_count, int) or isinstance(
+        controller_followup_prompt_count, bool
+    ):
+        controller_followup_prompt_count = 0
+    controller_stop_decision_count = controller_counters.get("stop_decision_count", 0)
+    if not isinstance(controller_stop_decision_count, int) or isinstance(
+        controller_stop_decision_count, bool
+    ):
+        controller_stop_decision_count = 0
+    controller_max_rounds_budget = controller_counters.get("max_rounds_budget", 0)
+    if not isinstance(controller_max_rounds_budget, int) or isinstance(
+        controller_max_rounds_budget, bool
+    ):
+        controller_max_rounds_budget = 0
+    user_loop_final_verify_recovery_triggered = bool(
+        controller_counters.get("benchflow_user_loop_final_verify_recovery_triggered")
+    )
+    controller_budget_cutoff_before_followup = (
+        bool(error_text)
+        and reward_value is None
+        and controller_trace_present
+        and not user_loop_final_verify_recovery_triggered
+        and controller_max_rounds_budget > 1
+        and controller_initial_prompt_count > 0
+        and controller_followup_prompt_count == 0
+        and controller_stop_decision_count == 0
+        and (partial_trajectory or tool_calls > 0)
+    )
+    controller_budget_cutoff_reason = (
+        "result_error_after_agent_round_no_reward_artifact"
+        if controller_budget_cutoff_before_followup
+        else "none"
+    )
+    if controller_budget_cutoff_before_followup:
+        for item in (
+            "skillsbench_controller_budget_not_exercised",
+            "skillsbench_result_error_cut_off_followup_loop",
+        ):
+            if item not in failure_labels:
+                failure_labels.append(item)
+    if (
+        error_text
+        and reward_value is None
+        and re.search(r"timeout|timed out|deadline", error_text, re.I)
+        and controller_trace_present
+        and user_loop_final_verify_recovery_triggered
+    ):
+        label = "skillsbench_final_verify_timeout_after_user_loop_recovery_no_reward_artifact"
+        exception_type = label
+        score_failure_attribution = label
+        runner_score_failure_attribution = label
+        failure_labels = [
+            item
+            for item in failure_labels
+            if item
+            not in {
+                "skillsbench_runner_error",
+                "skillsbench_controller_budget_not_exercised",
+                "skillsbench_result_error_cut_off_followup_loop",
+            }
+        ]
+        for item in (
+            label,
+            "skillsbench_final_verify_attempted_after_user_loop_recovery",
+            "skillsbench_reward_artifact_missing",
+        ):
+            if item not in failure_labels:
+                failure_labels.append(item)
+    elif (
+        error_text
+        and reward_value is None
+        and re.search(r"timeout|timed out|deadline", error_text, re.I)
+        and controller_trace_present
+        and (partial_trajectory or tool_calls > 0)
+    ):
+        label = "skillsbench_result_timeout_after_agent_round_no_reward_artifact"
+        exception_type = label
+        score_failure_attribution = label
+        runner_score_failure_attribution = label
+        failure_labels = [
+            item for item in failure_labels if item != "skillsbench_runner_error"
+        ]
+        for item in (
+            label,
+            "skillsbench_result_error_after_agent_round",
+            "skillsbench_reward_artifact_missing",
+        ):
+            if item not in failure_labels:
+                failure_labels.append(item)
     if trajectory_summary:
         evidence_files.append("loopx:acp_trajectory_summary")
     runner_failure: dict[str, Any] | None = None
@@ -2443,6 +2630,50 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "raw_task_text_read": False,
             "raw_trajectory_read": False,
         }
+        if controller_budget_cutoff_before_followup:
+            runner_failure["controller_cutoff"] = {
+                "schema_version": "skillsbench_controller_cutoff_v0",
+                "cutoff_before_followup": True,
+                "reason": controller_budget_cutoff_reason,
+                "max_rounds_budget": controller_max_rounds_budget,
+                "initial_prompt_count": controller_initial_prompt_count,
+                "followup_prompt_count": controller_followup_prompt_count,
+                "stop_decision_count": controller_stop_decision_count,
+            }
+        if user_loop_final_verify_recovery_triggered:
+            runner_failure["user_loop_recovery"] = {
+                "schema_version": "skillsbench_user_loop_recovery_v0",
+                "preserved_final_verify": bool(
+                    controller_counters.get(
+                        "benchflow_user_loop_recovery_preserved_final_verify"
+                    )
+                ),
+                "stage": controller_counters.get(
+                    "benchflow_user_loop_recovery_stage",
+                    "",
+                ),
+                "exception_type": controller_counters.get(
+                    "benchflow_user_loop_recovery_exception_type",
+                    "",
+                ),
+                "round": controller_counters.get(
+                    "benchflow_user_loop_recovery_round",
+                    0,
+                ),
+                "delta_events": controller_counters.get(
+                    "benchflow_user_loop_recovery_delta_events",
+                    0,
+                ),
+                "delta_tool_calls": controller_counters.get(
+                    "benchflow_user_loop_recovery_delta_tool_calls",
+                    0,
+                ),
+                "raw_error_recorded": bool(
+                    controller_counters.get(
+                        "benchflow_user_loop_recovery_raw_error_recorded"
+                    )
+                ),
+            }
         runner_failure_fingerprint = skillsbench_runner_error_fingerprint(
             error_text
         )
@@ -2652,6 +2883,68 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "controller_stop_decision_count": controller_counters.get(
                 "stop_decision_count", 0
             ),
+            "controller_budget_cutoff_before_followup": controller_budget_cutoff_before_followup,
+            "controller_budget_cutoff_reason": controller_budget_cutoff_reason,
+            "benchflow_user_loop_final_verify_recovery_enabled": controller_counters.get(
+                "benchflow_user_loop_final_verify_recovery_enabled",
+                False,
+            ),
+            "benchflow_user_loop_final_verify_recovery_triggered": controller_counters.get(
+                "benchflow_user_loop_final_verify_recovery_triggered",
+                False,
+            ),
+            "benchflow_user_loop_recovery_after_agent_activity": controller_counters.get(
+                "benchflow_user_loop_recovery_after_agent_activity",
+                False,
+            ),
+            "benchflow_user_loop_recovery_preserved_final_verify": controller_counters.get(
+                "benchflow_user_loop_recovery_preserved_final_verify",
+                False,
+            ),
+            "benchflow_user_loop_recovery_raw_error_recorded": controller_counters.get(
+                "benchflow_user_loop_recovery_raw_error_recorded",
+                False,
+            ),
+            "benchflow_user_loop_recovery_stage": controller_counters.get(
+                "benchflow_user_loop_recovery_stage",
+                "",
+            ),
+            "benchflow_user_loop_recovery_exception_type": controller_counters.get(
+                "benchflow_user_loop_recovery_exception_type",
+                "",
+            ),
+            "benchflow_user_loop_recovery_round": controller_counters.get(
+                "benchflow_user_loop_recovery_round",
+                0,
+            ),
+            "benchflow_user_loop_recovery_delta_events": controller_counters.get(
+                "benchflow_user_loop_recovery_delta_events",
+                0,
+            ),
+            "benchflow_user_loop_recovery_delta_tool_calls": controller_counters.get(
+                "benchflow_user_loop_recovery_delta_tool_calls",
+                0,
+            ),
+            "benchflow_intermediate_soft_verify_policy": controller_counters.get(
+                "benchflow_intermediate_soft_verify_policy",
+                "",
+            ),
+            "benchflow_intermediate_soft_verify_final_only": controller_counters.get(
+                "benchflow_intermediate_soft_verify_final_only",
+                False,
+            ),
+            "benchflow_intermediate_soft_verify_call_count": controller_counters.get(
+                "benchflow_intermediate_soft_verify_call_count",
+                0,
+            ),
+            "benchflow_intermediate_soft_verify_skipped_count": controller_counters.get(
+                "benchflow_intermediate_soft_verify_skipped_count",
+                0,
+            ),
+            "benchflow_intermediate_soft_verify_raw_output_recorded": controller_counters.get(
+                "benchflow_intermediate_soft_verify_raw_output_recorded",
+                False,
+            ),
             "controller_reward_observation_count": controller_counters.get(
                 "reward_observation_count", 0
             ),
@@ -2688,6 +2981,9 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "case_goal_state_init_status": controller_counters.get(
                 "case_goal_state_init_status", ""
             ),
+            "case_goal_state_init_failed_phase": controller_counters.get(
+                "case_goal_state_init_failed_phase", ""
+            ),
             "case_goal_state_schema_version": controller_counters.get(
                 "case_goal_state_schema_version", ""
             ),
@@ -2696,6 +2992,18 @@ def build_skillsbench_benchflow_result_benchmark_run(
             ),
             "declared_done_requires_no_remaining_goals": controller_counters.get(
                 "declared_done_requires_no_remaining_goals", False
+            ),
+            "product_mode_lifecycle_checkpoint_required": controller_counters.get(
+                "product_mode_lifecycle_checkpoint_required", False
+            ),
+            "product_mode_lifecycle_checkpoint_count": controller_counters.get(
+                "product_mode_lifecycle_checkpoint_count", 0
+            ),
+            "product_mode_lifecycle_checkpoint_round": controller_counters.get(
+                "product_mode_lifecycle_checkpoint_round", 0
+            ),
+            "product_mode_lifecycle_checkpoint_missing_reason": controller_counters.get(
+                "product_mode_lifecycle_checkpoint_missing_reason", ""
             ),
             "agent_declared_done": controller_counters.get(
                 "agent_declared_done", False

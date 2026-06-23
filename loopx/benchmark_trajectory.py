@@ -10,7 +10,7 @@ from typing import Any
 PUBLIC_TRAJECTORY_SUMMARY_SCHEMA_VERSION = "public_trajectory_summary_v0"
 
 SANDBOX_PATH_RE = re.compile(r"/(?:app|root|workspace|tmp)/[A-Za-z0-9_./-]+")
-LOOPX_CLI_RE = re.compile(r"(?:^|\s)loopx(?:\s|$)")
+LOOPX_CLI_RE = re.compile(r"(?:^|\s|/)loopx(?:\s|$)")
 SHELL_EDIT_RE = re.compile(
     r"(?i)(?:apply_patch|perl\b.*\s-[0-9a-z]*p|sed\b.*\s-i|"
     r"python\b[\s\S]*(?:write_text|open\(.+['\"]w|Path\(.+\)\.write)|"
@@ -45,6 +45,9 @@ LOOPX_WRITE_COMMANDS = {
     "reward",
     "sync-global",
 }
+LOOPX_QUOTA_WRITE_ACTIONS = {
+    "spend-slot",
+}
 LOOPX_TODO_WRITE_ACTIONS = {
     "add",
     "archive-completed",
@@ -57,6 +60,11 @@ LOOPX_BENCHMARK_WRITE_ACTIONS = {
 }
 LOOPX_CONTEXT_COMMANDS = {
     ("which", "goal"),
+}
+LOOPX_FLAG_VALUE_OPTIONS = {
+    "--format",
+    "--registry",
+    "--runtime-root",
 }
 
 
@@ -138,9 +146,16 @@ def normalized_loopx_cli_call(
     after = tokens[command_index + 1 :] if command_index >= 0 else []
     subcommands: list[str] = []
     flags: list[str] = []
+    skip_next = False
     for token in after:
+        if skip_next:
+            skip_next = False
+            continue
         if token.startswith("--"):
-            flags.append(token.split("=", 1)[0][:60])
+            flag = token.split("=", 1)[0][:60]
+            flags.append(flag)
+            if "=" not in token and flag in LOOPX_FLAG_VALUE_OPTIONS:
+                skip_next = True
             continue
         if token.startswith("-"):
             flags.append(token[:20])
@@ -173,6 +188,8 @@ def loopx_cli_state_usage(call: dict[str, Any]) -> str:
         return "context_lookup"
     primary = normalized[0] if normalized else ""
     secondary = normalized[1] if len(normalized) > 1 else ""
+    if primary == "quota" and secondary in LOOPX_QUOTA_WRITE_ACTIONS:
+        return "state_write"
     if primary == "todo":
         return "state_write" if secondary in LOOPX_TODO_WRITE_ACTIONS else "state_read"
     if primary == "benchmark" and secondary in LOOPX_BENCHMARK_WRITE_ACTIONS:
