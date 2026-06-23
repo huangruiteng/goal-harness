@@ -38,9 +38,15 @@ from loopx.benchmark_case_state import (
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LOOPX_AGENT_ID,
     BENCHMARK_CASE_LOOPX_CLI_PATH,
+    BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS,
+    BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE,
     BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE,
+    BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE,
+    BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+    BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
     BENCHMARK_CASE_LOOPX_SCHEDULER_ROUTE,
     BENCHMARK_CASE_LOOPX_TODO_ID,
+    benchmark_case_loopx_command_prefix,
     benchmark_case_loopx_event_log_path,
     benchmark_case_loopx_install_payload,
     benchmark_case_lifecycle_contract,
@@ -449,7 +455,11 @@ def _case_loopx_action_from_command(
             "raw_command_recorded": False,
         }
     args = parts[1:]
-    if len(args) >= 2 and args[0] == "--format":
+    while len(args) >= 2 and args[0] in {
+        "--format",
+        "--registry",
+        "--runtime-root",
+    }:
         args = args[2:]
     command_name = args[0] if args else ""
     subcommand = args[1] if len(args) > 1 else ""
@@ -712,7 +722,24 @@ def _case_cli_command(
     *args: str,
 ) -> str:
     cli = str(payload.get("case_cli_path") or BENCHMARK_CASE_LOOPX_CLI_PATH)
-    return " ".join([shlex.quote(cli), "--format", "json", *map(shlex.quote, args)])
+    registry = str(
+        payload.get("case_registry_path") or BENCHMARK_CASE_LOOPX_REGISTRY_PATH
+    )
+    runtime_root = str(
+        payload.get("case_runtime_root") or BENCHMARK_CASE_LOOPX_RUNTIME_ROOT
+    )
+    return " ".join(
+        [
+            shlex.quote(cli),
+            "--registry",
+            shlex.quote(registry),
+            "--runtime-root",
+            shlex.quote(runtime_root),
+            "--format",
+            "json",
+            *map(shlex.quote, args),
+        ]
+    )
 
 
 def _new_case_scheduler_trace(payload: dict[str, Any]) -> dict[str, Any]:
@@ -720,7 +747,14 @@ def _new_case_scheduler_trace(payload: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "harbor_case_loopx_cli_scheduler_trace_v0",
         "enabled": True,
         "route": BENCHMARK_CASE_LOOPX_SCHEDULER_ROUTE,
+        "formal_treatment_semantics": payload.get("formal_treatment_semantics")
+        or BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS,
+        "execution_style": payload.get("workflow_orchestrated_route")
+        or BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE,
+        "host_claims_case_todo_before_agent": False,
         "case_goal_id": payload.get("benchmark_case_goal_id") or "",
+        "case_registry_path": payload.get("case_registry_path") or "",
+        "case_runtime_root": payload.get("case_runtime_root") or "",
         "case_agent_id": payload.get("case_agent_id") or "",
         "case_todo_id": payload.get("case_todo_id") or "",
         "case_cli_path": payload.get("case_cli_path") or "",
@@ -876,7 +910,7 @@ def build_loopx_access_packet(
     runtime_root_arg: str = "",
     scan_path: str = "",
     classification: str = "swe_marathon_codex_loopx_treatment",
-    experiment_protocol: str = PACKET_ONLY_OBSERVATION_PROTOCOL_ID,
+    experiment_protocol: str = MAX5_BLIND_LOOP_NO_FEEDBACK_PROTOCOL_ID,
     max_rounds: int = BLIND_LOOP_DEFAULT_MAX_ROUNDS,
     benchmark_id: str = "swe-marathon",
     case_id: str = "current-case",
@@ -917,6 +951,11 @@ def build_loopx_access_packet(
     )
     case_goal_id = str(case_lifecycle["benchmark_case_goal_id"])
     case_event_log_path = benchmark_case_loopx_event_log_path(case_goal_id)
+    case_cli_prefix = benchmark_case_loopx_command_prefix(
+        case_cli_path=BENCHMARK_CASE_LOOPX_CLI_PATH,
+        case_registry_path=BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+        case_runtime_root=BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+    )
 
     lines = [
         "LoopX Access Packet V0",
@@ -932,14 +971,23 @@ def build_loopx_access_packet(
         "do_not_record_raw_task_text_logs_trajectories_or_credentials: true",
         "use_loopx_for_planning_checkpoints_and_boundary_awareness_only: false",
         "task_environment_commands_still_must_use_harbor_env_exec_bridge: true",
+        f"loopx_formal_treatment_semantics: {BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS}",
+        "loopx_canonical_product_mode_lifecycle_driver: true",
+        f"loopx_prompt_driven_execution_style: {BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE}",
+        f"loopx_workflow_orchestrated_execution_style: {BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE}",
         f"loopx_product_path_primary_route: {BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE}",
         "loopx_prompt_driven_loop_required: true",
         "loopx_scheduler_route_supported_for_smoke_or_fallback: true",
         "loopx_case_local_cli_installed_before_agent: true",
         f"loopx_case_cli_path: {BENCHMARK_CASE_LOOPX_CLI_PATH}",
+        f"loopx_case_registry_path: {BENCHMARK_CASE_LOOPX_REGISTRY_PATH}",
+        f"loopx_case_runtime_root: {BENCHMARK_CASE_LOOPX_RUNTIME_ROOT}",
         f"loopx_case_rollout_event_log_path: {case_event_log_path}",
         f"loopx_case_agent_id: {BENCHMARK_CASE_LOOPX_AGENT_ID}",
         f"loopx_case_todo_id: {BENCHMARK_CASE_LOOPX_TODO_ID}",
+        "loopx_case_todo_seeded_open: true",
+        "loopx_case_todo_preclaimed_by_host: false",
+        "loopx_agent_must_claim_selected_case_todo: true",
         f"loopx_treatment_evidence_tier: {claim['loopx_treatment_evidence_tier']}",
         f"strict_loopx_treatment_claim_allowed: {str(claim['strict_loopx_treatment_claim_allowed']).lower()}",
         f"loopx_treatment_claim_blocker: {claim['loopx_treatment_claim_blocker']}",
@@ -950,12 +998,12 @@ def build_loopx_access_packet(
         lines.extend(
             [
                 "primary_loopx_cli_surface: task_environment_case_local_cli",
-                f"loopx_case_command_quota_should_run: {BENCHMARK_CASE_LOOPX_CLI_PATH} --format json quota should-run --goal-id {shlex.quote(case_goal_id)} --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID}",
-                f"loopx_case_command_claim_todo: {BENCHMARK_CASE_LOOPX_CLI_PATH} --format json todo claim --goal-id {shlex.quote(case_goal_id)} --todo-id {BENCHMARK_CASE_LOOPX_TODO_ID} --claimed-by {BENCHMARK_CASE_LOOPX_AGENT_ID}",
-                f"loopx_case_command_status: {BENCHMARK_CASE_LOOPX_CLI_PATH} --format json status --goal-id {shlex.quote(case_goal_id)} --limit 5",
-                f"loopx_case_command_mark_todo_done_when_complete: {BENCHMARK_CASE_LOOPX_CLI_PATH} --format json todo update --goal-id {shlex.quote(case_goal_id)} --todo-id {BENCHMARK_CASE_LOOPX_TODO_ID} --status done --claimed-by {BENCHMARK_CASE_LOOPX_AGENT_ID}",
-                f"loopx_case_command_refresh_state: {BENCHMARK_CASE_LOOPX_CLI_PATH} --format json refresh-state --goal-id {shlex.quote(case_goal_id)}",
-                f"loopx_case_command_spend_quota: {BENCHMARK_CASE_LOOPX_CLI_PATH} --format json quota spend-slot --goal-id {shlex.quote(case_goal_id)}",
+                f"loopx_case_command_quota_should_run: {case_cli_prefix} quota should-run --goal-id {shlex.quote(case_goal_id)} --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID}",
+                f"loopx_case_command_claim_todo: {case_cli_prefix} todo claim --goal-id {shlex.quote(case_goal_id)} --todo-id {BENCHMARK_CASE_LOOPX_TODO_ID} --claimed-by {BENCHMARK_CASE_LOOPX_AGENT_ID}",
+                f"loopx_case_command_status: {case_cli_prefix} status --limit 5 --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID}",
+                f"loopx_case_command_mark_todo_done_when_complete: {case_cli_prefix} todo complete --goal-id {shlex.quote(case_goal_id)} --todo-id {BENCHMARK_CASE_LOOPX_TODO_ID} --claimed-by {BENCHMARK_CASE_LOOPX_AGENT_ID} --evidence local_validation_done",
+                f"loopx_case_command_refresh_state: {case_cli_prefix} refresh-state --goal-id {shlex.quote(case_goal_id)} --classification benchmark_case_agent_progress --delivery-batch-scale implementation --delivery-outcome outcome_progress --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID} --agent-lane benchmark_case",
+                f"loopx_case_command_spend_quota: {case_cli_prefix} quota spend-slot --goal-id {shlex.quote(case_goal_id)} --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID} --source adapter --execute",
                 "loopx_completion_source_of_truth: case_local_active_todo",
                 "before_planning_call_loopx_case_quota_should_run_once: true",
                 "before_planning_claim_loopx_case_todo_once: true",
@@ -1024,12 +1072,31 @@ def _case_goal_state_init_compact(
             payload.get("case_cli_path") and initialized_before_agent
         ),
         "loopx_case_cli_path": payload.get("case_cli_path") or "",
+        "loopx_case_registry_path": payload.get("case_registry_path") or "",
+        "loopx_case_runtime_root": payload.get("case_runtime_root") or "",
         "loopx_case_rollout_event_log_path": (
             payload.get("case_rollout_event_log_path") or ""
         ),
         "loopx_case_agent_id": payload.get("case_agent_id") or "",
         "loopx_case_todo_id": payload.get("case_todo_id") or "",
         "loopx_case_todo_seeded": bool(payload.get("case_todo_seeded")),
+        "loopx_case_todo_preclaimed": bool(payload.get("case_todo_preclaimed")),
+        "loopx_formal_treatment_semantics": (
+            payload.get("formal_treatment_semantics") or ""
+        ),
+        "loopx_lifecycle_driver_schema_version": (
+            payload.get("lifecycle_driver_schema_version") or ""
+        ),
+        "loopx_canonical_product_mode_lifecycle_driver": bool(
+            payload.get("canonical_product_mode_lifecycle_driver")
+        ),
+        "loopx_execution_style": payload.get("execution_style") or "",
+        "loopx_host_claims_case_todo_before_agent": bool(
+            payload.get("host_claims_case_todo_before_agent")
+        ),
+        "loopx_agent_must_claim_selected_case_todo": bool(
+            payload.get("agent_must_claim_selected_case_todo")
+        ),
         "loopx_product_path_primary_route": (
             payload.get("product_path_primary_route") or ""
         ),
@@ -1070,7 +1137,7 @@ class HarborHostCodexGoalAgent(BaseAgent):
         loopx_classification: str = (
             "swe_marathon_codex_loopx_treatment"
         ),
-        loopx_experiment_protocol: str = PACKET_ONLY_OBSERVATION_PROTOCOL_ID,
+        loopx_experiment_protocol: str = MAX5_BLIND_LOOP_NO_FEEDBACK_PROTOCOL_ID,
         loopx_max_rounds: str | int = BLIND_LOOP_DEFAULT_MAX_ROUNDS,
         loopx_prompt_polling_rounds: str | int = "auto",
         loopx_prompt_polling_round_timeout_sec: str | int | float = "auto",
@@ -1363,9 +1430,18 @@ class HarborHostCodexGoalAgent(BaseAgent):
                 case_agent_id = str(
                     case_state_init_payload.get("case_agent_id") or ""
                 )
-                case_todo_id = str(case_state_init_payload.get("case_todo_id") or "")
                 pre_agent_specs = [
-                    ("case_cli_check", ["check"]),
+                    ("case_cli_doctor", ["doctor"]),
+                    (
+                        "case_cli_status_before_agent",
+                        [
+                            "status",
+                            "--limit",
+                            "5",
+                            "--agent-id",
+                            case_agent_id,
+                        ],
+                    ),
                     (
                         "case_quota_should_run_before_agent",
                         [
@@ -1374,19 +1450,6 @@ class HarborHostCodexGoalAgent(BaseAgent):
                             "--goal-id",
                             case_goal_id,
                             "--agent-id",
-                            case_agent_id,
-                        ],
-                    ),
-                    (
-                        "case_todo_claim_before_agent",
-                        [
-                            "todo",
-                            "claim",
-                            "--goal-id",
-                            case_goal_id,
-                            "--todo-id",
-                            case_todo_id,
-                            "--claimed-by",
                             case_agent_id,
                         ],
                     ),

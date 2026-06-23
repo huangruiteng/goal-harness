@@ -33,6 +33,17 @@ from codex_app_server_goal_driver import (
     start_codex_app_server_goal_turn,
 )
 from loopx.benchmark_case_state import (
+    BENCHMARK_CASE_LOOPX_AGENT_ID,
+    BENCHMARK_CASE_LOOPX_CLI_PATH,
+    BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS,
+    BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE,
+    BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE,
+    BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE,
+    BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+    BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+    BENCHMARK_CASE_LOOPX_TODO_ID,
+    benchmark_case_loopx_command_prefix,
+    benchmark_case_loopx_install_payload,
     benchmark_case_lifecycle_contract,
     render_benchmark_case_lifecycle_contract_lines,
 )
@@ -120,10 +131,10 @@ completion file.
         prompt += (
             "\n\nLoopX case lifecycle packet:\n"
             f"{packet}\n\n"
-            "Use this packet as observational control-plane context. Keep the official "
-            "Terminal-Bench scorer authoritative, do not expose reward or verifier output "
-            "during the agent loop, and do not rely on runner-internal polling alone when "
-            "claiming LoopX treatment evidence."
+            "Use this packet as the canonical LoopX product-mode lifecycle contract. "
+            "Keep the official Terminal-Bench scorer authoritative, do not expose reward "
+            "or verifier output during the agent loop, and do not rely on runner-internal "
+            "polling or marker files as LoopX treatment evidence."
         )
     return prompt
 
@@ -145,10 +156,30 @@ def build_loopx_case_lifecycle_packet(
         arm_id=arm_id,
         max_rounds=max_rounds,
     )
+    case_goal_id = str(contract["benchmark_case_goal_id"])
+    case_cli_prefix = benchmark_case_loopx_command_prefix(
+        case_cli_path=BENCHMARK_CASE_LOOPX_CLI_PATH,
+        case_registry_path=BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+        case_runtime_root=BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+    )
     lines = [
         "terminal_bench_loopx_case_lifecycle_packet_v0:",
         f"  packet_mode: {packet_mode}",
-        "  benchmark_family: harbor",
+        "  benchmark_family: terminal-bench",
+        f"  loopx_formal_treatment_semantics: {BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS}",
+        "  loopx_canonical_product_mode_lifecycle_driver: true",
+        f"  loopx_product_path_primary_route: {BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE}",
+        f"  loopx_prompt_driven_execution_style: {BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE}",
+        f"  loopx_workflow_orchestrated_execution_style: {BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE}",
+        "  loopx_case_todo_seeded_open: true",
+        "  loopx_case_todo_preclaimed_by_host: false",
+        "  loopx_agent_must_claim_selected_case_todo: true",
+        f"  loopx_case_command_quota_should_run: {case_cli_prefix} quota should-run --goal-id {case_goal_id} --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID}",
+        f"  loopx_case_command_claim_todo: {case_cli_prefix} todo claim --goal-id {case_goal_id} --todo-id {BENCHMARK_CASE_LOOPX_TODO_ID} --claimed-by {BENCHMARK_CASE_LOOPX_AGENT_ID}",
+        f"  loopx_case_command_status: {case_cli_prefix} status --limit 5 --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID}",
+        f"  loopx_case_command_mark_todo_done_when_complete: {case_cli_prefix} todo complete --goal-id {case_goal_id} --todo-id {BENCHMARK_CASE_LOOPX_TODO_ID} --claimed-by {BENCHMARK_CASE_LOOPX_AGENT_ID} --evidence local_validation_done",
+        f"  loopx_case_command_refresh_state: {case_cli_prefix} refresh-state --goal-id {case_goal_id} --classification benchmark_case_agent_progress --delivery-batch-scale implementation --delivery-outcome outcome_progress --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID} --agent-lane benchmark_case",
+        f"  loopx_case_command_spend_quota: {case_cli_prefix} quota spend-slot --goal-id {case_goal_id} --agent-id {BENCHMARK_CASE_LOOPX_AGENT_ID} --source adapter --execute",
     ]
     lines.extend(render_benchmark_case_lifecycle_contract_lines(contract))
     return "\n".join(lines), contract
@@ -256,6 +287,68 @@ class HostCodexGoalAgent(BaseAgent):
             arm_id=self.loopx_arm_id,
             max_rounds=self.loopx_max_rounds,
         )
+        case_state_init_payload: dict[str, Any] = {}
+        if loopx_packet:
+            case_state_init_payload = dict(
+                benchmark_case_loopx_install_payload(
+                    benchmark_id=self.loopx_benchmark_id,
+                    case_id=self.loopx_case_id,
+                    arm_id=self.loopx_arm_id,
+                    route="loopx-product-mode",
+                    max_rounds=self.loopx_max_rounds,
+                )
+            )
+            init_command = str(case_state_init_payload["command"])
+            init_result = session.container.exec_run(
+                [
+                    "bash",
+                    "-lc",
+                    f"cd {shlex.quote(self.task_workdir)} && {init_command}",
+                ],
+            )
+            init_ok = int(getattr(init_result, "exit_code", 1) or 0) == 0
+            init_compact = {
+                "case_goal_state_init_required": True,
+                "case_goal_state_initialized_before_agent": init_ok,
+                "case_goal_state_init_status": "initialized" if init_ok else "init_failed",
+                "case_goal_state_path": case_state_init_payload.get("case_state_path") or "",
+                "loopx_lifecycle_driver_schema_version": case_state_init_payload.get("lifecycle_driver_schema_version") or "",
+                "loopx_formal_treatment_semantics": case_state_init_payload.get("formal_treatment_semantics") or "",
+                "loopx_canonical_product_mode_lifecycle_driver": bool(case_state_init_payload.get("canonical_product_mode_lifecycle_driver")),
+                "loopx_case_cli_installed_before_agent": init_ok,
+                "loopx_case_registry_path": case_state_init_payload.get("case_registry_path") or "",
+                "loopx_case_runtime_root": case_state_init_payload.get("case_runtime_root") or "",
+                "loopx_case_todo_id": case_state_init_payload.get("case_todo_id") or "",
+                "loopx_case_todo_seeded": bool(case_state_init_payload.get("case_todo_seeded")),
+                "loopx_case_todo_preclaimed": bool(case_state_init_payload.get("case_todo_preclaimed")),
+                "raw_output_recorded": False,
+            }
+            (work_dir / "case_goal_state_init.compact.json").write_text(
+                json.dumps(init_compact, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            if not init_ok:
+                (work_dir / "app_server_goal_turn.compact.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "terminal_bench_host_codex_goal_agent_v0",
+                            "ok": False,
+                            "first_blocker": "terminal_bench_case_goal_state_init_failed",
+                            "loopx_mode": self.loopx_mode,
+                            "loopx_case_lifecycle_packet_injected": True,
+                            "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                            **init_compact,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                return AgentResult(
+                    total_input_tokens=0,
+                    total_output_tokens=0,
+                    failure_mode=FailureMode.AGENT_TIMEOUT,
+                )
 
         prompt = build_host_goal_prompt(
             container_name=container_name,
@@ -314,6 +407,19 @@ class HostCodexGoalAgent(BaseAgent):
                             loopx_packet
                         ),
                         "benchmark_case_lifecycle_contract": case_lifecycle_contract,
+                        "case_goal_state_init_required": bool(
+                            case_state_init_payload
+                        ),
+                        "case_goal_state_initialized_before_agent": bool(
+                            case_state_init_payload
+                        ),
+                        "loopx_canonical_product_mode_lifecycle_driver": bool(
+                            case_state_init_payload.get(
+                                "canonical_product_mode_lifecycle_driver"
+                            )
+                        )
+                        if case_state_init_payload
+                        else False,
                     }
                 )
                 (work_dir / "app_server_goal_turn.compact.json").write_text(

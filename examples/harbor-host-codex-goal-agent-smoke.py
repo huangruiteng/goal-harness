@@ -78,9 +78,12 @@ def main() -> int:
     assert "loopx_product_path_primary_route: prompt_driven_case_local_loopx_cli" in treatment_packet
     assert "loopx_case_local_cli_installed_before_agent: true" in treatment_packet
     assert "loopx_case_cli_path: /app/.local/bin/loopx" in treatment_packet
-    assert "loopx_case_todo_id: todo_benchmark_case_main" in treatment_packet
+    assert f"loopx_case_todo_id: {module.BENCHMARK_CASE_LOOPX_TODO_ID}" in treatment_packet
     assert "loopx_case_command_quota_should_run:" in treatment_packet
-    assert "/app/.local/bin/loopx --format json quota should-run" in treatment_packet
+    assert (
+        "/app/.local/bin/loopx --registry /app/.loopx/registry.json "
+        "--runtime-root /app/.loopx/runtime --format json quota should-run"
+    ) in treatment_packet
     assert "loopx_case_command_claim_todo:" in treatment_packet
     assert "loopx_case_command_mark_todo_done_when_complete:" in treatment_packet
     assert "loopx_completion_source_of_truth: case_local_active_todo" in treatment_packet
@@ -91,7 +94,8 @@ def main() -> int:
     assert "loopx_global_command_check_optional_context:" in treatment_packet
     assert "do_not_upload_or_submit_to_leaderboard: true" in treatment_packet
     assert "benchmark_loop_contract:" in treatment_packet
-    assert "protocol_id: packet_only_observation" in treatment_packet
+    assert "protocol_id: max5_blind_loop_no_feedback" in treatment_packet
+    assert "route: loopx-prompt-polling-test" in treatment_packet
     assert "benchmark_case_lifecycle_contract:" in treatment_packet
     assert "case_isolation_scope: per_benchmark_case_arm" in treatment_packet
     assert "benchmark_case_goal_id: swe-marathon-current-case-codex-loopx-treatment-case" in treatment_packet
@@ -99,7 +103,18 @@ def main() -> int:
     assert "required_lifecycle_steps: quota_should_run,todo_claim_or_update,bounded_agent_turn,validation_or_case_result,refresh_state,quota_spend" in treatment_packet
     assert "required_rollout_event_kinds: quota_should_run,todo_claim,todo_update,validation,refresh_state,quota_spend,compact_case_result,failure_attribution" in treatment_packet
     assert "strict_loopx_treatment_claim_allowed: false" in treatment_packet
-    assert "loopx_treatment_claim_blocker:" in treatment_packet
+    assert "controller_trace_absent" in treatment_packet
+    packet_only_observation = module.build_loopx_access_packet(
+        mode="codex_loopx",
+        packet_mode="compact",
+        cli_bridge_enabled=True,
+        goal_id="loopx-meta",
+        experiment_protocol="packet_only_observation",
+        max_rounds=5,
+    )
+    assert "protocol_id: packet_only_observation" in packet_only_observation
+    assert "route: loopx-packet-only-observation" in packet_only_observation
+    assert "packet_only_no_max5_controller" in packet_only_observation
     polling_packet = module.build_loopx_access_packet(
         mode="codex_loopx",
         packet_mode="compact",
@@ -181,20 +196,26 @@ def main() -> int:
     assert init_payload["case_state_path"].endswith("/ACTIVE_GOAL_STATE.md"), init_payload
     assert init_payload["install_flow_schema_version"] == "loopx_benchmark_case_install_flow_v0", init_payload
     assert init_payload["case_cli_path"] == "/app/.local/bin/loopx", init_payload
-    assert init_payload["case_todo_id"] == "todo_benchmark_case_main", init_payload
+    assert init_payload["case_todo_id"] == module.BENCHMARK_CASE_LOOPX_TODO_ID, init_payload
     assert init_payload["case_agent_id"] == "codex-benchmark-agent", init_payload
     assert init_payload["product_path_primary_route"] == "prompt_driven_case_local_loopx_cli", init_payload
     assert init_payload["prompt_driven_route_required"] is True, init_payload
     init_command = init_payload["command"]
     assert "mkdir -p" in init_command, init_command
+    assert "install-from-github.sh" in init_command, init_command
     assert "mv \"$tmp\"" in init_command, init_command
-    assert "## Agent Todo" in init_command, init_command
+    assert " bootstrap " in init_command, init_command
+    assert " configure-goal " in init_command, init_command
+    assert " todo add " in init_command, init_command
     assert "loopx-prompt-polling-test" in init_command, init_command
     assert "find-network-alignments" in init_command, init_command
     assert "/app/.local/bin/loopx" in init_command, init_command
-    assert "quota_should_run" in init_command, init_command
-    assert "todo_claim" in init_command, init_command
-    assert "rollout-event-log.jsonl" in init_command, init_command
+    assert " quota should-run " in init_command, init_command
+    assert " refresh-state " in init_command, init_command
+    assert " todo claim " not in init_command, init_command
+    assert str(init_payload["case_rollout_event_log_path"]).endswith(
+        "/rollout-event-log.jsonl"
+    ), init_payload
     assert "/Users/" not in init_command, init_command
     init_compact = module._case_goal_state_init_compact(
         init_payload,
@@ -209,7 +230,7 @@ def main() -> int:
     assert init_compact["loopx_install_flow_status"] == "initialized", init_compact
     assert init_compact["loopx_case_cli_installed_before_agent"] is True, init_compact
     assert init_compact["loopx_case_cli_path"] == "/app/.local/bin/loopx", init_compact
-    assert init_compact["loopx_case_todo_id"] == "todo_benchmark_case_main", init_compact
+    assert init_compact["loopx_case_todo_id"] == module.BENCHMARK_CASE_LOOPX_TODO_ID, init_compact
     assert init_compact["loopx_product_path_primary_route"] == "prompt_driven_case_local_loopx_cli", init_compact
     assert init_compact["loopx_prompt_driven_route_required"] is True, init_compact
     assert init_compact["case_goal_state_raw_output_recorded"] is False, init_compact
@@ -220,7 +241,10 @@ def main() -> int:
             "should-run",
             "--goal-id",
             init_payload["benchmark_case_goal_id"],
-        ).startswith("/app/.local/bin/loopx --format json quota should-run")
+        ).startswith(
+            "/app/.local/bin/loopx --registry /app/.loopx/registry.json "
+            "--runtime-root /app/.loopx/runtime --format json quota should-run"
+        )
     )
 
     class _FakeExecResult:
@@ -356,7 +380,7 @@ def main() -> int:
         "quota_spend_observed": True,
         "agent_open_count": 1,
         "user_open_count": 0,
-        "case_todo_id": "todo_benchmark_case_main",
+        "case_todo_id": module.BENCHMARK_CASE_LOOPX_TODO_ID,
         "case_todo_status": "open",
         "case_todo_claimed_by": "codex-benchmark-agent",
         "timeout_preserves_open_todo": True,
@@ -455,18 +479,25 @@ def main() -> int:
         agent._case_state_init_payload = init_payload
         for index, command in enumerate(
             [
-                (
-                    "/app/.local/bin/loopx --format json quota "
-                    "should-run --goal-id "
-                    f"{init_payload['benchmark_case_goal_id']} "
-                    "--agent-id codex-benchmark-agent"
+                module._case_cli_command(
+                    init_payload,
+                    "quota",
+                    "should-run",
+                    "--goal-id",
+                    str(init_payload["benchmark_case_goal_id"]),
+                    "--agent-id",
+                    "codex-benchmark-agent",
                 ),
-                (
-                    "/app/.local/bin/loopx --format json todo claim "
-                    "--goal-id "
-                    f"{init_payload['benchmark_case_goal_id']} "
-                    "--todo-id todo_benchmark_case_main "
-                    "--claimed-by codex-benchmark-agent"
+                module._case_cli_command(
+                    init_payload,
+                    "todo",
+                    "claim",
+                    "--goal-id",
+                    str(init_payload["benchmark_case_goal_id"]),
+                    "--todo-id",
+                    module.BENCHMARK_CASE_LOOPX_TODO_ID,
+                    "--claimed-by",
+                    "codex-benchmark-agent",
                 ),
                 "python3 - <<'PY'\nopen('solution.py', 'w').write('ok')\nPY",
                 "make",
@@ -538,7 +569,7 @@ def main() -> int:
         assert agent.app_server_response_timeout_sec == 4.0
         assert agent.loopx_mode == "codex_goal_mode_baseline"
         assert agent.loopx_access_packet_mode == "none"
-        assert agent.loopx_experiment_protocol == "packet_only_observation"
+        assert agent.loopx_experiment_protocol == "max5_blind_loop_no_feedback"
         assert agent.loopx_max_rounds == 5
 
         no_wait_agent = module.HarborHostCodexGoalAgent(
@@ -559,8 +590,8 @@ def main() -> int:
         assert treatment_agent.loopx_mode == "codex_loopx"
         assert treatment_agent.loopx_access_packet_mode == "compact"
         assert treatment_agent.loopx_cli_bridge_enabled is True
-        assert treatment_agent.loopx_experiment_protocol == "packet_only_observation"
-        assert treatment_agent.loopx_prompt_polling_rounds == 1
+        assert treatment_agent.loopx_experiment_protocol == "max5_blind_loop_no_feedback"
+        assert treatment_agent.loopx_prompt_polling_rounds == 5
         assert treatment_agent.loopx_benchmark_id == "swe-marathon"
         assert treatment_agent.loopx_case_id == "current-case"
         assert treatment_agent.loopx_arm_id == "codex_loopx_treatment"
@@ -668,7 +699,9 @@ def main() -> int:
                                     "open_count": 0,
                                     "items": [
                                         {
-                                            "todo_id": "todo_benchmark_case_main",
+                                            "todo_id": (
+                                                module.BENCHMARK_CASE_LOOPX_TODO_ID
+                                            ),
                                             "status": "done",
                                             "claimed_by": "codex-benchmark-agent",
                                             "priority": "P0",

@@ -66,7 +66,7 @@ def main() -> int:
     assert lifecycle_contract is not None
     assert "terminal_bench_loopx_case_lifecycle_packet_v0:" in lifecycle_packet
     assert "packet_mode: compact" in lifecycle_packet
-    assert "benchmark_family: harbor" in lifecycle_packet
+    assert "benchmark_family: terminal-bench" in lifecycle_packet
     assert "benchmark_case_lifecycle_contract:" in lifecycle_packet
     assert "benchmark_id: terminal-bench" in lifecycle_packet
     assert "case_id: build-cython-ext" in lifecycle_packet
