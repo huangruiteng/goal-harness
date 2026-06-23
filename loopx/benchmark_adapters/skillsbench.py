@@ -2542,6 +2542,72 @@ def build_skillsbench_benchflow_result_benchmark_run(
         controller_max_rounds_budget, bool
     ):
         controller_max_rounds_budget = 0
+
+    def _controller_public_count(name: str) -> int:
+        value = controller_counters.get(name, 0)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    def _trajectory_public_count(name: str) -> int:
+        value = trajectory_summary.get(name, 0)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    product_mode_lifecycle_required = bool(route == "loopx-product-mode")
+    product_mode_lifecycle_read_count = max(
+        _controller_public_count("loopx_state_reads"),
+        _controller_public_count("loopx_case_state_reads"),
+        _trajectory_public_count("loopx_cli_state_read_count"),
+        _trajectory_public_count("loopx_case_state_read_count"),
+    )
+    product_mode_lifecycle_write_count = max(
+        _controller_public_count("loopx_state_writes"),
+        _controller_public_count("loopx_case_state_writes"),
+        _trajectory_public_count("loopx_cli_state_write_count"),
+        _trajectory_public_count("loopx_case_state_write_count"),
+    )
+    product_mode_lifecycle_checkpoint_required = bool(
+        controller_counters.get("product_mode_lifecycle_checkpoint_required")
+    )
+    product_mode_lifecycle_checkpoint_count = _controller_public_count(
+        "product_mode_lifecycle_checkpoint_count"
+    )
+    product_mode_lifecycle_attempt_observed = bool(
+        product_mode_lifecycle_checkpoint_required
+        or product_mode_lifecycle_checkpoint_count > 0
+        or controller_followup_prompt_count > 0
+        or controller_stop_decision_count > 0
+        or controller_max_rounds_budget > 1
+    )
+    product_mode_lifecycle_satisfied = bool(
+        not product_mode_lifecycle_required
+        or (
+            product_mode_lifecycle_read_count > 0
+            and product_mode_lifecycle_write_count > 0
+        )
+    )
+    product_mode_lifecycle_missing = bool(
+        product_mode_lifecycle_required
+        and controller_trace_present
+        and product_mode_lifecycle_attempt_observed
+        and not product_mode_lifecycle_satisfied
+    )
+    product_mode_lifecycle_contract = {
+        "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
+        "required": product_mode_lifecycle_required,
+        "satisfied": product_mode_lifecycle_satisfied,
+        "countable_treatment": not product_mode_lifecycle_missing,
+        "state_read_count": product_mode_lifecycle_read_count,
+        "state_write_count": product_mode_lifecycle_write_count,
+        "checkpoint_required": product_mode_lifecycle_checkpoint_required,
+        "checkpoint_count": product_mode_lifecycle_checkpoint_count,
+        "checkpoint_round": controller_counters.get(
+            "product_mode_lifecycle_checkpoint_round", 0
+        ),
+        "missing_reason": controller_counters.get(
+            "product_mode_lifecycle_checkpoint_missing_reason", ""
+        )
+        if product_mode_lifecycle_missing
+        else "",
+    }
     user_loop_final_verify_recovery_triggered = bool(
         controller_counters.get("benchflow_user_loop_final_verify_recovery_triggered")
     )
@@ -2773,6 +2839,40 @@ def build_skillsbench_benchflow_result_benchmark_run(
         validation_scope = (
             "official_benchflow_result_json_plus_loopx_controller_trace"
         )
+    if product_mode_lifecycle_missing:
+        label = "skillsbench_product_mode_lifecycle_missing"
+        contract_official_score_comparable_to_native_codex = False
+        contract_official_score_comparable_to_loopx_treatment = False
+        product_mode_lifecycle_contract["countable_treatment"] = False
+        if not official_passed:
+            exception_type = label
+            score_failure_attribution = label
+            runner_score_failure_attribution = label
+            failure_labels = [
+                item
+                for item in failure_labels
+                if item
+                not in {
+                    "skillsbench_runner_error",
+                    "verifier_infrastructure_failure",
+                    "official_score_zero_case_failure",
+                }
+            ]
+            if runner_failure is not None:
+                runner_failure["exception_type"] = label
+                runner_failure["failure_class"] = label
+        for item in (
+            label,
+            "skillsbench_product_mode_uncountable_treatment",
+            "skillsbench_case_local_loopx_state_not_observed",
+        ):
+            if item not in failure_labels:
+                failure_labels.append(item)
+        if (
+            reward_value is None
+            and "skillsbench_reward_artifact_missing" not in failure_labels
+        ):
+            failure_labels.append("skillsbench_reward_artifact_missing")
 
     native_goal_worker_trace_count = controller_counters.get(
         "native_goal_worker_trace_count", 0
@@ -3126,6 +3226,7 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "controller_trace_recorded": controller_trace_present,
             "does_not_upload_or_submit": True,
         },
+        "product_mode_lifecycle_contract": product_mode_lifecycle_contract,
         "trials": [
             {
                 "task_id": task_id,
@@ -3208,6 +3309,7 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "reward_feedback_forwarded": contract_reward_feedback_forwarded,
             "official_score_comparable_to_native_codex": contract_official_score_comparable_to_native_codex,
             "official_score_comparable_to_loopx_treatment": contract_official_score_comparable_to_loopx_treatment,
+            "product_mode_lifecycle": product_mode_lifecycle_contract,
             "leaderboard_evidence": False,
         },
         "evidence_files": evidence_files,

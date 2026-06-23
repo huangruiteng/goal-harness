@@ -692,6 +692,36 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
     return compact
 
 
+def _compact_product_mode_lifecycle_contract(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    compact: dict[str, Any] = {}
+    schema = public_safe_compact_text(value.get("schema_version"), limit=100)
+    if schema:
+        compact["schema_version"] = schema
+    for field in (
+        "required",
+        "satisfied",
+        "countable_treatment",
+        "checkpoint_required",
+    ):
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+    for field in (
+        "state_read_count",
+        "state_write_count",
+        "checkpoint_count",
+        "checkpoint_round",
+    ):
+        if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
+            compact[field] = value[field]
+    missing_reason = public_safe_compact_text(value.get("missing_reason"), limit=140)
+    if missing_reason:
+        compact["missing_reason"] = missing_reason
+    return compact
+
+
 def _compact_benchmark_round_reward_trace(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -2497,6 +2527,12 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     episode_policy = _compact_benchmark_episode_policy(source.get("episode_policy"))
     if episode_policy:
         compact["episode_policy"] = episode_policy
+
+    product_mode_lifecycle_contract = _compact_product_mode_lifecycle_contract(
+        source.get("product_mode_lifecycle_contract")
+    )
+    if product_mode_lifecycle_contract:
+        compact["product_mode_lifecycle_contract"] = product_mode_lifecycle_contract
 
     preflight_guard = _compact_benchmark_preflight_guard(source.get("preflight_guard"))
     if preflight_guard:
