@@ -114,6 +114,10 @@ runtime contract, benchmark route, or launch draft.
   bottom-layer LoopX capability increments needed by repo issue-fix loops,
   creator/self-media operations, and other repository scenario signals before
   domain-specific adapters are built.
+- [Office operations connector showcase](office-operations-connector-showcase.md):
+  public-safe showcase design for connector observations, signal inbox,
+  selected anchors, human review, gated external actions, and value metrics
+  beyond raw content or draft count.
 - [Issue/PR solver maintainer intake](issue-pr-solver-maintainer-intake.md):
   public-safe packet for deciding whether a repository issue or PR solver
   opportunity should become a high-value anchor, including repo fit, allowed
