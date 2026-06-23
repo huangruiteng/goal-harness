@@ -205,6 +205,9 @@ Already aligned:
   todo indexes.
 - `loopx_rollout_event_v0` can carry lane, transition, causality, handoff, and
   code refs for new events.
+- `examples/fixtures/long-horizon-self-iteration-rollout.public.json` gives
+  frontend and protocol tests a compact public-safe fixture with gate, handoff,
+  validation, deferred-resume, evidence, and inferred display-bridge coverage.
 
 Partially aligned:
 
@@ -243,3 +246,5 @@ A protocol implementation or fixture is acceptable when it proves:
   deletion;
 - public fixtures contain no raw logs, raw transcripts, credentials, or local
   absolute paths.
+- `python3 examples/long-horizon-self-iteration-rollout-fixture-smoke.py`
+  passes before a fixture is used as UI input.

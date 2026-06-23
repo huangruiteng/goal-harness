@@ -1,0 +1,505 @@
+{
+  "schema_version": "long_horizon_self_iteration_fixture_v0",
+  "fixture_id": "long_horizon_self_iteration_minimal_rollout_public_v0",
+  "goal_id": "public-long-horizon-loop",
+  "generated_at": "2026-06-24T01:12:00+08:00",
+  "purpose": "Minimal public-safe rollout input for long-horizon agent frontstage development and smoke testing.",
+  "public_boundary": {
+    "raw_task_text_recorded": false,
+    "raw_logs_recorded": false,
+    "raw_trajectory_recorded": false,
+    "raw_session_transcript_recorded": false,
+    "credential_values_recorded": false,
+    "absolute_paths_recorded": false,
+    "private_material_body_recorded": false
+  },
+  "derived_from": {
+    "source_docs": [
+      "docs/reference/protocols/long-horizon-agent-state-protocol-v0.md",
+      "docs/product/frontstage-dashboard-interaction-baseline.md"
+    ],
+    "source_prs": [
+      "https://github.com/huangruiteng/loopx/pull/617"
+    ],
+    "source_policy": "Compact public-safe metadata only; this fixture is not a source-of-truth event ledger."
+  },
+  "truth_contract": {
+    "event_ledger_is_source_of_truth": true,
+    "fixture_is_writable": false,
+    "projection_is_writable": false,
+    "write_authority": "none",
+    "recompute_rule": "Regenerate from active state, rollout events, PR metadata, and public docs; do not edit dashboard state as truth."
+  },
+  "lanes": [
+    {
+      "lane_id": "primary_control",
+      "agent_id": "codex-main-control",
+      "role": "primary",
+      "display_name": "Primary control"
+    },
+    {
+      "lane_id": "product_capability",
+      "agent_id": "codex-product-capability",
+      "role": "side-agent",
+      "display_name": "Product capability"
+    },
+    {
+      "lane_id": "implementation_lane",
+      "agent_id": "codex-side-bypass",
+      "role": "side-agent",
+      "display_name": "Implementation lane"
+    }
+  ],
+  "rollout_events": [
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_001_protocol_contract_ready",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "pr_merge",
+      "recorded_at": "2026-06-24T01:12:10+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_protocol_contract",
+      "lane": {
+        "lane_id": "product_capability",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "protocol_draft",
+        "to_state": "protocol_contract_ready"
+      },
+      "causality": {
+        "caused_by": "public_protocol_review",
+        "unblocks": [
+          "todo_minimal_rollout_fixture"
+        ]
+      },
+      "code_refs": {
+        "commit_ref": "bd05500",
+        "pr_ref": "huangruiteng/loopx#617"
+      },
+      "status": "ready",
+      "classification": "long_horizon_protocol_contract_ready",
+      "delivery_outcome": "outcome_progress",
+      "summary": "Long-horizon protocol now separates source-of-truth state from projection state and defines handoff, gate, evidence, and rollback anchors.",
+      "artifact_refs": [
+        "docs/reference/protocols/long-horizon-agent-state-protocol-v0.md"
+      ],
+      "source_refs": [
+        {
+          "kind": "pull_request",
+          "ref": "https://github.com/huangruiteng/loopx/pull/617"
+        }
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    },
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_002_fixture_scope_narrowed",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "todo_update",
+      "recorded_at": "2026-06-24T01:13:00+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_minimal_rollout_fixture",
+      "lane": {
+        "lane_id": "product_capability",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "full_history_fixture_planned",
+        "to_state": "minimal_rollout_fixture_required"
+      },
+      "causality": {
+        "caused_by": "scope_reduction",
+        "source_event_id": "evt_lh_001_protocol_contract_ready",
+        "decision_id": "decision_minimal_fixture_before_frontstage"
+      },
+      "status": "open",
+      "classification": "todo_scope_refined",
+      "summary": "The fixture scope narrows to a small public-safe rollout sample for frontend and protocol testing.",
+      "artifact_refs": [
+        "examples/fixtures/long-horizon-self-iteration-rollout.public.json"
+      ],
+      "source_refs": [
+        {
+          "kind": "todo",
+          "ref": "todo_minimal_rollout_fixture"
+        }
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    },
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_003_frontstage_impl_handoff",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "todo_update",
+      "recorded_at": "2026-06-24T01:14:00+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_frontstage_timeline",
+      "lane": {
+        "lane_id": "implementation_lane",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "open_product_capability_claim",
+        "to_state": "deferred_implementation_claim"
+      },
+      "causality": {
+        "caused_by": "frontstage_delegation",
+        "source_event_id": "evt_lh_002_fixture_scope_narrowed",
+        "gate_id": "gate_minimal_rollout_fixture",
+        "decision_id": "decision_frontstage_to_implementation_lane",
+        "blocks": [
+          "todo_frontstage_timeline"
+        ],
+        "unblocks": [
+          "todo_frontstage_timeline_after_fixture"
+        ]
+      },
+      "handoff": {
+        "to_agent_id": "codex-side-bypass"
+      },
+      "status": "deferred",
+      "classification": "frontstage_todo_assigned_to_implementation_lane",
+      "summary": "Frontstage implementation waits for the minimal rollout fixture before broader UI work starts.",
+      "artifact_refs": [
+        "docs/product/frontstage-dashboard-interaction-baseline.md"
+      ],
+      "source_refs": [
+        {
+          "kind": "todo",
+          "ref": "todo_frontstage_timeline"
+        }
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    },
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_004_sufficiency_check_deferred",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "todo_update",
+      "recorded_at": "2026-06-24T01:15:00+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_frontstage_sufficiency",
+      "lane": {
+        "lane_id": "implementation_lane",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "open_product_capability_claim",
+        "to_state": "deferred_implementation_claim"
+      },
+      "causality": {
+        "caused_by": "fixture_dependency",
+        "source_event_id": "evt_lh_003_frontstage_impl_handoff",
+        "gate_id": "gate_minimal_rollout_fixture",
+        "decision_id": "decision_frontstage_to_implementation_lane",
+        "blocks": [
+          "todo_frontstage_sufficiency"
+        ]
+      },
+      "handoff": {
+        "to_agent_id": "codex-side-bypass"
+      },
+      "status": "deferred",
+      "classification": "frontstage_sufficiency_waits_for_fixture",
+      "summary": "The sufficiency check remains visible as deferred work and resumes after fixture validation.",
+      "artifact_refs": [
+        "examples/fixtures/long-horizon-self-iteration-rollout.public.json"
+      ],
+      "source_refs": [
+        {
+          "kind": "todo",
+          "ref": "todo_frontstage_sufficiency"
+        }
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    },
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_005_minimal_fixture_validated",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "validation",
+      "recorded_at": "2026-06-24T01:16:00+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_minimal_rollout_fixture",
+      "lane": {
+        "lane_id": "product_capability",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "minimal_rollout_fixture_required",
+        "to_state": "fixture_ready_for_frontstage"
+      },
+      "causality": {
+        "caused_by": "public_fixture_validation",
+        "source_event_id": "evt_lh_002_fixture_scope_narrowed",
+        "unblocks": [
+          "todo_frontstage_sufficiency",
+          "todo_frontstage_timeline"
+        ]
+      },
+      "status": "validated",
+      "classification": "long_horizon_rollout_fixture_ready",
+      "delivery_outcome": "outcome_progress",
+      "summary": "Minimal rollout fixture covers three lanes, a human decision gate, handoff, validation evidence, and one inferred display bridge.",
+      "artifact_refs": [
+        "examples/fixtures/long-horizon-self-iteration-rollout.public.json",
+        "examples/long-horizon-self-iteration-rollout-fixture-smoke.py"
+      ],
+      "source_refs": [
+        {
+          "kind": "fixture",
+          "ref": "examples/fixtures/long-horizon-self-iteration-rollout.public.json"
+        }
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    },
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_006_sufficiency_ready",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "todo_update",
+      "recorded_at": "2026-06-24T01:17:00+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_frontstage_sufficiency",
+      "lane": {
+        "lane_id": "implementation_lane",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "deferred_implementation_claim",
+        "to_state": "ready_after_fixture"
+      },
+      "causality": {
+        "caused_by": "todo_done:todo_minimal_rollout_fixture",
+        "source_event_id": "evt_lh_005_minimal_fixture_validated",
+        "unblocks": [
+          "todo_frontstage_sufficiency"
+        ]
+      },
+      "handoff": {
+        "to_agent_id": "codex-side-bypass"
+      },
+      "status": "ready",
+      "classification": "frontstage_sufficiency_ready",
+      "summary": "The implementation lane can now test sufficiency against a concrete minimal rollout fixture.",
+      "artifact_refs": [
+        "examples/fixtures/long-horizon-self-iteration-rollout.public.json"
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    },
+    {
+      "schema_version": "loopx_rollout_event_v0",
+      "event_id": "evt_lh_007_timeline_ready",
+      "goal_id": "public-long-horizon-loop",
+      "event_kind": "todo_update",
+      "recorded_at": "2026-06-24T01:18:00+08:00",
+      "agent_id": "codex-product-capability",
+      "todo_id": "todo_frontstage_timeline",
+      "lane": {
+        "lane_id": "implementation_lane",
+        "agent_role": "side-agent"
+      },
+      "state_transition": {
+        "from_state": "deferred_implementation_claim",
+        "to_state": "ready_after_fixture"
+      },
+      "causality": {
+        "caused_by": "todo_done:todo_minimal_rollout_fixture",
+        "source_event_id": "evt_lh_005_minimal_fixture_validated",
+        "unblocks": [
+          "todo_frontstage_timeline"
+        ]
+      },
+      "handoff": {
+        "to_agent_id": "codex-side-bypass"
+      },
+      "status": "ready",
+      "classification": "frontstage_timeline_ready",
+      "summary": "The implementation lane can build a multi-lane timeline without reading private state.",
+      "artifact_refs": [
+        "examples/fixtures/long-horizon-self-iteration-rollout.public.json"
+      ],
+      "boundary": {
+        "raw_task_text_recorded": false,
+        "raw_logs_recorded": false,
+        "raw_trajectory_recorded": false,
+        "raw_session_transcript_recorded": false,
+        "credential_values_recorded": false,
+        "absolute_paths_recorded": false
+      }
+    }
+  ],
+  "animation_events": [
+    {
+      "animation_event_id": "anim_protocol_contract",
+      "lane_id": "product_capability",
+      "kind": "deliverable",
+      "title": "Protocol contract ready",
+      "source_event_ids": [
+        "evt_lh_001_protocol_contract_ready"
+      ],
+      "state_transition": {
+        "from_state": "draft",
+        "to_state": "ready"
+      },
+      "confidence": "observed",
+      "display_hint": "solid_edge",
+      "evidence_refs": [
+        "https://github.com/huangruiteng/loopx/pull/617"
+      ]
+    },
+    {
+      "animation_event_id": "anim_frontstage_delegation",
+      "lane_id": "primary_control",
+      "kind": "human_gate",
+      "title": "Operator delegates UI implementation",
+      "source_event_ids": [
+        "evt_lh_003_frontstage_impl_handoff",
+        "evt_lh_004_sufficiency_check_deferred"
+      ],
+      "state_transition": {
+        "from_state": "single lane owns protocol and UI planning",
+        "to_state": "implementation lane resumes after fixture"
+      },
+      "human_effect": {
+        "decision_id": "decision_frontstage_to_implementation_lane",
+        "changes": [
+          "claim_owner",
+          "resume_condition",
+          "handoff_target"
+        ]
+      },
+      "confidence": "observed",
+      "display_hint": "gate_node"
+    },
+    {
+      "animation_event_id": "anim_fixture_validation",
+      "lane_id": "product_capability",
+      "kind": "validation",
+      "title": "Minimal rollout fixture validated",
+      "source_event_ids": [
+        "evt_lh_005_minimal_fixture_validated"
+      ],
+      "state_transition": {
+        "from_state": "fixture_required",
+        "to_state": "fixture_ready"
+      },
+      "confidence": "observed",
+      "display_hint": "solid_edge",
+      "evidence_refs": [
+        "examples/fixtures/long-horizon-self-iteration-rollout.public.json",
+        "examples/long-horizon-self-iteration-rollout-fixture-smoke.py"
+      ]
+    },
+    {
+      "animation_event_id": "anim_sufficiency_unblocked",
+      "lane_id": "implementation_lane",
+      "kind": "handoff",
+      "title": "Sufficiency check resumes",
+      "source_event_ids": [
+        "evt_lh_006_sufficiency_ready"
+      ],
+      "state_transition": {
+        "from_state": "deferred",
+        "to_state": "ready"
+      },
+      "confidence": "inferred_high",
+      "display_hint": "solid_edge"
+    },
+    {
+      "animation_event_id": "anim_timeline_unblocked",
+      "lane_id": "implementation_lane",
+      "kind": "handoff",
+      "title": "Timeline implementation resumes",
+      "source_event_ids": [
+        "evt_lh_007_timeline_ready"
+      ],
+      "state_transition": {
+        "from_state": "deferred",
+        "to_state": "ready"
+      },
+      "confidence": "inferred_high",
+      "display_hint": "solid_edge"
+    },
+    {
+      "animation_event_id": "anim_fixture_to_ui_bridge",
+      "lane_id": "implementation_lane",
+      "kind": "synthetic_bridge",
+      "title": "Fixture-ready to UI-ready display bridge",
+      "source_event_ids": [
+        "evt_lh_005_minimal_fixture_validated",
+        "evt_lh_007_timeline_ready"
+      ],
+      "state_transition": {
+        "from_state": "fixture_ready",
+        "to_state": "ui_implementation_candidate"
+      },
+      "confidence": "synthetic_bridge",
+      "inference_reason": "The actual UI commit does not exist in this fixture yet; the bridge exists only so frontstage can render a future handoff target.",
+      "display_hint": "dashed_edge"
+    }
+  ],
+  "frontend_acceptance": {
+    "minimum_lane_ids": [
+      "primary_control",
+      "product_capability",
+      "implementation_lane"
+    ],
+    "must_render": [
+      "three agent lanes",
+      "one human gate node",
+      "one handoff from product-capability to implementation lane",
+      "one validation event",
+      "one PR or commit evidence reference",
+      "one dashed inferred bridge"
+    ],
+    "recommended_tests": [
+      "fixture schema smoke",
+      "frontstage route smoke",
+      "browser smoke across desktop and mobile once UI consumes this fixture"
+    ]
+  }
+}

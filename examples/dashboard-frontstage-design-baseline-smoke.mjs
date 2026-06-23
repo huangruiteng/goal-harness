@@ -47,6 +47,8 @@ includes(productDoc, "## Frontstage/Status Sufficiency Check", "frontstage statu
 includes(productDoc, "Todo-flow review", "todo-flow sufficiency check");
 includes(productDoc, "Human-gate animation", "human-gate animation sufficiency check");
 includes(productDoc, "Multi-lane timeline", "multi-lane timeline sufficiency check");
+includes(productDoc, "long-horizon-self-iteration-rollout.public.json", "long-horizon rollout fixture anchor");
+includes(productDoc, "long-horizon-self-iteration-rollout-fixture-smoke.py", "fixture smoke anchor");
 includes(productDoc, "npm run smoke:frontstage-browser", "visual acceptance anchor");
 includes(productDoc, "npm run smoke:frontstage-design-baseline", "design smoke anchor");
 
