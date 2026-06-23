@@ -70,6 +70,47 @@ def _safe_cwd(value: Any, *, default: str) -> str:
     return text or default
 
 
+def _public_bridge_label(value: Any, *, limit: int = 120) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("/", "_").replace("\\", "_")
+    text = re.sub(r"[^A-Za-z0-9_.:-]+", "_", text).strip("._:-")
+    return text[:limit]
+
+
+def _public_bridge_label_list(value: Any, *, limit: int = 80) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    labels: list[str] = []
+    for item in value[:12]:
+        label = _public_bridge_label(item, limit=limit)
+        if label:
+            labels.append(label)
+    return labels
+
+
+def _public_bridge_operations(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    operations: list[dict[str, Any]] = []
+    for item in value[:8]:
+        if not isinstance(item, dict):
+            continue
+        operation: dict[str, Any] = {}
+        for field in ("kind", "label", "status"):
+            label = _public_bridge_label(item.get(field), limit=80)
+            if label:
+                operation[field] = label
+        for field in ("exit_code_zero", "content_match"):
+            flag = item.get(field)
+            if isinstance(flag, bool):
+                operation[field] = flag
+        if operation:
+            operations.append(operation)
+    return operations
+
+
 def _codex_exec_failure_category(
     *,
     returncode: int | None,
@@ -904,15 +945,42 @@ raise SystemExit(proc.returncode)
                 "consumed_by_solver": True,
                 "probe_ready": bridge_probe.get("ready") is True,
                 "operation_count": operation_count,
-                "first_blocker": str(bridge_probe.get("first_blocker") or "")[:120],
-                "stage": str(bridge_probe.get("stage") or "")[:80],
+                "first_blocker": _public_bridge_label(
+                    bridge_probe.get("first_blocker"), limit=120
+                ),
+                "stage": _public_bridge_label(bridge_probe.get("stage"), limit=80),
                 "bridge_command_invoked": (
                     bridge_probe.get("bridge_command_invoked") is True
                 ),
                 "bridge_command_recorded": False,
+                "required_operations": _public_bridge_label_list(
+                    bridge_probe.get("required_operations")
+                ),
+                "missing_operations": _public_bridge_label_list(
+                    bridge_probe.get("missing_operations")
+                ),
+                "failed_operations": _public_bridge_label_list(
+                    bridge_probe.get("failed_operations")
+                ),
+                "boundary_violations": _public_bridge_label_list(
+                    bridge_probe.get("boundary_violations")
+                ),
+                "operations": _public_bridge_operations(bridge_probe.get("operations")),
             },
             "boundary": boundary,
         }
+        response_schema_version = _public_bridge_label(
+            bridge_probe.get("response_schema_version"), limit=120
+        )
+        if response_schema_version:
+            trace["remote_command_file_bridge"][
+                "response_schema_version"
+            ] = response_schema_version
+        elapsed_ms = bridge_probe.get("elapsed_ms")
+        if isinstance(elapsed_ms, int) and not isinstance(elapsed_ms, bool):
+            trace["remote_command_file_bridge"]["elapsed_ms"] = max(
+                0, min(elapsed_ms, 600_000)
+            )
         self._write_worker_public_trace(trace)
 
     def _publish_codex_exec_failure_trace(

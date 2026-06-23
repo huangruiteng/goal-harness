@@ -17,6 +17,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
+    CodexExecConfig,
+    SkillsBenchLocalAcpRelay,
     run_skillsbench_local_acp_relay_probe,
 )
 from scripts.skillsbench_automation_loop import (  # noqa: E402
@@ -463,6 +465,12 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
         assert bridge["consumed_by_solver"] is True
         assert bridge["probe_ready"] is True
         assert bridge["operation_count"] >= 4
+        assert bridge["missing_operations"] == []
+        assert bridge["failed_operations"] == []
+        assert bridge["boundary_violations"] == []
+        assert isinstance(bridge["operations"], list)
+        assert bridge["operations"], bridge
+        assert all("kind" in operation for operation in bridge["operations"])
         assert bridge["bridge_command_recorded"] is False
         boundary = bridge_trace["boundary"]
         assert boundary["raw_command_recorded"] is False
@@ -575,6 +583,65 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
             ]
             == "solver_prompt_probe_ready"
         )
+        bridge_failure_projection_dir = Path(tmp) / "bridge-failure-projection"
+        bridge_failure_relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(
+                route="loopx-product-mode",
+                dataset="skillsbench-v1.1",
+                task_id="demo-task",
+                worker_public_trace_dir=str(bridge_failure_projection_dir),
+            )
+        )
+        bridge_failure_relay._publish_remote_bridge_consumption_trace(
+            {
+                "ready": False,
+                "first_blocker": (
+                    "skillsbench_remote_command_file_bridge_operation_failed"
+                ),
+                "stage": "probe",
+                "response_schema_version": (
+                    "skillsbench_remote_command_file_bridge_probe_response_v0"
+                ),
+                "elapsed_ms": 1234,
+                "operation_count": 4,
+                "required_operations": [
+                    "exec",
+                    "write_file",
+                    "read_file",
+                    "cleanup",
+                ],
+                "missing_operations": [],
+                "failed_operations": ["read_file"],
+                "boundary_violations": [],
+                "operations": [
+                    {"kind": "exec", "label": "exec", "status": "ok"},
+                    {
+                        "kind": "read_file",
+                        "label": "read_file",
+                        "status": "failed",
+                        "content_match": False,
+                    },
+                ],
+                "bridge_command_invoked": True,
+                "raw_command_recorded": False,
+                "raw_stdout_recorded": False,
+                "raw_stderr_recorded": False,
+                "raw_task_text_recorded": False,
+            }
+        )
+        bridge_failure_trace_path = next(
+            bridge_failure_projection_dir.glob("*.compact.json")
+        )
+        bridge_failure_trace = json.loads(
+            bridge_failure_trace_path.read_text(encoding="utf-8")
+        )
+        bridge_failure = bridge_failure_trace["remote_command_file_bridge"]
+        assert bridge_failure["probe_ready"] is False
+        assert bridge_failure["failed_operations"] == ["read_file"]
+        assert bridge_failure["operations"][1]["status"] == "failed"
+        assert bridge_failure["operations"][1]["content_match"] is False
+        assert bridge_failure["bridge_command_recorded"] is False
+        assert bridge_failure_trace["boundary"]["raw_stdout_recorded"] is False
         failing_codex = Path(tmp) / "failing-codex"
         failing_codex.write_text(
             """#!/usr/bin/env python3
