@@ -46,6 +46,17 @@ raw evidence, private state, credentials, local paths, or generated logs.
 After self-merging, sync local `main`, leave unrelated untracked local artifacts
 alone, and continue with the next safe project batch.
 
+## PR Review Comments
+
+When the user asks the agent to review a GitHub PR, treat PR feedback as a
+public collaboration artifact by default. After validating the findings,
+publish actionable review findings directly on the PR as a comment or review,
+unless the user explicitly asks for a local-only review or the finding contains
+private/security-sensitive material that must not be posted publicly.
+
+Do not leave actionable PR blockers only in chat memory. The final user report
+should include the PR comment URL and a compact summary of the posted findings.
+
 ## Smoke Retention Policy
 
 Keep a smoke test only when it validates a durable public behavior:
