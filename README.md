@@ -45,15 +45,15 @@ connect, diagnose, and show the next safe action before doing longer work.
 ### Codex App
 
 Best when you want LoopX to keep working through Codex App heartbeats. Paste
-this from the project repo:
+this in the current project thread:
 
 ```text
-Connect this project to LoopX: <project repo URL or current repo>.
+Connect the current project to LoopX.
 Do not clone the LoopX repository for ordinary use. If `loopx` is not on PATH,
 install or repair it with the official no-clone installer:
 curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
 
-Then run `loopx doctor`. Work only from the target project root: if LoopX state
+Then run `loopx doctor`. Work only from the current project root: if LoopX state
 already exists, reuse it and do not create or overwrite a goal; if the project
 is not connected, prefer `loopx connect`, and use `loopx bootstrap` only when
 goal state clearly needs initialization. Ensure `.loopx/`, `.codex/goals/`,

@@ -8,7 +8,7 @@ dashboard use, development checks, and command discovery.
 ## Codex App And Other Agent Setup
 
 If you already use Codex, Claude Code, Cursor, or another terminal agent, paste
-this into the agent from your project repo:
+this into the agent while it is already operating in the project root:
 
 Compatibility check for non-Codex agents: the agent surface needs at least one
 control hook for LoopX to drive it, such as shell/CLI execution, a goal/task
@@ -17,13 +17,13 @@ one of those, use the manual shell commands instead; LoopX can preserve project
 state, but it cannot make an agent continue automatically.
 
 ```text
-Connect this project to LoopX: <project repo URL or current repo>.
+Connect the current project to LoopX.
 Do not clone the LoopX repository for ordinary use. If `loopx` is not on PATH,
 install or repair it with the official no-clone installer:
 curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 
-Then run `loopx doctor`. Work only from the target project root:
+Then run `loopx doctor`. Work only from the current project root:
 1. If LoopX state already exists, reuse it and do not create or overwrite a
    goal.
 2. If the project is not connected, prefer `loopx connect`; use

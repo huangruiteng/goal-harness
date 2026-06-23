@@ -109,6 +109,12 @@ def assert_docs_surface_codex_cli_quickstart() -> None:
     normalized_readme = " ".join(readme.split())
     normalized_getting_started = " ".join(getting_started.split())
     normalized_product_contract = " ".join(product_contract.split())
+    assert "<project repo URL or current repo>" not in readme, readme
+    assert "<project repo URL or current repo>" not in getting_started, getting_started
+    assert "<项目仓库链接或当前 repo>" not in readme, readme
+    assert "<项目仓库链接或当前 repo>" not in getting_started, getting_started
+    assert "Connect the current project to LoopX." in readme, readme
+    assert "Connect the current project to LoopX." in getting_started, getting_started
     assert "Hidden `codex exec` is not the default bootstrap path" in normalized_readme, readme
     assert "paste one setup message" in normalized_readme, readme
     assert "heartbeat setup, and status check" in normalized_readme, readme
