@@ -4,6 +4,8 @@ import posixpath
 import re
 import shlex
 
+from .todo_contract import build_todo_id
+
 BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION = (
     "loopx_benchmark_case_active_state_v1"
 )
@@ -19,10 +21,42 @@ BENCHMARK_CASE_LIFECYCLE_SOURCE_OF_TRUTH = "case_active_state_and_rollout_event_
 BENCHMARK_CASE_LOOPX_INSTALL_FLOW_SCHEMA_VERSION = (
     "loopx_benchmark_case_install_flow_v0"
 )
+BENCHMARK_CASE_LIFECYCLE_DRIVER_SCHEMA_VERSION = (
+    "loopx_benchmark_case_product_lifecycle_driver_v1"
+)
+BENCHMARK_CASE_LOOPX_PROJECT_ROOT = "/app"
+BENCHMARK_CASE_LOOPX_HOME = "/app"
 BENCHMARK_CASE_LOOPX_CLI_PATH = "/app/.local/bin/loopx"
+BENCHMARK_CASE_LOOPX_REGISTRY_PATH = "/app/.loopx/registry.json"
+BENCHMARK_CASE_LOOPX_RUNTIME_ROOT = "/app/.loopx/runtime"
+BENCHMARK_CASE_LOOPX_GOAL_DOC_PATH = "/app/.loopx/LOOPX_CASE_GOAL.md"
+BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET = "/app/.loopx-source"
 BENCHMARK_CASE_LOOPX_EVENT_LOG_BASENAME = "rollout-event-log.jsonl"
 BENCHMARK_CASE_LOOPX_AGENT_ID = "codex-benchmark-agent"
-BENCHMARK_CASE_LOOPX_TODO_ID = "todo_benchmark_case_main"
+BENCHMARK_CASE_LOOPX_TODO_TEXT = (
+    "Solve the current benchmark case using the official LoopX product-mode "
+    "lifecycle; inspect the task, implement the fix, validate locally, update "
+    "this todo, refresh state, and spend quota once after validated work."
+)
+BENCHMARK_CASE_LOOPX_TODO_ID = build_todo_id(
+    role="agent",
+    source_section="Agent Todo",
+    index=1,
+    text=BENCHMARK_CASE_LOOPX_TODO_TEXT,
+)
+BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS = "loopx-product-mode"
+BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE = "prompt_driven_loopx_cli"
+BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE = (
+    "orchestrated_agentloop_loopx_cli"
+)
+BENCHMARK_CASE_LOOPX_EXECUTION_STYLES = (
+    BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE,
+    BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE,
+)
+BENCHMARK_CASE_LOOPX_OFFICIAL_INSTALLER_URL = (
+    "https://raw.githubusercontent.com/huangruiteng/loopx/main/"
+    "scripts/install-from-github.sh"
+)
 BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE = (
     "prompt_driven_case_local_loopx_cli"
 )
@@ -96,10 +130,10 @@ def benchmark_case_loopx_case_dir(
 def benchmark_case_loopx_event_log_path(
     goal_id: str,
     *,
-    root: str = BENCHMARK_CASE_STATE_ROOT,
+    root: str = BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
 ) -> str:
     return (
-        f"{benchmark_case_loopx_case_dir(goal_id, root=root).rstrip('/')}/"
+        f"{root.rstrip('/')}/goals/{goal_id}/"
         f"{BENCHMARK_CASE_LOOPX_EVENT_LOG_BASENAME}"
     )
 
@@ -161,17 +195,35 @@ def benchmark_case_lifecycle_contract(
     rounds = max_rounds if isinstance(max_rounds, int) and max_rounds > 0 else 5
     return {
         "schema_version": BENCHMARK_CASE_LIFECYCLE_SCHEMA_VERSION,
+        "lifecycle_driver_schema_version": (
+            BENCHMARK_CASE_LIFECYCLE_DRIVER_SCHEMA_VERSION
+        ),
         "benchmark_id": benchmark_id,
         "case_id": case_id,
         "arm_id": arm_id,
         "case_isolation_scope": "per_benchmark_case_arm",
         "benchmark_case_goal_id": resolved_goal_id,
         "case_state_path": resolved_path,
+        "case_registry_path": BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+        "case_runtime_root": BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+        "case_goal_doc_path": BENCHMARK_CASE_LOOPX_GOAL_DOC_PATH,
+        "case_cli_path": BENCHMARK_CASE_LOOPX_CLI_PATH,
+        "case_agent_id": BENCHMARK_CASE_LOOPX_AGENT_ID,
+        "case_todo_id": BENCHMARK_CASE_LOOPX_TODO_ID,
+        "case_todo_text_public_safe": BENCHMARK_CASE_LOOPX_TODO_TEXT,
         "case_state_init_required_before_worker": True,
+        "formal_treatment_semantics": BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS,
+        "canonical_product_mode_lifecycle_driver": True,
+        "supported_execution_styles": list(BENCHMARK_CASE_LOOPX_EXECUTION_STYLES),
+        "preferred_execution_style": BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE,
         "source_of_truth": BENCHMARK_CASE_LIFECYCLE_SOURCE_OF_TRUTH,
         "required_lifecycle_steps": list(BENCHMARK_CASE_LIFECYCLE_STEPS),
         "required_rollout_event_kinds": list(BENCHMARK_CASE_LIFECYCLE_ROLLOUT_EVENTS),
         "max_rounds_budget": rounds,
+        "host_may_install_and_seed_case_state": True,
+        "host_may_preflight_quota_before_agent": True,
+        "host_claims_case_todo_before_agent": False,
+        "agent_must_claim_selected_case_todo": True,
         "runner_internal_prompt_polling_only_allowed": False,
         "surrogate_state_files_allowed": False,
         "official_feedback_forwarded": False,
@@ -193,8 +245,19 @@ def render_benchmark_case_lifecycle_contract_lines(
         "case_isolation_scope",
         "benchmark_case_goal_id",
         "case_state_path",
+        "case_registry_path",
+        "case_runtime_root",
+        "case_goal_doc_path",
+        "case_cli_path",
+        "case_agent_id",
+        "case_todo_id",
+        "formal_treatment_semantics",
+        "preferred_execution_style",
         "source_of_truth",
         "max_rounds_budget",
+        "canonical_product_mode_lifecycle_driver",
+        "host_claims_case_todo_before_agent",
+        "agent_must_claim_selected_case_todo",
         "runner_internal_prompt_polling_only_allowed",
         "surrogate_state_files_allowed",
         "official_feedback_forwarded",
@@ -206,7 +269,11 @@ def render_benchmark_case_lifecycle_contract_lines(
             continue
         rendered = str(value).lower() if isinstance(value, bool) else str(value)
         lines.append(f"  {field}: {rendered}")
-    for field in ("required_lifecycle_steps", "required_rollout_event_kinds"):
+    for field in (
+        "supported_execution_styles",
+        "required_lifecycle_steps",
+        "required_rollout_event_kinds",
+    ):
         value = contract.get(field)
         if isinstance(value, list) and value:
             lines.append(f"  {field}: {','.join(str(item) for item in value)}")
@@ -292,152 +359,221 @@ def benchmark_case_active_state_write_command(
     )
 
 
+def benchmark_case_goal_doc_text(
+    *,
+    benchmark_name: str,
+    goal_id: str,
+    task_id: str,
+    route: str,
+    max_rounds: int,
+) -> str:
+    """Return the public-safe goal doc used by official case-local LoopX."""
+
+    return (
+        f"# {benchmark_name} Case Goal\n\n"
+        "Solve the current benchmark task inside the sandbox using official "
+        "LoopX product-mode lifecycle evidence.\n\n"
+        "## Boundary\n\n"
+        "- Do not upload, submit to leaderboards, expose credentials, or record "
+        "raw task text, verifier output, raw logs, screenshots, or agent "
+        "trajectories in LoopX state.\n"
+        "- The benchmark runner/scorer remains authoritative for official "
+        "reward and pass/fail results.\n"
+        "- Case-local LoopX state is only for planning, todo ownership, local "
+        "evidence, validation, refresh, and quota accounting.\n\n"
+        "## Case Metadata\n\n"
+        f"- benchmark: `{benchmark_name}`\n"
+        f"- task_id: `{task_id}`\n"
+        f"- route: `{route}`\n"
+        f"- goal_id: `{goal_id}`\n"
+        f"- max_rounds: `{max_rounds}`\n"
+    )
+
+
+def _benchmark_case_write_text_command(path: str, content: str) -> str:
+    delimiter = "__LOOPX_BENCHMARK_CASE_TEXT_EOF__"
+    while delimiter in content:
+        delimiter += "_"
+    target = shlex.quote(path)
+    tmp_template = shlex.quote(f"{path}.tmp.XXXXXX")
+    parent = shlex.quote(posixpath.dirname(path.rstrip("/")) or "/")
+    return (
+        f"mkdir -p {parent} && "
+        f"tmp=$(mktemp {tmp_template}) && "
+        f"cat > \"$tmp\" <<'{delimiter}'\n"
+        f"{content}"
+        f"{delimiter}\n"
+        f"mv \"$tmp\" {target} && "
+        f"test -s {target}"
+    )
+
+
+def benchmark_case_loopx_command_prefix(
+    *,
+    case_cli_path: str = BENCHMARK_CASE_LOOPX_CLI_PATH,
+    case_registry_path: str = BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+    case_runtime_root: str = BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+    json_output: bool = True,
+) -> str:
+    """Return the canonical case-local LoopX CLI prefix."""
+
+    parts = [
+        shlex.quote(case_cli_path),
+        "--registry",
+        shlex.quote(case_registry_path),
+        "--runtime-root",
+        shlex.quote(case_runtime_root),
+    ]
+    if json_output:
+        parts.extend(["--format", "json"])
+    return " ".join(parts)
+
+
 def benchmark_case_loopx_install_command(
     *,
     goal_id: str,
     case_state_path: str,
     content: str,
+    benchmark_id: str = "benchmark",
+    case_id: str = "current-case",
+    route: str = BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS,
+    max_rounds: int = 0,
     case_cli_path: str = BENCHMARK_CASE_LOOPX_CLI_PATH,
-    case_rollout_event_log_path: str | None = None,
+    case_registry_path: str = BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+    case_runtime_root: str = BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+    case_goal_doc_path: str = BENCHMARK_CASE_LOOPX_GOAL_DOC_PATH,
+    case_project_root: str = BENCHMARK_CASE_LOOPX_PROJECT_ROOT,
+    case_home: str = BENCHMARK_CASE_LOOPX_HOME,
+    case_loopx_source_path: str | None = None,
     case_agent_id: str = BENCHMARK_CASE_LOOPX_AGENT_ID,
+    case_todo_text: str = BENCHMARK_CASE_LOOPX_TODO_TEXT,
     case_todo_id: str = BENCHMARK_CASE_LOOPX_TODO_ID,
 ) -> str:
-    """Return a shell command that installs the per-case GH CLI surface.
+    """Return the official case-local LoopX product-mode install command.
 
-    The installed CLI is intentionally tiny and public-safe: it models the
-    quota/todo/status/refresh/spend lifecycle inside the benchmark sandbox, logs
-    only event kinds and ids, and never records raw task text, verifier output,
-    trajectories, credentials, or host-local paths.
+    The command mirrors the README path: install or reuse the real ``loopx``
+    CLI, bootstrap/connect a project-local registry and active state, register
+    the benchmark agent, seed one open agent todo through ``loopx todo add``,
+    and run a quota guard. The host may run this before the agent starts, but
+    it must not claim or complete the case todo on the agent's behalf.
     """
 
-    event_log_path = case_rollout_event_log_path or (
-        benchmark_case_loopx_event_log_path(goal_id)
+    del content  # Official bootstrap owns the initial state body.
+    cli_prefix = benchmark_case_loopx_command_prefix(
+        case_cli_path=case_cli_path,
+        case_registry_path=case_registry_path,
+        case_runtime_root=case_runtime_root,
+    )
+    goal_doc = benchmark_case_goal_doc_text(
+        benchmark_name=benchmark_id,
+        goal_id=goal_id,
+        task_id=case_id,
+        route=route,
+        max_rounds=max_rounds,
+    )
+    goal_doc_write = _benchmark_case_write_text_command(
+        case_goal_doc_path,
+        goal_doc,
     )
     cli_parent = shlex.quote(posixpath.dirname(case_cli_path.rstrip("/")) or "/")
+    project_root = shlex.quote(case_project_root)
+    home = shlex.quote(case_home)
     cli_target = shlex.quote(case_cli_path)
-    event_log_target = shlex.quote(event_log_path)
-    case_dir = shlex.quote(posixpath.dirname(case_state_path.rstrip("/")) or "/")
-    state_write = benchmark_case_active_state_write_command(
-        case_state_path=case_state_path,
-        content=content,
+    source_path_value = case_loopx_source_path.rstrip("/") if case_loopx_source_path else ""
+    source_path = shlex.quote(source_path_value) if source_path_value else ""
+    registry_parent = shlex.quote(
+        posixpath.dirname(case_registry_path.rstrip("/")) or "/"
     )
-    script = f"""#!/usr/bin/env sh
-set -eu
-GOAL_ID={shlex.quote(goal_id)}
-STATE_FILE={shlex.quote(case_state_path)}
-EVENT_LOG={shlex.quote(event_log_path)}
-AGENT_ID={shlex.quote(case_agent_id)}
-TODO_ID={shlex.quote(case_todo_id)}
-
-record_event() {{
-  kind="$1"
-  mkdir -p "$(dirname "$EVENT_LOG")"
-  printf '{{"schema_version":"benchmark_case_loopx_cli_event_v0","event_kind":"%s","goal_id":"%s","todo_id":"%s","agent_id":"%s","raw_logs_recorded":false,"raw_task_text_recorded":false,"raw_verifier_output_recorded":false,"raw_agent_trajectory_recorded":false,"local_paths_recorded":false}}\\n' "$kind" "$GOAL_ID" "$TODO_ID" "$AGENT_ID" >> "$EVENT_LOG"
-}}
-
-if [ "${{1:-}}" = "--format" ]; then
-  shift
-  [ "${{1:-}}" = "json" ] && shift || true
-fi
-
-cmd="${{1:-}}"
-[ "$#" -gt 0 ] && shift || true
-
-case "$cmd" in
-  check)
-    record_event check
-    cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","scan_path_public":true,"raw_logs_recorded":false}}
-JSON
-    ;;
-  status)
-    record_event status
-    cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","status":"active","active_state_path":"$STATE_FILE","agent_todo_summary":{{"open_count":1,"items":[{{"todo_id":"$TODO_ID","priority":"P0","status":"open","task_class":"advancement_task","claimed_by":"$AGENT_ID"}}]}},"raw_logs_recorded":false,"local_paths_recorded":false}}
-JSON
-    ;;
-  history)
-    record_event history
-    cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","events_public_counts_only":true,"raw_logs_recorded":false,"raw_task_text_recorded":false}}
-JSON
-    ;;
-  refresh-state)
-    record_event refresh_state
-    cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","refreshed":true,"raw_logs_recorded":false}}
-JSON
-    ;;
-  quota)
-    sub="${{1:-}}"
-    [ "$#" -gt 0 ] && shift || true
-    case "$sub" in
-      should-run)
-        record_event quota_should_run
-        cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","agent_id":"$AGENT_ID","should_run":true,"decision":"run","interaction_contract":{{"user_channel":{{"action_required":false,"open_count":0}}}},"agent_lane_next_action":{{"todo_id":"$TODO_ID","priority":"P0","status":"open","task_class":"advancement_task","claimed_by":"$AGENT_ID"}},"raw_logs_recorded":false}}
-JSON
-        ;;
-      spend-slot|spend)
-        record_event quota_spend
-        cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","spent":true,"raw_logs_recorded":false}}
-JSON
-        ;;
-      *)
-        echo "unsupported quota subcommand: $sub" >&2
-        exit 2
-        ;;
-    esac
-    ;;
-  todo)
-    sub="${{1:-}}"
-    [ "$#" -gt 0 ] && shift || true
-    case "$sub" in
-      claim)
-        record_event todo_claim
-        cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","todo_id":"$TODO_ID","claimed_by":"$AGENT_ID","status":"claimed","raw_logs_recorded":false}}
-JSON
-        ;;
-      update)
-        record_event todo_update
-        cat <<JSON
-{{"ok":true,"goal_id":"$GOAL_ID","todo_id":"$TODO_ID","status":"updated","raw_logs_recorded":false}}
-JSON
-        ;;
-      *)
-        echo "unsupported todo subcommand: $sub" >&2
-        exit 2
-        ;;
-    esac
-    ;;
-  *)
-    echo "unsupported loopx case CLI command: $cmd" >&2
-    exit 2
-    ;;
-esac
-"""
-    delimiter = "__LOOPX_BENCHMARK_CASE_CLI_EOF__"
-    while delimiter in script:
-        delimiter += "_"
-    install_event = (
-        '{"schema_version":"benchmark_case_loopx_cli_event_v0",'
-        '"event_kind":"install","raw_logs_recorded":false,'
-        '"raw_task_text_recorded":false,"raw_verifier_output_recorded":false,'
-        '"raw_agent_trajectory_recorded":false,"local_paths_recorded":false}'
+    runtime_root = shlex.quote(case_runtime_root)
+    installer_url = shlex.quote(BENCHMARK_CASE_LOOPX_OFFICIAL_INSTALLER_URL)
+    todo_text = shlex.quote(case_todo_text)
+    bootstrap_cmd = (
+        f"{cli_prefix} bootstrap "
+        f"--project {project_root} "
+        f"--goal-id {shlex.quote(goal_id)} "
+        f"--objective {shlex.quote('Solve the current benchmark case using LoopX product-mode lifecycle.')} "
+        "--domain benchmark "
+        f"--state-file {shlex.quote(case_state_path)} "
+        f"--goal-doc {shlex.quote(case_goal_doc_path)} "
+        "--adapter-kind benchmark_case_loopx_product_mode_v0 "
+        "--adapter-status connected "
+        "--no-onboarding-scan "
+        "--force "
+        "--no-global-sync"
+    )
+    configure_cmd = (
+        f"{cli_prefix} configure-goal "
+        f"--goal-id {shlex.quote(goal_id)} "
+        f"--registered-agent {shlex.quote(case_agent_id)} "
+        f"--primary-agent {shlex.quote(case_agent_id)} "
+        "--execute"
+    )
+    todo_add_cmd = (
+        f"{cli_prefix} todo add "
+        f"--goal-id {shlex.quote(goal_id)} "
+        "--role agent "
+        f"--text {todo_text} "
+        "--task-class advancement_task "
+        "--action-kind solve_benchmark_case"
+    )
+    quota_cmd = (
+        f"{cli_prefix} quota should-run "
+        f"--goal-id {shlex.quote(goal_id)} "
+        f"--agent-id {shlex.quote(case_agent_id)}"
+    )
+    refresh_cmd = (
+        f"{cli_prefix} refresh-state "
+        f"--goal-id {shlex.quote(goal_id)} "
+        "--classification benchmark_case_lifecycle_initialized "
+        "--delivery-batch-scale single_surface "
+        "--delivery-outcome surface_only "
+        "--no-global-sync"
+    )
+    expected_todo_comment = (
+        f"# expected stable case todo id: {shlex.quote(case_todo_id)}"
     )
     return (
-        f"{state_write} && "
-        f"mkdir -p {cli_parent} {case_dir} && "
-        f"cat > {cli_target} <<'{delimiter}'\n"
-        f"{script}"
-        f"{delimiter}\n"
-        f"chmod +x {cli_target} && "
-        f": > {event_log_target} && "
-        f"printf '%s\\n' {shlex.quote(install_event)} >> {event_log_target} && "
-        f"test -x {cli_target} && "
-        f"test -s {shlex.quote(case_state_path)}"
+        "set -eu\n"
+        "echo 'loopx_case_init_phase:prepare_paths' >&2\n"
+        f"export HOME={home}\n"
+        f"export PATH={shlex.quote(posixpath.dirname(case_cli_path.rstrip('/')))}:$PATH\n"
+        f"mkdir -p {cli_parent} {registry_parent} {runtime_root} {project_root}\n"
+        "echo 'loopx_case_init_phase:ensure_cli' >&2\n"
+        f"if [ ! -x {cli_target} ]; then\n"
+        f"  if [ -n {shlex.quote(source_path_value)} ]; then\n"
+        f"    if [ ! -x {source_path}/scripts/install-local.sh ]; then\n"
+        "      echo 'LoopX local source install requested but scripts/install-local.sh is missing' >&2\n"
+        "      exit 127\n"
+        "    fi\n"
+        f"    LOOPX_BIN_DIR={cli_parent} LOOPX_INSTALL_CANARY=0 LOOPX_INSTALL_SKILL=0 LOOPX_SHELL_PROFILE={shlex.quote(case_home.rstrip('/') + '/.loopx-install-profile')} HOME={home} {source_path}/scripts/install-local.sh >/dev/null\n"
+        "  elif command -v loopx >/dev/null 2>&1; then\n"
+        f"    ln -sf \"$(command -v loopx)\" {cli_target}\n"
+        "  elif command -v curl >/dev/null 2>&1; then\n"
+        f"    curl -fsSL {installer_url} | HOME={home} bash\n"
+        "  else\n"
+        "    echo 'LoopX CLI unavailable and curl is missing for official install' >&2\n"
+        "    exit 127\n"
+        "  fi\n"
+        "fi\n"
+        f"test -x {cli_target}\n"
+        "echo 'loopx_case_init_phase:write_goal_doc' >&2\n"
+        f"{goal_doc_write}\n"
+        f"{expected_todo_comment}\n"
+        "echo 'loopx_case_init_phase:bootstrap' >&2\n"
+        f"{bootstrap_cmd}\n"
+        "echo 'loopx_case_init_phase:configure_goal' >&2\n"
+        f"{configure_cmd}\n"
+        "echo 'loopx_case_init_phase:todo_add' >&2\n"
+        f"{todo_add_cmd}\n"
+        "echo 'loopx_case_init_phase:quota_should_run' >&2\n"
+        f"{quota_cmd}\n"
+        "echo 'loopx_case_init_phase:refresh_state' >&2\n"
+        f"{refresh_cmd}\n"
+        "echo 'loopx_case_init_phase:verify_state' >&2\n"
+        f"test -s {shlex.quote(case_state_path)}\n"
+        "echo 'loopx_case_init_phase:grant_agent_access' >&2\n"
+        "chmod -R a+rwX /app/.codex /app/.loopx /app/.local 2>/dev/null || true\n"
+        "echo 'loopx_case_init_phase:complete' >&2\n"
     )
 
 
@@ -449,6 +585,7 @@ def benchmark_case_loopx_install_payload(
     route: str,
     max_rounds: int,
     case_cli_path: str = BENCHMARK_CASE_LOOPX_CLI_PATH,
+    case_loopx_source_path: str | None = None,
     case_agent_id: str = BENCHMARK_CASE_LOOPX_AGENT_ID,
     case_todo_id: str = BENCHMARK_CASE_LOOPX_TODO_ID,
 ) -> dict[str, object]:
@@ -476,27 +613,57 @@ def benchmark_case_loopx_install_payload(
         "install_flow_schema_version": (
             BENCHMARK_CASE_LOOPX_INSTALL_FLOW_SCHEMA_VERSION
         ),
+        "lifecycle_driver_schema_version": (
+            BENCHMARK_CASE_LIFECYCLE_DRIVER_SCHEMA_VERSION
+        ),
+        "formal_treatment_semantics": BENCHMARK_CASE_LOOPX_FORMAL_TREATMENT_SEMANTICS,
+        "canonical_product_mode_lifecycle_driver": True,
+        "execution_style": BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE,
+        "supported_execution_styles": list(BENCHMARK_CASE_LOOPX_EXECUTION_STYLES),
         "benchmark_case_goal_id": goal_id,
         "case_state_path": case_state_path,
+        "case_registry_path": BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+        "case_runtime_root": BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+        "case_goal_doc_path": BENCHMARK_CASE_LOOPX_GOAL_DOC_PATH,
         "case_cli_path": case_cli_path,
+        "case_loopx_source_path": case_loopx_source_path or "",
+        "case_loopx_source_path_recorded": False,
+        "case_loopx_source_install_requested": bool(case_loopx_source_path),
         "case_rollout_event_log_path": case_rollout_event_log_path,
         "case_agent_id": case_agent_id,
         "case_todo_id": case_todo_id,
+        "case_todo_text_public_safe": BENCHMARK_CASE_LOOPX_TODO_TEXT,
         "case_todo_seeded": True,
+        "case_todo_preclaimed": False,
+        "case_todo_seeded_by": "loopx todo add",
         "install_flow_required": True,
         "prompt_driven_route_required": True,
         "product_path_primary_route": (
             BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE
         ),
+        "host_claims_case_todo_before_agent": False,
+        "agent_must_claim_selected_case_todo": True,
         "scheduler_route_supported": True,
         "scheduler_route": BENCHMARK_CASE_LOOPX_SCHEDULER_ROUTE,
+        "workflow_orchestrated_route_supported": True,
+        "workflow_orchestrated_route": (
+            BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE
+        ),
         "command": benchmark_case_loopx_install_command(
+            benchmark_id=benchmark_id,
+            case_id=case_id,
+            route=route,
+            max_rounds=max_rounds,
             goal_id=goal_id,
             case_state_path=case_state_path,
             content=seed,
             case_cli_path=case_cli_path,
-            case_rollout_event_log_path=case_rollout_event_log_path,
+            case_loopx_source_path=case_loopx_source_path,
+            case_registry_path=BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+            case_runtime_root=BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+            case_goal_doc_path=BENCHMARK_CASE_LOOPX_GOAL_DOC_PATH,
             case_agent_id=case_agent_id,
+            case_todo_text=BENCHMARK_CASE_LOOPX_TODO_TEXT,
             case_todo_id=case_todo_id,
         ),
         "raw_task_text_required_for_init": False,
