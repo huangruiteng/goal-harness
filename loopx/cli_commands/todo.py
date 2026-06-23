@@ -4,6 +4,12 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..todo_suggestion_prompt import (
+    ALLOWED_TODO_SUGGESTION_SOURCES,
+    ALLOWED_TODO_SUGGESTION_TRIGGERS,
+    build_todo_suggestion_prompt_packet,
+    render_todo_suggestion_prompt_markdown,
+)
 from ..todos import (
     archive_completed_todos,
     add_goal_todo,
@@ -36,12 +42,14 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
             "complete",
             "supersede",
             "archive-completed",
+            "suggest",
         ],
         default="add",
         help=(
             "Use add to append a checkbox todo, claim to soft-claim by registered "
             "agent id, update/complete/supersede to transition by todo_id, or "
-            "archive-completed to move older completed todos into Completed Work Archive."
+            "archive-completed to move older completed todos into Completed Work Archive. "
+            "Use suggest to generate an agent-facing candidate todo analysis prompt without writing state."
         ),
     )
     todo_parser.add_argument("--goal-id", required=True, help="Goal id whose active state should receive the todo.")
@@ -162,6 +170,29 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         default=12,
         help="For archive-completed, keep this many completed todos in the active section.",
     )
+    todo_parser.add_argument(
+        "--agent-id",
+        help="For todo suggest, name the project agent that should perform the repository analysis.",
+    )
+    todo_parser.add_argument(
+        "--from",
+        dest="suggestion_sources",
+        choices=ALLOWED_TODO_SUGGESTION_SOURCES,
+        action="append",
+        help="For todo suggest, include a source lane for agent analysis. Repeat for multiple lanes.",
+    )
+    todo_parser.add_argument(
+        "--limit",
+        dest="suggestion_limit",
+        type=int,
+        help="For todo suggest, maximum candidate count. Values above 5 are clamped to 5.",
+    )
+    todo_parser.add_argument(
+        "--trigger",
+        dest="suggestion_trigger",
+        choices=ALLOWED_TODO_SUGGESTION_TRIGGERS,
+        help="For todo suggest, why this candidate queue is being requested.",
+    )
     todo_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
     todo_parser.add_argument("--state-file", help="Active goal state path. Defaults to the registry goal state_file.")
     todo_parser.add_argument("--dry-run", action="store_true", help="Preview the active-state edit without writing.")
@@ -176,7 +207,21 @@ def handle_todo_command(
     print_payload: PrintPayload,
     append_cli_rollout_event: RolloutEventAppender,
 ) -> int:
+    renderer = (
+        render_todo_suggestion_prompt_markdown
+        if args.todo_command == "suggest"
+        else render_todo_markdown
+    )
     try:
+        if args.todo_command != "suggest" and (
+            args.agent_id
+            or args.suggestion_sources
+            or args.suggestion_limit is not None
+            or args.suggestion_trigger
+        ):
+            raise ValueError(
+                "todo --agent-id, --from, --limit, and --trigger are only supported by `todo suggest`"
+            )
         if args.todo_command == "add":
             if not args.role:
                 raise ValueError("todo add requires --role")
@@ -372,12 +417,61 @@ def handle_todo_command(
                 state_file=Path(args.state_file).expanduser() if args.state_file else None,
                 dry_run=not bool(args.execute),
             )
+        elif args.todo_command == "suggest":
+            unsupported = [
+                flag
+                for flag, value in (
+                    ("--role", args.role),
+                    ("--text", args.text),
+                    ("--todo-id", args.todo_id),
+                    ("--status", args.status),
+                    ("--note", args.note),
+                    ("--evidence", args.evidence),
+                    ("--reason", args.reason),
+                    ("--task-class", args.task_class),
+                    ("--action-kind", args.action_kind),
+                    ("--required-write-scope", args.required_write_scopes),
+                    ("--required-capability", args.required_capabilities),
+                    ("--target-capability", args.target_capabilities),
+                    ("--claimed-by", args.claimed_by),
+                    ("--blocks-agent", args.blocks_agent),
+                    ("--unblocks-todo-id", args.unblocks_todo_id),
+                    ("--resume-when", args.resume_when),
+                    ("--clear-claim", args.clear_claim),
+                    ("--next-agent-todo", args.next_agent_todo),
+                    ("--next-user-todo", args.next_user_todo),
+                    ("--next-claimed-by", args.next_claimed_by),
+                    ("--next-task-class", args.next_task_class),
+                    ("--next-action-kind", args.next_action_kind),
+                    ("--side-agent-self-merged", args.side_agent_self_merged),
+                    ("--state-file", args.state_file),
+                    ("--execute", args.execute),
+                )
+                if value
+            ]
+            if unsupported:
+                raise ValueError(
+                    "todo suggest only accepts --goal-id, optional --project, --agent-id, "
+                    "--from, --limit, --trigger, --dry-run, and --format; unsupported: "
+                    + ", ".join(unsupported)
+                )
+            payload = build_todo_suggestion_prompt_packet(
+                goal_id=args.goal_id,
+                project=Path(args.project).expanduser() if args.project else None,
+                agent_id=args.agent_id,
+                sources=args.suggestion_sources,
+                limit=args.suggestion_limit,
+                trigger=args.suggestion_trigger,
+            )
+            payload["dry_run"] = True
         else:
             raise ValueError("unsupported todo command")
     except Exception as exc:
         payload = {
             "ok": False,
-            "dry_run": not bool(args.execute)
+            "dry_run": True
+            if args.todo_command == "suggest"
+            else not bool(args.execute)
             if args.todo_command == "archive-completed"
             else bool(args.dry_run),
             "added": False,
@@ -417,5 +511,5 @@ def handle_todo_command(
                 "already_exists": bool(payload.get("already_exists")),
             },
         )
-    print_payload(payload, args.format, render_todo_markdown)
+    print_payload(payload, args.format, renderer)
     return 0 if payload.get("ok") else 1
