@@ -34,7 +34,7 @@ def test_codex_client_writes_last_message_and_rewrites_bridge() -> None:
         prompt_dump = root / "prompt.txt"
         fake_codex.write_text(
             f"""#!/usr/bin/env python3
-import os, sys
+import os, sys, time
 from pathlib import Path
 
 args = sys.argv[1:]
@@ -44,6 +44,7 @@ if stdin_text:
 prompt = args[-1]
 Path({str(prompt_dump)!r}).write_text(prompt, encoding='utf-8')
 out = Path(args[args.index('--output-last-message') + 1])
+time.sleep(0.35)
 out.write_text('LOOPX_REVERSE_READY\\n', encoding='utf-8')
 print('codex stdout ok')
 print('codex stderr ok', file=sys.stderr)
@@ -92,6 +93,9 @@ print('codex stderr ok', file=sys.stderr)
             )
             remote_last = root / "remote-last-message.txt"
             prompt = "Private bridge command:\n/remote/tmp/bridge\n\nTask"
+            env = os.environ.copy()
+            env["LOOPX_REVERSE_CONNECT_TIMEOUT_SEC"] = "0.1"
+            env["LOOPX_REVERSE_RESPONSE_TIMEOUT_SEC"] = "5"
             proc = subprocess.run(
                 [
                     str(client),
@@ -108,6 +112,7 @@ print('codex stderr ok', file=sys.stderr)
                     prompt,
                 ],
                 check=False,
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -129,8 +134,9 @@ def test_json_client_forwards_stdin_to_bridge_command() -> None:
         fake_bridge = root / "fake-json-bridge"
         fake_bridge.write_text(
             """#!/usr/bin/env python3
-import json, sys
+import json, sys, time
 payload = json.loads(sys.stdin.read() or '{}')
+time.sleep(0.35)
 print(json.dumps({
     'ok': True,
     'operation': payload.get('operation'),
@@ -177,10 +183,14 @@ print(json.dumps({
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            env = os.environ.copy()
+            env["LOOPX_REVERSE_CONNECT_TIMEOUT_SEC"] = "0.1"
+            env["LOOPX_REVERSE_RESPONSE_TIMEOUT_SEC"] = "5"
             proc = subprocess.run(
                 [str(client)],
                 input=json.dumps({"operation": "exec", "cwd": "/app"}),
                 check=False,
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

@@ -244,6 +244,10 @@ payload = {{
 s=socket.socket(socket.AF_UNIX)
 s.settimeout(float(os.environ.get('LOOPX_REVERSE_CONNECT_TIMEOUT_SEC', '30')))
 s.connect(SOCK)
+s.settimeout(float(os.environ.get(
+    'LOOPX_REVERSE_RESPONSE_TIMEOUT_SEC',
+    os.environ.get('LOOPX_REVERSE_CODEX_TIMEOUT_SEC', '7200'),
+)))
 s.sendall(json.dumps(payload).encode()+b'\\n')
 data=b''
 while not data.endswith(b'\\n'):
@@ -280,6 +284,10 @@ payload = {{
 s=socket.socket(socket.AF_UNIX)
 s.settimeout(float(os.environ.get('LOOPX_REVERSE_CONNECT_TIMEOUT_SEC', '30')))
 s.connect(SOCK)
+s.settimeout(float(os.environ.get(
+    'LOOPX_REVERSE_RESPONSE_TIMEOUT_SEC',
+    os.environ.get('LOOPX_REVERSE_JSON_TIMEOUT_SEC', '300'),
+)))
 s.sendall(json.dumps(payload).encode()+b'\\n')
 data=b''
 while not data.endswith(b'\\n'):
