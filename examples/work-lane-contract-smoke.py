@@ -1138,6 +1138,135 @@ def assert_side_agent_waits_when_only_other_agent_has_claimed_work() -> None:
     assert "quiet_noop_allowed=True" in markdown, markdown
 
 
+def assert_side_agent_replans_when_deferred_successor_is_ready() -> None:
+    deferred_action = "[P1] Continue the issue meta surface fixture implementation."
+    payload = status_payload(
+        status="side_agent_ready_deferred_successor",
+        has_agent_todo=False,
+        next_action="Continue the ready deferred issue-surface successor.",
+        coordination={
+            "primary_agent": "codex-main-control",
+            "registered_agents": ["codex-main-control", "codex-side-bypass"],
+        },
+    )
+    agent_todos = {
+        "schema_version": "todo_summary_v0",
+        "source_section": "Agent Todo",
+        "total_count": 2,
+        "open_count": 0,
+        "done_count": 2,
+        "deferred_count": 1,
+        "first_open_items": [],
+        "backlog_items": [],
+        "items": [
+            {
+                "index": 1,
+                "text": "[P1] Finish CLI extraction prerequisite.",
+                "role": "agent",
+                "status": "done",
+                "done": True,
+                "priority": "P1",
+                "task_class": "advancement_task",
+                "todo_id": "todo_cli_done",
+            },
+            {
+                "index": 2,
+                "text": deferred_action,
+                "role": "agent",
+                "status": "deferred",
+                "done": True,
+                "priority": "P1",
+                "task_class": "advancement_task",
+                "claimed_by": "codex-side-bypass",
+                "todo_id": "todo_issue_surface_deferred",
+                "resume_when": "todo_done:todo_cli_done",
+                "resume_ready": True,
+                "resume_condition": {
+                    "schema_version": "todo_resume_condition_v0",
+                    "resume_when": "todo_done:todo_cli_done",
+                    "kind": "todo_done",
+                    "target_todo_id": "todo_cli_done",
+                    "target_status": "done",
+                    "satisfied": True,
+                },
+            },
+        ],
+        "deferred_items": [
+            {
+                "index": 2,
+                "text": deferred_action,
+                "role": "agent",
+                "status": "deferred",
+                "done": True,
+                "priority": "P1",
+                "task_class": "advancement_task",
+                "claimed_by": "codex-side-bypass",
+                "todo_id": "todo_issue_surface_deferred",
+                "resume_when": "todo_done:todo_cli_done",
+                "resume_ready": True,
+                "resume_condition": {
+                    "schema_version": "todo_resume_condition_v0",
+                    "resume_when": "todo_done:todo_cli_done",
+                    "kind": "todo_done",
+                    "target_todo_id": "todo_cli_done",
+                    "target_status": "done",
+                    "satisfied": True,
+                },
+            }
+        ],
+        "deferred_resume_candidates": [
+            {
+                "index": 2,
+                "text": deferred_action,
+                "role": "agent",
+                "status": "deferred",
+                "done": True,
+                "priority": "P1",
+                "task_class": "advancement_task",
+                "claimed_by": "codex-side-bypass",
+                "todo_id": "todo_issue_surface_deferred",
+                "resume_when": "todo_done:todo_cli_done",
+                "resume_ready": True,
+            }
+        ],
+    }
+    item = payload["attention_queue"]["items"][0]
+    item["project_asset"]["agent_todos"] = agent_todos
+    item["agent_todos"] = agent_todos
+
+    guard = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    assert guard["decision"] == "successor_replan_required", guard
+    assert guard["should_run"] is True, guard
+    assert guard["normal_delivery_allowed"] is False, guard
+    assert guard["actionable_by_codex"] is True, guard
+    assert guard["effective_action"] == "successor_replan_required", guard
+    frontier = guard["agent_scope_frontier"]
+    assert frontier["action"] == "successor_replan_required", frontier
+    assert frontier["quiet_noop_allowed"] is False, frontier
+    assert frontier["requires_replan"] is True, frontier
+    assert frontier["deferred_resume_candidates"][0]["todo_id"] == "todo_issue_surface_deferred", frontier
+    assert guard["agent_todo_summary"]["current_agent_deferred_resume_count"] == 1, guard
+    obligation = guard["execution_obligation"]
+    assert obligation["kind"] == "successor_replan_required", obligation
+    assert obligation["must_attempt_work"] is True, obligation
+    assert obligation["delivery_allowed"] is False, obligation
+    contract = guard["interaction_contract"]
+    assert contract["mode"] == "successor_replan_required", contract
+    assert contract["agent_channel"]["must_attempt"] is True, contract
+    assert contract["agent_channel"]["delivery_allowed"] is False, contract
+    assert contract["agent_channel"]["quiet_noop_allowed"] is False, contract
+    assert contract["cli_channel"]["spend_after_validation"] is True, contract
+    assert "todo_issue_surface_deferred" in contract["cli_channel"]["next_cli_actions"][0], contract
+    assert guard["automation_liveness"]["automation_action"] == "execute_bounded_work", guard
+    markdown = render_quota_should_run_markdown(guard)
+    assert "agent_scope_frontier: action=successor_replan_required" in markdown, markdown
+    assert "agent_scope_deferred_resume_candidates" in markdown, markdown
+
+
 def assert_side_agent_can_take_unclaimed_work() -> None:
     primary_action = "[P0] Run SWE-Marathon full-suite polling and record compact results."
     unclaimed_action = "[P0] Validate hosted Frontstage screenshot and public CTA copy."
@@ -1380,6 +1509,7 @@ def main() -> int:
     assert_launch_then_poll_todo_without_handle_routes_to_advancement()
     assert_side_agent_next_action_projects_without_stealing_goal_next_action()
     assert_side_agent_waits_when_only_other_agent_has_claimed_work()
+    assert_side_agent_replans_when_deferred_successor_is_ready()
     assert_side_agent_can_take_unclaimed_work()
     assert_agent_lane_next_action_prefers_capability_repair_candidate()
     assert_primary_agent_prioritizes_claimed_review_handoff()

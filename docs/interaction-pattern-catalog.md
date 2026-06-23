@@ -1299,8 +1299,50 @@ monitor work to crowd out the selected advancement lane.
 
 Agent-scoped quota must distinguish "the goal has runnable work" from "this
 agent has runnable work." When the current agent has no in-scope candidate,
-quota should not force a delivery turn. It should project one of these machine
-states instead:
+quota should not force a delivery turn. It first checks whether the scoped
+frontier is truly empty or whether a deferred successor has become ready.
+
+Deferred work should stay machine-readable without becoming executable backlog
+too early. A deferred todo may carry `resume_when=<token>`, initially
+`resume_when=todo_done:<todo_id>`. Status evaluates the condition, adds
+`resume_condition`, and marks `resume_ready=true` only after the target todo is
+done. Status and quota expose deferred work after sorted open lanes through
+bounded visibility fields:
+
+- `deferred_items`: sorted visibility for deferred todos;
+- `deferred_resume_candidates`: sorted visibility for ready deferred todos;
+- default cap: 8 deferred items per lane.
+
+These fields are visibility and replan input, not normal delivery permission.
+Consumers must not merge them into `first_open_items` or executable backlog
+until a lifecycle command reopens or supersedes the todo.
+
+For agent-scoped quota, ready deferred candidates are split by claim:
+
+- `current_agent_deferred_resume_candidates`;
+- `unclaimed_deferred_resume_candidates`;
+- `other_agent_deferred_resume_candidates`.
+
+Only current-agent and unclaimed ready deferred candidates can wake that side
+agent. Other-agent deferred candidates remain diagnostic visibility. If the
+side agent has no open current-agent or unclaimed advancement todo but does
+have a ready current-agent/unclaimed deferred candidate, quota should return:
+
+```text
+effective_action=successor_replan_required
+should_run=true
+normal_delivery_allowed=false
+execution_obligation.contract=deferred_resume_projection
+interaction_contract.agent_channel.must_attempt=true
+interaction_contract.agent_channel.quiet_noop_allowed=false
+```
+
+The bounded action is to reopen the deferred todo, supersede it with a current
+successor, or record a public-safe no-follow-up rationale. Only after that
+writeback may normal delivery resume.
+
+If no ready current-agent or unclaimed deferred successor exists, quota should
+project one of these machine states instead:
 
 - `scope_exhausted`: no current-agent or unclaimed candidate matches the
   registered agent profile and boundary;
@@ -1322,9 +1364,9 @@ recommended action should name the scoped condition, not borrow the global
 goal-level route. A side agent should be allowed to no-op without spend, or
 claim a newly exposed in-scope todo before delivery becomes allowed again.
 
-This pattern is the runtime counterpart of IP-022. IP-022 makes claimed and
-agent-lane work visible; IP-026 says what to do when that scoped frontier is
-empty.
+This pattern is the runtime counterpart of IP-022. IP-022 makes claimed,
+deferred, and agent-lane work visible; IP-026 says what to do when that scoped
+frontier is empty or when a deferred successor makes it non-empty again.
 
 **Visual Model**
 
@@ -1333,10 +1375,15 @@ flowchart TD
   Q["quota should-run --agent-id side"] --> F{"current-agent frontier?"}
   F -->|"current-agent candidate"| D["bounded delivery allowed"]
   F -->|"unclaimed in-scope candidate"| C["agent may claim before delivery"]
-  F -->|"only other-agent or out-of-scope work"| X["scope_exhausted / primary_review_wait"]
+  F -->|"no open candidate"| R{"ready current/unclaimed deferred successor?"}
+  R -->|"yes"| P["successor_replan_required"]
+  P --> U["reopen, supersede, or no-follow-up rationale"]
+  U --> Q
+  R -->|"no"| X["scope_exhausted / primary_review_wait"]
+  F -->|"only other-agent or out-of-scope work"| X
   X --> N["quiet no-op, no spend"]
-  X --> R["primary may review, merge, or reassign"]
-  R --> Q
+  X --> H["primary may review, merge, or reassign"]
+  H --> Q
 ```
 
 **Bad smell**
@@ -1346,7 +1393,11 @@ A side-agent heartbeat receives `should_run=true`,
 `agent_lane_next_action=None`, `current_agent_claimed_advancement_items=[]`,
 and the only recommendation is a primary-owned benchmark or runtime lane. The
 agent either churns through repeated empty heartbeats or risks working outside
-its registered scope.
+its registered scope. A related failure is a ready deferred successor that
+remains visible only in a quiet no-candidate payload; the side agent reports
+"nothing runnable" until a human notices and asks for the next productization
+layer. The opposite bad smell is also harmful: deferred items are mixed into
+the open todo list, so stale or future work outranks live open tasks.
 
 **Validation**
 
@@ -1354,7 +1405,15 @@ its registered scope.
   work is claimed by the primary and the side-agent `--agent-id` call returns
   `scope_exhausted` or `primary_review_wait`;
 - `examples/work-lane-contract-smoke.py` should cover that an empty
-  current-agent frontier cannot produce `delivery_allowed=true`;
+  current-agent frontier cannot produce `delivery_allowed=true`, and that a
+  ready deferred successor returns `successor_replan_required` instead of a
+  quiet no-op;
+- `examples/todo-durability-fixture-smoke.py` covers parsing
+  `resume_when=todo_done:<todo_id>` and projecting ready deferred candidates
+  after open items;
+- `docs/project-agent-todo-contract.md`
+- `docs/quota-allocation.md`
+- `docs/status-data-contract.md`
 - `skills/loopx-self-repair/references/repair-patterns.md` records
   `agent_scoped_no_candidate_gap` for incident triage.
 

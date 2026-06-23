@@ -24,6 +24,7 @@ FIRST_OPEN_TODO = (
 )
 SECOND_OPEN_TODO = "[P2] Keep the todo archive warning visible in quota should-run."
 ACTIVE_DONE_TODO = "[P2] Prior completed implementation remains in active Agent Todo until archived."
+DEFERRED_TODO = "[P1] Resume the issue surface fixture after CLI extraction stabilizes."
 ARCHIVED_DONE_TODOS = 25
 
 
@@ -64,6 +65,9 @@ def state_text() -> str:
         "- [ ] [P1] Add a parseable todo fixture when discovered planning work\n"
         "  cannot be represented by the current Markdown parser.\n"
         f"- [x] {ACTIVE_DONE_TODO}\n"
+        "  <!-- loopx:todo todo_id=todo_done_cli status=done task_class=advancement_task -->\n"
+        f"- [-] {DEFERRED_TODO}\n"
+        "  <!-- loopx:todo todo_id=todo_deferred_surface status=deferred task_class=advancement_task claimed_by=codex-product-capability resume_when=todo_done:todo_done_cli -->\n"
         f"- [ ] {SECOND_OPEN_TODO}\n\n"
         "## Completed Work Archive\n\n"
         f"{archived_lines}"
@@ -117,10 +121,11 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
 
 def assert_parseable_agent_todos(agent_todos: dict) -> None:
     assert agent_todos["schema_version"] == "todo_summary_v0", agent_todos
-    assert agent_todos["total_count"] == 3, agent_todos
+    assert agent_todos["total_count"] == 4, agent_todos
     assert agent_todos["open_count"] == 2, agent_todos
-    assert agent_todos["done_count"] == 1, agent_todos
-    assert [item["index"] for item in agent_todos["first_open_items"]] == [1, 3], agent_todos
+    assert agent_todos["done_count"] == 2, agent_todos
+    assert agent_todos["deferred_count"] == 1, agent_todos
+    assert [item["index"] for item in agent_todos["first_open_items"]] == [1, 4], agent_todos
 
     first_open = agent_todos["first_open_items"][0]
     assert first_open["schema_version"] == "todo_item_v0", first_open
@@ -140,6 +145,17 @@ def assert_parseable_agent_todos(agent_todos: dict) -> None:
     assert second_open["priority"] == "P2", second_open
     assert second_open["status"] == "open", second_open
     assert second_open["text"] == SECOND_OPEN_TODO, second_open
+
+    deferred = agent_todos["deferred_items"][0]
+    assert deferred["todo_id"] == "todo_deferred_surface", deferred
+    assert deferred["status"] == "deferred", deferred
+    assert deferred["resume_when"] == "todo_done:todo_done_cli", deferred
+    assert deferred["resume_ready"] is True, deferred
+    assert deferred["resume_condition"]["target_status"] == "done", deferred
+    assert agent_todos["deferred_resume_candidates"][0]["todo_id"] == "todo_deferred_surface", agent_todos
+    if "items" in agent_todos:
+        statuses = [item["status"] for item in agent_todos["items"][:3]]
+        assert statuses == ["open", "open", "deferred"], agent_todos
 
 
 def attention_item(status_payload: dict) -> dict:
@@ -161,7 +177,12 @@ def main() -> int:
         assert "completed_todo_archive_warning" not in item, item
         assert "completed_todo_archive_warning" not in item["project_asset"], item
         assert item["project_asset"]["agent_todos"]["open"] == 2, item
-        assert item["project_asset"]["agent_todos"]["done"] == 1, item
+        assert item["project_asset"]["agent_todos"]["done"] == 2, item
+        assert item["project_asset"]["agent_todos"]["deferred_count"] == 1, item
+        assert (
+            item["project_asset"]["agent_todos"]["deferred_resume_candidates"][0]["todo_id"]
+            == "todo_deferred_surface"
+        ), item
         assert item["project_asset"]["agent_todos"]["next"] == FIRST_OPEN_TODO, item
         assert item["project_asset"]["agent_todos"]["next_index"] == 1, item
 
@@ -198,7 +219,8 @@ def main() -> int:
         post_lifecycle_item = attention_item(post_lifecycle_status)
         post_agent_todos = post_lifecycle_item["agent_todos"]
         assert post_agent_todos["open_count"] == 2, post_agent_todos
-        assert post_agent_todos["done_count"] == 2, post_agent_todos
+        assert post_agent_todos["done_count"] == 3, post_agent_todos
+        assert post_agent_todos["deferred_count"] == 1, post_agent_todos
         assert post_agent_todos["first_open_items"][0]["priority"] == "P1", post_agent_todos
         assert post_agent_todos["first_open_items"][0]["todo_id"] == next_todo["todo_id"], post_agent_todos
         assert post_agent_todos["first_open_items"][0]["action_kind"] == "fixture_follow_up", post_agent_todos

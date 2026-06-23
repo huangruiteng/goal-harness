@@ -13,6 +13,7 @@ TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
 TODO_AGENT_CLAIM_PATTERN = re.compile(r"^[a-z][a-z0-9_.:@-]{0,79}$")
 TODO_CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
+TODO_RESUME_WHEN_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}(?::[a-z0-9_.:@-]{1,96})?$")
 TODO_WRITE_SCOPE_MAX_CHARS = 160
 
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
@@ -153,6 +154,13 @@ def normalize_todo_claimed_by(value: Any) -> str | None:
 
 def normalize_todo_blocks_agent(value: Any) -> str | None:
     return normalize_todo_claimed_by(value)
+
+
+def normalize_todo_resume_when(value: Any) -> str | None:
+    candidate = compact_todo_text(value).lower()
+    if candidate and TODO_RESUME_WHEN_PATTERN.match(candidate):
+        return candidate
+    return None
 
 
 def normalize_todo_id(value: Any) -> str | None:
@@ -318,6 +326,10 @@ def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
             todo_id = normalize_todo_id(value)
             if todo_id:
                 metadata["unblocks_todo_id"] = todo_id
+        elif key == "resume_when":
+            resume_when = normalize_todo_resume_when(value)
+            if resume_when:
+                metadata["resume_when"] = resume_when
         elif key in {"note", "evidence", "reason", "completed_at", "updated_at"}:
             if value:
                 metadata[key] = value
@@ -340,6 +352,7 @@ def format_todo_metadata_line(
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
     unblocks_todo_id: str | None = None,
+    resume_when: str | None = None,
     note: str | None = None,
     evidence: str | None = None,
     reason: str | None = None,
@@ -407,6 +420,11 @@ def format_todo_metadata_line(
         raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
     if normalized_unblocks_todo_id:
         fields.append(f"unblocks_todo_id={encode_metadata_value(normalized_unblocks_todo_id)}")
+    normalized_resume_when = normalize_todo_resume_when(resume_when)
+    if resume_when and not normalized_resume_when:
+        raise ValueError("resume_when must be a public-safe token such as todo_done:todo_ab12cd34ef56")
+    if normalized_resume_when:
+        fields.append(f"resume_when={encode_metadata_value(normalized_resume_when)}")
     for key, value in (
         ("note", note),
         ("evidence", evidence),
