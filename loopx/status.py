@@ -1006,6 +1006,7 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_launch",
         "remote_command_file_bridge_materialized",
         "remote_command_file_bridge_command_configured",
+        "remote_command_file_bridge_probe_command_configured",
         "remote_command_file_bridge_solver_wiring_configured",
         "remote_command_file_bridge_consumed_by_solver",
         "remote_command_file_bridge_solver_trace_dir_present",

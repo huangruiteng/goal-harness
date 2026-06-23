@@ -103,6 +103,7 @@ def main() -> int:
         assert failure["remote_command_file_bridge_consumed_by_solver"] is False
         assert failure["raw_logs_recorded"] is False
         assert failure["raw_task_text_read"] is False
+        assert failure["remote_command_file_bridge_probe_command_configured"] is False
         assert failure["remote_command_file_bridge_command_configured"] is False
         preflight = subprocess.run(
             [
@@ -142,7 +143,99 @@ def main() -> int:
             ]
             is True
         ), preflight_payload
+        blocked_probe_only = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--skillsbench-root",
+                str(root),
+                "--task-id",
+                "demo-task",
+                "--route",
+                "loopx-product-mode",
+                "--host-local-acp-launch",
+                "--remote-command-file-bridge-probe",
+                "--remote-command-file-bridge-probe-command",
+                f"{sys.executable} {BRIDGE_SCRIPT} --serve-probe",
+            ],
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert blocked_probe_only.returncode == 2, blocked_probe_only
+        probe_only_failure = json.loads(blocked_probe_only.stderr)
+        assert probe_only_failure["error_type"] == (
+            "SkillsBenchReverseChannelBridgeNotSolverWired"
+        ), probe_only_failure
+        assert (
+            probe_only_failure["remote_command_file_bridge_probe_command_configured"]
+            is True
+        )
+        assert (
+            probe_only_failure["remote_command_file_bridge_command_configured"]
+            is False
+        )
+        blocked_fixture_solver = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--skillsbench-root",
+                str(root),
+                "--task-id",
+                "demo-task",
+                "--route",
+                "loopx-product-mode",
+                "--host-local-acp-launch",
+                "--remote-command-file-bridge-ready",
+                "--remote-command-file-bridge-solver-command",
+                f"{sys.executable} {BRIDGE_SCRIPT} --serve-probe",
+            ],
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert blocked_fixture_solver.returncode == 2, blocked_fixture_solver
+        fixture_failure = json.loads(blocked_fixture_solver.stderr)
+        assert fixture_failure["error_type"] == (
+            "SkillsBenchReverseChannelBridgeFixtureOnlySolverCommand"
+        ), fixture_failure
         bridge_command = f"{sys.executable} {BRIDGE_SCRIPT} --serve-probe"
+        solver_bridge = Path(tmp) / "fake-solver-bridge"
+        solver_bridge.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+
+sys.path.insert(0, {str(REPO_ROOT)!r})
+from loopx.benchmark_adapters.skillsbench_remote_bridge import (
+    SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_PROBE_REQUEST_SCHEMA_VERSION,
+    build_skillsbench_remote_command_file_bridge_probe_response,
+)
+
+request = json.loads(sys.stdin.read() or "{{}}")
+if request.get("schema_version") == SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_PROBE_REQUEST_SCHEMA_VERSION:
+    print(json.dumps(build_skillsbench_remote_command_file_bridge_probe_response(
+        ready=True,
+        operations=[
+            {{"kind": "exec", "label": "bounded_noop_command", "status": "ok", "exit_code_zero": True}},
+            {{"kind": "write_file", "label": "probe_marker_write", "status": "ok"}},
+            {{"kind": "read_file", "label": "probe_marker_read", "status": "ok", "content_match": True}},
+            {{"kind": "cleanup", "label": "probe_marker_cleanup", "status": "ok"}},
+        ],
+    ), sort_keys=True))
+else:
+    print(json.dumps({{"ok": True, "operation": request.get("operation"), "stdout": "bridge-used\\n", "stderr": "", "exit_code": 0}}, sort_keys=True))
+""",
+            encoding="utf-8",
+        )
+        solver_bridge.chmod(0o755)
+        solver_bridge_command = str(solver_bridge)
         wired_plan_proc = subprocess.run(
             [
                 sys.executable,
@@ -157,6 +250,8 @@ def main() -> int:
                 "--remote-command-file-bridge-probe",
                 "--remote-command-file-bridge-probe-command",
                 bridge_command,
+                "--remote-command-file-bridge-solver-command",
+                solver_bridge_command,
                 "--plan-only",
             ],
             cwd=REPO_ROOT,
@@ -195,6 +290,8 @@ from pathlib import Path
 args = sys.argv[1:]
 if "Private bridge command:" not in args[-1]:
     raise SystemExit(7)
+if '"operation":"exec"' not in args[-1]:
+    raise SystemExit(10)
 ready, _, _ = select.select([sys.stdin], [], [], 0.2)
 if not ready:
     raise SystemExit(8)
@@ -222,7 +319,7 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
                 "--worker-public-trace-dir",
                 str(trace_dir),
                 "--remote-command-file-bridge-command",
-                bridge_command,
+                solver_bridge_command,
                 "--remote-command-file-bridge-timeout-sec",
                 "5",
             ],

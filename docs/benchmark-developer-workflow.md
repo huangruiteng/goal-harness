@@ -1469,6 +1469,12 @@ task text, paths, credentials, logs, trajectories, uploads, or submissions.
 local fake bridge for smoke tests and adapter development. It is not evidence
 that a real remote executor is ready.
 
+For a scored split-control launch, the readiness probe is not the solver
+bridge. Pass a separate private `--remote-command-file-bridge-solver-command`
+only when that command can operate on the scored BenchFlow sandbox. The runner
+must fail closed when only a probe command is configured, and it must reject the
+repo fake probe helper as a solver command.
+
 ## Evidence Contract
 
 Benchmark evidence may include:

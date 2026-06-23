@@ -210,6 +210,28 @@ def run_skillsbench_remote_command_file_bridge_probe(
         )
 
 
+def skillsbench_remote_command_file_bridge_command_is_fixture_probe(
+    command: str | list[str] | tuple[str, ...] | None,
+) -> bool:
+    """Return True when a command is the repo's fixture-only probe helper.
+
+    The probe helper intentionally proves only the public-safe stdin/stdout
+    readiness contract. It must not be injected as the private solver bridge for
+    a countable SkillsBench run, because it cannot operate on the scored
+    sandbox workspace.
+    """
+
+    if not command:
+        return False
+    try:
+        argv = _command_to_argv(command)
+    except ValueError:
+        return False
+    if "--serve-probe" not in argv:
+        return False
+    return any(part.endswith("skillsbench_remote_command_file_bridge.py") for part in argv)
+
+
 def _payload_from_bridge_response(
     response: dict[str, Any],
     *,

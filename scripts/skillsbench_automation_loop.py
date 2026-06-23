@@ -98,6 +98,7 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
 )
 from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
     run_skillsbench_remote_command_file_bridge_probe,
+    skillsbench_remote_command_file_bridge_command_is_fixture_probe,
 )
 from loopx.benchmark_core.loop_protocol import (  # noqa: E402
     AUTOMATION_LOOP_TREATMENT_ROUTE,
@@ -702,7 +703,7 @@ def _host_local_acp_launch_command(
     if (
         args.route in {"raw-codex-autonomous-max5", "loopx-product-mode"}
         and args.host_local_acp_launch
-        and args.remote_command_file_bridge_probe_command
+        and args.remote_command_file_bridge_solver_command
         and (
             args.remote_command_file_bridge_ready
             or args.remote_command_file_bridge_probe
@@ -711,7 +712,7 @@ def _host_local_acp_launch_command(
         command.extend(
             [
                 "--remote-command-file-bridge-command",
-                args.remote_command_file_bridge_probe_command,
+                args.remote_command_file_bridge_solver_command,
                 "--remote-command-file-bridge-timeout-sec",
                 str(args.remote_command_file_bridge_probe_timeout_sec),
             ]
@@ -867,6 +868,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_agent_install_skipped_by_runtime_layer",
         "remote_command_file_bridge_materialized",
         "remote_command_file_bridge_command_configured",
+        "remote_command_file_bridge_probe_command_configured",
         "remote_command_file_bridge_solver_wiring_configured",
         "remote_command_file_bridge_consumed_by_solver",
         "remote_command_file_bridge_solver_trace_dir_present",
@@ -2401,14 +2403,17 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         args.remote_command_file_bridge_ready
         or args.remote_command_file_bridge_probe
     )
-    remote_command_file_bridge_command_configured = bool(
+    remote_command_file_bridge_probe_command_configured = bool(
         args.remote_command_file_bridge_probe_command
+    )
+    remote_command_file_bridge_solver_command_configured = bool(
+        args.remote_command_file_bridge_solver_command
     )
     remote_command_file_bridge_solver_wiring_configured = bool(
         args.host_local_acp_launch
         and route in {"raw-codex-autonomous-max5", "loopx-product-mode"}
         and remote_command_file_bridge_materialized
-        and remote_command_file_bridge_command_configured
+        and remote_command_file_bridge_solver_command_configured
     )
     remote_command_file_bridge_consumed_by_solver = False
     if remote_command_file_bridge_solver_wiring_configured:
@@ -2558,7 +2563,10 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 remote_command_file_bridge_materialized
             ),
             "remote_command_file_bridge_command_configured": bool(
-                remote_command_file_bridge_command_configured
+                remote_command_file_bridge_solver_command_configured
+            ),
+            "remote_command_file_bridge_probe_command_configured": bool(
+                remote_command_file_bridge_probe_command_configured
             ),
             "remote_command_file_bridge_solver_wiring_configured": bool(
                 remote_command_file_bridge_solver_wiring_configured
@@ -5439,6 +5447,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--remote-command-file-bridge-solver-command",
+        default=None,
+        help=(
+            "Private command injected into host-local product-mode solver prompts "
+            "to operate on the scored SkillsBench sandbox. This is separate from "
+            "the public-safe probe command; fixture-only probe helpers must not "
+            "be used here."
+        ),
+    )
+    parser.add_argument(
         "--remote-command-file-bridge-probe-timeout-sec",
         type=float,
         default=10.0,
@@ -5625,9 +5643,54 @@ def main(argv: list[str] | None = None) -> int:
         args.remote_command_file_bridge_ready
         or args.remote_command_file_bridge_probe
     )
-    product_host_local_bridge_command_configured = bool(
+    product_host_local_bridge_probe_command_configured = bool(
         args.remote_command_file_bridge_probe_command
     )
+    product_host_local_bridge_command_configured = bool(
+        args.remote_command_file_bridge_solver_command
+    )
+    product_host_local_bridge_fixture_solver = (
+        skillsbench_remote_command_file_bridge_command_is_fixture_probe(
+            args.remote_command_file_bridge_solver_command
+        )
+    )
+    if (
+        args.route in {"raw-codex-autonomous-max5", "loopx-product-mode"}
+        and args.host_local_acp_launch
+        and product_host_local_bridge_fixture_solver
+        and not args.local_driver_worker_handshake_preflight
+        and not args.plan_only
+    ):
+        payload = {
+            "ok": False,
+            "error_type": "SkillsBenchReverseChannelBridgeFixtureOnlySolverCommand",
+            "route": args.route,
+            "reason": (
+                "the configured solver bridge is the repo fixture-only probe "
+                "helper. That helper validates readiness but cannot execute, "
+                "read, write, or clean up inside the scored BenchFlow sandbox."
+            ),
+            "next_action": (
+                "use a real sandbox workspace bridge or switch to the cloud-host "
+                "co-located product path; do not inject the fixture probe command "
+                "into the solver prompt"
+            ),
+            "remote_command_file_bridge_materialized": (
+                product_host_local_bridge_materialized
+            ),
+            "remote_command_file_bridge_probe_command_configured": (
+                product_host_local_bridge_probe_command_configured
+            ),
+            "remote_command_file_bridge_command_configured": True,
+            "remote_command_file_bridge_solver_wiring_configured": False,
+            "remote_command_file_bridge_consumed_by_solver": False,
+            "raw_logs_recorded": False,
+            "raw_task_text_read": False,
+            "raw_trajectory_recorded": False,
+            "credential_values_recorded": False,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
+        return 2
     if (
         args.route in {"raw-codex-autonomous-max5", "loopx-product-mode"}
         and args.host_local_acp_launch
@@ -5655,6 +5718,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "remote_command_file_bridge_materialized": (
                 product_host_local_bridge_materialized
+            ),
+            "remote_command_file_bridge_probe_command_configured": (
+                product_host_local_bridge_probe_command_configured
             ),
             "remote_command_file_bridge_command_configured": (
                 product_host_local_bridge_command_configured

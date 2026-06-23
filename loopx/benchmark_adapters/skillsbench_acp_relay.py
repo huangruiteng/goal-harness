@@ -290,7 +290,12 @@ class SkillsBenchLocalAcpRelay:
 LoopX SkillsBench remote workspace bridge:
 - This local Codex process is outside the scored SkillsBench sandbox.
 - Use the command below as a private JSON bridge for sandbox exec, file write, file read, and cleanup operations.
-- Send JSON requests on stdin and read compact JSON responses on stdout.
+- Send one JSON request on stdin and read one private JSON response on stdout.
+- Request examples:
+  - {{"operation":"exec","cwd":"/app","command":"pwd","timeout_sec":10}}
+  - {{"operation":"read_file","path":"/app/path/to/file","max_bytes":20000}}
+  - {{"operation":"write_file","path":"/app/path/to/file","content":"..."}}
+  - {{"operation":"cleanup","path":"/app/path/to/temp"}}
 - Do not upload, submit, expose credentials, quote the bridge command in final output, or record raw stdout/stderr/task text in public artifacts.
 - The bridge readiness probe completed with ready=true and operation_count={operation_count}.
 

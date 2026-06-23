@@ -41,6 +41,7 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
 from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
     SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_PROBE_SCHEMA_VERSION,
     run_skillsbench_remote_command_file_bridge_probe,
+    skillsbench_remote_command_file_bridge_command_is_fixture_probe,
 )
 from loopx.status import compact_benchmark_run  # noqa: E402
 from scripts.skillsbench_automation_loop import (  # noqa: E402
@@ -318,6 +319,10 @@ def test_skillsbench_remote_command_file_bridge_probe_fake_bridge_ready() -> Non
         str(REPO_ROOT / "scripts/skillsbench_remote_command_file_bridge.py"),
         "--serve-probe",
     ]
+    assert skillsbench_remote_command_file_bridge_command_is_fixture_probe(command)
+    assert not skillsbench_remote_command_file_bridge_command_is_fixture_probe(
+        [sys.executable, "private-skillsbench-sandbox-bridge", "--serve-probe"]
+    )
     payload = run_skillsbench_remote_command_file_bridge_probe(command)
     assert payload["ready"] is True, payload
     assert (
