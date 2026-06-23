@@ -179,6 +179,27 @@ def main() -> int:
     assert shallow_pair["main_table_claim_allowed"] is False, shallow_pair
     assert "treatment_loopx_lifecycle_not_observed" in shallow_pair["claim_blocker"]
 
+    orchestrated_treatment = dict(shallow_treatment)
+    orchestrated_treatment["product_mode_lifecycle_contract"] = {
+        "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
+        "required": True,
+        "satisfied": True,
+        "countable_treatment": True,
+        "state_read_count": 1,
+        "state_write_count": 3,
+        "execution_style": "orchestrated_agentloop_loopx_cli",
+    }
+    orchestrated_pair = classify_product_mode_main_table_pair(
+        baseline_run=baseline_run,
+        treatment_run=orchestrated_treatment,
+    )
+    assert orchestrated_pair["main_table_claim_allowed"] is True, (
+        orchestrated_pair
+    )
+    assert orchestrated_pair["treatment_loopx_lifecycle_observed"] is True, (
+        orchestrated_pair
+    )
+
     final_score_only_baseline = dict(baseline_run)
     final_score_only_baseline.pop("round_rewards")
     final_score_only_pair = classify_product_mode_main_table_pair(

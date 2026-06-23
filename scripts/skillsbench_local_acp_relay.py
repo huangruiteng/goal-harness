@@ -16,6 +16,7 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     CodexExecConfig,
     SkillsBenchLocalAcpRelay,
 )
+from loopx.benchmark_case_state import BENCHMARK_CASE_LOOPX_TODO_ID  # noqa: E402
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -107,10 +108,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--remote-command-file-bridge-command",
         default=None,
         help=(
-            "Private command used by host-local ACP product-mode runs to reach "
-            "the scored SkillsBench sandbox through a bounded command/file "
-            "bridge. The command is injected only into the private solver "
-            "prompt and is never written to public compact traces."
+            "Private command used by the relay/driver to reach the scored "
+            "SkillsBench sandbox through a bounded command/file bridge."
+        ),
+    )
+    parser.add_argument(
+        "--remote-command-file-bridge-agent-command",
+        default=None,
+        help=(
+            "Optional bridge command injected into the private local Codex "
+            "prompt. Use this when the relay runs remotely but Codex exec runs "
+            "on the controller host through a reverse channel."
         ),
     )
     parser.add_argument(
@@ -119,6 +127,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=10.0,
         help="Timeout for the per-prompt remote command/file bridge readiness probe.",
     )
+    parser.add_argument(
+        "--loopx-workflow-lifecycle-checkpoint",
+        action="store_true",
+        help=(
+            "For loopx-product-mode host-local ACP runs, execute a public-safe "
+            "workflow-style case-local LoopX quota/todo/refresh checkpoint "
+            "through the remote bridge before each Codex prompt."
+        ),
+    )
+    parser.add_argument("--loopx-case-goal-id", default="skillsbench-case")
+    parser.add_argument("--loopx-case-agent-id", default="codex-benchmark-agent")
+    parser.add_argument("--loopx-case-todo-id", default=BENCHMARK_CASE_LOOPX_TODO_ID)
+    parser.add_argument("--loopx-case-cli-path", default="/app/.local/bin/loopx")
+    parser.add_argument("--loopx-case-registry-path", default="/app/.loopx/registry.json")
+    parser.add_argument("--loopx-case-runtime-root", default="/app/.loopx/runtime")
     return parser.parse_args(argv)
 
 
@@ -144,9 +167,21 @@ def main(argv: list[str] | None = None) -> int:
             remote_command_file_bridge_command=(
                 args.remote_command_file_bridge_command
             ),
+            remote_command_file_bridge_agent_command=(
+                args.remote_command_file_bridge_agent_command
+            ),
             remote_command_file_bridge_timeout_sec=(
                 args.remote_command_file_bridge_timeout_sec
             ),
+            loopx_workflow_lifecycle_checkpoint=(
+                args.loopx_workflow_lifecycle_checkpoint
+            ),
+            loopx_case_goal_id=args.loopx_case_goal_id,
+            loopx_case_agent_id=args.loopx_case_agent_id,
+            loopx_case_todo_id=args.loopx_case_todo_id,
+            loopx_case_cli_path=args.loopx_case_cli_path,
+            loopx_case_registry_path=args.loopx_case_registry_path,
+            loopx_case_runtime_root=args.loopx_case_runtime_root,
         )
     )
     return relay.serve()

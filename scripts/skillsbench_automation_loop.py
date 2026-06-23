@@ -78,8 +78,11 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LOOPX_AGENT_ID,
-    BENCHMARK_CASE_LOOPX_TODO_ID,
+    BENCHMARK_CASE_LOOPX_CLI_PATH,
+    BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+    BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
     BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
+    BENCHMARK_CASE_LOOPX_TODO_ID,
     benchmark_case_loopx_command_prefix,
     benchmark_case_loopx_install_payload,
     benchmark_case_active_state_path,
@@ -114,6 +117,15 @@ from loopx.benchmark_core.loop_protocol import (  # noqa: E402
     build_blind_loop_initial_prompt,
 )
 from loopx.benchmark_trajectory import summarize_public_acp_trajectory
+
+
+class SkillsBenchRunnerInterrupted(RuntimeError):
+    """Public-safe interruption used to force compact runner closeout."""
+
+
+class SkillsBenchProductModeNoLifecycleRequests(RuntimeError):
+    """Product-mode agent made no required case-local LoopX lifecycle request."""
+
 
 DEFAULT_SKILLSBENCH_ROOT = REPO_ROOT / ".local/benchmark/externals/skillsbench"
 DEFAULT_LEDGER = (
@@ -340,8 +352,18 @@ def ensure_benchflow_runtime(args: argparse.Namespace) -> None:
 
     venv_python = Path(args.skillsbench_root).expanduser() / ".venv/bin/python"
     current_python = Path(sys.executable)
-    if not venv_python.exists() or _same_executable(venv_python, current_python):
-        raise
+    if not venv_python.exists():
+        raise RuntimeError(
+            "SkillsBench benchflow runtime unavailable: benchflow import failed "
+            "and skillsbench-root .venv/bin/python is missing; pass "
+            "--skillsbench-root pointing at a prepared SkillsBench checkout"
+        ) from None
+    if _same_executable(venv_python, current_python):
+        raise RuntimeError(
+            "SkillsBench benchflow runtime unavailable: benchflow import failed "
+            "and skillsbench-root .venv/bin/python resolves to the current "
+            "Python executable"
+        ) from None
     os.execv(
         str(venv_python),
         [str(venv_python), str(Path(__file__).resolve()), *sys.argv[1:]],
@@ -698,6 +720,12 @@ def _host_local_acp_launch_command(
             str(args.local_codex_exec_timeout_sec),
         ]
     )
+    if args.host_local_acp_launch and args.route != "codex-app-server-goal-baseline":
+        heartbeat_interval = min(
+            max(1.0, float(args.app_server_acp_heartbeat_interval_sec)),
+            15.0,
+        )
+        command.extend(["--stream-heartbeat-interval-sec", str(heartbeat_interval)])
     if args.model:
         command.extend(["--model", args.model])
     if (
@@ -717,7 +745,149 @@ def _host_local_acp_launch_command(
                 str(args.remote_command_file_bridge_probe_timeout_sec),
             ]
         )
+        if args.remote_command_file_bridge_agent_command:
+            command.extend(
+                [
+                    "--remote-command-file-bridge-agent-command",
+                    args.remote_command_file_bridge_agent_command,
+                ]
+            )
+        if args.route == "loopx-product-mode":
+            payload = benchmark_case_loopx_install_payload(
+                benchmark_id="skillsbench",
+                case_id=args.task_id,
+                arm_id="loopx_product_mode",
+                route=args.route,
+                max_rounds=args.max_rounds,
+                case_loopx_source_path=_loopx_case_source_path_for_container(args),
+            )
+            command.extend(
+                [
+                    "--loopx-workflow-lifecycle-checkpoint",
+                    "--loopx-case-goal-id",
+                    str(payload.get("benchmark_case_goal_id") or ""),
+                    "--loopx-case-agent-id",
+                    str(payload.get("case_agent_id") or BENCHMARK_CASE_LOOPX_AGENT_ID),
+                    "--loopx-case-todo-id",
+                    str(payload.get("case_todo_id") or BENCHMARK_CASE_LOOPX_TODO_ID),
+                    "--loopx-case-cli-path",
+                    str(payload.get("case_cli_path") or BENCHMARK_CASE_LOOPX_CLI_PATH),
+                    "--loopx-case-registry-path",
+                    str(
+                        payload.get("case_registry_path")
+                        or BENCHMARK_CASE_LOOPX_REGISTRY_PATH
+                    ),
+                    "--loopx-case-runtime-root",
+                    str(
+                        payload.get("case_runtime_root")
+                        or BENCHMARK_CASE_LOOPX_RUNTIME_ROOT
+                    ),
+                ]
+            )
     return command
+
+
+def _host_local_acp_codex_exec_preflight_command(
+    args: argparse.Namespace,
+    plan: dict[str, Any],
+) -> list[str]:
+    command = list(default_skillsbench_local_acp_relay_command())
+    if "--dry-run-response" in command:
+        index = command.index("--dry-run-response")
+        del command[index : index + 2]
+    command.extend(
+        [
+            "--route",
+            args.route,
+            "--dataset",
+            args.dataset,
+            "--task-id",
+            args.task_id,
+            "--codex-bin",
+            args.local_codex_bin,
+            "--sandbox",
+            args.local_codex_sandbox,
+            "--timeout-sec",
+            str(max(1, int(args.host_local_acp_codex_exec_preflight_timeout_sec))),
+        ]
+    )
+    if args.model:
+        command.extend(["--model", args.model])
+    relay_trace_dir = str(plan.get("host_local_acp_relay_trace_dir") or "")
+    if relay_trace_dir:
+        command.extend(
+            [
+                "--worker-public-trace-dir",
+                str(Path(relay_trace_dir) / "codex-exec-preflight"),
+            ]
+        )
+    return command
+
+
+def _run_host_local_acp_codex_exec_preflight(
+    args: argparse.Namespace,
+    plan: dict[str, Any],
+) -> None:
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    prerequisites["host_local_acp_codex_exec_preflight_requested"] = True
+    prerequisites["host_local_acp_codex_exec_preflight_status"] = "running"
+    attempts = max(
+        1,
+        int(getattr(args, "host_local_acp_codex_exec_preflight_attempts", 1) or 1),
+    )
+    command = _host_local_acp_codex_exec_preflight_command(args, plan)
+    relay_trace_dir = str(plan.get("host_local_acp_relay_trace_dir") or "")
+    preflight_trace_dir = (
+        Path(relay_trace_dir) / "codex-exec-preflight" if relay_trace_dir else None
+    )
+    for attempt in range(1, attempts + 1):
+        prerequisites["host_local_acp_codex_exec_preflight_attempt_count"] = attempt
+        if preflight_trace_dir:
+            preflight_trace_dir.mkdir(parents=True, exist_ok=True)
+            for trace_file in preflight_trace_dir.glob("*.compact.json"):
+                trace_file.unlink(missing_ok=True)
+        probe = run_skillsbench_local_acp_relay_probe(
+            command,
+            timeout_sec=float(args.host_local_acp_codex_exec_preflight_timeout_sec),
+        )
+        ready = probe.get("ready") is True
+        prerequisites["host_local_acp_codex_exec_preflight_ready"] = ready
+        prerequisites["host_local_acp_codex_exec_preflight_stage"] = str(
+            probe.get("stage") or ""
+        )[:180]
+        prerequisites["host_local_acp_codex_exec_preflight_first_blocker"] = str(
+            probe.get("first_blocker") or ""
+        )[:180]
+        if ready:
+            prerequisites["host_local_acp_codex_exec_preflight_status"] = "passed"
+            for key in (
+                "host_local_acp_codex_exec_failure_category",
+                "host_local_acp_codex_exec_failure_categories",
+                "host_local_acp_codex_exec_failure_trace_count",
+                "host_local_acp_codex_exec_failure_trace_present",
+            ):
+                prerequisites.pop(key, None)
+            return
+        prerequisites["host_local_acp_codex_exec_preflight_status"] = "failed"
+        if preflight_trace_dir:
+            trace: dict[str, Any] = {
+                "schema_version": "skillsbench_loopx_controller_trace_v0"
+            }
+            preflight_plan = {
+                "host_local_acp_relay_trace_dir": str(preflight_trace_dir),
+                "runner_prerequisites": prerequisites,
+            }
+            _merge_host_local_acp_relay_trace_summary(preflight_plan, trace)
+        category = str(
+            prerequisites.get("host_local_acp_codex_exec_failure_category") or ""
+        )
+        if (
+            category == "codex_reverse_channel_unavailable"
+            and attempt < attempts
+        ):
+            time.sleep(2.0)
+            continue
+        raise RuntimeError("host-local ACP codex exec preflight failed")
 
 
 def _benchflow_agent_runtime_layer_contract(args: argparse.Namespace) -> dict[str, Any]:
@@ -854,6 +1024,13 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_policy",
         "benchflow_setup_stall_cleanup_status",
         "remote_command_file_bridge_consumption_status",
+        "remote_command_file_bridge_agent_operation_trace_status",
+        "host_local_acp_codex_exec_preflight_status",
+        "host_local_acp_codex_exec_preflight_stage",
+        "host_local_acp_codex_exec_preflight_first_blocker",
+        "host_local_acp_codex_exec_failure_category",
+        "runner_interruption_kind",
+        "runner_interruption_status",
     ):
         raw = value.get(field)
         if isinstance(raw, str) and raw:
@@ -864,16 +1041,27 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "codex_acp_runtime_launch_preflight",
         "codex_acp_runtime_launch_preflight_raw_logs_read",
         "host_local_acp_launch",
+        "host_local_acp_codex_exec_preflight_requested",
+        "host_local_acp_codex_exec_preflight_ready",
         "container_codex_acp_install_skipped",
         "benchflow_agent_install_skipped_by_runtime_layer",
         "remote_command_file_bridge_materialized",
         "remote_command_file_bridge_command_configured",
+        "remote_command_file_bridge_agent_command_configured",
+        "remote_command_file_bridge_agent_command_instrumented",
         "remote_command_file_bridge_probe_command_configured",
         "remote_command_file_bridge_solver_wiring_configured",
         "remote_command_file_bridge_consumed_by_solver",
         "remote_command_file_bridge_solver_trace_dir_present",
         "remote_command_file_bridge_solver_public_trace_read",
         "remote_command_file_bridge_solver_raw_material_recorded",
+        "remote_command_file_bridge_agent_operation_trace_required",
+        "remote_command_file_bridge_agent_operation_trace_satisfied",
+        "remote_command_file_bridge_agent_operation_trace_present",
+        "remote_command_file_bridge_driver_lifecycle_trace_present",
+        "host_local_acp_codex_exec_failure_trace_present",
+        "host_local_acp_codex_exec_failure_raw_material_recorded",
+        "remote_command_file_bridge_driver_lifecycle_raw_material_recorded",
         "preinstalled_benchflow_agent_runtime_required",
         "benchflow_agent_runtime_layer_ready",
         "codex_acp_runtime_dependency_setup_skipped",
@@ -913,6 +1101,9 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_setup_stall_task_cancel_timeout",
         "benchflow_setup_stall_cleanup_requested",
         "benchflow_setup_stall_cleanup_raw_logs_read",
+        "runner_interrupted_before_official_result",
+        "runner_interruption_compact_closeout_expected",
+        "runner_interruption_raw_material_recorded",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -939,9 +1130,50 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_solver_trace_count",
         "remote_command_file_bridge_solver_probe_ready_count",
         "remote_command_file_bridge_solver_operation_count",
+        "remote_command_file_bridge_agent_operation_trace_count",
+        "remote_command_file_bridge_agent_request_count",
+        "remote_command_file_bridge_agent_loopx_cli_call_count",
+        "remote_command_file_bridge_agent_loopx_state_read_count",
+        "remote_command_file_bridge_agent_loopx_state_write_count",
+        "remote_command_file_bridge_driver_lifecycle_trace_count",
+        "remote_command_file_bridge_driver_lifecycle_checkpoint_count",
+        "remote_command_file_bridge_driver_lifecycle_request_count",
+        "remote_command_file_bridge_driver_lifecycle_success_count",
+        "remote_command_file_bridge_driver_lifecycle_failure_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count",
+        "host_local_acp_codex_exec_preflight_attempt_count",
+        "host_local_acp_codex_exec_failure_trace_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
+    for field in (
+        "remote_command_file_bridge_agent_operation_counts",
+        "remote_command_file_bridge_agent_loopx_subcommand_counts",
+        "remote_command_file_bridge_driver_lifecycle_command_counts",
+        "remote_command_file_bridge_driver_lifecycle_returncode_counts",
+    ):
+        raw_counts = value.get(field)
+        if not isinstance(raw_counts, dict):
+            continue
+        counts: dict[str, int] = {}
+        for key, count in raw_counts.items():
+            if (
+                isinstance(key, str)
+                and key
+                and isinstance(count, int)
+                and not isinstance(count, bool)
+                and count >= 0
+            ):
+                counts[key[:80]] = count
+        if counts:
+            compact[field] = dict(sorted(counts.items()))
+    style = value.get("remote_command_file_bridge_driver_lifecycle_execution_style")
+    if isinstance(style, str) and style:
+        compact["remote_command_file_bridge_driver_lifecycle_execution_style"] = (
+            style[:120]
+        )
     return compact
 
 
@@ -1523,6 +1755,14 @@ def _runner_prerequisite_failure_attribution(
             "skillsbench_environment_setup_error",
         ]
 
+    if value.get("runner_interrupted_before_official_result") is True:
+        label = "skillsbench_runner_interrupted_before_official_result"
+        return label, label, [
+            label,
+            "skillsbench_compact_closeout_recorded",
+            "skillsbench_runner_error",
+        ]
+
     if value.get("benchflow_final_verifier_timeout_triggered") is True:
         label = "skillsbench_final_verifier_timeout"
         return label, label, [
@@ -1555,6 +1795,72 @@ def _runner_prerequisite_failure_attribution(
     if value.get("host_local_acp_launch_status") == "failed":
         label = "skillsbench_host_local_acp_launch_failed"
         return label, label, [label, "skillsbench_runner_setup_error"]
+
+    if value.get("host_local_acp_codex_exec_preflight_status") == "failed":
+        category = str(value.get("host_local_acp_codex_exec_failure_category") or "")
+        label = "skillsbench_host_local_acp_codex_exec_preflight_failed"
+        if category:
+            label = f"{label}_{category}"
+        return label, label, [label, "skillsbench_runner_setup_error"]
+
+    if (
+        value.get("remote_command_file_bridge_agent_operation_trace_required") is True
+        and value.get("remote_command_file_bridge_agent_operation_trace_satisfied")
+        is False
+    ):
+        status = str(
+            value.get("remote_command_file_bridge_agent_operation_trace_status") or ""
+        )
+        trace_count = value.get("remote_command_file_bridge_agent_operation_trace_count")
+        request_count = value.get("remote_command_file_bridge_agent_request_count")
+        if (
+            status == "agent_operation_trace_present_no_requests"
+            or (
+                isinstance(trace_count, int)
+                and not isinstance(trace_count, bool)
+                and trace_count > 0
+                and (
+                    not isinstance(request_count, int)
+                    or isinstance(request_count, bool)
+                    or request_count <= 0
+                )
+            )
+        ):
+            label = "skillsbench_remote_bridge_agent_no_requests"
+            return (
+                label,
+                label,
+                [
+                    label,
+                    "skillsbench_product_mode_uncountable_treatment",
+                    "skillsbench_product_mode_lifecycle_missing",
+                ],
+            )
+        label = "skillsbench_remote_bridge_agent_operation_trace_missing"
+        return (
+            label,
+            label,
+            [
+                label,
+                "skillsbench_product_mode_uncountable_treatment",
+                "skillsbench_runner_setup_error",
+            ],
+        )
+
+    if value.get("host_local_acp_codex_exec_failure_trace_present") is True:
+        category = str(value.get("host_local_acp_codex_exec_failure_category") or "")
+        label = "skillsbench_host_local_acp_codex_exec_failed"
+        if category:
+            label = f"{label}_{category}"
+        return (
+            label,
+            label,
+            [
+                label,
+                "skillsbench_host_local_acp_codex_exec_failed",
+                "skillsbench_runner_setup_error",
+            ],
+        )
 
     if value.get("host_local_acp_launch_status") == "sandbox_install_failed":
         label = "skillsbench_host_local_acp_sandbox_install_failed"
@@ -1611,6 +1917,37 @@ def _agent_lifecycle_observed_for_setup_stall(plan: dict[str, Any]) -> bool:
 def _runner_exception_indicates_timeout(exc: BaseException) -> bool:
     text = f"{type(exc).__name__} {exc}".lower()
     return "timeout" in text or "timed out" in text
+
+
+def _runner_exception_indicates_interruption(exc: BaseException) -> bool:
+    return isinstance(exc, (KeyboardInterrupt, SkillsBenchRunnerInterrupted))
+
+
+def _ensure_runner_interruption_prerequisites(
+    plan: dict[str, Any],
+    exc: BaseException,
+) -> None:
+    if not _runner_exception_indicates_interruption(exc):
+        return
+
+    raw_prerequisites = plan.setdefault("runner_prerequisites", {})
+    kind = (
+        "sigterm"
+        if isinstance(exc, SkillsBenchRunnerInterrupted)
+        else "keyboard_interrupt"
+    )
+    raw_prerequisites.setdefault(
+        "benchflow_run_stage", "interrupted_before_official_result"
+    )
+    raw_prerequisites.setdefault("runner_interrupted_before_official_result", True)
+    raw_prerequisites.setdefault("runner_interruption_kind", kind)
+    raw_prerequisites.setdefault(
+        "runner_interruption_status", "compact_closeout_required"
+    )
+    raw_prerequisites.setdefault(
+        "runner_interruption_compact_closeout_expected", True
+    )
+    raw_prerequisites.setdefault("runner_interruption_raw_material_recorded", False)
 
 
 def _ensure_setup_stall_timeout_prerequisites(
@@ -1676,7 +2013,13 @@ def _apply_agent_message_only_no_tool_calls_attribution(
     preserve_attributions = {
         "skillsbench_codex_acp_provider_zero_activity",
     }
-    if current_attribution not in preserve_attributions:
+    preserve_current_attribution = (
+        current_attribution in preserve_attributions
+        or current_attribution.startswith(
+            "skillsbench_host_local_acp_codex_exec_failed"
+        )
+    )
+    if not preserve_current_attribution:
         compact["score_failure_attribution"] = label
         compact.setdefault("first_blocker", label)
     elif not compact.get("first_blocker"):
@@ -1687,7 +2030,7 @@ def _apply_agent_message_only_no_tool_calls_attribution(
         if isinstance(item, str)
     ]
     extra_labels = [label]
-    if current_attribution not in preserve_attributions:
+    if not preserve_current_attribution:
         extra_labels.append("skillsbench_agent_behavior_gap")
     for item in extra_labels:
         if item not in existing_labels:
@@ -2484,12 +2827,44 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     remote_command_file_bridge_solver_command_configured = bool(
         args.remote_command_file_bridge_solver_command
     )
+    remote_command_file_bridge_agent_command_configured = bool(
+        args.remote_command_file_bridge_agent_command
+    )
     remote_command_file_bridge_solver_wiring_configured = bool(
         args.host_local_acp_launch
         and route in {"raw-codex-autonomous-max5", "loopx-product-mode"}
         and remote_command_file_bridge_materialized
         and remote_command_file_bridge_solver_command_configured
     )
+    remote_command_file_bridge_agent_operation_trace_required = bool(
+        route == "loopx-product-mode"
+        and remote_command_file_bridge_solver_wiring_configured
+    )
+    remote_command_file_bridge_agent_command_instrumented = bool(
+        remote_command_file_bridge_solver_wiring_configured
+    )
+    if not remote_command_file_bridge_agent_operation_trace_required:
+        remote_command_file_bridge_agent_operation_trace_status = "not_required"
+    elif not remote_command_file_bridge_agent_command_configured:
+        remote_command_file_bridge_agent_operation_trace_status = (
+            "relay_generated_wrapper_pending_prompt"
+        )
+    elif remote_command_file_bridge_agent_command_instrumented:
+        if (
+            remote_command_file_bridge_agent_command_configured
+            and not args.remote_command_file_bridge_agent_command_instrumented
+        ):
+            remote_command_file_bridge_agent_operation_trace_status = (
+                "external_agent_command_relay_wrapped_pending_trace"
+            )
+        else:
+            remote_command_file_bridge_agent_operation_trace_status = (
+                "external_agent_command_declared_instrumented_pending_trace"
+            )
+    else:
+        remote_command_file_bridge_agent_operation_trace_status = (
+            "external_agent_command_uninstrumented"
+        )
     remote_command_file_bridge_consumed_by_solver = False
     if remote_command_file_bridge_solver_wiring_configured:
         remote_command_file_bridge_consumption_status = (
@@ -2628,6 +3003,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "host_local_acp_launch_status": (
                 "pending" if args.host_local_acp_launch else "not_requested"
             ),
+            "host_local_acp_codex_exec_preflight_requested": bool(
+                args.host_local_acp_codex_exec_preflight
+            ),
+            "host_local_acp_codex_exec_preflight_ready": False,
+            "host_local_acp_codex_exec_preflight_status": (
+                "pending"
+                if args.host_local_acp_codex_exec_preflight
+                else "not_requested"
+            ),
+            "host_local_acp_codex_exec_preflight_attempt_count": 0,
+            "host_local_acp_codex_exec_preflight_stage": "",
+            "host_local_acp_codex_exec_preflight_first_blocker": "",
             "container_codex_acp_install_skipped": (
                 True if is_app_server_goal_route else requires_preinstalled_runtime
             ),
@@ -2639,6 +3026,19 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "remote_command_file_bridge_command_configured": bool(
                 remote_command_file_bridge_solver_command_configured
+            ),
+            "remote_command_file_bridge_agent_command_configured": bool(
+                remote_command_file_bridge_agent_command_configured
+            ),
+            "remote_command_file_bridge_agent_command_instrumented": bool(
+                remote_command_file_bridge_agent_command_instrumented
+            ),
+            "remote_command_file_bridge_agent_operation_trace_required": bool(
+                remote_command_file_bridge_agent_operation_trace_required
+            ),
+            "remote_command_file_bridge_agent_operation_trace_satisfied": False,
+            "remote_command_file_bridge_agent_operation_trace_status": (
+                remote_command_file_bridge_agent_operation_trace_status
             ),
             "remote_command_file_bridge_probe_command_configured": bool(
                 remote_command_file_bridge_probe_command_configured
@@ -3288,6 +3688,26 @@ def _merge_host_local_acp_relay_trace_summary(
     solver_trace_count = 0
     probe_ready_count = 0
     operation_count = 0
+    codex_exec_failure_trace_count = 0
+    codex_exec_failure_categories: list[str] = []
+    agent_bridge_trace_count = 0
+    agent_bridge_request_count = 0
+    agent_bridge_loopx_cli_call_count = 0
+    agent_bridge_loopx_state_read_count = 0
+    agent_bridge_loopx_state_write_count = 0
+    agent_bridge_operation_counts: dict[str, int] = {}
+    agent_bridge_loopx_subcommand_counts: dict[str, int] = {}
+    driver_lifecycle_trace_count = 0
+    driver_lifecycle_checkpoint_count = 0
+    driver_lifecycle_request_count = 0
+    driver_lifecycle_success_count = 0
+    driver_lifecycle_failure_count = 0
+    driver_lifecycle_loopx_cli_call_count = 0
+    driver_lifecycle_loopx_state_read_count = 0
+    driver_lifecycle_loopx_state_write_count = 0
+    driver_lifecycle_command_counts: dict[str, int] = {}
+    driver_lifecycle_returncode_counts: dict[str, int] = {}
+    driver_lifecycle_execution_style = ""
     raw_material_recorded = False
     for path in files:
         try:
@@ -3301,26 +3721,152 @@ def _merge_host_local_acp_relay_trace_summary(
             != "skillsbench_host_local_acp_relay_public_trace_v0"
         ):
             continue
-        if payload.get("trace_kind") != "remote_command_file_bridge_solver_consumption":
-            continue
-        bridge = (
-            payload.get("remote_command_file_bridge")
-            if isinstance(payload.get("remote_command_file_bridge"), dict)
-            else {}
-        )
-        solver_trace_count += 1
-        if bridge.get("probe_ready") is True:
-            probe_ready_count += 1
-        bridge_operations = bridge.get("operation_count")
-        if isinstance(bridge_operations, int) and not isinstance(
-            bridge_operations, bool
-        ):
-            operation_count += max(0, bridge_operations)
         boundary = (
             payload.get("boundary")
             if isinstance(payload.get("boundary"), dict)
             else {}
         )
+        trace_kind = payload.get("trace_kind")
+        if trace_kind == "remote_command_file_bridge_solver_consumption":
+            bridge = (
+                payload.get("remote_command_file_bridge")
+                if isinstance(payload.get("remote_command_file_bridge"), dict)
+                else {}
+            )
+            solver_trace_count += 1
+            if bridge.get("probe_ready") is True:
+                probe_ready_count += 1
+            bridge_operations = bridge.get("operation_count")
+            if isinstance(bridge_operations, int) and not isinstance(
+                bridge_operations, bool
+            ):
+                operation_count += max(0, bridge_operations)
+        elif trace_kind == "codex_exec_process_failure":
+            process = (
+                payload.get("codex_exec_process")
+                if isinstance(payload.get("codex_exec_process"), dict)
+                else {}
+            )
+            codex_exec_failure_trace_count += 1
+            category = process.get("failure_category")
+            if (
+                isinstance(category, str)
+                and category
+                and category not in codex_exec_failure_categories
+            ):
+                codex_exec_failure_categories.append(category[:120])
+        elif trace_kind == "remote_command_file_bridge_agent_operations":
+            agent_ops = (
+                payload.get("remote_command_file_bridge_agent_operations")
+                if isinstance(
+                    payload.get("remote_command_file_bridge_agent_operations"),
+                    dict,
+                )
+                else {}
+            )
+            agent_bridge_trace_count += 1
+            raw_material_recorded = raw_material_recorded or (
+                agent_ops.get("raw_material_recorded") is True
+            )
+            count_fields = {
+                "request_count": "request",
+                "loopx_cli_call_count": "loopx_cli",
+                "loopx_state_read_count": "state_read",
+                "loopx_state_write_count": "state_write",
+            }
+            for field, target in count_fields.items():
+                value = agent_ops.get(field)
+                if not isinstance(value, int) or isinstance(value, bool):
+                    value = 0
+                value = max(0, value)
+                if target == "request":
+                    agent_bridge_request_count += value
+                elif target == "loopx_cli":
+                    agent_bridge_loopx_cli_call_count += value
+                elif target == "state_read":
+                    agent_bridge_loopx_state_read_count += value
+                elif target == "state_write":
+                    agent_bridge_loopx_state_write_count += value
+            for source_key, target_counts in (
+                ("operation_counts", agent_bridge_operation_counts),
+                ("loopx_cli_subcommand_counts", agent_bridge_loopx_subcommand_counts),
+            ):
+                source_counts = agent_ops.get(source_key)
+                if not isinstance(source_counts, dict):
+                    continue
+                for key, value in source_counts.items():
+                    if not isinstance(key, str) or not key:
+                        continue
+                    if not isinstance(value, int) or isinstance(value, bool):
+                        continue
+                    safe_key = key[:80]
+                    target_counts[safe_key] = (
+                        target_counts.get(safe_key, 0) + max(0, value)
+                    )
+        elif trace_kind == "remote_command_file_bridge_driver_lifecycle_checkpoint":
+            checkpoint = (
+                payload.get("remote_command_file_bridge_driver_lifecycle_checkpoint")
+                if isinstance(
+                    payload.get(
+                        "remote_command_file_bridge_driver_lifecycle_checkpoint"
+                    ),
+                    dict,
+                )
+                else {}
+            )
+            driver_lifecycle_trace_count += 1
+            raw_material_recorded = raw_material_recorded or (
+                checkpoint.get("raw_material_recorded") is True
+            )
+            style = checkpoint.get("execution_style")
+            if isinstance(style, str) and style and not driver_lifecycle_execution_style:
+                driver_lifecycle_execution_style = style[:120]
+            count_fields = {
+                "checkpoint_count": "checkpoint",
+                "request_count": "request",
+                "success_count": "success",
+                "failure_count": "failure",
+                "loopx_cli_call_count": "loopx_cli",
+                "loopx_state_read_count": "state_read",
+                "loopx_state_write_count": "state_write",
+            }
+            for field, target in count_fields.items():
+                value = checkpoint.get(field)
+                if not isinstance(value, int) or isinstance(value, bool):
+                    value = 0
+                value = max(0, value)
+                if target == "checkpoint":
+                    driver_lifecycle_checkpoint_count += value
+                elif target == "request":
+                    driver_lifecycle_request_count += value
+                elif target == "success":
+                    driver_lifecycle_success_count += value
+                elif target == "failure":
+                    driver_lifecycle_failure_count += value
+                elif target == "loopx_cli":
+                    driver_lifecycle_loopx_cli_call_count += value
+                elif target == "state_read":
+                    driver_lifecycle_loopx_state_read_count += value
+                elif target == "state_write":
+                    driver_lifecycle_loopx_state_write_count += value
+            for source_key, target_counts in (
+                ("command_counts", driver_lifecycle_command_counts),
+                ("returncode_counts", driver_lifecycle_returncode_counts),
+            ):
+                source_counts = checkpoint.get(source_key)
+                if not isinstance(source_counts, dict):
+                    continue
+                for key, value in source_counts.items():
+                    if not isinstance(key, str) or not key:
+                        continue
+                    if not isinstance(value, int) or isinstance(value, bool):
+                        continue
+                    safe_key = key[:80]
+                    target_counts[safe_key] = (
+                        target_counts.get(safe_key, 0) + max(0, value)
+                    )
+        else:
+            continue
         raw_material_recorded = raw_material_recorded or any(
             boundary.get(field) is True
             for field in (
@@ -3349,7 +3895,124 @@ def _merge_host_local_acp_relay_trace_summary(
     trace["remote_command_file_bridge_solver_raw_material_recorded"] = (
         raw_material_recorded
     )
+    trace["host_local_acp_codex_exec_failure_trace_count"] = (
+        codex_exec_failure_trace_count
+    )
+    trace["host_local_acp_codex_exec_failure_trace_present"] = (
+        codex_exec_failure_trace_count > 0
+    )
+    trace["host_local_acp_codex_exec_failure_categories"] = (
+        codex_exec_failure_categories
+    )
+    trace["host_local_acp_codex_exec_failure_category"] = (
+        codex_exec_failure_categories[0] if codex_exec_failure_categories else ""
+    )
+    trace["host_local_acp_codex_exec_failure_raw_material_recorded"] = (
+        raw_material_recorded
+    )
+    trace["remote_command_file_bridge_agent_operation_trace_count"] = (
+        agent_bridge_trace_count
+    )
+    trace["remote_command_file_bridge_agent_operation_trace_present"] = (
+        agent_bridge_trace_count > 0
+    )
     prerequisites = plan.setdefault("runner_prerequisites", {})
+    agent_trace_required = (
+        prerequisites.get("remote_command_file_bridge_agent_operation_trace_required")
+        is True
+    )
+    agent_trace_satisfied = bool(
+        (not agent_trace_required)
+        or (
+            agent_bridge_trace_count > 0
+            and agent_bridge_request_count > 0
+        )
+    )
+    if agent_trace_required:
+        if agent_trace_satisfied:
+            agent_trace_status = "agent_operation_trace_recorded"
+        elif agent_bridge_trace_count > 0:
+            agent_trace_status = "agent_operation_trace_present_no_requests"
+        else:
+            agent_trace_status = "agent_operation_trace_missing"
+    else:
+        agent_trace_status = str(
+            prerequisites.get("remote_command_file_bridge_agent_operation_trace_status")
+            or "not_required"
+        )
+    trace["remote_command_file_bridge_agent_command_configured"] = (
+        prerequisites.get("remote_command_file_bridge_agent_command_configured") is True
+    )
+    trace["remote_command_file_bridge_agent_command_instrumented"] = (
+        prerequisites.get("remote_command_file_bridge_agent_command_instrumented")
+        is True
+    )
+    trace["remote_command_file_bridge_agent_operation_trace_required"] = (
+        agent_trace_required
+    )
+    trace["remote_command_file_bridge_agent_operation_trace_satisfied"] = (
+        agent_trace_satisfied
+    )
+    trace["remote_command_file_bridge_agent_operation_trace_status"] = (
+        agent_trace_status
+    )
+    trace["remote_command_file_bridge_agent_request_count"] = (
+        agent_bridge_request_count
+    )
+    trace["remote_command_file_bridge_agent_loopx_cli_call_count"] = (
+        agent_bridge_loopx_cli_call_count
+    )
+    trace["remote_command_file_bridge_agent_loopx_state_read_count"] = (
+        agent_bridge_loopx_state_read_count
+    )
+    trace["remote_command_file_bridge_agent_loopx_state_write_count"] = (
+        agent_bridge_loopx_state_write_count
+    )
+    trace["remote_command_file_bridge_agent_operation_counts"] = dict(
+        sorted(agent_bridge_operation_counts.items())
+    )
+    trace["remote_command_file_bridge_agent_loopx_subcommand_counts"] = dict(
+        sorted(agent_bridge_loopx_subcommand_counts.items())
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_trace_count"] = (
+        driver_lifecycle_trace_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_trace_present"] = (
+        driver_lifecycle_trace_count > 0
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_execution_style"] = (
+        driver_lifecycle_execution_style
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_checkpoint_count"] = (
+        driver_lifecycle_checkpoint_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_request_count"] = (
+        driver_lifecycle_request_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_success_count"] = (
+        driver_lifecycle_success_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_failure_count"] = (
+        driver_lifecycle_failure_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count"] = (
+        driver_lifecycle_loopx_cli_call_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_loopx_state_read_count"] = (
+        driver_lifecycle_loopx_state_read_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_loopx_state_write_count"] = (
+        driver_lifecycle_loopx_state_write_count
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_command_counts"] = dict(
+        sorted(driver_lifecycle_command_counts.items())
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_returncode_counts"] = dict(
+        sorted(driver_lifecycle_returncode_counts.items())
+    )
+    trace["remote_command_file_bridge_driver_lifecycle_raw_material_recorded"] = (
+        raw_material_recorded
+    )
     prerequisites["remote_command_file_bridge_solver_trace_dir_present"] = (
         trace_dir.exists()
     )
@@ -3371,6 +4034,93 @@ def _merge_host_local_acp_relay_trace_summary(
     prerequisites["remote_command_file_bridge_solver_raw_material_recorded"] = (
         raw_material_recorded
     )
+    prerequisites["host_local_acp_codex_exec_failure_trace_count"] = (
+        codex_exec_failure_trace_count
+    )
+    prerequisites["host_local_acp_codex_exec_failure_trace_present"] = (
+        codex_exec_failure_trace_count > 0
+    )
+    prerequisites["host_local_acp_codex_exec_failure_categories"] = (
+        codex_exec_failure_categories
+    )
+    prerequisites["host_local_acp_codex_exec_failure_category"] = (
+        codex_exec_failure_categories[0] if codex_exec_failure_categories else ""
+    )
+    prerequisites["host_local_acp_codex_exec_failure_raw_material_recorded"] = (
+        raw_material_recorded
+    )
+    prerequisites["remote_command_file_bridge_agent_operation_trace_count"] = (
+        agent_bridge_trace_count
+    )
+    prerequisites["remote_command_file_bridge_agent_operation_trace_present"] = (
+        agent_bridge_trace_count > 0
+    )
+    prerequisites["remote_command_file_bridge_agent_operation_trace_required"] = (
+        agent_trace_required
+    )
+    prerequisites["remote_command_file_bridge_agent_operation_trace_satisfied"] = (
+        agent_trace_satisfied
+    )
+    prerequisites["remote_command_file_bridge_agent_operation_trace_status"] = (
+        agent_trace_status
+    )
+    prerequisites["remote_command_file_bridge_agent_request_count"] = (
+        agent_bridge_request_count
+    )
+    prerequisites["remote_command_file_bridge_agent_loopx_cli_call_count"] = (
+        agent_bridge_loopx_cli_call_count
+    )
+    prerequisites["remote_command_file_bridge_agent_loopx_state_read_count"] = (
+        agent_bridge_loopx_state_read_count
+    )
+    prerequisites["remote_command_file_bridge_agent_loopx_state_write_count"] = (
+        agent_bridge_loopx_state_write_count
+    )
+    prerequisites["remote_command_file_bridge_agent_operation_counts"] = dict(
+        sorted(agent_bridge_operation_counts.items())
+    )
+    prerequisites["remote_command_file_bridge_agent_loopx_subcommand_counts"] = dict(
+        sorted(agent_bridge_loopx_subcommand_counts.items())
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_trace_count"] = (
+        driver_lifecycle_trace_count
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_trace_present"] = (
+        driver_lifecycle_trace_count > 0
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_execution_style"] = (
+        driver_lifecycle_execution_style
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_checkpoint_count"] = (
+        driver_lifecycle_checkpoint_count
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_request_count"] = (
+        driver_lifecycle_request_count
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_success_count"] = (
+        driver_lifecycle_success_count
+    )
+    prerequisites["remote_command_file_bridge_driver_lifecycle_failure_count"] = (
+        driver_lifecycle_failure_count
+    )
+    prerequisites[
+        "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count"
+    ] = driver_lifecycle_loopx_cli_call_count
+    prerequisites[
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count"
+    ] = driver_lifecycle_loopx_state_read_count
+    prerequisites[
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count"
+    ] = driver_lifecycle_loopx_state_write_count
+    prerequisites["remote_command_file_bridge_driver_lifecycle_command_counts"] = (
+        dict(sorted(driver_lifecycle_command_counts.items()))
+    )
+    prerequisites[
+        "remote_command_file_bridge_driver_lifecycle_returncode_counts"
+    ] = dict(sorted(driver_lifecycle_returncode_counts.items()))
+    prerequisites[
+        "remote_command_file_bridge_driver_lifecycle_raw_material_recorded"
+    ] = raw_material_recorded
     if consumed_by_solver:
         prerequisites["remote_command_file_bridge_consumption_status"] = (
             "solver_prompt_probe_ready"
@@ -3626,6 +4376,19 @@ def _record_product_mode_no_tool_call_lifecycle_abort(
     if not isinstance(current, int) or isinstance(current, bool):
         current = 0
     trace["product_mode_no_tool_call_lifecycle_abort_count"] = current + 1
+
+
+def _record_product_mode_no_lifecycle_request_abort(
+    trace: dict[str, Any],
+    *,
+    agent_round: int,
+) -> None:
+    trace["product_mode_no_lifecycle_request_abort"] = True
+    trace["product_mode_no_lifecycle_request_abort_round"] = agent_round
+    current = trace.get("product_mode_no_lifecycle_request_abort_count")
+    if not isinstance(current, int) or isinstance(current, bool):
+        current = 0
+    trace["product_mode_no_lifecycle_request_abort_count"] = current + 1
 
 
 def _trajectory_candidate_paths(plan: dict[str, Any]) -> list[Path]:
@@ -3919,7 +4682,11 @@ def _build_product_mode_user(
             f"LoopX is initialized before the agent starts. Active state: "
             f"`{case_state_path}`. This is the only formal treatment "
             "lifecycle; runner polling is only the outer transport. Before "
-            "planning, run "
+            "planning, run the following commands inside the scored sandbox. "
+            "If a LoopX SkillsBench remote workspace bridge packet is present, "
+            "invoke that private JSON bridge from your shell tool and send each "
+            "command as an `operation=exec` request with `cwd=/app`; do not try "
+            "to run `/app/...` commands directly in the host-local temp cwd. "
             f"`{case_cli_prefix} quota should-run --goal-id {case_goal_id} "
             f"--agent-id {case_agent_id}` and claim the selected case todo "
             f"with `{case_cli_prefix} todo claim --goal-id {case_goal_id} "
@@ -3996,24 +4763,43 @@ def _build_product_mode_user(
                 _inc_counter(trace, "official_feedback_blinded_count")
                 if treatment:
                     _merge_acp_trajectory_summary(plan or {}, trace)
+                    _merge_host_local_acp_relay_trace_summary(plan or {}, trace)
+                    no_tool_calls = _round_result_tool_call_count(round_result) == 0
+                    no_lifecycle_requests = (
+                        trace.get(
+                            "remote_command_file_bridge_agent_operation_trace_status"
+                        )
+                        == "agent_operation_trace_present_no_requests"
+                    )
                     if (
-                        _round_result_tool_call_count(round_result) == 0
+                        (no_tool_calls or no_lifecycle_requests)
                         and not _product_mode_depth_gate_satisfied(trace)
                     ):
                         _record_product_mode_lifecycle_checkpoint_gap(
                             trace,
                             agent_round=round,
                         )
-                        _record_product_mode_no_tool_call_lifecycle_abort(
-                            trace,
-                            agent_round=round,
-                        )
+                        if no_tool_calls:
+                            _record_product_mode_no_tool_call_lifecycle_abort(
+                                trace,
+                                agent_round=round,
+                            )
+                        if no_lifecycle_requests:
+                            _record_product_mode_no_lifecycle_request_abort(
+                                trace,
+                                agent_round=round,
+                            )
                         _inc_counter(trace, "controller_action_decisions")
                         _inc_counter(trace, "stop_decision_count")
                         trace["last_decision"] = (
-                            "stop_after_product_mode_no_tool_calls_without_lifecycle"
+                            "stop_after_product_mode_agent_no_lifecycle_requests"
+                            if no_lifecycle_requests
+                            else "stop_after_product_mode_no_tool_calls_without_lifecycle"
                         )
-                        return None
+                        raise SkillsBenchProductModeNoLifecycleRequests(
+                            "loopx-product-mode agent produced no case-local "
+                            "LoopX lifecycle request before official verifier"
+                        )
                 if _round_result_declared_done(round_result):
                     if treatment:
                         if not _product_mode_depth_gate_satisfied(trace):
@@ -5024,6 +5810,7 @@ def build_runner_failure_compact(
     from loopx.status import compact_benchmark_run
 
     plan.setdefault("runner_prerequisites", {})
+    _ensure_runner_interruption_prerequisites(plan, exc)
     _ensure_setup_stall_timeout_prerequisites(
         args,
         plan,
@@ -5250,6 +6037,45 @@ def append_history(args: argparse.Namespace, compact_path: Path) -> dict[str, An
         "registry_exists": registry_exists,
         "raw_cli_output_recorded": False,
     }
+
+
+def _build_runner_exception_closeout_payload(
+    args: argparse.Namespace,
+    plan: dict[str, Any],
+    exc: BaseException,
+) -> tuple[dict[str, Any], int]:
+    recovered_payload = reduce_official_result_after_runner_exception(args, plan, exc)
+    if recovered_payload is not None:
+        return recovered_payload, 0
+
+    closeout_recorded = False
+    try:
+        compact = build_runner_failure_compact(args, plan, exc)
+        compact_path = Path(plan["compact_benchmark_run_json"])
+        compact_path.parent.mkdir(parents=True, exist_ok=True)
+        compact_path.write_text(
+            json.dumps(compact, indent=2, sort_keys=True, default=_json_default)
+            + "\n",
+            encoding="utf-8",
+        )
+        ledger_update = update_ledger(args, compact, compact_path=compact_path)
+        history_append = append_history(args, compact_path)
+        closeout_recorded = True
+    except Exception:
+        compact_path = None
+        ledger_update = None
+        history_append = None
+    payload = {
+        "ok": False,
+        "error_type": type(exc).__name__,
+        "error_recorded": closeout_recorded,
+        "compact_closeout_recorded": closeout_recorded,
+        "task_id": args.task_id,
+        "compact_benchmark_run_json": str(compact_path) if compact_path else None,
+        "ledger_update": ledger_update,
+        "history_append": history_append,
+    }
+    return payload, 0 if closeout_recorded else 1
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -5529,6 +6355,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--host-local-acp-codex-exec-preflight",
+        action="store_true",
+        help=(
+            "Before a full host-local ACP task launch, run a task-free relay "
+            "prompt through the configured local Codex exec command. Use this "
+            "for remote reverse-channel product-mode runs so a missing Codex "
+            "reverse server fails before BenchFlow starts a scored case."
+        ),
+    )
+    parser.add_argument(
+        "--host-local-acp-codex-exec-preflight-timeout-sec",
+        type=float,
+        default=120.0,
+        help="Timeout for --host-local-acp-codex-exec-preflight.",
+    )
+    parser.add_argument(
+        "--host-local-acp-codex-exec-preflight-attempts",
+        type=int,
+        default=3,
+        help=(
+            "Number of task-free Codex exec preflight attempts. Retries are "
+            "only useful for transient reverse-channel readiness races."
+        ),
+    )
+    parser.add_argument(
         "--benchflow-agent-runtime-dir",
         default=None,
         help=(
@@ -5580,6 +6431,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "to operate on the scored SkillsBench sandbox. This is separate from "
             "the public-safe probe command; fixture-only probe helpers must not "
             "be used here."
+        ),
+    )
+    parser.add_argument(
+        "--remote-command-file-bridge-agent-command",
+        default=None,
+        help=(
+            "Optional private command injected into the local Codex solver "
+            "prompt when --remote-command-file-bridge-solver-command is only "
+            "valid from the remote relay host. The command text is never "
+            "written to public compact traces."
+        ),
+    )
+    parser.add_argument(
+        "--remote-command-file-bridge-agent-command-instrumented",
+        action="store_true",
+        help=(
+            "Compatibility declaration for externally instrumented agent bridge "
+            "commands. The host-local relay still wraps explicit agent bridge "
+            "commands with its own public-safe operation counter; countable "
+            "product-mode treatment continues to require nonzero agent lifecycle "
+            "requests, not only driver checkpoints."
         ),
     )
     parser.add_argument(
@@ -5655,6 +6527,13 @@ async def async_main(
             "skillsbench apt setup risk preflight blocked: "
             "apt-based Docker setup risk detected before full case run"
         )
+
+    if (
+        args.host_local_acp_codex_exec_preflight
+        and args.host_local_acp_launch
+        and not args.reduce_only
+    ):
+        _run_host_local_acp_codex_exec_preflight(args, plan)
 
     ensure_benchflow_runtime(args)
     if args.reduce_only:
@@ -5895,50 +6774,45 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
         return 0
-    closeout_recorded = False
     if args.run_group_id is None:
         args.run_group_id = (
             f"skillsbench-{args.task_id}-{args.route}-{_now_stamp()}"
         )
     plan = build_plan(args)
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+    def _closeout_sigterm_handler(signum: int, frame: Any) -> None:
+        raise SkillsBenchRunnerInterrupted(
+            "skillsbench_runner_received_sigterm_before_official_result"
+        )
+
+    signal.signal(signal.SIGTERM, _closeout_sigterm_handler)
     try:
         payload = asyncio.run(async_main(args, plan=plan))
-    except Exception as exc:
-        recovered_payload = reduce_official_result_after_runner_exception(
+    except (KeyboardInterrupt, SkillsBenchRunnerInterrupted) as exc:
+        payload, returncode = _build_runner_exception_closeout_payload(
             args, plan, exc
         )
-        if recovered_payload is not None:
-            print(json.dumps(recovered_payload, indent=2, sort_keys=True))
-            return 0
-        try:
-            compact = build_runner_failure_compact(args, plan, exc)
-            compact_path = Path(plan["compact_benchmark_run_json"])
-            compact_path.parent.mkdir(parents=True, exist_ok=True)
-            compact_path.write_text(
-                json.dumps(compact, indent=2, sort_keys=True, default=_json_default)
-                + "\n",
-                encoding="utf-8",
-            )
-            ledger_update = update_ledger(args, compact, compact_path=compact_path)
-            history_append = append_history(args, compact_path)
-            closeout_recorded = True
-        except Exception:
-            compact = None
-            compact_path = None
-            ledger_update = None
-            history_append = None
-        payload = {
-            "ok": False,
-            "error_type": type(exc).__name__,
-            "error_recorded": closeout_recorded,
-            "compact_closeout_recorded": closeout_recorded,
-            "task_id": args.task_id,
-            "compact_benchmark_run_json": str(compact_path) if compact_path else None,
-            "ledger_update": ledger_update,
-            "history_append": history_append,
-        }
-        print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
-        return 0 if closeout_recorded else 1
+        output_stream = (
+            sys.stdout
+            if payload.get("recovered_after_runner_exception") is True
+            else sys.stderr
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True), file=output_stream)
+        return returncode
+    except Exception as exc:
+        payload, returncode = _build_runner_exception_closeout_payload(
+            args, plan, exc
+        )
+        output_stream = (
+            sys.stdout
+            if payload.get("recovered_after_runner_exception") is True
+            else sys.stderr
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True), file=output_stream)
+        return returncode
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
     return 0
 

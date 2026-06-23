@@ -990,6 +990,43 @@ def test_skillsbench_product_mode_pair_blocks_shallow_lifecycle() -> None:
         rendered = render_benchmark_run_ledger_markdown(ledger)
         assert "treatment_loopx_lifecycle_not_observed" in rendered, rendered
 
+    orchestrated_treatment = dict(treatment)
+    orchestrated_treatment["product_mode_lifecycle_contract"] = {
+        "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
+        "required": True,
+        "satisfied": True,
+        "countable_treatment": True,
+        "state_read_count": 1,
+        "state_write_count": 3,
+        "execution_style": "orchestrated_agentloop_loopx_cli",
+    }
+    with tempfile.TemporaryDirectory(
+        prefix="benchmark-run-ledger-product-pair-orchestrated-"
+    ) as tmp:
+        root = Path(tmp)
+        ledger_path = root / "ledger.json"
+        update_benchmark_run_ledger(
+            ledger_path=ledger_path,
+            benchmark_run=baseline,
+            run_group_id="product-pair-orchestrated-ledger-smoke",
+            cwd=root,
+        )
+        update_benchmark_run_ledger(
+            ledger_path=ledger_path,
+            benchmark_run=orchestrated_treatment,
+            run_group_id="product-pair-orchestrated-ledger-smoke",
+            cwd=root,
+        )
+        ledger = load_benchmark_run_ledger(ledger_path)
+        case = ledger["benchmarks"]["skillsbench@1.1"]["cases"][
+            "shallow-citation-check"
+        ]
+        pair = case["latest_decision"]["product_mode_main_table_pair"]
+        assert pair["treatment_loopx_lifecycle_observed"] is True, pair
+        assert "treatment_loopx_lifecycle_not_observed" not in pair[
+            "claim_blocker"
+        ], pair
+
 
 def test_raw_max5_baseline_does_not_force_product_pair_without_product_treatment() -> None:
     baseline = {

@@ -7,7 +7,9 @@ import json
 import subprocess
 import sys
 import tempfile
+import builtins
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +20,12 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     run_skillsbench_local_acp_relay_probe,
 )
 from scripts.skillsbench_automation_loop import (  # noqa: E402
+    _apply_agent_message_only_no_tool_calls_attribution,
+    _host_local_acp_launch_command,
     _merge_host_local_acp_relay_trace_summary,
+    _run_host_local_acp_codex_exec_preflight,
+    build_runner_failure_compact,
+    ensure_benchflow_runtime,
 )
 
 SCRIPT = REPO_ROOT / "scripts" / "skillsbench_automation_loop.py"
@@ -37,6 +44,32 @@ def main() -> int:
         task = root / "tasks" / "demo-task" / "environment"
         task.mkdir(parents=True)
         (task / "Dockerfile").write_text("FROM ubuntu:22.04\n", encoding="utf-8")
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "benchflow":
+                raise ModuleNotFoundError(
+                    "No module named 'benchflow'", name="benchflow"
+                )
+            return original_import(name, *args, **kwargs)
+
+        builtins.__import__ = fake_import
+        try:
+            try:
+                ensure_benchflow_runtime(
+                    SimpleNamespace(
+                        plan_only=False,
+                        reduce_only=False,
+                        skillsbench_root=str(root),
+                    )
+                )
+            except RuntimeError as exc:
+                assert "benchflow runtime unavailable" in str(exc)
+                assert "skillsbench-root .venv/bin/python is missing" in str(exc)
+            else:
+                raise AssertionError("missing benchflow runtime should fail closed")
+        finally:
+            builtins.__import__ = original_import
         proc = subprocess.run(
             [
                 sys.executable,
@@ -74,6 +107,29 @@ def main() -> int:
         assert prerequisites["container_codex_acp_install_skipped"] is False
         assert plan["public_boundary"]["leaderboard_upload"] is False
         assert plan["public_boundary"]["public_submission"] is False
+        launch_command = _host_local_acp_launch_command(
+            SimpleNamespace(
+                app_server_acp_heartbeat_interval_sec=120.0,
+                app_server_reasoning_effort="high",
+                dataset="skillsbench-v1.1",
+                host_local_acp_launch=True,
+                local_acp_relay_command=None,
+                local_codex_bin="codex",
+                local_codex_exec_timeout_sec=7200,
+                local_codex_sandbox="workspace-write",
+                model=None,
+                remote_command_file_bridge_probe=False,
+                remote_command_file_bridge_probe_timeout_sec=5.0,
+                remote_command_file_bridge_ready=False,
+                remote_command_file_bridge_agent_command=None,
+                remote_command_file_bridge_solver_command=None,
+                route="loopx-product-mode",
+                task_id="demo-task",
+            ),
+            {"host_local_acp_relay_trace_dir": str(Path(tmp) / "trace")},
+        )
+        heartbeat_index = launch_command.index("--stream-heartbeat-interval-sec")
+        assert launch_command[heartbeat_index + 1] == "15.0"
         blocked = subprocess.run(
             [
                 sys.executable,
@@ -252,6 +308,8 @@ else:
                 bridge_command,
                 "--remote-command-file-bridge-solver-command",
                 solver_bridge_command,
+                "--remote-command-file-bridge-agent-command",
+                "python3 managed-local-agent-bridge.py",
                 "--plan-only",
             ],
             cwd=REPO_ROOT,
@@ -272,6 +330,36 @@ else:
         )
         assert (
             wired_prerequisites[
+                "remote_command_file_bridge_agent_command_configured"
+            ]
+            is True
+        )
+        assert (
+            wired_prerequisites[
+                "remote_command_file_bridge_agent_command_instrumented"
+            ]
+            is True
+        )
+        assert (
+            wired_prerequisites[
+                "remote_command_file_bridge_agent_operation_trace_required"
+            ]
+            is True
+        )
+        assert (
+            wired_prerequisites[
+                "remote_command_file_bridge_agent_operation_trace_satisfied"
+            ]
+            is False
+        )
+        assert (
+            wired_prerequisites[
+                "remote_command_file_bridge_agent_operation_trace_status"
+            ]
+            == "external_agent_command_relay_wrapped_pending_trace"
+        )
+        assert (
+            wired_prerequisites[
                 "remote_command_file_bridge_solver_wiring_configured"
             ]
             is True
@@ -283,20 +371,36 @@ else:
         fake_codex = Path(tmp) / "fake-codex"
         fake_codex.write_text(
             """#!/usr/bin/env python3
+import json
 import select
+import subprocess
 import sys
 from pathlib import Path
 
 args = sys.argv[1:]
-if "Private bridge command:" not in args[-1]:
+prompt = args[-1]
+if "Private bridge command:" not in prompt:
     raise SystemExit(7)
-if '"operation":"exec"' not in args[-1]:
+bridge_command = prompt.split("Private bridge command:", 1)[1].strip().splitlines()[0]
+if not bridge_command:
     raise SystemExit(10)
 ready, _, _ = select.select([sys.stdin], [], [], 0.2)
 if not ready:
     raise SystemExit(8)
 if sys.stdin.read():
     raise SystemExit(9)
+for command in (
+    "/app/.local/bin/loopx quota should-run --goal-id skillsbench-case --agent-id codex-benchmark-agent",
+    "/app/.local/bin/loopx todo update --goal-id skillsbench-case --todo-id todo_seed --status open --note checkpoint",
+):
+    subprocess.run(
+        [bridge_command],
+        input=json.dumps({"operation": "exec", "cwd": "/app", "command": command}),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
 output = Path(args[args.index("--output-last-message") + 1])
 output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
 """,
@@ -320,15 +424,32 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
                 str(trace_dir),
                 "--remote-command-file-bridge-command",
                 solver_bridge_command,
+                "--remote-command-file-bridge-agent-command",
+                solver_bridge_command,
                 "--remote-command-file-bridge-timeout-sec",
                 "5",
+                "--loopx-workflow-lifecycle-checkpoint",
+                "--loopx-case-goal-id",
+                "skillsbench-case",
+                "--loopx-case-agent-id",
+                "codex-benchmark-agent",
+                "--loopx-case-todo-id",
+                "todo_seed",
             ],
             timeout_sec=20,
         )
         assert relay_probe["ready"] is True, relay_probe
         trace_files = sorted(trace_dir.glob("*.compact.json"))
-        assert trace_files, relay_probe
-        bridge_trace = json.loads(trace_files[0].read_text(encoding="utf-8"))
+        assert len(trace_files) >= 3, relay_probe
+        traces = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in trace_files
+        ]
+        bridge_trace = next(
+            trace
+            for trace in traces
+            if trace.get("trace_kind") == "remote_command_file_bridge_solver_consumption"
+        )
         assert (
             bridge_trace["schema_version"]
             == "skillsbench_host_local_acp_relay_public_trace_v0"
@@ -350,6 +471,37 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
         assert boundary["raw_task_text_recorded"] is False
         assert boundary["host_paths_recorded"] is False
         assert boundary["remote_paths_recorded"] is False
+        agent_ops_trace = next(
+            trace
+            for trace in traces
+            if trace.get("trace_kind") == "remote_command_file_bridge_agent_operations"
+        )
+        agent_ops = agent_ops_trace["remote_command_file_bridge_agent_operations"]
+        assert agent_ops["request_count"] == 2, agent_ops
+        assert agent_ops["loopx_cli_call_count"] == 2, agent_ops
+        assert agent_ops["loopx_state_read_count"] == 1, agent_ops
+        assert agent_ops["loopx_state_write_count"] == 1, agent_ops
+        assert agent_ops["raw_material_recorded"] is False, agent_ops
+        driver_lifecycle_trace = next(
+            trace
+            for trace in traces
+            if trace.get("trace_kind")
+            == "remote_command_file_bridge_driver_lifecycle_checkpoint"
+        )
+        driver_lifecycle = driver_lifecycle_trace[
+            "remote_command_file_bridge_driver_lifecycle_checkpoint"
+        ]
+        assert (
+            driver_lifecycle["execution_style"]
+            == "orchestrated_agentloop_loopx_cli"
+        ), driver_lifecycle
+        assert driver_lifecycle["checkpoint_count"] == 1, driver_lifecycle
+        assert driver_lifecycle["request_count"] == 4, driver_lifecycle
+        assert driver_lifecycle["failure_count"] == 0, driver_lifecycle
+        assert driver_lifecycle["loopx_cli_call_count"] == 4, driver_lifecycle
+        assert driver_lifecycle["loopx_state_read_count"] == 1, driver_lifecycle
+        assert driver_lifecycle["loopx_state_write_count"] == 3, driver_lifecycle
+        assert driver_lifecycle["raw_material_recorded"] is False, driver_lifecycle
         controller_trace = {"schema_version": "skillsbench_loopx_controller_trace_v0"}
         reducer_plan = {
             "host_local_acp_relay_trace_dir": str(trace_dir),
@@ -376,11 +528,251 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
             >= 4
         )
         assert (
+            controller_trace[
+                "remote_command_file_bridge_agent_operation_trace_count"
+            ]
+            == 1
+        )
+        assert (
+            controller_trace[
+                "remote_command_file_bridge_agent_loopx_state_read_count"
+            ]
+            == 1
+        )
+        assert (
+            controller_trace[
+                "remote_command_file_bridge_agent_loopx_state_write_count"
+            ]
+            == 1
+        )
+        assert (
+            controller_trace[
+                "remote_command_file_bridge_driver_lifecycle_trace_count"
+            ]
+            == 1
+        )
+        assert (
+            controller_trace[
+                "remote_command_file_bridge_driver_lifecycle_checkpoint_count"
+            ]
+            == 1
+        )
+        assert (
+            controller_trace[
+                "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count"
+            ]
+            == 1
+        )
+        assert (
+            controller_trace[
+                "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count"
+            ]
+            == 3
+        )
+        assert (
             reducer_plan["runner_prerequisites"][
                 "remote_command_file_bridge_consumption_status"
             ]
             == "solver_prompt_probe_ready"
         )
+        failing_codex = Path(tmp) / "failing-codex"
+        failing_codex.write_text(
+            """#!/usr/bin/env python3
+import sys
+
+print("hit your usage limit", file=sys.stderr)
+raise SystemExit(42)
+""",
+            encoding="utf-8",
+        )
+        failing_codex.chmod(0o755)
+        failure_trace_dir = Path(tmp) / "relay-failure-traces"
+        failing_probe = run_skillsbench_local_acp_relay_probe(
+            [
+                sys.executable,
+                str(RELAY_SCRIPT),
+                "--codex-bin",
+                str(failing_codex),
+                "--route",
+                "loopx-product-mode",
+                "--dataset",
+                "skillsbench-v1.1",
+                "--task-id",
+                "demo-task",
+                "--worker-public-trace-dir",
+                str(failure_trace_dir),
+            ],
+            timeout_sec=20,
+        )
+        assert failing_probe["ready"] is False, failing_probe
+        failure_trace_files = sorted(failure_trace_dir.glob("*.compact.json"))
+        assert len(failure_trace_files) == 1, failure_trace_files
+        failure_trace = json.loads(
+            failure_trace_files[0].read_text(encoding="utf-8")
+        )
+        assert failure_trace["trace_kind"] == "codex_exec_process_failure"
+        process = failure_trace["codex_exec_process"]
+        assert process["failure_category"] == "codex_usage_limit"
+        assert process["returncode"] == 42
+        assert process["stderr_bytes"] > 0
+        assert process["raw_stderr_recorded"] is False
+        assert process["raw_task_text_recorded"] is False
+        failure_controller_trace = {
+            "schema_version": "skillsbench_loopx_controller_trace_v0"
+        }
+        failure_reducer_plan = {
+            "host_local_acp_relay_trace_dir": str(failure_trace_dir),
+            "runner_prerequisites": {},
+        }
+        _merge_host_local_acp_relay_trace_summary(
+            failure_reducer_plan,
+            failure_controller_trace,
+        )
+        assert (
+            failure_controller_trace[
+                "host_local_acp_codex_exec_failure_trace_present"
+            ]
+            is True
+        )
+        assert (
+            failure_controller_trace["host_local_acp_codex_exec_failure_category"]
+            == "codex_usage_limit"
+        )
+        assert (
+            failure_reducer_plan["runner_prerequisites"][
+                "host_local_acp_codex_exec_failure_trace_count"
+            ]
+            == 1
+        )
+        reverse_failing_codex = Path(tmp) / "reverse-failing-codex"
+        reverse_failing_codex.write_text(
+            """#!/usr/bin/env python3
+import sys
+
+print("ConnectionRefusedError: [Errno 111] Connection refused", file=sys.stderr)
+raise SystemExit(1)
+""",
+            encoding="utf-8",
+        )
+        reverse_failing_codex.chmod(0o755)
+        reverse_failure_trace_dir = Path(tmp) / "reverse-failure-traces"
+        reverse_probe = run_skillsbench_local_acp_relay_probe(
+            [
+                sys.executable,
+                str(RELAY_SCRIPT),
+                "--codex-bin",
+                str(reverse_failing_codex),
+                "--route",
+                "loopx-product-mode",
+                "--dataset",
+                "skillsbench-v1.1",
+                "--task-id",
+                "demo-task",
+                "--model",
+                "gpt-5.5",
+                "--worker-public-trace-dir",
+                str(reverse_failure_trace_dir),
+            ],
+            timeout_sec=20,
+        )
+        assert reverse_probe["ready"] is False, reverse_probe
+        reverse_failure = json.loads(
+            next(reverse_failure_trace_dir.glob("*.compact.json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert (
+            reverse_failure["codex_exec_process"]["failure_category"]
+            == "codex_reverse_channel_unavailable"
+        ), reverse_failure
+        preflight_plan = {
+            "host_local_acp_relay_trace_dir": str(Path(tmp) / "preflight-traces"),
+            "runner_prerequisites": {},
+        }
+        preflight_args = SimpleNamespace(
+            dataset="skillsbench-v1.1",
+            host_local_acp_codex_exec_preflight_timeout_sec=20,
+            local_codex_bin=str(reverse_failing_codex),
+            local_codex_sandbox="workspace-write",
+            model="gpt-5.5",
+            route="loopx-product-mode",
+            task_id="demo-task",
+        )
+        try:
+            _run_host_local_acp_codex_exec_preflight(preflight_args, preflight_plan)
+        except RuntimeError as exc:
+            assert "codex exec preflight failed" in str(exc)
+        else:
+            raise AssertionError("reverse-channel preflight should fail closed")
+        preflight_prereqs = preflight_plan["runner_prerequisites"]
+        assert (
+            preflight_prereqs["host_local_acp_codex_exec_preflight_status"]
+            == "failed"
+        ), preflight_prereqs
+        assert (
+            preflight_prereqs["host_local_acp_codex_exec_failure_category"]
+            == "codex_reverse_channel_unavailable"
+        ), preflight_prereqs
+        compact_failure = {
+            "score_failure_attribution": (
+                "skillsbench_host_local_acp_codex_exec_failed_codex_usage_limit"
+            ),
+            "interaction_counters": {
+                "private_trajectory_event_count": 1,
+                "private_trajectory_round_count": 1,
+                "private_trajectory_tool_call_count": 0,
+                "controller_action_decisions": 1,
+            },
+            "failure_attribution_labels": [],
+        }
+        assert _apply_agent_message_only_no_tool_calls_attribution(compact_failure)
+        assert compact_failure["score_failure_attribution"] == (
+            "skillsbench_host_local_acp_codex_exec_failed_codex_usage_limit"
+        )
+        assert compact_failure["first_blocker"] == (
+            "skillsbench_host_local_acp_codex_exec_failed_codex_usage_limit"
+        )
+        assert "skillsbench_agent_behavior_gap" not in (
+            compact_failure["failure_attribution_labels"]
+        )
+        interruption_compact = build_runner_failure_compact(
+            SimpleNamespace(
+                build_stall_timeout_sec=0,
+                dataset="skillsbench-v1.1",
+                model=None,
+                route="loopx-product-mode",
+                task_id="demo-task",
+            ),
+            {
+                "compact_benchmark_run_json": str(
+                    Path(tmp) / "interrupted-compact.json"
+                ),
+                "runner_prerequisites": {
+                    "schema_version": "skillsbench_runner_prerequisites_v0",
+                    "agent_execution_mode": "host_local_acp",
+                },
+            },
+            KeyboardInterrupt(),
+        )
+        assert interruption_compact["score_failure_attribution"] == (
+            "skillsbench_runner_interrupted_before_official_result"
+        ), interruption_compact
+        assert "skillsbench_compact_closeout_recorded" in (
+            interruption_compact["failure_attribution_labels"]
+        )
+        interruption_prereqs = interruption_compact["runner_prerequisites"]
+        assert interruption_prereqs["runner_interrupted_before_official_result"] is True
+        assert interruption_prereqs["runner_interruption_kind"] == (
+            "keyboard_interrupt"
+        )
+        assert (
+            interruption_prereqs["runner_interruption_raw_material_recorded"]
+            is False
+        )
+        assert interruption_compact["validation"]["runner_failure_compact_recorded"]
+        assert interruption_compact["validation"]["no_raw_logs_read"]
+        assert interruption_compact["validation"]["no_raw_task_text_read"]
+        assert interruption_compact["validation"]["no_raw_trajectory_read"]
     print("skillsbench host-local ACP launch plan smoke passed")
     return 0
 

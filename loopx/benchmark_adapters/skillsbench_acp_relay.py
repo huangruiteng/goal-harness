@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import selectors
 import shlex
 import subprocess
@@ -14,6 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
+from loopx.benchmark_case_state import (
+    BENCHMARK_CASE_LOOPX_AGENT_ID,
+    BENCHMARK_CASE_LOOPX_CLI_PATH,
+    BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
+    BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
+    BENCHMARK_CASE_LOOPX_TODO_ID,
+    benchmark_case_goal_id,
+    benchmark_case_loopx_command_prefix,
+)
 from loopx.benchmark_adapters.skillsbench_remote_bridge import (
     run_skillsbench_remote_command_file_bridge_probe,
 )
@@ -60,6 +70,33 @@ def _safe_cwd(value: Any, *, default: str) -> str:
     return text or default
 
 
+def _codex_exec_failure_category(
+    *,
+    returncode: int | None,
+    stderr_text: str,
+) -> str:
+    text = (stderr_text or "").lower()
+    if (
+        "connectionrefusederror" in text
+        or "connection refused" in text
+        or "failed to establish a new connection" in text
+        or ("create_connection" in text and "socket" in text)
+    ):
+        return "codex_reverse_channel_unavailable"
+    if "hit your usage limit" in text or "usage limit" in text:
+        return "codex_usage_limit"
+    if "unexpected argument" in text or "unrecognized option" in text:
+        return "codex_cli_argument_incompatible"
+    if "api.openai.com" in text or "chatgpt.com" in text:
+        if any(token in text for token in ("timed out", "timeout", "connection")):
+            return "codex_network_or_api_unreachable"
+    if returncode == 124:
+        return "codex_exec_timeout"
+    if returncode is not None:
+        return "codex_exec_exit_nonzero"
+    return "codex_exec_failed"
+
+
 @dataclass(frozen=True)
 class CodexExecConfig:
     codex_bin: str = "codex"
@@ -78,7 +115,15 @@ class CodexExecConfig:
     reasoning_effort: str | None = "high"
     worker_public_trace_dir: str | None = None
     remote_command_file_bridge_command: str | None = None
+    remote_command_file_bridge_agent_command: str | None = None
     remote_command_file_bridge_timeout_sec: float = 10.0
+    loopx_workflow_lifecycle_checkpoint: bool = False
+    loopx_case_goal_id: str = "skillsbench-case"
+    loopx_case_agent_id: str = BENCHMARK_CASE_LOOPX_AGENT_ID
+    loopx_case_todo_id: str = BENCHMARK_CASE_LOOPX_TODO_ID
+    loopx_case_cli_path: str = BENCHMARK_CASE_LOOPX_CLI_PATH
+    loopx_case_registry_path: str = BENCHMARK_CASE_LOOPX_REGISTRY_PATH
+    loopx_case_runtime_root: str = BENCHMARK_CASE_LOOPX_RUNTIME_ROOT
 
 
 class SkillsBenchLocalAcpRelay:
@@ -94,6 +139,7 @@ class SkillsBenchLocalAcpRelay:
         self._config = config
         self._sessions: dict[str, dict[str, Any]] = {}
         self._published_lifecycle_stages: set[str] = set()
+        self._workflow_checkpoint_count = 0
 
     def serve(self, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> int:
         for line in stdin:
@@ -196,7 +242,19 @@ class SkillsBenchLocalAcpRelay:
                 },
             },
         )
-        return _json_rpc_result(message_id, {"stopReason": "end_turn"})
+        output_tokens = max(1, len(response_text.encode("utf-8")) // 4)
+        input_tokens = max(1, len(prompt_text.encode("utf-8")) // 4)
+        return _json_rpc_result(
+            message_id,
+            {
+                "stopReason": "end_turn",
+                "usage": {
+                    "inputTokens": input_tokens,
+                    "outputTokens": output_tokens,
+                    "totalTokens": input_tokens + output_tokens,
+                },
+            },
+        )
 
     def _run_codex(
         self,
@@ -218,6 +276,8 @@ class SkillsBenchLocalAcpRelay:
         with tempfile.TemporaryDirectory(prefix="gh-skillsbench-acp-") as tmp:
             tmp_path = Path(tmp)
             output_path = tmp_path / "last-message.txt"
+            stdout_path = tmp_path / "codex-stdout.txt"
+            stderr_path = tmp_path / "codex-stderr.txt"
             prompt_for_codex = prompt_text
             cwd = _safe_cwd(session.get("cwd"), default=os.getcwd())
             if self._config.remote_command_file_bridge_command:
@@ -228,10 +288,30 @@ class SkillsBenchLocalAcpRelay:
                 local_cwd = tmp_path / "local-codex-cwd"
                 local_cwd.mkdir(parents=True, exist_ok=True)
                 cwd = str(local_cwd)
+                bridge_summary_path = tmp_path / "remote-bridge-agent-ops.jsonl"
+                agent_bridge_command = (
+                    self._config.remote_command_file_bridge_agent_command
+                    or self._config.remote_command_file_bridge_command
+                    or ""
+                )
+                instrumented_bridge = self._write_instrumented_bridge_wrapper(
+                    tmp_path=tmp_path,
+                    summary_path=bridge_summary_path,
+                    bridge_command=agent_bridge_command,
+                )
+                bridge_command_for_agent = str(instrumented_bridge)
+                if self._config.loopx_workflow_lifecycle_checkpoint:
+                    self._workflow_checkpoint_count += 1
+                    self._run_loopx_workflow_lifecycle_checkpoint(
+                        checkpoint_index=self._workflow_checkpoint_count,
+                    )
                 prompt_for_codex = self._prompt_with_remote_bridge_packet(
                     prompt_text,
                     bridge_probe=bridge_probe,
+                    bridge_command_for_agent=bridge_command_for_agent,
                 )
+            else:
+                bridge_summary_path = None
             cmd = [
                 self._config.codex_bin,
                 "exec",
@@ -249,24 +329,113 @@ class SkillsBenchLocalAcpRelay:
             if model:
                 cmd.extend(["--model", str(model)])
             cmd.append(prompt_for_codex)
+            stdout_text = ""
+            stderr_text = ""
             try:
-                proc = subprocess.run(
-                    cmd,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=self._config.timeout_sec,
-                    check=False,
-                )
+                with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open(
+                    "w", encoding="utf-8"
+                ) as stderr_file:
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout_file,
+                        stderr=stderr_file,
+                        text=True,
+                    )
+                    deadline = time.monotonic() + self._config.timeout_sec
+                    next_heartbeat = (
+                        time.monotonic()
+                        + max(1.0, self._config.stream_heartbeat_interval_sec)
+                    )
+                    while proc.poll() is None:
+                        now = time.monotonic()
+                        if now >= deadline:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                            raise subprocess.TimeoutExpired(
+                                cmd,
+                                self._config.timeout_sec,
+                            )
+                        if now >= next_heartbeat:
+                            self._write_worker_heartbeat(
+                                stdout,
+                                session_id=session_id,
+                                text="local codex exec still running",
+                            )
+                            next_heartbeat = (
+                                now
+                                + max(
+                                    1.0,
+                                    self._config.stream_heartbeat_interval_sec,
+                                )
+                            )
+                        time.sleep(0.2)
             except subprocess.TimeoutExpired as exc:
+                stdout_text = (
+                    stdout_path.read_text(encoding="utf-8", errors="replace")
+                    if stdout_path.exists()
+                    else ""
+                )
+                stderr_text = (
+                    stderr_path.read_text(encoding="utf-8", errors="replace")
+                    if stderr_path.exists()
+                    else ""
+                )
+                self._publish_codex_exec_failure_trace(
+                    stage="timeout",
+                    returncode=124,
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    final_message_present=output_path.exists(),
+                    final_message_bytes=(
+                        output_path.stat().st_size if output_path.exists() else 0
+                    ),
+                )
                 raise TimeoutError from exc
+            stdout_text = (
+                stdout_path.read_text(encoding="utf-8", errors="replace")
+                if stdout_path.exists()
+                else ""
+            )
+            stderr_text = (
+                stderr_path.read_text(encoding="utf-8", errors="replace")
+                if stderr_path.exists()
+                else ""
+            )
             if proc.returncode != 0:
-                raise RuntimeError("local codex execution failed")
+                category = _codex_exec_failure_category(
+                    returncode=proc.returncode,
+                    stderr_text=stderr_text,
+                )
+                self._publish_codex_exec_failure_trace(
+                    stage="exit_nonzero",
+                    returncode=proc.returncode,
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    final_message_present=output_path.exists(),
+                    final_message_bytes=(
+                        output_path.stat().st_size if output_path.exists() else 0
+                    ),
+                    failure_category=category,
+                )
+                raise RuntimeError(f"local codex execution failed: {category}")
             try:
                 response = output_path.read_text(encoding="utf-8").strip()
             except OSError as exc:
+                self._publish_codex_exec_failure_trace(
+                    stage="final_message_missing",
+                    returncode=proc.returncode,
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    final_message_present=False,
+                    final_message_bytes=0,
+                    failure_category="codex_final_message_missing",
+                )
                 raise RuntimeError("local codex final message missing") from exc
+            if bridge_summary_path is not None:
+                self._publish_remote_bridge_agent_operations_trace(
+                    bridge_summary_path=bridge_summary_path,
+                )
             return response or "local codex returned an empty final message"
 
     def _consume_remote_bridge_for_solver(self) -> dict[str, Any]:
@@ -275,16 +444,209 @@ class SkillsBenchLocalAcpRelay:
             timeout_sec=self._config.remote_command_file_bridge_timeout_sec,
         )
 
+    def _run_remote_bridge_exec(self, command: str) -> dict[str, Any]:
+        bridge_command = self._config.remote_command_file_bridge_command or ""
+        request = {
+            "operation": "exec",
+            "cwd": "/app",
+            "command": command,
+            "timeout_sec": max(10.0, self._config.remote_command_file_bridge_timeout_sec),
+        }
+        started = time.monotonic()
+        proc = subprocess.run(
+            bridge_command,
+            input=json.dumps(request),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            timeout=max(10.0, self._config.remote_command_file_bridge_timeout_sec + 5),
+            check=False,
+        )
+        return {
+            "returncode": int(proc.returncode),
+            "stdout_bytes": len((proc.stdout or "").encode("utf-8")),
+            "stderr_bytes": len((proc.stderr or "").encode("utf-8")),
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "raw_stdout_recorded": False,
+            "raw_stderr_recorded": False,
+            "raw_command_recorded": False,
+        }
+
+    def _run_loopx_workflow_lifecycle_checkpoint(
+        self,
+        *,
+        checkpoint_index: int,
+    ) -> None:
+        case_goal_id = self._config.loopx_case_goal_id or benchmark_case_goal_id(
+            self._config.task_id
+        )
+        case_agent_id = self._config.loopx_case_agent_id or BENCHMARK_CASE_LOOPX_AGENT_ID
+        case_todo_id = self._config.loopx_case_todo_id or BENCHMARK_CASE_LOOPX_TODO_ID
+        cli_prefix = benchmark_case_loopx_command_prefix(
+            case_cli_path=self._config.loopx_case_cli_path,
+            case_registry_path=self._config.loopx_case_registry_path,
+            case_runtime_root=self._config.loopx_case_runtime_root,
+        )
+        note = shlex.quote(
+            f"workflow driver lifecycle checkpoint {checkpoint_index}"
+        )
+        evidence = shlex.quote(
+            "public-safe orchestrated checkpoint: case-local LoopX state touched"
+        )
+        commands = [
+            (
+                "quota should-run",
+                "read",
+                f"{cli_prefix} quota should-run --goal-id {shlex.quote(case_goal_id)} "
+                f"--agent-id {shlex.quote(case_agent_id)}",
+            ),
+            (
+                "todo claim",
+                "write",
+                f"{cli_prefix} todo claim --goal-id {shlex.quote(case_goal_id)} "
+                f"--todo-id {shlex.quote(case_todo_id)} "
+                f"--claimed-by {shlex.quote(case_agent_id)}",
+            ),
+            (
+                "todo update",
+                "write",
+                f"{cli_prefix} todo update --goal-id {shlex.quote(case_goal_id)} "
+                f"--todo-id {shlex.quote(case_todo_id)} --status open "
+                f"--note {note} --evidence {evidence} "
+                f"--claimed-by {shlex.quote(case_agent_id)}",
+            ),
+            (
+                "refresh-state",
+                "write",
+                f"{cli_prefix} refresh-state --goal-id {shlex.quote(case_goal_id)} "
+                "--classification benchmark_case_lifecycle_checkpoint "
+                "--delivery-batch-scale single_surface "
+                "--delivery-outcome surface_only "
+                f"--agent-id {shlex.quote(case_agent_id)} "
+                "--agent-lane benchmark_case --no-global-sync",
+            ),
+        ]
+        command_results: list[dict[str, Any]] = []
+        failures = 0
+        for command_name, io_kind, command in commands:
+            try:
+                result = self._run_remote_bridge_exec(command)
+            except (OSError, subprocess.SubprocessError, TimeoutError) as exc:
+                result = {
+                    "returncode": 124 if isinstance(exc, TimeoutError) else 1,
+                    "stdout_bytes": 0,
+                    "stderr_bytes": 0,
+                    "elapsed_ms": 0,
+                    "raw_stdout_recorded": False,
+                    "raw_stderr_recorded": False,
+                    "raw_command_recorded": False,
+                }
+            result["command_name"] = command_name
+            result["io_kind"] = io_kind
+            command_results.append(result)
+            if result.get("returncode") != 0:
+                failures += 1
+                break
+        self._publish_loopx_workflow_lifecycle_checkpoint_trace(
+            checkpoint_index=checkpoint_index,
+            command_results=command_results,
+            failure_count=failures,
+        )
+        if failures:
+            raise RuntimeError("LoopX workflow lifecycle checkpoint failed")
+
+    def _publish_loopx_workflow_lifecycle_checkpoint_trace(
+        self,
+        *,
+        checkpoint_index: int,
+        command_results: list[dict[str, Any]],
+        failure_count: int,
+    ) -> None:
+        if not self._config.worker_public_trace_dir:
+            return
+        command_counts: dict[str, int] = {}
+        returncode_counts: dict[str, int] = {}
+        state_read_count = 0
+        state_write_count = 0
+        for result in command_results:
+            name = str(result.get("command_name") or "unknown")[:80]
+            command_counts[name] = command_counts.get(name, 0) + 1
+            rc = result.get("returncode")
+            if isinstance(rc, int) and not isinstance(rc, bool):
+                key = str(rc)
+            else:
+                key = "unknown"
+            returncode_counts[key] = returncode_counts.get(key, 0) + 1
+            io_kind = result.get("io_kind")
+            if io_kind == "read":
+                state_read_count += 1
+            elif io_kind == "write":
+                state_write_count += 1
+        raw_material_recorded = any(
+            result.get(field) is True
+            for result in command_results
+            for field in (
+                "raw_command_recorded",
+                "raw_stdout_recorded",
+                "raw_stderr_recorded",
+            )
+        )
+        trace = {
+            "schema_version": "skillsbench_host_local_acp_relay_public_trace_v0",
+            "ok": failure_count == 0,
+            "route": self._config.route,
+            "trace_kind": "remote_command_file_bridge_driver_lifecycle_checkpoint",
+            "benchmark_id": self._config.dataset,
+            "task_id": self._config.task_id,
+            "remote_command_file_bridge_driver_lifecycle_checkpoint": {
+                "schema_version": (
+                    "skillsbench_remote_command_file_bridge_driver_lifecycle_v0"
+                ),
+                "execution_style": "orchestrated_agentloop_loopx_cli",
+                "checkpoint_index": checkpoint_index,
+                "checkpoint_count": 1,
+                "request_count": len(command_results),
+                "success_count": len(command_results) - max(0, failure_count),
+                "failure_count": max(0, failure_count),
+                "loopx_cli_call_count": len(command_results),
+                "loopx_state_read_count": state_read_count,
+                "loopx_state_write_count": state_write_count,
+                "command_counts": dict(sorted(command_counts.items())),
+                "returncode_counts": dict(sorted(returncode_counts.items())),
+                "raw_material_recorded": raw_material_recorded,
+            },
+            "boundary": {
+                "raw_command_recorded": False,
+                "raw_stdout_recorded": False,
+                "raw_stderr_recorded": False,
+                "raw_task_text_recorded": False,
+                "raw_logs_recorded": False,
+                "raw_trajectory_recorded": False,
+                "credential_values_recorded": False,
+                "host_paths_recorded": False,
+                "remote_paths_recorded": False,
+                "upload_performed": False,
+                "submit_performed": False,
+            },
+        }
+        self._write_worker_public_trace(trace)
+
     def _prompt_with_remote_bridge_packet(
         self,
         prompt_text: str,
         *,
         bridge_probe: dict[str, Any],
+        bridge_command_for_agent: str | None = None,
     ) -> str:
         operation_count = bridge_probe.get("operation_count")
         if not isinstance(operation_count, int) or isinstance(operation_count, bool):
             operation_count = 0
-        bridge_command = self._config.remote_command_file_bridge_command or ""
+        bridge_command = (
+            bridge_command_for_agent
+            or self._config.remote_command_file_bridge_command
+            or ""
+        )
         packet = f"""
 
 LoopX SkillsBench remote workspace bridge:
@@ -298,11 +660,213 @@ LoopX SkillsBench remote workspace bridge:
   - {{"operation":"cleanup","path":"/app/path/to/temp"}}
 - Do not upload, submit, expose credentials, quote the bridge command in final output, or record raw stdout/stderr/task text in public artifacts.
 - The bridge readiness probe completed with ready=true and operation_count={operation_count}.
+- If a LoopX product-mode lifecycle contract is present later in this prompt,
+  execute its case-local LoopX CLI commands through this JSON bridge
+  (`operation=exec`, `cwd=/app`) before prose planning or final answer. A
+  prose-only response without bridge requests is not a valid product-mode turn.
 
 Private bridge command:
 {bridge_command}
 """.strip()
         return f"{packet}\n\n{prompt_text}"
+
+    def _write_instrumented_bridge_wrapper(
+        self,
+        *,
+        tmp_path: Path,
+        summary_path: Path,
+        bridge_command: str | None = None,
+    ) -> Path:
+        wrapper_path = tmp_path / "loopx-remote-bridge"
+        command = bridge_command or self._config.remote_command_file_bridge_command or ""
+        script = f"""#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+SUMMARY_PATH = Path({str(summary_path)!r})
+BRIDGE_COMMAND = {command!r}
+
+def loopx_subcommands(command: str) -> list[str]:
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError:
+        tokens = (command or "").split()
+    idx = -1
+    for i, token in enumerate(tokens):
+        if token == "loopx" or token.endswith("/loopx"):
+            idx = i
+            break
+    if idx < 0:
+        return []
+    out: list[str] = []
+    skip = False
+    for token in tokens[idx + 1:]:
+        if skip:
+            skip = False
+            continue
+        if token.startswith("--"):
+            if "=" not in token and token in {{"--goal-id", "--todo-id", "--claimed-by", "--status", "--note", "--evidence", "--classification", "--registry", "--runtime-root", "--slots", "--source"}}:
+                skip = True
+            continue
+        if token.startswith("-"):
+            continue
+        if re.match(r"^[A-Za-z][A-Za-z0-9_-]{{0,40}}$", token):
+            out.append(token)
+            if len(out) >= 2:
+                break
+    return out
+
+raw = sys.stdin.read()
+record: dict[str, object] = {{
+    "schema_version": "skillsbench_remote_bridge_agent_operation_v0",
+    "raw_request_recorded": False,
+    "raw_stdout_recorded": False,
+    "raw_stderr_recorded": False,
+    "raw_task_text_recorded": False,
+    "credential_values_recorded": False,
+    "host_paths_recorded": False,
+    "remote_paths_recorded": False,
+}}
+try:
+    payload = json.loads(raw)
+except Exception:
+    payload = {{}}
+operation = payload.get("operation") if isinstance(payload, dict) else ""
+record["operation"] = operation if isinstance(operation, str) else "unknown"
+subcommands: list[str] = []
+if isinstance(payload, dict) and payload.get("operation") == "exec":
+    command_text = payload.get("command")
+    if isinstance(command_text, str):
+        subcommands = loopx_subcommands(command_text)
+record["loopx_cli_call"] = bool(subcommands)
+record["loopx_subcommands"] = subcommands[:2]
+record["loopx_state_read"] = subcommands[:2] in (["quota", "should-run"], ["status"], ["diagnose"])
+record["loopx_state_write"] = bool(subcommands and (
+    subcommands[0] in {{"todo", "refresh-state"}}
+    or subcommands[:2] == ["quota", "spend-slot"]
+))
+proc = subprocess.run(
+    BRIDGE_COMMAND,
+    input=raw,
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    shell=True,
+)
+record["returncode"] = int(proc.returncode)
+try:
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, sort_keys=True) + "\\n")
+except OSError:
+    pass
+sys.stdout.write(proc.stdout)
+sys.stderr.write(proc.stderr)
+raise SystemExit(proc.returncode)
+"""
+        wrapper_path.write_text(script, encoding="utf-8")
+        wrapper_path.chmod(0o700)
+        return wrapper_path
+
+    def _publish_remote_bridge_agent_operations_trace(
+        self,
+        *,
+        bridge_summary_path: Path,
+    ) -> None:
+        if not self._config.worker_public_trace_dir:
+            return
+        operation_counts: dict[str, int] = {}
+        loopx_subcommand_counts: dict[str, int] = {}
+        request_count = 0
+        loopx_cli_call_count = 0
+        state_read_count = 0
+        state_write_count = 0
+        raw_material_recorded = False
+        if bridge_summary_path.exists():
+            for line in bridge_summary_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines():
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                request_count += 1
+                operation = str(record.get("operation") or "unknown")[:40]
+                operation_counts[operation] = operation_counts.get(operation, 0) + 1
+                if record.get("loopx_cli_call") is True:
+                    loopx_cli_call_count += 1
+                if record.get("loopx_state_read") is True:
+                    state_read_count += 1
+                if record.get("loopx_state_write") is True:
+                    state_write_count += 1
+                subcommands = record.get("loopx_subcommands")
+                if isinstance(subcommands, list) and subcommands:
+                    key = " ".join(
+                        str(item)
+                        for item in subcommands[:2]
+                        if re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,40}$", str(item))
+                    )
+                    if key:
+                        loopx_subcommand_counts[key] = (
+                            loopx_subcommand_counts.get(key, 0) + 1
+                        )
+                raw_material_recorded = raw_material_recorded or any(
+                    record.get(field) is True
+                    for field in (
+                        "raw_request_recorded",
+                        "raw_stdout_recorded",
+                        "raw_stderr_recorded",
+                        "raw_task_text_recorded",
+                        "credential_values_recorded",
+                        "host_paths_recorded",
+                        "remote_paths_recorded",
+                    )
+                )
+        trace = {
+            "schema_version": "skillsbench_host_local_acp_relay_public_trace_v0",
+            "ok": True,
+            "route": self._config.route,
+            "trace_kind": "remote_command_file_bridge_agent_operations",
+            "benchmark_id": self._config.dataset,
+            "task_id": self._config.task_id,
+            "remote_command_file_bridge_agent_operations": {
+                "schema_version": (
+                    "skillsbench_remote_command_file_bridge_agent_operations_v0"
+                ),
+                "request_count": request_count,
+                "operation_counts": dict(sorted(operation_counts.items())),
+                "loopx_cli_call_count": loopx_cli_call_count,
+                "loopx_cli_subcommand_counts": dict(
+                    sorted(loopx_subcommand_counts.items())
+                ),
+                "loopx_state_read_count": state_read_count,
+                "loopx_state_write_count": state_write_count,
+                "raw_material_recorded": raw_material_recorded,
+            },
+            "boundary": {
+                "raw_command_recorded": False,
+                "raw_stdout_recorded": False,
+                "raw_stderr_recorded": False,
+                "raw_task_text_recorded": False,
+                "raw_logs_recorded": False,
+                "raw_trajectory_recorded": False,
+                "credential_values_recorded": False,
+                "host_paths_recorded": False,
+                "remote_paths_recorded": False,
+                "upload_performed": False,
+                "submit_performed": False,
+            },
+        }
+        self._write_worker_public_trace(trace)
 
     def _publish_remote_bridge_consumption_trace(
         self,
@@ -348,6 +912,73 @@ Private bridge command:
                 "bridge_command_recorded": False,
             },
             "boundary": boundary,
+        }
+        self._write_worker_public_trace(trace)
+
+    def _publish_codex_exec_failure_trace(
+        self,
+        *,
+        stage: str,
+        returncode: int | None,
+        stdout_text: str,
+        stderr_text: str,
+        final_message_present: bool,
+        final_message_bytes: int,
+        failure_category: str | None = None,
+    ) -> None:
+        if not self._config.worker_public_trace_dir:
+            return
+        safe_stage = "".join(
+            ch if ch.isalnum() or ch == "_" else "_"
+            for ch in str(stage or "").strip().lower()
+        )
+        if not safe_stage:
+            safe_stage = "codex_exec_failed"
+        category = failure_category or _codex_exec_failure_category(
+            returncode=returncode,
+            stderr_text=stderr_text,
+        )
+        trace = {
+            "schema_version": "skillsbench_host_local_acp_relay_public_trace_v0",
+            "ok": False,
+            "route": self._config.route,
+            "trace_kind": "codex_exec_process_failure",
+            "benchmark_id": self._config.dataset,
+            "task_id": self._config.task_id,
+            "codex_exec_process": {
+                "schema_version": "skillsbench_codex_exec_process_failure_v0",
+                "stage": safe_stage,
+                "failure_category": str(category or "codex_exec_failed")[:120],
+                "returncode": (
+                    returncode
+                    if isinstance(returncode, int)
+                    and not isinstance(returncode, bool)
+                    else None
+                ),
+                "stdout_bytes": len((stdout_text or "").encode("utf-8")),
+                "stderr_bytes": len((stderr_text or "").encode("utf-8")),
+                "final_message_present": bool(final_message_present),
+                "final_message_bytes": max(0, int(final_message_bytes or 0)),
+                "raw_stdout_recorded": False,
+                "raw_stderr_recorded": False,
+                "raw_task_text_recorded": False,
+                "raw_trajectory_recorded": False,
+                "credential_values_recorded": False,
+                "host_paths_recorded": False,
+            },
+            "boundary": {
+                "raw_command_recorded": False,
+                "raw_stdout_recorded": False,
+                "raw_stderr_recorded": False,
+                "raw_task_text_recorded": False,
+                "raw_logs_recorded": False,
+                "raw_trajectory_recorded": False,
+                "credential_values_recorded": False,
+                "host_paths_recorded": False,
+                "remote_paths_recorded": False,
+                "upload_performed": False,
+                "submit_performed": False,
+            },
         }
         self._write_worker_public_trace(trace)
 
@@ -829,11 +1460,23 @@ def run_skillsbench_local_acp_relay_probe(
             },
             timeout_at=started + timeout_sec,
         )
+        prompt_usage = (
+            prompt.get("result", {}).get("usage")
+            if isinstance(prompt.get("result"), dict)
+            else {}
+        )
+        usage_total = (
+            prompt_usage.get("totalTokens") if isinstance(prompt_usage, dict) else None
+        )
+        usage_ready = isinstance(usage_total, int) and not isinstance(
+            usage_total, bool
+        ) and usage_total > 0
         ready = (
             initialize.get("result", {}).get("agentInfo", {}).get("name")
             == "loopx-skillsbench-local-acp-relay"
             and bool(session_id)
             and prompt.get("result", {}).get("stopReason") == "end_turn"
+            and usage_ready
         )
         return _relay_probe_payload(
             ready=ready,
@@ -844,6 +1487,7 @@ def run_skillsbench_local_acp_relay_probe(
             ),
             stage="complete",
             request_count=4,
+            prompt_usage_total_tokens=usage_total if usage_ready else 0,
         )
     except (OSError, RuntimeError, TimeoutError, json.JSONDecodeError):
         return _relay_probe_payload(
@@ -851,6 +1495,7 @@ def run_skillsbench_local_acp_relay_probe(
             first_blocker=f"skillsbench_local_acp_relay_{stage}_failed",
             stage=stage,
             request_count=0,
+            prompt_usage_total_tokens=0,
         )
     finally:
         if proc is not None:
@@ -1035,6 +1680,7 @@ def _relay_probe_payload(
     first_blocker: str,
     stage: str,
     request_count: int,
+    prompt_usage_total_tokens: int = 0,
 ) -> dict[str, Any]:
     return {
         "schema_version": SKILLSBENCH_LOCAL_ACP_RELAY_PROBE_SCHEMA_VERSION,
@@ -1042,6 +1688,7 @@ def _relay_probe_payload(
         "first_blocker": first_blocker,
         "stage": stage,
         "request_count": request_count,
+        "prompt_usage_total_tokens": max(0, int(prompt_usage_total_tokens or 0)),
         "worker_protocol": "acp_stdio",
         "codex_cli_invoked": False,
         "raw_output_recorded": False,

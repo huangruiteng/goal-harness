@@ -546,6 +546,8 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_solver_trace_dir_present",
         "remote_command_file_bridge_solver_public_trace_read",
         "remote_command_file_bridge_solver_raw_material_recorded",
+        "remote_command_file_bridge_driver_lifecycle_trace_present",
+        "remote_command_file_bridge_driver_lifecycle_raw_material_recorded",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -616,6 +618,19 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_solver_trace_count",
         "remote_command_file_bridge_solver_probe_ready_count",
         "remote_command_file_bridge_solver_operation_count",
+        "remote_command_file_bridge_agent_operation_trace_count",
+        "remote_command_file_bridge_agent_request_count",
+        "remote_command_file_bridge_agent_loopx_cli_call_count",
+        "remote_command_file_bridge_agent_loopx_state_read_count",
+        "remote_command_file_bridge_agent_loopx_state_write_count",
+        "remote_command_file_bridge_driver_lifecycle_trace_count",
+        "remote_command_file_bridge_driver_lifecycle_checkpoint_count",
+        "remote_command_file_bridge_driver_lifecycle_request_count",
+        "remote_command_file_bridge_driver_lifecycle_success_count",
+        "remote_command_file_bridge_driver_lifecycle_failure_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -632,6 +647,7 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "benchflow_user_loop_recovery_stage",
         "benchflow_user_loop_recovery_exception_type",
         "benchflow_intermediate_soft_verify_policy",
+        "remote_command_file_bridge_driver_lifecycle_execution_style",
         "last_decision",
         "worker_submit_eligible_mismatch_reason",
         "worker_bridge_writeback_loss_reason",
@@ -717,6 +733,9 @@ def _compact_product_mode_lifecycle_contract(value: Any) -> dict[str, Any]:
         "satisfied",
         "countable_treatment",
         "checkpoint_required",
+        "agent_operation_trace_required",
+        "agent_operation_trace_satisfied",
+        "agent_operation_trace_missing",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -725,12 +744,25 @@ def _compact_product_mode_lifecycle_contract(value: Any) -> dict[str, Any]:
         "state_write_count",
         "checkpoint_count",
         "checkpoint_round",
+        "agent_bridge_state_read_count",
+        "agent_bridge_state_write_count",
+        "driver_lifecycle_state_read_count",
+        "driver_lifecycle_state_write_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
     missing_reason = public_safe_compact_text(value.get("missing_reason"), limit=140)
     if missing_reason:
         compact["missing_reason"] = missing_reason
+    trace_status = public_safe_compact_text(
+        value.get("agent_operation_trace_status"),
+        limit=120,
+    )
+    if trace_status:
+        compact["agent_operation_trace_status"] = trace_status
+    execution_style = public_safe_compact_text(value.get("execution_style"), limit=120)
+    if execution_style:
+        compact["execution_style"] = execution_style
     return compact
 
 
@@ -986,6 +1018,10 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_policy",
         "benchflow_setup_stall_cleanup_status",
         "remote_command_file_bridge_consumption_status",
+        "remote_command_file_bridge_agent_operation_trace_status",
+        "remote_command_file_bridge_driver_lifecycle_execution_style",
+        "runner_interruption_kind",
+        "runner_interruption_status",
     ):
         text = public_safe_compact_text(value.get(field), limit=180)
         if text:
@@ -1006,12 +1042,19 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_launch",
         "remote_command_file_bridge_materialized",
         "remote_command_file_bridge_command_configured",
+        "remote_command_file_bridge_agent_command_configured",
+        "remote_command_file_bridge_agent_command_instrumented",
         "remote_command_file_bridge_probe_command_configured",
         "remote_command_file_bridge_solver_wiring_configured",
         "remote_command_file_bridge_consumed_by_solver",
         "remote_command_file_bridge_solver_trace_dir_present",
         "remote_command_file_bridge_solver_public_trace_read",
         "remote_command_file_bridge_solver_raw_material_recorded",
+        "remote_command_file_bridge_agent_operation_trace_required",
+        "remote_command_file_bridge_agent_operation_trace_satisfied",
+        "remote_command_file_bridge_agent_operation_trace_present",
+        "remote_command_file_bridge_driver_lifecycle_trace_present",
+        "remote_command_file_bridge_driver_lifecycle_raw_material_recorded",
         "codex_app_server_goal_worker_adapter_present",
         "codex_app_server_goal_worker_turn_start_required",
         "codex_app_server_goal_worker_goal_get_required",
@@ -1044,6 +1087,9 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_setup_stall_task_cancel_timeout",
         "benchflow_setup_stall_cleanup_requested",
         "benchflow_setup_stall_cleanup_raw_logs_read",
+        "runner_interrupted_before_official_result",
+        "runner_interruption_compact_closeout_expected",
+        "runner_interruption_raw_material_recorded",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -1068,6 +1114,19 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_solver_trace_count",
         "remote_command_file_bridge_solver_probe_ready_count",
         "remote_command_file_bridge_solver_operation_count",
+        "remote_command_file_bridge_agent_operation_trace_count",
+        "remote_command_file_bridge_agent_request_count",
+        "remote_command_file_bridge_agent_loopx_cli_call_count",
+        "remote_command_file_bridge_agent_loopx_state_read_count",
+        "remote_command_file_bridge_agent_loopx_state_write_count",
+        "remote_command_file_bridge_driver_lifecycle_trace_count",
+        "remote_command_file_bridge_driver_lifecycle_checkpoint_count",
+        "remote_command_file_bridge_driver_lifecycle_request_count",
+        "remote_command_file_bridge_driver_lifecycle_success_count",
+        "remote_command_file_bridge_driver_lifecycle_failure_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count",
+        "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
