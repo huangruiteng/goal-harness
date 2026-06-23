@@ -57,6 +57,7 @@ from scripts.skillsbench_automation_loop import (  # noqa: E402
     LOCAL_CODEX_PARTICIPANT_MATERIALIZATION_SCHEMA_VERSION,
     PRODUCT_MODE_CASE_STATE_PATH,
     PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION,
+    SkillsBenchProductModeNoLifecycleRequests,
     _tail,
     _apply_agent_message_only_no_tool_calls_attribution,
     _blind_loop_persistent_continuation_clause,
@@ -1016,14 +1017,18 @@ def test_product_mode_no_tool_call_stops_before_checkpoint_loop() -> None:
             ]
             n_tool_calls = 0
 
-        prompt = asyncio.run(
-            user.run(
-                1,
-                "Fix the fixture.",
-                round_result=FakeRoundResult(),
+        try:
+            asyncio.run(
+                user.run(
+                    1,
+                    "Fix the fixture.",
+                    round_result=FakeRoundResult(),
+                )
             )
-        )
-        assert prompt is None, trace
+        except SkillsBenchProductModeNoLifecycleRequests as exc:
+            assert "no case-local LoopX lifecycle request" in str(exc)
+        else:
+            raise AssertionError("product-mode no-tool round must stop early")
         assert (
             trace["last_decision"]
             == "stop_after_product_mode_no_tool_calls_without_lifecycle"
@@ -1036,6 +1041,152 @@ def test_product_mode_no_tool_call_stops_before_checkpoint_loop() -> None:
         assert trace["product_mode_no_tool_call_lifecycle_abort_round"] == 1
         assert trace["followup_prompt_count"] == 0
         assert trace["stop_decision_count"] == 1
+
+
+def test_product_mode_agent_trace_no_requests_stops_before_verifier() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-no-agent-requests-") as tmp:
+        root = Path(tmp)
+        jobs_dir = root / "jobs"
+        job_name = "skillsbench_no_agent_requests_fixture"
+        rollout_name = "case__loopx_product_mode"
+        trace_dir = root / "public-traces"
+        trace_dir.mkdir(parents=True)
+        write_json(
+            trace_dir / "agent-ops.compact.json",
+            {
+                "schema_version": "skillsbench_host_local_acp_relay_public_trace_v0",
+                "trace_kind": "remote_command_file_bridge_agent_operations",
+                "boundary": {
+                    "raw_command_recorded": False,
+                    "raw_stdout_recorded": False,
+                    "raw_stderr_recorded": False,
+                    "raw_task_text_recorded": False,
+                    "raw_logs_recorded": False,
+                    "raw_trajectory_recorded": False,
+                    "credential_values_recorded": False,
+                    "host_paths_recorded": False,
+                    "remote_paths_recorded": False,
+                    "upload_performed": False,
+                    "submit_performed": False,
+                },
+                "remote_command_file_bridge_agent_operations": {
+                    "request_count": 0,
+                    "loopx_cli_call_count": 0,
+                    "loopx_state_read_count": 0,
+                    "loopx_state_write_count": 0,
+                    "operation_counts": {},
+                    "loopx_cli_subcommand_counts": {},
+                    "raw_material_recorded": False,
+                },
+            },
+        )
+        trace = {
+            "schema_version": "skillsbench_loopx_controller_trace_v0",
+            "route": "loopx-product-mode",
+            "loopx_state_reads": 0,
+            "loopx_state_writes": 0,
+            "loopx_case_state_reads": 0,
+            "loopx_case_state_writes": 0,
+            "heartbeat_count": 0,
+            "controller_action_decisions": 0,
+            "initial_prompt_count": 0,
+            "followup_prompt_count": 0,
+            "stop_decision_count": 0,
+            "reward_observation_count": 0,
+            "round_rewards": [],
+        }
+        plan = {
+            "jobs_dir": str(jobs_dir),
+            "job_name": job_name,
+            "rollout_name": rollout_name,
+            "host_local_acp_relay_trace_dir": str(trace_dir),
+            "runner_prerequisites": {
+                "remote_command_file_bridge_agent_command_configured": True,
+                "remote_command_file_bridge_agent_operation_trace_required": True,
+            },
+        }
+        saved_modules = {
+            name: sys.modules.get(name)
+            for name in (
+                "benchflow",
+                "benchflow.sandbox",
+                "benchflow.sandbox.user",
+            )
+        }
+        fake_benchflow = types.ModuleType("benchflow")
+        fake_sandbox = types.ModuleType("benchflow.sandbox")
+        fake_user = types.ModuleType("benchflow.sandbox.user")
+
+        class FakeBaseUser:
+            pass
+
+        class FakeRoundResultBase:
+            pass
+
+        fake_user.BaseUser = FakeBaseUser
+        fake_user.RoundResult = FakeRoundResultBase
+        sys.modules["benchflow"] = fake_benchflow
+        sys.modules["benchflow.sandbox"] = fake_sandbox
+        sys.modules["benchflow.sandbox.user"] = fake_user
+        try:
+            user = _build_product_mode_user(
+                route="loopx-product-mode",
+                max_rounds=8,
+                trace=trace,
+                plan=plan,
+            )
+        finally:
+            for name, module in saved_modules.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+
+        class FakeRoundResult:
+            rewards = {}
+            trajectory = [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "I used ordinary tools, but not LoopX.",
+                        }
+                    ],
+                }
+            ]
+            n_tool_calls = 2
+
+        try:
+            asyncio.run(
+                user.run(
+                    1,
+                    "Fix the fixture.",
+                    round_result=FakeRoundResult(),
+                )
+            )
+        except SkillsBenchProductModeNoLifecycleRequests as exc:
+            assert "no case-local LoopX lifecycle request" in str(exc)
+        else:
+            raise AssertionError("product-mode no-request trace must stop early")
+        assert (
+            trace["last_decision"]
+            == "stop_after_product_mode_agent_no_lifecycle_requests"
+        ), trace
+        assert trace["remote_command_file_bridge_agent_operation_trace_status"] == (
+            "agent_operation_trace_present_no_requests"
+        )
+        assert trace["remote_command_file_bridge_agent_operation_trace_count"] == 1
+        assert trace["remote_command_file_bridge_agent_request_count"] == 0
+        assert trace["product_mode_no_lifecycle_request_abort"] is True
+        assert trace["product_mode_no_lifecycle_request_abort_count"] == 1
+        assert trace["product_mode_no_lifecycle_request_abort_round"] == 1
+        assert trace.get("product_mode_no_tool_call_lifecycle_abort") is not True
+        assert trace["followup_prompt_count"] == 0
+        assert trace["stop_decision_count"] == 1
+        assert plan["runner_prerequisites"][
+            "remote_command_file_bridge_agent_operation_trace_status"
+        ] == "agent_operation_trace_present_no_requests"
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -3869,6 +4020,13 @@ def test_skillsbench_product_mode_lifecycle_checkpoint_is_compacted() -> None:
             "state_write_count": 0,
             "checkpoint_required": True,
             "checkpoint_count": 1,
+            "agent_operation_trace_required": False,
+            "agent_operation_trace_satisfied": False,
+            "agent_operation_trace_missing": False,
+            "agent_bridge_state_read_count": 0,
+            "agent_bridge_state_write_count": 0,
+            "driver_lifecycle_state_read_count": 0,
+            "driver_lifecycle_state_write_count": 0,
             "checkpoint_round": 1,
             "missing_reason": "missing_case_local_loopx_state_read_or_write",
         }, compact
@@ -3883,6 +4041,140 @@ def test_skillsbench_product_mode_lifecycle_checkpoint_is_compacted() -> None:
         assert compact_again["product_mode_lifecycle_contract"] == (
             lifecycle_contract
         ), compact_again
+        driver_controller_trace = dict(controller_trace)
+        driver_controller_trace.update(
+            {
+                "product_mode_lifecycle_checkpoint_missing_reason": "",
+                "remote_command_file_bridge_driver_lifecycle_trace_count": 1,
+                "remote_command_file_bridge_driver_lifecycle_execution_style": (
+                    "orchestrated_agentloop_loopx_cli"
+                ),
+                "remote_command_file_bridge_driver_lifecycle_checkpoint_count": 1,
+                "remote_command_file_bridge_driver_lifecycle_request_count": 4,
+                "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count": 4,
+                "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count": 1,
+                "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count": 3,
+            }
+        )
+        driver_compact = compact_benchmark_run(
+            build_skillsbench_benchflow_result_benchmark_run(
+                result_path,
+                route="loopx-product-mode",
+                controller_trace=driver_controller_trace,
+            )
+        )
+        assert driver_compact is not None
+        driver_contract = driver_compact["product_mode_lifecycle_contract"]
+        assert driver_contract["satisfied"] is True, driver_compact
+        assert driver_contract["countable_treatment"] is True, driver_compact
+        assert driver_contract["state_read_count"] == 1, driver_compact
+        assert driver_contract["state_write_count"] == 3, driver_compact
+        assert driver_contract["execution_style"] == (
+            "orchestrated_agentloop_loopx_cli"
+        ), driver_compact
+        driver_counters = driver_compact["interaction_counters"]
+        assert (
+            driver_counters[
+                "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count"
+            ]
+            == 1
+        ), driver_compact
+        assert (
+            driver_counters[
+                "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count"
+            ]
+            == 3
+        ), driver_compact
+        assert "skillsbench_product_mode_lifecycle_missing" not in driver_compact[
+            "failure_attribution_labels"
+        ], driver_compact
+        external_agent_controller_trace = dict(driver_controller_trace)
+        external_agent_controller_trace.update(
+            {
+                "remote_command_file_bridge_agent_command_configured": True,
+                "remote_command_file_bridge_agent_command_instrumented": False,
+                "remote_command_file_bridge_agent_operation_trace_required": True,
+                "remote_command_file_bridge_agent_operation_trace_satisfied": False,
+                "remote_command_file_bridge_agent_operation_trace_status": (
+                    "agent_operation_trace_missing"
+                ),
+                "remote_command_file_bridge_agent_operation_trace_count": 0,
+                "remote_command_file_bridge_agent_request_count": 0,
+                "remote_command_file_bridge_agent_loopx_state_read_count": 0,
+                "remote_command_file_bridge_agent_loopx_state_write_count": 0,
+            }
+        )
+        external_agent_compact = compact_benchmark_run(
+            build_skillsbench_benchflow_result_benchmark_run(
+                result_path,
+                route="loopx-product-mode",
+                controller_trace=external_agent_controller_trace,
+            )
+        )
+        assert external_agent_compact is not None
+        external_agent_contract = external_agent_compact[
+            "product_mode_lifecycle_contract"
+        ]
+        assert external_agent_contract["satisfied"] is False, external_agent_compact
+        assert external_agent_contract["countable_treatment"] is False, (
+            external_agent_compact
+        )
+        assert (
+            external_agent_contract["agent_operation_trace_required"] is True
+        ), external_agent_contract
+        assert (
+            external_agent_contract["agent_operation_trace_missing"] is True
+        ), external_agent_contract
+        assert external_agent_contract["state_read_count"] == 0, (
+            external_agent_contract
+        )
+        assert external_agent_contract["state_write_count"] == 0, (
+            external_agent_contract
+        )
+        assert external_agent_contract["driver_lifecycle_state_read_count"] == 1
+        assert external_agent_contract["driver_lifecycle_state_write_count"] == 3
+        assert external_agent_contract["missing_reason"] == (
+            "remote_command_file_bridge_agent_operation_trace_missing"
+        )
+        assert (
+            "skillsbench_remote_bridge_agent_operation_trace_missing"
+            in external_agent_compact["failure_attribution_labels"]
+        ), external_agent_compact
+        no_request_controller_trace = dict(external_agent_controller_trace)
+        no_request_controller_trace.update(
+            {
+                "remote_command_file_bridge_agent_operation_trace_status": (
+                    "agent_operation_trace_present_no_requests"
+                ),
+                "remote_command_file_bridge_agent_operation_trace_count": 1,
+            }
+        )
+        no_request_compact = compact_benchmark_run(
+            build_skillsbench_benchflow_result_benchmark_run(
+                result_path,
+                route="loopx-product-mode",
+                controller_trace=no_request_controller_trace,
+            )
+        )
+        assert no_request_compact is not None
+        no_request_contract = no_request_compact[
+            "product_mode_lifecycle_contract"
+        ]
+        assert no_request_contract["satisfied"] is False, no_request_compact
+        assert no_request_contract["countable_treatment"] is False, (
+            no_request_compact
+        )
+        assert no_request_contract["missing_reason"] == (
+            "remote_command_file_bridge_agent_no_requests"
+        )
+        assert (
+            "skillsbench_remote_bridge_agent_no_requests"
+            in no_request_compact["failure_attribution_labels"]
+        ), no_request_compact
+        assert (
+            "skillsbench_remote_bridge_agent_operation_trace_missing"
+            not in no_request_compact["failure_attribution_labels"]
+        ), no_request_compact
 
 
 def test_skillsbench_product_mode_no_tool_lifecycle_abort_is_compacted() -> None:
@@ -4569,6 +4861,69 @@ def test_skillsbench_runner_failure_compact_closeout() -> None:
             in compact["stop_conditions"]
         ), compact
         assert "BenchFlow result.json not found" not in json.dumps(compact), compact
+
+
+def test_skillsbench_runner_failure_compact_attributes_agent_no_requests() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-no-agent-request-") as tmp:
+        args = parse_args(
+            [
+                "--task-id",
+                "organize-messy-files",
+                "--route",
+                "loopx-product-mode",
+                "--jobs-dir",
+                str(Path(tmp) / "jobs"),
+                "--job-name",
+                "skillsbench-organize-messy-files-no-agent-request-fixture",
+            ]
+        )
+        plan = build_plan(args)
+        plan["runner_prerequisites"].update(
+            {
+                "remote_command_file_bridge_agent_operation_trace_required": True,
+                "remote_command_file_bridge_agent_operation_trace_satisfied": False,
+                "remote_command_file_bridge_agent_operation_trace_status": (
+                    "agent_operation_trace_present_no_requests"
+                ),
+                "remote_command_file_bridge_agent_operation_trace_count": 1,
+                "remote_command_file_bridge_agent_request_count": 0,
+                "remote_command_file_bridge_agent_loopx_cli_call_count": 0,
+                "remote_command_file_bridge_agent_loopx_state_read_count": 0,
+                "remote_command_file_bridge_agent_loopx_state_write_count": 0,
+            }
+        )
+        compact = build_runner_failure_compact(
+            args,
+            plan,
+            SkillsBenchProductModeNoLifecycleRequests(
+                "loopx-product-mode agent produced no tool or case-local "
+                "LoopX lifecycle request before official verifier"
+            ),
+        )
+        assert compact["official_score_status"] == "missing", compact
+        assert compact["first_blocker"] == (
+            "skillsbench_remote_bridge_agent_no_requests"
+        ), compact
+        assert compact["score_failure_attribution"] == (
+            "skillsbench_remote_bridge_agent_no_requests"
+        ), compact
+        assert (
+            compact["runner_failure"]["failure_class"]
+            == "skillsbench_remote_bridge_agent_no_requests"
+        ), compact
+        assert (
+            compact["runner_prerequisites"][
+                "remote_command_file_bridge_agent_operation_trace_status"
+            ]
+            == "agent_operation_trace_present_no_requests"
+        ), compact
+        assert "skillsbench_remote_bridge_agent_no_requests" in compact[
+            "failure_attribution_labels"
+        ], compact
+        assert "skillsbench_remote_bridge_agent_operation_trace_missing" not in compact[
+            "failure_attribution_labels"
+        ], compact
+        assert "case-local LoopX lifecycle request" not in json.dumps(compact), compact
 
 
 def test_skillsbench_runner_failure_prefers_structured_preflight_blocker() -> None:

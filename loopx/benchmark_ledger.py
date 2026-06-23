@@ -391,6 +391,39 @@ def _compact_product_mode_pair_review(review: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_product_mode_lifecycle_contract(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    schema = _compact_text(value.get("schema_version"), limit=100)
+    if schema:
+        compact["schema_version"] = schema
+    for field in (
+        "required",
+        "satisfied",
+        "countable_treatment",
+        "checkpoint_required",
+    ):
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+    for field in (
+        "state_read_count",
+        "state_write_count",
+        "checkpoint_count",
+        "checkpoint_round",
+    ):
+        raw = value.get(field)
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            compact[field] = max(0, raw)
+    missing_reason = _compact_text(value.get("missing_reason"), limit=140)
+    if missing_reason:
+        compact["missing_reason"] = missing_reason
+    execution_style = _compact_text(value.get("execution_style"), limit=120)
+    if execution_style:
+        compact["execution_style"] = execution_style
+    return compact
+
+
 def _terminal_bench_case_id_from_job_name(
     *,
     benchmark_id: str,
@@ -1332,6 +1365,11 @@ def build_benchmark_run_ledger_entry(
         else None,
         "source_event_schema": source_schema,
     }
+    product_mode_lifecycle_contract = _compact_product_mode_lifecycle_contract(
+        benchmark_run.get("product_mode_lifecycle_contract")
+    )
+    if product_mode_lifecycle_contract:
+        entry["product_mode_lifecycle_contract"] = product_mode_lifecycle_contract
     attempt_accounting = (
         benchmark_run.get("attempt_accounting")
         if isinstance(benchmark_run.get("attempt_accounting"), dict)

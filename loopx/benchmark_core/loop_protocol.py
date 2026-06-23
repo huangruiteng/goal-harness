@@ -327,6 +327,13 @@ def _run_has_headline_metrics(run: dict[str, Any]) -> bool:
 
 
 def _loopx_product_lifecycle_observed(run: dict[str, Any]) -> bool:
+    lifecycle_contract = run.get("product_mode_lifecycle_contract")
+    if isinstance(lifecycle_contract, dict):
+        if (
+            lifecycle_contract.get("satisfied") is True
+            and lifecycle_contract.get("countable_treatment") is not False
+        ):
+            return True
     if run.get("loopx_prompt_driven_lifecycle_observed") is True:
         return True
     for key in (
