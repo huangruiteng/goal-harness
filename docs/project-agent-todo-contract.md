@@ -19,6 +19,14 @@ right actor.
   stop conditions. Do not count them as user todos unless a specific human
   action can clear them.
 
+External boards and management surfaces, including Lark Kanban, are projections
+of this contract. They may show critical status, claims, gates, evidence, and
+worker handoff fields, but they should not become the place where agents invent
+new task identity. A long-running Codex session can claim visible board work and
+continue it; when it needs to fan out, split, supersede, or create successor
+work, it writes the new task through the LoopX todo lifecycle and lets the board
+sync catch up.
+
 ## Write Contract
 
 When read-only analysis, a review packet, a gate checklist, or P0/P1 steering

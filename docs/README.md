@@ -55,6 +55,7 @@ incident report, or launch draft.
 - [Benchmark developer workflow](benchmark-developer-workflow.md)
 - [Attention queue](attention-queue.md)
 - [Project agent todo contract](project-agent-todo-contract.md)
+- [Lark Kanban control-plane adapter](lark-kanban-control-plane-adapter.md)
 - [Authority source registration](authority-source-registration.md)
 - [New-project Codex prompt](new-project-codex-prompt.md)
 
@@ -66,6 +67,7 @@ incident report, or launch draft.
 - [Host integration surface v0](reference/protocols/host-integration-surface-v0.md)
 - [Reward gate direct-write contract](reward-gate-direct-write-contract.md)
 - [Worker bridge install contract](worker-bridge-install-contract.md)
+- [Lark Kanban control-plane adapter](lark-kanban-control-plane-adapter.md)
 - [Dashboard reward write boundary](dashboard-reward-write-boundary.md)
 - [Complex project read-only adapter](complex-project-readonly-adapter.md)
 - [Protocol contracts](reference/protocols/README.md)

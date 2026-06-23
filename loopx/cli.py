@@ -16,6 +16,7 @@ from .cli_commands import (
     handle_dreaming_command,
     handle_history_command,
     handle_issue_fix_command,
+    handle_lark_kanban_command,
     handle_ml_experiment_command,
     handle_project_lifecycle_command,
     handle_quota_command,
@@ -33,6 +34,7 @@ from .cli_commands import (
     register_dreaming_commands,
     register_history_command,
     register_issue_fix_commands,
+    register_lark_kanban_commands,
     register_ml_experiment_commands,
     register_project_lifecycle_commands,
     register_quota_command,
@@ -126,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     register_benchmark_command_group(sub, add_subcommand_format)
 
     register_project_lifecycle_commands(sub, add_subcommand_format)
+    register_lark_kanban_commands(sub, add_subcommand_format)
 
     register_status_commands(sub, add_subcommand_format)
     register_dreaming_commands(sub, add_subcommand_format)
@@ -252,6 +255,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     if project_lifecycle_result is not None:
         return project_lifecycle_result
+
+    lark_kanban_result = handle_lark_kanban_command(
+        args,
+        registry_path=registry_path,
+        print_payload=print_payload,
+        output_format=output_format,
+    )
+    if lark_kanban_result is not None:
+        return lark_kanban_result
 
     if args.command == "check":
         return handle_check_command(

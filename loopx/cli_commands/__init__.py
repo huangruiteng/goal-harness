@@ -81,6 +81,7 @@ from .doctor import handle_doctor_command, register_doctor_command
 from .dreaming import handle_dreaming_command, register_dreaming_commands
 from .history import handle_history_command, register_history_command
 from .issue_fix import handle_issue_fix_command, register_issue_fix_commands
+from .lark_kanban import handle_lark_kanban_command, register_lark_kanban_commands
 from .ml_experiment import handle_ml_experiment_command, register_ml_experiment_commands
 from .project_lifecycle import (
     handle_project_lifecycle_command,
@@ -197,6 +198,7 @@ __all__ = [
     "handle_dreaming_command",
     "handle_history_command",
     "handle_issue_fix_command",
+    "handle_lark_kanban_command",
     "handle_ml_experiment_command",
     "handle_new_project_prompt_command",
     "handle_project_lifecycle_command",
@@ -237,6 +239,7 @@ __all__ = [
     "register_dreaming_commands",
     "register_history_command",
     "register_issue_fix_commands",
+    "register_lark_kanban_commands",
     "register_ml_experiment_commands",
     "register_project_lifecycle_commands",
     "register_quota_command",

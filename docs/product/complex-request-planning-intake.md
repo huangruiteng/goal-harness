@@ -39,6 +39,9 @@ large user signal
 The intake gives the management surface something stable to show: themes,
 candidate anchors, ownership decisions, and the next few proof slices. Normal
 LoopX objects remain the source of truth for delivery.
+For external trackers such as Lark Kanban, this is the task-spawning path: the
+tracker shows status and claims, while intake creates the typed todo batch that
+later syncs back to the tracker.
 
 ## Intake Steps
 

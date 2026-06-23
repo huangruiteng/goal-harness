@@ -6184,6 +6184,72 @@ def sync_connected_attention_action_from_todos(item: dict[str, Any]) -> None:
         project_asset["next_action"] = agent_action
 
 
+def active_state_todo_attention_item(
+    goal: dict[str, Any],
+    fields: dict[str, Any],
+    current_run: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Surface active-state todos even when the latest run classification is passive."""
+
+    user_todos = fields.get("user_todos") if isinstance(fields.get("user_todos"), dict) else None
+    agent_todos = fields.get("agent_todos") if isinstance(fields.get("agent_todos"), dict) else None
+    active_next_action = public_safe_compact_text(
+        fields.get("active_state_next_action"),
+        limit=320,
+    )
+    user_action = public_safe_compact_text(first_open_todo_text(user_todos), limit=320)
+    agent_action = public_safe_compact_text(first_open_todo_text(agent_todos), limit=320)
+    lifecycle_fields = goal_lifecycle_fields(goal, current_run)
+    goal_id = str(goal.get("id") or "unknown-goal")
+
+    if user_action or todo_summary_open_count(user_todos) > 0:
+        return attention_item(
+            goal_id=goal_id,
+            status="active_state_user_todo",
+            waiting_on="controller",
+            severity="action",
+            recommended_action=(
+                user_action
+                or active_next_action
+                or "resolve the open user todo from the active goal state"
+            ),
+            source="active_state",
+            **lifecycle_fields,
+        )
+
+    if agent_action or todo_summary_open_count(agent_todos) > 0:
+        return attention_item(
+            goal_id=goal_id,
+            status="active_state_agent_todo",
+            waiting_on="codex",
+            severity="action",
+            recommended_action=(
+                agent_action
+                or active_next_action
+                or "run the open agent todo from the active goal state"
+            ),
+            source="active_state",
+            **lifecycle_fields,
+        )
+
+    projection_gap = fields.get("state_projection_gap")
+    if isinstance(projection_gap, dict):
+        return attention_item(
+            goal_id=goal_id,
+            status="state_projection_gap",
+            waiting_on="codex",
+            severity="action",
+            recommended_action=str(
+                projection_gap.get("recommended_action")
+                or "expand the active-state Next Action into parseable todos"
+            ),
+            source="active_state",
+            **lifecycle_fields,
+        )
+
+    return None
+
+
 def todo_summary_open_count(summary: dict[str, Any] | None) -> int:
     if not isinstance(summary, dict):
         return 0
@@ -7052,9 +7118,19 @@ def build_attention_queue(
     for goal in history.get("goals") or []:
         if not isinstance(goal, dict):
             continue
-        item = goal_attention(goal)
+        active_state_fields: dict[str, Any] | None = None
+        active_state_item: dict[str, Any] | None = None
+        current_status_run = latest_run(goal)
+        if goal.get("registry_member"):
+            active_state_fields = active_state_todo_fields(goal)
+            active_state_item = active_state_todo_attention_item(goal, active_state_fields, current_status_run)
+        if active_state_item and active_state_item.get("waiting_on") in {"controller", "user_or_controller"}:
+            item = active_state_item
+        else:
+            item = goal_attention(goal)
+            if not item:
+                item = active_state_item
         if item:
-            current_status_run = latest_run(goal)
             latest_run_action = public_safe_compact_text(
                 current_status_run.get("recommended_action")
                 if isinstance(current_status_run, dict)
@@ -7103,7 +7179,9 @@ def build_attention_queue(
                 if isinstance(item.get("project_asset"), dict):
                     item["project_asset"]["stale_latest_run_warning"] = projection_warning
             if goal.get("registry_member"):
-                item.update(active_state_todo_fields(goal))
+                if active_state_fields is None:
+                    active_state_fields = active_state_todo_fields(goal)
+                item.update(active_state_fields)
                 if isinstance(item.get("project_asset"), dict):
                     active_next_action = item.get("active_state_next_action")
                     if active_next_action:
