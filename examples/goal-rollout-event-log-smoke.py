@@ -138,12 +138,50 @@ def main() -> None:
             event_kind="quota_should_run",
             agent_id="codex-main-control",
             todo_id="todo_406bb256efd8",
+            lane_id="main-control",
+            agent_role="primary",
+            gate_id="gate_owner_scope",
+            decision_id="todo_7aadc0a2387a",
+            from_state="waiting",
+            to_state="eligible",
+            caused_by="quota_should_run",
+            source_event_id="event_previous_public",
+            blocks=["todo_blocked_by_gate"],
+            unblocks=["todo_406bb256efd8"],
+            handoff_to="codex-product-capability",
+            commit_ref="abcdef1",
+            pr_ref="huangruiteng/loopx#551",
+            revert_of="event_superseded_public",
             status="eligible",
             summary="Quota allowed one bounded rollout event-log slice.",
             artifact_refs=["docs/benchmark-developer-workflow.md"],
             details={"open_agent_todo_count": 2},
         )
         append_rollout_event(log_path, event)
+        assert event["lane"] == {
+            "lane_id": "main-control",
+            "agent_role": "primary",
+        }, event
+        assert event["state_transition"] == {
+            "from_state": "waiting",
+            "to_state": "eligible",
+        }, event
+        assert event["causality"] == {
+            "caused_by": "quota_should_run",
+            "source_event_id": "event_previous_public",
+            "gate_id": "gate_owner_scope",
+            "decision_id": "todo_7aadc0a2387a",
+            "blocks": ["todo_blocked_by_gate"],
+            "unblocks": ["todo_406bb256efd8"],
+        }, event
+        assert event["handoff"] == {
+            "to_agent_id": "codex-product-capability",
+        }, event
+        assert event["code_refs"] == {
+            "commit_ref": "abcdef1",
+            "pr_ref": "huangruiteng/loopx#551",
+            "revert_of": "event_superseded_public",
+        }, event
 
         result_event = run_script(
             "append",
@@ -163,12 +201,41 @@ def main() -> None:
             "build-cython-ext",
             "--status",
             "precise_blocker",
+            "--lane-id",
+            "product-capability",
+            "--agent-role",
+            "side-agent",
+            "--from-state",
+            "open",
+            "--to-state",
+            "blocked",
+            "--caused-by",
+            "validation",
+            "--gate-id",
+            "gate_public_safe_boundary",
+            "--commit-ref",
+            "bcdef12",
+            "--pr-ref",
+            "huangruiteng/loopx#552",
             "--summary",
             "Compact case result reduced to public-safe failure attribution.",
             "--artifact-ref",
             "docs/research/long-horizon-agent-benchmarks/benchmark-case-analysis.json",
         )
         assert result_event["event_kind"] == "compact_case_result", result_event
+        assert result_event["lane"]["lane_id"] == "product-capability", result_event
+        assert result_event["state_transition"] == {
+            "from_state": "open",
+            "to_state": "blocked",
+        }, result_event
+        assert result_event["causality"]["caused_by"] == "validation", result_event
+        assert result_event["causality"]["gate_id"] == (
+            "gate_public_safe_boundary"
+        ), result_event
+        assert result_event["code_refs"] == {
+            "commit_ref": "bcdef12",
+            "pr_ref": "huangruiteng/loopx#552",
+        }, result_event
         assert_boundary(result_event)
 
         session_root = Path(tmp) / "sessions"
@@ -202,6 +269,14 @@ def main() -> None:
         assert summary["counts_by_kind"]["quota_should_run"] == 1, summary
         assert summary["counts_by_kind"]["compact_case_result"] == 1, summary
         assert summary["counts_by_kind"]["codex_session_observed"] == 1, summary
+        latest_view = summary["recent_events"][0]
+        assert latest_view["lane"]["lane_id"] == "main-control", latest_view
+        assert latest_view["state_transition"]["to_state"] == "eligible", latest_view
+        assert latest_view["causality"]["gate_id"] == "gate_owner_scope", latest_view
+        assert latest_view["code_refs"]["pr_ref"] == "huangruiteng/loopx#551", latest_view
+        assert latest_view["handoff"]["to_agent_id"] == (
+            "codex-product-capability"
+        ), latest_view
         assert_boundary(summary)
         rendered_summary = run_script(
             "summarize",
