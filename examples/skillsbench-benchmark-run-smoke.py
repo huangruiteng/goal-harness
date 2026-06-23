@@ -3525,11 +3525,38 @@ def test_skillsbench_product_mode_lifecycle_checkpoint_is_compacted() -> None:
         assert counters["product_mode_lifecycle_checkpoint_missing_reason"] == (
             "missing_case_local_loopx_state_read_or_write"
         )
+        assert compact["score_failure_attribution"] == (
+            "skillsbench_product_mode_lifecycle_missing"
+        ), compact
+        assert compact["official_score_comparable_to_native_codex"] is False, compact
+        assert compact["official_score_comparable_to_loopx_treatment"] is False, compact
+        assert "skillsbench_product_mode_uncountable_treatment" in compact[
+            "failure_attribution_labels"
+        ], compact
+        lifecycle_contract = compact["product_mode_lifecycle_contract"]
+        assert lifecycle_contract == {
+            "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
+            "required": True,
+            "satisfied": False,
+            "countable_treatment": False,
+            "state_read_count": 0,
+            "state_write_count": 0,
+            "checkpoint_required": True,
+            "checkpoint_count": 1,
+            "checkpoint_round": 1,
+            "missing_reason": "missing_case_local_loopx_state_read_or_write",
+        }, compact
         compact_again = compact_benchmark_run(compact)
         assert compact_again is not None
         compact_counters = compact_again["interaction_counters"]
         assert compact_counters["product_mode_lifecycle_checkpoint_required"] is True
         assert compact_counters["product_mode_lifecycle_checkpoint_count"] == 1
+        assert compact_again["score_failure_attribution"] == (
+            "skillsbench_product_mode_lifecycle_missing"
+        ), compact_again
+        assert compact_again["product_mode_lifecycle_contract"] == (
+            lifecycle_contract
+        ), compact_again
 
 
 def test_skillsbench_product_mode_case_state_usage_is_compacted() -> None:
