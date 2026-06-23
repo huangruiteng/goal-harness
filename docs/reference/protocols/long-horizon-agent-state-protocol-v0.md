@@ -59,6 +59,7 @@ compress state, but they do not own truth or grant permission.
 | `todo_index_v0` | `loopx/status.py` | Cross-goal todo index from attention queue and rollout events. |
 | `task_graph_projection_v0` | `docs/reference/protocols/task-graph-projection-v0.md` | Optional graph of blocks, validates, repairs, hands off, and supersedes. |
 | `review_packet` | `loopx review-packet`, `loopx/review_packet.py` | Operator-facing gate/review/handoff packet. |
+| `global_manager_command_v0` | `docs/reference/protocols/global-manager-command-v0.md` | Read-first global command response for progress, gates, todos, risks, and next actions. |
 | `frontstage dashboard` | `apps/dashboard/src/views/frontstage-page.tsx` | Dense operator UI for lanes, gates, todos, recent evidence, and risks. |
 
 Projection truth contract:
@@ -229,7 +230,8 @@ Not yet aligned:
   or executes packets.
 - PR lifecycle resume conditions such as `pr_merged:#532` are not supported;
   only `resume_when=todo_done:<todo_id>` exists today.
-- Global manager slash commands have no host integration.
+- `global_manager_command_v0` is specified and smoke-tested, but no host
+  integration or CLI command emits it yet.
 - Historical human-gate impact must be inferred from public-safe evidence.
 - Frontstage does not yet render a full multi-lane self-iteration timeline from
   real status plus rollout events.
