@@ -1,0 +1,107 @@
+{
+  "schema_version": "global_manager_command_response_v0",
+  "request": {
+    "schema_version": "global_manager_command_request_v0",
+    "command": "/loop-global-summary",
+    "time_range": "24h",
+    "goal_filter": [
+      "loopx-meta"
+    ],
+    "agent_filter": [
+      "codex-main-control",
+      "codex-side-bypass",
+      "codex-product-capability"
+    ],
+    "include": [
+      "progress",
+      "gates",
+      "todos",
+      "risks",
+      "next_actions"
+    ],
+    "privacy_mode": "public_safe_summary",
+    "dry_run": true
+  },
+  "generated_at": "2026-06-24T00:00:00Z",
+  "summary": {
+    "headline": "Public-safe protocol work advanced and one primary review remains.",
+    "progress_count": 2,
+    "open_gate_count": 0,
+    "runnable_todo_count": 3,
+    "risk_count": 1
+  },
+  "lanes": [
+    {
+      "goal_id": "loopx-meta",
+      "agent_id": "codex-product-capability",
+      "status": "eligible",
+      "top_todo_id": "todo_public_protocol",
+      "last_event_id": "event_protocol_refresh",
+      "next_safe_action": "Continue with the next public-safe protocol increment after review handoff."
+    },
+    {
+      "goal_id": "loopx-meta",
+      "agent_id": "codex-main-control",
+      "status": "review_requested",
+      "top_todo_id": "todo_primary_review",
+      "last_event_id": "event_review_todo_created",
+      "next_safe_action": "Review and merge the public-safe protocol PR after validation."
+    }
+  ],
+  "gates": [],
+  "todos": [
+    {
+      "todo_id": "todo_primary_review",
+      "role": "agent",
+      "claimed_by": "codex-main-control",
+      "state": "open",
+      "priority": "P0",
+      "title": "Review the public-safe protocol PR."
+    },
+    {
+      "todo_id": "todo_public_protocol",
+      "role": "agent",
+      "claimed_by": "codex-product-capability",
+      "state": "done",
+      "priority": "P0",
+      "title": "Add public-safe long-horizon protocol increments."
+    }
+  ],
+  "risks": [
+    {
+      "kind": "stale_review",
+      "severity": "medium",
+      "evidence_refs": [
+        "pr_review_pending"
+      ],
+      "next_safe_action": "Keep the primary review todo visible until the PR is merged or superseded."
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "act_primary_review",
+      "kind": "review",
+      "requires_user_approval": false,
+      "requires_primary_agent": true,
+      "preview": "Ask the primary agent to review the public-safe protocol PR."
+    },
+    {
+      "action_id": "act_promote_candidate",
+      "kind": "promote_todo",
+      "requires_user_approval": true,
+      "requires_primary_agent": false,
+      "preview": "Promote a suggested todo only after the user or controller accepts it."
+    }
+  ],
+  "omissions": [
+    "Raw logs, raw transcripts, connector payloads, credential values, local paths, and private source bodies were intentionally omitted."
+  ],
+  "boundary": {
+    "raw_logs_recorded": false,
+    "raw_transcripts_recorded": false,
+    "raw_connector_payloads_recorded": false,
+    "credential_values_recorded": false,
+    "absolute_paths_recorded": false,
+    "private_source_bodies_recorded": false
+  }
+}

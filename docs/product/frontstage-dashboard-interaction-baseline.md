@@ -72,6 +72,22 @@ The ops surface should feel like a working console, not a landing page.
 - Optimize for repeated use: stable dimensions, no horizontal overflow,
   responsive constraints, and reduced-motion fallbacks.
 
+## Frontstage/Status Sufficiency Check
+
+Before building broader long-horizon LoopX UI, the frontstage/status slice is
+sufficient only if it proves three flows:
+
+- Todo-flow review: ops mode renders searchable user and agent todo lanes with
+  reproducible URL-backed filters and a visible result count.
+- Human-gate animation: showcase mode can explain that human judgment stays
+  visible while safe agent lanes continue, with reduced-motion fallbacks.
+- Multi-lane timeline: the surface can distinguish human decision, agent work,
+  and evidence writeback without making browser UI the source of truth.
+
+These checks intentionally stay narrower than future operator workflows. They
+prove that the existing status projection can carry the story before new
+screens add richer review, feed-style triage, or multi-agent launch controls.
+
 ## Current Acceptance Anchors
 
 The route currently exposes these durable anchors:
@@ -84,6 +100,11 @@ The route currently exposes these durable anchors:
   `frontstage-todo-result-count` for reviewable todo projection slices.
 - `frontstage-role-map`, `frontstage-active-claims`, `frontstage-open-gates`,
   `frontstage-artifacts`, and `frontstage-timeline` for the operator workspace.
+- `frontstage-showcase-motion-beam` and `frontstage-state-flow-beam` for
+  human-gate and state-flow animation checks.
+- `examples/fixtures/long-horizon-self-iteration-rollout.public.json` for a
+  public-safe multi-lane rollout fixture with human gate, handoff, validation,
+  and inferred display bridge coverage.
 
 `npm run smoke:frontstage-browser` remains the visual acceptance check for this
 surface. It captures desktop and mobile screenshots, checks animated showcase
@@ -92,3 +113,6 @@ lane filtering, goal selection, and loopback-source rejection.
 
 `npm run smoke:frontstage-design-baseline` keeps this document, route anchors,
 CSS shell classes, package scripts, and README entry points aligned.
+
+`python3 examples/long-horizon-self-iteration-rollout-fixture-smoke.py` keeps
+the public fixture safe and useful for future timeline consumption.

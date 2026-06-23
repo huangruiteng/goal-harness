@@ -53,6 +53,20 @@ def handle_append(args: argparse.Namespace) -> int:
         benchmark_id=args.benchmark_id,
         case_id=args.case_id,
         run_id=args.run_id,
+        lane_id=args.lane_id,
+        agent_role=args.agent_role,
+        gate_id=args.gate_id,
+        decision_id=args.decision_id,
+        from_state=args.from_state,
+        to_state=args.to_state,
+        caused_by=args.caused_by,
+        source_event_id=args.source_event_id,
+        blocks=args.blocks,
+        unblocks=args.unblocks,
+        handoff_to=args.handoff_to,
+        commit_ref=args.commit_ref,
+        pr_ref=args.pr_ref,
+        revert_of=args.revert_of,
         status=args.status,
         classification=args.classification,
         delivery_outcome=args.delivery_outcome,
@@ -117,6 +131,20 @@ def main() -> int:
     append_parser.add_argument("--benchmark-id")
     append_parser.add_argument("--case-id")
     append_parser.add_argument("--run-id")
+    append_parser.add_argument("--lane-id")
+    append_parser.add_argument("--agent-role")
+    append_parser.add_argument("--gate-id")
+    append_parser.add_argument("--decision-id")
+    append_parser.add_argument("--from-state")
+    append_parser.add_argument("--to-state")
+    append_parser.add_argument("--caused-by")
+    append_parser.add_argument("--source-event-id")
+    append_parser.add_argument("--blocks", action="append")
+    append_parser.add_argument("--unblocks", action="append")
+    append_parser.add_argument("--handoff-to")
+    append_parser.add_argument("--commit-ref")
+    append_parser.add_argument("--pr-ref")
+    append_parser.add_argument("--revert-of")
     append_parser.add_argument("--status")
     append_parser.add_argument("--classification")
     append_parser.add_argument("--delivery-outcome")

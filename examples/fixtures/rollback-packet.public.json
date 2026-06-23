@@ -1,0 +1,103 @@
+{
+  "schema_version": "rollback_packet_v0",
+  "packet_id": "rollback_public_boundary_example_v0",
+  "goal_id": "public-long-horizon-loop",
+  "created_at": "2026-06-24T01:20:00+08:00",
+  "trigger": {
+    "kind": "public_boundary_leak",
+    "summary": "A public PR surface exposed context that should remain local.",
+    "todo_ids": [
+      "todo_public_boundary_repair"
+    ],
+    "source_event_ids": [
+      "evt_lh_005_minimal_fixture_validated"
+    ]
+  },
+  "scope": {
+    "repository_refs": {
+      "commit_refs": [
+        "abcdef1"
+      ],
+      "pr_refs": [
+        "huangruiteng/loopx#617"
+      ]
+    },
+    "todo_ids": [
+      "todo_public_boundary_repair"
+    ],
+    "external_resource_refs": [
+      "github_support_request"
+    ],
+    "user_visible_surfaces": [
+      "pull_request",
+      "cached_view"
+    ],
+    "local_state_refs": []
+  },
+  "decision": {
+    "owner": "maintainer",
+    "required": true,
+    "reason": "History rewrite and external cached-view removal require explicit owner action.",
+    "default_safe_action": "pause_and_monitor"
+  },
+  "plan": [
+    {
+      "step_id": "clean_main_history",
+      "kind": "history_rewrite",
+      "action": "replace public branch history with a clean equivalent commit set",
+      "requires_gate": true,
+      "destructive": true,
+      "automatable_by_agent": false
+    },
+    {
+      "step_id": "submit_support_request",
+      "kind": "support_request",
+      "action": "ask provider support to remove read-only PR refs and cached views",
+      "requires_gate": true,
+      "destructive": false,
+      "automatable_by_agent": false
+    },
+    {
+      "step_id": "verify_public_boundary",
+      "kind": "validation",
+      "action": "scan normal heads and changed public paths for private markers",
+      "requires_gate": false,
+      "destructive": false,
+      "automatable_by_agent": true
+    }
+  ],
+  "todo_compensation": {
+    "complete_todo_ids": [
+      "todo_submit_support_request"
+    ],
+    "add_todos": [
+      {
+        "role": "agent",
+        "task_class": "continuous_monitor",
+        "title": "Verify provider-side cached view removal after support response."
+      }
+    ],
+    "supersede_todo_ids": []
+  },
+  "validation": {
+    "commands": [
+      "git diff --check",
+      "loopx check --scan-path <public-safe-path>",
+      "git ls-remote --heads origin"
+    ],
+    "public_boundary_scan_required": true,
+    "success_criteria": [
+      "normal public heads no longer contain the affected public markers",
+      "provider-owned cached views or read-only refs are removed or tracked by an open external gate",
+      "successor monitor todo exists when external cleanup is pending"
+    ]
+  },
+  "boundary": {
+    "raw_task_text_recorded": false,
+    "raw_logs_recorded": false,
+    "raw_trajectory_recorded": false,
+    "raw_session_transcript_recorded": false,
+    "credential_values_recorded": false,
+    "absolute_paths_recorded": false
+  }
+}

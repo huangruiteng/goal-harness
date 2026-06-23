@@ -43,6 +43,12 @@ includes(productDoc, "showcase surface can be fancy", "showcase motion allowance
 includes(productDoc, "working console, not a landing page", "ops workspace rule");
 includes(productDoc, "frontstage-ops-workspace-shell", "ops shell anchor");
 includes(productDoc, "frontstage-ops-command-strip", "ops command strip anchor");
+includes(productDoc, "## Frontstage/Status Sufficiency Check", "frontstage status sufficiency section");
+includes(productDoc, "Todo-flow review", "todo-flow sufficiency check");
+includes(productDoc, "Human-gate animation", "human-gate animation sufficiency check");
+includes(productDoc, "Multi-lane timeline", "multi-lane timeline sufficiency check");
+includes(productDoc, "long-horizon-self-iteration-rollout.public.json", "long-horizon rollout fixture anchor");
+includes(productDoc, "long-horizon-self-iteration-rollout-fixture-smoke.py", "fixture smoke anchor");
 includes(productDoc, "npm run smoke:frontstage-browser", "visual acceptance anchor");
 includes(productDoc, "npm run smoke:frontstage-design-baseline", "design smoke anchor");
 
@@ -64,6 +70,11 @@ includes(frontstageSource, 'data-testid="frontstage-active-claims"', "active cla
 includes(frontstageSource, 'data-testid="frontstage-open-gates"', "open gates anchor");
 includes(frontstageSource, 'data-testid="frontstage-artifacts"', "artifacts anchor");
 includes(frontstageSource, 'data-testid="frontstage-timeline"', "timeline anchor");
+includes(frontstageSource, "human judgment", "human-gate plain-language copy");
+includes(frontstageSource, "agent lanes", "agent-lane showcase copy");
+includes(frontstageSource, "evidence writeback", "evidence writeback showcase copy");
+includes(frontstageSource, 'data-testid="frontstage-showcase-motion-beam"', "human-gate animation beam");
+includes(frontstageSource, 'data-testid="frontstage-state-flow-beam"', "state-flow animation beam");
 excludes(frontstageSource, 'data-testid="frontstage-enable-ops-live"', "public in-page ops switch");
 
 includes(stylesSource, ".frontstage-workspace-shell", "workspace shell CSS");

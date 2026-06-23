@@ -148,6 +148,17 @@ def _safe_source_refs(
     return safe_refs
 
 
+def _safe_public_refs(
+    values: Sequence[str] | None, *, field: str
+) -> list[str]:
+    safe_refs: list[str] = []
+    for value in values or []:
+        safe = _safe_public_ref(value, field=field)
+        if safe:
+            safe_refs.append(safe)
+    return safe_refs
+
+
 def _normalized_event_kind(event_kind: str) -> str:
     text = str(event_kind).strip().lower().replace("-", "_")
     if text not in ROLLOUT_EVENT_KINDS:
@@ -184,6 +195,20 @@ def build_rollout_event(
     benchmark_id: str | None = None,
     case_id: str | None = None,
     run_id: str | None = None,
+    lane_id: str | None = None,
+    agent_role: str | None = None,
+    gate_id: str | None = None,
+    decision_id: str | None = None,
+    from_state: str | None = None,
+    to_state: str | None = None,
+    caused_by: str | None = None,
+    source_event_id: str | None = None,
+    blocks: Sequence[str] | None = None,
+    unblocks: Sequence[str] | None = None,
+    handoff_to: str | None = None,
+    commit_ref: str | None = None,
+    pr_ref: str | None = None,
+    revert_of: str | None = None,
     status: str | None = None,
     classification: str | None = None,
     delivery_outcome: str | None = None,
@@ -254,6 +279,58 @@ def build_rollout_event(
         safe = _compact_text(value, limit=500 if key == "summary" else 180, field=key)
         if safe:
             payload[key] = safe
+    lane: dict[str, Any] = {}
+    for key, value in {
+        "lane_id": lane_id,
+        "agent_role": agent_role,
+    }.items():
+        safe = _compact_text(value, limit=180, field=key)
+        if safe:
+            lane[key] = safe
+    if lane:
+        payload["lane"] = lane
+    transition: dict[str, Any] = {}
+    for key, value in {
+        "from_state": from_state,
+        "to_state": to_state,
+    }.items():
+        safe = _compact_text(value, limit=180, field=key)
+        if safe:
+            transition[key] = safe
+    if transition:
+        payload["state_transition"] = transition
+    causality: dict[str, Any] = {}
+    for key, value in {
+        "caused_by": caused_by,
+        "source_event_id": source_event_id,
+        "gate_id": gate_id,
+        "decision_id": decision_id,
+    }.items():
+        safe = _compact_text(value, limit=180, field=key)
+        if safe:
+            causality[key] = safe
+    relation_blocks = _safe_public_refs(blocks, field="blocks")
+    relation_unblocks = _safe_public_refs(unblocks, field="unblocks")
+    if relation_blocks:
+        causality["blocks"] = relation_blocks
+    if relation_unblocks:
+        causality["unblocks"] = relation_unblocks
+    if causality:
+        payload["causality"] = causality
+    code_refs: dict[str, Any] = {}
+    for key, value in {
+        "commit_ref": commit_ref,
+        "pr_ref": pr_ref,
+        "revert_of": revert_of,
+    }.items():
+        safe = _safe_public_ref(value, field=key)
+        if safe:
+            code_refs[key] = safe
+    if code_refs:
+        payload["code_refs"] = code_refs
+    safe_handoff_to = _compact_text(handoff_to, limit=180, field="handoff_to")
+    if safe_handoff_to:
+        payload["handoff"] = {"to_agent_id": safe_handoff_to}
     if safe_labels:
         payload["labels"] = safe_labels
     if safe_artifact_refs:
@@ -318,6 +395,11 @@ def _safe_event_view(event: Mapping[str, Any]) -> dict[str, Any]:
         "benchmark_id",
         "case_id",
         "run_id",
+        "lane",
+        "state_transition",
+        "causality",
+        "code_refs",
+        "handoff",
         "classification",
         "delivery_outcome",
         "summary",
