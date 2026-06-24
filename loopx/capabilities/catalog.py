@@ -181,12 +181,89 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
         "boundaries": [
             "Private connectors enter as owner gates or compact approved counts first.",
-            "Raw chats, transcripts, credentials, logs, and local paths are not copied into public packets.",
+            "Raw chats, transcripts, auth material, logs, and local paths are not copied into public packets.",
             "Publish remains blocked until an explicit user decision.",
         ],
         "next_real_step": (
             "Turn the aggregated surface into a small review/feed UI where a user "
             "can score source items, angles, and drafts."
+        ),
+    },
+    {
+        "id": "value-connectors",
+        "title": "External value connector starters",
+        "status": "active-preview",
+        "real_world_anchor": "external channel intake for revenue, cost, demand, and connector reuse",
+        "user_value": (
+            "Install and run public-safe connector starters that turn external "
+            "channel metadata into LoopX value signals while gating account "
+            "setup, sends, posts, and private reads."
+        ),
+        "entry_command": "loopx value-connectors install-check --format json",
+        "commands": [
+            {
+                "command": "loopx value-connectors install-check --format json",
+                "purpose": "Show connector starter install/use commands and local dependency status.",
+                "write_boundary": "local check only; no external read or write",
+            },
+            {
+                "command": "loopx value-connectors github-public-probe --url <github-issue-or-pr-url> --format json",
+                "purpose": "Validate a public GitHub channel URL and build a connector call packet.",
+                "write_boundary": "no network read unless --fetch-metadata is provided",
+            },
+            {
+                "command": "loopx value-connectors github-public-probe --url <github-issue-or-pr-url> --fetch-metadata --format json",
+                "purpose": "Fetch allowlisted public GitHub metadata without body/comment/timeline content.",
+                "write_boundary": "public metadata read only; no comments, PRs, account changes, or writes",
+            },
+            {
+                "command": "loopx value-connectors plan --connector-id <id> ... --format json",
+                "purpose": "Plan gated account setup, external replies, sends, or future connector calls.",
+                "write_boundary": "plan-only; external writes and account setup require exact approval",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "value_connector_plan_v0",
+                "module": "loopx.capabilities.value_connectors.planner",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+            {
+                "schema_version": "connector_call_intent_v0",
+                "module": "loopx.capabilities.value_connectors.planner",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+            {
+                "schema_version": "connector_approval_gate_v0",
+                "module": "loopx.capabilities.value_connectors.planner",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+            {
+                "schema_version": "github_public_channel_probe_packet_v0",
+                "module": "loopx.capabilities.value_connectors.github_public",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+            {
+                "schema_version": "value_connector_install_check_packet_v0",
+                "module": "loopx.capabilities.value_connectors.github_public",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+        ],
+        "smokes": [
+            "python3 examples/value-connectors-github-public-probe-smoke.py",
+        ],
+        "docs": [
+            "docs/capabilities/value-connectors/README.md",
+            "docs/reference/protocols/value-connector-plan-v0.md",
+        ],
+        "boundaries": [
+            "The GitHub starter copies allowlisted public metadata only, not bodies, comments, timelines, raw provider payloads, auth material, or local paths.",
+            "Account signup, email sends, community posts, public replies, private reads, paid services, and production actions remain gated exact-call actions.",
+            "Every connector call must include a money, cost, demand, or capability metric plus a kill condition.",
+        ],
+        "next_real_step": (
+            "Add one more executable starter, such as a reply monitor or host-email "
+            "send-gate adapter, while keeping exact external writes outside LoopX core."
         ),
     },
 )

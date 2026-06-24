@@ -1,0 +1,382 @@
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+from collections.abc import Mapping
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
+from urllib.request import Request, urlopen
+
+
+GITHUB_PUBLIC_CHANNEL_PROBE_PACKET_SCHEMA_VERSION = (
+    "github_public_channel_probe_packet_v0"
+)
+GITHUB_PUBLIC_CHANNEL_REF_SCHEMA_VERSION = "github_public_channel_ref_v0"
+GITHUB_PUBLIC_CHANNEL_METADATA_SCHEMA_VERSION = "github_public_channel_metadata_v0"
+VALUE_CONNECTOR_INSTALL_CHECK_PACKET_SCHEMA_VERSION = (
+    "value_connector_install_check_packet_v0"
+)
+
+ALLOWED_GITHUB_REF_TYPES = {"issue", "pull", "discussion"}
+
+
+def _normalise_github_url(url: str) -> tuple[str, dict[str, Any]]:
+    text = str(url or "").strip()
+    parsed = urlsplit(text)
+    if parsed.scheme != "https":
+        raise ValueError("GitHub channel URL must use https")
+    if parsed.username or parsed.password:
+        raise ValueError("GitHub channel URL must not include auth material")
+    if parsed.query or parsed.fragment:
+        raise ValueError("GitHub channel URL must not include query or fragment")
+    if parsed.hostname != "github.com":
+        raise ValueError("GitHub channel URL must target github.com")
+    if parsed.port not in (None, 443):
+        raise ValueError("GitHub channel URL must use the default https port")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) != 4 or parts[2] not in {"issues", "pull", "discussions"}:
+        raise ValueError(
+            "GitHub channel URL must look like /owner/repo/issues/123, "
+            "/owner/repo/pull/123, or /owner/repo/discussions/123"
+        )
+    owner, repo, kind_part, raw_number = parts
+    try:
+        number = int(raw_number)
+    except ValueError as exc:
+        raise ValueError("GitHub channel number must be an integer") from exc
+    if number <= 0:
+        raise ValueError("GitHub channel number must be positive")
+    ref_type = {
+        "issues": "issue",
+        "pull": "pull",
+        "discussions": "discussion",
+    }[kind_part]
+    normalised = urlunsplit(("https", "github.com", f"/{owner}/{repo}/{kind_part}/{number}", "", ""))
+    return normalised, {
+        "schema_version": GITHUB_PUBLIC_CHANNEL_REF_SCHEMA_VERSION,
+        "owner": owner,
+        "repo": repo,
+        "ref_type": ref_type,
+        "number": number,
+        "url": normalised,
+    }
+
+
+def _compact_error(exc: BaseException) -> str:
+    text = " ".join(str(exc).split())
+    return text[:180]
+
+
+def _fetch_issue_or_pull_metadata(ref: Mapping[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
+    api_url = (
+        f"https://api.github.com/repos/{ref['owner']}/{ref['repo']}/issues/"
+        f"{ref['number']}"
+    )
+    request = Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "LoopX-value-connectors",
+        },
+        method="GET",
+    )
+    with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - public GitHub API URL is validated above.
+        payload = json.loads(response.read().decode("utf-8"))
+    labels = payload.get("labels") if isinstance(payload.get("labels"), list) else []
+    return {
+        "schema_version": GITHUB_PUBLIC_CHANNEL_METADATA_SCHEMA_VERSION,
+        "provider": "github_rest",
+        "title": payload.get("title"),
+        "state": payload.get("state"),
+        "number": payload.get("number"),
+        "labels": [
+            item.get("name")
+            for item in labels
+            if isinstance(item, Mapping) and item.get("name")
+        ],
+        "comments_count": payload.get("comments"),
+        "created_at": payload.get("created_at"),
+        "updated_at": payload.get("updated_at"),
+        "closed_at": payload.get("closed_at"),
+        "author_association": payload.get("author_association"),
+        "is_pull_request": isinstance(payload.get("pull_request"), Mapping),
+        "html_url": payload.get("html_url"),
+        "raw_body_captured": False,
+        "comment_bodies_captured": False,
+        "timeline_captured": False,
+    }
+
+
+def _fetch_discussion_metadata(ref: Mapping[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
+    gh = shutil.which("gh")
+    if not gh:
+        raise RuntimeError("discussion metadata fetch requires GitHub CLI `gh`")
+    query = """
+query($owner:String!, $repo:String!, $number:Int!) {
+  repository(owner:$owner, name:$repo) {
+    discussion(number:$number) {
+      number
+      title
+      url
+      createdAt
+      updatedAt
+      comments { totalCount }
+      category { name }
+      author { login }
+    }
+  }
+}
+"""
+    result = subprocess.run(
+        [
+            gh,
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-F",
+            f"owner={ref['owner']}",
+            "-F",
+            f"repo={ref['repo']}",
+            "-F",
+            f"number={ref['number']}",
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout_seconds,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("gh graphql discussion metadata request failed")
+    payload = json.loads(result.stdout)
+    discussion = (
+        payload.get("data", {})
+        .get("repository", {})
+        .get("discussion")
+        if isinstance(payload, Mapping)
+        else None
+    )
+    if not isinstance(discussion, Mapping):
+        raise RuntimeError("discussion metadata was not found")
+    category = discussion.get("category") if isinstance(discussion.get("category"), Mapping) else {}
+    comments = discussion.get("comments") if isinstance(discussion.get("comments"), Mapping) else {}
+    author = discussion.get("author") if isinstance(discussion.get("author"), Mapping) else {}
+    return {
+        "schema_version": GITHUB_PUBLIC_CHANNEL_METADATA_SCHEMA_VERSION,
+        "provider": "github_graphql",
+        "title": discussion.get("title"),
+        "state": None,
+        "number": discussion.get("number"),
+        "labels": [],
+        "comments_count": comments.get("totalCount"),
+        "created_at": discussion.get("createdAt"),
+        "updated_at": discussion.get("updatedAt"),
+        "closed_at": None,
+        "author_association": None,
+        "category": category.get("name"),
+        "author_login": author.get("login"),
+        "html_url": discussion.get("url"),
+        "raw_body_captured": False,
+        "comment_bodies_captured": False,
+        "timeline_captured": False,
+    }
+
+
+def build_github_public_channel_probe_packet(
+    *,
+    url: str,
+    fetch_metadata: bool = False,
+    timeout_seconds: float = 10.0,
+) -> dict[str, Any]:
+    normalised_url, ref = _normalise_github_url(url)
+    metadata: dict[str, Any] | None = None
+    read_error: str | None = None
+    if fetch_metadata:
+        try:
+            if ref["ref_type"] in {"issue", "pull"}:
+                metadata = _fetch_issue_or_pull_metadata(ref, timeout_seconds=timeout_seconds)
+            else:
+                metadata = _fetch_discussion_metadata(ref, timeout_seconds=timeout_seconds)
+        except (HTTPError, URLError, TimeoutError, RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
+            read_error = _compact_error(exc)
+    connector_call = {
+        "schema_version": "connector_call_intent_v0",
+        "call_id": f"github_{ref['ref_type']}_{ref['number']}_metadata_probe",
+        "connector_id": "github_public_channel",
+        "connector_kind": "github_channel",
+        "channel": f"GitHub {ref['ref_type']}",
+        "stage": "observe",
+        "target_ref": f"{ref['owner']}/{ref['repo']}#{ref['number']}",
+        "target_url": normalised_url,
+        "access_mode": "public_metadata_only",
+        "external_reads_allowed": True,
+        "external_writes_allowed": False,
+        "external_write_requested": False,
+        "requires_user_approval": False,
+        "approval_gate_id": None,
+        "value_axis": "demand",
+        "money_metric": "qualified public workflow signal that can become a LoopX audit or pilot",
+        "success_metric": "metadata is enough to decide monitor, reply draft, or stop",
+        "kill_condition": "public metadata shows no workflow owner, reply path, or reusable agent-work signal",
+        "promotion_target": "value_connector_plan_v0",
+    }
+    validation_errors: list[str] = []
+    if read_error:
+        validation_errors.append("metadata read failed; retry with auth material/tooling or use no-fetch mode")
+    return {
+        "ok": not validation_errors,
+        "schema_version": GITHUB_PUBLIC_CHANNEL_PROBE_PACKET_SCHEMA_VERSION,
+        "mode": "github-public-channel-probe",
+        "connector_id": "github_public_channel",
+        "ref": ref,
+        "connector_call": connector_call,
+        "metadata": metadata,
+        "read_error": read_error,
+        "external_reads_performed": bool(fetch_metadata),
+        "external_writes_performed": False,
+        "raw_body_captured": False,
+        "comment_bodies_captured": False,
+        "timeline_captured": False,
+        "restricted_material_recorded": False,
+        "autopublish_allowed": False,
+        "validation": {
+            "ok": not validation_errors,
+            "errors": validation_errors,
+            "ref_type": ref["ref_type"],
+            "metadata_collected": metadata is not None,
+        },
+    }
+
+
+def build_value_connector_install_check_packet(
+    *, connector: str = "all"
+) -> dict[str, Any]:
+    checks = [
+        {
+            "connector_id": "github_public_channel",
+            "status": "ready" if shutil.which("python3") else "needs_python3",
+            "install": [
+                "python3 -m pip install -e .",
+                "loopx value-connectors github-public-probe --url https://github.com/owner/repo/issues/1 --format json",
+                "loopx value-connectors github-public-probe --url https://github.com/owner/repo/issues/1 --fetch-metadata --format json",
+            ],
+            "optional_tools": [
+                {
+                    "tool": "gh",
+                    "installed": shutil.which("gh") is not None,
+                    "needed_for": "discussion metadata fetch",
+                    "install_hint": "Install GitHub CLI and run `gh auth login` if discussion metadata is needed.",
+                }
+            ],
+            "external_write_capability": False,
+        },
+        {
+            "connector_id": "botmail_identity",
+            "status": "host_connector_required",
+            "install": [
+                "Install or enable a host email/Botmail connector.",
+                "Use LoopX only to plan the exact sender, recipient, subject, body, metric, and stop condition before sending.",
+            ],
+            "optional_tools": [],
+            "external_write_capability": True,
+            "write_gate": "exact sender/recipient/subject/body approval required before send",
+        },
+        {
+            "connector_id": "community_channel",
+            "status": "host_or_browser_connector_required",
+            "install": [
+                "Enable a browser or community connector owned by the user.",
+                "Run `loopx value-connectors plan` before signup, posting, or replies.",
+            ],
+            "optional_tools": [],
+            "external_write_capability": True,
+            "write_gate": "channel rules, account identity, exact message, and value metric required",
+        },
+    ]
+    selected = [
+        item
+        for item in checks
+        if connector == "all" or item["connector_id"] == connector
+    ]
+    if not selected:
+        raise ValueError("unknown connector install check")
+    return {
+        "ok": True,
+        "schema_version": VALUE_CONNECTOR_INSTALL_CHECK_PACKET_SCHEMA_VERSION,
+        "mode": "value-connector-install-check",
+        "connector": connector,
+        "checks": selected,
+        "truth_contract": {
+            "installation_check_only": True,
+            "external_reads_performed": False,
+            "external_writes_performed": False,
+            "restricted_material_recorded": False,
+        },
+    }
+
+
+def render_github_public_channel_probe_markdown(payload: dict[str, Any]) -> str:
+    ref = payload.get("ref") if isinstance(payload.get("ref"), Mapping) else {}
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    validation = payload.get("validation") if isinstance(payload.get("validation"), Mapping) else {}
+    lines = [
+        "# LoopX GitHub Public Channel Probe",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- ref: `{ref.get('owner')}/{ref.get('repo')} {ref.get('ref_type')} #{ref.get('number')}`",
+        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
+        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
+        f"- raw_body_captured: `{payload.get('raw_body_captured')}`",
+        f"- comment_bodies_captured: `{payload.get('comment_bodies_captured')}`",
+        "",
+    ]
+    if metadata:
+        lines.extend(
+            [
+                "## Metadata",
+                "",
+                f"- title: {metadata.get('title')}",
+                f"- state: `{metadata.get('state')}`",
+                f"- comments_count: `{metadata.get('comments_count')}`",
+                f"- updated_at: `{metadata.get('updated_at')}`",
+                "",
+            ]
+        )
+    if payload.get("read_error"):
+        lines.extend(["## Read Error", "", str(payload.get("read_error")), ""])
+    errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
+    if errors:
+        lines.extend(["## Validation Errors", ""])
+        lines.extend(f"- {error}" for error in errors)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_value_connector_install_check_markdown(payload: dict[str, Any]) -> str:
+    lines = ["# LoopX Value Connector Install Check", ""]
+    for item in payload.get("checks") or []:
+        if not isinstance(item, Mapping):
+            continue
+        lines.extend(
+            [
+                f"## {item.get('connector_id')}",
+                "",
+                f"- status: `{item.get('status')}`",
+                f"- external_write_capability: `{item.get('external_write_capability')}`",
+            ]
+        )
+        if item.get("write_gate"):
+            lines.append(f"- write_gate: {item.get('write_gate')}")
+        lines.extend(["", "Install / use:"])
+        for command in item.get("install") or []:
+            lines.append(f"- `{command}`")
+        for tool in item.get("optional_tools") or []:
+            if not isinstance(tool, Mapping):
+                continue
+            lines.append(
+                f"- optional `{tool.get('tool')}` installed=`{tool.get('installed')}`: {tool.get('needed_for')}"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
