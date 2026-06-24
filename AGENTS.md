@@ -89,6 +89,32 @@ status, quota, and todo projection. Only update an automation prompt when the
 heartbeat lifecycle contract itself changes or the user explicitly asks to
 change the scheduler.
 
+## Projection Sink Design
+
+When adding an operator-facing display sink such as Lark Base, dashboards,
+chat summaries, or reports, build it from LoopX's public-safe state and
+projection surfaces instead of parsing project-specific private source files.
+Valid display inputs include todo projection, quota/status contracts,
+frontstage projections, compact run-history events, public-safe evidence
+pointers, and redacted source warnings.
+
+Do not make a generic sink depend on the shape of one local document, private
+planning file, non-public wiki, raw transcript, local path, or connector payload.
+If a source is valuable, first convert it into a bounded LoopX projection with
+stable ids, source labels, evidence, and explicit gates; then let the sink
+render that projection. Public or multi-user sinks must consume redacted
+public-safe evidence. An explicitly owner-only operator board may sync private
+planning evidence when the user authorizes that boundary, but it should still
+scope rows by `agent_id` and avoid credentials or secrets unless the user
+explicitly asks for a credential-handling workflow.
+
+Projection sinks should preserve row lineage as data, not as ad hoc prose. When
+rows supersede, migrate, or retire earlier display rows, represent that through
+projection lifecycle fields such as `row_lifecycle`, `supersedes`,
+`superseded_by`, `source_id`, and compact migration audit evidence. A sink may
+render the lineage in existing evidence/history fields, but should not require
+reading a project-private source document to understand why a row changed.
+
 ## Smoke Retention Policy
 
 Keep a smoke test only when it validates a durable public behavior:
