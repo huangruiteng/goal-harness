@@ -28,6 +28,7 @@ GOAL_ID = "side-agent-workspace-goal"
 PRIMARY_TODO = "Run the primary benchmark rotation."
 UNCLAIMED_TODO = "Triage an unclaimed coordination task."
 SIDE_TODO = "Continue the side-agent productization docs lane."
+OTHER_SIDE_GATE = "Approve the other side-agent external write policy."
 
 
 @contextmanager
@@ -72,7 +73,11 @@ def status_payload(repo: Path, registry: Path) -> dict:
         "reason": "fixture eligible quota",
     }
     coordination = {
-        "registered_agents": ["codex-main-control", "codex-side-bypass"],
+        "registered_agents": [
+            "codex-main-control",
+            "codex-side-bypass",
+            "codex-other-side-agent",
+        ],
         "primary_agent": "codex-main-control",
     }
     goal = {
@@ -144,6 +149,26 @@ def status_payload(repo: Path, registry: Path) -> dict:
                     },
                 ],
             },
+            "user_todos": {
+                "schema_version": "todo_summary_v0",
+                "total_count": 1,
+                "open_count": 1,
+                "done_count": 0,
+                "items": [
+                    {
+                        "index": 1,
+                        "text": OTHER_SIDE_GATE,
+                        "schema_version": "todo_item_v0",
+                        "todo_id": "todo_value_explorer_gate",
+                        "role": "user",
+                        "status": "open",
+                        "priority": "P0",
+                        "task_class": "user_gate",
+                        "action_kind": "external_write_policy",
+                        "claimed_by": "codex-other-side-agent",
+                    }
+                ],
+            },
         },
     }
     return {
@@ -207,6 +232,10 @@ def main() -> int:
         assert guarded["effective_action"] == "side_agent_workspace_repair", guarded
         assert guarded["workspace_guard"]["current_workspace"] == "primary_checkout", guarded
         assert guarded["interaction_contract"]["mode"] == "side_agent_workspace_repair", guarded
+        assert guarded["interaction_contract"]["user_channel"]["action_required"] is False, guarded
+        assert guarded["requires_user_action"] is False, guarded
+        assert guarded["user_todo_summary"]["open_count"] == 0, guarded
+        assert guarded["user_todo_summary"]["other_agent_scoped_open_count"] == 1, guarded
         assert guarded["interaction_contract"]["agent_channel"]["delivery_allowed"] is False, guarded
         assert guarded["interaction_contract"]["cli_channel"]["spend_after_validation"] is False, guarded
         assert "workspace_guard: action=move_to_independent_worktree" in markdown, markdown
