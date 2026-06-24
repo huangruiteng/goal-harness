@@ -193,7 +193,7 @@ points:
   a reproducible synthetic demo where a human gate stays visible while safe
   fallback work continues.
 - [LoopX self-iteration](docs/showcases/cases/0619-loopx-self-iteration.md)
-  and the [hardware-agent workflow](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.md):
+  and the [hardware-agent workflow](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html):
   public-safe evidence that one control plane can coordinate primary and side
   agents without hiding ownership or scope.
 

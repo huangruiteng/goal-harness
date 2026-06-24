@@ -115,6 +115,15 @@ if (manifest.public_boundary.primary_content_is_showcase_catalog !== true) {
 if (manifest.content_sources?.primary_public_story !== "docs/showcases/showcase-catalog.json") {
   throw new Error(`manifest primary content source mismatch: ${JSON.stringify(manifest.content_sources)}`);
 }
+const interactivePages = manifest.content_sources?.interactive_case_pages ?? [];
+if (!interactivePages.includes("docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html")) {
+  throw new Error(`share bundle did not include the hardware-agent interactive page: ${JSON.stringify(interactivePages)}`);
+}
+assertExists(resolve(siteDir, "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html"));
+const hardwareCaseHtml = await readFile(resolve(siteDir, "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html"), "utf8");
+if (!hardwareCaseHtml.includes("loopx 在芯片开发任务上的实践") || !hardwareCaseHtml.includes("VeeR EH1")) {
+  throw new Error("copied hardware-agent interactive page is missing expected public case content");
+}
 if (manifest.content_sources?.live_status_feed !== false) {
   throw new Error("public share bundle must not declare a live status feed content source");
 }

@@ -179,6 +179,7 @@ includes(frontstageSource, "Open selected case page", "showcase spotlight case p
 includes(frontstageSource, "docs/showcases/showcase-catalog.json", "showcase catalog source copy");
 includes(frontstageSource, "Open case page", "case page outbound link");
 includes(frontstageSource, "github.com/huangruiteng/loopx/blob/main", "public GitHub case page links");
+includes(frontstageSource, "huangruiteng.github.io/loopx", "hosted interactive case links");
 includes(frontstageSource, "Projection is read-only", "read-only truth copy");
 includes(frontstageSource, "Inspired by modern agent boards", "product benchmark copy");
 excludes(frontstageSource, "<form", "write form");
@@ -189,6 +190,8 @@ includes(catalogSource, '"efficiency_model"', "showcase catalog efficiency model
 includes(catalogSource, '"2026-06-19-loopx-self-iteration"', "self-iteration showcase case");
 includes(catalogSource, '"2026-06-17-blocked-p0-safe-rotation"', "blocked P0 showcase case");
 includes(catalogSource, '"2026-06-19-dynamic-workflow-hardware-agent"', "hardware-agent showcase case");
+includes(catalogSource, '"public_safe_interactive_case"', "hardware-agent interactive case status");
+includes(catalogSource, '"interactive_page"', "hardware-agent interactive page field");
 includes(catalogSource, '"2026-06-20-creator-operator-case-spec"', "creator operator showcase case");
 
 const motionSource = sourceBetween(frontstageSource, "function ShowcaseMotionBoard", "function ShowcaseCasePackPanel", "showcase motion board");

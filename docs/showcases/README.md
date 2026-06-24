@@ -74,12 +74,13 @@ the artifact with `python3 examples/showcase-animation-prototype-smoke.py`.
 | --- | --- | --- | --- |
 | [0617 blocked P0 with safe P1/P2 rotation](cases/0617-blocked-p0-safe-rotation.md) | Blocked priority fallback, concrete user gate, quota discipline | Reproducible synthetic demo | `python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py` |
 | [0619 LoopX self-iteration loop](cases/0619-loopx-self-iteration.md) | Self-iteration, side-agent scope, evidence writeback | Public Git evidence case | Commit-backed narrative and workload signal |
-| [0619 dynamic workflow for hardware-agent development](cases/0619-dynamic-workflow-hardware-agent.md) | Dynamic workflow, multi-agent convergence, shared control plane | Redacted stub pending contributor detail | Public-safe narrative only |
+| [0619 dynamic workflow for hardware-agent development](cases/0619-dynamic-workflow-hardware-agent.html) | Dynamic workflow, multi-agent convergence, shared control plane | Public-safe interactive case | Five hardware-agent cases plus companion notes |
 
 The catalog order above is the canonical frontstage order for the PoC. It keeps
 the public homepage focused on one reproducible control-plane proof, one
-commit-backed self-iteration case, and one contributor-facing redacted workflow
-stub that can expand when approved public details arrive.
+commit-backed self-iteration case, and one contributor-approved interactive
+workflow case that shows how LoopX coordinates generated scripts and worker
+agents under a shared control plane.
 
 ## Appendix Cases
 

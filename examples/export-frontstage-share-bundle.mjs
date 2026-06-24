@@ -2,7 +2,7 @@
 // Build a public-safe static frontstage bundle for demos and future Pages hosting.
 
 import { spawnSync } from "node:child_process";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +80,34 @@ async function copyIndexForFrontstage(siteDir) {
   await writeFile(resolve(frontstageDir, "index.html"), html);
 }
 
+function validateInteractivePagePath(path) {
+  if (typeof path !== "string") {
+    throw new Error(`interactive_page must be a string: ${JSON.stringify(path)}`);
+  }
+  if (!path.startsWith("docs/showcases/") || !path.endsWith(".html") || path.includes("..")) {
+    throw new Error(`interactive_page must stay under docs/showcases/*.html: ${path}`);
+  }
+  return path;
+}
+
+async function copyInteractiveCasePages(siteDir) {
+  const catalog = JSON.parse(await readFile(resolve(repoRoot, showcaseCatalogPath), "utf8"));
+  const interactivePages = new Set();
+  for (const item of catalog.cases ?? []) {
+    if (item.interactive_page) {
+      interactivePages.add(validateInteractivePagePath(item.interactive_page));
+    }
+  }
+
+  for (const pagePath of interactivePages) {
+    const sourcePath = resolve(repoRoot, pagePath);
+    const targetPath = resolve(siteDir, pagePath);
+    await mkdir(dirname(targetPath), { recursive: true });
+    await copyFile(sourcePath, targetPath);
+  }
+  return Array.from(interactivePages).sort();
+}
+
 async function removeCopiedLiveStatusFiles(siteDir) {
   for (const entry of await readdir(siteDir, { withFileTypes: true })) {
     if (!entry.isFile()) {
@@ -147,7 +175,7 @@ function buildStatusFixture(projection) {
   };
 }
 
-async function writeShareReadme(outDir, base) {
+async function writeShareReadme(outDir, base, interactivePages) {
   const siteDir = resolve(outDir, "site");
   const frontstageUrl = `${base}frontstage/`;
   const previewBlock = base === "/"
@@ -191,9 +219,11 @@ ${previewBlock}
 
 ## Publication Boundary
 
-- Includes: compiled dashboard assets, \`${statusFileName}\`, and direct
-  \`/frontstage/\` static route support.
+- Includes: compiled dashboard assets, \`${statusFileName}\`, direct
+  \`/frontstage/\` static route support, and catalog-declared interactive
+  case pages.
 - Primary case source: \`${showcaseCatalogPath}\`.
+- Interactive case pages: ${interactivePages.length ? interactivePages.map((path) => `\`${path}\``).join(", ") : "none"}.
 - Demo shell fixture: \`${projectionFixturePath} --format json\`.
 - Excludes: live registry state, local paths, credentials, raw logs, raw
   benchmark evidence, and write APIs.
@@ -201,7 +231,7 @@ ${previewBlock}
   await writeFile(resolve(outDir, "README.md"), readme);
 }
 
-async function writeManifest(outDir, base) {
+async function writeManifest(outDir, base, interactivePages) {
   const manifest = {
     schema_version: "loopx_frontstage_share_bundle_v0",
     base,
@@ -210,11 +240,13 @@ async function writeManifest(outDir, base) {
     frontstage_entry: "site/frontstage/index.html",
     content_sources: {
       primary_public_story: showcaseCatalogPath,
+      interactive_case_pages: interactivePages,
       read_only_control_plane_shell: projectionFixturePath,
       live_status_feed: false,
     },
     public_boundary: {
       primary_content_is_showcase_catalog: true,
+      interactive_pages_from_showcase_catalog: true,
       live_registry_state: false,
       write_api: false,
       raw_logs: false,
@@ -296,6 +328,7 @@ async function main() {
 
   await removeCopiedLiveStatusFiles(siteDir);
   await copyIndexForFrontstage(siteDir);
+  const interactivePages = await copyInteractiveCasePages(siteDir);
 
   const projectionOutput = run("python3", [resolve(repoRoot, "examples/goal-channel-frontstage-fixture.py"), "--format", "json"], {
     capture: true,
@@ -304,8 +337,8 @@ async function main() {
   const projection = sanitizeProjectionForShare(JSON.parse(projectionOutput));
   const statusFixture = buildStatusFixture(projection);
   await writeFile(resolve(siteDir, statusFileName), `${JSON.stringify(statusFixture, null, 2)}\n`);
-  await writeShareReadme(outDir, args.base);
-  await writeManifest(outDir, args.base);
+  await writeShareReadme(outDir, args.base, interactivePages);
+  await writeManifest(outDir, args.base, interactivePages);
   await scanPublicBoundary(outDir);
 
   console.log(JSON.stringify({

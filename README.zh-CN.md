@@ -122,7 +122,7 @@ loopx bootstrap \
 - [Blocked P0 with safe P1/P2 rotation](docs/showcases/cases/0617-blocked-p0-safe-rotation.md)：
   一个可复现 synthetic demo，展示用户决策保持可见时，安全侧路仍可继续推进。
 - [LoopX self-iteration](docs/showcases/cases/0619-loopx-self-iteration.md)
-  和 [hardware-agent workflow](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.md)：
+  和 [hardware-agent workflow](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html)：
   用 public-safe 证据展示同一控制面如何协调主控、旁路、scope 和 ownership。
 
 完整案例目录见 [docs/showcases/README.md](docs/showcases/README.md)。
