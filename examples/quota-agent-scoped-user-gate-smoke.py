@@ -291,6 +291,14 @@ def assert_agent_without_advancement_candidate_waits_for_primary() -> None:
     assert scheduler["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, scheduler
     assert scheduler["claude_code_loop"]["after_limit"] == "stop_loop", scheduler
     assert scheduler["claude_code_loop"]["unchanged_poll_limit"] == 3, scheduler
+    reset = scheduler["reset_policy"]
+    assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
+    assert reset["profile_action"] == "backoff_until_reassigned", reset
+    assert reset["codex_app_initial_interval_minutes"] == 10, reset
+    assert reset["identity_keys"] == scheduler["unchanged_identity_keys"], reset
+    assert reset["identity_snapshot"]["agent_identity.agent_id"] == payload["agent_identity"]["agent_id"], reset
+    assert "new_or_reassigned_todo" in reset["reset_conditions"], reset
+    assert reset["no_spend_for_reset"] is True, reset
     assert "scheduler=backoff_until_reassigned" in payload["protocol_action_packet"]["summary"], payload
 
 
