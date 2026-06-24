@@ -1116,16 +1116,16 @@ def _agent_lane_candidate_sort_key(
     claim_rank = 0 if agent_id and claimed_by == agent_id else 1
     repair_rank = 0 if raw_item.get("capability_repair_mode") is True else 1
     return (
+        active_next_rank,
+        claim_rank,
+        _todo_priority_rank(raw_item),
         _primary_agent_unblock_handoff_rank(
             raw_item,
             agent_id=agent_id,
             primary_agent=primary_agent,
         ),
-        active_next_rank,
-        claim_rank,
         _primary_review_rank(raw_item, agent_id=agent_id),
         repair_rank,
-        _todo_priority_rank(raw_item),
         _todo_index_rank(raw_item),
     )
 
@@ -1142,9 +1142,9 @@ def _sort_capability_runnable_candidates(
         return runnable, None
     primary_agent = normalize_todo_claimed_by(agent_identity.get("primary_agent"))
     policy = (
-        "primary_agent_unblock_handoff_then_active_next_then_claim_then_repair_then_priority"
+        "active_next_then_claim_then_priority_then_primary_agent_unblock_handoff_then_repair"
         if primary_agent and agent_id == primary_agent
-        else "active_next_then_claim_then_repair_then_priority"
+        else "active_next_then_claim_then_priority_then_repair"
     )
     return (
         sorted(
