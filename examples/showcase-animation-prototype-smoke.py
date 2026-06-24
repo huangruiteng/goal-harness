@@ -100,7 +100,9 @@ def main() -> int:
         assert case_id in rendered, case_id
         assert escaped(case["title"]) in rendered, case_id
         assert escaped(case["headline"]) in rendered, case_id
-        frontend = case["frontend_card"]
+        frontend = case.get("frontend_card")
+        if not isinstance(frontend, dict):
+            continue
         for badge in frontend.get("badges", [])[:3]:
             assert escaped(badge) in rendered, (case_id, badge)
 

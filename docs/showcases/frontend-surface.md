@@ -25,6 +25,7 @@ Use these catalog fields directly:
 | `id`, `date`, `title` | Stable card identity and sort key. |
 | `status` | Badge and rendering state. |
 | `case_page` | Link to the narrative source. |
+| `interactive_page` | Optional static HTML case artifact; use a hosted Pages link when present. |
 | `demo_command` | "Try the demo" command when available. |
 | `storyboard_path` | Link to a frontend-ready storyboard when a runnable demo is not available. |
 | `feedback_contract_path` | Link to feedback/source-status rules when a case includes user steering. |
@@ -118,6 +119,9 @@ A case detail view should be a short visual story:
 
 For `redacted_stub_pending_contributor_details`, show the missing evidence
 plainly. Do not fill the gap with speculative claims.
+For `public_safe_interactive_case`, prefer the `interactive_page` artifact as
+the frontstage CTA, while keeping `case_page` as the companion narrative and
+evidence-boundary note.
 
 ## Status Rendering
 
@@ -127,6 +131,7 @@ plainly. Do not fill the gap with speculative claims.
 | `public_evidence_case` | Public evidence | Show Git/doc/smoke-backed evidence summary. |
 | `redacted_stub_pending_contributor_details` | Redacted stub | Show the pattern and missing public evidence. |
 | `public_safe_case_spec` | Case spec | Show narrative, storyboard, and feedback contract links when present. |
+| `public_safe_interactive_case` | Interactive case | Link the hosted HTML artifact and keep the evidence boundary visible. |
 
 New statuses should be added to the catalog smoke before they appear in the
 website.
@@ -157,7 +162,7 @@ The first implementation should be static and catalog-driven:
 2. Validate the known `schema_version`.
 3. Render the comparison block, filter/search controls, case grid, and detail
    story from catalog fields.
-4. Link back to Markdown case pages.
+4. Link back to Markdown case pages, or to hosted static HTML when `interactive_page` is present.
 5. Use `docs/assets/control-plane-board.svg` as the first shared visual asset.
 6. Use `examples/showcase-frontstage-prototype.py` as the no-build static
    prototype until a real frontend app exists.

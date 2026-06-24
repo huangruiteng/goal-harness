@@ -185,8 +185,9 @@
       "id": "2026-06-19-dynamic-workflow-hardware-agent",
       "date": "2026-06-19",
       "title": "Dynamic workflow for hardware-agent development",
-      "status": "redacted_stub_pending_contributor_details",
+      "status": "public_safe_interactive_case",
       "case_page": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.md",
+      "interactive_page": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html",
       "demo_command": null,
       "domain": "hardware-agent-development",
       "audience": [
@@ -205,25 +206,25 @@
       "problem": "Specialized engineering work can require multiple agents to split work and converge without losing ownership or state.",
       "loopx_behavior": [
         "keep durable goal state outside any one chat thread",
-        "make ownership and review handoff explicit",
-        "project evidence and convergence state for the operator",
-        "leave domain-specific artifacts private until sanitized"
+        "make ownership, quota, and evidence writeback explicit",
+        "let script-generated worker loops continue only after bounded validation",
+        "project convergence state and human gates for the operator"
       ],
-      "user_value": "The public claim is limited to the observed control-plane pattern: shared state helps long-running multi-agent work converge.",
-      "evidence_boundary": "Redacted stub; no raw chats, screenshots, proprietary design details, internal tool names, repositories, paths, task ids, or unpublished hardware artifacts.",
+      "user_value": "A contributor-approved public artifact shows how one control plane can coordinate Claude Code, generated scripts, and hardware-agent workers across five long-running engineering cases.",
+      "evidence_boundary": "Public-safe interactive artifact; no raw chats, screenshots, proprietary design details, private repositories, local paths, task ids, credentials, or unpublished hardware artifacts.",
       "frontend_card": {
         "visual_metaphor": "multiple worker lanes converging through one shared control plane",
-        "primary_metric_hint": "convergence under a fuzzy goal",
+        "primary_metric_hint": "five public hardware-agent cases under one control plane",
         "badges": [
-          "redacted",
+          "interactive-html",
           "multi-agent",
-          "pending-demo"
+          "hardware"
         ],
         "story_beats": [
-          "fuzzy engineering goal needs multiple workers",
-          "LoopX provides shared state and ownership",
-          "work converges through evidence and primary review",
-          "public demo waits for safe abstraction"
+          "LoopX owns goal state, quota, todos, claims, evidence, and history",
+          "Claude Code writes task-specific orchestration scripts under that contract",
+          "hardware-agent workers perform bounded RTL, simulation, and validation work",
+          "five public cases show closed tasks, DSE, flagship Fmax optimization, and convergence floors"
         ]
       }
     },

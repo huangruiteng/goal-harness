@@ -88,6 +88,28 @@ def main() -> int:
             page_text = read(page)
             assert "public-safe stub" in page_text, case_id
             assert "No reproducible public demo is included yet" in page_text, case_id
+        if case.get("status") == "public_safe_interactive_case":
+            assert demo_command is None, case
+            interactive_page = case.get("interactive_page")
+            assert isinstance(interactive_page, str), case
+            assert interactive_page.startswith("docs/showcases/"), case
+            assert interactive_page.endswith(".html"), case
+            interactive_path = REPO_ROOT / interactive_page
+            assert interactive_path.is_file(), case
+            assert_public_safe(interactive_path)
+            interactive_text = read(interactive_path)
+            for phrase in (
+                "loopx 在芯片开发任务上的实践",
+                "Claude Code",
+                "DUDU",
+                "CV32E40P",
+                "VeeR EH1",
+                "Viterbi",
+            ):
+                assert phrase in interactive_text, phrase
+            page_text = read(page)
+            assert interactive_page.split("/")[-1] in page_text, case_id
+            assert "Public Artifact" in page_text, case_id
         if case.get("status") == "public_safe_case_spec":
             assert demo_command is None, case
             assert isinstance(appendix, dict), case
@@ -172,7 +194,7 @@ def main() -> int:
         "## See It In Action",
         "docs/showcases/cases/0617-blocked-p0-safe-rotation.md",
         "docs/showcases/cases/0619-loopx-self-iteration.md",
-        "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.md",
+        "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html",
     ):
         assert phrase in repo_readme, phrase
 

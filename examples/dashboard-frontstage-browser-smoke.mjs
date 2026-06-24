@@ -507,13 +507,13 @@ async function main() {
           ?.textContent?.includes("Dynamic workflow for hardware-agent development"),
       );
       const hardwareSpotlightText = await spotlight.innerText();
-      if (!hardwareSpotlightText.includes("Redacted stub")) {
+      if (!hardwareSpotlightText.includes("Public-safe interactive artifact")) {
         throw new Error("Showcase spotlight did not expose the selected hardware-agent evidence boundary");
       }
       const spotlightCaseHref = await desktopPage
         .locator('[data-testid="frontstage-showcase-spotlight-case-page"]')
         .getAttribute("href");
-      if (!spotlightCaseHref?.includes("github.com/huangruiteng/loopx/blob/main/docs/showcases/")) {
+      if (!spotlightCaseHref?.includes("huangruiteng.github.io/loopx/docs/showcases/")) {
         throw new Error(`Showcase spotlight case link points outside public showcases: ${spotlightCaseHref}`);
       }
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("self-iteration");

@@ -49,6 +49,7 @@ type ShowcaseFrontstageCase = {
   headline?: string;
   domain?: string;
   case_page?: string;
+  interactive_page?: string;
   evidence_boundary?: string;
   feature_points?: string[];
   pattern_tags?: string[];
@@ -207,11 +208,17 @@ function showcaseSearchText(item: ShowcaseFrontstageCase) {
     .toLowerCase();
 }
 
-function showcaseCaseHref(casePage?: string) {
-  if (!casePage) {
+function showcaseCaseHref(item?: ShowcaseFrontstageCase) {
+  if (!item) {
     return undefined;
   }
-  return `https://github.com/huangruiteng/loopx/blob/main/${casePage}`;
+  if (item.interactive_page) {
+    return `https://huangruiteng.github.io/loopx/${item.interactive_page}`;
+  }
+  if (item.case_page) {
+    return `https://github.com/huangruiteng/loopx/blob/main/${item.case_page}`;
+  }
+  return undefined;
 }
 
 function uniqueClaimOwners(projection: GoalChannelProjection) {
@@ -429,7 +436,7 @@ function ShowcaseMotionBoard() {
   }
   const activeStoryBeats = activeCase.frontend_card?.story_beats?.slice(0, 5) ?? [];
   const activeFeaturePoints = activeCase.feature_points?.slice(0, 3) ?? [];
-  const activeCaseHref = showcaseCaseHref(activeCase.case_page);
+  const activeCaseHref = showcaseCaseHref(activeCase);
   const journeySegments = [
     {
       label: "human judgment",
@@ -681,7 +688,7 @@ function ShowcaseCasePackPanel() {
         <div className="grid gap-3 lg:grid-cols-2">
           {filteredCases.map((item) => {
             const badges = item.frontend_card?.badges?.slice(0, 4) ?? item.pattern_tags?.slice(0, 4) ?? [];
-            const caseHref = showcaseCaseHref(item.case_page);
+            const caseHref = showcaseCaseHref(item);
             return (
               <article className="rounded-md border border-slate-200 bg-slate-50 p-3" key={item.id}>
                 <div className="flex flex-wrap items-center gap-2">
@@ -938,7 +945,7 @@ function ShowcaseKineticCaseStrip() {
             <a
               className="frontstage-showcase-kinetic-card"
               data-testid="frontstage-showcase-kinetic-card"
-              href={showcaseCaseHref(item.case_page) ?? "#"}
+              href={showcaseCaseHref(item) ?? "#"}
               key={`${item.id}-${index}`}
               rel="noreferrer"
               target="_blank"
