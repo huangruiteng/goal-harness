@@ -1524,7 +1524,8 @@ machine states:
 - `scope_exhausted`: no current-agent or unclaimed candidate matches the
   registered agent profile and boundary;
 - `primary_review_wait`: the remaining useful step is review, merge,
-  reassignment, or decision by the primary agent/controller;
+  reassignment, or decision by the primary agent/controller, or by the
+  explicitly claimed reviewer that blocks the current agent's handoff;
 - `reassignment_required`: useful work exists, but ownership must be changed
   before this agent may treat it as its lane.
 
