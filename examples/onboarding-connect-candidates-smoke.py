@@ -105,21 +105,30 @@ def assert_default_onboarding(project: Path, runtime: Path) -> None:
     assert "validation_plan" in candidate_kinds, candidates
     assert payload["onboarding_acceptance_required"] is True, payload
     assert payload["autonomous_advance_choice_required"] is True, payload
+    assert payload["heartbeat_opt_in_required"] is True, payload
+    assert payload["host_loop_activation_required"] is True, payload
+    assert "heartbeat=yes" in payload["heartbeat_opt_in_instruction"], payload
     assert payload["onboarding_todos_written"] is True, payload
     assert len(payload["accept_candidate_commands"]) == len(candidates), payload
 
     registry_path = project / ".loopx" / "registry.json"
     status_payload = run_cli("--registry", str(registry_path), "status")
     status_item = status_payload["attention_queue"]["items"][0]
-    assert "Present the onboarding scan" in status_item["recommended_action"], status_item
-    assert "Present the onboarding scan" in status_item["project_asset"]["next_action"], status_item
+    user_todo_title = status_item["user_todos"]["items"][0]["title"]
+    assert "Choose which proposed onboarding agent todos" in status_item["recommended_action"], status_item
+    assert "Codex App heartbeat" in status_item["recommended_action"], status_item
+    assert "heartbeat=yes/no" in user_todo_title, status_item
+    assert "Codex App heartbeat" in status_item["project_asset"]["next_action"], status_item
+    assert "Codex App heartbeat" in status_item["active_state_next_action"], status_item
     assert status_item["user_todos"]["open_count"] == 1, status_item
     assert status_item["agent_todos"]["open_count"] == 1, status_item
 
     quota_payload = run_cli("--registry", str(registry_path), "quota", "should-run", "--goal-id", goal_id)
-    assert quota_payload["should_run"] is True, quota_payload
+    assert quota_payload["should_run"] is False, quota_payload
+    assert quota_payload["effective_action"] == "operator_gate_notify", quota_payload
     assert quota_payload["requires_user_action"] is True, quota_payload
-    assert "Present the onboarding scan" in quota_payload["recommended_action"], quota_payload
+    assert "Codex App heartbeat" in quota_payload["recommended_action"], quota_payload
+    assert "heartbeat=yes/no" in quota_payload["gate_prompt"], quota_payload
     assert quota_payload["user_todo_summary"]["open_count"] == 1, quota_payload
     assert quota_payload["agent_todo_summary"]["open_count"] == 1, quota_payload
 
@@ -128,9 +137,14 @@ def assert_default_onboarding(project: Path, runtime: Path) -> None:
     assert "## Proposed Onboarding Candidates" in text, text
     assert "Candidate agent todos: `requires user selection before delivery work`" in text, text
     assert "Autonomous advancement: `requires an explicit user yes/no choice`" in text, text
+    assert (
+        "Codex App heartbeat: `requires explicit heartbeat=yes/no before a recurring "
+        "Codex App automation is installed`" in text
+    ), text
     assert "## User Todo / Owner Review Reading Queue" in text, text
     assert "## Agent Todo" in text, text
-    assert "accepted numbers plus autonomous=yes/no" in text, text
+    assert "accepted numbers plus autonomous=yes/no plus heartbeat=yes/no" in text, text
+    assert "identity-scoped `loopx heartbeat-prompt --thin`" in text, text
 
     todos = parse_active_state_todos(text)
     user_items = todos.get("user_todos", {}).get("items", [])
@@ -157,14 +171,21 @@ def assert_preauthorized_onboarding(project: Path, runtime: Path) -> None:
         "README.md",
         "--accept-onboarding-agent-todos",
         "--begin-autonomous-advance",
+        "--codex-app-heartbeat",
+        "yes",
         "--no-global-sync",
     )
     assert payload["ok"] is True, payload
+    assert payload["codex_app_heartbeat"] == "yes", payload
     assert payload["onboarding_acceptance_required"] is False, payload
     assert payload["autonomous_advance_choice_required"] is False, payload
+    assert payload["heartbeat_opt_in_required"] is False, payload
+    assert payload["host_loop_activation_required"] is True, payload
+    assert "preauthorized" in payload["heartbeat_opt_in_instruction"], payload
     text = state_text(project, goal_id)
     assert "Candidate agent todos: `accepted and written into Agent Todo`" in text, text
     assert "Autonomous advancement: `allowed after accepted agent todos and a fresh quota guard`" in text, text
+    assert "Codex App heartbeat: `explicitly preauthorized" in text, text
     assert "Choose which proposed onboarding agent todos" not in text, text
 
     todos = parse_active_state_todos(text)
@@ -178,6 +199,58 @@ def assert_preauthorized_onboarding(project: Path, runtime: Path) -> None:
     assert "validation_plan" in kinds, agent_items
 
 
+def assert_autonomy_preauth_still_requires_heartbeat_choice(project: Path, runtime: Path) -> None:
+    goal_id = "onboarding-smoke-autonomy-with-heartbeat-gate"
+    payload = run_cli(
+        "--runtime-root",
+        str(runtime),
+        "bootstrap",
+        "--project",
+        str(project),
+        "--goal-id",
+        goal_id,
+        "--objective",
+        "Exercise autonomous preauthorization without heartbeat preauthorization.",
+        "--goal-doc",
+        "README.md",
+        "--accept-onboarding-agent-todos",
+        "--begin-autonomous-advance",
+        "--no-global-sync",
+    )
+    assert payload["ok"] is True, payload
+    assert payload["codex_app_heartbeat"] == "ask", payload
+    assert payload["onboarding_acceptance_required"] is False, payload
+    assert payload["autonomous_advance_choice_required"] is False, payload
+    assert payload["heartbeat_opt_in_required"] is True, payload
+    assert payload["host_loop_activation_required"] is True, payload
+    assert "heartbeat=yes" in payload["heartbeat_opt_in_instruction"], payload
+
+    registry_path = project / ".loopx" / "registry.json"
+    quota_payload = run_cli("--registry", str(registry_path), "quota", "should-run", "--goal-id", goal_id)
+    assert quota_payload["effective_action"] == "operator_gate_notify", quota_payload
+    assert quota_payload["normal_delivery_allowed"] is False, quota_payload
+    assert quota_payload["requires_user_action"] is True, quota_payload
+    assert quota_payload["interaction_contract"]["user_channel"]["notify"] == "NOTIFY", quota_payload
+    assert "heartbeat=yes/no" in quota_payload["gate_prompt"], quota_payload
+
+    text = state_text(project, goal_id)
+    assert "Candidate agent todos: `accepted and written into Agent Todo`" in text, text
+    assert "Autonomous advancement: `allowed after accepted agent todos and a fresh quota guard`" in text, text
+    assert (
+        "Codex App heartbeat: `requires explicit heartbeat=yes/no before a recurring "
+        "Codex App automation is installed`" in text
+    ), text
+    assert "reply with heartbeat=yes/no" in text, text
+    assert "identity-scoped `loopx heartbeat-prompt --thin`" in text, text
+
+    todos = parse_active_state_todos(text)
+    user_items = todos.get("user_todos", {}).get("items", [])
+    agent_items = todos["agent_todos"]["items"]
+    assert len(user_items) == 1, user_items
+    assert action_kinds(user_items) == {"onboarding_decision"}, user_items
+    assert "onboarding_todo_review" in action_kinds(agent_items), agent_items
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-onboarding-smoke-") as tmp:
         root = Path(tmp)
@@ -185,6 +258,7 @@ def main() -> int:
         project = make_project(root, "fixture-project")
         assert_default_onboarding(project, runtime)
         assert_preauthorized_onboarding(project, runtime)
+        assert_autonomy_preauth_still_requires_heartbeat_choice(project, runtime)
 
     print("onboarding-connect-candidates-smoke ok")
     return 0

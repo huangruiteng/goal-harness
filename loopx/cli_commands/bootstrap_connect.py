@@ -116,6 +116,15 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
         help="Record that Codex may begin from accepted onboarding agent todos after the quota guard permits work.",
     )
     bootstrap_parser.add_argument(
+        "--codex-app-heartbeat",
+        choices=["ask", "yes", "no"],
+        default="ask",
+        help=(
+            "Codex App recurring heartbeat choice for onboarding. Default ask creates a user gate; "
+            "yes/no records an explicit operator decision for headless setup."
+        ),
+    )
+    bootstrap_parser.add_argument(
         "--onboarding-max-commits",
         type=int,
         default=5,
@@ -194,6 +203,7 @@ def handle_bootstrap_connect_command(
             onboarding_scan_enabled=not bool(args.no_onboarding_scan),
             accept_onboarding_agent_todos=bool(args.accept_onboarding_agent_todos),
             begin_autonomous_advance=bool(args.begin_autonomous_advance),
+            codex_app_heartbeat=str(args.codex_app_heartbeat),
             onboarding_max_commits=args.onboarding_max_commits,
             onboarding_max_status_paths=args.onboarding_max_status_paths,
             onboarding_max_top_level_files=args.onboarding_max_top_level_files,
