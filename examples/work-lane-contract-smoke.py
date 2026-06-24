@@ -1179,6 +1179,63 @@ def assert_side_agent_waits_when_only_other_agent_has_claimed_work() -> None:
     assert "quiet_noop_allowed=True" in markdown, markdown
 
 
+def assert_side_agent_wait_mentions_blocking_review_owner() -> None:
+    primary_action = "[P0] Run SkillsBench matrix and record compact results."
+    review_action = (
+        "[P1-review] codex-side-bypass review the agent permission replay packet."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="value_explorer_side_bypass_review_wait",
+            next_action=primary_action,
+            coordination={
+                "primary_agent": "codex-main-control",
+                "registered_agents": [
+                    "codex-main-control",
+                    "codex-side-bypass",
+                    "codex-value-explorer",
+                ],
+            },
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": primary_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "advancement_task",
+                    "claimed_by": "codex-main-control",
+                    "todo_id": "todo_primary_suite",
+                    "required_capabilities": ["shell"],
+                },
+                {
+                    "index": 2,
+                    "text": review_action,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P1-review",
+                    "task_class": "advancement_task",
+                    "action_kind": "side_bypass_review_agent_permission_replay_packet",
+                    "claimed_by": "codex-side-bypass",
+                    "blocks_agent": "codex-value-explorer",
+                    "todo_id": "todo_side_bypass_review",
+                },
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id="codex-value-explorer",
+    )
+    assert guard["decision"] == "primary_review_wait", guard
+    assert guard["should_run"] is False, guard
+    frontier = guard["agent_scope_frontier"]
+    assert frontier["action"] == "primary_review_wait", frontier
+    assert frontier["blocking_review_claimants"] == ["codex-side-bypass"], frontier
+    assert frontier["candidate_counts"]["other_agent_claimed_advancement_count"] == 2
+    assert "codex-side-bypass" in guard["recommended_action"], guard
+    assert "codex-main-control" not in guard["recommended_action"], guard
+    assert "blocking handoff" in guard["interaction_contract"]["agent_channel"]["primary_action"], guard
+
+
 def assert_scoped_user_gate_does_not_steal_other_agent_fallback() -> None:
     gated_action = (
         "[P0] Sync the local long-horizon protocol packet into the approved "
@@ -1753,6 +1810,7 @@ def main() -> int:
     assert_launch_then_poll_todo_without_handle_routes_to_advancement()
     assert_side_agent_next_action_projects_without_stealing_goal_next_action()
     assert_side_agent_waits_when_only_other_agent_has_claimed_work()
+    assert_side_agent_wait_mentions_blocking_review_owner()
     assert_scoped_user_gate_does_not_steal_other_agent_fallback()
     assert_side_agent_replans_when_deferred_successor_is_ready()
     assert_side_agent_can_take_unclaimed_work()

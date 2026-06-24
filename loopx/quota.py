@@ -2601,6 +2601,19 @@ def _agent_scope_no_candidate_frontier(
             if claimed_by
         }
     )
+    blocking_review_items = [
+        item
+        for item in other_advancement_items
+        if normalize_todo_claimed_by(item.get("blocks_agent")) == agent_id
+    ]
+    blocking_review_claimants = sorted(
+        {
+            claimed_by
+            for item in blocking_review_items
+            for claimed_by in [normalize_todo_claimed_by(item.get("claimed_by"))]
+            if claimed_by
+        }
+    )
     claim_scope = (
         agent_todo_summary.get("claim_scope")
         if isinstance(agent_todo_summary.get("claim_scope"), dict)
@@ -2608,21 +2621,34 @@ def _agent_scope_no_candidate_frontier(
     )
     primary_agent = normalize_todo_claimed_by(agent_identity.get("primary_agent"))
     if other_advancement_items:
-        action = (
-            AgentScopeFrontierAction.PRIMARY_REVIEW_WAIT
-            if primary_agent and primary_agent in other_claimants
-            else AgentScopeFrontierAction.REASSIGNMENT_REQUIRED
-        )
-        owner = primary_agent or ", ".join(other_claimants) or "the owning agent"
-        reason = (
-            f"current side-agent {agent_id} has no current/unclaimed advancement "
-            f"candidate; visible advancement work is claimed by {owner}"
-        )
-        recommended_action = (
-            f"Keep {agent_id} active but quiet: wait for {owner} to review, merge, "
-            "reassign, or create a concrete current-agent/unclaimed advancement todo "
-            "before delivery."
-        )
+        if blocking_review_claimants:
+            action = AgentScopeFrontierAction.PRIMARY_REVIEW_WAIT
+            owner = ", ".join(blocking_review_claimants)
+            reason = (
+                f"current side-agent {agent_id} has no current/unclaimed advancement "
+                f"candidate; blocking review work is claimed by {owner}"
+            )
+            recommended_action = (
+                f"Keep {agent_id} active but quiet: wait for {owner} to review the "
+                "blocking handoff, reassign it, or create a concrete current-agent/"
+                "unclaimed advancement todo before delivery."
+            )
+        else:
+            action = (
+                AgentScopeFrontierAction.PRIMARY_REVIEW_WAIT
+                if primary_agent and primary_agent in other_claimants
+                else AgentScopeFrontierAction.REASSIGNMENT_REQUIRED
+            )
+            owner = primary_agent or ", ".join(other_claimants) or "the owning agent"
+            reason = (
+                f"current side-agent {agent_id} has no current/unclaimed advancement "
+                f"candidate; visible advancement work is claimed by {owner}"
+            )
+            recommended_action = (
+                f"Keep {agent_id} active but quiet: wait for {owner} to review, merge, "
+                "reassign, or create a concrete current-agent/unclaimed advancement todo "
+                "before delivery."
+            )
     else:
         action = AgentScopeFrontierAction.AGENT_SCOPE_EXHAUSTED
         reason = (
@@ -2654,6 +2680,7 @@ def _agent_scope_no_candidate_frontier(
             ),
         },
         "other_claimants": other_claimants,
+        "blocking_review_claimants": blocking_review_claimants,
         "other_agent_claimed_items": [
             _compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
             for item in other_advancement_items[:3]
