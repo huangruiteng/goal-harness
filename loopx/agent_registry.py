@@ -66,10 +66,13 @@ def side_agent_handoff_agent_id_for_goal(goal: dict[str, Any] | None) -> str | N
     coordination = goal.get("coordination")
     if isinstance(coordination, dict):
         candidates.append(coordination.get("side_agent_handoff_agent"))
+        candidates.append(coordination.get("side_agent_review_agent"))
     candidates.append(goal.get("side_agent_handoff_agent"))
+    candidates.append(goal.get("side_agent_review_agent"))
     spawn_policy = goal.get("spawn_policy")
     if isinstance(spawn_policy, dict):
         candidates.append(spawn_policy.get("side_agent_handoff_agent"))
+        candidates.append(spawn_policy.get("side_agent_review_agent"))
     for candidate in candidates:
         agent = normalize_todo_claimed_by(candidate)
         if agent:

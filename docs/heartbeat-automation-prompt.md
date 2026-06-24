@@ -136,7 +136,9 @@ agent identity.
   unclear, or broad changes, create a successor handoff todo with
   `--next-agent-todo`. By default it is claimed by `<primary-agent>`; if the
   goal registry declares `coordination.side_agent_handoff_agent`, LoopX routes
-  the successor there instead. Same-agent broad handoff is rejected; use
+  the successor there instead. Existing
+  `coordination.side_agent_review_agent` values are honored as a legacy alias
+  until the goal registry migrates. Same-agent broad handoff is rejected; use
   `--side-agent-self-merged --evidence` for same-agent delivery.
 Once a goal has `coordination.registered_agents`, prompt generation without
 `--agent-id` fails closed. That is the lightweight migration signal for stale
