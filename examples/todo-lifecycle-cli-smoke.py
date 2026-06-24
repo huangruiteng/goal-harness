@@ -25,6 +25,10 @@ SIDE_TODO = "Refine todo ownership contract from a side worktree."
 SIDE_CONTINUATION_TODO = "Continue the small side-agent productization lane after self-merge."
 SIDE_REVIEW_TODO = "Refine todo ownership contract with primary review required."
 REVIEW_TODO = "Primary agent review, verify, and merge the side-agent ownership contract work."
+HANDOFF_SOURCE_TODO = "Prepare successor handoff routing from the primary agent."
+HANDOFF_SUCCESSOR_TODO = "Continue successor handoff routing from the side agent."
+UNCLAIMED_SOURCE_TODO = "Prepare an unclaimed successor routing check."
+UNCLAIMED_SUCCESSOR_TODO = "Continue the unclaimed successor routing check."
 
 
 def write_fixture(root: Path) -> tuple[Path, Path]:
@@ -403,6 +407,27 @@ def main() -> int:
         assert repeated["changed"] is False, repeated
         assert state_file.read_text(encoding="utf-8").count(REBUILD_TODO) == 1
 
+        supersede_claimed_by_error = run_cli_error(
+            registry_path,
+            "todo",
+            "supersede",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            rebuild_todo_id,
+            "--claimed-by",
+            "codex-main-control",
+            "--next-agent-todo",
+            VALIDATE_TODO,
+        )
+        assert "todo supersede does not support --claimed-by" in supersede_claimed_by_error["error"], (
+            supersede_claimed_by_error
+        )
+        assert "--next-claimed-by" in supersede_claimed_by_error["error"], supersede_claimed_by_error
+        assert "inherit the superseded todo owner when present" in supersede_claimed_by_error["error"], (
+            supersede_claimed_by_error
+        )
+
         superseded = run_cli(
             registry_path,
             "todo",
@@ -426,6 +451,87 @@ def main() -> int:
         assert rebuild_item["done"] is True and rebuild_item["superseded_by"] == validate_todo_id, rebuild_item
         assert validate_item["done"] is False and validate_item["task_class"] == "advancement_task", validate_item
         assert validate_item["claimed_by"] == "codex-main-control", validate_item
+
+        handoff_source = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            HANDOFF_SOURCE_TODO,
+            "--claimed-by",
+            "codex-main-control",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "handoff_route",
+        )
+        handoff = run_cli(
+            registry_path,
+            "todo",
+            "supersede",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            handoff_source["todo_id"],
+            "--reason",
+            "split-to-side-agent-successor",
+            "--next-agent-todo",
+            HANDOFF_SUCCESSOR_TODO,
+            "--next-claimed-by",
+            "codex-side-bypass",
+            "--next-action-kind",
+            "handoff_route",
+        )
+        assert handoff["changed"] is True, handoff
+        assert handoff["next_todos"][0]["claimed_by"] == "codex-side-bypass", handoff
+        handoff_successor_id = handoff["next_todos"][0]["todo_id"]
+        handoff_items = parsed_items(state_file)
+        handoff_source_item = next(item for item in handoff_items if item["todo_id"] == handoff_source["todo_id"])
+        handoff_successor_item = next(item for item in handoff_items if item["todo_id"] == handoff_successor_id)
+        assert handoff_source_item["superseded_by"] == handoff_successor_id, handoff_source_item
+        assert handoff_successor_item["claimed_by"] == "codex-side-bypass", handoff_successor_item
+
+        unclaimed_source = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            UNCLAIMED_SOURCE_TODO,
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "unclaimed_route",
+        )
+        unclaimed = run_cli(
+            registry_path,
+            "todo",
+            "supersede",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            unclaimed_source["todo_id"],
+            "--reason",
+            "keep-successor-unclaimed",
+            "--next-agent-todo",
+            UNCLAIMED_SUCCESSOR_TODO,
+            "--next-action-kind",
+            "unclaimed_route",
+        )
+        assert unclaimed["changed"] is True, unclaimed
+        assert not unclaimed["next_todos"][0].get("claimed_by"), unclaimed
+        unclaimed_successor_id = unclaimed["next_todos"][0]["todo_id"]
+        unclaimed_successor_item = next(
+            item for item in parsed_items(state_file) if item["todo_id"] == unclaimed_successor_id
+        )
+        assert not unclaimed_successor_item.get("claimed_by"), unclaimed_successor_item
 
         blocked = run_cli(
             registry_path,
