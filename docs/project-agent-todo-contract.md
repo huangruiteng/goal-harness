@@ -98,10 +98,8 @@ in an independent git worktree/branch, never in the primary checkout. Small
 AGENTS-eligible validated changes may be self-merged when the side agent records
 public-safe evidence; higher-risk or unclear work should create a successor
 handoff todo claimed by the primary agent by default or by
-`coordination.side_agent_handoff_agent` when configured. Existing
-`coordination.side_agent_review_agent` values are honored as a legacy alias
-until the goal registry migrates. First register the agent ids and primary agent
-in the goal registry:
+`coordination.side_agent_handoff_agent` when configured. First register the
+agent ids and primary agent in the goal registry:
 
 `quota should-run --agent-id <side-agent-id>` enforces this as a preflight: when
 the side agent is running from the registered primary checkout, a non-git
@@ -272,10 +270,9 @@ goal's `primary_agent`. A goal may instead set
 `coordination.side_agent_handoff_agent` to another registered agent; in that
 case the successor handoff todo defaults to that agent and `--next-claimed-by`
 is allowed only when it matches the configured handoff owner. Existing
-registries that still use `coordination.side_agent_review_agent` get the same
-routing as a legacy alias. This keeps broad side-agent handoff visible to the
-shared control plane without hard-coding the primary agent as the only follow-up
-surface.
+registry fields named for review are not aliases for this route. This keeps
+broad side-agent handoff visible to the shared control plane without hard-coding
+the primary agent as the only follow-up surface.
 
 LoopX does not model "review" as a separate kernel object. Review, verification,
 or continuation are product-level names for a successor todo. The machine

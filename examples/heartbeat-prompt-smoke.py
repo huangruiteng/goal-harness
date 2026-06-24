@@ -1081,8 +1081,8 @@ def main() -> int:
             cli_profile_scoped_payload
         )
 
-        legacy_handoff_registry_path = project / ".loopx" / "legacy-handoff-registry.json"
-        legacy_handoff_registry_path.write_text(
+        ignored_review_registry_path = project / ".loopx" / "ignored-review-registry.json"
+        ignored_review_registry_path.write_text(
             json.dumps(
                 {
                     "goals": [
@@ -1108,7 +1108,7 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
-        cli_legacy_handoff_json = subprocess.run(
+        cli_ignored_review_json = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -1116,7 +1116,7 @@ def main() -> int:
                 "--format",
                 "json",
                 "--registry",
-                str(legacy_handoff_registry_path),
+                str(ignored_review_registry_path),
                 "heartbeat-prompt",
                 "--goal-id",
                 GOAL_ID,
@@ -1131,13 +1131,14 @@ def main() -> int:
             capture_output=True,
             text=True,
         ).stdout
-        cli_legacy_handoff_payload = json.loads(cli_legacy_handoff_json)
-        assert cli_legacy_handoff_payload["side_agent_handoff_agent"] == "codex-side-reviewer", (
-            cli_legacy_handoff_payload
+        cli_ignored_review_payload = json.loads(cli_ignored_review_json)
+        assert cli_ignored_review_payload["side_agent_handoff_agent"] is None, cli_ignored_review_payload
+        assert "handoff todo claimed_by `codex-side-reviewer`" not in cli_ignored_review_payload["task_body"], (
+            cli_ignored_review_payload
         )
-        assert "handoff todo claimed_by `codex-side-reviewer`" in cli_legacy_handoff_payload["task_body"], (
-            cli_legacy_handoff_payload
-        )
+        assert "handoff todo claimed_by primary_agent `codex-main-control`" in cli_ignored_review_payload[
+            "task_body"
+        ], cli_ignored_review_payload
 
         cli_unknown_scoped = subprocess.run(
             [
