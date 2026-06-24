@@ -232,15 +232,15 @@ def assert_configured_side_agent_handoff() -> None:
             same_agent_handoff["error"]
         ), same_agent_handoff
 
-    with tempfile.TemporaryDirectory(prefix="loopx-legacy-side-agent-review-smoke-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="loopx-ignored-side-agent-review-smoke-") as tmp:
         root = Path(tmp)
-        registry_path, state_file = write_fixture(root)
+        registry_path, _state_file = write_fixture(root)
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
         coordination = registry["goals"][0]["coordination"]
         coordination["registered_agents"].append("codex-side-reviewer")
         coordination["side_agent_review_agent"] = "codex-side-reviewer"
         registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        legacy_handoff_added = run_cli(
+        ignored_review_added = run_cli(
             registry_path,
             "todo",
             "add",
@@ -257,14 +257,14 @@ def assert_configured_side_agent_handoff() -> None:
             "--action-kind",
             "contract_refine",
         )
-        legacy_handoff_completed = run_cli(
+        ignored_review_handoff = run_cli_error(
             registry_path,
             "todo",
             "complete",
             "--goal-id",
             GOAL_ID,
             "--todo-id",
-            legacy_handoff_added["todo_id"],
+            ignored_review_added["todo_id"],
             "--claimed-by",
             "codex-side-bypass",
             "--evidence",
@@ -274,13 +274,7 @@ def assert_configured_side_agent_handoff() -> None:
             "--next-claimed-by",
             "codex-side-reviewer",
         )
-        assert legacy_handoff_completed["changed"] is True, legacy_handoff_completed
-        legacy_successor_id = legacy_handoff_completed["next_todos"][0]["todo_id"]
-        assert legacy_handoff_completed["next_todos"][0]["claimed_by"] == "codex-side-reviewer", (
-            legacy_handoff_completed
-        )
-        legacy_successor = next(item for item in parsed_items(state_file) if item["todo_id"] == legacy_successor_id)
-        assert legacy_successor["claimed_by"] == "codex-side-reviewer", legacy_successor
+        assert "handoff_agent='codex-main-control'" in ignored_review_handoff["error"], ignored_review_handoff
 
 
 def main() -> int:
