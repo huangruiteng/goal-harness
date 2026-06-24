@@ -1464,7 +1464,14 @@ def _agent_scope_filter_user_gate_items(
     other_agent_scoped_items: list[dict[str, Any]] = []
     for item in open_items:
         blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
-        if blocks_agent and blocks_agent != agent_id:
+        if blocks_agent:
+            if blocks_agent != agent_id:
+                other_agent_scoped_items.append(item)
+                continue
+            current_agent_items.append(item)
+            continue
+        claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+        if claimed_by and claimed_by != agent_id:
             other_agent_scoped_items.append(item)
             continue
         current_agent_items.append(item)
@@ -1478,7 +1485,7 @@ def _agent_scope_filter_user_gate_items(
             "schema_version": "agent_scoped_user_gate_filter_v0",
             "agent_id": agent_id,
             "policy": (
-                "user todos with blocks_agent set to another registered agent "
+                "user todos scoped to another agent by blocks_agent or claimed_by "
                 "remain visible but do not block this agent's quota lane"
             ),
             "current_agent_blocking_open_count": len(current_agent_items),
@@ -2288,7 +2295,7 @@ def _agent_scoped_user_gate_override(
         "other_agent_scoped_open_count": other_count,
         "selected_action": selected_action,
         "reason": (
-            "the open user gate is scoped to another agent via blocks_agent; "
+            "the open user gate is scoped to another agent via blocks_agent or claimed_by; "
             "this agent still has an executable in-scope todo"
         ),
     }
