@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.lark_kanban import (  # noqa: E402
     CLAIM_UNCLAIMED,
     STATUS_CLAIMED,
+    STATUS_DONE,
     STATUS_USER_GATE,
     STATUS_REVIEW,
     STATUS_TODO,
@@ -32,6 +33,7 @@ from loopx.lark_kanban import (  # noqa: E402
     read_lark_kanban_local_config,
     seed_lark_kanban_records,
     setup_lark_kanban_board,
+    sync_loopx_projection_to_lark_kanban,
     sync_loopx_todos_to_lark_kanban,
     use_lark_kanban_board,
 )
@@ -319,12 +321,14 @@ def main() -> int:
                     "## User Todo / Owner Review Reading Queue",
                     "",
                     "- [ ] [P1] Approve LoopX board sharing",
-                    "  <!-- loopx: todo_id=todo_user_share status=open task_class=user_gate action_kind=decide -->",
+                    "  <!-- loopx: todo_id=todo_user_share status=open task_class=user_gate action_kind=decide blocks_agent=codex-main-control -->",
                     "",
                     "## Agent Todo",
                     "",
                     "- [ ] [P2] Wire conservative board sync",
                     "  <!-- loopx: todo_id=todo_agent_sync status=open task_class=advancement_task action_kind=sync_board required_write_scopes=loopx claimed_by=codex-main-control -->",
+                    "- [ ] [P1] Product capability scoped board sync",
+                    "  <!-- loopx: todo_id=todo_product_scope status=open task_class=advancement_task action_kind=sync_board claimed_by=codex-product-capability -->",
                     "",
                     "- [ ] [P1] Keep malformed metadata executable",
                     "  <!-- loopx: todo_id=todo_agent_malformed status=blocked_typo task_class=user_gate_typo action_kind=sync_board claimed_by=codex-main-control -->",
@@ -358,7 +362,7 @@ def main() -> int:
             execute=False,
         )
         assert sync_payload["ok"] is True, sync_payload
-        assert sync_payload["todo_count"] == 3, sync_payload
+        assert sync_payload["todo_count"] == 4, sync_payload
         assert any(item["values"]["Status"] == "User Gate" for item in sync_payload["records"]), sync_payload
         malformed = next(
             item for item in sync_payload["records"] if item["todo_id"] == "todo_agent_malformed"
@@ -369,6 +373,314 @@ def main() -> int:
         assert all(item["values"]["Workdir"] == "" for item in sync_payload["records"]), sync_payload
         assert str(root) not in json.dumps(sync_payload["records"], ensure_ascii=False), sync_payload
         assert all(item["command"]["executed"] is False for item in sync_payload["records"]), sync_payload
+        scoped_payload = sync_loopx_todos_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            registry_path=registry,
+            goal_id="goal_lark_sync_fixture",
+            agent_id="codex-main-control",
+            config_path=default_lark_kanban_config_path(registry),
+            execute=False,
+        )
+        scoped_todo_ids = {item["todo_id"] for item in scoped_payload["records"]}
+        assert scoped_payload["todo_count"] == 3, scoped_payload
+        assert scoped_todo_ids == {
+            "todo_user_share",
+            "todo_agent_sync",
+            "todo_agent_malformed",
+        }, scoped_payload
+
+        projection_payload = {
+            "schema_version": "goal_channel_projection_v0",
+            "goal_id": "goal_lark_sync_fixture",
+            "source_id": "frontstage-smoke",
+            "agent_identity": {"agent_id": "codex-main-control"},
+            "user_todos": [
+                {
+                    "todo_id": "todo_projection_gate",
+                    "title": "[P1] Approve projection sink",
+                    "status": "open",
+                    "task_class": "user_gate",
+                    "action_kind": "decide",
+                    "blocks_agent": "codex-main-control",
+                }
+            ],
+            "agent_todos": [
+                {
+                    "todo_id": "todo_projection_sync",
+                    "title": "[P0] Sync projection rows",
+                    "status": "open",
+                    "task_class": "advancement_task",
+                    "action_kind": "sync_projection",
+                    "claimed_by": "codex-main-control",
+                },
+                {
+                    "todo_id": "todo_projection_other",
+                    "title": "[P2] Other lane item",
+                    "status": "open",
+                    "task_class": "advancement_task",
+                    "action_kind": "sync_projection",
+                    "claimed_by": "codex-product-capability",
+                },
+                {
+                    "todo_id": "todo_projection_done",
+                    "title": "[P2] Completed projection item",
+                    "status": "done",
+                    "task_class": "advancement_task",
+                    "action_kind": "sync_projection",
+                    "claimed_by": "codex-main-control",
+                },
+            ],
+            "agent_lane_next_action": {
+                "todo_id": "todo_projection_next",
+                "text": "[P0] Run the projected next action",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "next_action",
+            },
+        }
+        projection_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=projection_payload,
+            agent_id="codex-main-control",
+            config_path=default_lark_kanban_config_path(registry),
+            execute=False,
+        )
+        projection_todo_ids = {item["todo_id"] for item in projection_sync["records"]}
+        assert projection_sync["ok"] is True, projection_sync
+        assert projection_sync["schema_version"] == "loopx_lark_kanban_sync_projection_v0", projection_sync
+        assert projection_sync["row_count"] == 3, projection_sync
+        assert "projection:frontstage-smoke:user_todo:todo_projection_gate" in projection_todo_ids, projection_sync
+        assert "projection:frontstage-smoke:agent_todo:todo_projection_sync" in projection_todo_ids, projection_sync
+        assert "projection:frontstage-smoke:agent_todo:todo_projection_done" not in projection_todo_ids
+        assert all(item["command"]["executed"] is False for item in projection_sync["records"]), projection_sync
+        next_action_record = next(
+            item["values"]
+            for item in projection_sync["records"]
+            if item["todo_id"] == "projection:frontstage-smoke:next_action:todo_projection_next"
+        )
+        assert next_action_record["Priority"] == "P0", next_action_record
+        assert next_action_record["Scope"] == "projection_source=frontstage-smoke", next_action_record
+
+        quota_projection = {
+            "goal_id": "goal_lark_sync_fixture",
+            "agent_identity": {"agent_id": "codex-product-capability"},
+            "agent_lane_next_action": {
+                "todo_id": "todo_quota_next",
+                "text": "[P0] Execute quota next action",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "quota_next_action",
+            },
+            "capability_gate": {
+                "runnable_candidates": [
+                    {
+                        "todo_id": "todo_quota_run",
+                        "text": "[P1] Runnable product candidate",
+                        "status": "open",
+                        "task_class": "advancement_task",
+                        "action_kind": "run_candidate",
+                        "claimed_by": "codex-product-capability",
+                    },
+                    {
+                        "todo_id": "todo_quota_other",
+                        "text": "[P1] Other agent candidate",
+                        "status": "open",
+                        "task_class": "advancement_task",
+                        "action_kind": "run_candidate",
+                        "claimed_by": "codex-main-control",
+                    },
+                ]
+            },
+        }
+        quota_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=quota_projection,
+            agent_id="codex-product-capability",
+            source_id="quota-smoke",
+            config_path=default_lark_kanban_config_path(registry),
+            execute=False,
+        )
+        assert quota_sync["row_count"] == 2, quota_sync
+        assert {item["todo_id"] for item in quota_sync["records"]} == {
+            "projection:quota-smoke:next_action:todo_quota_next",
+            "projection:quota-smoke:runnable_candidate:todo_quota_run",
+        }, quota_sync
+
+        lifecycle_projection = {
+            "schema_version": "goal_channel_projection_v0",
+            "goal_id": "goal_lark_sync_fixture",
+            "source_id": "row-lifecycle-smoke",
+            "agent_identity": {"agent_id": "codex-product-capability"},
+            "row_lifecycle_events": [
+                {
+                    "row_id": "legacy-local-seed-1",
+                    "row_lifecycle": {
+                        "state": "superseded",
+                        "source_row_id": "legacy-local-seed-1",
+                        "supersedes": ["legacy-local-seed-1"],
+                        "superseded_by": "projection:row-lifecycle-smoke:agent_todo:todo_projection_current",
+                        "migration_audit_id": "audit_public_fixture_001",
+                    },
+                    "text": "[P2] Mark legacy local seed row superseded",
+                    "claimed_by": "codex-product-capability",
+                }
+            ],
+        }
+        lifecycle_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=lifecycle_projection,
+            agent_id="codex-product-capability",
+            config_path=default_lark_kanban_config_path(registry),
+            execute=False,
+        )
+        assert lifecycle_sync["row_count"] == 1, lifecycle_sync
+        lifecycle_record = lifecycle_sync["records"][0]["values"]
+        assert lifecycle_sync["records"][0]["todo_id"] == (
+            "projection:row-lifecycle-smoke:row_lifecycle:legacy-local-seed-1"
+        ), lifecycle_sync
+        assert lifecycle_record["Status"] == STATUS_DONE, lifecycle_record
+        assert lifecycle_record["Action Kind"] == "projection_row_lifecycle", lifecycle_record
+        assert "row_lifecycle=superseded" in lifecycle_record["Evidence"], lifecycle_record
+        assert "supersedes=legacy-local-seed-1" in lifecycle_record["Evidence"], lifecycle_record
+        assert "superseded_by=projection:row-lifecycle-smoke:agent_todo:todo_projection_current" in lifecycle_record["Evidence"], lifecycle_record
+        assert "migration_audit_id=audit_public_fixture_001" in lifecycle_record["Evidence"], lifecycle_record
+
+        private_projection = {
+            "schema_version": "goal_channel_projection_v0",
+            "goal_id": "goal_lark_sync_fixture",
+            "source_id": "PRIVATE_MATERIAL_projection",
+            "agent_identity": {"agent_id": "codex-product-capability"},
+            "agent_lane_next_action": {
+                "todo_id": "todo_shared_private",
+                "text": "[P0] Inspect /Users/example/loopx/.local/private-plan.md",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "projection_sink_safety",
+                "claimed_by": "codex-product-capability",
+                "scope": "/private/tmp/loopx-private/**",
+                "handoff": "Open file:///Users/example/secret.md and https://internal.example.invalid/doc/private",
+                "evidence": "PRIVATE_MATERIAL_ref from base_privatefixture and recPrivateFixture001",
+            },
+        }
+        owner_only_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=private_projection,
+            agent_id="codex-product-capability",
+            sink_visibility="owner-only",
+            config_path=default_lark_kanban_config_path(registry),
+            execute=False,
+        )
+        owner_only_blob = json.dumps(owner_only_sync["records"], ensure_ascii=False)
+        assert "/Users/example/loopx/.local/private-plan.md" in owner_only_blob, owner_only_sync
+        assert "PRIVATE_MATERIAL_ref" in owner_only_blob, owner_only_sync
+
+        shared_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=private_projection,
+            agent_id="codex-product-capability",
+            sink_visibility="shared",
+            config_path=default_lark_kanban_config_path(registry),
+            execute=False,
+        )
+        shared_blob = json.dumps(shared_sync["records"], ensure_ascii=False)
+        assert shared_sync["public_safe_redaction"] is True, shared_sync
+        assert "[local-path-redacted]" in shared_blob, shared_sync
+        assert "[private-link-redacted]" in shared_blob, shared_sync
+        assert "[private-ref-redacted]" in shared_blob, shared_sync
+        for private_fragment in (
+            "/Users/example",
+            "/private/tmp",
+            "file:///Users",
+            "internal.example.invalid",
+            "PRIVATE_MATERIAL_ref",
+            "base_privatefixture",
+            "recPrivateFixture001",
+        ):
+            assert private_fragment not in shared_blob, (private_fragment, shared_sync)
+
+        projection_calls: list[list[str]] = []
+
+        def projection_upsert_runner(args: list[str], cwd: Path | None, timeout: float | None) -> dict[str, object]:
+            projection_calls.append(args)
+            if "+record-list" in args:
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        {
+                            "ok": True,
+                            "data": {
+                                "fields": ["LoopX Goal ID", "LoopX Todo ID"],
+                                "data": [],
+                                "record_id_list": [],
+                            },
+                        }
+                    ),
+                    "stderr": "",
+                    "timed_out": False,
+                }
+            if "+record-upsert" in args:
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps({"ok": True, "data": {"record_id": "recProjection0001"}}),
+                    "stderr": "",
+                    "timed_out": False,
+                }
+            raise AssertionError(args)
+
+        idempotent_config_path = Path(tmp) / ".loopx" / "projection-idempotent.json"
+        first_execute_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=private_projection,
+            agent_id="codex-product-capability",
+            sink_visibility="shared",
+            config_path=idempotent_config_path,
+            execute=True,
+            runner=projection_upsert_runner,
+        )
+        assert first_execute_sync["ok"] is True, first_execute_sync
+        assert first_execute_sync["row_count"] == 1, first_execute_sync
+        stored_projection_config = read_lark_kanban_local_config(idempotent_config_path)
+        assert "recProjection0001" in set(stored_projection_config["todo_records"].values()), stored_projection_config
+
+        projection_calls.clear()
+        second_execute_sync = sync_loopx_projection_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            projection=private_projection,
+            agent_id="codex-product-capability",
+            sink_visibility="shared",
+            config_path=idempotent_config_path,
+            execute=True,
+            runner=projection_upsert_runner,
+        )
+        assert second_execute_sync["ok"] is True, second_execute_sync
+        upsert_commands = [args for args in projection_calls if "+record-upsert" in args]
+        assert len(upsert_commands) == 1, projection_calls
+        assert "--record-id" in upsert_commands[0], upsert_commands
+        assert "recProjection0001" in upsert_commands[0], upsert_commands
 
     sink_record = _lark_record_from_todo_block(
         {

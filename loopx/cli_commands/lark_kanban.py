@@ -27,6 +27,7 @@ from ..lark_kanban import (
     seed_lark_kanban_records,
     seed_lark_kanban_task,
     setup_lark_kanban_board,
+    sync_loopx_projection_to_lark_kanban,
     sync_loopx_todos_to_lark_kanban,
     use_lark_kanban_board,
 )
@@ -125,11 +126,33 @@ def register_lark_kanban_commands(
     _add_local_config_args(sync)
     _add_lark_target_args(sync)
     sync.add_argument("--goal-id", required=True)
+    sync.add_argument("--agent-id", help="Only sync todos claimed by or blocking this agent id.")
     sync.add_argument("--project")
     sync.add_argument("--state-file")
     sync.add_argument("--include-done", action="store_true")
     sync.add_argument("--limit", type=int, default=50)
     sync.add_argument("--execute", action="store_true", help="Actually upsert records and remember record ids.")
+
+    projection = sub.add_parser(
+        "sync-projection",
+        help="Sync a LoopX status/quota/frontstage projection into the configured board. Dry-run unless --execute.",
+    )
+    add_subcommand_format(projection)
+    _add_local_config_args(projection)
+    _add_lark_target_args(projection)
+    projection.add_argument("--projection-file", required=True)
+    projection.add_argument("--goal-id", help="Only sync this goal id; defaults from the projection payload.")
+    projection.add_argument("--agent-id", help="Only sync rows claimed by, blocking, or projected for this agent id.")
+    projection.add_argument("--source-id", help="Stable source namespace used in synthetic row ids.")
+    projection.add_argument(
+        "--sink-visibility",
+        choices=["owner-only", "shared"],
+        default="owner-only",
+        help="Use shared to redact local paths, private links, and external ids before writing projection rows.",
+    )
+    projection.add_argument("--include-done", action="store_true")
+    projection.add_argument("--limit", type=int, default=50)
+    projection.add_argument("--execute", action="store_true", help="Actually upsert records and remember record ids.")
 
     heartbeat = sub.add_parser(
         "heartbeat",
@@ -339,9 +362,23 @@ def handle_lark_kanban_command(
                 _target_config(args, config_path=config_path),
                 registry_path=registry_path,
                 goal_id=args.goal_id,
+                agent_id=args.agent_id,
                 config_path=config_path,
                 project=Path(args.project).expanduser() if args.project else None,
                 state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                include_done=bool(args.include_done),
+                limit=args.limit,
+                execute=bool(args.execute),
+            )
+        elif args.lark_kanban_command == "sync-projection":
+            payload = sync_loopx_projection_to_lark_kanban(
+                _target_config(args, config_path=config_path),
+                projection=_load_fixture(args.projection_file),
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                source_id=args.source_id,
+                sink_visibility=args.sink_visibility,
+                config_path=config_path,
                 include_done=bool(args.include_done),
                 limit=args.limit,
                 execute=bool(args.execute),

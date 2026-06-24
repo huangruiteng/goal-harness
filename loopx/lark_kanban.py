@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 
 from .todo_contract import (
@@ -26,6 +26,7 @@ from .todo_contract import (
 LARK_KANBAN_SCHEMA_VERSION = "loopx_lark_kanban_control_plane_v0"
 LARK_KANBAN_HEARTBEAT_VERSION = "loopx_lark_kanban_heartbeat_v0"
 LARK_KANBAN_LOCAL_CONFIG_VERSION = "loopx_lark_kanban_local_config_v0"
+LARK_KANBAN_SYNC_PROJECTION_VERSION = "loopx_lark_kanban_sync_projection_v0"
 DEFAULT_TABLE_NAME = "LoopX Control Plane"
 DEFAULT_AGENT_ID = "codex-kanban-worker"
 DEFAULT_CLI_BIN = "lark-cli"
@@ -45,6 +46,9 @@ CLAIM_AGENT = "Agent"
 
 TEXT_LIMIT = 4000
 OUTPUT_LIMIT = 1800
+SINK_VISIBILITY_OWNER_ONLY = "owner-only"
+SINK_VISIBILITY_SHARED = "shared"
+SINK_VISIBILITIES = {SINK_VISIBILITY_OWNER_ONLY, SINK_VISIBILITY_SHARED}
 
 
 CommandRunner = Callable[[list[str], Optional[Path], Optional[float]], dict[str, Any]]
@@ -524,6 +528,42 @@ def _compact_text(value: Any, *, limit: int = TEXT_LIMIT) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "..."
+
+
+def _public_safe_text(value: Any, *, limit: int = TEXT_LIMIT) -> str:
+    text = _compact_text(value, limit=limit)
+    patterns = (
+        (re.compile(r"file://[^\s,;)]+", re.IGNORECASE), "[local-path-redacted]"),
+        (
+            re.compile(r"(?<![A-Za-z0-9_.-])(?:~|/(?:Users|private|var|tmp|Volumes))/[^\s,;)]+"),
+            "[local-path-redacted]",
+        ),
+        (
+            re.compile(
+                r"https?://[^\s,;)]*(?:feishu|larksuite|internal|corp|localhost|127\.0\.0\.1)[^\s,;)]*",
+                re.IGNORECASE,
+            ),
+            "[private-link-redacted]",
+        ),
+        (re.compile(r"\b(?:base|tbl|vew|rec)[A-Za-z0-9_-]{6,}\b"), "[external-id-redacted]"),
+        (
+            re.compile(
+                r"\b(?:PRIVATE_MATERIAL|PRIVATE_REF|SECRET_REF|CREDENTIAL_REF)[A-Za-z0-9_.:-]*\b",
+                re.IGNORECASE,
+            ),
+            "[private-ref-redacted]",
+        ),
+    )
+    for pattern, replacement in patterns:
+        text = pattern.sub(replacement, text)
+    return _compact_text(text, limit=limit)
+
+
+def _public_safe_lark_values(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: _public_safe_text(value) if isinstance(value, str) else value
+        for key, value in values.items()
+    }
 
 
 def now_lark_datetime(now: datetime | None = None) -> str:
@@ -1922,11 +1962,611 @@ def _identity_error(identity: str) -> str:
     return f"lark-cli identity {identity!r} is unavailable; run `lark-cli auth status`"
 
 
+def _todo_matches_agent_scope(block: dict[str, Any], agent_id: str | None) -> bool:
+    if not agent_id:
+        return True
+    for key in ("claimed_by", "blocks_agent"):
+        value = block.get(key)
+        if isinstance(value, str) and value.strip() == agent_id:
+            return True
+        if isinstance(value, list) and agent_id in {str(item).strip() for item in value}:
+            return True
+    return False
+
+
+def _projection_matches_agent_scope(block: dict[str, Any], agent_id: str | None) -> bool:
+    if not agent_id:
+        return True
+    if _todo_matches_agent_scope(block, agent_id):
+        return True
+    claimed_by = block.get("claimed_by")
+    if isinstance(claimed_by, str) and claimed_by.strip():
+        return False
+    if isinstance(claimed_by, list) and [item for item in claimed_by if str(item).strip()]:
+        return False
+    blocks_agent = block.get("blocks_agent")
+    if isinstance(blocks_agent, str) and blocks_agent.strip():
+        return False
+    if isinstance(blocks_agent, list) and [item for item in blocks_agent if str(item).strip()]:
+        return False
+    if block.get("projection_agent_id") == agent_id:
+        return True
+    return str(block.get("role") or "") == "agent"
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _as_mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _stable_projection_segment(value: Any, *, fallback: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"[^A-Za-z0-9_.:-]+", "-", text).strip("-")
+    return (text or fallback)[:160]
+
+
+def _projection_namespace(projection: dict[str, Any], source_id: str | None) -> tuple[str, list[str]]:
+    warnings: list[str] = []
+    payload_source = str(projection.get("source_id") or "").strip()
+    requested = str(source_id or "").strip()
+    if requested and payload_source and requested != payload_source:
+        warnings.append(f"projection source_id {payload_source!r} does not match requested source_id {requested!r}")
+    raw = requested or payload_source or str(projection.get("schema_version") or "projection")
+    return _stable_projection_segment(raw, fallback="projection"), warnings
+
+
+def _projection_payload_goal_id(projection: dict[str, Any]) -> str:
+    for value in (
+        projection.get("goal_id"),
+        _as_mapping(projection.get("selected")).get("goal_id"),
+        _as_mapping(projection.get("goal")).get("id"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _projection_item_text(item: dict[str, Any], *, fallback: str) -> str:
+    for key in ("title", "text", "task", "summary", "recommended_action", "reason"):
+        value = _compact_text(item.get(key), limit=260)
+        if value:
+            return value
+    return fallback
+
+
+def _projection_lifecycle_payload(item: dict[str, Any]) -> dict[str, Any]:
+    lifecycle = item.get("row_lifecycle")
+    if isinstance(lifecycle, Mapping):
+        return dict(lifecycle)
+    if isinstance(lifecycle, str) and lifecycle.strip():
+        return {"state": lifecycle.strip()}
+    return {}
+
+
+def _projection_lifecycle_state(item: dict[str, Any]) -> str:
+    lifecycle = _projection_lifecycle_payload(item)
+    return str(
+        lifecycle.get("state")
+        or lifecycle.get("status")
+        or item.get("row_lifecycle_state")
+        or ""
+    ).strip().lower()
+
+
+def _projection_item_status(item: dict[str, Any]) -> str:
+    raw = str(item.get("status") or item.get("state") or "").strip()
+    lifecycle_state = _projection_lifecycle_state(item)
+    if (
+        item.get("done") is True
+        or normalize_todo_status(raw) == TODO_STATUS_DONE
+        or raw.lower() in {"closed", "complete", "completed", "resolved", "superseded", "migrated", "retired"}
+        or lifecycle_state in {"superseded", "migrated", "retired"}
+    ):
+        return TODO_STATUS_DONE
+    if normalize_todo_status(raw) == TODO_STATUS_BLOCKED or raw.lower() in {"error", "failed"}:
+        return TODO_STATUS_BLOCKED
+    if normalize_todo_status(raw) == TODO_STATUS_DEFERRED:
+        return TODO_STATUS_DEFERRED
+    return normalize_todo_status(raw) or TODO_STATUS_OPEN
+
+
+def _as_text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [_compact_text(item, limit=220) for item in value if _compact_text(item, limit=220)]
+    text = _compact_text(value, limit=220)
+    return [text] if text else []
+
+
+def _projection_lifecycle_value(item: dict[str, Any], key: str) -> Any:
+    lifecycle = _projection_lifecycle_payload(item)
+    if key in lifecycle:
+        return lifecycle.get(key)
+    return item.get(key)
+
+
+def _projection_lifecycle_parts(item: dict[str, Any], *, source_id: str) -> list[str]:
+    parts: list[str] = []
+    state = _projection_lifecycle_state(item)
+    if state:
+        parts.append(f"row_lifecycle={state}")
+    for key in ("source_id", "source_row_id", "target_row_id", "migration_audit_id"):
+        value = _projection_lifecycle_value(item, key)
+        text = _compact_text(value, limit=220)
+        if text:
+            parts.append(f"{key}={text}")
+    for key in ("supersedes", "superseded_by"):
+        values = _as_text_list(_projection_lifecycle_value(item, key))
+        if values:
+            parts.append(f"{key}={','.join(values)}")
+    if state and not any(part.startswith("source_id=") for part in parts):
+        parts.append(f"source_id={source_id}")
+    return parts
+
+
+def _projection_lifecycle_default_text(item: dict[str, Any], *, index: int) -> str:
+    state = _projection_lifecycle_state(item) or "updated"
+    supersedes = ", ".join(_as_text_list(_projection_lifecycle_value(item, "supersedes"))) or "previous row"
+    superseded_by = ", ".join(_as_text_list(_projection_lifecycle_value(item, "superseded_by"))) or "current projection"
+    return f"[P2] Projection row lifecycle {index}: {state} {supersedes} -> {superseded_by}"
+
+
+def _projection_lifecycle_events(projection: dict[str, Any]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for key in ("row_lifecycle_events", "projection_row_lifecycle", "migration_audit"):
+        value = projection.get(key)
+        if isinstance(value, Mapping):
+            if isinstance(value.get("events"), list):
+                events.extend(_as_mapping_list(value.get("events")))
+            else:
+                events.append(dict(value))
+        elif isinstance(value, list):
+            events.extend(_as_mapping_list(value))
+    return events
+
+
+def _projection_item_priority(item: dict[str, Any], text: str) -> str:
+    for value in (item.get("priority"), text):
+        match = re.search(r"\b(P[0-3])(?:\b|-)", str(value or "").upper())
+        if match:
+            return match.group(1)
+    return "P2"
+
+
+def _projection_todo_candidates(summary: Any) -> list[dict[str, Any]]:
+    if isinstance(summary, list):
+        source_groups = [summary]
+    elif isinstance(summary, Mapping):
+        source_groups = [
+            summary.get(key)
+            for key in (
+                "first_open_items",
+                "first_executable_items",
+                "executable_backlog_items",
+                "backlog_items",
+                "claimed_open_items",
+                "deferred_resume_candidates",
+                "deferred_items",
+                "items",
+            )
+        ]
+    else:
+        return []
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in source_groups:
+        for item in _as_mapping_list(group):
+            identity = str(item.get("todo_id") or item.get("gate_id") or item.get("title") or item.get("text") or "")
+            if not identity:
+                identity = json.dumps(item, ensure_ascii=False, sort_keys=True)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            items.append(item)
+    return items
+
+
+def _projection_project_asset(projection: dict[str, Any], goal_id: str | None) -> dict[str, Any]:
+    project_asset = _as_mapping(projection.get("project_asset"))
+    if project_asset:
+        return project_asset
+    queue = _as_mapping(projection.get("attention_queue"))
+    for item in _as_mapping_list(queue.get("items")):
+        item_goal_id = str(item.get("goal_id") or "").strip()
+        if goal_id and item_goal_id != goal_id:
+            continue
+        asset = _as_mapping(item.get("project_asset"))
+        if asset:
+            return asset
+    return {}
+
+
+def _projection_row(
+    *,
+    source_id: str,
+    goal_id: str,
+    kind: str,
+    identity: Any,
+    role: str,
+    item: dict[str, Any],
+    fallback_text: str,
+    projection_agent_id: str | None = None,
+) -> dict[str, Any]:
+    text = _projection_item_text(item, fallback=fallback_text)
+    task_class = normalize_explicit_todo_task_class(item.get("task_class")) or (
+        TODO_TASK_CLASS_USER_GATE if role == "user" else TODO_TASK_CLASS_ADVANCEMENT
+    )
+    todo_id = (
+        "projection:"
+        f"{source_id}:"
+        f"{_stable_projection_segment(kind, fallback='item')}:"
+        f"{_stable_projection_segment(identity, fallback='row')}"
+    )
+    return {
+        **item,
+        "goal_id": goal_id,
+        "role": role,
+        "status": _projection_item_status(item),
+        "text": text,
+        "todo_id": todo_id,
+        "original_todo_id": str(item.get("todo_id") or item.get("gate_id") or ""),
+        "task_class": task_class,
+        "action_kind": str(item.get("action_kind") or kind).strip() or kind,
+        "priority": _projection_item_priority(item, text),
+        "source_id": source_id,
+        "projection_agent_id": projection_agent_id,
+    }
+
+
+def _projection_rows_from_payload(
+    projection: dict[str, Any],
+    *,
+    goal_id: str | None,
+    agent_id: str | None,
+    source_id: str,
+    include_done: bool,
+    limit: int,
+) -> tuple[str, list[dict[str, Any]], list[str]]:
+    payload_goal_id = _projection_payload_goal_id(projection)
+    resolved_goal_id = str(goal_id or payload_goal_id or "loopx-projection").strip()
+    warnings: list[str] = []
+    if goal_id and payload_goal_id and goal_id != payload_goal_id:
+        warnings.append(f"payload goal_id {payload_goal_id!r} does not match requested goal_id {goal_id!r}")
+        return resolved_goal_id, [], warnings
+
+    payload_agent_id = str(_as_mapping(projection.get("agent_identity")).get("agent_id") or "").strip()
+    rows: list[dict[str, Any]] = []
+
+    def add_row(row: dict[str, Any]) -> None:
+        if len(rows) >= limit:
+            return
+        if row.get("status") == TODO_STATUS_DONE and not include_done and not row.get("_include_done_by_default"):
+            return
+        if agent_id and not _projection_matches_agent_scope(row, agent_id):
+            return
+        rows.append(row)
+
+    project_asset = _projection_project_asset(projection, resolved_goal_id)
+    for role in ("user", "agent"):
+        group = projection.get(f"{role}_todos")
+        if group is None and project_asset:
+            group = project_asset.get(f"{role}_todos")
+        for index, item in enumerate(_projection_todo_candidates(group), start=1):
+            identity = item.get("todo_id") or item.get("title") or item.get("text") or index
+            add_row(
+                _projection_row(
+                    source_id=source_id,
+                    goal_id=resolved_goal_id,
+                    kind=f"{role}_todo",
+                    identity=identity,
+                    role=role,
+                    item=item,
+                    fallback_text=f"{role} todo {index}",
+                )
+            )
+
+    for index, gate in enumerate(_as_mapping_list(projection.get("open_gates")), start=1):
+        identity = gate.get("gate_id") or gate.get("id") or index
+        gate_text = gate.get("title") or gate.get("text") or gate.get("kind") or "Open user gate"
+        add_row(
+            _projection_row(
+                source_id=source_id,
+                goal_id=resolved_goal_id,
+                kind="open_gate",
+                identity=identity,
+                role="user",
+                item={
+                    **gate,
+                    "title": gate_text,
+                    "status": TODO_STATUS_OPEN,
+                    "task_class": TODO_TASK_CLASS_USER_GATE,
+                    "action_kind": "projection_user_gate",
+                    "blocks_agent": gate.get("blocks_agent") or gate.get("blocks"),
+                    "evidence": gate.get("message") or gate.get("reason"),
+                },
+                fallback_text="Open user gate",
+            )
+        )
+
+    next_action = _as_mapping(projection.get("agent_lane_next_action"))
+    if not next_action and projection.get("next_action"):
+        next_action = {
+            "text": projection.get("next_action"),
+            "action_kind": "projection_next_action",
+            "task_class": TODO_TASK_CLASS_ADVANCEMENT,
+        }
+    if next_action:
+        identity = next_action.get("todo_id") or "next_action"
+        add_row(
+            _projection_row(
+                source_id=source_id,
+                goal_id=resolved_goal_id,
+                kind="next_action",
+                identity=identity,
+                role="agent",
+                item=next_action,
+                fallback_text="Projected next action",
+                projection_agent_id=payload_agent_id or agent_id,
+            )
+        )
+
+    capability_gate = _as_mapping(projection.get("capability_gate"))
+    for index, item in enumerate(_as_mapping_list(capability_gate.get("runnable_candidates")), start=1):
+        identity = item.get("todo_id") or item.get("title") or item.get("text") or index
+        add_row(
+            _projection_row(
+                source_id=source_id,
+                goal_id=resolved_goal_id,
+                kind="runnable_candidate",
+                identity=identity,
+                role="agent",
+                item={
+                    **item,
+                    "action_kind": item.get("action_kind") or "projection_runnable_candidate",
+                    "task_class": item.get("task_class") or TODO_TASK_CLASS_ADVANCEMENT,
+                },
+                fallback_text=f"Runnable candidate {index}",
+                projection_agent_id=payload_agent_id,
+            )
+        )
+
+    for index, event in enumerate(_projection_lifecycle_events(projection), start=1):
+        identity = (
+            event.get("row_id")
+            or event.get("todo_id")
+            or event.get("source_row_id")
+            or event.get("supersedes")
+            or index
+        )
+        add_row(
+            _projection_row(
+                source_id=source_id,
+                goal_id=resolved_goal_id,
+                kind="row_lifecycle",
+                identity=identity,
+                role=str(event.get("role") or "agent"),
+                item={
+                    **event,
+                    "title": event.get("title") or event.get("text") or _projection_lifecycle_default_text(event, index=index),
+                    "action_kind": event.get("action_kind") or "projection_row_lifecycle",
+                    "task_class": event.get("task_class") or "continuous_monitor",
+                    "claimed_by": event.get("claimed_by") or event.get("agent_id") or payload_agent_id,
+                    "_include_done_by_default": True,
+                },
+                fallback_text=_projection_lifecycle_default_text(event, index=index),
+                projection_agent_id=str(event.get("agent_id") or payload_agent_id or agent_id or "").strip() or None,
+            )
+        )
+
+    interaction = _as_mapping(projection.get("interaction_contract"))
+    user_channel = _as_mapping(interaction.get("user_channel"))
+    if user_channel.get("action_required") is True:
+        add_row(
+            _projection_row(
+                source_id=source_id,
+                goal_id=resolved_goal_id,
+                kind="interaction_gate",
+                identity="user_channel",
+                role="user",
+                item={
+                    "title": user_channel.get("reason") or "User channel action required",
+                    "status": TODO_STATUS_OPEN,
+                    "task_class": TODO_TASK_CLASS_USER_GATE,
+                    "action_kind": "projection_interaction_gate",
+                    "blocks_agent": agent_id or payload_agent_id,
+                    "evidence": user_channel.get("payload") or user_channel.get("reason"),
+                },
+                fallback_text="User channel action required",
+            )
+        )
+
+    return resolved_goal_id, rows[:limit], warnings
+
+
+def _lark_record_from_projection_block(
+    block: dict[str, Any],
+    *,
+    goal_id: str,
+    source_id: str,
+    public_safe: bool = False,
+) -> dict[str, Any]:
+    priority = str(block.get("priority") or "P2")
+    values = _lark_record_from_todo_block(
+        block,
+        goal_id=goal_id,
+        state_file=Path(f"{source_id}.projection"),
+        priority=priority,
+    )
+    original_id = str(block.get("original_todo_id") or "")
+    evidence_parts = [
+        str(block.get("evidence") or block.get("reason") or block.get("note") or "").strip(),
+        f"source_id={source_id}",
+    ]
+    if original_id:
+        evidence_parts.append(f"original_todo_id={original_id}")
+    evidence_parts.extend(_projection_lifecycle_parts(block, source_id=source_id))
+    lifecycle_state = _projection_lifecycle_state(block)
+    default_handoff = f"Synced from LoopX projection source={source_id}"
+    if lifecycle_state in {"superseded", "migrated", "retired"}:
+        superseded_by = ", ".join(_as_text_list(_projection_lifecycle_value(block, "superseded_by"))) or "current projection row"
+        default_handoff = f"Row lifecycle {lifecycle_state}; continue with {superseded_by}."
+    values.update(
+        {
+            "LoopX Goal ID": goal_id,
+            "LoopX Todo ID": str(block.get("todo_id") or ""),
+            "Scope": _compact_text(block.get("scope") or block.get("source_section") or f"projection_source={source_id}"),
+            "Handoff": _compact_text(block.get("handoff") or default_handoff),
+            "Evidence": _compact_text("; ".join(part for part in evidence_parts if part)),
+            "Run History": _compact_text(
+                "; ".join(
+                    part
+                    for part in [
+                        f"synced from LoopX projection source={source_id} status={block.get('status') or 'open'}",
+                        f"row_lifecycle={lifecycle_state}" if lifecycle_state else "",
+                    ]
+                    if part
+                )
+            ),
+        }
+    )
+    return _public_safe_lark_values(values) if public_safe else values
+
+
+def sync_loopx_projection_to_lark_kanban(
+    config: LarkKanbanConfig,
+    *,
+    projection: dict[str, Any],
+    goal_id: str | None = None,
+    agent_id: str | None = None,
+    source_id: str | None = None,
+    config_path: Path | None = None,
+    include_done: bool = False,
+    limit: int = 50,
+    sink_visibility: str = SINK_VISIBILITY_OWNER_ONLY,
+    execute: bool = False,
+    runner: CommandRunner = default_subprocess_runner,
+) -> dict[str, Any]:
+    if not isinstance(projection, dict):
+        raise ValueError("projection must be a JSON object")
+    if sink_visibility not in SINK_VISIBILITIES:
+        raise ValueError(f"sink_visibility must be one of {sorted(SINK_VISIBILITIES)}")
+    public_safe = sink_visibility == SINK_VISIBILITY_SHARED
+    resolved_source_id, namespace_warnings = _projection_namespace(projection, source_id)
+    resolved_goal_id, rows, warnings = _projection_rows_from_payload(
+        projection,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        source_id=resolved_source_id,
+        include_done=include_done,
+        limit=limit,
+    )
+    warnings = [*namespace_warnings, *warnings]
+
+    local = read_lark_kanban_local_config(config_path) if config_path else {}
+    record_map = dict(local.get("todo_records") or {}) if isinstance(local.get("todo_records"), dict) else {}
+    commands: list[dict[str, Any]] = []
+    if execute:
+        list_config = LarkKanbanConfig(
+            **{"base_" + "token": config.base_token},
+            table_id=config.table_id,
+            view_id=None,
+            cli_bin=config.cli_bin,
+            identity=config.identity,
+        )
+        list_result = _run_command(build_record_list_command(list_config), execute=True, runner=runner)
+        commands.append(list_result)
+        if list_result.get("ok"):
+            for record in lark_record_rows(list_result.get("json") if isinstance(list_result.get("json"), dict) else {}):
+                todo_id = str(record.get("LoopX Todo ID") or "").strip()
+                row_goal_id = str(record.get("LoopX Goal ID") or "").strip()
+                record_id = str(record.get("_record_id") or "").strip()
+                if todo_id and row_goal_id and record_id:
+                    record_map[f"{row_goal_id}:{todo_id}"] = record_id
+
+    results: list[dict[str, Any]] = []
+    ok = True
+    for row in rows:
+        row_goal_id = str(row.get("goal_id") or resolved_goal_id)
+        todo_id = str(row.get("todo_id") or "").strip()
+        key = f"{row_goal_id}:{todo_id}"
+        values = _lark_record_from_projection_block(
+            row,
+            goal_id=row_goal_id,
+            source_id=resolved_source_id,
+            public_safe=public_safe,
+        )
+        result = _run_command(
+            build_record_upsert_command(config, record_id=record_map.get(key), values=values),
+            execute=execute,
+            runner=runner,
+        )
+        commands.append(result)
+        record_id = _extract_created_record_id(result.get("json")) or record_map.get(key)
+        if execute and result.get("ok") and record_id:
+            record_map[key] = record_id
+        results.append(
+            {
+                "todo_id": todo_id,
+                "record_id": record_id,
+                "command": result,
+                "values": values,
+            }
+        )
+        ok = ok and bool(result.get("ok"))
+        if execute and not result.get("ok"):
+            break
+
+    if execute and config_path and ok:
+        board = local.get("board") if isinstance(local.get("board"), dict) else {}
+        if not board:
+            board = {
+                "base_token": config.base_token,
+                "table_id": config.table_id,
+                "view_id": config.view_id,
+                "cli_bin": config.cli_bin,
+                "identity": config.identity,
+            }
+        write_lark_kanban_local_config(
+            config_path,
+            {
+                "schema_version": LARK_KANBAN_LOCAL_CONFIG_VERSION,
+                "board": board,
+                "todo_records": record_map,
+            },
+        )
+
+    return {
+        "ok": ok,
+        "schema_version": LARK_KANBAN_SYNC_PROJECTION_VERSION,
+        "execute": execute,
+        "goal_id": resolved_goal_id,
+        "agent_id": agent_id,
+        "source_id": resolved_source_id,
+        "sink_visibility": sink_visibility,
+        "public_safe_redaction": public_safe,
+        "projection_schema_version": projection.get("schema_version"),
+        "row_count": len(rows),
+        "records": results,
+        "commands": commands,
+        "warnings": warnings,
+        "config_path": str(config_path) if config_path else None,
+    }
+
+
 def sync_loopx_todos_to_lark_kanban(
     config: LarkKanbanConfig,
     *,
     registry_path: Path,
     goal_id: str,
+    agent_id: str | None = None,
     config_path: Path | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
@@ -1951,9 +2591,14 @@ def sync_loopx_todos_to_lark_kanban(
             continue
         start, end, heading = bounds
         for block in todo_blocks(lines, start, end, role=role, source_section=heading):
-            if block.get("done") and not include_done:
+            raw_status = str(block.get("status") or "").strip()
+            status = normalize_todo_status(raw_status)
+            if (block.get("done") or status == TODO_STATUS_DONE) and not include_done:
                 continue
-            todos.append({**block, "role": role, "source_section": heading})
+            candidate = {**block, "role": role, "source_section": heading}
+            if not _todo_matches_agent_scope(candidate, agent_id):
+                continue
+            todos.append(candidate)
     todos = todos[:limit]
 
     local = read_lark_kanban_local_config(config_path) if config_path else {}
@@ -2033,6 +2678,7 @@ def sync_loopx_todos_to_lark_kanban(
         "schema_version": "loopx_lark_kanban_sync_todos_v0",
         "execute": execute,
         "goal_id": goal_id,
+        "agent_id": agent_id,
         "project": str(resolved_project) if resolved_project else None,
         "state_file": str(resolved_state_file),
         "todo_count": len(todos),
