@@ -651,6 +651,13 @@ def main() -> int:
         assert first_guard["scheduler_hint"]["local_scheduler"]["max_interval_minutes"] == 60, first_guard
         assert first_guard["scheduler_hint"]["codex_cli_tui"]["unchanged_poll_limit"] == 3, first_guard
         assert first_guard["scheduler_hint"]["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, first_guard
+        reset = first_guard["scheduler_hint"]["reset_policy"]
+        assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
+        assert reset["profile_action"] == "backoff_until_material_transition", reset
+        assert reset["codex_app_initial_interval_minutes"] == 15, reset
+        assert reset["identity_keys"] == first_guard["scheduler_hint"]["unchanged_identity_keys"], reset
+        assert "material_transition" in reset["reset_conditions"], reset
+        assert reset["clear_unchanged_poll_state"] is True, reset
         assert "automation=keep_active_quiet" in first_guard["protocol_action_packet"]["summary"], first_guard
         assert "scheduler=backoff_until_material_transition" in first_guard["protocol_action_packet"]["summary"], first_guard
         assert "pause_allowed=false" in first_guard["protocol_action_packet"]["summary"], first_guard

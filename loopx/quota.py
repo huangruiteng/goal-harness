@@ -146,6 +146,7 @@ INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 AUTOMATION_LIVENESS_SCHEMA_VERSION = "automation_liveness_v0"
 SCHEDULER_HINT_SCHEMA_VERSION = "scheduler_hint_v0"
+SCHEDULER_RESET_POLICY_SCHEMA_VERSION = "scheduler_reset_policy_v0"
 CAPABILITY_GATE_SCHEMA_VERSION = "capability_gate_v0"
 SIDE_AGENT_WORKSPACE_GUARD_SCHEMA_VERSION = "side_agent_workspace_guard_v0"
 AGENT_CLAIM_SCOPE_SCHEMA_VERSION = "agent_claim_scope_v0"
@@ -3815,6 +3816,22 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
         or execution_obligation.get("spend_policy")
         or heartbeat_recommendation.get("spend_policy")
     )
+    identity_keys = [
+        "goal_id",
+        "agent_identity.agent_id",
+        "effective_action",
+        "heartbeat_recommendation.recommended_mode",
+        "interaction_contract.mode",
+        "recommended_action",
+    ]
+
+    def identity_value(path: str) -> Any:
+        current: Any = payload
+        for part in path.split("."):
+            if not isinstance(current, dict):
+                return None
+            current = current.get(part)
+        return current
 
     def hint(
         *,
@@ -3839,6 +3856,30 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
             "if_run_now": "execute_new_quota_contract",
             "if_unchanged": "apply_after_limit_without_spend",
             "spend_policy": "no quota spend for final replan check or loop stop",
+        }
+        reset_policy = {
+            "schema_version": SCHEDULER_RESET_POLICY_SCHEMA_VERSION,
+            "source": "quota.should-run",
+            "reset_to": "profile_initial_interval",
+            "profile_action": action,
+            "codex_app_initial_interval_minutes": codex_interval,
+            "local_scheduler_initial_interval_minutes": codex_interval,
+            "clear_unchanged_poll_state": True,
+            "identity_keys": identity_keys,
+            "identity_snapshot": {
+                key: identity_value(key)
+                for key in identity_keys
+            },
+            "reset_conditions": [
+                "quota_identity_snapshot_changed",
+                "scheduler_action_changed",
+                "user_feedback",
+                "new_or_reassigned_todo",
+                "gate_resolved",
+                "material_transition",
+            ],
+            "after_reset": "apply the current profile initial interval before starting unchanged backoff again",
+            "no_spend_for_reset": True,
         }
         return {
             "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
@@ -3877,14 +3918,8 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
                 "final_quota_replan_check": final_replan_check,
                 "no_spend_for_stop": True,
             },
-            "unchanged_identity_keys": [
-                "goal_id",
-                "agent_identity.agent_id",
-                "effective_action",
-                "heartbeat_recommendation.recommended_mode",
-                "interaction_contract.mode",
-                "recommended_action",
-            ],
+            "unchanged_identity_keys": identity_keys,
+            "reset_policy": reset_policy,
         }
 
     if (
@@ -8191,6 +8226,19 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if scheduler_hint.get("reason"):
             lines.append(f"- scheduler_hint_reason: {scheduler_hint.get('reason')}")
+        reset_policy = (
+            scheduler_hint.get("reset_policy")
+            if isinstance(scheduler_hint.get("reset_policy"), dict)
+            else {}
+        )
+        if reset_policy:
+            lines.append(
+                "- scheduler_reset: "
+                f"reset_to={reset_policy.get('reset_to')} "
+                f"initial_interval={reset_policy.get('codex_app_initial_interval_minutes')} "
+                f"identity_keys={reset_policy.get('identity_keys')} "
+                f"conditions={reset_policy.get('reset_conditions')}"
+            )
     protocol_action_packet = (
         payload.get("protocol_action_packet")
         if isinstance(payload.get("protocol_action_packet"), dict)
