@@ -503,8 +503,8 @@ JSON or Markdown decision:
     "schema_version": "scheduler_hint_v0",
     "action": "backoff_waiting_for_user",
     "codex_app": {
-      "recommended_interval_minutes": 60,
-      "example_progression_minutes": [60, 120, 240]
+      "recommended_interval_minutes": 30,
+      "example_progression_minutes": [30, 60, 120]
     },
     "codex_cli_tui": {
       "unchanged_poll_limit": 3,
@@ -629,15 +629,18 @@ The response also includes `scheduler_hint.schema_version=scheduler_hint_v0`.
 That hint is not a delivery permission. It is the cross-runtime wait policy:
 `run_now` keeps the active cadence for required work; `backoff_waiting_for_user`
 slows Codex App and stops CLI/Claude loops after repeated unchanged polls;
-`backoff_until_reassigned` handles side-agent primary-review waits;
+`backoff_until_reassigned` handles side-agent primary-review waits without
+dropping agent-to-agent handoff cadence too quickly;
 `backoff_until_material_transition` handles monitor-only quiet polls; and
 `backoff_until_fresh_evidence` handles mapped or post-handoff no-op waits.
 For Codex App and local schedulers, `recommended_interval_minutes` is the next
 target interval; if the same `unchanged_identity_keys` remain unchanged, the
 host multiplies the applied interval by
-`unchanged_poll_backoff_multiplier` until `max_interval_minutes`. For example,
-an agent-scope wait with `[30, 60, 120]` means a 600-second local tick should
-move to 1800 seconds, then 3600 seconds, then cap at 7200 seconds.
+`unchanged_poll_backoff_multiplier` until `max_interval_minutes`. Human gates
+can move to `[30, 60, 120]` after the concrete user todo has been surfaced.
+Agent-scope waits use a more conservative adjustment curve such as
+`[10, 20, 30]`, so a 600-second local tick stays close to the existing
+agent-to-agent interaction cadence before cooling further.
 For Codex CLI TUI and Claude Code loops, `unchanged_poll_limit=3` means the
 third unchanged poll triggers `final_quota_replan_check`; if the rerun is still
 unchanged, the loop applies `after_limit`.

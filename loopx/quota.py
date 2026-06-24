@@ -3936,8 +3936,8 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
                 "concrete todo or gate, external loops should stop repeating the "
                 "same quiet poll"
             ),
-            codex_interval=60,
-            codex_max=240,
+            codex_interval=30,
+            codex_max=120,
             cli_limit=3,
             claude_limit=3,
         )
@@ -3947,12 +3947,13 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
             action="backoff_until_reassigned",
             cadence_class="agent_scope_wait",
             reason=(
-                "this registered agent has no in-scope advancement candidate; poll "
-                "less often until primary review, reassignment, or a current-agent "
-                "todo appears"
+                "this registered agent has no in-scope advancement candidate; "
+                "agent-to-agent handoffs may change quickly, so stay closer to "
+                "the prior scheduler cadence while waiting for primary review, "
+                "reassignment, or a current-agent todo"
             ),
-            codex_interval=30,
-            codex_max=120,
+            codex_interval=10,
+            codex_max=30,
             cli_limit=3,
             claude_limit=3,
         )

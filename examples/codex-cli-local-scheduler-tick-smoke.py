@@ -116,9 +116,9 @@ QUOTA_HINT_FIXTURE = {
         "action": "backoff_until_reassigned",
         "cadence_class": "agent_scope_wait",
         "local_scheduler": {
-            "recommended_interval_minutes": 30,
-            "max_interval_minutes": 120,
-            "example_progression_minutes": [30, 60, 120],
+            "recommended_interval_minutes": 10,
+            "max_interval_minutes": 30,
+            "example_progression_minutes": [10, 20, 30],
             "unchanged_poll_limit": 3,
             "after_limit": "stop_tick_loop",
             "final_quota_replan_check": {"enabled": True},
@@ -227,8 +227,8 @@ def main() -> int:
 
     hinted_tick = build_tick(FALLBACK_HELP_FIXTURE, quota_payload=QUOTA_HINT_FIXTURE)
     assert hinted_tick["scheduler_hint"]["action"] == "backoff_until_reassigned", hinted_tick
-    assert hinted_tick["launchd"]["recommended_interval_seconds"] == 1800, hinted_tick
-    assert hinted_tick["scheduler_hint"]["local_scheduler"]["example_progression_minutes"] == [30, 60, 120], hinted_tick
+    assert hinted_tick["launchd"]["recommended_interval_seconds"] == 600, hinted_tick
+    assert hinted_tick["scheduler_hint"]["local_scheduler"]["example_progression_minutes"] == [10, 20, 30], hinted_tick
     assert hinted_tick["scheduler_hint"]["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, hinted_tick
 
     with tempfile.TemporaryDirectory(prefix="loopx-codex-cli-scheduler-tick-") as tmp:
@@ -268,7 +268,7 @@ def main() -> int:
         assert_boundary(cli_json)
         assert cli_json["scheduler_action"] == "write_precise_blocker", cli_json
         assert cli_json["scheduler_hint"]["action"] == "backoff_until_reassigned", cli_json
-        assert cli_json["launchd"]["recommended_interval_seconds"] == 1800, cli_json
+        assert cli_json["launchd"]["recommended_interval_seconds"] == 600, cli_json
 
         cli_proof_json = json.loads(
             run_cli(
@@ -329,7 +329,7 @@ def main() -> int:
         )
         assert "# Codex CLI Local Scheduler Tick" in cli_markdown, cli_markdown
         assert "scheduler_action: `write_precise_blocker`" in cli_markdown, cli_markdown
-        assert "local_progression_minutes: `[30, 60, 120]`" in cli_markdown, cli_markdown
+        assert "local_progression_minutes: `[10, 20, 30]`" in cli_markdown, cli_markdown
         assert "local_unchanged_poll_limit: `3`" in cli_markdown, cli_markdown
         assert "final_quota_replan_check:" in cli_markdown, cli_markdown
         assert "runs_codex: `False`" in cli_markdown, cli_markdown
