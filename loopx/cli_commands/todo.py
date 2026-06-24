@@ -397,8 +397,14 @@ def handle_todo_command(
         elif args.todo_command == "supersede":
             if not args.todo_id:
                 raise ValueError("todo supersede requires --todo-id")
-            if args.claimed_by or args.clear_claim:
-                raise ValueError("todo supersede does not support --claimed-by or --clear-claim")
+            if args.claimed_by:
+                raise ValueError(
+                    "todo supersede does not support --claimed-by; use --next-claimed-by "
+                    "to assign the successor, or omit it to inherit the superseded todo "
+                    "owner when present"
+                )
+            if args.clear_claim:
+                raise ValueError("todo supersede does not support --clear-claim")
             if args.side_agent_self_merged:
                 raise ValueError("todo supersede does not support --side-agent-self-merged")
             if args.followups:
