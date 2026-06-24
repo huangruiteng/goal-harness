@@ -1,0 +1,17 @@
+{
+  "name": "loopx-goal-mode",
+  "version": "0.1.0",
+  "description": "LoopX adapter for Claude Code: the loopx control-plane MCP (should_run / claim_task / complete_task) + the /loopx setup command + statusline. The run loop is Claude Code's native /loop, driven by a .claude/loop.md that /loopx writes; the optional should_run PreToolUse gate (hooks/goal_policy.py) is added deliberately via install.py --harden, NOT by default.",
+  "author": "loopx",
+  "commands": "./commands",
+  "statusLine": {
+    "type": "command",
+    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/statusline/goal_status.py\""
+  },
+  "mcpServers": {
+    "loopx": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/loopx_mcp.py"]
+    }
+  }
+}
