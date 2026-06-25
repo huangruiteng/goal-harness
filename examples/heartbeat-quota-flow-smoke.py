@@ -647,6 +647,7 @@ def main() -> int:
         assert "not a self-stop signal" in first_guard["automation_liveness"]["reason"], first_guard
         assert first_guard["scheduler_hint"]["action"] == "backoff_until_material_transition", first_guard
         assert first_guard["scheduler_hint"]["codex_app"]["recommended_interval_minutes"] == 15, first_guard
+        assert first_guard["scheduler_hint"]["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", first_guard
         assert first_guard["scheduler_hint"]["codex_app"]["example_progression_minutes"] == [15, 30, 60], first_guard
         assert first_guard["scheduler_hint"]["local_scheduler"]["max_interval_minutes"] == 60, first_guard
         assert first_guard["scheduler_hint"]["codex_cli_tui"]["unchanged_poll_limit"] == 3, first_guard
@@ -654,10 +655,16 @@ def main() -> int:
         reset = first_guard["scheduler_hint"]["reset_policy"]
         assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
         assert reset["profile_action"] == "backoff_until_material_transition", reset
+        assert isinstance(reset["reset_token"], str) and len(reset["reset_token"]) == 16, reset
+        assert reset["host_state_key"] == "scheduler_hint.reset_policy.reset_token", reset
         assert reset["codex_app_initial_interval_minutes"] == 15, reset
+        assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=15", reset
         assert reset["identity_keys"] == first_guard["scheduler_hint"]["unchanged_identity_keys"], reset
+        assert "reset_token_changed" in reset["reset_conditions"], reset
         assert "material_transition" in reset["reset_conditions"], reset
+        assert "active_work_projected" in reset["reset_conditions"], reset
         assert reset["clear_unchanged_poll_state"] is True, reset
+        first_reset_token = reset["reset_token"]
         assert "automation=keep_active_quiet" in first_guard["protocol_action_packet"]["summary"], first_guard
         assert "scheduler=backoff_until_material_transition" in first_guard["protocol_action_packet"]["summary"], first_guard
         assert "pause_allowed=false" in first_guard["protocol_action_packet"]["summary"], first_guard
@@ -714,6 +721,12 @@ def main() -> int:
         assert replan_guard["automation_liveness"]["automation_action"] == "execute_bounded_work", replan_guard
         assert replan_guard["automation_liveness"]["pause_allowed"] is False, replan_guard
         assert replan_guard["scheduler_hint"]["action"] == "run_now", replan_guard
+        assert replan_guard["scheduler_hint"]["codex_app"]["recommended_interval_minutes"] == 3, replan_guard
+        assert replan_guard["scheduler_hint"]["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=3", replan_guard
+        replan_reset = replan_guard["scheduler_hint"]["reset_policy"]
+        assert replan_reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=3", replan_reset
+        assert replan_reset["reset_token"] != first_reset_token, replan_reset
+        assert "active_work_projected" in replan_reset["reset_conditions"], replan_reset
         assert "automation=execute_bounded_work" in replan_guard["protocol_action_packet"]["summary"], replan_guard
         interaction = replan_guard["interaction_contract"]
         assert interaction["mode"] == "autonomous_replan", interaction

@@ -666,6 +666,16 @@ actionable again, such as user feedback in the thread, a new or reassigned todo,
 a resolved gate, or material evidence transition. A reset applies
 `codex_app_initial_interval_minutes` (and the matching local scheduler initial
 interval) before starting unchanged backoff again; it never spends quota.
+For Codex App heartbeats, hosts and agents should use
+`codex_app.recommended_rrule` for the current cadence and
+`reset_policy.codex_app_initial_rrule` when the stored
+`reset_policy.reset_token` changes. This gives host runtimes a compact state key
+instead of requiring them to diff the whole quota payload. The token is derived
+from scheduler action, `identity_snapshot`, and `profile_snapshot`, so a changed
+initial RRULE or scheduler profile also produces a new generation. User
+feedback, newly runnable work, reassignment, or material evidence should
+therefore restore the automation to the current profile's initial interval
+before backoff resumes.
 For Codex CLI TUI and Claude Code loops, `unchanged_poll_limit=3` means the
 third unchanged poll triggers `final_quota_replan_check`; if the rerun is still
 unchanged, the loop applies `after_limit`.

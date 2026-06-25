@@ -133,6 +133,12 @@ QUOTA_HINT_FIXTURE = {
             "after_limit": "stop_loop",
             "final_quota_replan_check": {"enabled": True},
         },
+        "reset_policy": {
+            "schema_version": "scheduler_reset_policy_v0",
+            "reset_token": "fixture-reset-001",
+            "local_scheduler_initial_interval_minutes": 10,
+            "codex_app_initial_rrule": "FREQ=MINUTELY;INTERVAL=10",
+        },
     }
 }
 
@@ -228,6 +234,9 @@ def main() -> int:
     hinted_tick = build_tick(FALLBACK_HELP_FIXTURE, quota_payload=QUOTA_HINT_FIXTURE)
     assert hinted_tick["scheduler_hint"]["action"] == "backoff_until_reassigned", hinted_tick
     assert hinted_tick["launchd"]["recommended_interval_seconds"] == 600, hinted_tick
+    assert hinted_tick["launchd"]["reset_token"] == "fixture-reset-001", hinted_tick
+    assert hinted_tick["launchd"]["reset_interval_seconds"] == 600, hinted_tick
+    assert hinted_tick["launchd"]["reset_policy"]["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=10", hinted_tick
     assert hinted_tick["scheduler_hint"]["local_scheduler"]["example_progression_minutes"] == [10, 20, 30], hinted_tick
     assert hinted_tick["scheduler_hint"]["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, hinted_tick
 

@@ -1212,6 +1212,15 @@ new/reassigned todo, resolved gate, or material transition makes the goal
 actionable again. The reset moves Codex App/local cadence back to the current
 profile's initial interval before unchanged backoff resumes, and does not spend
 quota.
+Codex App heartbeats should apply `codex_app.recommended_rrule` for ordinary
+cadence updates. They should cache only
+`reset_policy.reset_token` plus the automation id when possible; when that token
+changes, or when user feedback/new work/reassignment/material evidence makes the
+goal active again, update the heartbeat RRULE to
+`reset_policy.codex_app_initial_rrule` and clear unchanged-poll state before
+starting a new backoff progression. The token is generated from scheduler
+action, `identity_snapshot`, and `profile_snapshot`, so hosts do not need to
+diff the whole payload to notice an initial-RRULE/profile generation change.
 The payload also includes `execution_obligation`, which is the compatibility
 entry point for older workers deciding whether a quiet no-op is allowed.
 `heartbeat_recommendation.notify` is only a user-facing notification policy. It

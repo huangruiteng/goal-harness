@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from enum import Enum
 import fnmatch
+import hashlib
 import json
 import re
 import subprocess
@@ -4169,28 +4170,59 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
             "if_unchanged": "apply_after_limit_without_spend",
             "spend_policy": "no quota spend for final replan check or loop stop",
         }
+        identity_snapshot = {
+            key: identity_value(key)
+            for key in identity_keys
+        }
+        codex_rrule = f"FREQ=MINUTELY;INTERVAL={codex_interval}"
+        profile_snapshot = {
+            "cadence_class": cadence_class,
+            "codex_app_initial_interval_minutes": codex_interval,
+            "codex_app_initial_rrule": codex_rrule,
+            "codex_app_max_interval_minutes": codex_max,
+            "unchanged_poll_backoff_multiplier": multiplier,
+            "local_scheduler_unchanged_poll_limit": cli_limit,
+            "claude_code_loop_unchanged_poll_limit": claude_limit,
+        }
+        reset_token_payload = {
+            "action": action,
+            "identity_snapshot": identity_snapshot,
+            "profile_snapshot": profile_snapshot,
+        }
+        reset_token = hashlib.sha256(
+            json.dumps(
+                reset_token_payload,
+                ensure_ascii=True,
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()[:16]
         reset_policy = {
             "schema_version": SCHEDULER_RESET_POLICY_SCHEMA_VERSION,
             "source": "quota.should-run",
             "reset_to": "profile_initial_interval",
             "profile_action": action,
+            "reset_token": reset_token,
+            "host_state_key": "scheduler_hint.reset_policy.reset_token",
             "codex_app_initial_interval_minutes": codex_interval,
+            "codex_app_initial_rrule": codex_rrule,
             "local_scheduler_initial_interval_minutes": codex_interval,
             "clear_unchanged_poll_state": True,
             "identity_keys": identity_keys,
-            "identity_snapshot": {
-                key: identity_value(key)
-                for key in identity_keys
-            },
+            "identity_snapshot": identity_snapshot,
+            "profile_snapshot": profile_snapshot,
             "reset_conditions": [
+                "reset_token_changed",
                 "quota_identity_snapshot_changed",
                 "scheduler_action_changed",
                 "user_feedback",
                 "new_or_reassigned_todo",
                 "gate_resolved",
                 "material_transition",
+                "active_work_projected",
             ],
             "after_reset": "apply the current profile initial interval before starting unchanged backoff again",
+            "codex_app_apply": "if a stored reset_token differs, update the heartbeat RRULE to codex_app_initial_rrule and clear unchanged poll state before applying new backoff",
             "no_spend_for_reset": True,
         }
         return {
@@ -4202,6 +4234,7 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
             "spend_policy": spend_policy,
             "codex_app": {
                 "recommended_interval_minutes": codex_interval,
+                "recommended_rrule": codex_rrule,
                 "max_interval_minutes": codex_max,
                 "unchanged_poll_backoff_multiplier": multiplier,
                 "example_progression_minutes": cadence_progression,
@@ -8533,6 +8566,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"action={scheduler_hint.get('action')} "
             f"cadence={scheduler_hint.get('cadence_class')} "
             f"codex_app_minutes={codex_app.get('recommended_interval_minutes')} "
+            f"codex_app_rrule={codex_app.get('recommended_rrule')} "
             f"codex_app_progression={codex_app.get('example_progression_minutes')} "
             f"cli_unchanged_limit={codex_cli_tui.get('unchanged_poll_limit')} "
             f"claude_unchanged_limit={claude_code_loop.get('unchanged_poll_limit')}"
@@ -8549,6 +8583,8 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 "- scheduler_reset: "
                 f"reset_to={reset_policy.get('reset_to')} "
                 f"initial_interval={reset_policy.get('codex_app_initial_interval_minutes')} "
+                f"initial_rrule={reset_policy.get('codex_app_initial_rrule')} "
+                f"reset_generation={reset_policy.get('reset_token')} "
                 f"identity_keys={reset_policy.get('identity_keys')} "
                 f"conditions={reset_policy.get('reset_conditions')}"
             )

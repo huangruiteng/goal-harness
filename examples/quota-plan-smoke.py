@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import subprocess
 import sys
@@ -35,6 +36,23 @@ from loopx.quota import (  # noqa: E402
 
 
 SCOPED_AGENT_ID = "codex-side-bypass"
+
+
+def expected_scheduler_reset_token(scheduler: dict) -> str:
+    reset = scheduler["reset_policy"]
+    token_payload = {
+        "action": scheduler["action"],
+        "identity_snapshot": reset["identity_snapshot"],
+        "profile_snapshot": reset["profile_snapshot"],
+    }
+    return hashlib.sha256(
+        json.dumps(
+            token_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
 
 
 def goal(
@@ -1552,23 +1570,37 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     scheduler = mapped_decision["scheduler_hint"]
     assert scheduler["action"] == "backoff_until_fresh_evidence", mapped_decision
     assert scheduler["codex_app"]["recommended_interval_minutes"] == 60, mapped_decision
+    assert scheduler["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=60", mapped_decision
     assert scheduler["codex_app"]["example_progression_minutes"] == [60, 120, 240], mapped_decision
     assert scheduler["codex_cli_tui"]["unchanged_poll_limit"] == 3, mapped_decision
     assert scheduler["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, mapped_decision
     reset = scheduler["reset_policy"]
     assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
     assert reset["reset_to"] == "profile_initial_interval", reset
+    assert isinstance(reset["reset_token"], str) and len(reset["reset_token"]) == 16, reset
+    assert reset["reset_token"] == expected_scheduler_reset_token(scheduler), reset
+    assert reset["host_state_key"] == "scheduler_hint.reset_policy.reset_token", reset
     assert reset["codex_app_initial_interval_minutes"] == 60, reset
+    assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", reset
+    assert reset["profile_snapshot"]["cadence_class"] == "unchanged_noop", reset
+    assert reset["profile_snapshot"]["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", reset
+    assert reset["profile_snapshot"]["codex_app_max_interval_minutes"] == 240, reset
+    assert reset["profile_snapshot"]["unchanged_poll_backoff_multiplier"] == 2, reset
     assert reset["identity_keys"] == scheduler["unchanged_identity_keys"], reset
     assert reset["identity_snapshot"]["recommended_action"] == mapped_decision["recommended_action"], reset
+    assert "reset_token_changed" in reset["reset_conditions"], reset
     assert "user_feedback" in reset["reset_conditions"], reset
     assert "new_or_reassigned_todo" in reset["reset_conditions"], reset
+    assert "active_work_projected" in reset["reset_conditions"], reset
     assert "do not run another dry-run" in mapped_rec["spend_policy"], mapped_rec
     assert "heartbeat_recommendation: mode=mapped_noop_if_unchanged notify=DONT_NOTIFY" in mapped_markdown
     assert "heartbeat_stop_if_unchanged: `True`" in mapped_markdown, mapped_markdown
     assert "scheduler_hint: action=backoff_until_fresh_evidence" in mapped_markdown, mapped_markdown
+    assert "codex_app_rrule=FREQ=MINUTELY;INTERVAL=60" in mapped_markdown, mapped_markdown
     assert "codex_app_progression=[60, 120, 240]" in mapped_markdown, mapped_markdown
     assert "scheduler_reset: reset_to=profile_initial_interval initial_interval=60" in mapped_markdown, mapped_markdown
+    assert "initial_rrule=FREQ=MINUTELY;INTERVAL=60" in mapped_markdown, mapped_markdown
+    assert "reset_generation=" in mapped_markdown, mapped_markdown
     assert (
         "execution_obligation: must_attempt_work=False kind=quiet_noop_if_unchanged notify_is_execution_gate=False"
         in mapped_markdown
