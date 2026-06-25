@@ -111,6 +111,39 @@ comment author, author association, timestamps, and URL. It detects whether a
 public maintainer/member/collaborator replied after the LoopX comment and
 returns `prepare_public_triage_note`; otherwise it returns `wait_no_bump`.
 
+## Browser Social Connector Profile
+
+`social_browser_x` is the first browser-backed value connector profile. It is
+not a headless X API client and it does not grant LoopX permission to post. It
+documents how a user's agent can use an ego-browser session for public-safe X
+work while LoopX keeps the control-plane state.
+
+Allowed before an exact approval gate:
+
+- `install-check` reporting whether `ego-browser` is available;
+- metadata-only public-handle packets through `loopx content-ops
+  observe-public-handle`;
+- no-send research notes, target-specific draft packets, image/body/link/mention
+  review packets, and reply-monitor plans;
+- value metrics and kill conditions for the planned post, reply, or monitor.
+
+Forbidden before an exact approval gate:
+
+- account creation, profile edits, posting, replies, reposts, follows used as
+  growth automation, deletion, appeals, or paid actions;
+- captcha bypass, credential collection, cookie export, raw timeline capture,
+  private DMs, or non-public material;
+- public claims outside the declared LoopX brand boundary.
+
+The connector exists because browser channels often have the highest business
+value but the highest account-health and public/private-boundary risk. A useful
+LoopX packet should let a user hand their own agent the process without handing
+over judgment:
+
+```text
+install-check -> public metadata packet -> no-send draft packet -> exact approval gate -> ego-browser execution -> compact reply/value monitor
+```
+
 ## User Value
 
 This capability is valuable only when the connector output can produce one of:
