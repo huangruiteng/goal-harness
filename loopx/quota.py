@@ -50,6 +50,7 @@ from .todo_contract import (
     normalize_todo_status,
     normalize_todo_task_class,
 )
+from .todo_handoff_gate import HandoffGateState, build_todo_handoff_gate_states
 
 
 DEFAULT_COMPUTE_QUOTA = 1.0
@@ -1733,6 +1734,58 @@ def _todo_summary_source_items(value: dict[str, Any]) -> list[dict[str, Any]]:
     return open_items
 
 
+def _todo_summary_handoff_gates(value: dict[str, Any]) -> list[dict[str, Any]]:
+    projected = value.get("handoff_gates")
+    if isinstance(projected, list):
+        return [item for item in projected if isinstance(item, dict)]
+    source_items = value.get("items") if isinstance(value.get("items"), list) else []
+    return build_todo_handoff_gate_states(source_items)
+
+
+def _handoff_gate_lanes(
+    value: dict[str, Any],
+    *,
+    agent_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    handoff_gates = _todo_summary_handoff_gates(value)
+    if not handoff_gates:
+        return {}
+    lanes: dict[str, Any] = {
+        "handoff_gate_count": len(handoff_gates),
+        "handoff_gates": handoff_gates[:TODO_BACKLOG_ITEM_LIMIT],
+    }
+    agent_id = (
+        normalize_todo_claimed_by(agent_identity.get("agent_id"))
+        if isinstance(agent_identity, dict)
+        else None
+    )
+    if agent_id:
+        current_agent_items = [
+            item
+            for item in handoff_gates
+            if normalize_todo_blocks_agent(item.get("blocks_agent")) == agent_id
+        ]
+        cleared_without_successor = [
+            item
+            for item in current_agent_items
+            if item.get("gate_state")
+            == HandoffGateState.CLEARED_WITHOUT_SUCCESSOR.value
+        ]
+        lanes.update(
+            {
+                "current_agent_handoff_gate_count": len(current_agent_items),
+                "current_agent_handoff_gates": current_agent_items[:TODO_BACKLOG_ITEM_LIMIT],
+                "current_agent_cleared_without_successor_handoff_count": len(
+                    cleared_without_successor
+                ),
+                "current_agent_cleared_without_successor_handoff_gates": (
+                    cleared_without_successor[:TODO_BACKLOG_ITEM_LIMIT]
+                ),
+            }
+        )
+    return lanes
+
+
 def _is_user_gate_todo_item(item: dict[str, Any]) -> bool:
     if _todo_task_class(item) == TODO_TASK_CLASS_USER_GATE:
         return True
@@ -1824,6 +1877,12 @@ def _summarize_user_todos(
     )
     summary.update(
         _deferred_visibility_lanes(
+            value,
+            agent_identity=agent_identity,
+        )
+    )
+    summary.update(
+        _handoff_gate_lanes(
             value,
             agent_identity=agent_identity,
         )
@@ -1942,6 +2001,12 @@ def _summarize_project_asset_todos(
     )
     summary.update(
         _deferred_visibility_lanes(
+            value,
+            agent_identity=agent_identity,
+        )
+    )
+    summary.update(
+        _handoff_gate_lanes(
             value,
             agent_identity=agent_identity,
         )
@@ -2487,6 +2552,76 @@ def _agent_scope_deferred_resume_candidates(
     return sorted(unique, key=_todo_projection_sort_key)
 
 
+def _agent_scope_cleared_without_successor_handoff_gates(
+    agent_todo_summary: dict[str, Any],
+    *,
+    agent_id: str,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for key in (
+        "current_agent_cleared_without_successor_handoff_gates",
+        "handoff_gates",
+    ):
+        value = agent_todo_summary.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if normalize_todo_blocks_agent(item.get("blocks_agent")) != agent_id:
+                continue
+            if item.get("gate_state") != HandoffGateState.CLEARED_WITHOUT_SUCCESSOR.value:
+                continue
+            candidates.append(item)
+
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        identity = str(item.get("todo_id") or item.get("index") or item.get("text") or "")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        compact = dict(item)
+        compact["text"] = str(item.get("text") or "").strip()
+        unique.append(compact)
+    return sorted(
+        unique,
+        key=lambda item: (
+            -int(item.get("index") or 0),
+            str(item.get("todo_id") or ""),
+        ),
+    )
+
+
+def _agent_scope_blocking_handoff_gates(
+    agent_todo_summary: dict[str, Any],
+    *,
+    agent_id: str,
+) -> list[dict[str, Any]]:
+    gates = agent_todo_summary.get("current_agent_handoff_gates")
+    if not isinstance(gates, list):
+        gates = agent_todo_summary.get("handoff_gates")
+    if not isinstance(gates, list):
+        return []
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in gates:
+        if not isinstance(item, dict):
+            continue
+        if normalize_todo_blocks_agent(item.get("blocks_agent")) != agent_id:
+            continue
+        if item.get("gate_state") != HandoffGateState.BLOCKING.value:
+            continue
+        identity = str(item.get("todo_id") or item.get("index") or item.get("text") or "")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        compact = dict(item)
+        compact["text"] = str(item.get("text") or "").strip()
+        selected.append(compact)
+    return sorted(selected, key=_todo_projection_sort_key)
+
+
 def _agent_scope_no_candidate_frontier(
     *,
     agent_identity: dict[str, Any] | None,
@@ -2568,6 +2703,93 @@ def _agent_scope_no_candidate_frontier(
                 "deferred_resume_candidate_count": len(deferred_resume_candidates),
             },
             "deferred_resume_candidates": deferred_resume_candidates[:3],
+        }
+
+    blocking_handoff_gates = _agent_scope_blocking_handoff_gates(
+        agent_todo_summary,
+        agent_id=agent_id,
+    )
+    if blocking_handoff_gates:
+        blocking_review_claimants = sorted(
+            {
+                claimed_by
+                for item in blocking_handoff_gates
+                for claimed_by in [normalize_todo_claimed_by(item.get("claimed_by"))]
+                if claimed_by
+            }
+        )
+        owner = ", ".join(blocking_review_claimants) or "the owning agent"
+        reason = (
+            f"current side-agent {agent_id} has no current/unclaimed advancement "
+            f"candidate; blocking handoff work is claimed by {owner}"
+        )
+        recommended_action = (
+            f"Keep {agent_id} active but quiet: wait for {owner} to finish the "
+            "blocking handoff, reassign it, or create a concrete current-agent/"
+            "unclaimed advancement todo before delivery."
+        )
+        return {
+            "schema_version": AGENT_SCOPE_FRONTIER_SCHEMA_VERSION,
+            "agent_id": agent_id,
+            "primary_agent": normalize_todo_claimed_by(agent_identity.get("primary_agent")),
+            "action": AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
+            "effective_action": AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
+            "blocks_delivery": True,
+            "quiet_noop_allowed": True,
+            "spend_policy": "no quota spend while the current agent has no in-scope runnable candidate",
+            "reason": reason,
+            "recommended_action": recommended_action,
+            "candidate_counts": {
+                "current_agent_claimed_advancement_count": current_agent_count,
+                "unclaimed_advancement_count": unclaimed_count,
+                "blocking_handoff_gate_count": len(blocking_handoff_gates),
+            },
+            "other_claimants": blocking_review_claimants,
+            "blocking_review_claimants": blocking_review_claimants,
+            "blocking_handoff_gates": blocking_handoff_gates[:3],
+        }
+
+    cleared_handoff_gates = _agent_scope_cleared_without_successor_handoff_gates(
+        agent_todo_summary,
+        agent_id=agent_id,
+    )
+    if cleared_handoff_gates:
+        first_item = cleared_handoff_gates[0]
+        blocker_todo_id = str(first_item.get("todo_id") or "").strip() or "<todo_id>"
+        unblocks_todo_id = normalize_todo_id(first_item.get("unblocks_todo_id"))
+        target_text = (
+            f" for unblocked todo {unblocks_todo_id}"
+            if unblocks_todo_id
+            else ""
+        )
+        reason = (
+            f"current side-agent {agent_id} has no open current/unclaimed "
+            f"advancement candidate, but blocking handoff {blocker_todo_id}"
+            f"{target_text} is already done without a projected successor"
+        )
+        recommended_action = (
+            "Run a bounded successor replan before quiet wait: reopen or supersede "
+            f"{blocker_todo_id} into a concrete {agent_id}/unclaimed advancement todo, "
+            "or record an explicit no-follow-up rationale."
+        )
+        return {
+            "schema_version": AGENT_SCOPE_FRONTIER_SCHEMA_VERSION,
+            "agent_id": agent_id,
+            "primary_agent": normalize_todo_claimed_by(agent_identity.get("primary_agent")),
+            "action": AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
+            "effective_action": AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
+            "blocks_delivery": True,
+            "requires_replan": True,
+            "quiet_noop_allowed": False,
+            "spend_policy": "spend once after validated successor replan/todo writeback",
+            "reason": reason,
+            "recommended_action": recommended_action,
+            "candidate_counts": {
+                "current_agent_claimed_advancement_count": current_agent_count,
+                "unclaimed_advancement_count": unclaimed_count,
+                "cleared_without_successor_handoff_count": len(cleared_handoff_gates),
+            },
+            "cleared_without_successor_handoff_gates": cleared_handoff_gates[:3],
         }
 
     if not has_advancement_contract:
