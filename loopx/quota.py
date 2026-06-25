@@ -1075,14 +1075,12 @@ def _unblock_handoff_rank(
 ) -> int:
     claimed_by = normalize_todo_claimed_by(raw_item.get("claimed_by"))
     blocks_agent = normalize_todo_blocks_agent(raw_item.get("blocks_agent"))
-    unblocks_todo_id = normalize_todo_id(raw_item.get("unblocks_todo_id"))
     return (
         0
         if agent_id
         and claimed_by == agent_id
         and blocks_agent
         and blocks_agent != agent_id
-        and unblocks_todo_id
         else 1
     )
 
@@ -1115,8 +1113,8 @@ def _agent_lane_candidate_sort_key(
     return (
         active_next_rank,
         claim_rank,
-        _todo_priority_rank(raw_item),
         _unblock_handoff_rank(raw_item, agent_id=agent_id),
+        _todo_priority_rank(raw_item),
         _primary_review_rank(raw_item, agent_id=agent_id),
         repair_rank,
         _todo_index_rank(raw_item),
@@ -1134,11 +1132,7 @@ def _sort_capability_runnable_candidates(
     if not agent_id:
         return runnable, None
     primary_agent = normalize_todo_claimed_by(agent_identity.get("primary_agent"))
-    policy = (
-        "active_next_then_claim_then_priority_then_unblock_handoff_then_repair"
-        if primary_agent and agent_id == primary_agent
-        else "active_next_then_claim_then_priority_then_repair"
-    )
+    policy = "active_next_then_claim_then_unblock_handoff_then_priority_then_repair"
     return (
         sorted(
             runnable,
@@ -2392,11 +2386,10 @@ def _agent_lane_next_action(
                 payload["claim_required_before_work"] = True
             blocks_agent = normalize_todo_blocks_agent(raw_item.get("blocks_agent"))
             unblocks_todo_id = normalize_todo_id(raw_item.get("unblocks_todo_id"))
-            if blocks_agent and unblocks_todo_id:
-                payload["unblock_handoff"] = {
-                    "blocks_agent": blocks_agent,
-                    "unblocks_todo_id": unblocks_todo_id,
-                }
+            if blocks_agent:
+                payload["unblock_handoff"] = {"blocks_agent": blocks_agent}
+                if unblocks_todo_id:
+                    payload["unblock_handoff"]["unblocks_todo_id"] = unblocks_todo_id
             for key in (
                 "missing_capabilities",
                 "missing_target_capabilities",

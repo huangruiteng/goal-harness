@@ -10,6 +10,9 @@ Current capability paths:
   caller-approved local issue branches and PR-review evidence.
 - [content-ops](content-ops/README.md): collect public/private content signals
   into reviewable source, angle, draft, feedback, and publish-gate packets.
+- [value-connectors](value-connectors/README.md): install and run public-safe
+  external-value connector starters, beginning with body-free GitHub public
+  channel metadata probes.
 
 Do not add a capability path until there is at least one real CLI entrypoint and
 one smoke test. Future ideas belong in product planning docs until they have

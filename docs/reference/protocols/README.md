@@ -19,3 +19,4 @@ Current contracts:
 - [content_ops_surface_v0](content-ops-surface-v0.md)
 - [issue_fix_acceptance_loop_v0](issue-fix-acceptance-loop-v0.md)
 - [cs_notes_explore_capability_map_v0](cs-notes-explore-capability-map-v0.md)
+- [value_connector_plan_v0](value-connector-plan-v0.md)
