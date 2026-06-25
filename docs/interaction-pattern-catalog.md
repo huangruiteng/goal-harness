@@ -188,6 +188,7 @@ Hot-path execution decisions: deliver, fallback, recover, or stay quiet.
 | P0 | IP-001 | Bounded Delivery | Agent | no interruption | implement, validate, write back, spend once |
 | P0 | IP-002 | Blocked Priority With Safe Fallback | Agent plus user-visible notification | notify without requiring an answer | continue safe fallback after exposing blocked higher-priority work |
 | P0 | IP-003 | Scoped Gate With Safe Fallback | User plus agent | notify concrete scoped gate | execute non-dependent fallback; no gated action |
+| P0 | IP-029 | Handoff Todo Gate State | Status/quota | no interruption unless the handoff itself is user-held | map `blocks_agent` todo lifecycle into wait, successor replan, or concrete successor routing |
 | P0 | IP-021 | Per-Todo Capability Gate | CLI projects, agent decides | ask only when missing capability is owner-held | expose runnable executable candidates; agent chooses one, otherwise repair bridge or skip |
 | P0 | IP-007 | Outcome Floor Recovery | Agent | usually no interruption | produce missing outcome-scale evidence or blocker only |
 | P1 | IP-008 | Monitor Quiet Skip | CLI/controller | no notification | append at most one no-spend poll, then stay quiet |
@@ -804,6 +805,77 @@ step, so stale or future work outranks live open tasks.
 - `docs/status-data-contract.md`
 - `skills/loopx-self-repair/references/repair-patterns.md` records
   `deferred_gate_resume_misclassified` for incident triage.
+
+#### IP-029 Handoff Todo Gate State
+
+**Trigger**
+
+- a todo carries `blocks_agent=<agent-id>` and represents review, handoff,
+  unblock, or owner work for that agent;
+- the todo status changes among open/blocked, done, deferred, or superseded;
+- the todo may name a follow-up via `unblocks_todo_id`,
+  `resume_when=todo_done:<todo_id>`, or `superseded_by`; and
+- `quota should-run --agent-id <agent-id>` needs to decide whether the agent
+  should wait, replan, or run a concrete successor.
+
+**Expected behavior**
+
+`blocks_agent` todos are not only backlog rows. They are inter-agent gate
+states. Status should project `agent_todos.handoff_gates[]` from the complete
+todo list, not only from open lanes, using `todo_handoff_gate_v0`.
+
+| gate_state | Todo condition | Quota effect |
+| --- | --- | --- |
+| `blocking` | non-terminal handoff todo for the scoped agent | return `agent_scope_wait`; name the owning reviewer/agent rather than waking the blocked agent for delivery |
+| `cleared_without_successor` | done handoff with no stable successor or supersede link | return `successor_replan_required`; reopen, supersede, or record no-follow-up rationale |
+| `cleared_with_successor` | done handoff linked to a successor via `unblocks_todo_id`, `resume_when`, or `superseded_by` | route to the concrete successor through normal todo selection |
+| `superseded` | handoff todo carries `superseded_by` | keep as history; do not wake the blocked agent from the stale gate |
+| `deferred` | handoff todo is parked behind an unsatisfied resume condition | keep diagnostic visibility; IP-027 owns the ready-deferred resume path |
+
+Quota ordering matters. Current-agent ordinary advancement still wins normal
+delivery. If no ordinary current-agent successor is ready, a current-agent
+`blocking` handoff wins over stale done handoffs. A
+`cleared_without_successor` handoff wins over generic IP-026 no-candidate wait
+because it means the handoff state changed but no replayable successor exists.
+Only after those checks may IP-026 classify `scope_exhausted` or
+`agent_scope_wait`.
+
+**Visual Model**
+
+```mermaid
+flowchart TD
+  T["blocks_agent todo"] --> S{"todo lifecycle"}
+  S -->|"open / blocked"| B["handoff gate: blocking"]
+  B --> W["agent_scope_wait for blocked agent"]
+  S -->|"done + successor"| C["handoff gate: cleared_with_successor"]
+  C --> N["run concrete successor normally"]
+  S -->|"done + no successor"| R["handoff gate: cleared_without_successor"]
+  R --> L["successor_replan_required"]
+  L --> F["reopen / supersede / no-follow-up rationale"]
+  S -->|"superseded_by"| H["handoff gate: superseded"]
+  H --> I["historical only"]
+  S -->|"deferred"| D["handoff gate: deferred"]
+  D --> P["IP-027 resume rules"]
+```
+
+**Bad smell**
+
+A done review/handoff todo disappears because only open lanes feed quota, so
+the blocked agent falls into a vague `agent_scope_wait`. The opposite bad smell
+is also harmful: a stale done handoff outranks a live open review blocker, so
+the agent replans while a real reviewer-owned gate is still open. Both are
+state-machine bugs, not prompt wording bugs.
+
+**Validation**
+
+- `loopx/todo_handoff_gate.py` owns the `todo_handoff_gate_v0` projection.
+- `examples/quota-cleared-blocker-successor-gate-smoke.py` covers
+  `blocking`, `cleared_without_successor`, `cleared_with_successor`, and
+  `superseded` gate states.
+- `docs/quota-allocation.md`
+- `docs/status-data-contract.md`
+- `skills/loopx-self-repair/references/repair-patterns.md` records
+  `handoff_gate_state_projection_gap` for incident triage.
 
 #### IP-014 Decision Write Preview And Append
 
@@ -1519,9 +1591,11 @@ Agent-scoped quota must distinguish "the goal has runnable work" from "this
 agent has runnable work." When the current agent has no in-scope candidate,
 quota should not force a delivery turn. This pattern applies only after the
 guard has also checked IP-027 and found no ready current-agent or unclaimed
-deferred resume candidate. If a deferred resume candidate is ready, IP-027 owns
-the `successor_replan_required` path; IP-026 must not swallow it as
-"nothing runnable."
+deferred resume candidate, and after IP-029 has found no current-agent handoff
+gate state that should wait or replan. If a deferred resume candidate is ready,
+IP-027 owns the `successor_replan_required` path; if a handoff review todo has
+changed state, IP-029 owns the handoff wait or successor-replan path. IP-026
+must not swallow either case as "nothing runnable."
 
 When the scoped frontier is truly empty, quota should project one of these
 machine states:
@@ -1549,8 +1623,10 @@ goal-level route. A side agent should be allowed to no-op without spend, or
 claim a newly exposed in-scope todo before delivery becomes allowed again.
 
 This pattern is the runtime counterpart of IP-022. IP-022 makes claimed,
-deferred, and agent-lane work visible; IP-026 says what to do when the scoped
-open frontier is empty and IP-027 has not found a ready deferred gate resume.
+deferred, handoff, and agent-lane work visible; IP-026 says what to do when the
+scoped open frontier is empty, IP-027 has not found a ready deferred gate
+resume, and IP-029 has not found a handoff todo gate state for the scoped
+agent.
 If the only apparent blocker is a user todo with `blocks_agent` pointing at a
 different agent, IP-003 owns the case before IP-026: filter that other-agent
 gate out of the current agent's blocking user summary, then decide whether the
@@ -1566,7 +1642,9 @@ flowchart TD
   F -->|"unclaimed in-scope candidate"| C["agent may claim before delivery"]
   F -->|"no open candidate"| R{"IP-027 ready deferred resume?"}
   R -->|"yes"| P["defer to IP-027"]
-  R -->|"no"| X["scope_exhausted / agent_scope_wait"]
+  R -->|"no"| G{"IP-029 handoff gate state?"}
+  G -->|"blocking or cleared_without_successor"| K["defer to IP-029"]
+  G -->|"none"| X["scope_exhausted / agent_scope_wait"]
   F -->|"only other-agent or out-of-scope work"| X
   X --> N["quiet no-op, no spend"]
   X --> H["owning agent may advance, merge, or reassign"]
@@ -1582,9 +1660,10 @@ and the only recommendation is another agent's benchmark or runtime lane. The
 agent either churns through repeated empty heartbeats or risks working outside
 its registered scope. A related failure is treating a ready deferred successor
 as part of this no-candidate pattern instead of routing it through IP-027's
-gate-resume lifecycle. The opposite bad smell is also harmful: deferred items
-are mixed into the open todo list, so stale or future work outranks live open
-tasks.
+gate-resume lifecycle, or treating a handoff todo lifecycle change as generic
+agent wait instead of routing it through IP-029. The opposite bad smell is also
+harmful: deferred or handoff items are mixed into the open todo list, so stale
+or future work outranks live open tasks.
 
 **Validation**
 
@@ -1599,8 +1678,11 @@ tasks.
 - `examples/quota-agent-scoped-user-gate-smoke.py` for the nearby case where
   a user gate is real but scoped to a different agent and therefore must not
   create current-agent scope exhaustion.
+- `examples/quota-cleared-blocker-successor-gate-smoke.py` for the nearby
+  case where a `blocks_agent` handoff todo directly controls the scoped gate.
 - `skills/loopx-self-repair/references/repair-patterns.md` records
-  `agent_scoped_no_candidate_gap` for incident triage.
+  `agent_scoped_no_candidate_gap` and `handoff_gate_state_projection_gap` for
+  incident triage.
 
 #### IP-023 Status Neutral Run Window
 

@@ -75,6 +75,7 @@ from .todo_contract import (
     todo_done_for_status,
     todo_status_from_marker,
 )
+from .todo_handoff_gate import build_todo_handoff_gate_states
 
 
 CODEX_READY_CLASSIFICATIONS = {
@@ -4821,6 +4822,9 @@ def compact_todo_group(
         ][:MAX_DEFERRED_TODO_VISIBILITY_ITEMS],
         "items": budgeted_items[:MAX_STATUS_TODOS_PER_ROLE],
     }
+    handoff_gates = build_todo_handoff_gate_states(items)
+    if handoff_gates:
+        summary["handoff_gates"] = handoff_gates
     if active_next_action_items:
         summary["active_next_action_items"] = [
             compact_active_next_action_todo_item(item)
