@@ -295,6 +295,7 @@ type TrajectoryStage = {
   animationEventId: string;
   confidence: string;
   evidenceRefs: string[];
+  inferenceReason?: string;
   isCurrent: boolean;
   isSynthetic: boolean;
   kind: string;
@@ -360,6 +361,7 @@ function buildTrajectoryAnalysis(fixture: LongHorizonRolloutFixture) {
       animationEventId: event.animation_event_id,
       confidence: event.confidence,
       evidenceRefs: event.evidence_refs ?? [],
+      inferenceReason: event.inference_reason,
       isCurrent: index === fixture.animation_events.length - 1,
       isSynthetic: event.confidence === "synthetic_bridge" || event.display_hint === "dashed_edge",
       kind: event.kind,
@@ -576,6 +578,7 @@ function TrajectoryAnalysisPanel() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Badge variant="info">read-only projection</Badge>
               <Badge variant="success">{analysis.observedCount} observed</Badge>
               <Badge variant={analysis.syntheticCount ? "warning" : "success"}>
                 {analysis.syntheticCount} bridge
@@ -643,6 +646,11 @@ function TrajectoryAnalysisPanel() {
             <p className="mt-2 text-xs leading-5 text-slate-500">
               {currentStage?.laneLabel ?? "No lane"} / {currentStage?.transitionLabel ?? "state retained"}
             </p>
+            {currentStage?.inferenceReason ? (
+              <p className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium leading-5 text-slate-600">
+                {currentStage.inferenceReason}
+              </p>
+            ) : null}
           </div>
 
           <div

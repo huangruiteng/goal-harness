@@ -224,6 +224,8 @@ includes(trajectorySource, "buildTrajectoryAnalysis(selfIterationRollout)", "tra
 includes(trajectorySource, "frontstage-trajectory-stage", "trajectory stage render loop");
 includes(trajectorySource, "Stage progress curve", "trajectory curve label");
 includes(trajectorySource, "Evidence drawer", "trajectory evidence drawer label");
+includes(trajectorySource, "read-only projection", "trajectory read-only projection label");
+includes(trajectorySource, "inferenceReason", "trajectory surfaces bridge inference reason");
 includes(trajectorySource, "local prose, private docs, and raw trajectory logs", "trajectory private-source exclusion copy");
 excludes(trajectorySource, "fetchFrontstageStatusPayload", "trajectory live status dependency");
 excludes(trajectorySource, "statusUrl", "trajectory status URL dependency");
