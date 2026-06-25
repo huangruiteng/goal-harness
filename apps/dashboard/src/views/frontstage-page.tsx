@@ -272,7 +272,7 @@ function uniqueClaimOwners(projection: GoalChannelProjection) {
       [
         ...projection.agent_todos.map((todo) => todo.claimed_by),
         ...projection.active_leases.map((lease) => lease.owner_agent),
-      ].filter(Boolean),
+      ].filter((value): value is string => Boolean(value)),
     ),
   );
 }
@@ -474,6 +474,116 @@ function Panel({
       </div>
       {children}
     </section>
+  );
+}
+
+type ManagementSurfaceCard = {
+  body: string;
+  icon: React.ComponentType<{ className?: string }>;
+  id: string;
+  label: string;
+  source: string;
+  value: string;
+};
+
+function FrontstageManagementSurfaceMock({
+  claimOwners,
+  claimedAgentTodos,
+  openAgentTodos,
+  openUserTodos,
+  projection,
+  quotaUsed,
+}: {
+  claimOwners: string[];
+  claimedAgentTodos: number;
+  openAgentTodos: number;
+  openUserTodos: number;
+  projection: GoalChannelProjection;
+  quotaUsed: string;
+}) {
+  const firstGate = projection.open_gates[0];
+  const latestEvent = projection.recent_events[0];
+  const cards: ManagementSurfaceCard[] = [
+    {
+      body: projection.next_action,
+      icon: LayoutDashboard,
+      id: "mission",
+      label: "Mission Bar",
+      source: "goal_id + next_action",
+      value: projection.display_name,
+    },
+    {
+      body: claimOwners.length ? claimOwners.slice(0, 3).join(", ") : "No claimed owner projected.",
+      icon: Users,
+      id: "team",
+      label: "Team Roster",
+      source: "active_leases + claimed_by",
+      value: `${claimOwners.length} visible agents`,
+    },
+    {
+      body: `${openUserTodos} user todo, ${openAgentTodos} agent todo; ${claimedAgentTodos} claimed.`,
+      icon: ListChecks,
+      id: "tickets",
+      label: "Ticket Board",
+      source: "user_todos + agent_todos",
+      value: `${openUserTodos + openAgentTodos} open tickets`,
+    },
+    {
+      body: firstGate ? `${firstGate.kind} blocks ${(firstGate.blocks ?? []).join(", ") || "delivery"}.` : "No open gate in this projection.",
+      icon: CircleAlert,
+      id: "gates",
+      label: "Gate Inbox",
+      source: "decision_frame + open_gates",
+      value: projection.decision_frame.user_action_required ? "decision visible" : "clear",
+    },
+    {
+      body: `${artifactDisplayValue(projection.quota.spend_policy)}; state=${stringifyScalar(projection.quota.state)}.`,
+      icon: Clock3,
+      id: "cadence",
+      label: "Cadence / Budget",
+      source: "quota + scheduler hints",
+      value: quotaUsed,
+    },
+    {
+      body: latestEvent ? `${latestEvent.classification ?? "event"}: ${latestEvent.summary ?? latestEvent.generated_at ?? "recorded"}` : "No compact event projected.",
+      icon: ShieldCheck,
+      id: "evidence",
+      label: "Evidence Timeline",
+      source: "recent_events + artifacts",
+      value: `${projection.recent_events.length} events`,
+    },
+  ];
+
+  return (
+    <Panel icon={LayoutDashboard} title="Management Surface Mock">
+      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3" data-testid="frontstage-management-surface-mock">
+        {cards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <section
+              className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-3"
+              data-testid={`frontstage-management-${card.id}`}
+              key={card.id}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-950">{card.label}</div>
+                    <div className="truncate text-[11px] font-medium text-slate-500">{card.source}</div>
+                  </div>
+                </div>
+                <Badge variant="neutral">kernel</Badge>
+              </div>
+              <div className="mt-3 break-words text-lg font-semibold leading-7 text-slate-950">{card.value}</div>
+              <p className="mt-1 line-clamp-3 break-words text-xs font-medium leading-5 text-slate-600">{card.body}</p>
+            </section>
+          );
+        })}
+      </div>
+    </Panel>
   );
 }
 
@@ -1832,6 +1942,17 @@ function FrontstageRoute({
               ))}
             </div>
           </div>
+
+          {isOpsMode ? (
+            <FrontstageManagementSurfaceMock
+              claimOwners={claimOwners}
+              claimedAgentTodos={claimedAgentTodos}
+              openAgentTodos={openAgentTodos}
+              openUserTodos={openUserTodos}
+              projection={projection}
+              quotaUsed={quotaUsed}
+            />
+          ) : null}
 
           {!isDeveloperMode ? <EfficiencyEvidencePanel /> : null}
 

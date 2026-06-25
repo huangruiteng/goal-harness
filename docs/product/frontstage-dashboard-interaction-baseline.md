@@ -98,6 +98,10 @@ The route currently exposes these durable anchors:
 - `frontstage-ops-command-strip` for search/filter/result-count controls.
 - `frontstage-todo-search`, `frontstage-todo-lane-filter`, and
   `frontstage-todo-result-count` for reviewable todo projection slices.
+- `frontstage-management-surface-mock` for the low-fidelity ops projection
+  that maps kernel state into mission, team roster, ticket board, gate inbox,
+  cadence/budget, and evidence timeline without introducing a parallel state
+  model.
 - `frontstage-role-map`, `frontstage-active-claims`, `frontstage-open-gates`,
   `frontstage-artifacts`, and `frontstage-timeline` for the operator workspace.
 - `frontstage-showcase-motion-beam` and `frontstage-state-flow-beam` for

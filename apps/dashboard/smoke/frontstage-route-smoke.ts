@@ -99,6 +99,18 @@ includes(frontstageSource, "resolveFrontstageOpsStatusUrl", "ops status URL reso
 includes(frontstageSource, "statusContractFreshnessIssue", "schema freshness gate");
 includes(frontstageSource, "localDashboardApiCapabilities", "local capability projection");
 includes(frontstageSource, "Ops statusUrl accepts only relative or loopback sources.", "ops source guard helper copy");
+includes(frontstageSource, 'data-testid="frontstage-management-surface-mock"', "management surface mock");
+includes(frontstageSource, 'data-testid={`frontstage-management-${card.id}`}', "management surface card ids");
+includes(frontstageSource, "Mission Bar", "management surface mission bar");
+includes(frontstageSource, "Team Roster", "management surface team roster");
+includes(frontstageSource, "Ticket Board", "management surface ticket board");
+includes(frontstageSource, "Gate Inbox", "management surface gate inbox");
+includes(frontstageSource, "Cadence / Budget", "management surface cadence budget");
+includes(frontstageSource, "Evidence Timeline", "management surface evidence timeline");
+includes(frontstageSource, "goal_id + next_action", "management surface mission source");
+includes(frontstageSource, "user_todos + agent_todos", "management surface ticket source");
+includes(frontstageSource, "quota + scheduler hints", "management surface budget source");
+includes(frontstageSource, "recent_events + artifacts", "management surface evidence source");
 includes(frontstageSource, 'data-testid="frontstage-user-todos"', "user todo lane");
 includes(frontstageSource, 'data-testid="frontstage-agent-todos"', "agent todo lane");
 includes(frontstageSource, 'data-testid="frontstage-todo-discovery"', "todo discovery controls");
