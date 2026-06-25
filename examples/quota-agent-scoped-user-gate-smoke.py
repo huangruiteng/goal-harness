@@ -286,6 +286,7 @@ def assert_agent_without_advancement_candidate_enters_scope_wait() -> None:
     assert scheduler["schema_version"] == "scheduler_hint_v0", scheduler
     assert scheduler["action"] == "backoff_until_reassigned", scheduler
     assert scheduler["codex_app"]["recommended_interval_minutes"] == 10, scheduler
+    assert scheduler["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=10", scheduler
     assert scheduler["codex_app"]["example_progression_minutes"] == [10, 20, 30], scheduler
     assert scheduler["codex_cli_tui"]["unchanged_poll_limit"] == 3, scheduler
     assert scheduler["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, scheduler
@@ -294,10 +295,15 @@ def assert_agent_without_advancement_candidate_enters_scope_wait() -> None:
     reset = scheduler["reset_policy"]
     assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
     assert reset["profile_action"] == "backoff_until_reassigned", reset
+    assert isinstance(reset["reset_token"], str) and len(reset["reset_token"]) == 16, reset
+    assert reset["host_state_key"] == "scheduler_hint.reset_policy.reset_token", reset
     assert reset["codex_app_initial_interval_minutes"] == 10, reset
+    assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=10", reset
     assert reset["identity_keys"] == scheduler["unchanged_identity_keys"], reset
     assert reset["identity_snapshot"]["agent_identity.agent_id"] == payload["agent_identity"]["agent_id"], reset
+    assert "reset_token_changed" in reset["reset_conditions"], reset
     assert "new_or_reassigned_todo" in reset["reset_conditions"], reset
+    assert "active_work_projected" in reset["reset_conditions"], reset
     assert reset["no_spend_for_reset"] is True, reset
     assert "scheduler=backoff_until_reassigned" in payload["protocol_action_packet"]["summary"], payload
 

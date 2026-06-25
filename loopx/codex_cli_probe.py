@@ -1388,9 +1388,18 @@ def build_codex_cli_local_scheduler_tick(
         if isinstance(scheduler_hint.get("local_scheduler"), dict)
         else {}
     )
+    reset_policy = (
+        scheduler_hint.get("reset_policy")
+        if isinstance(scheduler_hint.get("reset_policy"), dict)
+        else {}
+    )
     recommended_interval_minutes = _positive_int(
         local_scheduler_hint.get("recommended_interval_minutes"),
         10,
+    )
+    reset_interval_minutes = _positive_int(
+        reset_policy.get("local_scheduler_initial_interval_minutes"),
+        recommended_interval_minutes,
     )
 
     candidate_command = None
@@ -1481,9 +1490,13 @@ def build_codex_cli_local_scheduler_tick(
             "one_shot_command": scheduler_tick_command,
             "keep_alive": False,
             "recommended_interval_seconds": recommended_interval_minutes * 60,
+            "reset_token": reset_policy.get("reset_token"),
+            "reset_interval_seconds": reset_interval_minutes * 60,
+            "reset_policy": reset_policy or None,
             "notes": [
                 "Run this tick as a one-shot or low-frequency launchd job.",
                 "If quota scheduler_hint is present, apply its cadence/backoff and unchanged-poll stop policy.",
+                "If scheduler_hint.reset_policy.reset_token changes, reset the local interval to reset_interval_seconds and clear unchanged-poll state without spending quota.",
                 "The tick prints a candidate command or blocker command; it does not execute Codex.",
                 "Use external logging that excludes raw transcripts, session files, credentials, and private paths.",
             ],
