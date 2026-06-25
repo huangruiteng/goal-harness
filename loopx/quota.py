@@ -4174,9 +4174,20 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
             key: identity_value(key)
             for key in identity_keys
         }
+        codex_rrule = f"FREQ=MINUTELY;INTERVAL={codex_interval}"
+        profile_snapshot = {
+            "cadence_class": cadence_class,
+            "codex_app_initial_interval_minutes": codex_interval,
+            "codex_app_initial_rrule": codex_rrule,
+            "codex_app_max_interval_minutes": codex_max,
+            "unchanged_poll_backoff_multiplier": multiplier,
+            "local_scheduler_unchanged_poll_limit": cli_limit,
+            "claude_code_loop_unchanged_poll_limit": claude_limit,
+        }
         reset_token_payload = {
             "action": action,
             "identity_snapshot": identity_snapshot,
+            "profile_snapshot": profile_snapshot,
         }
         reset_token = hashlib.sha256(
             json.dumps(
@@ -4186,7 +4197,6 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
                 default=str,
             ).encode("utf-8")
         ).hexdigest()[:16]
-        codex_rrule = f"FREQ=MINUTELY;INTERVAL={codex_interval}"
         reset_policy = {
             "schema_version": SCHEDULER_RESET_POLICY_SCHEMA_VERSION,
             "source": "quota.should-run",
@@ -4200,6 +4210,7 @@ def _scheduler_hint(payload: dict[str, Any]) -> dict[str, Any]:
             "clear_unchanged_poll_state": True,
             "identity_keys": identity_keys,
             "identity_snapshot": identity_snapshot,
+            "profile_snapshot": profile_snapshot,
             "reset_conditions": [
                 "reset_token_changed",
                 "quota_identity_snapshot_changed",

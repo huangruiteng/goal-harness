@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import subprocess
 import sys
@@ -35,6 +36,23 @@ from loopx.quota import (  # noqa: E402
 
 
 SCOPED_AGENT_ID = "codex-side-bypass"
+
+
+def expected_scheduler_reset_token(scheduler: dict) -> str:
+    reset = scheduler["reset_policy"]
+    token_payload = {
+        "action": scheduler["action"],
+        "identity_snapshot": reset["identity_snapshot"],
+        "profile_snapshot": reset["profile_snapshot"],
+    }
+    return hashlib.sha256(
+        json.dumps(
+            token_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
 
 
 def goal(
@@ -1560,9 +1578,14 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
     assert reset["reset_to"] == "profile_initial_interval", reset
     assert isinstance(reset["reset_token"], str) and len(reset["reset_token"]) == 16, reset
+    assert reset["reset_token"] == expected_scheduler_reset_token(scheduler), reset
     assert reset["host_state_key"] == "scheduler_hint.reset_policy.reset_token", reset
     assert reset["codex_app_initial_interval_minutes"] == 60, reset
     assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", reset
+    assert reset["profile_snapshot"]["cadence_class"] == "unchanged_noop", reset
+    assert reset["profile_snapshot"]["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=60", reset
+    assert reset["profile_snapshot"]["codex_app_max_interval_minutes"] == 240, reset
+    assert reset["profile_snapshot"]["unchanged_poll_backoff_multiplier"] == 2, reset
     assert reset["identity_keys"] == scheduler["unchanged_identity_keys"], reset
     assert reset["identity_snapshot"]["recommended_action"] == mapped_decision["recommended_action"], reset
     assert "reset_token_changed" in reset["reset_conditions"], reset
