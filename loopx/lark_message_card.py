@@ -18,7 +18,7 @@ def compact_markdown(
     max_chars: int = DEFAULT_MAX_MARKDOWN_CHARS,
     suffix: str = DEFAULT_TRUNCATION_SUFFIX,
 ) -> str:
-    value = str(text or "").replace("\r", "").strip()
+    value = str(text or "").replace("\r", "").replace("\\r\\n", "\n").replace("\\n", "\n").strip()
     if len(value) <= max_chars:
         return value
     if max_chars <= len(suffix):

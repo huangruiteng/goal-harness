@@ -40,6 +40,9 @@ def main() -> int:
         "tag": "note",
         "elements": [{"tag": "plain_text", "content": "LoopX automated reply"}],
     }, card
+    escaped_newline_content = build_lark_markdown_reply_card("first\\nsecond")["elements"][0]["text"]["content"]
+    assert "\\n" not in escaped_newline_content, escaped_newline_content
+    assert "first\nsecond" in escaped_newline_content, escaped_newline_content
 
     assert compact_plain_text("  one\n\n two  ", max_chars=20) == "one two"
     assert len(compact_plain_text("x" * 100, max_chars=12)) <= 12
