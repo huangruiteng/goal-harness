@@ -653,6 +653,96 @@ def _compact_numeric_map(value: Any, *, keys: tuple[str, ...] | None = None) -> 
     return compact
 
 
+def _compact_benchmark_case_event_timeline(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    events: list[dict[str, Any]] = []
+    for raw_event in value.get("events", []):
+        if not isinstance(raw_event, dict):
+            continue
+        event: dict[str, Any] = {}
+        for field in ("phase", "event", "status"):
+            text = public_safe_compact_text(raw_event.get(field), limit=120)
+            if text:
+                event[field] = text
+        if not {"phase", "event", "status"} <= set(event):
+            continue
+        for field in (
+            "execution_style",
+            "agent_operation_trace_status",
+            "last_decision",
+            "recovery_stage",
+            "recovery_exception_type",
+            "runner_failure_class",
+            "official_score_status",
+            "score_failure_attribution",
+        ):
+            text = public_safe_compact_text(raw_event.get(field), limit=140)
+            if text:
+                event[field] = text
+        for field in (
+            "required",
+            "initialized_before_agent",
+            "consumed_by_solver",
+            "official_score_passed",
+        ):
+            if isinstance(raw_event.get(field), bool):
+                event[field] = raw_event[field]
+        for field in (
+            "index",
+            "checkpoint_count",
+            "state_read_count",
+            "state_write_count",
+            "solver_operation_count",
+            "solver_probe_ready_count",
+            "trajectory_event_count",
+            "trajectory_round_count",
+            "trajectory_tool_call_count",
+            "agent_bridge_request_count",
+            "agent_bridge_task_facing_operation_count",
+            "action_decision_count",
+            "initial_prompt_count",
+            "followup_prompt_count",
+            "stop_decision_count",
+            "max_rounds_budget",
+            "final_round",
+            "recovery_delta_events",
+            "recovery_delta_tool_calls",
+            "benchflow_agent_timeout_effective_sec",
+            "local_codex_exec_timeout_sec",
+            "todo_closeout_count",
+            "refresh_state_count",
+            "quota_spend_slot_count",
+        ):
+            raw = raw_event.get(field)
+            if isinstance(raw, int) and not isinstance(raw, bool):
+                event[field] = max(0, raw)
+        for field in ("best_round_reward", "official_score_value"):
+            raw = raw_event.get(field)
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                event[field] = raw
+        labels = public_safe_compact_list(
+            raw_event.get("failure_attribution_labels"),
+            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+        )
+        if labels:
+            event["failure_attribution_labels"] = labels
+        events.append(event)
+
+    if not events:
+        return {}
+
+    compact: dict[str, Any] = {
+        "schema_version": "skillsbench_case_event_timeline_v0",
+        "source": "compact_public_signals",
+        "raw_material_recorded": False,
+        "event_count": len(events),
+        "events": events[:12],
+    }
+    return compact
+
+
 def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -679,6 +769,7 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "product_mode_lifecycle_checkpoint_required",
         "product_mode_solver_activity_required",
         "product_mode_solver_activity_gap",
+        "product_mode_declared_done_below_passing_reward",
         "product_mode_no_tool_call_lifecycle_abort",
         "agent_declared_done",
         "agent_declared_no_remaining_goals",
@@ -700,6 +791,8 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_timeout_raw_output_recorded",
         "benchflow_intermediate_soft_verify_timeout_cleanup_requested",
         "benchflow_intermediate_soft_verify_timeout_cleanup_raw_logs_read",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_requested",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_raw_logs_read",
         "private_trajectory_summary_present",
         "native_goal_worker_route",
         "native_goal_worker_connected",
@@ -714,6 +807,8 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_agent_operation_trace_satisfied",
         "remote_command_file_bridge_driver_lifecycle_trace_present",
         "remote_command_file_bridge_driver_lifecycle_raw_material_recorded",
+        "host_local_acp_codex_exec_failure_trace_present",
+        "host_local_acp_codex_exec_failure_raw_material_recorded",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
@@ -736,6 +831,8 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "product_mode_lifecycle_checkpoint_round",
         "product_mode_solver_activity_gap_count",
         "product_mode_solver_activity_gap_round",
+        "product_mode_declared_done_below_passing_reward_count",
+        "product_mode_declared_done_below_passing_reward_round",
         "product_mode_no_tool_call_lifecycle_abort_count",
         "product_mode_no_tool_call_lifecycle_abort_round",
         "controller_verifier_feedback_observation_count",
@@ -753,6 +850,11 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_timeout_cleanup_term_sent_count",
         "benchflow_intermediate_soft_verify_timeout_cleanup_kill_sent_count",
         "benchflow_intermediate_soft_verify_timeout_cleanup_alive_after_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_container_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_match_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_term_sent_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_kill_sent_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_alive_after_count",
         "private_trajectory_event_count",
         "private_trajectory_round_count",
         "private_trajectory_tool_call_count",
@@ -795,6 +897,8 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_solver_operation_count",
         "remote_command_file_bridge_agent_operation_trace_count",
         "remote_command_file_bridge_agent_request_count",
+        "remote_command_file_bridge_agent_success_count",
+        "remote_command_file_bridge_agent_failure_count",
         "remote_command_file_bridge_agent_loopx_cli_call_count",
         "remote_command_file_bridge_agent_loopx_state_read_count",
         "remote_command_file_bridge_agent_loopx_state_write_count",
@@ -810,9 +914,14 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count",
         "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count",
         "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count",
+        "host_local_acp_codex_exec_failure_trace_count",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
+    for field in ("product_mode_declared_done_below_passing_reward_score",):
+        raw = value.get(field)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            compact[field] = float(raw)
     for field in (
         "case_result_writeback",
         "counter_trust_level",
@@ -823,14 +932,18 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "case_goal_state_schema_version",
         "product_mode_lifecycle_checkpoint_missing_reason",
         "product_mode_solver_activity_missing_reason",
+        "product_mode_declared_done_below_passing_reward_score_status",
+        "product_mode_declared_done_policy",
         "controller_budget_cutoff_reason",
         "benchflow_user_loop_recovery_stage",
         "benchflow_user_loop_recovery_exception_type",
         "benchflow_intermediate_soft_verify_policy",
         "benchflow_intermediate_soft_verify_timeout_stage",
         "benchflow_intermediate_soft_verify_timeout_cleanup_status",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_status",
         "remote_command_file_bridge_agent_operation_trace_status",
         "remote_command_file_bridge_driver_lifecycle_execution_style",
+        "host_local_acp_codex_exec_failure_category",
         "last_decision",
         "worker_submit_eligible_mismatch_reason",
         "worker_bridge_writeback_loss_reason",
@@ -854,6 +967,8 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
         "codex_runtime_goal_tool_calls",
         "trajectory_action_category_counts",
         "loopx_cli_state_usage_counts",
+        "remote_command_file_bridge_agent_returncode_counts",
+        "remote_command_file_bridge_agent_successful_loopx_subcommand_counts",
     ):
         calls = _compact_numeric_map(value.get(field))
         if calls:
@@ -953,7 +1068,142 @@ def _compact_product_mode_lifecycle_contract(value: Any) -> dict[str, Any]:
     execution_style = public_safe_compact_text(value.get("execution_style"), limit=120)
     if execution_style:
         compact["execution_style"] = execution_style
+    _normalize_product_mode_lifecycle_contract(compact)
     return compact
+
+
+def _normalize_product_mode_lifecycle_contract(contract: dict[str, Any]) -> None:
+    """Repair old compact records whose bridge closeout evidence was copied late."""
+
+    def positive_int(field: str) -> int:
+        value = contract.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return 0
+
+    agent_trace_required = contract.get("agent_operation_trace_required") is True
+    agent_trace_satisfied = contract.get("agent_operation_trace_satisfied") is True
+    agent_trace_missing = contract.get("agent_operation_trace_missing") is True
+    agent_trace_ok = bool(
+        not agent_trace_missing
+        and (agent_trace_satisfied or not agent_trace_required)
+    )
+    agent_bridge_closeout_satisfied = bool(
+        positive_int("agent_bridge_todo_closeout_count") > 0
+        and positive_int("agent_bridge_refresh_state_count") > 0
+        and positive_int("agent_bridge_quota_spend_slot_count") > 0
+    )
+    lifecycle_io_satisfied = bool(
+        positive_int("state_read_count") > 0
+        and positive_int("state_write_count") > 0
+    )
+    lifecycle_closeout_satisfied = bool(
+        contract.get("closeout_satisfied") is True
+        or agent_bridge_closeout_satisfied
+    )
+    if (
+        contract.get("required") is True
+        and agent_trace_ok
+        and lifecycle_io_satisfied
+        and lifecycle_closeout_satisfied
+    ):
+        contract["satisfied"] = True
+        contract["countable_treatment"] = True
+        contract["closeout_satisfied"] = True
+        if contract.get("missing_reason") in {
+            "missing_case_local_loopx_closeout",
+            "remote_command_file_bridge_agent_operation_trace_missing",
+        }:
+            contract.pop("missing_reason", None)
+
+
+def _repair_product_mode_lifecycle_missing_attribution(
+    compact: dict[str, Any],
+) -> None:
+    contract = compact.get("product_mode_lifecycle_contract")
+    if not isinstance(contract, dict):
+        return
+    if not (
+        contract.get("required") is True
+        and contract.get("satisfied") is True
+        and contract.get("countable_treatment") is True
+    ):
+        return
+    if compact.get("score_failure_attribution") != (
+        "skillsbench_product_mode_lifecycle_missing"
+    ):
+        return
+
+    labels = public_safe_compact_list(
+        compact.get("failure_attribution_labels"),
+        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
+    stale_labels = {
+        "skillsbench_product_mode_lifecycle_missing",
+        "skillsbench_product_mode_uncountable_treatment",
+        "skillsbench_case_local_loopx_state_not_observed",
+        "skillsbench_remote_bridge_agent_no_requests",
+        "skillsbench_remote_bridge_agent_operation_trace_missing",
+    }
+    labels = [label for label in labels if label not in stale_labels]
+
+    official_score = compact.get("official_score")
+    counters = compact.get("interaction_counters")
+    if not isinstance(counters, dict):
+        counters = {}
+
+    def positive_counter(field: str) -> int:
+        value = counters.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return 0
+
+    def zero_counter_observed(field: str) -> bool:
+        if field not in counters:
+            return False
+        value = counters.get(field)
+        return isinstance(value, int) and not isinstance(value, bool) and value == 0
+
+    solver_activity_gap = bool(
+        counters.get("product_mode_solver_activity_gap") is True
+        and (
+            counters.get("product_mode_solver_activity_missing_reason")
+            == "missing_task_facing_activity_or_agent_closeout_before_declared_done"
+            or positive_counter("product_mode_solver_activity_gap_count") > 0
+            or zero_counter_observed(
+                "remote_command_file_bridge_agent_task_facing_operation_count"
+            )
+            or zero_counter_observed(
+                "remote_command_file_bridge_agent_todo_closeout_count"
+            )
+        )
+    )
+    if solver_activity_gap:
+        replacement = "skillsbench_product_mode_solver_activity_gap"
+        labels = [
+            label
+            for label in labels
+            if label
+            not in {
+                "official_verifier_solution_failure",
+                "official_score_zero_case_failure",
+            }
+        ]
+    elif isinstance(official_score, (int, float)) and not isinstance(
+        official_score,
+        bool,
+    ) and official_score == 0:
+        replacement = "official_verifier_solution_failure"
+    else:
+        replacement = "none"
+
+    compact["score_failure_attribution"] = replacement
+    if replacement != "none" and replacement not in labels:
+        labels.insert(0, replacement)
+    if labels:
+        compact["failure_attribution_labels"] = labels[:MAX_BENCHMARK_RUN_LIST_ITEMS]
+    else:
+        compact.pop("failure_attribution_labels", None)
 
 
 def _compact_benchmark_round_reward_trace(value: Any) -> dict[str, Any]:
@@ -1208,6 +1458,7 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_policy",
         "benchflow_intermediate_soft_verify_timeout_stage",
         "benchflow_intermediate_soft_verify_timeout_cleanup_status",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_status",
         "benchflow_setup_stall_cleanup_status",
         "remote_command_file_bridge_consumption_status",
         "remote_command_file_bridge_agent_operation_trace_status",
@@ -1263,6 +1514,8 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_timeout_raw_output_recorded",
         "benchflow_intermediate_soft_verify_timeout_cleanup_requested",
         "benchflow_intermediate_soft_verify_timeout_cleanup_raw_logs_read",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_requested",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_raw_logs_read",
         "benchflow_verifier_prep_timeout_override_enabled",
         "benchflow_verifier_prep_timeout_raw_command_recorded",
         "benchflow_final_verifier_timeout_enabled",
@@ -1304,6 +1557,11 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_timeout_cleanup_term_sent_count",
         "benchflow_intermediate_soft_verify_timeout_cleanup_kill_sent_count",
         "benchflow_intermediate_soft_verify_timeout_cleanup_alive_after_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_container_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_match_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_term_sent_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_kill_sent_count",
+        "benchflow_intermediate_soft_verify_orphan_cleanup_alive_after_count",
         "benchflow_verifier_prep_timeout_sec",
         "benchflow_final_verifier_timeout_sec",
         "benchflow_final_verifier_timeout_override_count",
@@ -1320,6 +1578,8 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_solver_operation_count",
         "remote_command_file_bridge_agent_operation_trace_count",
         "remote_command_file_bridge_agent_request_count",
+        "remote_command_file_bridge_agent_success_count",
+        "remote_command_file_bridge_agent_failure_count",
         "remote_command_file_bridge_agent_loopx_cli_call_count",
         "remote_command_file_bridge_agent_loopx_state_read_count",
         "remote_command_file_bridge_agent_loopx_state_write_count",
@@ -2836,6 +3096,13 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     )
     if product_mode_lifecycle_contract:
         compact["product_mode_lifecycle_contract"] = product_mode_lifecycle_contract
+        _repair_product_mode_lifecycle_missing_attribution(compact)
+
+    case_event_timeline = _compact_benchmark_case_event_timeline(
+        source.get("case_event_timeline")
+    )
+    if case_event_timeline:
+        compact["case_event_timeline"] = case_event_timeline
 
     preflight_guard = _compact_benchmark_preflight_guard(source.get("preflight_guard"))
     if preflight_guard:

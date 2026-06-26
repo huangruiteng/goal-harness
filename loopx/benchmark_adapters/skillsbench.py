@@ -1877,6 +1877,11 @@ def _skillsbench_controller_trace_counters(
             return value
         return 0
 
+    def max_direct_or_subcommands(key: str, commands: tuple[str, ...]) -> int:
+        direct = count(key)
+        derived = sum(subcommand_count(command) for command in commands)
+        return max(direct, derived)
+
     def round_reward_records() -> list[dict[str, Any]]:
         raw_records = controller_trace.get("round_rewards")
         if not isinstance(raw_records, list):
@@ -1973,6 +1978,10 @@ def _skillsbench_controller_trace_counters(
         is True,
         "product_mode_solver_activity_gap": controller_trace.get(
             "product_mode_solver_activity_gap"
+        )
+        is True,
+        "product_mode_declared_done_below_passing_reward": controller_trace.get(
+            "product_mode_declared_done_below_passing_reward"
         )
         is True,
         "agent_declared_done": controller_trace.get("agent_declared_done") is True,
@@ -2084,14 +2093,17 @@ def _skillsbench_controller_trace_counters(
         "remote_command_file_bridge_agent_loopx_state_write_count": count(
             "remote_command_file_bridge_agent_loopx_state_write_count"
         ),
-        "remote_command_file_bridge_agent_todo_closeout_count": (
-            subcommand_count("todo complete") + subcommand_count("todo update")
+        "remote_command_file_bridge_agent_todo_closeout_count": max_direct_or_subcommands(
+            "remote_command_file_bridge_agent_todo_closeout_count",
+            ("todo complete", "todo update"),
         ),
-        "remote_command_file_bridge_agent_refresh_state_count": subcommand_count(
-            "refresh-state"
+        "remote_command_file_bridge_agent_refresh_state_count": max_direct_or_subcommands(
+            "remote_command_file_bridge_agent_refresh_state_count",
+            ("refresh-state",),
         ),
-        "remote_command_file_bridge_agent_quota_spend_slot_count": subcommand_count(
-            "quota spend-slot"
+        "remote_command_file_bridge_agent_quota_spend_slot_count": max_direct_or_subcommands(
+            "remote_command_file_bridge_agent_quota_spend_slot_count",
+            ("quota spend-slot",),
         ),
         "remote_command_file_bridge_agent_task_facing_operation_count": count(
             "remote_command_file_bridge_agent_task_facing_operation_count"
@@ -2120,6 +2132,17 @@ def _skillsbench_controller_trace_counters(
         "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count": count(
             "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count"
         ),
+        "host_local_acp_codex_exec_failure_trace_count": count(
+            "host_local_acp_codex_exec_failure_trace_count"
+        ),
+        "host_local_acp_codex_exec_failure_trace_present": controller_trace.get(
+            "host_local_acp_codex_exec_failure_trace_present"
+        )
+        is True,
+        "host_local_acp_codex_exec_failure_raw_material_recorded": controller_trace.get(
+            "host_local_acp_codex_exec_failure_raw_material_recorded"
+        )
+        is True,
         "heartbeat_count": count("heartbeat_count"),
         "raw_task_text_recorded": controller_trace.get("raw_task_text_recorded")
         is True,
@@ -2193,6 +2216,12 @@ def _skillsbench_controller_trace_counters(
         ),
         "product_mode_solver_activity_gap_round": count(
             "product_mode_solver_activity_gap_round"
+        ),
+        "product_mode_declared_done_below_passing_reward_count": count(
+            "product_mode_declared_done_below_passing_reward_count"
+        ),
+        "product_mode_declared_done_below_passing_reward_round": count(
+            "product_mode_declared_done_below_passing_reward_round"
         ),
         "product_mode_no_tool_call_lifecycle_abort": controller_trace.get(
             "product_mode_no_tool_call_lifecycle_abort"
@@ -2277,6 +2306,28 @@ def _skillsbench_controller_trace_counters(
         counters["remote_command_file_bridge_driver_lifecycle_execution_style"] = (
             workflow_style
         )
+    host_codex_failure_category = _skillsbench_public_safe_label(
+        controller_trace.get("host_local_acp_codex_exec_failure_category") or ""
+    )
+    if host_codex_failure_category:
+        counters["host_local_acp_codex_exec_failure_category"] = (
+            host_codex_failure_category
+        )
+    host_codex_failure_categories: list[str] = []
+    raw_host_codex_failure_categories = controller_trace.get(
+        "host_local_acp_codex_exec_failure_categories"
+    )
+    if isinstance(raw_host_codex_failure_categories, list):
+        for item in raw_host_codex_failure_categories:
+            category = _skillsbench_public_safe_label(item or "")
+            if category and category not in host_codex_failure_categories:
+                host_codex_failure_categories.append(category)
+    elif host_codex_failure_category:
+        host_codex_failure_categories.append(host_codex_failure_category)
+    if host_codex_failure_categories:
+        counters["host_local_acp_codex_exec_failure_categories"] = (
+            host_codex_failure_categories[:8]
+        )
     case_state_path = str(controller_trace.get("case_goal_state_path") or "")
     if (
         "/.codex/goals/" in case_state_path
@@ -2293,6 +2344,31 @@ def _skillsbench_controller_trace_counters(
         and not isinstance(declared_done_score, bool)
     ):
         counters["declared_done_score"] = float(declared_done_score)
+    below_passing_score = controller_trace.get(
+        "product_mode_declared_done_below_passing_reward_score"
+    )
+    if (
+        isinstance(below_passing_score, (int, float))
+        and not isinstance(below_passing_score, bool)
+    ):
+        counters["product_mode_declared_done_below_passing_reward_score"] = float(
+            below_passing_score
+        )
+    below_passing_score_status = _skillsbench_public_safe_label(
+        controller_trace.get(
+            "product_mode_declared_done_below_passing_reward_score_status"
+        )
+        or ""
+    )
+    if below_passing_score_status:
+        counters["product_mode_declared_done_below_passing_reward_score_status"] = (
+            below_passing_score_status
+        )
+    declared_done_policy = _skillsbench_public_safe_label(
+        controller_trace.get("product_mode_declared_done_policy") or ""
+    )
+    if declared_done_policy:
+        counters["product_mode_declared_done_policy"] = declared_done_policy
     if reward_records:
         counters["round_rewards"] = reward_records
     trajectory_summary = (
@@ -3001,9 +3077,32 @@ def build_skillsbench_benchflow_result_benchmark_run(
     product_mode_solver_activity_gap_observed = bool(
         controller_counters.get("product_mode_solver_activity_gap") is True
     )
-    if (
+    product_mode_solver_activity_gap_corroborated = bool(
         product_mode_solver_activity_gap_observed
-        and reward_value is None
+        and (
+            controller_counters.get("product_mode_solver_activity_missing_reason")
+            == "missing_task_facing_activity_or_agent_closeout_before_declared_done"
+            or _controller_public_count("product_mode_solver_activity_gap_count") > 0
+            or (
+                "remote_command_file_bridge_agent_task_facing_operation_count"
+                in controller_counters
+                and _controller_public_count(
+                    "remote_command_file_bridge_agent_task_facing_operation_count"
+                )
+                == 0
+            )
+            or (
+                "remote_command_file_bridge_agent_todo_closeout_count"
+                in controller_counters
+                and _controller_public_count(
+                    "remote_command_file_bridge_agent_todo_closeout_count"
+                )
+                == 0
+            )
+        )
+    )
+    if (
+        product_mode_solver_activity_gap_corroborated
         and not official_passed
     ):
         label = "skillsbench_product_mode_solver_activity_gap"
@@ -3013,18 +3112,41 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "none",
             "skillsbench_runner_error",
             "verifier_infrastructure_failure",
+            "official_verifier_solution_failure",
+            "official_score_zero_case_failure",
         }:
             score_failure_attribution = label
             runner_score_failure_attribution = label
+            failure_labels = [
+                item
+                for item in failure_labels
+                if item
+                not in {
+                    "official_verifier_solution_failure",
+                    "official_score_zero_case_failure",
+                    "verifier_infrastructure_failure",
+                }
+            ]
         for item in (
             label,
             "skillsbench_agent_behavior_gap",
-            "skillsbench_reward_artifact_missing",
+            "skillsbench_reward_artifact_missing" if reward_value is None else "",
             "skillsbench_verifier_error_subtype_unavailable_public"
             if verifier_error_text
             else "",
         ):
             if item and item not in failure_labels:
+                failure_labels.append(item)
+    product_mode_declared_done_below_passing_reward = bool(
+        controller_counters.get("product_mode_declared_done_below_passing_reward")
+        is True
+    )
+    if product_mode_declared_done_below_passing_reward and not official_passed:
+        for item in (
+            "skillsbench_product_mode_declared_done_below_passing_reward",
+            "skillsbench_agent_premature_done_signal",
+        ):
+            if item not in failure_labels:
                 failure_labels.append(item)
     user_loop_final_verify_recovery_triggered = bool(
         controller_counters.get("benchflow_user_loop_final_verify_recovery_triggered")
@@ -3100,6 +3222,54 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "skillsbench_reward_artifact_missing",
         ):
             if item not in failure_labels:
+                failure_labels.append(item)
+    host_local_acp_codex_exec_failure_present = bool(
+        controller_counters.get("host_local_acp_codex_exec_failure_trace_present")
+        is True
+    )
+    host_local_acp_codex_exec_failure_category = str(
+        controller_counters.get("host_local_acp_codex_exec_failure_category") or ""
+    )
+    if host_local_acp_codex_exec_failure_present and not official_passed:
+        host_failure_label = "skillsbench_host_local_acp_codex_exec_failed"
+        if host_local_acp_codex_exec_failure_category:
+            host_failure_label = (
+                f"{host_failure_label}_{host_local_acp_codex_exec_failure_category}"
+            )
+        exception_type = host_failure_label
+        score_failure_attribution = host_failure_label
+        runner_score_failure_attribution = host_failure_label
+        contract_official_score_comparable_to_native_codex = False
+        contract_official_score_comparable_to_loopx_treatment = False
+        failure_labels = [
+            item
+            for item in failure_labels
+            if item
+            not in {
+                "skillsbench_runner_error",
+                "skillsbench_codex_acp_jsonrpc_internal_error",
+                "skillsbench_codex_acp_transport_error",
+                "skillsbench_controller_budget_not_exercised",
+                "skillsbench_result_error_cut_off_followup_loop",
+                "skillsbench_result_timeout_after_agent_round_no_reward_artifact",
+                "skillsbench_result_error_after_agent_round",
+                "skillsbench_reward_artifact_missing",
+                "verifier_infrastructure_failure",
+                "official_score_zero_case_failure",
+                "official_verifier_solution_failure",
+            }
+        ]
+        controller_budget_cutoff_before_followup = False
+        controller_budget_cutoff_reason = "none"
+        for item in (
+            host_failure_label,
+            "skillsbench_host_local_acp_codex_exec_failed",
+            "skillsbench_runner_setup_error",
+            "skillsbench_product_mode_transport_failure"
+            if route == "loopx-product-mode"
+            else "",
+        ):
+            if item and item not in failure_labels:
                 failure_labels.append(item)
     if trajectory_summary:
         evidence_files.append("loopx:acp_trajectory_summary")
@@ -3551,6 +3721,9 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "product_mode_solver_activity_gap": controller_counters.get(
                 "product_mode_solver_activity_gap", False
             ),
+            "product_mode_declared_done_below_passing_reward": controller_counters.get(
+                "product_mode_declared_done_below_passing_reward", False
+            ),
             "product_mode_lifecycle_checkpoint_count": controller_counters.get(
                 "product_mode_lifecycle_checkpoint_count", 0
             ),
@@ -3568,6 +3741,21 @@ def build_skillsbench_benchflow_result_benchmark_run(
             ),
             "product_mode_solver_activity_missing_reason": controller_counters.get(
                 "product_mode_solver_activity_missing_reason", ""
+            ),
+            "product_mode_declared_done_below_passing_reward_count": controller_counters.get(
+                "product_mode_declared_done_below_passing_reward_count", 0
+            ),
+            "product_mode_declared_done_below_passing_reward_round": controller_counters.get(
+                "product_mode_declared_done_below_passing_reward_round", 0
+            ),
+            "product_mode_declared_done_below_passing_reward_score": controller_counters.get(
+                "product_mode_declared_done_below_passing_reward_score"
+            ),
+            "product_mode_declared_done_below_passing_reward_score_status": controller_counters.get(
+                "product_mode_declared_done_below_passing_reward_score_status", ""
+            ),
+            "product_mode_declared_done_policy": controller_counters.get(
+                "product_mode_declared_done_policy", ""
             ),
             "product_mode_no_tool_call_lifecycle_abort": controller_counters.get(
                 "product_mode_no_tool_call_lifecycle_abort", False
@@ -3821,6 +4009,27 @@ def build_skillsbench_benchflow_result_benchmark_run(
                     "",
                 )
             ),
+            "host_local_acp_codex_exec_failure_trace_present": (
+                controller_counters.get(
+                    "host_local_acp_codex_exec_failure_trace_present", False
+                )
+            ),
+            "host_local_acp_codex_exec_failure_trace_count": (
+                controller_counters.get(
+                    "host_local_acp_codex_exec_failure_trace_count", 0
+                )
+            ),
+            "host_local_acp_codex_exec_failure_category": (
+                controller_counters.get(
+                    "host_local_acp_codex_exec_failure_category", ""
+                )
+            ),
+            "host_local_acp_codex_exec_failure_raw_material_recorded": (
+                controller_counters.get(
+                    "host_local_acp_codex_exec_failure_raw_material_recorded",
+                    False,
+                )
+            ),
             "loopx_case_state_path_count": trajectory_summary.get(
                 "loopx_case_state_path_count", 0
             ),
@@ -4034,7 +4243,7 @@ def build_skillsbench_benchflow_result_benchmark_run(
     if runner_failure is not None:
         benchmark_run["runner_failure"] = runner_failure
         benchmark_run["runner_failure_fingerprint"] = runner_failure_fingerprint
-    if partial_trajectory:
+    if partial_trajectory and not host_local_acp_codex_exec_failure_present:
         benchmark_run["failure_attribution_labels"].append("partial_trajectory")
     return benchmark_run
 

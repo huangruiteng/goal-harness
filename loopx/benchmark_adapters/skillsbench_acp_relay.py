@@ -6,6 +6,7 @@ import os
 import re
 import selectors
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,43 @@ SKILLSBENCH_LOCAL_ACP_RELAY_HEALTH_PROMPT = (
     "LoopX relay health check. Reply exactly "
     f"{SKILLSBENCH_LOCAL_ACP_RELAY_READY_MARKER} and end the turn."
 )
+SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER = (
+    "LOOPX_SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_READY"
+)
+SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_PROMPT = (
+    "LoopX bridge action preflight. First use the private bridge command from "
+    "the relay packet to run one JSON preflight request that does not require "
+    "scored sandbox target environment variables. Do not plan, explain, inspect "
+    "files, or reply before that bridge request returns. Your first tool action "
+    "should be a shell "
+    "pipeline that sends the JSON request to the private bridge command shown "
+    "in the packet, for example: "
+    "`printf '%s\\n' '{\"operation\":\"preflight\"}' | <private bridge command>`. "
+    "After the bridge response returns, reply exactly "
+    f"{SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER} and end the turn."
+)
+
+
+def _prompt_requires_bridge_first_action(prompt: str) -> bool:
+    text = prompt or ""
+    if "Private bridge command:" not in text:
+        return False
+    lowered = text.lower()
+    required_markers = (
+        SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER.lower(),
+        "your first tool action should be a shell",
+        "your first agent action must be a shell/tool call",
+        "first run the case-local quota/todo commands",
+    )
+    return any(marker in lowered for marker in required_markers)
+
+
+def _is_bridge_action_preflight_prompt(prompt: str) -> bool:
+    text = prompt or ""
+    return (
+        SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER in text
+        and "LoopX bridge action preflight" in text
+    )
 
 
 def _json_rpc_result(message_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +159,31 @@ def _codex_exec_failure_category(
     stderr_text: str,
 ) -> str:
     text = (stderr_text or "").lower()
+    if any(
+        token in text
+        for token in (
+            "not authenticated",
+            "authentication",
+            "unauthorized",
+            "api key",
+            "login required",
+            "please login",
+            "401",
+        )
+    ):
+        return "codex_auth_or_login_required"
+    if "model" in text and any(
+        token in text
+        for token in (
+            "not found",
+            "unknown",
+            "unsupported",
+            "invalid",
+            "does not exist",
+            "unavailable",
+        )
+    ):
+        return "codex_model_unavailable"
     if (
         "connectionrefusederror" in text
         or "connection refused" in text
@@ -130,13 +193,30 @@ def _codex_exec_failure_category(
         return "codex_reverse_channel_unavailable"
     if "hit your usage limit" in text or "usage limit" in text:
         return "codex_usage_limit"
+    if "codex_exec_first_action_timeout" in text:
+        return "codex_exec_first_action_timeout"
+    if "codex_exec_bridge_idle_timeout" in text:
+        return "codex_exec_bridge_idle_timeout"
     if "unexpected argument" in text or "unrecognized option" in text:
         return "codex_cli_argument_incompatible"
+    if any(
+        token in text
+        for token in (
+            "command not found",
+            "no such file or directory",
+            "modulenotfounderror",
+            "importerror",
+            "failed to spawn",
+        )
+    ):
+        return "codex_cli_or_environment_missing"
     if "api.openai.com" in text or "chatgpt.com" in text:
         if any(token in text for token in ("timed out", "timeout", "connection")):
             return "codex_network_or_api_unreachable"
     if returncode == 124:
         return "codex_exec_timeout"
+    if returncode is not None and 0 < returncode <= 255:
+        return f"codex_exec_exit_{returncode}"
     if returncode is not None:
         return "codex_exec_exit_nonzero"
     return "codex_exec_failed"
@@ -157,6 +237,8 @@ class CodexExecConfig:
     response_timeout_sec: float = 30.0
     worker_script: str | None = None
     stream_heartbeat_interval_sec: float = 120.0
+    first_action_timeout_sec: float = 0.0
+    bridge_idle_timeout_sec: float = 0.0
     reasoning_effort: str | None = "high"
     worker_public_trace_dir: str | None = None
     remote_command_file_bridge_command: str | None = None
@@ -326,7 +408,10 @@ class SkillsBenchLocalAcpRelay:
             prompt_for_codex = prompt_text
             cwd = _safe_cwd(session.get("cwd"), default=os.getcwd())
             if self._config.remote_command_file_bridge_command:
-                bridge_probe = self._consume_remote_bridge_for_solver()
+                if _is_bridge_action_preflight_prompt(prompt_text):
+                    bridge_probe = self._reverse_channel_json_preflight_probe()
+                else:
+                    bridge_probe = self._consume_remote_bridge_for_solver()
                 self._publish_remote_bridge_consumption_trace(bridge_probe)
                 if bridge_probe.get("ready") is not True:
                     raise RuntimeError("remote command/file bridge probe failed")
@@ -373,7 +458,7 @@ class SkillsBenchLocalAcpRelay:
             model = self._config.model or session.get("model")
             if model:
                 cmd.extend(["--model", str(model)])
-            cmd.append(prompt_for_codex)
+            codex_stdin_prompt = prompt_for_codex
             stdout_text = ""
             stderr_text = ""
             try:
@@ -387,22 +472,105 @@ class SkillsBenchLocalAcpRelay:
                         )
                     proc = subprocess.Popen(
                         cmd,
-                        stdin=subprocess.DEVNULL,
+                        stdin=subprocess.PIPE,
                         stdout=stdout_file,
                         stderr=stderr_file,
                         text=True,
                         env=codex_env,
+                        start_new_session=True,
                     )
+                    if proc.stdin is not None:
+                        try:
+                            proc.stdin.write(codex_stdin_prompt)
+                            proc.stdin.close()
+                        except BrokenPipeError:
+                            pass
                     deadline = time.monotonic() + self._config.timeout_sec
+                    first_action_deadline = 0.0
+                    if (
+                        bridge_summary_path is not None
+                        and self._config.first_action_timeout_sec > 0
+                        and _prompt_requires_bridge_first_action(prompt_for_codex)
+                    ):
+                        first_action_deadline = (
+                            time.monotonic()
+                            + max(1.0, self._config.first_action_timeout_sec)
+                        )
+                    first_action_seen = not bool(first_action_deadline)
+                    bridge_idle_timeout_sec = max(
+                        0.0,
+                        float(self._config.bridge_idle_timeout_sec or 0.0),
+                    )
+                    last_bridge_summary_size = 0
+                    last_bridge_activity_at = time.monotonic()
                     next_heartbeat = (
                         time.monotonic()
                         + max(1.0, self._config.stream_heartbeat_interval_sec)
                     )
                     while proc.poll() is None:
                         now = time.monotonic()
+                        if bridge_summary_path is not None:
+                            try:
+                                current_bridge_summary_size = (
+                                    bridge_summary_path.stat().st_size
+                                )
+                            except OSError:
+                                current_bridge_summary_size = 0
+                            if current_bridge_summary_size > last_bridge_summary_size:
+                                last_bridge_summary_size = current_bridge_summary_size
+                                last_bridge_activity_at = now
+                                first_action_seen = True
+                            elif (
+                                not first_action_seen
+                                and current_bridge_summary_size > 0
+                            ):
+                                first_action_seen = True
+                        if (
+                            not first_action_seen
+                            and first_action_deadline
+                            and now >= first_action_deadline
+                        ):
+                            self._terminate_codex_process(proc)
+                            self._publish_codex_exec_failure_trace(
+                                stage="first_action_timeout",
+                                returncode=124,
+                                stdout_text="",
+                                stderr_text="codex_exec_first_action_timeout\n",
+                                final_message_present=output_path.exists(),
+                                final_message_bytes=(
+                                    output_path.stat().st_size
+                                    if output_path.exists()
+                                    else 0
+                                ),
+                                failure_category="codex_exec_first_action_timeout",
+                            )
+                            raise TimeoutError("local codex first action timeout")
+                        if (
+                            first_action_seen
+                            and bridge_summary_path is not None
+                            and bridge_idle_timeout_sec > 0
+                            and now - last_bridge_activity_at >= bridge_idle_timeout_sec
+                        ):
+                            self._terminate_codex_process(proc)
+                            self._publish_remote_bridge_agent_operations_trace(
+                                bridge_summary_path=bridge_summary_path,
+                            )
+                            self._publish_codex_exec_failure_trace(
+                                stage="bridge_idle_timeout",
+                                returncode=124,
+                                stdout_text="",
+                                stderr_text="codex_exec_bridge_idle_timeout\n",
+                                final_message_present=output_path.exists(),
+                                final_message_bytes=(
+                                    output_path.stat().st_size
+                                    if output_path.exists()
+                                    else 0
+                                ),
+                                failure_category="codex_exec_bridge_idle_timeout",
+                            )
+                            raise TimeoutError("local codex bridge idle timeout")
                         if now >= deadline:
-                            proc.kill()
-                            proc.wait(timeout=5)
+                            self._terminate_codex_process(proc)
                             raise subprocess.TimeoutExpired(
                                 cmd,
                                 self._config.timeout_sec,
@@ -432,6 +600,10 @@ class SkillsBenchLocalAcpRelay:
                     if stderr_path.exists()
                     else ""
                 )
+                if bridge_summary_path is not None:
+                    self._publish_remote_bridge_agent_operations_trace(
+                        bridge_summary_path=bridge_summary_path,
+                    )
                 self._publish_codex_exec_failure_trace(
                     stage="timeout",
                     returncode=124,
@@ -489,11 +661,79 @@ class SkillsBenchLocalAcpRelay:
                 )
             return response or "local codex returned an empty final message"
 
+    def _terminate_codex_process(
+        self,
+        proc: subprocess.Popen[str],
+        *,
+        grace_sec: float = 5.0,
+    ) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.terminate()
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        try:
+            proc.wait(timeout=grace_sec)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        try:
+            proc.wait(timeout=grace_sec)
+        except subprocess.TimeoutExpired:
+            pass
+
     def _consume_remote_bridge_for_solver(self) -> dict[str, Any]:
         return run_skillsbench_remote_command_file_bridge_probe(
             self._config.remote_command_file_bridge_command,
             timeout_sec=self._config.remote_command_file_bridge_timeout_sec,
         )
+
+    def _reverse_channel_json_preflight_probe(self) -> dict[str, Any]:
+        return {
+            "schema_version": "skillsbench_remote_command_file_bridge_probe_v0",
+            "ready": True,
+            "first_blocker": "skillsbench_reverse_channel_json_preflight_ready",
+            "stage": "pre_sandbox_reverse_channel_json",
+            "elapsed_ms": 0,
+            "bridge_command_invoked": False,
+            "response_schema_version": (
+                "skillsbench_reverse_channel_json_preflight_response_v0"
+            ),
+            "required_operations": ["preflight"],
+            "operation_count": 1,
+            "operations": [
+                {
+                    "kind": "preflight",
+                    "label": "reverse_channel_json_bridge",
+                    "status": "ok",
+                }
+            ],
+            "missing_operations": [],
+            "failed_operations": [],
+            "boundary_violations": [],
+            "raw_command_recorded": False,
+            "raw_stdout_recorded": False,
+            "raw_stderr_recorded": False,
+            "raw_task_text_recorded": False,
+            "raw_logs_recorded": False,
+            "raw_trajectory_recorded": False,
+            "credential_values_recorded": False,
+            "host_paths_recorded": False,
+            "remote_paths_recorded": False,
+            "upload_performed": False,
+            "submit_performed": False,
+        }
 
     def _run_remote_bridge_exec(self, command: str) -> dict[str, Any]:
         bridge_command = self._config.remote_command_file_bridge_command or ""
@@ -698,12 +938,34 @@ class SkillsBenchLocalAcpRelay:
             or self._config.remote_command_file_bridge_command
             or ""
         )
+        first_exec_request = json.dumps(
+            {
+                "operation": "exec",
+                "cwd": "/app",
+                "command": "pwd && ls -la",
+                "timeout_sec": 10,
+            },
+            separators=(",", ":"),
+        )
+        first_exec_command = (
+            f"printf '%s\\n' {shlex.quote(first_exec_request)} | {bridge_command}"
+            if bridge_command
+            else (
+                "printf '%s\\n' "
+                f"{shlex.quote(first_exec_request)} | <private bridge command>"
+            )
+        )
         packet = f"""
 
 LoopX SkillsBench remote workspace bridge:
 - This local Codex process is outside the scored SkillsBench sandbox.
 - Use the command below as a private JSON bridge for sandbox exec, file write, file read, and cleanup operations.
 - Send one JSON request on stdin and read one private JSON response on stdout.
+- FIRST ACTION REQUIRED: before prose planning or final answer, copy and run
+  this exact shell command to prove task-facing sandbox access:
+  `{first_exec_command}`
+- Invoke additional bridge operations by piping JSON to the same private bridge
+  command shown below.
 - Request examples:
   - {{"operation":"exec","cwd":"/app","command":"pwd","timeout_sec":10}}
   - {{"operation":"read_file","path":"/app/path/to/file","max_bytes":20000}}
@@ -806,6 +1068,18 @@ record["task_facing_operation"] = bool(
     operation in {{"read_file", "write_file", "cleanup"}}
     or (operation == "exec" and not subcommands)
 )
+record["operation_observed"] = True
+
+def append_record(item: dict[str, object]) -> None:
+    try:
+        SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(item, sort_keys=True) + "\\n")
+    except OSError:
+        pass
+
+record["record_phase"] = "start"
+append_record(record)
 proc = subprocess.run(
     BRIDGE_COMMAND,
     input=raw,
@@ -814,13 +1088,13 @@ proc = subprocess.run(
     stderr=subprocess.PIPE,
     shell=True,
 )
-record["returncode"] = int(proc.returncode)
-try:
-    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\\n")
-except OSError:
-    pass
+complete_record = dict(record)
+complete_record["record_phase"] = "complete"
+complete_record["returncode"] = int(proc.returncode)
+complete_record["success"] = proc.returncode == 0
+complete_record["stdout_bytes"] = len((proc.stdout or "").encode("utf-8"))
+complete_record["stderr_bytes"] = len((proc.stderr or "").encode("utf-8"))
+append_record(complete_record)
 sys.stdout.write(proc.stdout)
 sys.stderr.write(proc.stderr)
 raise SystemExit(proc.returncode)
@@ -838,7 +1112,11 @@ raise SystemExit(proc.returncode)
             return
         operation_counts: dict[str, int] = {}
         loopx_subcommand_counts: dict[str, int] = {}
+        successful_loopx_subcommand_counts: dict[str, int] = {}
+        returncode_counts: dict[str, int] = {}
         request_count = 0
+        success_count = 0
+        failure_count = 0
         loopx_cli_call_count = 0
         state_read_count = 0
         state_write_count = 0
@@ -855,16 +1133,44 @@ raise SystemExit(proc.returncode)
                     continue
                 if not isinstance(record, dict):
                     continue
-                request_count += 1
                 operation = str(record.get("operation") or "unknown")[:40]
-                operation_counts[operation] = operation_counts.get(operation, 0) + 1
-                if record.get("loopx_cli_call") is True:
+                phase = str(record.get("record_phase") or "").strip().lower()
+                counts_as_request = phase != "complete"
+                counts_as_completion = phase == "complete" or (
+                    not phase and ("returncode" in record or "success" in record)
+                )
+                if counts_as_request:
+                    request_count += 1
+                    operation_counts[operation] = (
+                        operation_counts.get(operation, 0) + 1
+                    )
+                rc = record.get("returncode")
+                if counts_as_completion:
+                    if isinstance(rc, int) and not isinstance(rc, bool):
+                        returncode_counts[str(rc)] = (
+                            returncode_counts.get(str(rc), 0) + 1
+                        )
+                        if rc == 0:
+                            success_count += 1
+                        else:
+                            failure_count += 1
+                    elif record.get("success") is True:
+                        success_count += 1
+                        returncode_counts["unknown_success"] = (
+                            returncode_counts.get("unknown_success", 0) + 1
+                        )
+                    elif record.get("success") is False:
+                        failure_count += 1
+                        returncode_counts["unknown_failure"] = (
+                            returncode_counts.get("unknown_failure", 0) + 1
+                        )
+                if counts_as_request and record.get("loopx_cli_call") is True:
                     loopx_cli_call_count += 1
-                if record.get("loopx_state_read") is True:
+                if counts_as_request and record.get("loopx_state_read") is True:
                     state_read_count += 1
-                if record.get("loopx_state_write") is True:
+                if counts_as_request and record.get("loopx_state_write") is True:
                     state_write_count += 1
-                if record.get("task_facing_operation") is True:
+                if counts_as_request and record.get("task_facing_operation") is True:
                     task_facing_operation_count += 1
                 subcommands = record.get("loopx_subcommands")
                 if isinstance(subcommands, list) and subcommands:
@@ -873,10 +1179,15 @@ raise SystemExit(proc.returncode)
                         for item in subcommands[:2]
                         if re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,40}$", str(item))
                     )
-                    if key:
+                    if key and counts_as_request:
                         loopx_subcommand_counts[key] = (
                             loopx_subcommand_counts.get(key, 0) + 1
                         )
+                    if key and counts_as_completion:
+                        if record.get("success") is True or record.get("returncode") == 0:
+                            successful_loopx_subcommand_counts[key] = (
+                                successful_loopx_subcommand_counts.get(key, 0) + 1
+                            )
                 raw_material_recorded = raw_material_recorded or any(
                     record.get(field) is True
                     for field in (
@@ -901,10 +1212,16 @@ raise SystemExit(proc.returncode)
                     "skillsbench_remote_command_file_bridge_agent_operations_v0"
                 ),
                 "request_count": request_count,
+                "success_count": success_count,
+                "failure_count": failure_count,
                 "operation_counts": dict(sorted(operation_counts.items())),
+                "returncode_counts": dict(sorted(returncode_counts.items())),
                 "loopx_cli_call_count": loopx_cli_call_count,
                 "loopx_cli_subcommand_counts": dict(
                     sorted(loopx_subcommand_counts.items())
+                ),
+                "successful_loopx_cli_subcommand_counts": dict(
+                    sorted(successful_loopx_subcommand_counts.items())
                 ),
                 "loopx_state_read_count": state_read_count,
                 "loopx_state_write_count": state_write_count,
@@ -1490,6 +1807,9 @@ def run_skillsbench_local_acp_relay_probe(
     command: str | list[str] | tuple[str, ...] | None = None,
     *,
     timeout_sec: float = 10.0,
+    prompt_text: str | None = None,
+    required_response_marker: str | None = None,
+    model_id: str | None = "probe-model",
 ) -> dict[str, Any]:
     argv = (
         _command_to_argv(command)
@@ -1499,6 +1819,7 @@ def run_skillsbench_local_acp_relay_probe(
     started = time.monotonic()
     proc: subprocess.Popen[bytes] | None = None
     stage = "spawn"
+    request_count = 0
     try:
         proc = subprocess.Popen(
             argv,
@@ -1512,6 +1833,7 @@ def run_skillsbench_local_acp_relay_probe(
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             timeout_at=started + timeout_sec,
         )
+        request_count += 1
         stage = "session_new"
         session = _probe_request(
             proc,
@@ -1523,37 +1845,48 @@ def run_skillsbench_local_acp_relay_probe(
             },
             timeout_at=started + timeout_sec,
         )
+        request_count += 1
         session_id = str(session.get("result", {}).get("sessionId") or "")
-        stage = "set_model"
-        _probe_request(
-            proc,
-            {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "session/set_model",
-                "params": {"sessionId": session_id, "modelId": "probe-model"},
-            },
-            timeout_at=started + timeout_sec,
-        )
+        next_id = 3
+        if model_id:
+            stage = "set_model"
+            _probe_request(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": next_id,
+                    "method": "session/set_model",
+                    "params": {"sessionId": session_id, "modelId": str(model_id)},
+                },
+                timeout_at=started + timeout_sec,
+            )
+            request_count += 1
+            next_id += 1
         stage = "prompt"
+        agent_message_chunks: list[str] = []
         prompt = _probe_request(
             proc,
             {
                 "jsonrpc": "2.0",
-                "id": 4,
+                "id": next_id,
                 "method": "session/prompt",
                 "params": {
                     "sessionId": session_id,
                     "prompt": [
                         {
                             "type": "text",
-                            "text": SKILLSBENCH_LOCAL_ACP_RELAY_HEALTH_PROMPT,
+                            "text": (
+                                prompt_text
+                                or SKILLSBENCH_LOCAL_ACP_RELAY_HEALTH_PROMPT
+                            ),
                         }
                     ],
                 },
             },
             timeout_at=started + timeout_sec,
+            agent_message_chunks=agent_message_chunks,
         )
+        request_count += 1
         prompt_usage = (
             prompt.get("result", {}).get("usage")
             if isinstance(prompt.get("result"), dict)
@@ -1565,23 +1898,34 @@ def run_skillsbench_local_acp_relay_probe(
         usage_ready = isinstance(usage_total, int) and not isinstance(
             usage_total, bool
         ) and usage_total > 0
+        agent_message_present = bool("".join(agent_message_chunks).strip())
+        response_marker_observed = True
+        if required_response_marker:
+            response_marker_observed = (
+                required_response_marker in "".join(agent_message_chunks)
+            )
         ready = (
             initialize.get("result", {}).get("agentInfo", {}).get("name")
             == "loopx-skillsbench-local-acp-relay"
             and bool(session_id)
             and prompt.get("result", {}).get("stopReason") == "end_turn"
             and usage_ready
+            and response_marker_observed
         )
+        first_blocker = "skillsbench_local_acp_relay_ready"
+        if not ready:
+            first_blocker = "skillsbench_local_acp_relay_probe_failed"
+            if required_response_marker and not response_marker_observed:
+                first_blocker = "skillsbench_local_acp_relay_response_marker_missing"
         return _relay_probe_payload(
             ready=ready,
-            first_blocker=(
-                "skillsbench_local_acp_relay_ready"
-                if ready
-                else "skillsbench_local_acp_relay_probe_failed"
-            ),
+            first_blocker=first_blocker,
             stage="complete",
-            request_count=4,
+            request_count=request_count,
             prompt_usage_total_tokens=usage_total if usage_ready else 0,
+            response_marker_required=bool(required_response_marker),
+            response_marker_observed=response_marker_observed,
+            agent_message_present=agent_message_present,
         )
     except (OSError, RuntimeError, TimeoutError, json.JSONDecodeError):
         return _relay_probe_payload(
@@ -1590,6 +1934,9 @@ def run_skillsbench_local_acp_relay_probe(
             stage=stage,
             request_count=0,
             prompt_usage_total_tokens=0,
+            response_marker_required=bool(required_response_marker),
+            response_marker_observed=False,
+            agent_message_present=False,
         )
     finally:
         if proc is not None:
@@ -1715,6 +2062,7 @@ def _probe_request(
     message: dict[str, Any],
     *,
     timeout_at: float,
+    agent_message_chunks: list[str] | None = None,
 ) -> dict[str, Any]:
     if proc.stdin is None or proc.stdout is None:
         raise RuntimeError("probe process pipes missing")
@@ -1740,6 +2088,22 @@ def _probe_request(
                 if not raw_line.strip():
                     continue
                 decoded = json.loads(raw_line.decode())
+                if (
+                    agent_message_chunks is not None
+                    and isinstance(decoded, dict)
+                    and decoded.get("jsonrpc") == "2.0"
+                    and decoded.get("method") == "session/update"
+                ):
+                    params = decoded.get("params")
+                    update = (
+                        params.get("update") if isinstance(params, dict) else None
+                    )
+                    content = (
+                        update.get("content") if isinstance(update, dict) else None
+                    )
+                    text = content.get("text") if isinstance(content, dict) else None
+                    if isinstance(text, str):
+                        agent_message_chunks.append(text)
                 if (
                     isinstance(decoded, dict)
                     and decoded.get("jsonrpc") == "2.0"
@@ -1778,6 +2142,9 @@ def _relay_probe_payload(
     stage: str,
     request_count: int,
     prompt_usage_total_tokens: int = 0,
+    response_marker_required: bool = False,
+    response_marker_observed: bool = True,
+    agent_message_present: bool = False,
 ) -> dict[str, Any]:
     return {
         "schema_version": SKILLSBENCH_LOCAL_ACP_RELAY_PROBE_SCHEMA_VERSION,
@@ -1786,6 +2153,9 @@ def _relay_probe_payload(
         "stage": stage,
         "request_count": request_count,
         "prompt_usage_total_tokens": max(0, int(prompt_usage_total_tokens or 0)),
+        "response_marker_required": bool(response_marker_required),
+        "response_marker_observed": bool(response_marker_observed),
+        "agent_message_present": bool(agent_message_present),
         "worker_protocol": "acp_stdio",
         "codex_cli_invoked": False,
         "raw_output_recorded": False,

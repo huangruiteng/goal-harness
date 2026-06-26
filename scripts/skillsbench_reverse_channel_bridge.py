@@ -13,17 +13,39 @@ import argparse
 import json
 import os
 import re
+import signal
 import shlex
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
 
 CLIENT_SCHEMA_VERSION = "skillsbench_reverse_channel_client_v0"
 SERVER_RESPONSE_SCHEMA_VERSION = "skillsbench_reverse_channel_response_v0"
+JSON_PREFLIGHT_RESPONSE_SCHEMA_VERSION = (
+    "skillsbench_reverse_channel_json_preflight_response_v0"
+)
+_CODEX_EXEC_OPTIONS_WITH_VALUE = {
+    "-C",
+    "--cd",
+    "--color",
+    "--config",
+    "-c",
+    "--image",
+    "-i",
+    "--model",
+    "-m",
+    "--oss",
+    "--output-last-message",
+    "--profile",
+    "-p",
+    "--sandbox",
+    "-s",
+}
 SOCKET_PROBE_SCHEMA_VERSION = "skillsbench_reverse_channel_socket_probe_v0"
 ALLOWED_PAYLOAD_ENV_KEYS = (
     "AI_ADDR",
@@ -75,6 +97,44 @@ def _bridge_command_with_payload_env(command: str, extra: object) -> str:
     return command.replace("{loopx_allowed_env}", _allowed_env_assignments(extra))
 
 
+def _stop_process_group(proc: subprocess.Popen[str], *, sig: int) -> None:
+    try:
+        os.killpg(proc.pid, sig)
+        return
+    except ProcessLookupError:
+        return
+    except OSError:
+        pass
+    try:
+        proc.send_signal(sig)
+    except ProcessLookupError:
+        return
+    except OSError:
+        if sig == signal.SIGKILL:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+def _communicate_after_stop(proc: subprocess.Popen[str]) -> tuple[str, str]:
+    try:
+        stdout_text, stderr_text = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        _stop_process_group(proc, sig=signal.SIGKILL)
+        stdout_text, stderr_text = proc.communicate(timeout=5)
+    return stdout_text or "", stderr_text or ""
+
+
+def _read_agent_operations_jsonl(path: Path | None) -> str:
+    if path is None or not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[:200_000]
+    except OSError:
+        return ""
+
+
 def _replace_output_last_message(args: list[str], replacement: Path) -> str | None:
     for index, token in enumerate(args[:-1]):
         if token == "--output-last-message":
@@ -106,6 +166,53 @@ def _rewrite_private_bridge_command(prompt: str, replacement: str | None) -> str
         return prompt
     pattern = r"(Private bridge command:\n)([^\n]+)"
     return re.sub(pattern, r"\1" + replacement, prompt, count=1)
+
+
+def _prompt_requires_bridge_first_action(prompt: str) -> bool:
+    text = prompt or ""
+    if "Private bridge command:" not in text:
+        return False
+    lowered = text.lower()
+    required_markers = (
+        "loopx_skillsbench_local_acp_relay_bridge_ready",
+        "your first tool action should be a shell",
+        "your first agent action must be a shell/tool call",
+        "first run the case-local quota/todo commands",
+    )
+    return any(marker in lowered for marker in required_markers)
+
+
+def _split_codex_exec_prompt_for_stdin(args: list[str]) -> tuple[list[str], str | None]:
+    """Move the positional codex exec prompt out of argv and into stdin.
+
+    Host-local benchmark prompts can contain raw task text. Passing them as a
+    process argument exposes them to process-list observers on shared hosts, so
+    the reverse bridge feeds the prompt through stdin and closes stdin
+    immediately instead.
+    """
+
+    if not args or args[0] != "exec":
+        return args, None
+    positional_indices: list[int] = []
+    index = 1
+    while index < len(args):
+        item = args[index]
+        if item == "--":
+            positional_indices.extend(range(index + 1, len(args)))
+            break
+        if item in _CODEX_EXEC_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        if item.startswith("-"):
+            index += 1
+            continue
+        positional_indices.append(index)
+        index += 1
+    if not positional_indices:
+        return args, None
+    prompt_index = positional_indices[-1]
+    prompt = args[prompt_index]
+    return args[:prompt_index] + args[prompt_index + 1 :], prompt
 
 
 def _write_instrumented_prompt_bridge(
@@ -220,6 +327,13 @@ record["task_facing_operation"] = bool(
     operation in {{"read_file", "write_file", "cleanup"}}
     or (operation == "exec" and not subcommands)
 )
+record["operation_observed"] = True
+try:
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, sort_keys=True) + "\\n")
+except OSError:
+    pass
 proc = subprocess.run(
     bridge_command(),
     input=raw,
@@ -228,13 +342,6 @@ proc = subprocess.run(
     stderr=subprocess.PIPE,
     shell=True,
 )
-record["returncode"] = int(proc.returncode)
-try:
-    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\\n")
-except OSError:
-    pass
 sys.stdout.write(proc.stdout)
 sys.stderr.write(proc.stderr)
 raise SystemExit(proc.returncode)
@@ -250,6 +357,8 @@ def _run_codex_payload(
     codex_bin: str,
     default_timeout_sec: float,
     prompt_bridge_command: str | None,
+    first_action_timeout_sec: float = 0.0,
+    bridge_idle_timeout_sec: float = 0.0,
 ) -> dict[str, Any]:
     args = [str(item) for item in payload.get("args") or []]
     if not args:
@@ -268,50 +377,126 @@ def _run_codex_payload(
         local_cwd.mkdir(parents=True, exist_ok=True)
         remote_last_message_path = _replace_output_last_message(args, last_message_path)
         _replace_remote_cwd(args, local_cwd)
+        args, stdin_prompt = _split_codex_exec_prompt_for_stdin(args)
+        if stdin_prompt is None:
+            payload_stdin = payload.get("stdin")
+            if isinstance(payload_stdin, str) and payload_stdin:
+                stdin_prompt = payload_stdin
         agent_operations_summary_path: Path | None = None
-        if prompt_bridge_command and args:
-            private_bridge_command = _extract_private_bridge_command(args[-1])
-            instrumented_bridge, agent_operations_summary_path = (
-                _write_instrumented_prompt_bridge(
-                    tmp_path=tmp_path,
-                    bridge_command=prompt_bridge_command,
-                    private_bridge_command=private_bridge_command,
+        if prompt_bridge_command and stdin_prompt is not None:
+            private_bridge_command = _extract_private_bridge_command(stdin_prompt)
+            if private_bridge_command:
+                instrumented_bridge, agent_operations_summary_path = (
+                    _write_instrumented_prompt_bridge(
+                        tmp_path=tmp_path,
+                        bridge_command=prompt_bridge_command,
+                        private_bridge_command=private_bridge_command,
+                    )
                 )
-            )
-            args[-1] = _rewrite_private_bridge_command(
-                args[-1],
-                str(instrumented_bridge),
-            )
+                stdin_prompt = _rewrite_private_bridge_command(
+                    stdin_prompt,
+                    str(instrumented_bridge),
+                )
         cmd = [codex_bin, *args]
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE if stdin_prompt is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
-                check=False,
                 env=env,
+                start_new_session=True,
             )
+            if stdin_prompt is not None and proc.stdin is not None:
+                try:
+                    proc.stdin.write(stdin_prompt)
+                    proc.stdin.close()
+                    proc.stdin = None
+                except BrokenPipeError:
+                    proc.stdin = None
+            deadline = time.monotonic() + timeout
+            first_action_deadline = 0.0
+            if (
+                stdin_prompt is not None
+                and prompt_bridge_command
+                and first_action_timeout_sec > 0
+                and _prompt_requires_bridge_first_action(stdin_prompt)
+            ):
+                first_action_deadline = (
+                    time.monotonic() + max(1.0, float(first_action_timeout_sec))
+                )
+            first_action_seen = not bool(first_action_deadline)
+            bridge_idle_timeout_sec = max(0.0, float(bridge_idle_timeout_sec or 0.0))
+            last_agent_operations_size = 0
+            last_bridge_activity_at = time.monotonic()
+            timeout_kind = ""
+            while proc.poll() is None:
+                now = time.monotonic()
+                if not first_action_seen and agent_operations_summary_path:
+                    try:
+                        current_agent_operations_size = (
+                            agent_operations_summary_path.stat().st_size
+                        )
+                    except OSError:
+                        current_agent_operations_size = 0
+                    if current_agent_operations_size > last_agent_operations_size:
+                        last_agent_operations_size = current_agent_operations_size
+                        last_bridge_activity_at = now
+                        first_action_seen = True
+                    elif current_agent_operations_size > 0:
+                        first_action_seen = True
+                if not first_action_seen and first_action_deadline and now >= first_action_deadline:
+                    timeout_kind = "codex_exec_first_action_timeout"
+                    _stop_process_group(proc, sig=signal.SIGTERM)
+                    break
+                if (
+                    first_action_seen
+                    and agent_operations_summary_path is not None
+                    and bridge_idle_timeout_sec > 0
+                    and now - last_bridge_activity_at >= bridge_idle_timeout_sec
+                ):
+                    timeout_kind = "codex_exec_bridge_idle_timeout"
+                    _stop_process_group(proc, sig=signal.SIGTERM)
+                    break
+                if now >= deadline:
+                    timeout_kind = "codex_exec_timeout"
+                    _stop_process_group(proc, sig=signal.SIGTERM)
+                    break
+                time.sleep(0.1)
+            if timeout_kind:
+                stdout_text, stderr_text = _communicate_after_stop(proc)
+            else:
+                stdout_text, stderr_text = proc.communicate()
+            if timeout_kind:
+                return {
+                    "schema_version": SERVER_RESPONSE_SCHEMA_VERSION,
+                    "exit_code": 124,
+                    "stdout": stdout_text or "",
+                    "stderr": f"{timeout_kind}\n",
+                    "last_message": "",
+                    "remote_last_message_path": remote_last_message_path,
+                    "agent_operations_jsonl": _read_agent_operations_jsonl(
+                        agent_operations_summary_path
+                    ),
+                    "agent_operations_raw_material_recorded": False,
+                    "raw_task_text_recorded": False,
+                    "credential_values_recorded": False,
+                }
             try:
                 last_message = last_message_path.read_text(encoding="utf-8")
             except OSError:
                 last_message = ""
-            agent_operations_jsonl = ""
-            if agent_operations_summary_path and agent_operations_summary_path.exists():
-                agent_operations_jsonl = agent_operations_summary_path.read_text(
-                    encoding="utf-8",
-                    errors="replace",
-                )[:200_000]
             return {
                 "schema_version": SERVER_RESPONSE_SCHEMA_VERSION,
                 "exit_code": int(proc.returncode),
-                "stdout": proc.stdout or "",
-                "stderr": proc.stderr or "",
+                "stdout": stdout_text or "",
+                "stderr": stderr_text or "",
                 "last_message": last_message,
                 "remote_last_message_path": remote_last_message_path,
-                "agent_operations_jsonl": agent_operations_jsonl,
+                "agent_operations_jsonl": _read_agent_operations_jsonl(
+                    agent_operations_summary_path
+                ),
                 "agent_operations_raw_material_recorded": False,
                 "raw_task_text_recorded": False,
                 "credential_values_recorded": False,
@@ -326,7 +511,9 @@ def _run_codex_payload(
                 "stderr": stderr,
                 "last_message": "",
                 "remote_last_message_path": remote_last_message_path,
-                "agent_operations_jsonl": "",
+                "agent_operations_jsonl": _read_agent_operations_jsonl(
+                    agent_operations_summary_path
+                ),
                 "agent_operations_raw_material_recorded": False,
                 "raw_task_text_recorded": False,
                 "credential_values_recorded": False,
@@ -341,6 +528,37 @@ def _run_json_bridge_payload(
 ) -> dict[str, Any]:
     timeout = max(1.0, float(default_timeout_sec))
     stdin_text = str(payload.get("stdin") or "")
+    try:
+        request = json.loads(stdin_text or "{}")
+    except json.JSONDecodeError:
+        request = {}
+    if isinstance(request, dict) and request.get("operation") == "preflight":
+        return {
+            "schema_version": SERVER_RESPONSE_SCHEMA_VERSION,
+            "exit_code": 0,
+            "stdout": json.dumps(
+                {
+                    "schema_version": JSON_PREFLIGHT_RESPONSE_SCHEMA_VERSION,
+                    "ok": True,
+                    "operation": "preflight",
+                    "stage": "reverse_channel_json_server",
+                    "raw_stdout_recorded": False,
+                    "raw_stderr_recorded": False,
+                    "raw_task_text_recorded": False,
+                    "credential_values_recorded": False,
+                    "host_paths_recorded": False,
+                    "remote_paths_recorded": False,
+                    "upload_performed": False,
+                    "submit_performed": False,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            "stderr": "",
+            "raw_stdout_recorded": False,
+            "raw_stderr_recorded": False,
+            "credential_values_recorded": False,
+        }
     payload_env = payload.get("env")
     env = _safe_env(payload_env)
     command = _bridge_command_with_payload_env(bridge_command, payload_env)
@@ -435,6 +653,7 @@ SOCK = {socket_path!r}
 payload = {{
     'schema_version': {CLIENT_SCHEMA_VERSION!r},
     'args': sys.argv[1:],
+    'stdin': sys.stdin.read(),
     'env': {{k: os.environ.get(k, '') for k in ('AI_ADDR','AI_PORT','GOAL_HARNESS_REMOTE_BENCH_ROOT','LOOPX_REMOTE_AGENT_OPS_SUMMARY_PATH')}},
     'timeout_sec': float(os.environ.get('LOOPX_REVERSE_CODEX_TIMEOUT_SEC', '7200')),
 }}
@@ -452,7 +671,17 @@ while not data.endswith(b'\\n'):
     if not chunk:
         break
     data += chunk
-resp=json.loads(data.decode() or '{{}}')
+if not data:
+    sys.stderr.write('reverse channel response missing\\n')
+    sys.exit(125)
+try:
+    resp=json.loads(data.decode())
+except Exception:
+    sys.stderr.write('reverse channel response invalid\\n')
+    sys.exit(125)
+if not isinstance(resp, dict):
+    sys.stderr.write('reverse channel response invalid\\n')
+    sys.exit(125)
 out=resp.get('stdout')
 err=resp.get('stderr')
 if isinstance(out, str): sys.stdout.write(out)
@@ -500,7 +729,17 @@ while not data.endswith(b'\\n'):
     if not chunk:
         break
     data += chunk
-resp=json.loads(data.decode() or '{{}}')
+if not data:
+    sys.stderr.write('reverse channel response missing\\n')
+    sys.exit(125)
+try:
+    resp=json.loads(data.decode())
+except Exception:
+    sys.stderr.write('reverse channel response invalid\\n')
+    sys.exit(125)
+if not isinstance(resp, dict):
+    sys.stderr.write('reverse channel response invalid\\n')
+    sys.exit(125)
 out=resp.get('stdout')
 err=resp.get('stderr')
 if isinstance(out, str): sys.stdout.write(out)
@@ -550,6 +789,8 @@ def main(argv: list[str] | None = None) -> int:
     codex_server.add_argument("--socket", required=True)
     codex_server.add_argument("--codex-bin", default="codex")
     codex_server.add_argument("--timeout-sec", type=float, default=7200.0)
+    codex_server.add_argument("--first-action-timeout-sec", type=float, default=0.0)
+    codex_server.add_argument("--bridge-idle-timeout-sec", type=float, default=0.0)
     codex_server.add_argument("--prompt-bridge-command")
     codex_server.add_argument("--once", action="store_true")
 
@@ -585,6 +826,8 @@ def main(argv: list[str] | None = None) -> int:
                 codex_bin=args.codex_bin,
                 default_timeout_sec=args.timeout_sec,
                 prompt_bridge_command=args.prompt_bridge_command,
+                first_action_timeout_sec=args.first_action_timeout_sec,
+                bridge_idle_timeout_sec=args.bridge_idle_timeout_sec,
             ),
         )
     if args.command == "serve-json":

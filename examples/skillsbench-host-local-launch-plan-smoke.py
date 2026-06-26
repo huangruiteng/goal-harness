@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import io
 import subprocess
 import sys
 import tempfile
@@ -19,11 +20,16 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     CodexExecConfig,
     SkillsBenchLocalAcpRelay,
+    SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER,
     SKILLSBENCH_LOCAL_ACP_RELAY_READY_MARKER,
     run_skillsbench_local_acp_relay_probe,
 )
 from scripts.skillsbench_automation_loop import (  # noqa: E402
+    HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC,
     _apply_agent_message_only_no_tool_calls_attribution,
+    _effective_benchflow_agent_timeout_sec,
+    _effective_local_codex_exec_timeout_sec,
+    _host_local_acp_codex_exec_preflight_command,
     _host_local_acp_docker_bridge_command,
     _host_local_acp_launch_command,
     _host_local_acp_target_env,
@@ -60,6 +66,19 @@ def main() -> int:
     assert "env=target_env" in source
     assert "local_acp_command = _set_option_value(" in source
     assert "del (\n            env," not in source
+    packet = SkillsBenchLocalAcpRelay(
+        CodexExecConfig(remote_command_file_bridge_command="/tmp/private-bridge")
+    )._prompt_with_remote_bridge_packet(
+        "Task",
+        bridge_probe={"operation_count": 1},
+        bridge_command_for_agent="/tmp/private-bridge",
+    )
+    first_action_block = packet.split("FIRST ACTION REQUIRED:", 1)[1].split(
+        "Request examples:", 1
+    )[0]
+    assert "pwd && ls -la" in first_action_block
+    assert "/tmp/private-bridge" in first_action_block
+    assert "<private bridge command>" not in first_action_block
     target_env = _host_local_acp_target_env(
         {
             "AI_ADDR": "127.0.0.1",
@@ -73,6 +92,21 @@ def main() -> int:
         "AI_PORT": "2022",
         "GOAL_HARNESS_REMOTE_BENCH_ROOT": "/tmp/bench",
     }
+    timeout_args = SimpleNamespace(
+        agent_idle_timeout=7200,
+        host_local_acp_launch=True,
+        local_codex_exec_timeout_sec=21600,
+    )
+    assert _effective_local_codex_exec_timeout_sec(timeout_args) == 21600
+    assert _effective_benchflow_agent_timeout_sec(timeout_args) == (
+        21600 + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC
+    )
+    non_host_local_timeout_args = SimpleNamespace(
+        agent_idle_timeout=7200,
+        host_local_acp_launch=False,
+        local_codex_exec_timeout_sec=21600,
+    )
+    assert _effective_benchflow_agent_timeout_sec(non_host_local_timeout_args) == 7200
     replaced = _replace_option_value(
         ["relay", "--remote-command-file-bridge-command", "old", "--keep", "x"],
         "--remote-command-file-bridge-command",
@@ -123,7 +157,9 @@ out = ""
 for index, token in enumerate(args[:-1]):
     if token == "--output-last-message":
         out = args[index + 1]
-prompt = args[-1] if args else ""
+prompt = sys.stdin.read()
+if any("Private bridge command:" in item for item in args):
+    raise SystemExit(42)
 match = re.search(r"Private bridge command:\\n([^\\n]+)", prompt)
 assert match, prompt
 subprocess.run(
@@ -276,31 +312,106 @@ if out:
         assert prerequisites["container_codex_acp_install_skipped"] is False
         assert plan["public_boundary"]["leaderboard_upload"] is False
         assert plan["public_boundary"]["public_submission"] is False
-        launch_command = _host_local_acp_launch_command(
+        launch_args = SimpleNamespace(
+            agent_idle_timeout=7200,
+            app_server_acp_heartbeat_interval_sec=120.0,
+            app_server_reasoning_effort="high",
+            dataset="skillsbench-v1.1",
+            host_local_acp_launch=True,
+            local_acp_relay_command=None,
+            local_codex_bin="codex",
+            local_codex_bridge_idle_timeout_sec=None,
+            local_codex_exec_timeout_sec=7200,
+            local_codex_sandbox="workspace-write",
+            max_rounds=24,
+            model=None,
+            remote_command_file_bridge_probe=False,
+            remote_command_file_bridge_probe_timeout_sec=5.0,
+            remote_command_file_bridge_ready=False,
+            remote_command_file_bridge_agent_command=None,
+            remote_command_file_bridge_solver_command=None,
+            route="loopx-product-mode",
+            sandbox="docker",
+            task_id="demo-task",
+        )
+        launch_plan = {"host_local_acp_relay_trace_dir": str(Path(tmp) / "trace")}
+        launch_command = _host_local_acp_launch_command(launch_args, launch_plan)
+        heartbeat_index = launch_command.index("--stream-heartbeat-interval-sec")
+        assert launch_command[heartbeat_index + 1] == "15.0"
+        bridge_idle_index = launch_command.index("--bridge-idle-timeout-sec")
+        assert launch_command[bridge_idle_index + 1] == "7200"
+        launch_args.local_codex_bridge_idle_timeout_sec = 0
+        bridge_idle_disabled_command = _host_local_acp_launch_command(
+            launch_args,
+            launch_plan,
+        )
+        bridge_idle_disabled_index = bridge_idle_disabled_command.index(
+            "--bridge-idle-timeout-sec"
+        )
+        assert bridge_idle_disabled_command[bridge_idle_disabled_index + 1] == "0"
+        launch_args.local_codex_bridge_idle_timeout_sec = 1800
+        bridge_idle_explicit_command = _host_local_acp_launch_command(
+            launch_args,
+            launch_plan,
+        )
+        bridge_idle_explicit_index = bridge_idle_explicit_command.index(
+            "--bridge-idle-timeout-sec"
+        )
+        assert bridge_idle_explicit_command[bridge_idle_explicit_index + 1] == "1800"
+        explicit_preflight_command = _host_local_acp_codex_exec_preflight_command(
             SimpleNamespace(
-                app_server_acp_heartbeat_interval_sec=120.0,
-                app_server_reasoning_effort="high",
                 dataset="skillsbench-v1.1",
-                host_local_acp_launch=True,
-                local_acp_relay_command=None,
-                local_codex_bin="codex",
-                local_codex_exec_timeout_sec=7200,
+                host_local_acp_codex_exec_preflight_timeout_sec=20,
+                local_acp_relay_command=(
+                    f"{sys.executable} /tmp/loopx-remote-codex-client.py"
+                ),
+                local_codex_bin="/unused/when-explicit-client-is-configured",
                 local_codex_sandbox="workspace-write",
-                max_rounds=24,
-                model=None,
-                remote_command_file_bridge_probe=False,
-                remote_command_file_bridge_probe_timeout_sec=5.0,
-                remote_command_file_bridge_ready=False,
-                remote_command_file_bridge_agent_command=None,
-                remote_command_file_bridge_solver_command=None,
+                model="gpt-5.5",
                 route="loopx-product-mode",
-                sandbox="docker",
                 task_id="demo-task",
             ),
             {"host_local_acp_relay_trace_dir": str(Path(tmp) / "trace")},
         )
-        heartbeat_index = launch_command.index("--stream-heartbeat-interval-sec")
-        assert launch_command[heartbeat_index + 1] == "15.0"
+        assert explicit_preflight_command[:2] == [
+            sys.executable,
+            "/tmp/loopx-remote-codex-client.py",
+        ], explicit_preflight_command
+        assert explicit_preflight_command.count("--codex-bin") == 1
+        assert (
+            explicit_preflight_command[
+                explicit_preflight_command.index("--codex-bin") + 1
+            ]
+            == "/unused/when-explicit-client-is-configured"
+        )
+        bridge_preflight_command = _host_local_acp_codex_exec_preflight_command(
+            SimpleNamespace(
+                dataset="skillsbench-v1.1",
+                host_local_acp_codex_exec_preflight_timeout_sec=120,
+                host_local_acp_launch=True,
+                local_acp_relay_command=(
+                    f"{sys.executable} /tmp/loopx-remote-codex-client.py"
+                ),
+                local_codex_bin="/unused/when-explicit-client-is-configured",
+                local_codex_first_action_timeout_sec=1800,
+                local_codex_sandbox="workspace-write",
+                model=None,
+                remote_command_file_bridge_agent_command="/tmp/local-agent-bridge",
+                remote_command_file_bridge_probe=False,
+                remote_command_file_bridge_probe_timeout_sec=5.0,
+                remote_command_file_bridge_ready=True,
+                remote_command_file_bridge_solver_command="/tmp/remote-solver-bridge",
+                route="loopx-product-mode",
+                task_id="demo-task",
+            ),
+            {"host_local_acp_relay_trace_dir": str(Path(tmp) / "trace")},
+        )
+        assert "--remote-command-file-bridge-command" in bridge_preflight_command
+        assert "--remote-command-file-bridge-agent-command" in bridge_preflight_command
+        first_action_index = bridge_preflight_command.index(
+            "--first-action-timeout-sec"
+        )
+        assert bridge_preflight_command[first_action_index + 1] == "90"
         auto_wiring_plan_proc = subprocess.run(
             [
                 sys.executable,
@@ -557,13 +668,14 @@ else:
         fake_codex.write_text(
             """#!/usr/bin/env python3
 import json
-import select
 import subprocess
 import sys
 from pathlib import Path
 
 args = sys.argv[1:]
-prompt = args[-1]
+prompt = sys.stdin.read()
+if any("Private bridge command:" in item for item in args):
+    raise SystemExit(42)
 if "Private bridge command:" not in prompt:
     raise SystemExit(7)
 if """ + repr(SKILLSBENCH_LOCAL_ACP_RELAY_READY_MARKER) + """ not in prompt:
@@ -571,11 +683,14 @@ if """ + repr(SKILLSBENCH_LOCAL_ACP_RELAY_READY_MARKER) + """ not in prompt:
 bridge_command = prompt.split("Private bridge command:", 1)[1].strip().splitlines()[0]
 if not bridge_command:
     raise SystemExit(10)
-ready, _, _ = select.select([sys.stdin], [], [], 0.2)
-if not ready:
-    raise SystemExit(8)
-if sys.stdin.read():
-    raise SystemExit(9)
+if "FIRST ACTION REQUIRED:" in prompt:
+    copyable_packet = prompt.split("FIRST ACTION REQUIRED:", 1)[1].split("Request examples:", 1)[0]
+    if "<private bridge command>" in copyable_packet:
+        raise SystemExit(12)
+    if "pwd && ls -la" not in copyable_packet:
+        raise SystemExit(13)
+    if bridge_command not in copyable_packet:
+        raise SystemExit(14)
 for command in (
     "/app/.local/bin/loopx quota should-run --goal-id skillsbench-case --agent-id codex-benchmark-agent",
     "/app/.local/bin/loopx todo update --goal-id skillsbench-case --todo-id todo_seed --status open --note checkpoint",
@@ -671,9 +786,15 @@ output.write_text("fake solver saw bridge packet\\n", encoding="utf-8")
         )
         agent_ops = agent_ops_trace["remote_command_file_bridge_agent_operations"]
         assert agent_ops["request_count"] == 2, agent_ops
+        assert agent_ops["success_count"] == 2, agent_ops
+        assert agent_ops["failure_count"] == 0, agent_ops
         assert agent_ops["loopx_cli_call_count"] == 2, agent_ops
         assert agent_ops["loopx_state_read_count"] == 1, agent_ops
         assert agent_ops["loopx_state_write_count"] == 1, agent_ops
+        assert agent_ops["successful_loopx_cli_subcommand_counts"] == {
+            "quota should-run": 1,
+            "todo update": 1,
+        }, agent_ops
         assert agent_ops["raw_material_recorded"] is False, agent_ops
         driver_lifecycle_trace = next(
             trace
@@ -921,6 +1042,99 @@ raise SystemExit(42)
             ]
             == 1
         )
+        exit125_codex = Path(tmp) / "exit125-codex"
+        exit125_codex.write_text(
+            """#!/usr/bin/env python3
+import sys
+
+print("generic host wrapper failure", file=sys.stderr)
+raise SystemExit(125)
+""",
+            encoding="utf-8",
+        )
+        exit125_codex.chmod(0o755)
+        exit125_trace_dir = Path(tmp) / "relay-exit125-traces"
+        exit125_probe = run_skillsbench_local_acp_relay_probe(
+            [
+                sys.executable,
+                str(RELAY_SCRIPT),
+                "--codex-bin",
+                str(exit125_codex),
+                "--route",
+                "loopx-product-mode",
+                "--dataset",
+                "skillsbench-v1.1",
+                "--task-id",
+                "demo-task",
+                "--worker-public-trace-dir",
+                str(exit125_trace_dir),
+            ],
+            timeout_sec=20,
+        )
+        assert exit125_probe["ready"] is False, exit125_probe
+        exit125_failure = json.loads(
+            next(exit125_trace_dir.glob("*.compact.json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        exit125_process = exit125_failure["codex_exec_process"]
+        assert exit125_process["failure_category"] == "codex_exec_exit_125"
+        assert exit125_process["returncode"] == 125
+        assert exit125_process["raw_stderr_recorded"] is False
+        exit125_controller_trace = {
+            "schema_version": "skillsbench_loopx_controller_trace_v0"
+        }
+        exit125_reducer_plan = {
+            "host_local_acp_relay_trace_dir": str(exit125_trace_dir),
+            "runner_prerequisites": {},
+        }
+        _merge_host_local_acp_relay_trace_summary(
+            exit125_reducer_plan,
+            exit125_controller_trace,
+        )
+        assert (
+            exit125_controller_trace["host_local_acp_codex_exec_failure_category"]
+            == "codex_exec_exit_125"
+        )
+        exit1_codex = Path(tmp) / "exit1-codex"
+        exit1_codex.write_text(
+            """#!/usr/bin/env python3
+import sys
+
+print("opaque command failure", file=sys.stderr)
+raise SystemExit(1)
+""",
+            encoding="utf-8",
+        )
+        exit1_codex.chmod(0o755)
+        exit1_trace_dir = Path(tmp) / "relay-exit1-traces"
+        exit1_probe = run_skillsbench_local_acp_relay_probe(
+            [
+                sys.executable,
+                str(RELAY_SCRIPT),
+                "--codex-bin",
+                str(exit1_codex),
+                "--route",
+                "loopx-product-mode",
+                "--dataset",
+                "skillsbench-v1.1",
+                "--task-id",
+                "demo-task",
+                "--worker-public-trace-dir",
+                str(exit1_trace_dir),
+            ],
+            timeout_sec=20,
+        )
+        assert exit1_probe["ready"] is False, exit1_probe
+        exit1_failure = json.loads(
+            next(exit1_trace_dir.glob("*.compact.json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        exit1_process = exit1_failure["codex_exec_process"]
+        assert exit1_process["failure_category"] == "codex_exec_exit_1"
+        assert exit1_process["returncode"] == 1
+        assert exit1_process["raw_stderr_recorded"] is False
         reverse_failing_codex = Path(tmp) / "reverse-failing-codex"
         reverse_failing_codex.write_text(
             """#!/usr/bin/env python3
@@ -962,16 +1176,472 @@ raise SystemExit(1)
             reverse_failure["codex_exec_process"]["failure_category"]
             == "codex_reverse_channel_unavailable"
         ), reverse_failure
+        reverse_sleeping_codex = Path(tmp) / "reverse-sleeping-codex"
+        reverse_sleeping_codex.write_text(
+            """#!/usr/bin/env python3
+import time
+
+time.sleep(30)
+""",
+            encoding="utf-8",
+        )
+        reverse_sleeping_codex.chmod(0o755)
+        reverse_timeout = _run_codex_payload(
+            {
+                "args": [
+                    "exec",
+                    (
+                        "LoopX bridge test. Your first tool action should be "
+                        "a shell pipeline that sends JSON to the private bridge.\n\n"
+                        "Private bridge command:\n"
+                        "/tmp/not-recorded"
+                    ),
+                ],
+                "timeout_sec": 30,
+            },
+            codex_bin=str(reverse_sleeping_codex),
+            default_timeout_sec=30,
+            prompt_bridge_command="true",
+            first_action_timeout_sec=1,
+        )
+        assert reverse_timeout["exit_code"] == 124, reverse_timeout
+        assert "codex_exec_first_action_timeout" in reverse_timeout["stderr"]
+        assert reverse_timeout["agent_operations_jsonl"] == ""
+        assert reverse_timeout["agent_operations_raw_material_recorded"] is False
+        assert reverse_timeout["raw_task_text_recorded"] is False
+        reverse_hanging_bridge = Path(tmp) / "reverse-hanging-bridge"
+        reverse_hanging_bridge.write_text(
+            """#!/usr/bin/env python3
+import sys
+import time
+
+sys.stdin.read()
+time.sleep(30)
+""",
+            encoding="utf-8",
+        )
+        reverse_hanging_bridge.chmod(0o755)
+        reverse_hanging_codex = Path(tmp) / "reverse-hanging-codex"
+        reverse_hanging_codex.write_text(
+            """#!/usr/bin/env python3
+import json
+import re
+import subprocess
+import sys
+
+prompt = sys.stdin.read()
+match = re.search(r"Private bridge command:\\n([^\\n]+)", prompt)
+assert match, prompt
+subprocess.run(
+    match.group(1),
+    input=json.dumps({
+        "operation": "exec",
+        "cwd": "/app",
+        "command": "python - <<'PY'\\nprint('task-facing')\\nPY",
+        "timeout_sec": 10,
+    }),
+    text=True,
+    shell=True,
+    check=False,
+)
+""",
+            encoding="utf-8",
+        )
+        reverse_hanging_codex.chmod(0o755)
+        reverse_hanging_timeout = _run_codex_payload(
+            {
+                "args": [
+                    "exec",
+                    (
+                        "LoopX bridge test. Your first tool action should be "
+                        "a shell pipeline that sends JSON to the private bridge.\n\n"
+                        "Private bridge command:\n"
+                        "/tmp/not-recorded"
+                    ),
+                ],
+                "timeout_sec": 2,
+            },
+            codex_bin=str(reverse_hanging_codex),
+            default_timeout_sec=2,
+            prompt_bridge_command=str(reverse_hanging_bridge),
+            first_action_timeout_sec=1,
+        )
+        assert reverse_hanging_timeout["exit_code"] == 124, reverse_hanging_timeout
+        assert any(
+            marker in reverse_hanging_timeout["stderr"]
+            for marker in (
+                "codex_exec_timeout",
+                "codex_exec_first_action_timeout",
+                "codex_exec_bridge_idle_timeout",
+            )
+        ), reverse_hanging_timeout
+        reverse_hanging_operations = [
+            json.loads(line)
+            for line in str(
+                reverse_hanging_timeout["agent_operations_jsonl"]
+            ).splitlines()
+            if line.strip()
+        ]
+        if "codex_exec_first_action_timeout" in reverse_hanging_timeout["stderr"]:
+            assert reverse_hanging_operations == [], reverse_hanging_timeout
+        else:
+            assert len(reverse_hanging_operations) == 1, reverse_hanging_timeout
+            assert (
+                reverse_hanging_operations[0]["task_facing_operation"] is True
+            ), reverse_hanging_operations
+            assert (
+                reverse_hanging_operations[0]["raw_request_recorded"] is False
+            ), reverse_hanging_operations
+        idle_bridge = Path(tmp) / "post-action-idle-bridge"
+        idle_bridge.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+if "operations" in payload:
+    print(json.dumps({
+        "schema_version": "skillsbench_remote_command_file_bridge_probe_response_v0",
+        "ready": True,
+        "stage": "complete",
+        "operations": [
+            {"kind": "exec", "status": "ok", "exit_code_zero": True},
+            {"kind": "write_file", "status": "ok"},
+            {"kind": "read_file", "status": "ok", "content_match": True},
+            {"kind": "cleanup", "status": "ok"},
+        ],
+        "raw_command_recorded": False,
+        "raw_stdout_recorded": False,
+        "raw_stderr_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_trajectory_recorded": False,
+        "credential_values_recorded": False,
+        "host_paths_recorded": False,
+        "remote_paths_recorded": False,
+        "upload_performed": False,
+        "submit_performed": False,
+    }))
+else:
+    print("{}")
+""",
+            encoding="utf-8",
+        )
+        idle_bridge.chmod(0o755)
+        idle_codex = Path(tmp) / "post-action-idle-codex"
+        idle_codex.write_text(
+            """#!/usr/bin/env python3
+import json
+import re
+import subprocess
+import sys
+import time
+
+args = sys.argv[1:]
+prompt = sys.stdin.read()
+if any("Private bridge command:" in item for item in args):
+    raise SystemExit(42)
+match = re.search(r"Private bridge command:\\n([^\\n]+)", prompt)
+assert match, prompt
+subprocess.run(
+    match.group(1),
+    input=json.dumps({
+        "operation": "exec",
+        "cwd": "/app",
+        "command": "python - <<'PY'\\nprint('task-facing')\\nPY",
+        "timeout_sec": 10,
+    }),
+    text=True,
+    shell=True,
+    check=True,
+)
+time.sleep(30)
+""",
+            encoding="utf-8",
+        )
+        idle_codex.chmod(0o755)
+        idle_trace_dir = Path(tmp) / "post-action-idle-traces"
+        idle_relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(
+                codex_bin=str(idle_codex),
+                sandbox="workspace-write",
+                route="loopx-product-mode",
+                dataset="skillsbench-v1.1",
+                task_id="demo-task",
+                timeout_sec=30,
+                first_action_timeout_sec=1,
+                bridge_idle_timeout_sec=1,
+                worker_public_trace_dir=str(idle_trace_dir),
+                remote_command_file_bridge_command=str(idle_bridge),
+                remote_command_file_bridge_agent_command=str(idle_bridge),
+            )
+        )
+        try:
+            idle_relay._run_codex(
+                "LoopX demo prompt.",
+                session={"cwd": str(Path(tmp))},
+                session_id="idle-demo",
+                stdout=io.StringIO(),
+            )
+        except TimeoutError as exc:
+            assert "bridge idle timeout" in str(exc), exc
+        else:
+            raise AssertionError("expected bridge idle timeout")
+        idle_traces = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in idle_trace_dir.glob("*.compact.json")
+        ]
+        idle_agent_ops = [
+            trace
+            for trace in idle_traces
+            if trace.get("trace_kind") == "remote_command_file_bridge_agent_operations"
+        ]
+        assert len(idle_agent_ops) == 1, idle_traces
+        idle_counts = idle_agent_ops[0]["remote_command_file_bridge_agent_operations"]
+        assert idle_counts["request_count"] in {0, 1}, idle_counts
+        if idle_counts["request_count"] == 1:
+            assert idle_counts["task_facing_operation_count"] == 1, idle_counts
+        else:
+            assert idle_counts["task_facing_operation_count"] == 0, idle_counts
+        assert idle_counts["raw_material_recorded"] is False, idle_counts
+        idle_failures = [
+            trace
+            for trace in idle_traces
+            if trace.get("trace_kind") == "codex_exec_process_failure"
+        ]
+        assert len(idle_failures) == 1, idle_traces
+        assert idle_failures[0]["codex_exec_process"]["failure_category"] == (
+            "codex_exec_bridge_idle_timeout"
+        )
+        inflight_bridge = Path(tmp) / "inflight-idle-bridge"
+        inflight_bridge.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+import time
+
+payload = json.loads(sys.stdin.read() or "{}")
+if "operations" in payload:
+    print(json.dumps({
+        "schema_version": "skillsbench_remote_command_file_bridge_probe_response_v0",
+        "ready": True,
+        "stage": "complete",
+        "operations": [
+            {"kind": "exec", "status": "ok", "exit_code_zero": True},
+            {"kind": "write_file", "status": "ok"},
+            {"kind": "read_file", "status": "ok", "content_match": True},
+            {"kind": "cleanup", "status": "ok"},
+        ],
+        "raw_command_recorded": False,
+        "raw_stdout_recorded": False,
+        "raw_stderr_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_trajectory_recorded": False,
+        "credential_values_recorded": False,
+        "host_paths_recorded": False,
+        "remote_paths_recorded": False,
+        "upload_performed": False,
+        "submit_performed": False,
+    }))
+    raise SystemExit(0)
+time.sleep(30)
+""",
+            encoding="utf-8",
+        )
+        inflight_bridge.chmod(0o755)
+        inflight_codex = Path(tmp) / "inflight-idle-codex"
+        inflight_codex.write_text(
+            """#!/usr/bin/env python3
+import json
+import re
+import subprocess
+import sys
+
+args = sys.argv[1:]
+prompt = sys.stdin.read()
+if any("Private bridge command:" in item for item in args):
+    raise SystemExit(42)
+match = re.search(r"Private bridge command:\\n([^\\n]+)", prompt)
+assert match, prompt
+subprocess.run(
+    match.group(1),
+    input=json.dumps({
+        "operation": "exec",
+        "cwd": "/app",
+        "command": "python - <<'PY'\\nprint('task-facing')\\nPY",
+        "timeout_sec": 10,
+    }),
+    text=True,
+    shell=True,
+    check=False,
+)
+""",
+            encoding="utf-8",
+        )
+        inflight_codex.chmod(0o755)
+        inflight_trace_dir = Path(tmp) / "inflight-idle-traces"
+        inflight_relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(
+                codex_bin=str(inflight_codex),
+                sandbox="workspace-write",
+                route="loopx-product-mode",
+                dataset="skillsbench-v1.1",
+                task_id="demo-task",
+                timeout_sec=30,
+                first_action_timeout_sec=1,
+                bridge_idle_timeout_sec=1,
+                worker_public_trace_dir=str(inflight_trace_dir),
+                remote_command_file_bridge_command=str(inflight_bridge),
+                remote_command_file_bridge_agent_command=str(inflight_bridge),
+            )
+        )
+        try:
+            inflight_relay._run_codex(
+                "LoopX demo prompt.",
+                session={"cwd": str(Path(tmp))},
+                session_id="inflight-idle-demo",
+                stdout=io.StringIO(),
+            )
+        except TimeoutError as exc:
+            assert "bridge idle timeout" in str(exc), exc
+        else:
+            raise AssertionError("expected in-flight bridge idle timeout")
+        inflight_traces = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in inflight_trace_dir.glob("*.compact.json")
+        ]
+        inflight_agent_ops = [
+            trace
+            for trace in inflight_traces
+            if trace.get("trace_kind") == "remote_command_file_bridge_agent_operations"
+        ]
+        assert len(inflight_agent_ops) == 1, inflight_traces
+        inflight_counts = inflight_agent_ops[0][
+            "remote_command_file_bridge_agent_operations"
+        ]
+        assert inflight_counts["request_count"] in {0, 1}, inflight_counts
+        if inflight_counts["request_count"] == 1:
+            assert inflight_counts["task_facing_operation_count"] == 1, inflight_counts
+        else:
+            assert inflight_counts["task_facing_operation_count"] == 0, inflight_counts
+        assert inflight_counts["raw_material_recorded"] is False, inflight_counts
+        bridge_preflight_codex = Path(tmp) / "bridge-preflight-codex"
+        bridge_preflight_codex.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+output = Path(args[args.index("--output-last-message") + 1])
+prompt = sys.stdin.read()
+if any("Private bridge command:" in item for item in args):
+    raise SystemExit(42)
+match = re.search(r"Private bridge command:\\n([^\\n]+)", prompt)
+assert match, prompt
+subprocess.run(
+    match.group(1),
+    input=json.dumps({{
+        "operation": "preflight",
+    }}),
+    text=True,
+    shell=True,
+    check=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+output.write_text({SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER!r}, encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
+        bridge_preflight_codex.chmod(0o755)
+        bridge_preflight_plan = {
+            "host_local_acp_relay_trace_dir": str(
+                Path(tmp) / "bridge-preflight-traces"
+            ),
+            "runner_prerequisites": {},
+        }
+        bridge_preflight_args = SimpleNamespace(
+            dataset="skillsbench-v1.1",
+            host_local_acp_codex_exec_preflight_attempts=1,
+            host_local_acp_codex_exec_preflight_timeout_sec=20,
+            host_local_acp_launch=True,
+            local_acp_relay_command=None,
+            local_codex_bin=str(bridge_preflight_codex),
+            local_codex_first_action_timeout_sec=1800,
+            local_codex_sandbox="workspace-write",
+            model=None,
+            remote_command_file_bridge_agent_command=str(idle_bridge),
+            remote_command_file_bridge_probe=False,
+            remote_command_file_bridge_probe_timeout_sec=5.0,
+            remote_command_file_bridge_ready=True,
+            remote_command_file_bridge_solver_command=str(idle_bridge),
+            route="loopx-product-mode",
+            task_id="demo-task",
+        )
+        _run_host_local_acp_codex_exec_preflight(
+            bridge_preflight_args,
+            bridge_preflight_plan,
+        )
+        bridge_preflight_prereqs = bridge_preflight_plan["runner_prerequisites"]
+        assert (
+            bridge_preflight_prereqs["host_local_acp_codex_exec_preflight_status"]
+            == "passed"
+        ), bridge_preflight_prereqs
+        assert (
+            bridge_preflight_prereqs[
+                "host_local_acp_codex_exec_preflight_bridge_action_required"
+            ]
+            is True
+        ), bridge_preflight_prereqs
+        assert (
+            bridge_preflight_prereqs[
+                "host_local_acp_codex_exec_preflight_bridge_action_observed"
+            ]
+            is True
+        ), bridge_preflight_prereqs
+        assert (
+            bridge_preflight_prereqs[
+                "host_local_acp_codex_exec_preflight_bridge_task_facing_operation_count"
+            ]
+            == 0
+        ), bridge_preflight_prereqs
+        assert (
+            bridge_preflight_prereqs[
+                "host_local_acp_codex_exec_preflight_bridge_preflight_operation_count"
+            ]
+            == 1
+        ), bridge_preflight_prereqs
+        assert (
+            bridge_preflight_prereqs[
+                "host_local_acp_codex_exec_preflight_response_marker_observed"
+            ]
+            is True
+        ), bridge_preflight_prereqs
+        assert (
+            "remote_command_file_bridge_agent_task_facing_operation_count"
+            not in bridge_preflight_prereqs
+        ), bridge_preflight_prereqs
         preflight_plan = {
             "host_local_acp_relay_trace_dir": str(Path(tmp) / "preflight-traces"),
             "runner_prerequisites": {},
         }
         preflight_args = SimpleNamespace(
             dataset="skillsbench-v1.1",
+            host_local_acp_codex_exec_preflight_attempts=1,
             host_local_acp_codex_exec_preflight_timeout_sec=20,
+            host_local_acp_launch=False,
+            local_acp_relay_command=None,
             local_codex_bin=str(reverse_failing_codex),
+            local_codex_first_action_timeout_sec=0,
             local_codex_sandbox="workspace-write",
             model="gpt-5.5",
+            remote_command_file_bridge_probe=False,
+            remote_command_file_bridge_ready=False,
+            remote_command_file_bridge_solver_command=None,
             route="loopx-product-mode",
             task_id="demo-task",
         )

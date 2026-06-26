@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -37,6 +38,81 @@ def connect_only_probe(path: Path) -> None:
         sock.close()
 
 
+def wait_for_path(path: Path) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"path did not appear: {path}")
+
+
+def run_empty_response_server(path: Path) -> threading.Thread:
+    def serve() -> None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        server = socket.socket(socket.AF_UNIX)
+        try:
+            server.bind(str(path))
+            path.chmod(0o600)
+            server.listen(1)
+            conn, _ = server.accept()
+            with conn:
+                conn.recv(65536)
+        finally:
+            server.close()
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    wait_for_path(path)
+    return thread
+
+
+def test_reverse_channel_clients_fail_closed_on_empty_response() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-reverse-empty-response-") as tmp:
+        root = Path(tmp)
+        for kind in ("codex", "json"):
+            socket_path = root / f"{kind}.sock"
+            server = run_empty_response_server(socket_path)
+            client = root / f"{kind}-client"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(BRIDGE),
+                    "write-client",
+                    "--kind",
+                    kind,
+                    "--socket",
+                    str(socket_path),
+                    "--output",
+                    str(client),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            args = [str(client), "exec"] if kind == "codex" else [str(client)]
+            proc = subprocess.run(
+                args,
+                input="{}",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            assert proc.returncode == 125, (kind, proc.returncode, proc.stderr)
+            assert "reverse channel response missing" in proc.stderr
+            server.join(timeout=5)
+            assert not server.is_alive()
+
+
 def test_codex_client_writes_last_message_and_rewrites_bridge() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-reverse-bridge-smoke-") as tmp:
         root = Path(tmp)
@@ -49,9 +125,11 @@ from pathlib import Path
 
 args = sys.argv[1:]
 stdin_text = sys.stdin.read()
-if stdin_text:
+if not stdin_text:
     raise SystemExit(41)
-prompt = args[-1]
+if any('Private bridge command:' in item or 'Task' in item for item in args):
+    raise SystemExit(42)
+prompt = stdin_text
 Path({str(prompt_dump)!r}).write_text(prompt, encoding='utf-8')
 out = Path(args[args.index('--output-last-message') + 1])
 time.sleep(0.35)
@@ -169,10 +247,11 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 args = sys.argv[1:]
-prompt = next(
-    (item for item in args if 'Private bridge command:\\n' in item),
-    '\\n'.join(args),
-)
+prompt = sys.stdin.read()
+if not prompt:
+    raise SystemExit(41)
+if any('Private bridge command:' in item for item in args):
+    raise SystemExit(42)
 bridge = prompt.split('Private bridge command:\\n', 1)[1].split('\\n', 1)[0]
 env = os.environ.copy()
 env['AI_ADDR'] = '127.0.0.1'
@@ -265,6 +344,95 @@ raise SystemExit(proc.returncode)
             assert any(item.startswith("AI_PORT=") for item in argv), argv
             assert remote_last.read_text(encoding="utf-8") == (
                 "LOOPX_REVERSE_TEMPLATE_READY\n"
+            )
+        finally:
+            server.wait(timeout=5)
+
+
+def test_codex_client_plain_prompt_does_not_require_bridge_action() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-reverse-plain-prompt-") as tmp:
+        root = Path(tmp)
+        fake_codex = root / "fake-codex"
+        prompt_dump = root / "plain-prompt.txt"
+        fake_codex.write_text(
+            f"""#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+prompt = sys.stdin.read()
+if not prompt:
+    raise SystemExit(41)
+if any('plain health prompt' in item for item in args):
+    raise SystemExit(42)
+Path({str(prompt_dump)!r}).write_text(prompt, encoding='utf-8')
+out = Path(args[args.index('--output-last-message') + 1])
+out.write_text('LOOPX_REVERSE_PLAIN_READY\\n', encoding='utf-8')
+print('plain codex stdout ok')
+""",
+            encoding="utf-8",
+        )
+        fake_codex.chmod(0o700)
+        socket_path = root / "codex.sock"
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                str(BRIDGE),
+                "serve-codex",
+                "--socket",
+                str(socket_path),
+                "--codex-bin",
+                str(fake_codex),
+                "--prompt-bridge-command",
+                "false",
+                "--first-action-timeout-sec",
+                "1",
+                "--once",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            wait_for_socket(socket_path, server)
+            client = root / "codex-client"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(BRIDGE),
+                    "write-client",
+                    "--kind",
+                    "codex",
+                    "--socket",
+                    str(socket_path),
+                    "--output",
+                    str(client),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            remote_last = root / "remote-last-message.txt"
+            proc = subprocess.run(
+                [
+                    str(client),
+                    "exec",
+                    "--output-last-message",
+                    str(remote_last),
+                    "--json",
+                ],
+                check=False,
+                input="plain health prompt",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+            assert "plain codex stdout ok" in proc.stdout
+            assert prompt_dump.read_text(encoding="utf-8") == "plain health prompt"
+            assert remote_last.read_text(encoding="utf-8") == (
+                "LOOPX_REVERSE_PLAIN_READY\n"
             )
         finally:
             server.wait(timeout=5)
@@ -442,6 +610,81 @@ print(json.dumps({
             server.wait(timeout=5)
 
 
+def test_json_preflight_does_not_require_target_env_or_bridge_command() -> None:
+    with tempfile.TemporaryDirectory(prefix="lrjp-") as tmp:
+        root = Path(tmp)
+        fake_bridge = root / "fake-json-bridge"
+        marker = root / "bridge-invoked"
+        fake_bridge.write_text(
+            f"""#!/usr/bin/env python3
+from pathlib import Path
+Path({str(marker)!r}).write_text('unexpected', encoding='utf-8')
+raise SystemExit(42)
+""",
+            encoding="utf-8",
+        )
+        fake_bridge.chmod(0o700)
+        socket_path = root / "json-preflight.sock"
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                str(BRIDGE),
+                "serve-json",
+                "--socket",
+                str(socket_path),
+                "--bridge-command",
+                str(fake_bridge),
+                "--once",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            wait_for_socket(socket_path, server)
+            client = root / "json-client"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(BRIDGE),
+                    "write-client",
+                    "--kind",
+                    "json",
+                    "--socket",
+                    str(socket_path),
+                    "--output",
+                    str(client),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            env = os.environ.copy()
+            env.pop("AI_ADDR", None)
+            env.pop("AI_PORT", None)
+            env["LOOPX_REVERSE_CONNECT_TIMEOUT_SEC"] = "0.1"
+            env["LOOPX_REVERSE_RESPONSE_TIMEOUT_SEC"] = "5"
+            proc = subprocess.run(
+                [str(client)],
+                input=json.dumps({"operation": "preflight"}),
+                check=False,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+            response = json.loads(proc.stdout)
+            assert response["ok"] is True
+            assert response["operation"] == "preflight"
+            assert response["raw_task_text_recorded"] is False
+            assert response["credential_values_recorded"] is False
+            assert marker.exists() is False
+        finally:
+            server.wait(timeout=5)
+
+
 def test_socket_probe_reports_missing_or_orphaned() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-reverse-probe-smoke-") as tmp:
         missing = Path(tmp) / "missing.sock"
@@ -466,8 +709,10 @@ def test_socket_probe_reports_missing_or_orphaned() -> None:
 def main() -> int:
     test_codex_client_writes_last_message_and_rewrites_bridge()
     test_codex_bridge_template_preserves_dynamic_private_command()
+    test_codex_client_plain_prompt_does_not_require_bridge_action()
     test_json_client_forwards_stdin_to_bridge_command()
     test_json_client_expands_allowed_env_template_for_nested_bridge()
+    test_json_preflight_does_not_require_target_env_or_bridge_command()
     test_socket_probe_reports_missing_or_orphaned()
     print("skillsbench reverse-channel bridge smoke passed")
     return 0
