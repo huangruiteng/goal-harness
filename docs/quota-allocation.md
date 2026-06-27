@@ -381,13 +381,33 @@ no-spend stall evidence with:
 loopx --registry "$HOME/.codex/loopx/registry.global.json" quota monitor-poll --goal-id <GOAL_ID> --source heartbeat --execute
 ```
 
-`quota monitor-poll` is valid only when the current guard is
-`effective_action=monitor_quiet_skip` and
-`recommended_mode=monitor_quiet_until_material_transition`. It appends a
-`quota_monitor_poll` run record, does not mutate the registry, and does not
-append `quota_slot_spent`. The run includes `quota_monitor_target_v0`, a compact
-hash of the public monitor identity. Six consecutive public stalled monitor
-records with the same target feed `autonomous_replan_obligation` as
+`quota monitor-poll` is valid when the current guard is a quiet monitor skip,
+an external-evidence observation, or a due `continuous_monitor` todo selected
+by `work_lane_contract.obligation=attempt_due_monitor`. For due monitor todos,
+pass `--todo-id` or `--target-key` plus a public `--result-hash`; unchanged
+polls update `last_checked_at`, `next_due_at`, and
+`consecutive_no_change` without appending `quota_slot_spent`:
+
+```bash
+loopx quota monitor-poll --goal-id <GOAL_ID> \
+  --todo-id <TODO_ID> --result-hash <HASH> --execute
+```
+
+When a poll sees a material transition, add `--material-change` and optionally
+`--next-agent-todo` or `--next-user-todo` so the monitor produces a concrete
+follow-up instead of staying as an opaque watch:
+
+```bash
+loopx quota monitor-poll --goal-id <GOAL_ID> \
+  --target-key <TARGET_KEY> --result-hash <HASH> --material-change \
+  --next-agent-todo "<PUBLIC_SAFE_FOLLOW_UP>" --execute
+```
+
+The command appends a `quota_monitor_poll` run record, does not mutate the
+registry, and does not append `quota_slot_spent`. The run includes
+`quota_monitor_target_v0`, a compact hash of the public monitor identity. Six
+consecutive public stalled monitor records with the same target feed
+`autonomous_replan_obligation` as
 `dead_monitor_repeat`, so the next independent `quota should-run` may flip to
 `autonomous_replan_required` /
 `execution_obligation.must_attempt_work=true`; the executor should then record a
