@@ -31,6 +31,7 @@ from .execution_profile import (
     execution_profile_summary,
     outcome_floor_threshold,
 )
+from .long_task_cadence import long_task_cadence_hint_summary
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .state_projection import is_user_wait_text, next_action_projection_warning
 from .todo_contract import (
@@ -6659,6 +6660,15 @@ def build_quota_should_run(
             )
             if project_asset
             else None,
+            "long_task_cadence_hint": (
+                project_asset.get("long_task_cadence_hint")
+                if project_asset and isinstance(project_asset.get("long_task_cadence_hint"), dict)
+                else (
+                    item.get("long_task_cadence_hint")
+                    if isinstance(item.get("long_task_cadence_hint"), dict)
+                    else None
+                )
+            ),
             "handoff_readiness": item.get("handoff_readiness"),
             "heartbeat_recommendation": heartbeat_recommendation,
             "execution_obligation": _execution_obligation(
@@ -8349,6 +8359,15 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
     )
     if execution_profile:
         lines.append(f"- execution_profile: {execution_profile_summary(execution_profile)}")
+    long_task_cadence_hint = (
+        payload.get("long_task_cadence_hint")
+        if isinstance(payload.get("long_task_cadence_hint"), dict)
+        else {}
+    )
+    if long_task_cadence_hint:
+        lines.append(
+            f"- long_task_cadence_hint: {long_task_cadence_hint_summary(long_task_cadence_hint)}"
+        )
     control_plane = payload.get("control_plane") if isinstance(payload.get("control_plane"), dict) else None
     if control_plane:
         lines.append(f"- control_plane: {control_plane_policy_summary(control_plane)}")

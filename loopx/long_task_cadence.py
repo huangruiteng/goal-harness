@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .delivery_batch_scale import DeliveryBatchScale, normalize_delivery_batch_scale
+from .delivery_outcome import (
+    DeliveryOutcome,
+    DeliveryTurnKind,
+    normalize_delivery_outcome,
+    normalize_delivery_turn_kind,
+)
+from .execution_profile import compact_execution_profile, execution_profile_threshold
+
+
+LONG_TASK_CADENCE_HINT_SCHEMA_VERSION = "cadence_hint_v0"
+
+BLOCKED_QUOTA_STATES = frozenset(
+    {
+        "blocked",
+        "blocked_health",
+        "focus_wait",
+        "monitor_only",
+        "operator_gate",
+        "paused",
+        "throttled",
+        "user_gate",
+        "waiting",
+    }
+)
+SMALL_PROGRESS_GRANULARITIES = frozenset({"status_only", "single_surface"})
+MATERIAL_PROGRESS_GRANULARITIES = frozenset(
+    {"multi_surface", "implementation_plus_validation", "milestone"}
+)
+
+
+def _progress_granularity(run: dict[str, Any] | None) -> str:
+    if not isinstance(run, dict) or not run:
+        return "status_only"
+
+    outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
+    turn_kind = normalize_delivery_turn_kind(run.get("delivery_turn_kind"))
+    scale = normalize_delivery_batch_scale(run.get("delivery_batch_scale"))
+
+    if outcome == DeliveryOutcome.PRIMARY_GOAL_OUTCOME:
+        return "milestone"
+    if outcome == DeliveryOutcome.OUTCOME_PROGRESS:
+        return "implementation_plus_validation"
+    if turn_kind == DeliveryTurnKind.PRODUCT_PATH_EXECUTION:
+        return "implementation_plus_validation"
+    if scale == DeliveryBatchScale.IMPLEMENTATION:
+        return "implementation_plus_validation"
+    if scale == DeliveryBatchScale.MULTI_SURFACE or turn_kind == DeliveryTurnKind.COMPACT_EVIDENCE:
+        return "multi_surface"
+    if scale in {DeliveryBatchScale.TEST_ONLY, DeliveryBatchScale.SINGLE_SURFACE}:
+        return "single_surface"
+    if turn_kind == DeliveryTurnKind.CONTRACT_ONLY_PREPARATION:
+        return "single_surface"
+    return "status_only"
+
+
+def _small_step_streak(runs: list[dict[str, Any]]) -> int:
+    streak = 0
+    for run in runs:
+        turn_kind = normalize_delivery_turn_kind(run.get("delivery_turn_kind"))
+        if turn_kind == DeliveryTurnKind.BLOCKER_WRITEBACK:
+            break
+        if _progress_granularity(run) not in SMALL_PROGRESS_GRANULARITIES:
+            break
+        streak += 1
+    return streak
+
+
+def _recent_runs(
+    *,
+    latest_runs: list[dict[str, Any]] | None,
+    handoff_readiness: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    readiness = handoff_readiness if isinstance(handoff_readiness, dict) else {}
+    compact_runs = (
+        readiness.get("post_handoff_recent_runs")
+        if isinstance(readiness.get("post_handoff_recent_runs"), list)
+        else []
+    )
+    if compact_runs:
+        return [run for run in compact_runs if isinstance(run, dict)]
+    latest_run = readiness.get("post_handoff_latest_run")
+    if isinstance(latest_run, dict) and latest_run:
+        return [latest_run]
+    runs = [run for run in latest_runs or [] if isinstance(run, dict)]
+    if runs:
+        return runs
+    return []
+
+
+def _reason_from_granularity(granularity: str) -> str:
+    return f"{granularity}_latest_turn"
+
+
+def _blocked_reason(quota_state: str, user_todo_open_count: int | None) -> list[str]:
+    reasons = [f"quota_state_{quota_state}"]
+    if user_todo_open_count and user_todo_open_count > 0:
+        reasons.append("open_user_todos_visible")
+    return reasons
+
+
+def build_long_task_cadence_hint(
+    *,
+    execution_profile: dict[str, Any] | None = None,
+    latest_runs: list[dict[str, Any]] | None = None,
+    handoff_readiness: dict[str, Any] | None = None,
+    quota_state: str | None = None,
+    user_todo_open_count: int | None = None,
+) -> dict[str, Any]:
+    """Build a small, public-safe cadence hint from existing control signals."""
+
+    profile = compact_execution_profile(execution_profile)
+    runs = _recent_runs(latest_runs=latest_runs, handoff_readiness=handoff_readiness)
+    latest_run = runs[0] if runs else {}
+    threshold = execution_profile_threshold(profile)
+    small_step_streak = _small_step_streak(runs)
+    normalized_quota_state = str(quota_state or "").strip()
+
+    if normalized_quota_state in BLOCKED_QUOTA_STATES:
+        return {
+            "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
+            "signal": "blocked",
+            "recommendation": "wait",
+            "reason_codes": _blocked_reason(normalized_quota_state, user_todo_open_count),
+        }
+
+    if not runs:
+        return {
+            "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
+            "signal": "unknown",
+            "recommendation": "keep",
+            "reason_codes": ["missing_recent_runs"],
+        }
+
+    granularity = _progress_granularity(latest_run)
+    if granularity in SMALL_PROGRESS_GRANULARITIES:
+        recommendation = "widen" if small_step_streak >= threshold else "keep"
+        reason = "repeated_surface_only" if recommendation == "widen" else _reason_from_granularity(granularity)
+        return {
+            "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
+            "signal": "thin_progress",
+            "recommendation": recommendation,
+            "reason_codes": [reason],
+        }
+
+    if granularity in MATERIAL_PROGRESS_GRANULARITIES:
+        return {
+            "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
+            "signal": "material_progress",
+            "recommendation": "keep",
+            "reason_codes": [_reason_from_granularity(granularity)],
+        }
+
+    return {
+        "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
+        "signal": "unknown",
+        "recommendation": "keep",
+        "reason_codes": [_reason_from_granularity(granularity)],
+    }
+
+
+def build_long_task_cadence_policy(**kwargs: Any) -> dict[str, Any]:
+    """Compatibility wrapper for older callers while this projection rolls out."""
+
+    return build_long_task_cadence_hint(**kwargs)
+
+
+def long_task_cadence_hint_summary(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    reason_codes = value.get("reason_codes")
+    if isinstance(reason_codes, list):
+        reason_text = ",".join(str(reason) for reason in reason_codes)
+    else:
+        reason_text = ""
+    return (
+        f"signal={value.get('signal')} "
+        f"recommendation={value.get('recommendation')} "
+        f"reasons={reason_text}"
+    )
+
+
+def long_task_cadence_summary(value: Any) -> str:
+    return long_task_cadence_hint_summary(value)
