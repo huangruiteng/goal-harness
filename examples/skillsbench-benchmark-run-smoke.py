@@ -398,6 +398,109 @@ def test_product_mode_initial_prompt_keeps_task_visible_after_lifecycle_gate() -
     assert trace["followup_prompt_count"] == 1, trace
 
 
+def test_goal_start_workflow_driver_bootstraps_bridge_before_task_packet() -> None:
+    trace = {
+        "schema_version": "skillsbench_loopx_controller_trace_v0",
+        "route": "loopx-goal-start-product-mode",
+        "heartbeat_count": 0,
+        "controller_action_decisions": 0,
+        "initial_prompt_count": 0,
+        "followup_prompt_count": 0,
+        "stop_decision_count": 0,
+        "reward_observation_count": 0,
+        "round_rewards": [],
+    }
+    saved_modules = {
+        name: sys.modules.get(name)
+        for name in (
+            "benchflow",
+            "benchflow.sandbox",
+            "benchflow.sandbox.user",
+        )
+    }
+    fake_benchflow = types.ModuleType("benchflow")
+    fake_sandbox = types.ModuleType("benchflow.sandbox")
+    fake_user = types.ModuleType("benchflow.sandbox.user")
+
+    class FakeBaseUser:
+        pass
+
+    class FakeRoundResultBase:
+        pass
+
+    class FakeRoundResult:
+        rewards: dict[str, float] = {}
+        n_tool_calls = 1
+        trajectory: list[object] = []
+
+    fake_user.BaseUser = FakeBaseUser
+    fake_user.RoundResult = FakeRoundResultBase
+    sys.modules["benchflow"] = fake_benchflow
+    sys.modules["benchflow.sandbox"] = fake_sandbox
+    sys.modules["benchflow.sandbox.user"] = fake_user
+    try:
+        user = _build_product_mode_user(
+            route="loopx-goal-start-product-mode",
+            max_rounds=8,
+            trace=trace,
+            plan={
+                "runner_prerequisites": {
+                    "loopx_workflow_lifecycle_checkpoint": True,
+                    "loopx_product_mode_lifecycle_driver_kind": (
+                        "orchestrated_agentloop_loopx_cli"
+                    ),
+                }
+            },
+            case_payload={
+                "canonical_product_mode_lifecycle_driver": True,
+                "planned_todo_count": 3,
+                "selected_p0_todo_id": "todo_goalstart_p0",
+            },
+        )
+    finally:
+        for name, module in saved_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+    bootstrap_prompt = asyncio.run(user.run(0, "Compute the requested coefficient."))
+    assert bootstrap_prompt is not None
+    assert "--- LOOPX PRODUCT-MODE CONTROL PLANE ---" in bootstrap_prompt
+    assert "--- TASK INSTRUCTION ---" not in bootstrap_prompt
+    assert "Compute the requested coefficient." not in bootstrap_prompt
+    assert "FIRST ACTION REQUIRED" in bootstrap_prompt
+    assert "benchmark task instruction will be sent after" in bootstrap_prompt
+    assert trace["product_mode_task_instruction_deferred_until_agent_lifecycle"] is True
+    assert trace["product_mode_task_instruction_sent_initially"] is False
+    assert trace["last_decision"] == "send_goal_start_workflow_bridge_bootstrap_prompt"
+
+    trace.update(
+        {
+            "remote_command_file_bridge_driver_lifecycle_execution_style": (
+                "orchestrated_agentloop_loopx_cli"
+            ),
+            "remote_command_file_bridge_driver_lifecycle_checkpoint_count": 1,
+            "remote_command_file_bridge_driver_lifecycle_success_count": 1,
+            "remote_command_file_bridge_driver_lifecycle_failure_count": 0,
+            "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count": 4,
+            "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count": 1,
+            "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count": 3,
+            "remote_command_file_bridge_agent_request_count": 1,
+            "remote_command_file_bridge_agent_task_facing_operation_count": 1,
+        }
+    )
+    task_prompt = asyncio.run(
+        user.run(1, "Compute the requested coefficient.", FakeRoundResult())
+    )
+    assert task_prompt is not None
+    assert "--- TASK INSTRUCTION ---" in task_prompt
+    assert "Compute the requested coefficient." in task_prompt
+    assert "The task packet is now available" in task_prompt
+    assert trace["product_mode_task_instruction_sent_after_agent_lifecycle"] is True
+    assert trace["last_decision"] == "send_product_mode_task_instruction_after_agent_lifecycle"
+
+
 def test_loopx_subcommand_family_counts_include_arguments() -> None:
     counts = {
         "todo complete": 2,

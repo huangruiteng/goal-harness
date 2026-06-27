@@ -7100,6 +7100,27 @@ def _build_product_mode_user(
             "closeout."
         )
 
+    def workflow_bootstrap_prompt() -> str:
+        return (
+            "LoopX product-mode treatment round 1. "
+            "You are running inside the official SkillsBench sandbox transport, "
+            "but this local Codex process is outside the scored sandbox. No "
+            "official reward, pass/fail status, verifier error, verifier output, "
+            "or verifier tail will be shown during this run.\n\n"
+            "--- LOOPX PRODUCT-MODE CONTROL PLANE ---\n"
+            "The canonical workflow lifecycle driver has already executed the "
+            "case-local quota/todo/update/refresh checkpoint through the sandbox "
+            "bridge before this prompt. This route simulates `/loopx <task "
+            "objective>` goal start: a compact ranked todo plan and selected P0 "
+            "todo have already been seeded in the case-local LoopX state. "
+            "Do not repeat setup lifecycle, do not solve from prose, and do not "
+            "declare done in this bootstrap round. Your only job in this round "
+            "is to prove task-facing sandbox access: copy and run the bridge "
+            "packet's FIRST ACTION REQUIRED shell command exactly, then briefly "
+            "report that bridge access is available. The benchmark task "
+            "instruction will be sent after that bridge action is observed."
+        )
+
     def solver_activity_prompt(round_number: int) -> str:
         return (
             f"Mandatory product-mode solver checkpoint before round {round_number} "
@@ -7264,7 +7285,7 @@ def _build_product_mode_user(
                             "LoopX lifecycle request before official verifier"
                         )
                     if (
-                        _product_mode_agent_lifecycle_gate_satisfied(trace)
+                        product_mode_entry_lifecycle_gate_satisfied()
                         and not self._task_instruction_sent
                     ):
                         self._task_instruction_sent = True
@@ -7407,12 +7428,23 @@ def _build_product_mode_user(
                     trace["persistent_constraint_protected_paths"] = protected_paths
                 if treatment:
                     prefix = "LoopX product-mode treatment round 1. "
+                    trace["case_goal_state_packet_present"] = True
+                    if workflow_lifecycle_driver and goal_start_product_mode:
+                        self._task_instruction_sent = False
+                        trace[
+                            "product_mode_task_instruction_deferred_until_agent_lifecycle"
+                        ] = True
+                        trace["product_mode_task_instruction_sent_initially"] = False
+                        trace["last_decision"] = (
+                            "send_goal_start_workflow_bridge_bootstrap_prompt"
+                        )
+                        return workflow_bootstrap_prompt()
+
                     self._task_instruction_sent = True
                     trace[
                         "product_mode_task_instruction_deferred_until_agent_lifecycle"
                     ] = False
                     trace["product_mode_task_instruction_sent_initially"] = True
-                    trace["case_goal_state_packet_present"] = True
                     control_clause = (
                         "Use LoopX as your product control plane: create "
                         "a compact goal state, maintain todos, replan when local "
