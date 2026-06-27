@@ -1118,6 +1118,11 @@ def build_review_packet(
         if isinstance(item, dict) and isinstance(item.get("stale_latest_run_warning"), dict)
         else None
     )
+    task_graph_projection = (
+        item.get("task_graph_projection")
+        if isinstance(item, dict) and isinstance(item.get("task_graph_projection"), dict)
+        else None
+    )
     stale_latest_run_lines = stale_latest_run_packet_lines(stale_latest_run_warning)
     approved_handoff = operator_gate_approved_handoff(item, goal)
     command = redact_local_absolute_paths(project_agent_command(status_payload, goal_id, kind, item, goal))
@@ -1222,6 +1227,7 @@ def build_review_packet(
         "handoff_interface_budget": handoff_interface_budget,
         "decision_freshness_warning": freshness_warning,
         "stale_latest_run_warning": stale_latest_run_warning,
+        "task_graph_projection": task_graph_projection,
         "project_asset_source": asset_source,
         "packet": "\n".join(line for line in lines if line),
     }
