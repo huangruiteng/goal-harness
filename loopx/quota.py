@@ -2202,7 +2202,26 @@ def _todo_action_scope_tokens(item: dict[str, Any]) -> set[str]:
     return _action_scope_tokens_from_text(text)
 
 
+def _todo_gate_relation(gate: dict[str, Any], agent_item: dict[str, Any]) -> dict[str, Any] | None:
+    target_todo_id = normalize_todo_id(gate.get("unblocks_todo_id"))
+    if not target_todo_id:
+        return None
+    agent_todo_id = normalize_todo_id(agent_item.get("todo_id"))
+    return {
+        "schema_version": "todo_gate_relation_v0",
+        "source": "unblocks_todo_id",
+        "state": "gate_targets_todo" if target_todo_id == agent_todo_id else "independent",
+        "gate_todo_id": normalize_todo_id(gate.get("todo_id")),
+        "target_todo_id": target_todo_id,
+        "agent_todo_id": agent_todo_id,
+    }
+
+
 def _user_gate_blocks_agent_item(gate: dict[str, Any], agent_item: dict[str, Any]) -> bool:
+    relation = _todo_gate_relation(gate, agent_item)
+    if relation:
+        return relation.get("state") == "gate_targets_todo"
+
     gate_action_tokens = _todo_action_kind_tokens(gate)
     agent_action_tokens = _todo_action_kind_tokens(agent_item)
     if gate_action_tokens and agent_action_tokens:
@@ -2262,7 +2281,11 @@ def _scoped_user_gate_fallback(
         if matching_gate:
             blocking_gate = blocking_gate or matching_gate
             text = str(item.get("text") or "").strip()
-            blocked_items.append(_compact_todo_summary_item(item, text=text))
+            blocked_item = _compact_todo_summary_item(item, text=text)
+            relation = _todo_gate_relation(matching_gate, item)
+            if relation:
+                blocked_item["todo_gate_relation"] = relation
+            blocked_items.append(blocked_item)
             continue
         if selected is None:
             selected = item
@@ -2274,6 +2297,10 @@ def _scoped_user_gate_fallback(
 
     selected_text = str(selected.get("text") or "").strip()
     gate_to_surface = blocking_gate or gates[0]
+    selected_item = _compact_todo_summary_item(selected, text=selected_text)
+    selected_relation = _todo_gate_relation(gate_to_surface, selected)
+    if selected_relation:
+        selected_item["todo_gate_relation"] = selected_relation
     gate_text = str(gate_to_surface.get("text") or "").strip()
     reason = (
         "an open user_gate blocks a scoped agent todo, but a non-dependent "
@@ -2292,7 +2319,7 @@ def _scoped_user_gate_fallback(
         "reason": reason,
         "blocked_user_gate": _compact_todo_summary_item(gate_to_surface, text=gate_text),
         "blocked_agent_items": blocked_items[:3],
-        "selected_executable": _compact_todo_summary_item(selected, text=selected_text),
+        "selected_executable": selected_item,
         "recommended_action": (
             "Notify the user about the scoped gate; then execute the selected "
             "non-gated fallback and spend only after validated writeback."
