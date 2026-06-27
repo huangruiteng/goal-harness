@@ -7592,20 +7592,283 @@ def _allows_no_spend_external_monitor_poll(decision: dict[str, Any]) -> bool:
     return bool(decision.get("external_evidence_observation"))
 
 
+MONITOR_CADENCE_PATTERN = re.compile(
+    r"^\s*(?P<count>[1-9][0-9]{0,4})\s*"
+    r"(?P<unit>s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_monitor_counter(value: Any) -> int:
+    try:
+        return max(0, int(str(value or "0").strip()))
+    except ValueError:
+        return 0
+
+
+def _monitor_cadence_delta(value: Any) -> timedelta | None:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    match = MONITOR_CADENCE_PATTERN.match(candidate)
+    if not match:
+        return None
+    count = int(match.group("count"))
+    unit = match.group("unit").lower()
+    if unit.startswith("s"):
+        return timedelta(seconds=count)
+    if unit.startswith("m"):
+        return timedelta(minutes=count)
+    if unit.startswith("h"):
+        return timedelta(hours=count)
+    return timedelta(days=count)
+
+
+def _monitor_next_due_at(
+    *,
+    generated_at: str,
+    cadence: Any = None,
+    explicit_next_due_at: Any = None,
+) -> str | None:
+    explicit = str(explicit_next_due_at or "").strip()
+    if explicit:
+        if _parse_timestamp(explicit) is None:
+            raise ValueError("--next-due-at must be an ISO timestamp")
+        return explicit
+    delta = _monitor_cadence_delta(cadence)
+    if delta is None:
+        return None
+    checked_at = _parse_timestamp(generated_at)
+    if checked_at is None:
+        checked_at = datetime.now(timezone.utc)
+    return (checked_at + delta).astimezone().replace(microsecond=0).isoformat()
+
+
+def _quota_decision_due_monitor_item(decision: dict[str, Any]) -> dict[str, Any]:
+    item = (
+        decision.get("agent_lane_next_action")
+        if isinstance(decision.get("agent_lane_next_action"), dict)
+        else {}
+    )
+    if _todo_task_class(item) != TODO_TASK_CLASS_MONITOR:
+        item = {}
+    if item:
+        return item
+    contract = (
+        decision.get("work_lane_contract")
+        if isinstance(decision.get("work_lane_contract"), dict)
+        else {}
+    )
+    selected_todo_id = normalize_todo_id(contract.get("selected_todo_id"))
+    due_items = contract.get("monitor_due_items") if isinstance(contract.get("monitor_due_items"), list) else []
+    for due_item in due_items:
+        if not isinstance(due_item, dict):
+            continue
+        if selected_todo_id and normalize_todo_id(due_item.get("todo_id")) != selected_todo_id:
+            continue
+        if _todo_task_class(due_item) == TODO_TASK_CLASS_MONITOR:
+            return due_item
+    return item
+
+
+def _allows_due_monitor_poll(
+    decision: dict[str, Any],
+    *,
+    todo_id: str | None = None,
+    target_key: str | None = None,
+) -> bool:
+    if decision.get("should_run") is not True:
+        return False
+    if decision.get("requires_user_action") is True:
+        return False
+    item = _quota_decision_due_monitor_item(decision)
+    if not item:
+        return False
+    if todo_id and normalize_todo_id(item.get("todo_id")) != normalize_todo_id(todo_id):
+        return False
+    if target_key:
+        item_target_key = str(item.get("target_key") or "").strip()
+        if item_target_key and item_target_key != str(target_key).strip():
+            return False
+    return True
+
+
+def _resolve_monitor_todo_item(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str | None = None,
+    target_key: str | None = None,
+) -> dict[str, Any]:
+    from .todos import list_goal_todos
+
+    normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
+    safe_target_key = str(target_key or "").strip()
+    if not normalized_todo_id and not safe_target_key:
+        raise ValueError("monitor todo writeback requires --todo-id or --target-key")
+    payload = list_goal_todos(registry_path=registry_path, goal_id=goal_id, role="agent")
+    matches: list[dict[str, Any]] = []
+    for item in payload.get("todos") if isinstance(payload.get("todos"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        if normalized_todo_id and normalize_todo_id(item.get("todo_id")) == normalized_todo_id:
+            matches.append(item)
+            continue
+        if safe_target_key and str(item.get("target_key") or "").strip() == safe_target_key:
+            matches.append(item)
+    if not matches:
+        target = normalized_todo_id or safe_target_key
+        raise ValueError(f"monitor todo target {target!r} was not found")
+    if len(matches) > 1:
+        raise ValueError(f"monitor target_key {safe_target_key!r} matched multiple todos; pass --todo-id")
+    item = matches[0]
+    if _todo_task_class(item) != TODO_TASK_CLASS_MONITOR:
+        raise ValueError("monitor-poll todo writeback target must be task_class=continuous_monitor")
+    return item
+
+
+def _write_monitor_poll_todo_state(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    generated_at: str,
+    execute: bool,
+    todo_id: str | None = None,
+    target_key: str | None = None,
+    result_hash: str | None = None,
+    material_change: bool = False,
+    cadence: str | None = None,
+    next_due_at: str | None = None,
+    reason_summary: str | None = None,
+    next_agent_todo: str | None = None,
+    next_user_todo: str | None = None,
+    next_claimed_by: str | None = None,
+    agent_id: str | None = None,
+) -> dict[str, Any] | None:
+    from .todos import add_goal_todo, update_goal_todo
+
+    if not todo_id and not target_key:
+        return None
+    safe_result_hash = str(result_hash or "").strip()
+    if not safe_result_hash:
+        raise ValueError("monitor todo writeback requires --result-hash")
+    item = _resolve_monitor_todo_item(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        target_key=target_key,
+    )
+    resolved_todo_id = normalize_todo_id(item.get("todo_id"))
+    if not resolved_todo_id:
+        raise ValueError("resolved monitor todo has no stable todo_id")
+    safe_target_key = str(target_key or item.get("target_key") or "").strip()
+    effective_cadence = str(cadence or item.get("cadence") or "").strip()
+    effective_next_due_at = _monitor_next_due_at(
+        generated_at=generated_at,
+        cadence=effective_cadence,
+        explicit_next_due_at=next_due_at,
+    )
+    if not material_change and not effective_next_due_at:
+        raise ValueError(
+            "unchanged monitor todo writeback requires --next-due-at or a parseable cadence such as 30m/2h/1d"
+        )
+    previous_hash = str(item.get("result_hash") or "").strip()
+    previous_no_change = _parse_monitor_counter(item.get("consecutive_no_change"))
+    consecutive_no_change = (
+        0
+        if material_change or (previous_hash and previous_hash != safe_result_hash)
+        else previous_no_change + 1
+    )
+    monitor_metadata: dict[str, Any] = {
+        "last_checked_at": generated_at,
+        "result_hash": safe_result_hash,
+        "consecutive_no_change": str(consecutive_no_change),
+        "material_change": "true" if material_change else "false",
+    }
+    if safe_target_key:
+        monitor_metadata["target_key"] = safe_target_key
+    if effective_cadence:
+        monitor_metadata["cadence"] = effective_cadence
+    if effective_next_due_at:
+        monitor_metadata["next_due_at"] = effective_next_due_at
+    update_result = update_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=resolved_todo_id,
+        role="agent",
+        reason=reason_summary,
+        monitor_metadata=monitor_metadata,
+        dry_run=not execute,
+    )
+    next_results: list[dict[str, Any]] = []
+    if material_change and next_agent_todo:
+        next_results.append(
+            add_goal_todo(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                role="agent",
+                text=next_agent_todo,
+                task_class=TODO_TASK_CLASS_ADVANCEMENT,
+                action_kind="advance",
+                claimed_by=next_claimed_by,
+                unblocks_todo_id=resolved_todo_id,
+                dry_run=not execute,
+            )
+        )
+    if material_change and next_user_todo:
+        next_results.append(
+            add_goal_todo(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                role="user",
+                text=next_user_todo,
+                task_class=TODO_TASK_CLASS_USER_GATE,
+                action_kind="gate",
+                agent_id=agent_id,
+                unblocks_todo_id=resolved_todo_id,
+                dry_run=not execute,
+            )
+        )
+    return {
+        "schema_version": "monitor_poll_todo_writeback_v0",
+        "dry_run": not execute,
+        "goal_id": goal_id,
+        "todo_id": resolved_todo_id,
+        "target_key": safe_target_key or None,
+        "result_hash": safe_result_hash,
+        "material_change": material_change,
+        "consecutive_no_change": consecutive_no_change,
+        "last_checked_at": generated_at,
+        "next_due_at": effective_next_due_at,
+        "cadence": effective_cadence or None,
+        "todo_update": update_result,
+        "next_todos": next_results,
+    }
+
+
 def build_quota_monitor_poll_event(
     before: dict[str, Any],
     *,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
     generated_at: str | None = None,
     reason_summary: str | None = None,
+    todo_id: str | None = None,
+    target_key: str | None = None,
+    result_hash: str | None = None,
+    material_change: bool = False,
 ) -> dict[str, Any]:
     safe_source = str(source or DEFAULT_SLOT_SPEND_SOURCE).strip()
     if safe_source not in VALID_SLOT_SPEND_SOURCES:
         raise ValueError(f"quota monitor-poll source must be one of: {', '.join(sorted(VALID_SLOT_SPEND_SOURCES))}")
     external_monitor_poll = _allows_no_spend_external_monitor_poll(before)
-    if before.get("effective_action") != "monitor_quiet_skip" and not external_monitor_poll:
+    due_monitor_poll = _allows_due_monitor_poll(
+        before,
+        todo_id=todo_id,
+        target_key=target_key,
+    )
+    if before.get("effective_action") != "monitor_quiet_skip" and not external_monitor_poll and not due_monitor_poll:
         raise ValueError(
-            "quota monitor-poll requires a monitor_quiet_skip or external monitor observation decision"
+            "quota monitor-poll requires a monitor_quiet_skip, due monitor todo, or external monitor observation decision"
         )
     recommendation = (
         before.get("heartbeat_recommendation")
@@ -7615,12 +7878,21 @@ def build_quota_monitor_poll_event(
     if (
         recommendation.get("recommended_mode") != "monitor_quiet_until_material_transition"
         and not external_monitor_poll
+        and not due_monitor_poll
     ):
         raise ValueError("quota monitor-poll requires monitor_quiet_until_material_transition mode")
     monitor_mode = (
         "external_monitor_observed_without_material_transition"
         if external_monitor_poll
-        else "monitor_quiet_until_material_transition"
+        else (
+            "due_monitor_material_transition"
+            if due_monitor_poll and material_change
+            else (
+                "due_monitor_observed_without_material_transition"
+                if due_monitor_poll
+                else "monitor_quiet_until_material_transition"
+            )
+        )
     )
     monitor_target = _quota_monitor_target(before, monitor_mode=monitor_mode)
     safe_reason_summary = str(reason_summary or "").strip()
@@ -7640,11 +7912,23 @@ def build_quota_monitor_poll_event(
         "classification": QUOTA_MONITOR_POLL_CLASSIFICATION,
         "recommended_action": before.get("recommended_action") or recommendation.get("reason") or before.get("reason"),
         "health_check": (
-            "external monitor observation unchanged; no quota spend; no material transition"
+            "due monitor material transition observed; follow-up state updated; no quota spend by monitor-poll"
+            if due_monitor_poll and material_change
+            else (
+                "due monitor observation unchanged; no quota spend; next due updated"
+                if due_monitor_poll
+                else (
+                    "external monitor observation unchanged; no quota spend; no material transition"
             if external_monitor_poll
             else "monitor-only poll unchanged; no quota spend; no material transition"
+                )
+            )
         ),
-        "delivery_outcome": DeliveryOutcome.SURFACE_ONLY.value,
+        "delivery_outcome": (
+            DeliveryOutcome.OUTCOME_PROGRESS.value
+            if due_monitor_poll and material_change
+            else DeliveryOutcome.SURFACE_ONLY.value
+        ),
         "monitor_target": monitor_target,
         "monitor_event": {
             "event_type": QUOTA_MONITOR_POLL_CLASSIFICATION,
@@ -7652,6 +7936,10 @@ def build_quota_monitor_poll_event(
             "monitor_mode": monitor_mode,
             "monitor_target": monitor_target,
             "reason_summary": safe_reason_summary,
+            "material_change": material_change,
+            "todo_id": normalize_todo_id(todo_id) if todo_id else None,
+            "target_key": str(target_key or "").strip() or None,
+            "result_hash": str(result_hash or "").strip() or None,
             "before": _compact_quota_decision(before),
         },
     }
@@ -7832,14 +8120,59 @@ def record_quota_monitor_poll(
     status_payload: dict[str, Any],
     *,
     goal_id: str,
+    registry_path: Path | None = None,
     execute: bool = False,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
     reason_summary: str | None = None,
     agent_id: str | None = None,
+    todo_id: str | None = None,
+    target_key: str | None = None,
+    result_hash: str | None = None,
+    material_change: bool = False,
+    cadence: str | None = None,
+    next_due_at: str | None = None,
+    next_agent_todo: str | None = None,
+    next_user_todo: str | None = None,
+    next_claimed_by: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
     before = build_quota_should_run(status_payload, goal_id=safe_goal_id, agent_id=agent_id)
-    if before.get("effective_action") != "monitor_quiet_skip" and not _allows_no_spend_external_monitor_poll(before):
+    normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
+    safe_target_key = str(target_key or "").strip() or None
+    if material_change and not (normalized_todo_id or safe_target_key):
+        return {
+            "ok": False,
+            "mode": "monitor-poll",
+            "dry_run": not execute,
+            "goal_id": safe_goal_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": "`quota monitor-poll --material-change` requires --todo-id or --target-key",
+            "before": before,
+            "after": None,
+        }
+    if (next_agent_todo or next_user_todo) and not material_change:
+        return {
+            "ok": False,
+            "mode": "monitor-poll",
+            "dry_run": not execute,
+            "goal_id": safe_goal_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": "`--next-agent-todo` and `--next-user-todo` require --material-change",
+            "before": before,
+            "after": None,
+        }
+    due_monitor_poll = _allows_due_monitor_poll(
+        before,
+        todo_id=normalized_todo_id,
+        target_key=safe_target_key,
+    )
+    if (
+        before.get("effective_action") != "monitor_quiet_skip"
+        and not _allows_no_spend_external_monitor_poll(before)
+        and not due_monitor_poll
+    ):
         return {
             "ok": False,
             "mode": "monitor-poll",
@@ -7849,19 +8182,63 @@ def record_quota_monitor_poll(
             "registry_mutated": False,
             "reason": (
                 before.get("reason")
-                or "monitor-poll requires monitor_quiet_skip or external monitor observation"
+                or "monitor-poll requires monitor_quiet_skip, due monitor todo, or external monitor observation"
             ),
             "before": before,
             "after": None,
         }
 
     generated_at = _now_local()
+    todo_writeback = None
+    if normalized_todo_id or safe_target_key:
+        if registry_path is None:
+            raise ValueError("monitor todo writeback requires registry_path")
+        todo_writeback = _write_monitor_poll_todo_state(
+            registry_path=registry_path,
+            goal_id=safe_goal_id,
+            generated_at=generated_at,
+            execute=execute,
+            todo_id=normalized_todo_id,
+            target_key=safe_target_key,
+            result_hash=result_hash,
+            material_change=material_change,
+            cadence=cadence,
+            next_due_at=next_due_at,
+            reason_summary=reason_summary,
+            next_agent_todo=next_agent_todo,
+            next_user_todo=next_user_todo,
+            next_claimed_by=next_claimed_by,
+            agent_id=agent_id,
+        )
     record = build_quota_monitor_poll_event(
         before,
         source=source,
         generated_at=generated_at,
         reason_summary=reason_summary,
+        todo_id=(todo_writeback or {}).get("todo_id") or normalized_todo_id,
+        target_key=(todo_writeback or {}).get("target_key") or safe_target_key,
+        result_hash=(todo_writeback or {}).get("result_hash") or result_hash,
+        material_change=material_change,
     )
+    if todo_writeback:
+        record["monitor_event"]["todo_writeback"] = {
+            key: value
+            for key, value in todo_writeback.items()
+            if key
+            in {
+                "schema_version",
+                "dry_run",
+                "goal_id",
+                "todo_id",
+                "target_key",
+                "result_hash",
+                "material_change",
+                "consecutive_no_change",
+                "last_checked_at",
+                "next_due_at",
+                "cadence",
+            }
+        }
     raw_runtime_root = status_payload.get("runtime_root")
     if not raw_runtime_root:
         raise ValueError("status payload does not include runtime_root")
@@ -7883,6 +8260,12 @@ def record_quota_monitor_poll(
     }
     if record.get("agent_id"):
         index_record["agent_id"] = record["agent_id"]
+    if record["monitor_event"].get("todo_id"):
+        index_record["todo_id"] = record["monitor_event"]["todo_id"]
+    if record["monitor_event"].get("target_key"):
+        index_record["target_key"] = record["monitor_event"]["target_key"]
+    if record["monitor_event"].get("material_change"):
+        index_record["material_change"] = record["monitor_event"]["material_change"]
 
     after_status = deepcopy(status_payload)
     if execute:
@@ -7913,7 +8296,11 @@ def record_quota_monitor_poll(
         "classification": QUOTA_MONITOR_POLL_CLASSIFICATION,
         "generated_at": generated_at,
         "agent_id": record.get("agent_id"),
+        "todo_id": record["monitor_event"].get("todo_id"),
+        "target_key": record["monitor_event"].get("target_key"),
+        "material_change": record["monitor_event"].get("material_change"),
         "monitor_event": record["monitor_event"],
+        "todo_writeback": todo_writeback,
         "health_check": record["health_check"],
         "delivery_outcome": record["delivery_outcome"],
         "json_path": str(json_path),
@@ -8346,6 +8733,7 @@ def render_quota_slot_preview_markdown(payload: dict[str, Any]) -> str:
 def render_quota_monitor_poll_markdown(payload: dict[str, Any]) -> str:
     event = payload.get("monitor_event") if isinstance(payload.get("monitor_event"), dict) else {}
     before = event.get("before") if isinstance(event.get("before"), dict) else {}
+    todo_writeback = event.get("todo_writeback") if isinstance(event.get("todo_writeback"), dict) else {}
     lines = [
         "# LoopX Quota Monitor Poll",
         "",
@@ -8355,12 +8743,23 @@ def render_quota_monitor_poll_markdown(payload: dict[str, Any]) -> str:
         f"- source: `{event.get('source')}`",
         f"- effective_action: `{before.get('effective_action')}`",
         f"- monitor_target: `{(event.get('monitor_target') or {}).get('target_id') if isinstance(event.get('monitor_target'), dict) else ''}`",
+        f"- todo_id: `{event.get('todo_id') or ''}`",
+        f"- target_key: `{event.get('target_key') or ''}`",
+        f"- material_change: `{event.get('material_change')}`",
         f"- should_run: `{before.get('should_run')}`",
         f"- self_repair_allowed: `{before.get('self_repair_allowed')}`",
         f"- state: `{before.get('state')}`",
         f"- health_check: {payload.get('health_check')}",
         f"- reason: {event.get('reason_summary')}",
     ]
+    if todo_writeback:
+        lines.append(
+            "- todo_writeback: "
+            f"dry_run={todo_writeback.get('dry_run')} "
+            f"consecutive_no_change={todo_writeback.get('consecutive_no_change')} "
+            f"last_checked_at={todo_writeback.get('last_checked_at')} "
+            f"next_due_at={todo_writeback.get('next_due_at')}"
+        )
     return "\n".join(lines)
 
 
