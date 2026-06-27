@@ -35,5 +35,6 @@ operator-only state are intentionally excluded.
 ## Automation
 
 See [Biweekly update-note automation](automation.md) for the recommended
-publication path. The short version: use a separate release-note job that opens
-a reviewable PR, not custom logic inside the active LoopX heartbeat.
+publication path. The short version: `.github/workflows/update-notes.yml` runs
+a separate release-note job that opens a reviewable PR, not custom logic inside
+the active LoopX heartbeat.
