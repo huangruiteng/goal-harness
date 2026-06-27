@@ -38,6 +38,7 @@ from loopx.benchmark_ledger import (  # noqa: E402
 from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     SKILLSBENCH_LOCAL_ACP_RELAY_PROBE_SCHEMA_VERSION,
     _codex_exec_failure_category,
+    _prompt_requires_bridge_first_action as _relay_prompt_requires_bridge_first_action,
     run_skillsbench_local_acp_relay_probe,
 )
 from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
@@ -101,7 +102,10 @@ from scripts.skillsbench_automation_loop import (  # noqa: E402
     stage_task_for_sandbox,
 )
 import scripts.skillsbench_automation_loop as skillsbench_loop  # noqa: E402
-from scripts.skillsbench_reverse_channel_bridge import _run_codex_payload  # noqa: E402
+from scripts.skillsbench_reverse_channel_bridge import (  # noqa: E402
+    _prompt_requires_bridge_first_action as _reverse_prompt_requires_bridge_first_action,
+    _run_codex_payload,
+)
 
 
 GOAL_ID = "skillsbench-benchmark-run-fixture"
@@ -177,6 +181,37 @@ def test_reverse_channel_raw_prompt_does_not_require_bridge_first_action() -> No
     assert time.monotonic() - start >= 1.5
     assert response["exit_code"] == 0, response
     assert response["stderr"] != "codex_exec_first_action_timeout\n"
+    assert response["raw_task_text_recorded"] is False
+    assert response["credential_values_recorded"] is False
+
+
+def test_reverse_channel_goal_start_prompt_requires_bridge_first_action() -> None:
+    prompt = (
+        "LoopX product-mode lifecycle contract. This route simulates "
+        "`/loopx <task objective>` goal start: a compact ranked 3-todo plan "
+        "must exist before todo writes, with selected runnable P0 todo "
+        "`todo_example` entering the lifecycle. Before prose planning, "
+        "your first agent action must be a task-facing shell/tool call through "
+        "the available sandbox bridge.\n\n"
+        "Private bridge command:\nfixture-bridge"
+    )
+    assert _reverse_prompt_requires_bridge_first_action(prompt) is True
+    assert _relay_prompt_requires_bridge_first_action(prompt) is True
+    start = time.monotonic()
+    response = _run_codex_payload(
+        {
+            "args": ["-c", "import time; time.sleep(30)"],
+            "stdin": prompt,
+            "timeout_sec": 20,
+        },
+        codex_bin=sys.executable,
+        default_timeout_sec=20,
+        prompt_bridge_command="unused {private_bridge_command_sh}",
+        first_action_timeout_sec=1,
+    )
+    assert time.monotonic() - start < 8
+    assert response["exit_code"] == 124
+    assert response["stderr"] == "codex_exec_first_action_timeout\n"
     assert response["raw_task_text_recorded"] is False
     assert response["credential_values_recorded"] is False
 
