@@ -1,0 +1,1527 @@
+{
+  "schema_version": "frontstage_rollout_projection_bundle_v0",
+  "bundle_id": "frontstage_public_rollout_projection_bundle_v0",
+  "generated_at": "2026-06-27T21:18:00+08:00",
+  "purpose": "Public-safe display projections for turning rollout and trajectory evidence into reusable frontstage visuals.",
+  "truth_contract": {
+    "projection_is_writable": false,
+    "write_authority": "none",
+    "evidence_floor": "public GitHub PR metadata and public Git history",
+    "recompute_rule": "Regenerate projections from public event sources before treating them as current."
+  },
+  "public_boundary": {
+    "raw_task_text_recorded": false,
+    "raw_logs_recorded": false,
+    "raw_trajectory_recorded": false,
+    "raw_session_transcript_recorded": false,
+    "credential_values_recorded": false,
+    "absolute_paths_recorded": false,
+    "private_material_body_recorded": false
+  },
+  "projection_model": {
+    "schema_version": "frontstage_rollout_projection_model_v0",
+    "description": "A projection maps source evidence into metrics, actor/state stages, lanes, nodes, and edges. The frontstage renderer consumes this model without knowing whether the source was a PR batch, agent rollout, issue-fix loop, benchmark route, or long-running LoopX iteration.",
+    "required_sections": [
+      "metrics",
+      "stages",
+      "lanes",
+      "nodes",
+      "edges"
+    ],
+    "optional_rich_sections": [
+      "timeline",
+      "rollout_sequence",
+      "mapping_layers",
+      "flow_signals",
+      "relationship_summaries",
+      "attention_hotspots"
+    ],
+    "node_contract": "Nodes are compact public-safe work units such as pull_request, event, todo, gate, validation, or artifact.",
+    "edge_contract": "Edges are compact public-safe relationships such as review, followup, handoff, revert, validation, dependency, or successor."
+  },
+  "projections": [
+    {
+      "projection_id": "overnight_pr_batch_20260627",
+      "projection_kind": "pr_batch_rollout",
+      "title": "Overnight PR batch with reviewable control",
+      "scene": {
+        "scene_id": "scene_recent_pr_batch_review_mesh",
+        "title": "Review mesh over a 30-PR public batch",
+        "stage_label": "Multi-agent flow",
+        "confidence": "observed_public_metadata",
+        "explanation": "A generic rollout projection turns public PR metadata into a visible state graph: PR-sized slices move through runtime, product, benchmark, docs, and review lanes, then converge through validation and merge gates.",
+        "why_current": "This is the first concrete projection instance after the PR #674 trajectory panel: it exercises the generic renderer with a larger public PR/review batch."
+      },
+      "source_contract": {
+        "claim_boundary": "Display projection only. Public GitHub PR metadata and public repository history are the evidence floor; raw logs, private chats, local state, and private planning material are excluded.",
+        "anchor_node_id": "pr_674",
+        "sample_window": "#746-#775",
+        "next_projection_hint": "LoopX overall iteration should reuse this projection model instead of adding another bespoke panel."
+      },
+      "timeline": {
+        "timeline_id": "overnight_pr_wall_clock",
+        "title": "Overnight wall-clock timeline",
+        "axis_kind": "wall_clock",
+        "window_label": "#746 -> #775 / 13:24-21:30 Asia/Shanghai",
+        "unit_label": "PR nodes",
+        "description": "The timeline is a wall-clock public-safe work-unit axis. This instance positions PR nodes by public GitHub createdAt and shows completedAt/duration on hover; other rollout projections can provide issue, todo, run, or trace timestamps.",
+        "item_node_ids": [
+          "pr_746",
+          "pr_747",
+          "pr_748",
+          "pr_749",
+          "pr_750",
+          "pr_751",
+          "pr_752",
+          "pr_753",
+          "pr_754",
+          "pr_755",
+          "pr_756",
+          "pr_757",
+          "pr_758",
+          "pr_759",
+          "pr_760",
+          "pr_761",
+          "pr_762",
+          "pr_763",
+          "pr_764",
+          "pr_765",
+          "pr_766",
+          "pr_767",
+          "pr_768",
+          "pr_769",
+          "pr_770",
+          "pr_771",
+          "pr_772",
+          "pr_773",
+          "pr_774",
+          "pr_775"
+        ],
+        "timezone": "Asia/Shanghai",
+        "start_at": "2026-06-27T13:24:51+08:00",
+        "end_at": "2026-06-27T21:30:06+08:00",
+        "time_basis": "node.started_at positions each work unit; node.completed_at and duration_label explain review/merge latency",
+        "ticks": [
+          {
+            "tick_id": "tick_1400",
+            "label": "14:00",
+            "at": "2026-06-27T14:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_1500",
+            "label": "15:00",
+            "at": "2026-06-27T15:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_1600",
+            "label": "16:00",
+            "at": "2026-06-27T16:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_1700",
+            "label": "17:00",
+            "at": "2026-06-27T17:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_1800",
+            "label": "18:00",
+            "at": "2026-06-27T18:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_1900",
+            "label": "19:00",
+            "at": "2026-06-27T19:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_2000",
+            "label": "20:00",
+            "at": "2026-06-27T20:00:00+08:00"
+          },
+          {
+            "tick_id": "tick_2100",
+            "label": "21:00",
+            "at": "2026-06-27T21:00:00+08:00"
+          }
+        ]
+      },
+      "mapping_layers": [
+        {
+          "layer_id": "source_intake",
+          "label": "Source intake",
+          "role": "Evidence becomes objects",
+          "description": "Public PR metadata is reduced into compact work-unit facts without importing raw chats, local state, or private traces.",
+          "input": "public PR metadata",
+          "output": "32 public nodes",
+          "tone": "info",
+          "node_ids": [
+            "pr_674",
+            "pr_745",
+            "pr_746",
+            "pr_747",
+            "pr_748",
+            "pr_749",
+            "pr_750",
+            "pr_751",
+            "pr_752",
+            "pr_753",
+            "pr_754",
+            "pr_755",
+            "pr_756",
+            "pr_757",
+            "pr_758",
+            "pr_759",
+            "pr_760",
+            "pr_761",
+            "pr_762",
+            "pr_763",
+            "pr_764",
+            "pr_765",
+            "pr_766",
+            "pr_767",
+            "pr_768",
+            "pr_769",
+            "pr_770",
+            "pr_771",
+            "pr_772",
+            "pr_773",
+            "pr_774",
+            "pr_775"
+          ],
+          "edge_ids": []
+        },
+        {
+          "layer_id": "state_projection",
+          "label": "State projection",
+          "role": "Nodes gain lifecycle meaning",
+          "description": "Each work unit is mapped onto claim, plan, edit, validate, review, and resume stages so a single agent's progress is visible.",
+          "input": "nodes + public states",
+          "output": "6 actor/state stages",
+          "tone": "success",
+          "node_ids": [
+            "pr_747",
+            "pr_754",
+            "pr_759",
+            "pr_764",
+            "pr_774",
+            "pr_775"
+          ],
+          "edge_ids": []
+        },
+        {
+          "layer_id": "lane_routing",
+          "label": "Lane routing",
+          "role": "Work becomes parallel lanes",
+          "description": "The same nodes are grouped into runtime, product, benchmark, docs, and open-review lanes so multi-agent flow is legible.",
+          "input": "node scopes",
+          "output": "5 lanes",
+          "tone": "neutral",
+          "node_ids": [
+            "pr_747",
+            "pr_754",
+            "pr_750",
+            "pr_749",
+            "pr_751"
+          ],
+          "edge_ids": []
+        },
+        {
+          "layer_id": "edge_reasoning",
+          "label": "Edge reasoning",
+          "role": "Relationships explain motion",
+          "description": "Review, revert, validation, CLI, automation, and runtime followups form a mesh that explains why the next slice exists.",
+          "input": "public PR relationships",
+          "output": "10 explainable edges",
+          "tone": "warning",
+          "node_ids": [
+            "pr_674",
+            "pr_752",
+            "pr_753",
+            "pr_759",
+            "pr_761",
+            "pr_764",
+            "pr_765",
+            "pr_766",
+            "pr_773",
+            "pr_774"
+          ],
+          "edge_ids": [
+            "edge_trajectory_anchor_to_v2",
+            "edge_gallery_revert_review",
+            "edge_monitor_watch_to_due",
+            "edge_monitor_due_to_writeback",
+            "edge_monitor_writeback_to_smoke",
+            "edge_monitor_smoke_to_metadata",
+            "edge_command_onboarding_to_review"
+          ]
+        },
+        {
+          "layer_id": "operator_readout",
+          "label": "Operator readout",
+          "role": "Display supports decisions",
+          "description": "The renderer highlights merged throughput, open review, follow-up chains, and the next reusable projection target.",
+          "input": "metrics + stages + lanes + edges",
+          "output": "reviewable frontstage story",
+          "tone": "info",
+          "node_ids": [
+            "pr_775",
+            "pr_766",
+            "pr_765",
+            "pr_751"
+          ],
+          "edge_ids": [
+            "edge_trajectory_anchor_to_v2",
+            "edge_monitor_smoke_to_metadata",
+            "edge_command_onboarding_to_review"
+          ]
+        }
+      ],
+      "flow_signals": [
+        {
+          "signal_id": "throughput",
+          "label": "Throughput",
+          "value": "29 merged",
+          "description": "Nearly the whole public batch landed during the visible wall-clock window.",
+          "tone": "success",
+          "source_node_ids": [
+            "pr_747",
+            "pr_754",
+            "pr_759",
+            "pr_764",
+            "pr_774"
+          ]
+        },
+        {
+          "signal_id": "active_review",
+          "label": "Review resolution",
+          "value": "1 unmerged",
+          "description": "The projection keeps the closed/non-merged branch visible as a review outcome instead of hiding it.",
+          "tone": "warning",
+          "source_node_ids": [
+            "pr_751",
+            "pr_765",
+            "pr_766",
+            "pr_775"
+          ]
+        },
+        {
+          "signal_id": "cross_lane_edges",
+          "label": "Cross-lane edges",
+          "value": "7 chains",
+          "description": "Relationships cross product, runtime, docs, and benchmark lanes.",
+          "tone": "info",
+          "source_node_ids": [
+            "pr_752",
+            "pr_753",
+            "pr_759",
+            "pr_761",
+            "pr_764",
+            "pr_765",
+            "pr_766",
+            "pr_773",
+            "pr_774"
+          ]
+        },
+        {
+          "signal_id": "reusable_model",
+          "label": "Reusable model",
+          "value": "5 sections",
+          "description": "The same renderer can later map issue-fix, content ops, benchmark, or LoopX iteration rollouts.",
+          "tone": "neutral",
+          "source_node_ids": [
+            "pr_674",
+            "pr_775"
+          ]
+        }
+      ],
+      "relationship_summaries": [
+        {
+          "kind": "runtime_followup",
+          "count": 2,
+          "label": "Monitor/runtime chain",
+          "description": "Watch routing moves into due selection and poll writeback."
+        },
+        {
+          "kind": "validation_followup",
+          "count": 1,
+          "label": "Validation chain",
+          "description": "Runtime API work is followed by smoke coverage."
+        },
+        {
+          "kind": "showcase_followup",
+          "count": 2,
+          "label": "Showcase chain",
+          "description": "Public cases become pages and then a canonical showcase path."
+        },
+        {
+          "kind": "review_revert",
+          "count": 1,
+          "label": "Review correction",
+          "description": "A public surface review creates a fast revert slice."
+        },
+        {
+          "kind": "review_command_followup",
+          "count": 1,
+          "label": "Command loop",
+          "description": "Newcomer command path feeds an explicit PR review command."
+        }
+      ],
+      "attention_hotspots": [
+        {
+          "hotspot_id": "open_runtime_chain",
+          "label": "Runtime chain resolved",
+          "severity": "low",
+          "description": "Monitor scheduler smoke and CLI metadata moved through review and merge; the chain remains visible as a completed follow-up path.",
+          "node_ids": [
+            "pr_765",
+            "pr_766"
+          ],
+          "edge_ids": [
+            "edge_monitor_writeback_to_smoke",
+            "edge_monitor_smoke_to_metadata"
+          ]
+        },
+        {
+          "hotspot_id": "adapter_review",
+          "label": "Adapter review resolved",
+          "severity": "low",
+          "description": "The memory adapter contract also merged later in the same wall-clock window, showing how a long review branch rejoins the batch.",
+          "node_ids": [
+            "pr_751"
+          ],
+          "edge_ids": []
+        },
+        {
+          "hotspot_id": "projection_next",
+          "label": "Next projection target",
+          "severity": "low",
+          "description": "After this PR batch projection is accepted, LoopX overall iteration can reuse the same renderer.",
+          "node_ids": [
+            "pr_674",
+            "pr_775"
+          ],
+          "edge_ids": [
+            "edge_trajectory_anchor_to_v2"
+          ]
+        }
+      ],
+      "rollout_sequence": {
+        "sequence_id": "overnight_requirement_rollout_spine",
+        "title": "Requirement rollout spine",
+        "description": "One demand unlocks the next: each requirement becomes a reviewable slice, validates against the public boundary, and leaves the next requirement visible.",
+        "units": [
+          {
+            "unit_id": "req_frontstage_projection",
+            "order": 1,
+            "requirement": "Show frontstage trajectory as a reusable projection",
+            "triggered_by": "owner presentation need",
+            "outcome": "PR #674 anchors the trajectory panel.",
+            "state": "merged",
+            "lane_id": "product_frontstage",
+            "node_ids": [
+              "pr_674"
+            ],
+            "unlocks": [
+              "req_public_showcase_case_set"
+            ],
+            "stage_steps": [
+              {
+                "step_id": "intake",
+                "label": "Intake",
+                "status": "done",
+                "node_ids": [
+                  "pr_674"
+                ]
+              },
+              {
+                "step_id": "panel",
+                "label": "Panel",
+                "status": "done",
+                "node_ids": [
+                  "pr_674"
+                ]
+              },
+              {
+                "step_id": "review",
+                "label": "Review",
+                "status": "done",
+                "node_ids": [
+                  "pr_674"
+                ]
+              }
+            ]
+          },
+          {
+            "unit_id": "req_public_showcase_case_set",
+            "order": 2,
+            "requirement": "Turn reusable cases into public showcase pages",
+            "triggered_by": "frontstage needs inspectable examples",
+            "outcome": "Case set, showcase pages, and canonical path landed.",
+            "state": "merged",
+            "lane_id": "public_docs_showcase",
+            "node_ids": [
+              "pr_745",
+              "pr_752",
+              "pr_753",
+              "pr_756",
+              "pr_771"
+            ],
+            "unlocks": [
+              "req_update_notes_loop"
+            ],
+            "stage_steps": [
+              {
+                "step_id": "case_set",
+                "label": "Case set",
+                "status": "done",
+                "node_ids": [
+                  "pr_745"
+                ]
+              },
+              {
+                "step_id": "pages",
+                "label": "Pages",
+                "status": "done",
+                "node_ids": [
+                  "pr_756"
+                ]
+              },
+              {
+                "step_id": "surface_review",
+                "label": "Surface review",
+                "status": "done",
+                "node_ids": [
+                  "pr_752",
+                  "pr_753"
+                ]
+              },
+              {
+                "step_id": "canonical",
+                "label": "Canonical path",
+                "status": "done",
+                "node_ids": [
+                  "pr_771"
+                ]
+              }
+            ]
+          },
+          {
+            "unit_id": "req_update_notes_loop",
+            "order": 3,
+            "requirement": "Publish biweekly update notes without relying on memory",
+            "triggered_by": "operator wants durable product rhythm",
+            "outcome": "Archive plus draft PR automation are now visible.",
+            "state": "merged",
+            "lane_id": "product_frontstage",
+            "node_ids": [
+              "pr_754",
+              "pr_758"
+            ],
+            "unlocks": [
+              "req_monitor_scheduler_due_work"
+            ],
+            "stage_steps": [
+              {
+                "step_id": "archive",
+                "label": "Archive",
+                "status": "done",
+                "node_ids": [
+                  "pr_754"
+                ]
+              },
+              {
+                "step_id": "automation",
+                "label": "Draft PR job",
+                "status": "done",
+                "node_ids": [
+                  "pr_758"
+                ]
+              },
+              {
+                "step_id": "monitor",
+                "label": "Monitor hook",
+                "status": "done",
+                "node_ids": [
+                  "pr_758"
+                ]
+              }
+            ]
+          },
+          {
+            "unit_id": "req_monitor_scheduler_due_work",
+            "order": 4,
+            "requirement": "Monitor tasks become due work instead of hidden polling",
+            "triggered_by": "continuous monitors need explicit cadence",
+            "outcome": "Watch routing, due selection, and writeback landed; smoke and CLI metadata remain open.",
+            "state": "open",
+            "lane_id": "kernel_runtime",
+            "node_ids": [
+              "pr_759",
+              "pr_761",
+              "pr_764",
+              "pr_765",
+              "pr_766"
+            ],
+            "unlocks": [
+              "req_skillsbench_goal_start_bridge"
+            ],
+            "stage_steps": [
+              {
+                "step_id": "watch_route",
+                "label": "Watch route",
+                "status": "done",
+                "node_ids": [
+                  "pr_759"
+                ]
+              },
+              {
+                "step_id": "due_select",
+                "label": "Due select",
+                "status": "done",
+                "node_ids": [
+                  "pr_761"
+                ]
+              },
+              {
+                "step_id": "writeback",
+                "label": "Writeback",
+                "status": "done",
+                "node_ids": [
+                  "pr_764"
+                ]
+              },
+              {
+                "step_id": "smoke",
+                "label": "Smoke",
+                "status": "active",
+                "node_ids": [
+                  "pr_765"
+                ]
+              },
+              {
+                "step_id": "metadata",
+                "label": "CLI metadata",
+                "status": "active",
+                "node_ids": [
+                  "pr_766"
+                ]
+              }
+            ]
+          },
+          {
+            "unit_id": "req_skillsbench_goal_start_bridge",
+            "order": 5,
+            "requirement": "Keep goal-start benchmark routing attributed while product work evolves",
+            "triggered_by": "solver lifecycle needs a stable bridge",
+            "outcome": "Goal-start bridge, closeout attribution, watchdog, and ledger updates landed.",
+            "state": "merged",
+            "lane_id": "benchmark_interface",
+            "node_ids": [
+              "pr_750",
+              "pr_755",
+              "pr_757",
+              "pr_760",
+              "pr_762",
+              "pr_767",
+              "pr_770",
+              "pr_772"
+            ],
+            "unlocks": [
+              "req_command_review_loop"
+            ],
+            "stage_steps": [
+              {
+                "step_id": "preserve",
+                "label": "Preserve metadata",
+                "status": "done",
+                "node_ids": [
+                  "pr_750"
+                ]
+              },
+              {
+                "step_id": "host_shape",
+                "label": "Host shape",
+                "status": "done",
+                "node_ids": [
+                  "pr_755"
+                ]
+              },
+              {
+                "step_id": "watchdog",
+                "label": "Watchdog",
+                "status": "done",
+                "node_ids": [
+                  "pr_760"
+                ]
+              },
+              {
+                "step_id": "ledger",
+                "label": "Ledger",
+                "status": "done",
+                "node_ids": [
+                  "pr_762",
+                  "pr_767"
+                ]
+              },
+              {
+                "step_id": "bootstrap",
+                "label": "Bootstrap",
+                "status": "done",
+                "node_ids": [
+                  "pr_770",
+                  "pr_772"
+                ]
+              }
+            ]
+          },
+          {
+            "unit_id": "req_command_review_loop",
+            "order": 6,
+            "requirement": "Let users drive review and newcomer commands explicitly",
+            "triggered_by": "slash commands should be product entry points",
+            "outcome": "Newcomer command path feeds an explicit PR review command.",
+            "state": "merged",
+            "lane_id": "product_frontstage",
+            "node_ids": [
+              "pr_773",
+              "pr_774"
+            ],
+            "unlocks": [
+              "req_profile_handoff_route"
+            ],
+            "stage_steps": [
+              {
+                "step_id": "newcomer_path",
+                "label": "Newcomer path",
+                "status": "done",
+                "node_ids": [
+                  "pr_773"
+                ]
+              },
+              {
+                "step_id": "review_command",
+                "label": "Review command",
+                "status": "done",
+                "node_ids": [
+                  "pr_774"
+                ]
+              },
+              {
+                "step_id": "feedback_loop",
+                "label": "Feedback loop",
+                "status": "done",
+                "node_ids": [
+                  "pr_773",
+                  "pr_774"
+                ]
+              }
+            ]
+          },
+          {
+            "unit_id": "req_profile_handoff_route",
+            "order": 7,
+            "requirement": "Route side-agent handoffs by profile instead of prose",
+            "triggered_by": "multi-agent rollout needs a clean next receiver",
+            "outcome": "PR #775 keeps the open handoff route visible for review.",
+            "state": "open",
+            "lane_id": "kernel_runtime",
+            "node_ids": [
+              "pr_775"
+            ],
+            "unlocks": [],
+            "stage_steps": [
+              {
+                "step_id": "handoff",
+                "label": "Handoff",
+                "status": "active",
+                "node_ids": [
+                  "pr_775"
+                ]
+              },
+              {
+                "step_id": "route",
+                "label": "Route",
+                "status": "active",
+                "node_ids": [
+                  "pr_775"
+                ]
+              },
+              {
+                "step_id": "review",
+                "label": "Review",
+                "status": "active",
+                "node_ids": [
+                  "pr_775"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "metrics": [
+        {
+          "metric_id": "public_sample",
+          "label": "Public sample",
+          "value": "30 PRs",
+          "helper": "#746-#775",
+          "tone": "info"
+        },
+        {
+          "metric_id": "merged",
+          "label": "Merged",
+          "value": "29",
+          "helper": "public PR metadata",
+          "tone": "success"
+        },
+        {
+          "metric_id": "open_review",
+          "label": "Unmerged",
+          "value": "1",
+          "helper": "0 open / 1 closed",
+          "tone": "warning"
+        },
+        {
+          "metric_id": "review_edges",
+          "label": "Review edges",
+          "value": "10",
+          "helper": "follow-up relationships",
+          "tone": "neutral"
+        }
+      ],
+      "stages": [
+        {
+          "stage_id": "claimed",
+          "label": "Claim",
+          "description": "Pick one scoped todo and reserve the lane.",
+          "confidence": "observed",
+          "actor_scope": "single_agent",
+          "current": false
+        },
+        {
+          "stage_id": "planning",
+          "label": "Plan",
+          "description": "Split the target into ordered public-safe slices.",
+          "confidence": "observed",
+          "actor_scope": "single_agent",
+          "current": false
+        },
+        {
+          "stage_id": "editing",
+          "label": "Edit",
+          "description": "Apply a narrow patch against one product or runtime surface.",
+          "confidence": "observed",
+          "actor_scope": "single_agent",
+          "current": false
+        },
+        {
+          "stage_id": "validating",
+          "label": "Validate",
+          "description": "Run focused smokes and boundary checks before writeback.",
+          "confidence": "observed",
+          "actor_scope": "single_agent",
+          "current": false
+        },
+        {
+          "stage_id": "reviewing",
+          "label": "Review",
+          "description": "Attach review packet, handoff, or self-merge decision.",
+          "confidence": "observed_public_metadata",
+          "actor_scope": "single_agent",
+          "current": true
+        },
+        {
+          "stage_id": "resuming",
+          "label": "Resume",
+          "description": "Use the next public todo or monitor due signal for the following loop.",
+          "confidence": "inferred_high",
+          "actor_scope": "single_agent",
+          "current": false
+        }
+      ],
+      "lanes": [
+        {
+          "lane_id": "kernel_runtime",
+          "label": "Kernel runtime",
+          "role": "product + runtime lane",
+          "summary": "Status, quota, monitor, handoff, and todo projection contracts.",
+          "node_ids": [
+            "pr_747",
+            "pr_748",
+            "pr_759",
+            "pr_761",
+            "pr_764",
+            "pr_765",
+            "pr_766",
+            "pr_775"
+          ]
+        },
+        {
+          "lane_id": "product_frontstage",
+          "label": "Product frontstage",
+          "role": "product surface lane",
+          "summary": "Public showcase pages, trajectory panels, command onboarding, and update notes.",
+          "node_ids": [
+            "pr_754",
+            "pr_756",
+            "pr_758",
+            "pr_769",
+            "pr_771",
+            "pr_773",
+            "pr_774"
+          ]
+        },
+        {
+          "lane_id": "benchmark_interface",
+          "label": "Benchmark interface",
+          "role": "benchmark contract lane",
+          "summary": "Goal-start bridge, runner attribution, reducer preservation, and latest ledger updates.",
+          "node_ids": [
+            "pr_750",
+            "pr_755",
+            "pr_757",
+            "pr_760",
+            "pr_762",
+            "pr_767",
+            "pr_770",
+            "pr_772"
+          ]
+        },
+        {
+          "lane_id": "public_docs_showcase",
+          "label": "Docs and showcase",
+          "role": "evidence lane",
+          "summary": "Public-safe case set, local agent launch protocol, release readiness, and adoption loop.",
+          "node_ids": [
+            "pr_749",
+            "pr_752",
+            "pr_753",
+            "pr_768"
+          ]
+        },
+        {
+          "lane_id": "open_review",
+          "label": "Open review lane",
+          "role": "open review lane",
+          "summary": "Adapter and branch work that stays visible as a review gate.",
+          "node_ids": [
+            "pr_746",
+            "pr_751",
+            "pr_763"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "node_id": "pr_674",
+          "kind": "pull_request",
+          "label": "#674",
+          "title": "feat(dashboard): add frontstage trajectory analysis",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/674",
+          "role": "anchor",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "node_id": "pr_745",
+          "kind": "pull_request",
+          "label": "#745",
+          "title": "Add public-safe showcase case set",
+          "state": "merged",
+          "lane_id": "public_docs_showcase",
+          "url": "https://github.com/huangruiteng/loopx/pull/745",
+          "role": "precursor",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "node_id": "pr_775",
+          "kind": "pull_request",
+          "label": "#775",
+          "title": "Fix profile-scoped side-agent handoff routing",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/775",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T20:50:03+08:00",
+          "completed_at": "2026-06-27T21:23:04+08:00",
+          "occurred_at": "2026-06-27T20:50:03+08:00",
+          "display_time": "20:50 -> 21:23",
+          "duration_label": "33m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_774",
+          "kind": "pull_request",
+          "label": "#774",
+          "title": "Add PR review slash command",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/774",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T20:47:10+08:00",
+          "completed_at": "2026-06-27T21:12:31+08:00",
+          "occurred_at": "2026-06-27T20:47:10+08:00",
+          "display_time": "20:47 -> 21:12",
+          "duration_label": "25m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_773",
+          "kind": "pull_request",
+          "label": "#773",
+          "title": "docs: add newcomer command path",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/773",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T19:58:53+08:00",
+          "completed_at": "2026-06-27T20:31:10+08:00",
+          "occurred_at": "2026-06-27T19:58:53+08:00",
+          "display_time": "19:58 -> 20:31",
+          "duration_label": "32m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_772",
+          "kind": "pull_request",
+          "label": "#772",
+          "title": "Bootstrap SkillsBench goal-start bridge before task",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/772",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T19:48:30+08:00",
+          "completed_at": "2026-06-27T19:49:10+08:00",
+          "occurred_at": "2026-06-27T19:48:30+08:00",
+          "display_time": "19:48 -> 19:49",
+          "duration_label": "40 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_771",
+          "kind": "pull_request",
+          "label": "#771",
+          "title": "docs: add public showcase pages and experimental value path",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/771",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T19:45:25+08:00",
+          "completed_at": "2026-06-27T21:07:26+08:00",
+          "occurred_at": "2026-06-27T19:45:25+08:00",
+          "display_time": "19:45 -> 21:07",
+          "duration_label": "1h 22m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_770",
+          "kind": "pull_request",
+          "label": "#770",
+          "title": "Fix SkillsBench goal-start host-local attribution",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/770",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T19:31:35+08:00",
+          "completed_at": "2026-06-27T19:34:32+08:00",
+          "occurred_at": "2026-06-27T19:31:35+08:00",
+          "display_time": "19:31 -> 19:34",
+          "duration_label": "2m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_769",
+          "kind": "pull_request",
+          "label": "#769",
+          "title": "Add public adoption loop contract",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/769",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T19:10:17+08:00",
+          "completed_at": "2026-06-27T19:10:57+08:00",
+          "occurred_at": "2026-06-27T19:10:17+08:00",
+          "display_time": "19:10 -> 19:10",
+          "duration_label": "40 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_768",
+          "kind": "pull_request",
+          "label": "#768",
+          "title": "Add release readiness mental model",
+          "state": "merged",
+          "lane_id": "public_docs_showcase",
+          "url": "https://github.com/huangruiteng/loopx/pull/768",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T18:59:20+08:00",
+          "completed_at": "2026-06-27T19:00:27+08:00",
+          "occurred_at": "2026-06-27T18:59:20+08:00",
+          "display_time": "18:59 -> 19:00",
+          "duration_label": "1m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_767",
+          "kind": "pull_request",
+          "label": "#767",
+          "title": "Update SkillsBench goal-start ledger status",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/767",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T18:45:55+08:00",
+          "completed_at": "2026-06-27T18:47:26+08:00",
+          "occurred_at": "2026-06-27T18:45:55+08:00",
+          "display_time": "18:45 -> 18:47",
+          "duration_label": "1m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_766",
+          "kind": "pull_request",
+          "label": "#766",
+          "title": "Add monitor cadence todo CLI metadata",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/766",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T18:36:48+08:00",
+          "completed_at": "2026-06-27T21:30:06+08:00",
+          "occurred_at": "2026-06-27T18:36:48+08:00",
+          "display_time": "18:36 -> 21:30",
+          "duration_label": "2h 53m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_765",
+          "kind": "pull_request",
+          "label": "#765",
+          "title": "Add monitor scheduler smoke coverage",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/765",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T18:25:07+08:00",
+          "completed_at": "2026-06-27T21:28:57+08:00",
+          "occurred_at": "2026-06-27T18:25:07+08:00",
+          "display_time": "18:25 -> 21:28",
+          "duration_label": "3h 3m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_764",
+          "kind": "pull_request",
+          "label": "#764",
+          "title": "Add monitor-poll todo writeback API",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/764",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T18:17:16+08:00",
+          "completed_at": "2026-06-27T18:17:56+08:00",
+          "occurred_at": "2026-06-27T18:17:16+08:00",
+          "display_time": "18:17 -> 18:17",
+          "duration_label": "40 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_763",
+          "kind": "pull_request",
+          "label": "#763",
+          "title": "Add monitor-poll todo writeback API",
+          "state": "closed",
+          "lane_id": "open_review",
+          "url": "https://github.com/huangruiteng/loopx/pull/763",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T18:01:18+08:00",
+          "completed_at": "2026-06-27T18:06:42+08:00",
+          "occurred_at": "2026-06-27T18:01:18+08:00",
+          "display_time": "18:01 -> 18:06",
+          "duration_label": "5m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_762",
+          "kind": "pull_request",
+          "label": "#762",
+          "title": "Update SkillsBench latest case ledger",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/762",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T17:57:39+08:00",
+          "completed_at": "2026-06-27T17:58:31+08:00",
+          "occurred_at": "2026-06-27T17:57:39+08:00",
+          "display_time": "17:57 -> 17:58",
+          "duration_label": "52 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_761",
+          "kind": "pull_request",
+          "label": "#761",
+          "title": "Add due monitor work-lane selection",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/761",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T17:45:10+08:00",
+          "completed_at": "2026-06-27T18:06:40+08:00",
+          "occurred_at": "2026-06-27T17:45:10+08:00",
+          "display_time": "17:45 -> 18:06",
+          "duration_label": "21m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_760",
+          "kind": "pull_request",
+          "label": "#760",
+          "title": "Fix SkillsBench goal-start first-action watchdog",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/760",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T17:27:43+08:00",
+          "completed_at": "2026-06-27T17:28:29+08:00",
+          "occurred_at": "2026-06-27T17:27:43+08:00",
+          "display_time": "17:27 -> 17:28",
+          "duration_label": "46 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_759",
+          "kind": "pull_request",
+          "label": "#759",
+          "title": "Fix status watch routing for monitor classifications",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/759",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T17:02:53+08:00",
+          "completed_at": "2026-06-27T17:22:49+08:00",
+          "occurred_at": "2026-06-27T17:02:53+08:00",
+          "display_time": "17:02 -> 17:22",
+          "duration_label": "19m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_758",
+          "kind": "pull_request",
+          "label": "#758",
+          "title": "Add update notes draft PR automation",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/758",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T16:12:32+08:00",
+          "completed_at": "2026-06-27T16:14:49+08:00",
+          "occurred_at": "2026-06-27T16:12:32+08:00",
+          "display_time": "16:12 -> 16:14",
+          "duration_label": "2m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_757",
+          "kind": "pull_request",
+          "label": "#757",
+          "title": "Refine SkillsBench closeout attribution",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/757",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T16:07:09+08:00",
+          "completed_at": "2026-06-27T16:07:40+08:00",
+          "occurred_at": "2026-06-27T16:07:09+08:00",
+          "display_time": "16:07 -> 16:07",
+          "duration_label": "31 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_756",
+          "kind": "pull_request",
+          "label": "#756",
+          "title": "Add public showcase case pages",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/756",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T15:54:59+08:00",
+          "completed_at": "2026-06-27T15:59:37+08:00",
+          "occurred_at": "2026-06-27T15:54:59+08:00",
+          "display_time": "15:54 -> 15:59",
+          "duration_label": "4m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_755",
+          "kind": "pull_request",
+          "label": "#755",
+          "title": "Handle SkillsBench host-local ACP return shape",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/755",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T15:38:48+08:00",
+          "completed_at": "2026-06-27T15:39:21+08:00",
+          "occurred_at": "2026-06-27T15:38:48+08:00",
+          "display_time": "15:38 -> 15:39",
+          "duration_label": "33 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_754",
+          "kind": "pull_request",
+          "label": "#754",
+          "title": "Add biweekly update note archive",
+          "state": "merged",
+          "lane_id": "product_frontstage",
+          "url": "https://github.com/huangruiteng/loopx/pull/754",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T15:23:04+08:00",
+          "completed_at": "2026-06-27T16:01:58+08:00",
+          "occurred_at": "2026-06-27T15:23:04+08:00",
+          "display_time": "15:23 -> 16:01",
+          "duration_label": "38m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_753",
+          "kind": "pull_request",
+          "label": "#753",
+          "title": "Revert \"Add bilingual showcase gallery pages\"",
+          "state": "merged",
+          "lane_id": "public_docs_showcase",
+          "url": "https://github.com/huangruiteng/loopx/pull/753",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T15:12:29+08:00",
+          "completed_at": "2026-06-27T15:12:40+08:00",
+          "occurred_at": "2026-06-27T15:12:29+08:00",
+          "display_time": "15:12 -> 15:12",
+          "duration_label": "11 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_752",
+          "kind": "pull_request",
+          "label": "#752",
+          "title": "Add bilingual showcase gallery pages",
+          "state": "merged",
+          "lane_id": "public_docs_showcase",
+          "url": "https://github.com/huangruiteng/loopx/pull/752",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T15:01:25+08:00",
+          "completed_at": "2026-06-27T15:03:10+08:00",
+          "occurred_at": "2026-06-27T15:01:25+08:00",
+          "display_time": "15:01 -> 15:03",
+          "duration_label": "1m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_751",
+          "kind": "pull_request",
+          "label": "#751",
+          "title": "Add OpenViking session memory adapter contract",
+          "state": "merged",
+          "lane_id": "open_review",
+          "url": "https://github.com/huangruiteng/loopx/pull/751",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T14:25:02+08:00",
+          "completed_at": "2026-06-27T21:16:15+08:00",
+          "occurred_at": "2026-06-27T14:25:02+08:00",
+          "display_time": "14:25 -> 21:16",
+          "duration_label": "6h 51m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_750",
+          "kind": "pull_request",
+          "label": "#750",
+          "title": "Preserve SkillsBench failure closeout metadata",
+          "state": "merged",
+          "lane_id": "benchmark_interface",
+          "url": "https://github.com/huangruiteng/loopx/pull/750",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T14:16:40+08:00",
+          "completed_at": "2026-06-27T14:17:11+08:00",
+          "occurred_at": "2026-06-27T14:16:40+08:00",
+          "display_time": "14:16 -> 14:17",
+          "duration_label": "31 sec",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_749",
+          "kind": "pull_request",
+          "label": "#749",
+          "title": "Add local agent launch dry-run protocol",
+          "state": "merged",
+          "lane_id": "public_docs_showcase",
+          "url": "https://github.com/huangruiteng/loopx/pull/749",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T14:06:17+08:00",
+          "completed_at": "2026-06-27T14:33:21+08:00",
+          "occurred_at": "2026-06-27T14:06:17+08:00",
+          "display_time": "14:06 -> 14:33",
+          "duration_label": "27m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_748",
+          "kind": "pull_request",
+          "label": "#748",
+          "title": "Add agent lane frontier hint contract",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/748",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T14:03:52+08:00",
+          "completed_at": "2026-06-27T14:47:54+08:00",
+          "occurred_at": "2026-06-27T14:03:52+08:00",
+          "display_time": "14:03 -> 14:47",
+          "duration_label": "44m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_747",
+          "kind": "pull_request",
+          "label": "#747",
+          "title": "Fix refresh-state Next Action default",
+          "state": "merged",
+          "lane_id": "kernel_runtime",
+          "url": "https://github.com/huangruiteng/loopx/pull/747",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T13:52:32+08:00",
+          "completed_at": "2026-06-27T15:53:58+08:00",
+          "occurred_at": "2026-06-27T13:52:32+08:00",
+          "display_time": "13:52 -> 15:53",
+          "duration_label": "2h 1m",
+          "timezone": "Asia/Shanghai"
+        },
+        {
+          "node_id": "pr_746",
+          "kind": "pull_request",
+          "label": "#746",
+          "title": "Accept Harbor reducer wrapper in run ledger upsert",
+          "state": "merged",
+          "lane_id": "open_review",
+          "url": "https://github.com/huangruiteng/loopx/pull/746",
+          "confidence": "observed_public_metadata",
+          "started_at": "2026-06-27T13:24:51+08:00",
+          "completed_at": "2026-06-27T13:25:38+08:00",
+          "occurred_at": "2026-06-27T13:24:51+08:00",
+          "display_time": "13:24 -> 13:25",
+          "duration_label": "47 sec",
+          "timezone": "Asia/Shanghai"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "edge_trajectory_anchor_to_v2",
+          "from_node_id": "pr_674",
+          "to_node_id": "pr_775",
+          "edge_kind": "frontstage_followup",
+          "label": "trajectory panel anchor expands into recent PR batch projection",
+          "confidence": "inferred_high"
+        },
+        {
+          "edge_id": "edge_gallery_revert_review",
+          "from_node_id": "pr_752",
+          "to_node_id": "pr_753",
+          "edge_kind": "review_revert",
+          "label": "public surface review produced a quick revert slice",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_showcase_case_pack",
+          "from_node_id": "pr_745",
+          "to_node_id": "pr_756",
+          "edge_kind": "showcase_followup",
+          "label": "case set became public showcase pages",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_showcase_canonical",
+          "from_node_id": "pr_756",
+          "to_node_id": "pr_771",
+          "edge_kind": "showcase_followup",
+          "label": "case pages converged into canonical showcase path",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_update_note_loop",
+          "from_node_id": "pr_754",
+          "to_node_id": "pr_758",
+          "edge_kind": "automation_followup",
+          "label": "archive note became scheduled draft automation",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_monitor_watch_to_due",
+          "from_node_id": "pr_759",
+          "to_node_id": "pr_761",
+          "edge_kind": "runtime_followup",
+          "label": "watch routing made due monitor lane selection reviewable",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_monitor_due_to_writeback",
+          "from_node_id": "pr_761",
+          "to_node_id": "pr_764",
+          "edge_kind": "runtime_followup",
+          "label": "due monitor selection led to poll writeback API",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_monitor_writeback_to_smoke",
+          "from_node_id": "pr_764",
+          "to_node_id": "pr_765",
+          "edge_kind": "validation_followup",
+          "label": "writeback API is followed by smoke coverage",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_monitor_smoke_to_metadata",
+          "from_node_id": "pr_765",
+          "to_node_id": "pr_766",
+          "edge_kind": "cli_followup",
+          "label": "smoke contract is followed by CLI metadata affordance",
+          "confidence": "observed_public_metadata"
+        },
+        {
+          "edge_id": "edge_command_onboarding_to_review",
+          "from_node_id": "pr_773",
+          "to_node_id": "pr_774",
+          "edge_kind": "review_command_followup",
+          "label": "newcomer command path feeds explicit PR review command",
+          "confidence": "observed_public_metadata"
+        }
+      ],
+      "frontend_acceptance": {
+        "must_render": [
+          "generic projection model contract",
+          "30 PR relationship mesh",
+          "timeline axis",
+          "hoverable node and edge details",
+          "sequential requirement rollout",
+          "rollout requirement spine",
+          "projection capability map",
+          "30 public PR nodes",
+          "single-agent stage flow",
+          "multi-agent lane graph",
+          "review edge mesh",
+          "flow signals",
+          "attention hotspots",
+          "public evidence boundary",
+          "wall-clock timeline ticks",
+          "node time and duration hover details"
+        ]
+      }
+    }
+  ],
+  "planned_projections": [
+    {
+      "projection_id": "loopx_overall_iteration",
+      "status": "planned",
+      "reason": "Use the same projection model after the overnight PR batch renderer is validated."
+    }
+  ]
+}
