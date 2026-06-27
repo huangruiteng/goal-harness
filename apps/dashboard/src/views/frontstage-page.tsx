@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import showcaseCatalog from "../../../../docs/showcases/showcase-catalog.json";
+import rolloutProjectionFixture from "../../../../examples/fixtures/frontstage-rollout-projections.public.json";
 import rolloutFixture from "../../../../examples/fixtures/long-horizon-self-iteration-rollout.public.json";
 import { frontstageRoute } from "../router";
 import {
@@ -128,6 +129,215 @@ type LongHorizonRolloutFixture = {
 };
 
 const selfIterationRollout = rolloutFixture as LongHorizonRolloutFixture;
+
+type RolloutProjectionNodeState = "open" | "merged" | "closed" | "done" | "active" | "blocked" | "planned";
+type RolloutProjectionTone = BadgeTone;
+
+type RolloutProjectionMetric = {
+  helper: string;
+  label: string;
+  metric_id: string;
+  tone: RolloutProjectionTone;
+  value: string;
+};
+
+type RolloutProjectionMappingLayer = {
+  description: string;
+  edge_ids: string[];
+  input: string;
+  label: string;
+  layer_id: string;
+  node_ids: string[];
+  output: string;
+  role: string;
+  tone: RolloutProjectionTone;
+};
+
+type RolloutProjectionFlowSignal = {
+  description: string;
+  label: string;
+  signal_id: string;
+  source_node_ids: string[];
+  tone: RolloutProjectionTone;
+  value: string;
+};
+
+type RolloutProjectionRelationshipSummary = {
+  count: number;
+  description: string;
+  kind: string;
+  label: string;
+};
+
+type RolloutProjectionAttentionHotspot = {
+  description: string;
+  edge_ids: string[];
+  hotspot_id: string;
+  label: string;
+  node_ids: string[];
+  severity: "low" | "medium" | "high";
+};
+
+type RolloutTimelineTick = {
+  at: string;
+  label: string;
+  tick_id: string;
+};
+
+type RolloutTimeline = {
+  axis_kind: string;
+  description: string;
+  end_at?: string;
+  item_node_ids: string[];
+  start_at?: string;
+  ticks?: RolloutTimelineTick[];
+  timeline_id: string;
+  time_basis?: string;
+  title: string;
+  timezone?: string;
+  unit_label: string;
+  window_label: string;
+};
+
+type RolloutSequenceStep = {
+  label: string;
+  node_ids: string[];
+  status: string;
+  step_id: string;
+};
+
+type RolloutSequenceUnit = {
+  lane_id: string;
+  node_ids: string[];
+  order: number;
+  outcome: string;
+  requirement: string;
+  stage_steps: RolloutSequenceStep[];
+  state: RolloutProjectionNodeState;
+  triggered_by: string;
+  unit_id: string;
+  unlocks: string[];
+};
+
+type RolloutSequence = {
+  description: string;
+  sequence_id: string;
+  title: string;
+  units: RolloutSequenceUnit[];
+};
+
+type RolloutProjectionNode = {
+  confidence?: string;
+  kind: string;
+  label: string;
+  lane_id: string;
+  node_id: string;
+  role?: string;
+  state: RolloutProjectionNodeState;
+  title: string;
+  completed_at?: string;
+  display_time?: string;
+  duration_label?: string;
+  occurred_at?: string;
+  started_at?: string;
+  timezone?: string;
+  url?: string;
+};
+
+type RolloutTimeMilestone = {
+  detail: string;
+  id: string;
+  label: string;
+  time: number | null;
+  time_label: string;
+};
+
+type RolloutProjectionStage = {
+  actor_scope: string;
+  confidence: string;
+  current: boolean;
+  description: string;
+  label: string;
+  stage_id: string;
+};
+
+type RolloutProjectionLane = {
+  label: string;
+  lane_id: string;
+  node_ids: string[];
+  role: string;
+  summary: string;
+};
+
+type RolloutProjectionEdge = {
+  confidence: string;
+  edge_id: string;
+  edge_kind: string;
+  from_node_id: string;
+  label: string;
+  to_node_id: string;
+};
+
+type RolloutProjection = {
+  attention_hotspots?: RolloutProjectionAttentionHotspot[];
+  edges: RolloutProjectionEdge[];
+  frontend_acceptance: {
+    must_render: string[];
+  };
+  flow_signals?: RolloutProjectionFlowSignal[];
+  lanes: RolloutProjectionLane[];
+  mapping_layers?: RolloutProjectionMappingLayer[];
+  metrics: RolloutProjectionMetric[];
+  nodes: RolloutProjectionNode[];
+  projection_id: string;
+  projection_kind: string;
+  scene: {
+    confidence: string;
+    explanation: string;
+    scene_id: string;
+    stage_label: string;
+    title: string;
+    why_current: string;
+  };
+  relationship_summaries?: RolloutProjectionRelationshipSummary[];
+  rollout_sequence?: RolloutSequence;
+  timeline?: RolloutTimeline;
+  source_contract: {
+    anchor_node_id: string;
+    claim_boundary: string;
+    next_projection_hint: string;
+    sample_window: string;
+  };
+  stages: RolloutProjectionStage[];
+  title: string;
+};
+
+type RolloutProjectionBundle = {
+  planned_projections?: Array<{
+    projection_id: string;
+    reason: string;
+    status: string;
+  }>;
+  projection_model: {
+    description: string;
+    edge_contract: string;
+    node_contract: string;
+    optional_rich_sections?: string[];
+    required_sections: string[];
+    schema_version: string;
+  };
+  projections: RolloutProjection[];
+  schema_version: string;
+  truth_contract: {
+    evidence_floor: string;
+    projection_is_writable: boolean;
+    recompute_rule: string;
+    write_authority: string;
+  };
+};
+
+const rolloutProjectionBundle = rolloutProjectionFixture as RolloutProjectionBundle;
+const overnightPrProjection = rolloutProjectionBundle.projections[0];
 
 type ProjectionOption = {
   goalId: string;
@@ -340,6 +550,9 @@ function trajectoryConfidenceTone(confidence: string): BadgeTone {
   if (confidence === "observed") {
     return "success";
   }
+  if (confidence === "observed_public_metadata") {
+    return "success";
+  }
   if (confidence === "synthetic_bridge") {
     return "warning";
   }
@@ -347,6 +560,1165 @@ function trajectoryConfidenceTone(confidence: string): BadgeTone {
     return "info";
   }
   return "neutral";
+}
+
+function nodeStateTone(state: RolloutProjectionNodeState): BadgeTone {
+  if (state === "merged" || state === "done") {
+    return "success";
+  }
+  if (state === "open" || state === "active") {
+    return "info";
+  }
+  if (state === "blocked") {
+    return "danger";
+  }
+  return "warning";
+}
+
+function sequenceStepTone(status: string): BadgeTone {
+  if (["done", "merged", "validated"].includes(status)) {
+    return "success";
+  }
+  if (["active", "reviewing", "review"].includes(status)) {
+    return "warning";
+  }
+  if (["queued", "planned"].includes(status)) {
+    return "neutral";
+  }
+  return "info";
+}
+
+const trajectoryLaneTones = [
+  {
+    ring: "border-cyan-300/40 bg-cyan-300/10 text-cyan-100",
+    card: "border-cyan-200 bg-cyan-50",
+    dot: "bg-cyan-300",
+    line: "bg-cyan-300/40",
+  },
+  {
+    ring: "border-emerald-300/40 bg-emerald-300/10 text-emerald-100",
+    card: "border-emerald-200 bg-emerald-50",
+    dot: "bg-emerald-400",
+    line: "bg-emerald-300/40",
+  },
+  {
+    ring: "border-amber-300/40 bg-amber-300/10 text-amber-100",
+    card: "border-amber-200 bg-amber-50",
+    dot: "bg-amber-400",
+    line: "bg-amber-300/40",
+  },
+  {
+    ring: "border-rose-300/40 bg-rose-300/10 text-rose-100",
+    card: "border-rose-200 bg-rose-50",
+    dot: "bg-rose-400",
+    line: "bg-rose-300/40",
+  },
+  {
+    ring: "border-violet-300/40 bg-violet-300/10 text-violet-100",
+    card: "border-violet-200 bg-violet-50",
+    dot: "bg-violet-400",
+    line: "bg-violet-300/40",
+  },
+];
+
+function trajectoryLaneTone(index: number) {
+  return trajectoryLaneTones[index % trajectoryLaneTones.length];
+}
+
+function nodesById(projection: RolloutProjection) {
+  return new Map(projection.nodes.map((item) => [item.node_id, item]));
+}
+
+function nodesForLane(projection: RolloutProjection, lane: RolloutProjectionLane) {
+  const byId = nodesById(projection);
+  return lane.node_ids.map((nodeId) => byId.get(nodeId)).filter((item): item is RolloutProjectionNode => Boolean(item));
+}
+
+function prNumberFromNode(node: RolloutProjectionNode) {
+  const match = node.node_id.match(/^pr_(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function rolloutOrderedNodes(projection: RolloutProjection) {
+  const byId = nodesById(projection);
+  if (projection.timeline?.item_node_ids.length) {
+    return projection.timeline.item_node_ids
+      .map((nodeId) => byId.get(nodeId))
+      .filter((node): node is RolloutProjectionNode => Boolean(node));
+  }
+
+  return projection.nodes
+    .filter((node) => node.role !== "anchor" && node.role !== "precursor")
+    .sort((left, right) => {
+      const leftPr = prNumberFromNode(left);
+      const rightPr = prNumberFromNode(right);
+      if (leftPr !== null && rightPr !== null) {
+        return leftPr - rightPr;
+      }
+      return left.label.localeCompare(right.label);
+    });
+}
+
+function parseRolloutTime(value?: string) {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function rolloutNodeTime(node: RolloutProjectionNode) {
+  return parseRolloutTime(node.occurred_at) ?? parseRolloutTime(node.started_at) ?? parseRolloutTime(node.completed_at);
+}
+
+function rolloutTimelineBounds(projection: RolloutProjection, nodes: RolloutProjectionNode[]) {
+  const nodeTimes = nodes.map(rolloutNodeTime).filter((value): value is number => value !== null);
+  const completedTimes = nodes
+    .map((node) => parseRolloutTime(node.completed_at))
+    .filter((value): value is number => value !== null);
+  const start = parseRolloutTime(projection.timeline?.start_at) ?? (nodeTimes.length ? Math.min(...nodeTimes) : null);
+  const end =
+    parseRolloutTime(projection.timeline?.end_at) ??
+    (completedTimes.length ? Math.max(...completedTimes) : nodeTimes.length ? Math.max(...nodeTimes) : null);
+  if (start === null || end === null || end <= start) {
+    return null;
+  }
+  return { end, start };
+}
+
+function rolloutTimeRatio(value: number | null, bounds: { end: number; start: number } | null, fallbackRatio: number) {
+  if (value === null || !bounds) {
+    return fallbackRatio;
+  }
+  const ratio = (value - bounds.start) / (bounds.end - bounds.start);
+  return Math.min(1, Math.max(0, ratio));
+}
+
+function rolloutTimelinePercent(
+  node: RolloutProjectionNode,
+  bounds: { end: number; start: number } | null,
+  index: number,
+  total: number,
+) {
+  const fallback = total > 1 ? index / (total - 1) : 0.5;
+  return rolloutTimeRatio(rolloutNodeTime(node), bounds, fallback) * 100;
+}
+
+function rolloutTickPercent(tick: RolloutTimelineTick, bounds: { end: number; start: number } | null) {
+  return rolloutTimeRatio(parseRolloutTime(tick.at), bounds, 0) * 100;
+}
+
+function rolloutNodeTimeLabel(node?: RolloutProjectionNode) {
+  return node?.display_time ?? node?.started_at ?? node?.occurred_at ?? "time n/a";
+}
+
+function rolloutClockLabel(value?: string) {
+  const match = value?.match(/T(\d{2}:\d{2})/);
+  return match?.[1] ?? value ?? "n/a";
+}
+
+function rolloutNodeStartClock(node?: RolloutProjectionNode) {
+  return node?.display_time?.split(" -> ")[0] ?? rolloutClockLabel(node?.started_at ?? node?.occurred_at);
+}
+
+function uniqueRolloutMilestones(items: RolloutTimeMilestone[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.label}:${item.detail}:${item.time_label}`;
+    if (item.time === null || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function rolloutTimelineMilestones(nodes: RolloutProjectionNode[]): RolloutTimeMilestone[] {
+  const timedNodes = nodes
+    .map((node) => ({ node, time: rolloutNodeTime(node) }))
+    .filter((item): item is { node: RolloutProjectionNode; time: number } => item.time !== null)
+    .sort((left, right) => left.time - right.time);
+  if (!timedNodes.length) {
+    return [];
+  }
+  const first = timedNodes[0];
+  const midpoint = timedNodes[Math.floor((timedNodes.length - 1) / 2)];
+  const lastStart = timedNodes[timedNodes.length - 1];
+  const latestCompletion = nodes
+    .map((node) => ({ node, time: parseRolloutTime(node.completed_at) }))
+    .filter((item): item is { node: RolloutProjectionNode; time: number } => item.time !== null)
+    .sort((left, right) => right.time - left.time)[0];
+
+  return uniqueRolloutMilestones([
+    {
+      detail: first.node.label,
+      id: "start",
+      label: "start",
+      time: first.time,
+      time_label: rolloutNodeStartClock(first.node),
+    },
+    {
+      detail: midpoint.node.label,
+      id: "midpoint",
+      label: "midpoint",
+      time: midpoint.time,
+      time_label: rolloutNodeStartClock(midpoint.node),
+    },
+    {
+      detail: lastStart.node.label,
+      id: "last_start",
+      label: "last start",
+      time: lastStart.time,
+      time_label: rolloutNodeStartClock(lastStart.node),
+    },
+    {
+      detail: latestCompletion?.node.label ?? lastStart.node.label,
+      id: "tail_done",
+      label: "tail done",
+      time: latestCompletion?.time ?? null,
+      time_label: rolloutClockLabel(latestCompletion?.node.completed_at),
+    },
+  ]);
+}
+
+function RolloutProjectionConstellation({
+  bundle,
+  projection,
+}: {
+  bundle: RolloutProjectionBundle;
+  projection: RolloutProjection;
+}) {
+  const visibleNodes = projection.nodes
+    .filter((node) => node.role !== "anchor" && node.role !== "precursor")
+    .slice(0, 30);
+
+  return (
+    <div
+      className="frontstage-rollout-projection-constellation relative overflow-hidden rounded-md border border-slate-800 bg-slate-950 p-4 text-white xl:col-span-2"
+      data-testid="frontstage-rollout-projection-constellation"
+    >
+      <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-cyan-200">
+            Rollout projection
+          </div>
+          <h3 className="mt-2 max-w-3xl text-lg font-semibold leading-7 text-white">
+            {projection.scene.title}
+          </h3>
+          <p className="mt-2 max-w-4xl text-sm font-medium leading-6 text-slate-300">
+            {projection.scene.explanation}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="info">{projection.scene.stage_label}</Badge>
+          <Badge variant={trajectoryConfidenceTone(projection.scene.confidence)}>
+            {projection.scene.confidence}
+          </Badge>
+        </div>
+      </div>
+
+      <div className="relative z-10 mt-5 grid gap-3 md:grid-cols-4" data-testid="frontstage-rollout-projection-metrics">
+        {projection.metrics.map((metric) => (
+          <div className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-3" key={metric.metric_id}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">
+                {metric.label}
+              </span>
+              <Badge variant={metric.tone}>{metric.helper}</Badge>
+            </div>
+            <div className="mt-2 text-2xl font-semibold leading-8 text-white">{metric.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        aria-hidden="true"
+        className="frontstage-rollout-node-grid relative z-10 mt-5"
+        data-testid="frontstage-rollout-node-particles"
+      >
+        {visibleNodes.map((node, index) => (
+          <span
+            className={cn(
+              "frontstage-rollout-node-dot h-2.5 rounded-full",
+              node.state === "merged" ? "bg-emerald-300" : node.state === "open" ? "bg-cyan-300" : "bg-amber-300",
+            )}
+            key={node.node_id}
+            style={{ animationDelay: `${index * 80}ms` }}
+            title={`${node.label} ${node.state}`}
+          />
+        ))}
+      </div>
+
+      <div
+        className="relative z-10 mt-4 grid gap-2 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium leading-5 text-slate-300 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]"
+        data-testid="frontstage-rollout-projection-model-contract"
+      >
+        <div>
+          <span className="font-semibold text-white">Projection model: </span>
+          {bundle.projection_model.required_sections.join(" / ")}.
+        </div>
+        <div>
+          <span className="font-semibold text-white">Evidence floor: </span>
+          {bundle.truth_contract.evidence_floor}.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type PrMeshEdge = {
+  edge_id: string;
+  edge_kind: "timeline" | "lane" | "explicit";
+  from_node_id: string;
+  label: string;
+  to_node_id: string;
+};
+
+function meshEdgeTitle(edge: PrMeshEdge, byId: Map<string, RolloutProjectionNode>) {
+  const fromNode = byId.get(edge.from_node_id);
+  const toNode = byId.get(edge.to_node_id);
+  return `${edge.edge_kind}: ${fromNode?.label ?? edge.from_node_id} -> ${toNode?.label ?? edge.to_node_id}; ${edge.label}`;
+}
+
+function RolloutRelationshipMesh({ projection }: { projection: RolloutProjection }) {
+  const orderedNodes = rolloutOrderedNodes(projection);
+  const byId = new Map(orderedNodes.map((node) => [node.node_id, node]));
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const timelineBounds = rolloutTimelineBounds(projection, orderedNodes);
+  const timeTicks = projection.timeline?.ticks ?? [];
+  const laneRows = new Map<string, { index: number; y: number }>(
+    projection.lanes.map((lane, index) => [lane.lane_id, { index, y: 70 + index * 112 }]),
+  );
+  const positions = new Map<string, { x: number; y: number }>();
+
+  for (const lane of projection.lanes) {
+    const laneNodes = lane.node_ids.map((nodeId) => byId.get(nodeId)).filter((node): node is RolloutProjectionNode => Boolean(node));
+    const laneY = laneRows.get(lane.lane_id)?.y ?? 70;
+    let lastX = 140;
+    laneNodes.forEach((node, index) => {
+      const fallback = laneNodes.length > 1 ? index / (laneNodes.length - 1) : 0.5;
+      const ratio = rolloutTimeRatio(rolloutNodeTime(node), timelineBounds, fallback);
+      const timeX = 190 + ratio * 750;
+      const spacedX = Math.max(timeX, lastX + 76);
+      const x = Math.min(940, Math.max(190, spacedX));
+      lastX = x;
+      positions.set(node.node_id, { x, y: laneY });
+    });
+  }
+
+  const edgeMap = new Map<string, PrMeshEdge>();
+  const setEdge = (edge: PrMeshEdge) => {
+    const key = `${edge.from_node_id}->${edge.to_node_id}`;
+    const current = edgeMap.get(key);
+    if (!current || edge.edge_kind === "explicit" || (edge.edge_kind === "lane" && current.edge_kind === "timeline")) {
+      edgeMap.set(key, edge);
+    }
+  };
+
+  orderedNodes.slice(0, -1).forEach((node, index) => {
+    const next = orderedNodes[index + 1];
+    setEdge({
+      edge_id: `timeline_${node.node_id}_${next.node_id}`,
+      edge_kind: "timeline",
+      from_node_id: node.node_id,
+      label: "overnight sequence",
+      to_node_id: next.node_id,
+    });
+  });
+
+  for (const lane of projection.lanes) {
+    const laneNodes = lane.node_ids.map((nodeId) => byId.get(nodeId)).filter((node): node is RolloutProjectionNode => Boolean(node));
+    laneNodes.slice(0, -1).forEach((node, index) => {
+      const next = laneNodes[index + 1];
+      setEdge({
+        edge_id: `lane_${lane.lane_id}_${node.node_id}_${next.node_id}`,
+        edge_kind: "lane",
+        from_node_id: node.node_id,
+        label: lane.label,
+        to_node_id: next.node_id,
+      });
+    });
+  }
+
+  for (const edge of projection.edges) {
+    if (positions.has(edge.from_node_id) && positions.has(edge.to_node_id)) {
+      setEdge({
+        edge_id: edge.edge_id,
+        edge_kind: "explicit",
+        from_node_id: edge.from_node_id,
+        label: edge.label,
+        to_node_id: edge.to_node_id,
+      });
+    }
+  }
+
+  const meshEdges = Array.from(edgeMap.values());
+  const explicitEdgeCount = meshEdges.filter((edge) => edge.edge_kind === "explicit").length;
+  const laneFlowEdgeCount = meshEdges.filter((edge) => edge.edge_kind === "lane").length;
+  const timelineEdgeCount = meshEdges.filter((edge) => edge.edge_kind === "timeline").length;
+  const hoveredEdge = meshEdges.find((edge) => edge.edge_id === hoveredEdgeId) ?? null;
+  const timelineTitle = projection.timeline?.title ?? "Rollout timeline";
+  const timelineWindow = projection.timeline?.window_label ?? projection.source_contract.sample_window;
+  const timelineUnitLabel = projection.timeline?.unit_label ?? "work nodes";
+  const timelineAxis = projection.timeline?.axis_kind ?? "ordered";
+  const timelineTimezone = projection.timeline?.timezone ?? "local";
+  const timeMilestones = rolloutTimelineMilestones(orderedNodes);
+
+  return (
+    <div
+      className="frontstage-rollout-pr-mesh relative overflow-hidden rounded-md border border-slate-800 bg-slate-950 p-4 text-white xl:col-span-2"
+      data-testid="frontstage-rollout-relationship-mesh"
+    >
+      <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-cyan-200">
+            {projection.title}
+          </div>
+          <h3 className="mt-2 max-w-3xl text-lg font-semibold leading-7 text-white">
+            A wall-clock rollout map, all at once
+          </h3>
+          <p className="mt-2 max-w-4xl text-sm font-medium leading-6 text-slate-300">
+            Every work unit in {timelineWindow} is placed on a real time axis. Thin links preserve ordering, lane links
+            show parallel workstreams, and bright links mark explicit review or follow-up relationships. Hover nodes or
+            lines to inspect time, duration, and relationship details.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="success">{orderedNodes.length} {timelineUnitLabel}</Badge>
+          <Badge variant="info">{meshEdges.length} links</Badge>
+          <Badge variant="warning">{explicitEdgeCount} explicit</Badge>
+          <Badge variant="neutral">{timelineTimezone}</Badge>
+        </div>
+      </div>
+
+      <div
+        className="frontstage-rollout-timeline relative z-10 mt-4 rounded-md border border-white/10 bg-black/20 p-3"
+        data-testid="frontstage-rollout-timeline"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">{timelineTitle}</div>
+            <div className="mt-1 text-sm font-semibold leading-6 text-white">{timelineWindow}</div>
+            <div className="mt-1 text-[11px] font-medium leading-4 text-slate-400">
+              {projection.timeline?.time_basis ?? "work-unit order"}
+            </div>
+          </div>
+          <Badge variant="info">{timelineAxis}</Badge>
+        </div>
+        <div
+          className="frontstage-rollout-timeline-track mt-3"
+          data-testid="frontstage-rollout-timeline-scale"
+        >
+          {timeTicks.map((tick) => (
+            <span
+              className="frontstage-rollout-timeline-tick"
+              data-testid="frontstage-rollout-timeline-tick"
+              key={tick.tick_id}
+              style={{ left: `${rolloutTickPercent(tick, timelineBounds)}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
+          {orderedNodes.map((node, index) => (
+            <a
+              className={cn(
+                "frontstage-rollout-timeline-point",
+                node.state === "merged"
+                  ? "frontstage-rollout-timeline-point-merged"
+                  : node.state === "open"
+                    ? "frontstage-rollout-timeline-point-open"
+                    : "frontstage-rollout-timeline-point-closed",
+              )}
+              data-node-time={rolloutNodeTimeLabel(node)}
+              data-testid="frontstage-rollout-timeline-point"
+              href={node.url ?? "#"}
+              key={node.node_id}
+              rel={node.url ? "noreferrer" : undefined}
+              style={{ left: `${rolloutTimelinePercent(node, timelineBounds, index, orderedNodes.length)}%` }}
+              target={node.url ? "_blank" : undefined}
+              title={`${String(index + 1).padStart(2, "0")} ${node.label}: ${node.title} / ${rolloutNodeTimeLabel(node)}`}
+            >
+              <span>{node.label.replace("#", "")}</span>
+              <small>{node.display_time?.split(" -> ")[0] ?? ""}</small>
+            </a>
+          ))}
+        </div>
+        {timeMilestones.length ? (
+          <div className="frontstage-rollout-time-milestones" data-testid="frontstage-rollout-time-milestones">
+            {timeMilestones.map((milestone) => (
+              <span
+                className="frontstage-rollout-time-milestone"
+                data-testid="frontstage-rollout-time-milestone"
+                key={milestone.id}
+                style={{ left: `${rolloutTimeRatio(milestone.time, timelineBounds, 0) * 100}%` }}
+                title={`${milestone.label}: ${milestone.detail} at ${milestone.time_label}`}
+              >
+                <strong>{milestone.time_label}</strong>
+                <small>
+                  {milestone.label} {milestone.detail}
+                </small>
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="relative z-10 mt-4 overflow-x-auto rounded-md border border-white/10 bg-black/20">
+        <div className="frontstage-rollout-pr-mesh-stage relative">
+          <div aria-hidden="true" className="frontstage-rollout-pr-mesh-time-grid">
+            {timeTicks.map((tick) => (
+              <span
+                className="frontstage-rollout-pr-mesh-time-tick"
+                data-testid="frontstage-rollout-mesh-time-tick"
+                key={`${tick.tick_id}-mesh`}
+                style={{ left: `${10 + rolloutTickPercent(tick, timelineBounds) * 0.82}%` }}
+              >
+                {tick.label}
+              </span>
+            ))}
+          </div>
+          <svg
+            aria-label="Rollout relationship graph"
+            className="frontstage-rollout-pr-mesh-svg"
+            preserveAspectRatio="none"
+            role="img"
+            viewBox="0 0 1000 560"
+          >
+            {meshEdges.map((edge, index) => {
+              const from = positions.get(edge.from_node_id);
+              const to = positions.get(edge.to_node_id);
+              if (!from || !to) {
+                return null;
+              }
+              const edgeTitle = meshEdgeTitle(edge, byId);
+              return (
+                <g
+                  aria-label={edgeTitle}
+                  className="frontstage-rollout-pr-mesh-edge-group"
+                  data-edge-kind={edge.edge_kind}
+                  data-edge-label={edge.label}
+                  data-edge-title={edgeTitle}
+                  data-from-node={edge.from_node_id}
+                  data-testid="frontstage-rollout-mesh-edge"
+                  data-to-node={edge.to_node_id}
+                  key={edge.edge_id}
+                  onBlur={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                  onFocus={() => setHoveredEdgeId(edge.edge_id)}
+                  onMouseEnter={() => setHoveredEdgeId(edge.edge_id)}
+                  onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                  role="listitem"
+                  style={{ animationDelay: `${index * 30}ms` }}
+                  tabIndex={0}
+                >
+                  <title>{edgeTitle}</title>
+                  <line
+                    className="frontstage-rollout-pr-mesh-edge-hit"
+                    data-testid="frontstage-rollout-mesh-edge-hit"
+                    onMouseEnter={() => setHoveredEdgeId(edge.edge_id)}
+                    onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                    onPointerEnter={() => setHoveredEdgeId(edge.edge_id)}
+                    onPointerLeave={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                    x1={from.x}
+                    x2={to.x}
+                    y1={from.y}
+                    y2={to.y}
+                  />
+                  <line
+                    className={cn("frontstage-rollout-pr-mesh-edge", `frontstage-rollout-pr-mesh-edge-${edge.edge_kind}`)}
+                    onMouseEnter={() => setHoveredEdgeId(edge.edge_id)}
+                    onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                    onPointerEnter={() => setHoveredEdgeId(edge.edge_id)}
+                    onPointerLeave={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                    x1={from.x}
+                    x2={to.x}
+                    y1={from.y}
+                    y2={to.y}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+
+          {meshEdges.map((edge) => {
+            const from = positions.get(edge.from_node_id);
+            const to = positions.get(edge.to_node_id);
+            if (!from || !to) {
+              return null;
+            }
+            const edgeTitle = meshEdgeTitle(edge, byId);
+            return (
+              <button
+                aria-label={edgeTitle}
+                className={cn(
+                  "frontstage-rollout-mesh-edge-hotspot",
+                  `frontstage-rollout-mesh-edge-hotspot-${edge.edge_kind}`,
+                )}
+                data-edge-kind={edge.edge_kind}
+                data-edge-label={edge.label}
+                data-edge-title={edgeTitle}
+                data-from-node={edge.from_node_id}
+                data-testid="frontstage-rollout-mesh-edge-hotspot"
+                data-to-node={edge.to_node_id}
+                key={`${edge.edge_id}-hotspot`}
+                onBlur={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                onFocus={() => setHoveredEdgeId(edge.edge_id)}
+                onMouseEnter={() => setHoveredEdgeId(edge.edge_id)}
+                onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.edge_id ? null : current))}
+                style={{
+                  left: `${(((from.x + to.x) / 2) / 1000) * 100}%`,
+                  top: `${(((from.y + to.y) / 2) / 560) * 100}%`,
+                }}
+                title={edgeTitle}
+                type="button"
+              />
+            );
+          })}
+
+          {projection.lanes.map((lane) => {
+            const row = laneRows.get(lane.lane_id);
+            const laneNodes = lane.node_ids.filter((nodeId) => byId.has(nodeId));
+            if (!row || !laneNodes.length) {
+              return null;
+            }
+            return (
+              <div
+                className="frontstage-rollout-pr-mesh-lane-label"
+                data-testid="frontstage-rollout-mesh-lane"
+                key={lane.lane_id}
+                style={{ top: `${(row.y / 560) * 100}%` }}
+              >
+                <span>{lane.label}</span>
+                <Badge variant="neutral">{laneNodes.length}</Badge>
+              </div>
+            );
+          })}
+
+          {orderedNodes.map((node, index) => {
+            const position = positions.get(node.node_id);
+            if (!position) {
+              return null;
+            }
+            const lane = projection.lanes.find((item) => item.lane_id === node.lane_id);
+            return (
+              <a
+                className={cn(
+                  "frontstage-rollout-pr-mesh-node",
+                  node.state === "merged"
+                    ? "frontstage-rollout-pr-mesh-node-merged"
+                    : node.state === "open"
+                      ? "frontstage-rollout-pr-mesh-node-open"
+                      : "frontstage-rollout-pr-mesh-node-closed",
+                )}
+                data-node-lane={lane?.label ?? node.lane_id}
+                data-node-state={node.state}
+                data-node-time={rolloutNodeTimeLabel(node)}
+                data-node-title={node.title}
+                data-testid="frontstage-rollout-mesh-node"
+                href={node.url ?? "#"}
+                key={node.node_id}
+                rel={node.url ? "noreferrer" : undefined}
+                style={{
+                  animationDelay: `${index * 45}ms`,
+                  left: `${(position.x / 1000) * 100}%`,
+                  top: `${(position.y / 560) * 100}%`,
+                }}
+                target={node.url ? "_blank" : undefined}
+                title={`${node.label} ${node.title} / ${lane?.label ?? node.lane_id}`}
+              >
+                <span>{node.label}</span>
+                <small>{node.state}</small>
+                <span className="frontstage-rollout-pr-mesh-node-tooltip" data-testid="frontstage-rollout-mesh-node-tooltip">
+                  <strong>{node.label}</strong>
+                  <span>{node.title}</span>
+                  <span>time: {rolloutNodeTimeLabel(node)}</span>
+                  <span>duration: {node.duration_label ?? "n/a"}</span>
+                  <span>lane: {lane?.label ?? node.lane_id}</span>
+                  <span>state: {node.state}</span>
+                </span>
+              </a>
+            );
+          })}
+
+          <div
+            className={cn(
+              "frontstage-rollout-mesh-edge-hover-card",
+              hoveredEdge ? "frontstage-rollout-mesh-edge-hover-card-visible" : "",
+            )}
+            data-testid="frontstage-rollout-mesh-edge-hover-card"
+          >
+            {hoveredEdge ? (
+              <>
+                <div className="text-[11px] font-semibold uppercase tracking-normal text-cyan-200">
+                  {hoveredEdge.edge_kind} relation
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="info">{byId.get(hoveredEdge.from_node_id)?.label ?? hoveredEdge.from_node_id}</Badge>
+                  <span className="text-slate-500">-&gt;</span>
+                  <Badge variant="success">{byId.get(hoveredEdge.to_node_id)?.label ?? hoveredEdge.to_node_id}</Badge>
+                </div>
+                <p className="mt-2 grid gap-1 text-[11px] font-semibold leading-4 text-slate-400">
+                  <span>from: {rolloutNodeTimeLabel(byId.get(hoveredEdge.from_node_id))}</span>
+                  <span>to: {rolloutNodeTimeLabel(byId.get(hoveredEdge.to_node_id))}</span>
+                </p>
+                <p className="mt-2 text-xs font-medium leading-5 text-slate-300">{hoveredEdge.label}</p>
+              </>
+            ) : (
+              <>
+                <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">Hover a line</div>
+                <p className="mt-1 text-xs font-medium leading-5 text-slate-400">
+                  Relation details appear here without opening raw logs.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="relative z-10 mt-3 grid gap-2 md:grid-cols-4">
+        <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Timeline links</div>
+          <div className="mt-1 text-lg font-semibold text-white">{timelineEdgeCount}</div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Lane-flow links</div>
+          <div className="mt-1 text-lg font-semibold text-white">{laneFlowEdgeCount}</div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Explicit review links</div>
+          <div className="mt-1 text-lg font-semibold text-white">{explicitEdgeCount}</div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Public boundary</div>
+          <div className="mt-1 text-sm font-semibold leading-6 text-slate-200">metadata only</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RolloutRequirementSpine({ projection }: { projection: RolloutProjection }) {
+  const sequence = projection.rollout_sequence;
+  if (!sequence) {
+    return null;
+  }
+
+  const byId = nodesById(projection);
+  const units = [...sequence.units].sort((left, right) => left.order - right.order);
+  const unitIds = new Set(units.map((unit) => unit.unit_id));
+  const referencedNodeCount = new Set(units.flatMap((unit) => unit.node_ids)).size;
+
+  return (
+    <div
+      className="frontstage-rollout-requirement-spine relative overflow-hidden rounded-md border border-slate-800 bg-slate-950 p-4 text-white xl:col-span-2"
+      data-testid="frontstage-rollout-requirement-spine"
+    >
+      <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-cyan-200">
+            Requirement rollout spine
+          </div>
+          <h3 className="mt-2 max-w-3xl text-lg font-semibold leading-7 text-white">
+            One demand unlocks the next
+          </h3>
+          <p className="mt-2 max-w-4xl text-sm font-medium leading-6 text-slate-300">
+            {sequence.description}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="info">{units.length} requirements</Badge>
+          <Badge variant="success">{referencedNodeCount} public nodes</Badge>
+        </div>
+      </div>
+
+      <div
+        className="frontstage-rollout-spine-ribbon relative z-10 mt-5 grid gap-2 rounded-md border border-white/10 bg-black/25 p-2 lg:grid-cols-7"
+        data-testid="frontstage-rollout-sequence-ribbon"
+      >
+        {units.map((unit, index) => (
+          <div
+            className="frontstage-rollout-sequence-chip grid min-h-16 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-md border border-white/10 bg-white/[0.06] px-2 py-2"
+            data-testid="frontstage-rollout-sequence-chip"
+            key={unit.unit_id}
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 font-mono text-xs font-semibold text-cyan-100">
+              {String(unit.order).padStart(2, "0")}
+            </span>
+            <span className="min-w-0 text-[11px] font-semibold leading-5 text-slate-200">
+              {unit.requirement}
+              {index < units.length - 1 ? <span className="ml-1 text-cyan-200">-&gt;</span> : null}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="frontstage-rollout-spine-track relative z-10 mt-3 grid gap-3 lg:grid-cols-4 2xl:grid-cols-7">
+        {units.map((unit, index) => {
+          const lane = projection.lanes.find((item) => item.lane_id === unit.lane_id);
+          const nodes = unit.node_ids.map((nodeId) => byId.get(nodeId)).filter((node): node is RolloutProjectionNode => Boolean(node));
+          const nextUnits = unit.unlocks.filter((unitId) => unitIds.has(unitId));
+          return (
+            <article
+              className={cn(
+                "frontstage-rollout-spine-card relative min-h-80 rounded-md border border-white/10 bg-white/[0.06] px-3 py-3",
+                unit.state === "open" ? "ring-1 ring-cyan-300/50" : "",
+              )}
+              data-testid="frontstage-rollout-requirement-unit"
+              key={unit.unit_id}
+              style={{ animationDelay: `${index * 90}ms` }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="frontstage-rollout-spine-order flex h-10 w-10 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 font-mono text-sm font-semibold text-cyan-100">
+                  {String(unit.order).padStart(2, "0")}
+                </span>
+                <Badge variant={nodeStateTone(unit.state)}>{unit.state}</Badge>
+              </div>
+              <h4 className="mt-3 text-sm font-semibold leading-6 text-white">{unit.requirement}</h4>
+              <p className="mt-2 text-xs font-medium leading-5 text-slate-400">
+                Trigger: <span className="text-slate-200">{unit.triggered_by}</span>
+              </p>
+              <p className="mt-2 rounded-md border border-white/10 bg-black/20 px-2 py-2 text-xs font-medium leading-5 text-slate-300">
+                {unit.outcome}
+              </p>
+              <div className="mt-3 flex min-h-10 flex-wrap gap-1.5">
+                {nodes.map((node) => (
+                  <a
+                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[11px] font-semibold text-slate-200 transition hover:border-cyan-300/50 hover:text-white"
+                    href={node.url}
+                    key={node.node_id}
+                    rel="noreferrer"
+                    target="_blank"
+                    title={node.title}
+                  >
+                    {node.label}
+                    <span className={cn("h-1.5 w-1.5 rounded-full", node.state === "merged" ? "bg-emerald-300" : node.state === "open" ? "bg-cyan-300" : "bg-amber-300")} />
+                  </a>
+                ))}
+              </div>
+              <div className="mt-3 grid gap-1.5">
+                {unit.stage_steps.map((step) => (
+                  <div
+                    className="frontstage-rollout-spine-step grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5"
+                    data-testid="frontstage-rollout-requirement-step"
+                    key={step.step_id}
+                  >
+                    <span className="min-w-0 truncate text-[11px] font-semibold text-slate-300">{step.label}</span>
+                    <Badge variant={sequenceStepTone(step.status)}>{step.status}</Badge>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 grid gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 py-2 text-[11px] font-medium leading-5 text-slate-400">
+                <span>
+                  lane <span className="text-slate-200">{lane?.label ?? unit.lane_id}</span>
+                </span>
+                <span>
+                  unlocks <span className="text-slate-200">{nextUnits.length ? nextUnits.map((unitId) => unitId.replace(/^req_/, "")).join(", ") : "next projection"}</span>
+                </span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function hotspotSeverityTone(severity: RolloutProjectionAttentionHotspot["severity"]): BadgeTone {
+  if (severity === "high") {
+    return "danger";
+  }
+  if (severity === "medium") {
+    return "warning";
+  }
+  return "info";
+}
+
+function RolloutProjectionCapabilityMap({
+  bundle,
+  projection,
+}: {
+  bundle: RolloutProjectionBundle;
+  projection: RolloutProjection;
+}) {
+  const layers = projection.mapping_layers ?? [];
+  const signals = projection.flow_signals ?? [];
+  const relationshipSummaries = projection.relationship_summaries ?? [];
+  const hotspots = projection.attention_hotspots ?? [];
+
+  return (
+    <div
+      className="frontstage-rollout-capability-map relative overflow-hidden rounded-md border border-slate-800 bg-slate-950 p-4 text-white xl:col-span-2"
+      data-testid="frontstage-rollout-capability-map"
+    >
+      <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-emerald-200">
+            Projection capability map
+          </div>
+          <h3 className="mt-2 max-w-3xl text-lg font-semibold leading-7 text-white">
+            Evidence becomes state, lanes, edges, and operator decisions
+          </h3>
+          <p className="mt-2 max-w-4xl text-sm font-medium leading-6 text-slate-300">
+            The renderer reads a generic projection contract, then makes the transformation visible: source facts become
+            work nodes, nodes gain lifecycle state, lanes show parallel flow, edges explain why follow-up work exists, and
+            hotspots keep review attention from getting lost.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="success">{bundle.projection_model.schema_version}</Badge>
+          <Badge variant="info">{bundle.projection_model.optional_rich_sections?.length ?? 0} rich layers</Badge>
+        </div>
+      </div>
+
+      <div className="frontstage-rollout-layer-rail relative z-10 mt-5 grid gap-3 lg:grid-cols-5">
+        {layers.map((layer, index) => (
+          <article
+            className="frontstage-rollout-layer-card relative min-h-44 rounded-md border border-white/10 bg-white/[0.06] px-3 py-3"
+            data-testid="frontstage-rollout-mapping-layer"
+            key={layer.layer_id}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-[11px] font-semibold text-slate-500">{String(index + 1).padStart(2, "0")}</span>
+              <Badge variant={layer.tone}>{layer.output}</Badge>
+            </div>
+            <h4 className="mt-3 text-sm font-semibold leading-6 text-white">{layer.label}</h4>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-normal text-cyan-200">{layer.role}</p>
+            <p className="mt-2 text-xs font-medium leading-5 text-slate-300">{layer.description}</p>
+            <div className="mt-3 grid gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-2 text-[11px] font-medium leading-5 text-slate-400">
+              <span>
+                <span className="text-slate-500">in</span> {layer.input}
+              </span>
+              <span>
+                <span className="text-slate-500">refs</span> {layer.node_ids.length} nodes / {layer.edge_ids.length} edges
+              </span>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="relative z-10 mt-4 grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="rounded-md border border-white/10 bg-white/[0.04] p-3" data-testid="frontstage-rollout-flow-signals">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Flow signals</div>
+            <Badge variant="neutral">{signals.length} signals</Badge>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {signals.map((signal) => (
+              <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2" key={signal.signal_id}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-white">{signal.label}</span>
+                  <Badge variant={signal.tone}>{signal.value}</Badge>
+                </div>
+                <p className="mt-1 text-[11px] font-medium leading-5 text-slate-400">{signal.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-md border border-white/10 bg-white/[0.04] p-3" data-testid="frontstage-rollout-relationship-summaries">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Relationship grammar</div>
+              <Badge variant="neutral">{relationshipSummaries.length} kinds</Badge>
+            </div>
+            <div className="mt-3 space-y-2">
+              {relationshipSummaries.map((summary) => (
+                <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2" key={summary.kind}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-white">{summary.label}</span>
+                    <Badge variant="info">{summary.count}</Badge>
+                  </div>
+                  <p className="mt-1 text-[11px] font-medium leading-5 text-slate-400">{summary.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-white/10 bg-white/[0.04] p-3" data-testid="frontstage-rollout-attention-hotspots">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-400">Attention hotspots</div>
+              <Badge variant="warning">{hotspots.length} visible</Badge>
+            </div>
+            <div className="mt-3 space-y-2">
+              {hotspots.map((hotspot) => (
+                <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2" key={hotspot.hotspot_id}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-white">{hotspot.label}</span>
+                    <Badge variant={hotspotSeverityTone(hotspot.severity)}>{hotspot.severity}</Badge>
+                  </div>
+                  <p className="mt-1 text-[11px] font-medium leading-5 text-slate-400">{hotspot.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RolloutProjectionStageFlow({ projection }: { projection: RolloutProjection }) {
+  return (
+    <div
+      className="rounded-md border border-slate-200 bg-white px-3 py-3 xl:col-span-2"
+      data-testid="frontstage-rollout-stage-flow"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
+            Actor / state stages
+          </div>
+          <h3 className="mt-1 text-base font-semibold leading-7 text-slate-950">
+            One node can move; many lanes can compose
+          </h3>
+        </div>
+        <Badge variant="neutral">stage projection</Badge>
+      </div>
+      <div className="frontstage-rollout-stage-flow relative mt-4 grid gap-2 md:grid-cols-6">
+        <span aria-hidden="true" className="frontstage-rollout-stage-flow-beam" />
+        {projection.stages.map((stage, index) => (
+          <div
+            className={cn(
+              "relative min-h-36 overflow-hidden rounded-md border px-3 py-3",
+              stage.current
+                ? "border-slate-900 bg-slate-950 text-white shadow-sm"
+                : "border-slate-200 bg-slate-50 text-slate-950",
+            )}
+            data-testid="frontstage-rollout-stage"
+            key={stage.stage_id}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md border text-xs font-semibold",
+                  stage.current ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-slate-200 bg-white text-slate-500",
+                )}
+              >
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <Badge variant={trajectoryConfidenceTone(stage.confidence)}>{stage.confidence}</Badge>
+            </div>
+            <div className={cn("mt-3 text-sm font-semibold leading-6", stage.current ? "text-white" : "text-slate-950")}>
+              {stage.label}
+            </div>
+            <p className={cn("mt-1 text-xs font-medium leading-5", stage.current ? "text-slate-300" : "text-slate-600")}>
+              {stage.description}
+            </p>
+            {stage.current ? (
+              <div className="mt-3 rounded-md border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-normal text-cyan-100">
+                current scene
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RolloutProjectionLaneGraph({ projection }: { projection: RolloutProjection }) {
+  const byId = nodesById(projection);
+
+  return (
+    <div
+      className="grid gap-4 rounded-md border border-slate-200 bg-slate-50 p-3 xl:col-span-2 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]"
+      data-testid="frontstage-rollout-lane-graph"
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
+              Rollout lane graph
+            </div>
+            <h3 className="mt-1 text-base font-semibold leading-7 text-slate-950">
+              Lanes keep throughput reviewable
+            </h3>
+          </div>
+          <Badge variant="info">{projection.lanes.length} lanes</Badge>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          {projection.lanes.map((lane, index) => {
+            const tone = trajectoryLaneTone(index);
+            const nodes = nodesForLane(projection, lane);
+            return (
+              <article
+                className={cn("min-w-0 overflow-hidden rounded-md border px-3 py-3", tone.card)}
+                data-testid="frontstage-rollout-lane"
+                key={lane.lane_id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
+                      {lane.role}
+                    </div>
+                    <h4 className="mt-1 text-sm font-semibold leading-6 text-slate-950">{lane.label}</h4>
+                  </div>
+                  <Badge variant="neutral">{nodes.length} nodes</Badge>
+                </div>
+                <p className="mt-2 text-xs font-medium leading-5 text-slate-600">{lane.summary}</p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {nodes.map((node) => (
+                    <a
+                      className="inline-flex items-center gap-1 rounded-md border border-white/80 bg-white/80 px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                      href={node.url}
+                      key={node.node_id}
+                      rel="noreferrer"
+                      target="_blank"
+                      title={node.title}
+                    >
+                      <span>{node.label}</span>
+                      <span className={cn("h-1.5 w-1.5 rounded-full", tone.dot)} />
+                    </a>
+                  ))}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="min-w-0 rounded-md border border-slate-900 bg-slate-950 p-3 text-white">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-normal text-cyan-200">
+              Review edge mesh
+            </div>
+            <p className="mt-1 text-sm font-semibold leading-6 text-white">
+              Generic edges explain why one node points at another.
+            </p>
+          </div>
+          <Badge variant="neutral">{projection.edges.length} edges</Badge>
+        </div>
+        <div className="frontstage-rollout-edge-list mt-3 space-y-2" data-testid="frontstage-rollout-edge-list">
+          {projection.edges.map((edge, index) => {
+            const fromNode = byId.get(edge.from_node_id);
+            const toNode = byId.get(edge.to_node_id);
+            return (
+              <div
+                className="frontstage-rollout-edge relative rounded-md border border-white/10 bg-white/[0.06] px-3 py-2"
+                data-testid="frontstage-rollout-edge"
+                key={edge.edge_id}
+                style={{ animationDelay: `${index * 120}ms` }}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="info">{fromNode?.label ?? edge.from_node_id}</Badge>
+                  <span className="text-slate-500">-&gt;</span>
+                  <Badge variant={toNode ? nodeStateTone(toNode.state) : "neutral"}>
+                    {toNode?.label ?? edge.to_node_id}
+                  </Badge>
+                  <Badge variant={trajectoryConfidenceTone(edge.confidence)}>{edge.edge_kind}</Badge>
+                </div>
+                <p className="mt-2 text-xs font-medium leading-5 text-slate-300">{edge.label}</p>
+                <div className="mt-1 grid gap-1 text-[11px] leading-5 text-slate-500">
+                  <span className="truncate">{fromNode?.title ?? "upstream node"}</span>
+                  <span className="truncate">{toNode?.title ?? "downstream node"}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function buildTrajectoryAnalysis(fixture: LongHorizonRolloutFixture) {
@@ -665,8 +2037,11 @@ function EfficiencyEvidencePanel() {
 }
 
 function TrajectoryAnalysisPanel() {
-  const analysis = useMemo(() => buildTrajectoryAnalysis(selfIterationRollout), []);
-  const currentStage = analysis.currentStage;
+  const projection = overnightPrProjection;
+  const nodeMap = nodesById(projection);
+  const anchorNode = nodeMap.get(projection.source_contract.anchor_node_id);
+  const currentProjectionStage = projection.stages.find((stage) => stage.current) ?? projection.stages.at(-1);
+  const plannedProjection = rolloutProjectionBundle.planned_projections?.[0];
 
   return (
     <Panel icon={Activity} title="Trajectory Analysis">
@@ -674,6 +2049,11 @@ function TrajectoryAnalysisPanel() {
         className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,420px)]"
         data-testid="frontstage-trajectory-analysis"
       >
+        <RolloutProjectionConstellation bundle={rolloutProjectionBundle} projection={projection} />
+        <RolloutRelationshipMesh projection={projection} />
+        <RolloutRequirementSpine projection={projection} />
+        <RolloutProjectionCapabilityMap bundle={rolloutProjectionBundle} projection={projection} />
+
         <div
           className="min-w-0 rounded-md border border-slate-900 bg-slate-950 p-4 text-white"
           data-testid="frontstage-trajectory-stage-curve"
@@ -684,51 +2064,46 @@ function TrajectoryAnalysisPanel() {
                 Stage progress curve
               </div>
               <p className="mt-1 max-w-2xl text-sm font-semibold leading-6 text-white">
-                A projection fixture turns state transitions into a visible trajectory, not a raw trajectory replay.
+                The same projection model maps actor state, lane flow, and review edges without reading raw logs.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge variant="info">read-only projection</Badge>
-              <Badge variant="success">{analysis.observedCount} observed</Badge>
-              <Badge variant={analysis.syntheticCount ? "warning" : "success"}>
-                {analysis.syntheticCount} bridge
-              </Badge>
+              <Badge variant="success">{projection.nodes.length} nodes</Badge>
+              <Badge variant="neutral">{projection.edges.length} edges</Badge>
             </div>
           </div>
           <div className="mt-4 space-y-2">
-            {analysis.stages.map((stage, index) => (
+            {projection.stages.map((stage, index) => (
               <div
                 className="grid gap-2 sm:grid-cols-[104px_minmax(0,1fr)]"
                 data-testid="frontstage-trajectory-stage"
-                key={stage.animationEventId}
+                key={stage.stage_id}
               >
                 <div className="flex min-h-10 items-center justify-between gap-2 text-xs font-semibold text-slate-300">
-                  <span>{stage.stageLabel}</span>
+                  <span>{stage.actor_scope}</span>
                   <span className="font-mono text-slate-500">{String(index + 1).padStart(2, "0")}</span>
                 </div>
                 <div
                   className={cn(
                     "relative min-h-10 rounded-md border border-white/10 bg-white/[0.06] px-3 py-2",
-                    stage.isCurrent ? "ring-1 ring-cyan-300/70" : "",
+                    stage.current ? "ring-1 ring-cyan-300/70" : "",
                   )}
                 >
                   <span
                     aria-hidden="true"
-                    className={cn(
-                      "absolute bottom-0 left-0 top-0 rounded-md",
-                      stage.isSynthetic ? "bg-amber-400/15" : "bg-cyan-300/15",
-                    )}
-                    style={{ width: `${Math.max(12, stage.progress)}%` }}
+                    className="absolute bottom-0 left-0 top-0 rounded-md bg-cyan-300/15"
+                    style={{ width: `${Math.max(12, ((index + 1) / projection.stages.length) * 100)}%` }}
                   />
                   <div className="relative z-10 flex min-w-0 flex-wrap items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-sm font-semibold text-white">{stage.title}</span>
+                    <span className="min-w-0 truncate text-sm font-semibold text-white">{stage.label}</span>
                     <span className="flex flex-wrap gap-1.5">
-                      <Badge variant={rolloutKindTone(stage.kind)}>{stage.kind}</Badge>
                       <Badge variant={trajectoryConfidenceTone(stage.confidence)}>{stage.confidence}</Badge>
+                      {stage.current ? <Badge variant="info">current</Badge> : null}
                     </span>
                   </div>
                   <div className="relative z-10 mt-1 text-xs font-medium leading-5 text-slate-300">
-                    {stage.transitionLabel}
+                    {stage.description}
                   </div>
                 </div>
               </div>
@@ -742,25 +2117,42 @@ function TrajectoryAnalysisPanel() {
             data-testid="frontstage-trajectory-current-scene"
           >
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="info">{currentStage?.laneRole ?? "agent"}</Badge>
-              <Badge variant={currentStage?.isSynthetic ? "warning" : "success"}>
-                {currentStage?.isSynthetic ? "needs evidence" : "observed"}
+              <Badge variant="info">{projection.projection_kind}</Badge>
+              <Badge variant={trajectoryConfidenceTone(projection.scene.confidence)}>{projection.scene.confidence}</Badge>
+            </div>
+            <h3 className="mt-3 text-base font-semibold leading-7 text-slate-950">
+              {projection.scene.stage_label}
+            </h3>
+            <p className="mt-1 text-sm font-medium leading-6 text-slate-700">
+              {projection.scene.title}
+            </p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              {currentProjectionStage?.label ?? "No current stage"} / {projection.source_contract.sample_window}
+            </p>
+            <p className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium leading-5 text-slate-600">
+              {projection.scene.why_current}
+            </p>
+          </div>
+
+          <div
+            className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-3"
+            data-testid="frontstage-trajectory-stage-confidence"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="info">projection model</Badge>
+              <Badge variant={trajectoryConfidenceTone(projection.scene.confidence)}>
+                {projection.scene.confidence}
               </Badge>
             </div>
             <h3 className="mt-3 text-base font-semibold leading-7 text-slate-950">
-              {currentStage?.stageLabel ?? "Current stage"}
+              {projection.scene.stage_label}
             </h3>
             <p className="mt-1 text-sm font-medium leading-6 text-slate-700">
-              {currentStage?.title ?? "No stage projected"}
+              {projection.scene.why_current}
             </p>
-            <p className="mt-2 text-xs leading-5 text-slate-500">
-              {currentStage?.laneLabel ?? "No lane"} / {currentStage?.transitionLabel ?? "state retained"}
+            <p className="mt-2 rounded-md border border-cyan-200 bg-white px-2 py-1.5 text-xs font-medium leading-5 text-slate-600">
+              Anchor {anchorNode?.label ?? projection.source_contract.anchor_node_id}: {anchorNode?.role ?? "projection anchor"}.
             </p>
-            {currentStage?.inferenceReason ? (
-              <p className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium leading-5 text-slate-600">
-                {currentStage.inferenceReason}
-              </p>
-            ) : null}
           </div>
 
           <div
@@ -770,12 +2162,17 @@ function TrajectoryAnalysisPanel() {
             <div className="text-[11px] font-semibold uppercase tracking-normal text-amber-800">
               Verdict
             </div>
-            <p className="mt-2 text-sm font-semibold leading-6 text-slate-950">{analysis.verdict}</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-950">
+              {projection.source_contract.next_projection_hint}
+            </p>
             <p className="mt-2 text-xs font-medium leading-5 text-amber-950">
-              The panel is derived from public rollout projections and keeps local prose, private docs, and raw trajectory logs out of the browser surface.
+              The renderer consumes only the projection bundle. Public GitHub metadata is enough for this batch; raw trajectories and local state stay outside the browser surface.
             </p>
           </div>
         </div>
+
+        <RolloutProjectionStageFlow projection={projection} />
+        <RolloutProjectionLaneGraph projection={projection} />
 
         <div
           className="rounded-md border border-slate-200 bg-white px-3 py-3 xl:col-span-2"
@@ -787,24 +2184,40 @@ function TrajectoryAnalysisPanel() {
                 Evidence drawer
               </div>
               <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
-                Source events and public evidence references explain every plotted stage.
+                Edges, model sections, and planned projections keep the rollout display explainable.
               </p>
             </div>
-            <Badge variant="neutral">{analysis.evidenceItems.length} refs</Badge>
+            <Badge variant="neutral">{projection.edges.length} edges</Badge>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {analysis.evidenceItems.map((item) => (
+            {projection.edges.map((edge) => {
+              const fromNode = nodeMap.get(edge.from_node_id);
+              const toNode = nodeMap.get(edge.to_node_id);
+              return (
               <div
                 className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
-                key={`${item.kind}-${item.ref}-${item.eventTitle}`}
+                key={edge.edge_id}
               >
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant={item.kind === "evidence_ref" ? "success" : "info"}>{item.kind}</Badge>
-                  <span className="truncate text-xs font-semibold text-slate-950">{item.eventTitle}</span>
+                  <Badge variant="info">{edge.edge_kind}</Badge>
+                  <Badge variant={trajectoryConfidenceTone(edge.confidence)}>{edge.confidence}</Badge>
+                  <span className="truncate text-xs font-semibold text-slate-950">{edge.label}</span>
                 </div>
-                <div className="mt-1 break-words font-mono text-[11px] leading-5 text-slate-600">{item.ref}</div>
+                <div className="mt-1 break-words font-mono text-[11px] leading-5 text-slate-600">
+                  {fromNode?.label ?? edge.from_node_id} -&gt; {toNode?.label ?? edge.to_node_id}
+                </div>
               </div>
-            ))}
+              );
+            })}
+            {plannedProjection ? (
+              <div className="min-w-0 rounded-md border border-dashed border-slate-300 bg-white px-3 py-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="neutral">{plannedProjection.status}</Badge>
+                  <span className="truncate text-xs font-semibold text-slate-950">{plannedProjection.projection_id}</span>
+                </div>
+                <div className="mt-1 text-xs font-medium leading-5 text-slate-600">{plannedProjection.reason}</div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

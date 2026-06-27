@@ -3,7 +3,7 @@
 
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -17,8 +17,13 @@ const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const privateTrapFixtureName = "status.frontstage.private-trap.json";
 const privateTrapFixturePath = resolve(dashboardDir, "public", privateTrapFixtureName);
 const privateTrapSourcePath = resolve(repoRoot, "examples/fixtures/frontstage-private-status-trap.public.json");
+const showcaseCatalogPath = resolve(repoRoot, "docs/showcases/showcase-catalog.json");
 const visualOutputDir = resolve(repoRoot, "output/playwright/dashboard-frontstage-visual-acceptance");
 const port = Number(process.env.LOOPX_DASHBOARD_FRONTSTAGE_SMOKE_PORT ?? "5197");
+const showcaseCatalog = JSON.parse(readFileSync(showcaseCatalogPath, "utf8"));
+const publicShowcaseCaseCount = showcaseCatalog.cases.filter((item) => item.frontend_card).length;
+const allShowcaseCasesText = `Showing ${publicShowcaseCaseCount} of ${publicShowcaseCaseCount} public-safe cases`;
+const selfIterationFilterText = `Showing 1 of ${publicShowcaseCaseCount} public-safe cases`;
 const fakePrivateTrapMarkers = [
   "GH_FAKE_PRIVATE_STATUS_ALPHA",
   "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA",
@@ -475,10 +480,42 @@ async function main() {
         "human gate: decision_frontstage_to_implementation_lane",
         "INFERRED DISPLAY BRIDGE",
         "Truth source: event ledger",
+        "ROLLOUT PROJECTION",
+        "Review mesh over a 30-PR public batch",
+        "PUBLIC SAMPLE",
+        "30 PRs",
+        "Projection model:",
+        "Overnight PR batch with reviewable control",
+        "A wall-clock rollout map, all at once",
+        "OVERNIGHT WALL-CLOCK TIMELINE",
+        "#746 -> #775 / 13:24-21:30 Asia/Shanghai",
+        "wall_clock",
+        "node.started_at positions each work unit",
+        "TIMELINE LINKS",
+        "LANE-FLOW LINKS",
+        "EXPLICIT REVIEW LINKS",
+        "REQUIREMENT ROLLOUT SPINE",
+        "One demand unlocks the next",
+        "Show frontstage trajectory as a reusable projection",
+        "Monitor tasks become due work instead of hidden polling",
+        "PROJECTION CAPABILITY MAP",
+        "Evidence becomes state, lanes, edges, and operator decisions",
+        "Source intake",
+        "State projection",
+        "Lane routing",
+        "Edge reasoning",
+        "Operator readout",
+        "FLOW SIGNALS",
+        "RELATIONSHIP GRAMMAR",
+        "ATTENTION HOTSPOTS",
+        "ACTOR / STATE STAGES",
+        "ROLLOUT LANE GRAPH",
+        "REVIEW EDGE MESH",
+        "Anchor #674",
         "ASYNCHRONOUS AGENT RHYTHM",
         "Agent teams work across turns and off-hours",
         "SEARCH PUBLIC SHOWCASES",
-        "Showing 3 of 3 public-safe cases",
+        allShowcaseCasesText,
         "Public Boundary",
         "Ops live only",
         "None in browser",
@@ -518,9 +555,157 @@ async function main() {
       if (!showcaseMotionBeamBox || showcaseMotionBeamBox.width < 20) {
         throw new Error("Showcase motion traffic beam did not render");
       }
+      const trajectoryParticles = await desktopPage
+        .locator('[data-testid="frontstage-rollout-node-particles"] span')
+        .count();
+      if (trajectoryParticles !== 30) {
+        throw new Error(`Rollout projection should render 30 public PR nodes; saw ${trajectoryParticles}`);
+      }
+      const timelinePointCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-timeline-point"]')
+        .count();
+      if (timelinePointCount !== 30) {
+        throw new Error(`Rollout timeline should render all 30 ordered work units; saw ${timelinePointCount}`);
+      }
+      const timelineTickCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-timeline-tick"]')
+        .count();
+      if (timelineTickCount < 8) {
+        throw new Error(`Rollout wall-clock timeline should render hour ticks; saw ${timelineTickCount}`);
+      }
+      const firstTimelinePointTime = await desktopPage
+        .locator('[data-testid="frontstage-rollout-timeline-point"]')
+        .first()
+        .getAttribute("data-node-time");
+      if (!firstTimelinePointTime?.includes("13:24")) {
+        throw new Error(`Rollout first timeline point should expose a concrete start time; saw ${firstTimelinePointTime}`);
+      }
+      const meshTimeTickCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-time-tick"]')
+        .count();
+      if (meshTimeTickCount < 8) {
+        throw new Error(`Rollout mesh should render wall-clock grid ticks; saw ${meshTimeTickCount}`);
+      }
+      const timelineMilestoneText = await desktopPage
+        .locator('[data-testid="frontstage-rollout-time-milestones"]')
+        .innerText();
+      if (
+        !timelineMilestoneText.includes("13:24") ||
+        !timelineMilestoneText.includes("tail done") ||
+        !timelineMilestoneText.includes("21:30")
+      ) {
+        throw new Error(`Rollout wall-clock milestones did not expose concrete time anchors: ${timelineMilestoneText}`);
+      }
+      const prMeshNodeCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-node"]')
+        .count();
+      if (prMeshNodeCount !== 30) {
+        throw new Error(`Rollout relationship mesh should render all 30 PR nodes; saw ${prMeshNodeCount}`);
+      }
+      const prMeshNodeTooltipCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-node-tooltip"]')
+        .count();
+      if (prMeshNodeTooltipCount !== 30) {
+        throw new Error(`Rollout relationship mesh should render hover content for all 30 nodes; saw ${prMeshNodeTooltipCount}`);
+      }
+      const firstMeshNodeTime = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-node"]')
+        .first()
+        .getAttribute("data-node-time");
+      if (!firstMeshNodeTime?.includes("13:24")) {
+        throw new Error(`Rollout mesh nodes should expose concrete time attributes; saw ${firstMeshNodeTime}`);
+      }
+      const prMeshEdgeCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-edge"]')
+        .count();
+      if (prMeshEdgeCount < 40) {
+        throw new Error(`Rollout relationship mesh should render a dense link graph; saw ${prMeshEdgeCount}`);
+      }
+      const firstMeshEdge = desktopPage.locator('[data-testid="frontstage-rollout-mesh-edge"]').first();
+      const firstMeshEdgeKind = await firstMeshEdge.getAttribute("data-edge-kind");
+      const firstMeshEdgeLabel = await firstMeshEdge.getAttribute("data-edge-label");
+      const firstMeshEdgeTitle = await firstMeshEdge.getAttribute("data-edge-title");
+      if (!firstMeshEdgeKind || !firstMeshEdgeLabel || !firstMeshEdgeTitle?.includes("->")) {
+        throw new Error("Rollout mesh edge did not expose hover/data relationship properties");
+      }
+      const prMeshEdgeHotspotCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-edge-hotspot"]')
+        .count();
+      if (prMeshEdgeHotspotCount !== prMeshEdgeCount) {
+        throw new Error(`Rollout mesh should expose one hover hotspot per edge; saw ${prMeshEdgeHotspotCount}`);
+      }
+      await desktopPage.locator('[data-testid="frontstage-rollout-mesh-edge-hotspot"]').first().hover({ force: true });
+      await desktopPage.waitForFunction(
+        ({ kind, label }) => {
+          const card = document.querySelector('[data-testid="frontstage-rollout-mesh-edge-hover-card"]');
+          return Boolean(card?.textContent?.includes(kind) && card.textContent.includes(label));
+        },
+        { kind: firstMeshEdgeKind, label: firstMeshEdgeLabel },
+      );
+      const edgeHoverText = await desktopPage.locator('[data-testid="frontstage-rollout-mesh-edge-hover-card"]').innerText();
+      if (!edgeHoverText.toLowerCase().includes(firstMeshEdgeKind) || !edgeHoverText.includes(firstMeshEdgeLabel)) {
+        throw new Error("Rollout mesh edge hover card did not show relationship details");
+      }
+      if (!/\d{2}:\d{2}/.test(edgeHoverText) || !edgeHoverText.includes("from:") || !edgeHoverText.includes("to:")) {
+        throw new Error(`Rollout mesh edge hover card did not show from/to time details: ${edgeHoverText}`);
+      }
+      const prMeshLaneCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mesh-lane"]')
+        .count();
+      if (prMeshLaneCount < 5) {
+        throw new Error(`Rollout relationship mesh should render five lane labels; saw ${prMeshLaneCount}`);
+      }
+      const rolloutSequenceChipCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-sequence-chip"]')
+        .count();
+      if (rolloutSequenceChipCount < 7) {
+        throw new Error(`Rollout sequence ribbon should render at least seven chips; saw ${rolloutSequenceChipCount}`);
+      }
+      const rolloutRequirementCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-requirement-unit"]')
+        .count();
+      if (rolloutRequirementCount < 7) {
+        throw new Error(`Rollout sequence should render at least seven requirement units; saw ${rolloutRequirementCount}`);
+      }
+      const rolloutRequirementStepCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-requirement-step"]')
+        .count();
+      if (rolloutRequirementStepCount < rolloutRequirementCount * 3) {
+        throw new Error(
+          `Rollout sequence should render several stage steps per requirement; saw ${rolloutRequirementStepCount}`,
+        );
+      }
+      const mappingLayerCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-mapping-layer"]')
+        .count();
+      if (mappingLayerCount < 5) {
+        throw new Error(`Rollout capability map should render five mapping layers; saw ${mappingLayerCount}`);
+      }
+      const flowSignalText = await desktopPage.locator('[data-testid="frontstage-rollout-flow-signals"]').innerText();
+      if (!flowSignalText.includes("Throughput") || !flowSignalText.includes("Review resolution")) {
+        throw new Error("Rollout capability map did not surface the expected flow signals");
+      }
+      const singleAgentStateCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-stage"]')
+        .count();
+      if (singleAgentStateCount < 6) {
+        throw new Error(`Rollout stage flow should render at least six stages; saw ${singleAgentStateCount}`);
+      }
+      const multiAgentLaneCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-lane"]')
+        .count();
+      if (multiAgentLaneCount < 5) {
+        throw new Error(`Rollout lane graph should render at least five lanes; saw ${multiAgentLaneCount}`);
+      }
+      const reviewEdgeCount = await desktopPage
+        .locator('[data-testid="frontstage-rollout-edge"]')
+        .count();
+      if (reviewEdgeCount < 10) {
+        throw new Error(`Rollout review mesh should render ten review edges; saw ${reviewEdgeCount}`);
+      }
       const spotlight = desktopPage.locator('[data-testid="frontstage-showcase-spotlight"]');
       const initialSpotlightText = await spotlight.innerText();
-      if (!initialSpotlightText.includes("Blocked P0 with safe P1/P2 rotation")) {
+      if (!initialSpotlightText.includes("Overnight PR batch with reviewable control")) {
         throw new Error("Showcase spotlight did not default to the first public case");
       }
       await desktopPage
@@ -543,7 +728,7 @@ async function main() {
         throw new Error(`Showcase spotlight case link points outside public showcases: ${spotlightCaseHref}`);
       }
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("self-iteration");
-      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 1 of 3 public-safe cases"));
+      await desktopPage.waitForFunction((text) => document.body.innerText.includes(text), selfIterationFilterText);
       const filteredCaseText = await desktopPage.locator('[data-testid="frontstage-showcase-cases"]').innerText();
       if (!filteredCaseText.includes("LoopX self-iteration loop")) {
         throw new Error("Showcase search did not keep the self-iteration case visible");
@@ -554,7 +739,7 @@ async function main() {
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("no-matching-showcase");
       await desktopPage.waitForFunction(() => document.body.innerText.includes("No public showcase matched the current filters."));
       await desktopPage.locator('[data-testid="frontstage-showcase-search"]').fill("");
-      await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 3 of 3 public-safe cases"));
+      await desktopPage.waitForFunction((text) => document.body.innerText.includes(text), allShowcaseCasesText);
       await captureFrontstage(
         desktopPage,
         `${baseUrl}/frontstage?statusUrl=/${fixtureName}&goalId=live-goal-a`,
