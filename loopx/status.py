@@ -53,6 +53,20 @@ from .paths import global_registry_path, resolve_runtime_root
 from .promotion_gate import build_promotion_gate
 from .quota import quota_status, quota_with_handoff_outcome_floor
 from .registry import registry_goals
+from .renderers.status_markdown import (
+    append_attention_queue_item_header_markdown as _append_attention_queue_item_header_markdown,
+    append_attention_queue_summary_markdown as _append_attention_queue_summary_markdown,
+    append_decision_freshness_summary_markdown as _append_decision_freshness_summary_markdown,
+    append_event_ledger_summary_markdown as _append_event_ledger_summary_markdown,
+    append_human_reward_markdown as _append_human_reward_markdown,
+    append_operator_gate_resume_contract_markdown as _append_operator_gate_resume_contract_markdown,
+    append_promotion_gate_markdown as _append_promotion_gate_markdown,
+    append_promotion_readiness_summary_markdown as _append_promotion_readiness_summary_markdown,
+    append_usage_summary_markdown as _append_usage_summary_markdown,
+    authority_registry_markdown_summary as _authority_registry_markdown_summary,
+    goals_by_id as _goals_by_id,
+    markdown_scalar as _markdown_scalar,
+)
 from .rollout_event_log import load_rollout_events, rollout_event_log_path
 from .session_runtime import SESSION_RUNTIME_READONLY_PROJECTION_SCHEMA_VERSION
 from .state_projection import (
@@ -8907,101 +8921,6 @@ def compact_controller_readiness(readiness: Any) -> dict[str, Any] | None:
     return compact or None
 
 
-def _markdown_scalar(value: Any) -> str:
-    return str(value).replace("\n", " ").replace("|", "\\|").strip()
-
-
-def _goals_by_id(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    run_history = payload.get("run_history") if isinstance(payload.get("run_history"), dict) else {}
-    goals = run_history.get("goals") if isinstance(run_history.get("goals"), list) else []
-    result: dict[str, dict[str, Any]] = {}
-    for goal in goals:
-        if not isinstance(goal, dict):
-            continue
-        goal_id = str(goal.get("id") or "")
-        if goal_id:
-            result[goal_id] = goal
-    return result
-
-
-def _authority_registry_markdown_summary(goal: dict[str, Any] | None) -> str | None:
-    registry = goal.get("authority_registry") if isinstance(goal, dict) else None
-    if not isinstance(registry, dict) or not registry.get("declared"):
-        return None
-    materials = int(registry.get("project_material_count") or 0)
-    topics = int(registry.get("topic_authority_count") or 0)
-    if materials <= 0 and topics <= 0:
-        return None
-    return (
-        f"entries={int(registry.get('default_entries_present') or 0)}/"
-        f"{int(registry.get('default_entry_count') or 0)} "
-        f"topics={topics} "
-        f"materials={materials} "
-        f"repositories={int(registry.get('project_material_repository_count') or 0)} "
-        f"owner_review_required={int(registry.get('project_material_owner_review_required_count') or 0)} "
-        f"stale={int(registry.get('project_material_stale_count') or 0)} "
-        f"current_authority={int(registry.get('project_material_current_authority_count') or 0)} "
-        f"risk={_markdown_scalar(registry.get('conflict_risk') or 'unknown')}"
-    )
-
-
-def _append_human_reward_markdown(lines: list[str], goal_id: Any, reward: dict[str, Any]) -> None:
-    headline_parts = []
-    for field in ("recorded_at", "decision", "reward"):
-        value = reward.get(field)
-        if value:
-            headline_parts.append(f"{field}={_markdown_scalar(value)}")
-    if not headline_parts:
-        headline_parts.append("recorded=True")
-    lines.append(f"    - human_reward: {' '.join(headline_parts)}")
-    reason = reward.get("reason_summary")
-    if reason:
-        lines.append(f"      - reason_summary: {_markdown_scalar(reason)}")
-    follow_up = reward.get("follow_up")
-    if follow_up:
-        lines.append(f"      - follow_up: {_markdown_scalar(follow_up)}")
-    lesson = reward.get("lesson") if isinstance(reward.get("lesson"), dict) else {}
-    if lesson:
-        lines.append(
-            "      - lesson: "
-            f"kind={_markdown_scalar(lesson.get('kind') or '')} "
-            f"summary={_markdown_scalar(lesson.get('summary') or '')}"
-        )
-        for field in ("avoid", "prefer"):
-            values = lesson.get(field) if isinstance(lesson.get(field), list) else []
-            if values:
-                lines.append(
-                    f"        - lesson_{field}: "
-                    + ", ".join(_markdown_scalar(value) for value in values[:5])
-                )
-    if goal_id:
-        lines.append(
-            "      - project_agent_visibility: "
-            f"`loopx history --goal-id {_markdown_scalar(goal_id)} --limit 3`"
-        )
-
-
-def _append_operator_gate_resume_contract_markdown(lines: list[str], contract: dict[str, Any]) -> None:
-    headline_parts = []
-    for field in ("version", "gate_id", "operator_decision"):
-        value = contract.get(field)
-        if value:
-            headline_parts.append(f"{field}={_markdown_scalar(value)}")
-    if not headline_parts:
-        headline_parts.append("recorded=True")
-    lines.append(f"    - operator_gate_resume_contract: {' '.join(headline_parts)}")
-    for field in (
-        "latest_state_ref",
-        "freshness_check",
-        "precondition_check",
-        "migration_or_rebase_result",
-        "validation_after_resume",
-    ):
-        value = contract.get(field)
-        if value:
-            lines.append(f"      - {field}: {_markdown_scalar(value)}")
-
-
 def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     compact = {field: run[field] for field in RUN_COMPACT_FIELDS if field in run}
     flags = run_lifecycle_flags(run)
@@ -9840,13 +9759,6 @@ def collect_status(
     }
 
 
-def _event_class_count_text(counts: dict[str, Any]) -> str:
-    return " ".join(
-        f"{event_class}={counts.get(event_class, 0)}"
-        for event_class in EVENT_LEDGER_CLASSES
-    )
-
-
 def render_status_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# LoopX Status",
@@ -9904,290 +9816,51 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
         if isinstance(payload.get("event_ledger_summary"), dict)
         else {}
     )
-    event_totals = (
-        event_ledger.get("totals")
-        if isinstance(event_ledger.get("totals"), dict)
-        else {}
+    _append_event_ledger_summary_markdown(
+        lines,
+        event_ledger,
+        event_classes=EVENT_LEDGER_CLASSES,
     )
-    if event_ledger.get("available") and event_totals:
-        by_class_24h = (
-            event_totals.get("by_class_24h")
-            if isinstance(event_totals.get("by_class_24h"), dict)
-            else {}
-        )
-        by_class_7d = (
-            event_totals.get("by_class_7d")
-            if isinstance(event_totals.get("by_class_7d"), dict)
-            else {}
-        )
-        lines.extend(
-            [
-                "",
-                "## Event Ledger Summary",
-                "- summary: "
-                f"source={_markdown_scalar(event_ledger.get('source') or '')} "
-                f"samples={event_ledger.get('sample_run_count')} "
-                f"events_24h={event_totals.get('events_24h')} "
-                f"events_7d={event_totals.get('events_7d')} "
-                f"benchmark_runs_24h={event_totals.get('benchmark_runs_24h', 0)} "
-                f"benchmark_runs_7d={event_totals.get('benchmark_runs_7d', 0)} "
-                f"classes_24h={_event_class_count_text(by_class_24h)} "
-                f"classes_7d={_event_class_count_text(by_class_7d)}",
-            ]
-        )
-        event_goals = (
-            event_ledger.get("goals")
-            if isinstance(event_ledger.get("goals"), list)
-            else []
-        )
-        for goal in event_goals[:3]:
-            if not isinstance(goal, dict):
-                continue
-            goal_by_class_24h = (
-                goal.get("by_class_24h")
-                if isinstance(goal.get("by_class_24h"), dict)
-                else {}
-            )
-            lines.append(
-                "- "
-                f"`{_markdown_scalar(goal.get('goal_id') or '')}`: "
-                f"events_24h={goal.get('events_24h')} "
-                f"events_7d={goal.get('events_7d')} "
-                f"benchmark_runs_24h={goal.get('benchmark_runs_24h', 0)} "
-                f"benchmark_runs_7d={goal.get('benchmark_runs_7d', 0)} "
-                f"latest={_markdown_scalar(goal.get('latest_event_class') or '')} "
-                f"classes_24h={_event_class_count_text(goal_by_class_24h)}"
-            )
 
     promotion_readiness = (
         payload.get("promotion_readiness_summary")
         if isinstance(payload.get("promotion_readiness_summary"), dict)
         else {}
     )
-    if promotion_readiness:
-        lines.extend(
-            [
-                "",
-                "## Promotion Readiness Summary",
-                "- summary: "
-                f"source={_markdown_scalar(promotion_readiness.get('source') or '')} "
-                f"available={promotion_readiness.get('available')} "
-                f"samples={promotion_readiness.get('sample_run_count')} "
-                f"freshness={_markdown_scalar(promotion_readiness.get('freshness_status') or '')} "
-                f"age_hours={promotion_readiness.get('age_hours')} "
-                f"requires_readiness_run={promotion_readiness.get('requires_readiness_run')} "
-                f"window_hours={promotion_readiness.get('freshness_window_hours')}",
-                "- latest: "
-                f"goal={_markdown_scalar(promotion_readiness.get('goal_id') or '')} "
-                f"generated_at={_markdown_scalar(promotion_readiness.get('generated_at') or '')} "
-                f"classification={_markdown_scalar(promotion_readiness.get('classification') or '')} "
-                f"outcome={_markdown_scalar(promotion_readiness.get('delivery_outcome') or '')} "
-                f"artifacts={promotion_readiness.get('json_exists')}/{promotion_readiness.get('markdown_exists')}",
-            ]
-        )
+    _append_promotion_readiness_summary_markdown(lines, promotion_readiness)
 
     promotion_gate = (
         payload.get("promotion_gate")
         if isinstance(payload.get("promotion_gate"), dict)
         else {}
     )
-    promotion_gate_readiness = (
-        promotion_gate.get("readiness")
-        if isinstance(promotion_gate.get("readiness"), dict)
-        else {}
-    )
-    if promotion_gate:
-        lines.extend(
-            [
-                "",
-                "## Promotion Gate",
-                "- gate: "
-                f"state={_markdown_scalar(promotion_gate.get('gate_state') or '')} "
-                f"can_promote={promotion_gate.get('can_promote')} "
-                f"should_warn={promotion_gate.get('should_warn')} "
-                f"non_blocking={promotion_gate.get('non_blocking')} "
-                f"freshness={_markdown_scalar(promotion_gate_readiness.get('freshness_status') or '')} "
-                f"requires_readiness_run={promotion_gate_readiness.get('requires_readiness_run')}",
-                "- latest: "
-                f"generated_at={_markdown_scalar(promotion_gate_readiness.get('generated_at') or '')} "
-                f"age_hours={promotion_gate_readiness.get('age_hours')} "
-                f"action={_markdown_scalar(promotion_gate.get('recommended_action') or '')}",
-            ]
-        )
-        if promotion_gate.get("warning_message"):
-            lines.append(
-                "- warning: "
-                f"{_markdown_scalar(promotion_gate.get('warning_message') or '')}"
-            )
+    _append_promotion_gate_markdown(lines, promotion_gate)
 
     decision_freshness = (
         payload.get("decision_freshness_summary")
         if isinstance(payload.get("decision_freshness_summary"), dict)
         else {}
     )
-    decision_summary = (
-        decision_freshness.get("summary")
-        if isinstance(decision_freshness.get("summary"), dict)
-        else {}
-    )
-    if decision_freshness.get("available") and decision_summary:
-        lines.extend(
-            [
-                "",
-                "## Decision Freshness Summary",
-                "- summary: "
-                f"source={_markdown_scalar(decision_freshness.get('source') or '')} "
-                f"samples={decision_freshness.get('sample_run_count')} "
-                f"window_days={decision_freshness.get('window_days')} "
-                f"decisions={decision_summary.get('decision_count')} "
-                f"stale={decision_summary.get('stale_count')} "
-                f"rebase_required={decision_summary.get('rebase_required_count')} "
-                f"fresh={decision_summary.get('fresh_count')}",
-            ]
-        )
-        decision_items = (
-            decision_freshness.get("items")
-            if isinstance(decision_freshness.get("items"), list)
-            else []
-        )
-        for item in decision_items[:3]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(
-                "- "
-                f"`{_markdown_scalar(item.get('goal_id') or '')}`: "
-                f"kind={_markdown_scalar(item.get('decision_kind') or '')} "
-                f"state={_markdown_scalar(item.get('freshness_state') or '')} "
-                f"age_days={item.get('age_days')} "
-                f"newer_7d={item.get('newer_event_count_7d')} "
-                f"decision_at={_markdown_scalar(item.get('decision_at') or '')}"
-            )
+    _append_decision_freshness_summary_markdown(lines, decision_freshness)
 
     usage = payload.get("usage_summary") if isinstance(payload.get("usage_summary"), dict) else {}
-    usage_totals = usage.get("totals") if isinstance(usage.get("totals"), dict) else {}
-    if usage.get("available") and usage_totals:
-        lines.extend(
-            [
-                "",
-                "## Usage Summary",
-                "- summary: "
-                f"source={_markdown_scalar(usage.get('source') or '')} "
-                f"samples={usage.get('sample_run_count')} "
-                f"runs_24h={usage_totals.get('runs_24h')} "
-                f"runs_7d={usage_totals.get('runs_7d')} "
-                f"quota_slots_24h={usage_totals.get('quota_spend_slots_24h')} "
-                f"quota_slots_7d={usage_totals.get('quota_spend_slots_7d')} "
-                f"automation_24h={usage_totals.get('automation_run_count_24h')} "
-                f"automation_7d={usage_totals.get('automation_run_count_7d')} "
-                f"progress_signals_24h={usage_totals.get('progress_signal_run_count_24h')} "
-                f"progress_signals_7d={usage_totals.get('progress_signal_run_count_7d')}",
-            ]
-        )
-        usage_goals = usage.get("goals") if isinstance(usage.get("goals"), list) else []
-        for goal in usage_goals[:3]:
-            if not isinstance(goal, dict):
-                continue
-            lines.append(
-                "- "
-                f"`{_markdown_scalar(goal.get('goal_id') or '')}`: "
-                f"runs_24h={goal.get('runs_24h')} "
-                f"runs_7d={goal.get('runs_7d')} "
-                f"quota_slots_24h={goal.get('quota_spend_slots_24h')} "
-                f"automation_24h={goal.get('automation_run_count_24h')} "
-                f"progress_signals_24h={goal.get('progress_signal_run_count_24h')} "
-                f"share_24h={goal.get('project_share_24h')}"
-            )
+    _append_usage_summary_markdown(lines, usage)
 
     queue = payload.get("attention_queue") if isinstance(payload.get("attention_queue"), dict) else {}
-    lines.extend(
-        [
-            "",
-            "## Attention Queue",
-            "- summary: "
-            f"items={queue.get('item_count')}, "
-            f"needs_user_or_controller={queue.get('needs_user_or_controller')}, "
-            f"needs_controller={queue.get('needs_controller')}, "
-            f"needs_codex={queue.get('needs_codex')}, "
-            f"watching_external_evidence={queue.get('watching_external_evidence')}, "
-            f"watching_monitor={queue.get('watching_monitor')}",
-        ]
-    )
+    _append_attention_queue_summary_markdown(lines, queue)
     items = queue.get("items") if isinstance(queue.get("items"), list) else []
     goals = _goals_by_id(payload)
-    backlog = (
-        queue.get("autonomous_backlog_candidates")
-        if isinstance(queue.get("autonomous_backlog_candidates"), dict)
-        else {}
-    )
-    if backlog:
-        lines.append(
-            "- autonomous_backlog_candidates: "
-            f"open={backlog.get('open_count')} "
-            f"task_class={_markdown_scalar(backlog.get('task_class') or '')} "
-            f"source={_markdown_scalar(backlog.get('source') or '')}"
-        )
-        for candidate in backlog.get("items") or []:
-            if not isinstance(candidate, dict):
-                continue
-            priority_text = ""
-            if candidate.get("priority"):
-                priority_text = f" priority={_markdown_scalar(candidate.get('priority') or '')}"
-            lines.append(
-                "  - autonomous_candidate: "
-                f"goal={_markdown_scalar(candidate.get('goal_id') or '')}"
-                f"{priority_text} "
-                f"text={_markdown_scalar(candidate.get('text') or '')}"
-            )
-    monitor_candidates = (
-        queue.get("autonomous_monitor_candidates")
-        if isinstance(queue.get("autonomous_monitor_candidates"), dict)
-        else {}
-    )
-    if monitor_candidates:
-        lines.append(
-            "- autonomous_monitor_candidates: "
-            f"open={monitor_candidates.get('open_count')} "
-            f"task_class={_markdown_scalar(monitor_candidates.get('task_class') or '')} "
-            f"source={_markdown_scalar(monitor_candidates.get('source') or '')}"
-        )
-        for candidate in monitor_candidates.get("items") or []:
-            if not isinstance(candidate, dict):
-                continue
-            priority_text = ""
-            if candidate.get("priority"):
-                priority_text = f" priority={_markdown_scalar(candidate.get('priority') or '')}"
-            lines.append(
-                "  - autonomous_monitor_candidate: "
-                f"goal={_markdown_scalar(candidate.get('goal_id') or '')}"
-                f"{priority_text} "
-                f"text={_markdown_scalar(candidate.get('text') or '')}"
-            )
     if not items:
         lines.append("- none")
     for item in items:
         if not isinstance(item, dict):
             continue
-        action = str(item.get("recommended_action") or "").replace("|", "\\|")
-        lines.append(
-            "- "
-            f"`{item.get('goal_id')}`: "
-            f"status={item.get('status')} "
-            f"phase={item.get('lifecycle_phase')} "
-            f"waiting_on={item.get('waiting_on')} "
-            f"severity={item.get('severity')} "
-            f"source={item.get('source')}"
-        )
-        if action:
-            lines.append(f"  - action: {action}")
-        active_state_action = _markdown_scalar(item.get("active_state_next_action") or "")
-        if active_state_action:
-            lines.append(f"  - active_state_next_action: {active_state_action}")
-        latest_run_action = _markdown_scalar(item.get("latest_run_recommended_action") or "")
-        if latest_run_action:
-            lines.append(f"  - latest_run_recommended_action: {latest_run_action}")
         authority_summary = _authority_registry_markdown_summary(goals.get(str(item.get("goal_id") or "")))
-        if authority_summary:
-            lines.append(f"  - authority_material: {authority_summary}")
+        _append_attention_queue_item_header_markdown(
+            lines,
+            item,
+            authority_summary=authority_summary,
+        )
         project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
         agent_lane_next_action = (
             project_asset.get("agent_lane_next_action")
