@@ -22,26 +22,37 @@ Mixing the two would create avoidable friction:
 
 ## Recommended Shape
 
-Use a dedicated release-note job that opens a PR. It can live as a GitHub
-Actions workflow, an external scheduled worker, or a thin `loopx update-notes`
-CLI subcommand once the generator is stable.
+Use a dedicated release-note job that opens a draft PR. The repository ships
+the first version as `.github/workflows/update-notes.yml`, backed by
+`scripts/update_notes_release_job.py`. A future `loopx update-notes` CLI
+subcommand can wrap the same contract once the generator is stable.
+
+The GitHub Action does not have an LLM. It should therefore generate a factual
+source draft from public git history, not pretend to write final narrative. A
+maintainer or LoopX agent should refine the draft PR before marking it ready.
 
 The job should:
 
-1. Determine the next window from `docs/update-notes/README.md`.
-2. Collect public git history and merged PR titles for that window.
+1. Determine the next window from existing note filenames in
+   `docs/update-notes/`.
+2. Collect public git history for that window.
 3. Group changes into stable product themes rather than dumping commit logs.
 4. Write a new note under `docs/update-notes/`.
 5. Update the archive table and latest-note pointer.
 6. Keep the root README as a compact pointer, not a long changelog.
 7. Run the update-note smoke and `loopx check` over the touched public docs.
-8. Open a reviewable PR instead of pushing directly to `main`.
+8. Open a reviewable draft PR instead of pushing directly to `main`.
 
 ## Trigger Policy
 
-The cadence is anchored to the initial public scaffold on 2026-05-31. The job
-should run every two weeks after a window closes, with `workflow_dispatch` for
-manual repair or backfill.
+The cadence is anchored to the initial public scaffold on 2026-05-31. GitHub
+Actions cron cannot express a reviewable "every two weeks after this anchored
+window closes" rule cleanly, so the workflow runs weekly and lets the generator
+be the biweekly gate. If the next window is not due, the script exits without
+changes and no PR is opened.
+
+Manual `workflow_dispatch` supports repair and backfill through optional
+`since`, `until`, and `force` inputs.
 
 The recommended first scheduled publication after this archive is for
 2026-06-28 to 2026-07-11, opened for review on or after 2026-07-12.
@@ -55,12 +66,20 @@ The recommended first scheduled publication after this archive is for
 - Keep generated notes short enough to review manually.
 - Fail closed if the generator cannot determine the prior window.
 - Prefer opening a draft PR when classification confidence is low.
+- Do not require an LLM secret for the default job.
 - Treat update notes as a summary surface. They do not replace git history,
   review packets, or LoopX state.
 
 ## Future CLI Contract
 
-A future CLI surface could look like:
+The current project-level command is:
+
+```bash
+python3 scripts/update_notes_release_job.py --dry-run
+python3 scripts/update_notes_release_job.py --since 2026-06-28 --until 2026-07-11 --force
+```
+
+A future CLI surface could wrap the same generator:
 
 ```bash
 loopx update-notes plan --since 2026-06-28 --until 2026-07-11
@@ -68,6 +87,8 @@ loopx update-notes write --since 2026-06-28 --until 2026-07-11 --dry-run
 loopx update-notes write --since 2026-06-28 --until 2026-07-11 --open-pr
 ```
 
-The first implementation should stay dry-run first. Publishing remains a
-reviewed PR until the public/private boundary and grouping quality are proven
-stable.
+Publishing remains a reviewed PR until the public/private boundary and grouping
+quality are proven stable. If the project later wants fully written prose from
+CI, add an explicit optional LLM step with a repository secret and fail closed
+when that secret is absent; keep the deterministic source-draft mode as the
+default.
