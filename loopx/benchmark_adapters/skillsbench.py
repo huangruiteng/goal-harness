@@ -2254,6 +2254,9 @@ def _skillsbench_controller_trace_counters(
         "remote_command_file_bridge_agent_task_facing_operation_count": count(
             "remote_command_file_bridge_agent_task_facing_operation_count"
         ),
+        "remote_command_file_bridge_agent_probe_operation_count": count(
+            "remote_command_file_bridge_agent_probe_operation_count"
+        ),
         "remote_command_file_bridge_driver_lifecycle_trace_count": count(
             "remote_command_file_bridge_driver_lifecycle_trace_count"
         ),
@@ -2336,6 +2339,34 @@ def _skillsbench_controller_trace_counters(
         ),
         "benchflow_user_loop_recovery_delta_tool_calls": count(
             "benchflow_user_loop_recovery_delta_tool_calls"
+        ),
+        "benchflow_user_loop_soft_verify_exception_continued": controller_trace.get(
+            "benchflow_user_loop_soft_verify_exception_continued"
+        )
+        is True,
+        "benchflow_user_loop_soft_verify_exception_raw_error_recorded": controller_trace.get(
+            "benchflow_user_loop_soft_verify_exception_raw_error_recorded"
+        )
+        is True,
+        "benchflow_user_loop_soft_verify_exception_stage": str(
+            controller_trace.get("benchflow_user_loop_soft_verify_exception_stage")
+            or ""
+        )[:120],
+        "benchflow_user_loop_soft_verify_exception_type": str(
+            controller_trace.get("benchflow_user_loop_soft_verify_exception_type")
+            or ""
+        )[:120],
+        "benchflow_user_loop_soft_verify_exception_count": count(
+            "benchflow_user_loop_soft_verify_exception_count"
+        ),
+        "benchflow_user_loop_soft_verify_exception_round": count(
+            "benchflow_user_loop_soft_verify_exception_round"
+        ),
+        "benchflow_user_loop_soft_verify_exception_delta_events": count(
+            "benchflow_user_loop_soft_verify_exception_delta_events"
+        ),
+        "benchflow_user_loop_soft_verify_exception_delta_tool_calls": count(
+            "benchflow_user_loop_soft_verify_exception_delta_tool_calls"
         ),
         "benchflow_intermediate_soft_verify_final_only": controller_trace.get(
             "benchflow_intermediate_soft_verify_final_only"
@@ -3855,6 +3886,38 @@ def build_skillsbench_benchflow_result_benchmark_run(
                 "benchflow_user_loop_recovery_delta_tool_calls",
                 0,
             ),
+            "benchflow_user_loop_soft_verify_exception_continued": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_continued",
+                False,
+            ),
+            "benchflow_user_loop_soft_verify_exception_raw_error_recorded": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_raw_error_recorded",
+                False,
+            ),
+            "benchflow_user_loop_soft_verify_exception_stage": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_stage",
+                "",
+            ),
+            "benchflow_user_loop_soft_verify_exception_type": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_type",
+                "",
+            ),
+            "benchflow_user_loop_soft_verify_exception_count": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_count",
+                0,
+            ),
+            "benchflow_user_loop_soft_verify_exception_round": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_round",
+                0,
+            ),
+            "benchflow_user_loop_soft_verify_exception_delta_events": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_delta_events",
+                0,
+            ),
+            "benchflow_user_loop_soft_verify_exception_delta_tool_calls": controller_counters.get(
+                "benchflow_user_loop_soft_verify_exception_delta_tool_calls",
+                0,
+            ),
             "benchflow_intermediate_soft_verify_policy": controller_counters.get(
                 "benchflow_intermediate_soft_verify_policy",
                 "",
@@ -4188,6 +4251,11 @@ def build_skillsbench_benchflow_result_benchmark_run(
             "remote_command_file_bridge_agent_task_facing_operation_count": (
                 controller_counters.get(
                     "remote_command_file_bridge_agent_task_facing_operation_count", 0
+                )
+            ),
+            "remote_command_file_bridge_agent_probe_operation_count": (
+                controller_counters.get(
+                    "remote_command_file_bridge_agent_probe_operation_count", 0
                 )
             ),
             "remote_command_file_bridge_driver_lifecycle_trace_count": (

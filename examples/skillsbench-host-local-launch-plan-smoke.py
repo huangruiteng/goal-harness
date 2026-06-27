@@ -24,6 +24,9 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     SKILLSBENCH_LOCAL_ACP_RELAY_READY_MARKER,
     run_skillsbench_local_acp_relay_probe,
 )
+from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
+    build_skillsbench_remote_command_file_bridge_probe_request,
+)
 from scripts.skillsbench_automation_loop import (  # noqa: E402
     HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC,
     _apply_agent_message_only_no_tool_calls_attribution,
@@ -59,7 +62,7 @@ def main() -> int:
     assert "getattr(\n        benchflow_rollout_module, \"connect_acp\", _MISSING" in source
     assert "if original_rollout_connect_acp is not _MISSING:" in source
     assert "from benchflow.agents.protocol import ACPSessionAdapter" in source
-    assert ") -> tuple[Any, Any, Any, str]:" in source
+    assert ") -> tuple[Any, ...]:" in source
     assert "session_adapter = ACPSessionAdapter(client)" in source
     assert "return client, session, session_adapter, agent_name" in source
     assert "_filter_kwargs_for_signature(RolloutConfig, rollout_config_kwargs)" in source
@@ -79,6 +82,58 @@ def main() -> int:
     assert "pwd && ls -la" in first_action_block
     assert "/tmp/private-bridge" in first_action_block
     assert "<private bridge command>" not in first_action_block
+    with tempfile.TemporaryDirectory(prefix="skillsbench-agent-probe-count-") as tmp:
+        tmp_path = Path(tmp)
+        fake_bridge = tmp_path / "fake-bridge"
+        fake_bridge.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+json.loads(sys.stdin.read() or "{}")
+print(json.dumps({"ok": True, "stdout": "", "stderr": "", "exit_code": 0}))
+""",
+            encoding="utf-8",
+        )
+        fake_bridge.chmod(0o755)
+        trace_dir = tmp_path / "traces"
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(
+                remote_command_file_bridge_command=str(fake_bridge),
+                worker_public_trace_dir=str(trace_dir),
+            )
+        )
+        summary_path = tmp_path / "summary.jsonl"
+        wrapper_path = relay._write_instrumented_bridge_wrapper(
+            tmp_path=tmp_path,
+            summary_path=summary_path,
+            bridge_command=str(fake_bridge),
+        )
+        proc = subprocess.run(
+            [str(wrapper_path)],
+            input=json.dumps(build_skillsbench_remote_command_file_bridge_probe_request()),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+        assert proc.returncode == 0, proc
+        relay._publish_remote_bridge_agent_operations_trace(
+            bridge_summary_path=summary_path
+        )
+        traces = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in trace_dir.glob("*.compact.json")
+        ]
+        agent_ops = [
+            trace["remote_command_file_bridge_agent_operations"]
+            for trace in traces
+            if trace.get("trace_kind") == "remote_command_file_bridge_agent_operations"
+        ]
+        assert len(agent_ops) == 1, traces
+        assert agent_ops[0]["probe_operation_count"] == 1, agent_ops
+        assert agent_ops[0]["task_facing_operation_count"] == 0, agent_ops
     target_env = _host_local_acp_target_env(
         {
             "AI_ADDR": "127.0.0.1",
@@ -1765,6 +1820,7 @@ output.write_text({SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER!r}, encod
                 build_stall_timeout_sec=0,
                 dataset="skillsbench-v1.1",
                 model=None,
+                run_group_id=None,
                 route="loopx-product-mode",
                 task_id="demo-task",
             ),
