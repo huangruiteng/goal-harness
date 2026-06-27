@@ -1026,6 +1026,14 @@ from pathlib import Path
 
 SUMMARY_PATH = Path({str(summary_path)!r})
 BRIDGE_COMMAND = {command!r}
+PROBE_REQUEST_SCHEMA_VERSION = "skillsbench_remote_command_file_bridge_probe_request_v0"
+PROBE_OPERATION_LABELS = {{
+    "bounded_noop_command",
+    "probe_marker_write",
+    "probe_marker_read",
+    "probe_marker_cleanup",
+}}
+PROBE_PATH_LABELS = {{"bridge_probe_marker"}}
 
 def loopx_subcommands(command: str) -> list[str]:
     try:
@@ -1074,6 +1082,24 @@ except Exception:
     payload = {{}}
 operation = payload.get("operation") if isinstance(payload, dict) else ""
 record["operation"] = operation if isinstance(operation, str) else "unknown"
+operation_label = payload.get("label") if isinstance(payload, dict) else ""
+path_label = payload.get("path_label") if isinstance(payload, dict) else ""
+if isinstance(operation_label, str) and operation_label:
+    record["operation_label"] = operation_label[:80]
+if isinstance(path_label, str) and path_label:
+    record["path_label"] = path_label[:80]
+bridge_probe_operation = bool(
+    isinstance(payload, dict)
+    and (
+        payload.get("schema_version") == PROBE_REQUEST_SCHEMA_VERSION
+        or payload.get("probe_id") == "skillsbench_remote_command_file_bridge_probe"
+        or (
+            isinstance(operation_label, str)
+            and operation_label in PROBE_OPERATION_LABELS
+        )
+        or (isinstance(path_label, str) and path_label in PROBE_PATH_LABELS)
+    )
+)
 subcommands: list[str] = []
 if isinstance(payload, dict) and payload.get("operation") == "exec":
     command_text = payload.get("command")
@@ -1087,9 +1113,13 @@ record["loopx_state_write"] = bool(subcommands and (
     or subcommands[:2] == ["quota", "spend-slot"]
 ))
 record["task_facing_operation"] = bool(
-    operation in {{"read_file", "write_file", "cleanup"}}
-    or (operation == "exec" and not subcommands)
+    not bridge_probe_operation
+    and (
+        operation in {{"read_file", "write_file", "cleanup"}}
+        or (operation == "exec" and not subcommands)
+    )
 )
+record["bridge_probe_operation"] = bridge_probe_operation
 record["operation_observed"] = True
 
 def append_record(item: dict[str, object]) -> None:
@@ -1143,6 +1173,7 @@ raise SystemExit(proc.returncode)
         state_read_count = 0
         state_write_count = 0
         task_facing_operation_count = 0
+        probe_operation_count = 0
         raw_material_recorded = False
         if bridge_summary_path.exists():
             for line in bridge_summary_path.read_text(
@@ -1194,6 +1225,8 @@ raise SystemExit(proc.returncode)
                     state_write_count += 1
                 if counts_as_request and record.get("task_facing_operation") is True:
                     task_facing_operation_count += 1
+                if counts_as_request and record.get("bridge_probe_operation") is True:
+                    probe_operation_count += 1
                 subcommands = record.get("loopx_subcommands")
                 if isinstance(subcommands, list) and subcommands:
                     key = " ".join(
@@ -1248,6 +1281,7 @@ raise SystemExit(proc.returncode)
                 "loopx_state_read_count": state_read_count,
                 "loopx_state_write_count": state_write_count,
                 "task_facing_operation_count": task_facing_operation_count,
+                "probe_operation_count": probe_operation_count,
                 "raw_material_recorded": raw_material_recorded,
             },
             "boundary": {

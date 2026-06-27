@@ -9019,13 +9019,14 @@ def test_skillsbench_result_timeout_after_loopx_lifecycle_is_attributed() -> Non
         ), compact
 
 
-def test_skillsbench_user_loop_recovery_preserves_final_verify_path() -> None:
-    with tempfile.TemporaryDirectory(prefix="skillsbench-user-loop-recovery-") as tmp:
+def test_skillsbench_user_loop_soft_verify_exception_continues_to_next_round() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-user-loop-soft-verify-") as tmp:
         rollout_dir = Path(tmp)
         plan = {"runner_prerequisites": {}}
         trace: dict[str, Any] = {
             "schema_version": "skillsbench_loopx_controller_trace_v0",
         }
+        seen_rounds: list[tuple[int, str | None]] = []
 
         fake_benchflow = types.ModuleType("benchflow")
         fake_sandbox = types.ModuleType("benchflow.sandbox")
@@ -9060,6 +9061,14 @@ def test_skillsbench_user_loop_recovery_preserves_final_verify_path() -> None:
                 round_result: Any | None = None,
             ) -> str | None:
                 assert instruction == "fixture instruction"
+                seen_rounds.append(
+                    (
+                        round,
+                        getattr(round_result, "verifier_error", None)
+                        if round_result is not None
+                        else None,
+                    )
+                )
                 if round == 0:
                     return "continue without verifier feedback"
                 return None
@@ -9127,17 +9136,41 @@ def test_skillsbench_user_loop_recovery_preserves_final_verify_path() -> None:
         assert fake_rollout.disconnected is True
         assert prerequisites["benchflow_user_loop_final_verify_recovery_enabled"] is True
         assert (
-            prerequisites["benchflow_user_loop_final_verify_recovery_triggered"]
+            prerequisites.get("benchflow_user_loop_final_verify_recovery_triggered")
+            is not True
+        )
+        assert (
+            prerequisites["benchflow_user_loop_soft_verify_exception_continued"]
             is True
         )
-        assert prerequisites["benchflow_user_loop_recovery_stage"] == "soft_verify"
-        assert prerequisites["benchflow_user_loop_recovery_exception_type"] == (
+        assert prerequisites["benchflow_user_loop_soft_verify_exception_stage"] == (
+            "soft_verify"
+        )
+        assert prerequisites["benchflow_user_loop_soft_verify_exception_type"] == (
             "TimeoutError"
         )
-        assert prerequisites["benchflow_user_loop_recovery_delta_events"] == 2
-        assert prerequisites["benchflow_user_loop_recovery_delta_tool_calls"] == 1
-        assert prerequisites["benchflow_user_loop_recovery_raw_error_recorded"] is False
-        assert trace["benchflow_user_loop_recovery_preserved_final_verify"] is True
+        assert prerequisites["benchflow_user_loop_soft_verify_exception_count"] == 1
+        assert prerequisites["benchflow_user_loop_soft_verify_exception_round"] == 0
+        assert (
+            prerequisites["benchflow_user_loop_soft_verify_exception_delta_events"]
+            == 2
+        )
+        assert (
+            prerequisites[
+                "benchflow_user_loop_soft_verify_exception_delta_tool_calls"
+            ]
+            == 1
+        )
+        assert (
+            prerequisites[
+                "benchflow_user_loop_soft_verify_exception_raw_error_recorded"
+            ]
+            is False
+        )
+        assert seen_rounds == [
+            (0, None),
+            (1, "public_safe_soft_verify_exception_after_agent_round"),
+        ]
         rounds_log = (rollout_dir / "user_rounds.jsonl").read_text(encoding="utf-8")
         assert "public_safe_soft_verify_exception_after_agent_round" in rounds_log
         assert "PRIVATE_PATH_SHOULD_NOT_ESCAPE" not in rounds_log
@@ -10095,7 +10128,7 @@ if __name__ == "__main__":
     test_skillsbench_main_recovers_official_result_after_runner_exception()
     test_skillsbench_main_recovers_missing_reward_with_structured_prereq_blocker()
     test_skillsbench_result_timeout_after_loopx_lifecycle_is_attributed()
-    test_skillsbench_user_loop_recovery_preserves_final_verify_path()
+    test_skillsbench_user_loop_soft_verify_exception_continues_to_next_round()
     test_skillsbench_final_verify_timeout_after_user_loop_recovery_is_attributed()
     test_skillsbench_verifier_prep_timeout_override_is_public_safe()
     test_skillsbench_main_marks_empty_acp_trajectory_after_host_install()

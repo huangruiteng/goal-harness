@@ -1474,6 +1474,8 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "codex_app_server_goal_worker_plan_schema",
         "benchflow_user_loop_recovery_exception_type",
         "benchflow_user_loop_recovery_stage",
+        "benchflow_user_loop_soft_verify_exception_type",
+        "benchflow_user_loop_soft_verify_exception_stage",
         "benchflow_intermediate_soft_verify_policy",
         "benchflow_intermediate_soft_verify_timeout_stage",
         "benchflow_intermediate_soft_verify_timeout_cleanup_status",
@@ -1561,6 +1563,8 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_user_loop_recovery_after_agent_activity",
         "benchflow_user_loop_recovery_raw_error_recorded",
         "benchflow_user_loop_recovery_preserved_final_verify",
+        "benchflow_user_loop_soft_verify_exception_continued",
+        "benchflow_user_loop_soft_verify_exception_raw_error_recorded",
         "benchflow_intermediate_soft_verify_final_only",
         "benchflow_intermediate_soft_verify_raw_output_recorded",
         "benchflow_intermediate_soft_verify_timeout_enabled",
@@ -1607,6 +1611,10 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_user_loop_recovery_round",
         "benchflow_user_loop_recovery_delta_events",
         "benchflow_user_loop_recovery_delta_tool_calls",
+        "benchflow_user_loop_soft_verify_exception_count",
+        "benchflow_user_loop_soft_verify_exception_round",
+        "benchflow_user_loop_soft_verify_exception_delta_events",
+        "benchflow_user_loop_soft_verify_exception_delta_tool_calls",
         "benchflow_intermediate_soft_verify_call_count",
         "benchflow_intermediate_soft_verify_skipped_count",
         "benchflow_intermediate_soft_verify_timeout_sec",
@@ -1642,6 +1650,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_agent_loopx_state_read_count",
         "remote_command_file_bridge_agent_loopx_state_write_count",
         "remote_command_file_bridge_agent_task_facing_operation_count",
+        "remote_command_file_bridge_agent_probe_operation_count",
         "remote_command_file_bridge_agent_todo_closeout_count",
         "remote_command_file_bridge_agent_refresh_state_count",
         "remote_command_file_bridge_agent_quota_spend_slot_count",
@@ -2389,6 +2398,47 @@ def _mark_user_loop_final_verify_recovery(
         trace["last_decision"] = "break_after_agent_round_preserve_final_verify"
 
 
+def _mark_user_loop_soft_verify_exception_continuation(
+    *,
+    plan: dict[str, Any],
+    trace: dict[str, Any] | None,
+    round_num: int,
+    exception: Exception,
+    delta_events: int,
+    delta_tool_calls: int,
+) -> None:
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    fields: dict[str, Any] = {
+        "benchflow_user_loop_soft_verify_exception_continued": True,
+        "benchflow_user_loop_soft_verify_exception_raw_error_recorded": False,
+        "benchflow_user_loop_soft_verify_exception_stage": "soft_verify",
+        "benchflow_user_loop_soft_verify_exception_type": type(exception).__name__,
+        "benchflow_user_loop_soft_verify_exception_round": round_num,
+        "benchflow_user_loop_soft_verify_exception_delta_events": max(
+            0,
+            delta_events,
+        ),
+        "benchflow_user_loop_soft_verify_exception_delta_tool_calls": max(
+            0,
+            delta_tool_calls,
+        ),
+    }
+    current = prerequisites.get("benchflow_user_loop_soft_verify_exception_count")
+    if not isinstance(current, int) or isinstance(current, bool):
+        current = 0
+    fields["benchflow_user_loop_soft_verify_exception_count"] = current + 1
+    prerequisites.update(fields)
+    if isinstance(trace, dict):
+        trace_current = trace.get("benchflow_user_loop_soft_verify_exception_count")
+        if not isinstance(trace_current, int) or isinstance(trace_current, bool):
+            trace_current = 0
+        trace_fields = dict(fields)
+        trace_fields["benchflow_user_loop_soft_verify_exception_count"] = (
+            trace_current + 1
+        )
+        trace.update(trace_fields)
+
+
 def install_benchflow_user_loop_final_verify_recovery(
     rollout_cls: Any,
     *,
@@ -2559,27 +2609,18 @@ def install_benchflow_user_loop_final_verify_recovery(
                     )
                     rewards, verifier_output, verifier_error = await self.soft_verify()
             except Exception as exc:
-                _mark_user_loop_final_verify_recovery(
+                _mark_user_loop_soft_verify_exception_continuation(
                     plan=plan,
                     trace=trace,
-                    stage="soft_verify",
                     round_num=round_num,
                     exception=exc,
                     delta_events=len(round_trajectory),
                     delta_tool_calls=round_tools,
                 )
-                rounds_log.append(
-                    {
-                        "round": round_num,
-                        "rewards": None,
-                        "verifier_error": "public_safe_soft_verify_exception_after_agent_round",
-                        "soft_verify_policy": intermediate_soft_verify_policy,
-                        "soft_verify_skipped": False,
-                        "n_tool_calls": round_tools,
-                        "n_trajectory_events": len(round_trajectory),
-                    }
-                )
-                break
+                rewards = None
+                verifier_output = None
+                verifier_error = "public_safe_soft_verify_exception_after_agent_round"
+                soft_verify_skipped = False
             finally:
                 if cfg.oracle_access:
                     await self._env.exec(
@@ -5501,6 +5542,7 @@ def _merge_host_local_acp_relay_trace_summary(
     agent_bridge_loopx_state_read_count = 0
     agent_bridge_loopx_state_write_count = 0
     agent_bridge_task_facing_operation_count = 0
+    agent_bridge_probe_operation_count = 0
     agent_bridge_operation_counts: dict[str, int] = {}
     agent_bridge_loopx_subcommand_counts: dict[str, int] = {}
     agent_bridge_successful_loopx_subcommand_counts: dict[str, int] = {}
@@ -5584,6 +5626,7 @@ def _merge_host_local_acp_relay_trace_summary(
                 "loopx_state_read_count": "state_read",
                 "loopx_state_write_count": "state_write",
                 "task_facing_operation_count": "task_facing",
+                "probe_operation_count": "probe",
             }
             for field, target in count_fields.items():
                 value = agent_ops.get(field)
@@ -5604,6 +5647,8 @@ def _merge_host_local_acp_relay_trace_summary(
                     agent_bridge_loopx_state_write_count += value
                 elif target == "task_facing":
                     agent_bridge_task_facing_operation_count += value
+                elif target == "probe":
+                    agent_bridge_probe_operation_count += value
             for source_key, target_counts in (
                 ("operation_counts", agent_bridge_operation_counts),
                 ("loopx_cli_subcommand_counts", agent_bridge_loopx_subcommand_counts),
@@ -5799,6 +5844,9 @@ def _merge_host_local_acp_relay_trace_summary(
     trace["remote_command_file_bridge_agent_task_facing_operation_count"] = (
         agent_bridge_task_facing_operation_count
     )
+    trace["remote_command_file_bridge_agent_probe_operation_count"] = (
+        agent_bridge_probe_operation_count
+    )
     trace["remote_command_file_bridge_agent_operation_counts"] = dict(
         sorted(agent_bridge_operation_counts.items())
     )
@@ -5940,6 +5988,9 @@ def _merge_host_local_acp_relay_trace_summary(
     )
     prerequisites["remote_command_file_bridge_agent_task_facing_operation_count"] = (
         agent_bridge_task_facing_operation_count
+    )
+    prerequisites["remote_command_file_bridge_agent_probe_operation_count"] = (
+        agent_bridge_probe_operation_count
     )
     prerequisites["remote_command_file_bridge_agent_operation_counts"] = dict(
         sorted(agent_bridge_operation_counts.items())
