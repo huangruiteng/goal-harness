@@ -728,6 +728,9 @@ def _role_id_for_lane(*, lane_id: str, index: int, explicit_role_id: str | None 
     role_id = AUTO_RESEARCH_ROLE_PROFILE_ALIASES.get(raw, raw)
     if role_id in AUTO_RESEARCH_ROLE_PROFILE_TEMPLATES:
         return role_id
+    if explicit_role_id is not None:
+        allowed = ", ".join(AUTO_RESEARCH_ROLE_PROFILE_ORDER)
+        raise ValueError(f"agent[] role_id must be one of: {allowed}")
     return AUTO_RESEARCH_ROLE_PROFILE_ORDER[(index - 1) % len(AUTO_RESEARCH_ROLE_PROFILE_ORDER)]
 
 

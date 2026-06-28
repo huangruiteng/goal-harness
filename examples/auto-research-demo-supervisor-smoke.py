@@ -189,6 +189,16 @@ def main() -> int:
     )
     assert_supervisor_contract(payload)
 
+    try:
+        build_auto_research_demo_supervisor_plan(
+            goal_id=GOAL_ID,
+            agent_specs=["codex-main-control:evidence-runner:not_a_role"],
+        )
+    except ValueError as exc:
+        assert "role_id must be one of" in str(exc), exc
+    else:
+        raise AssertionError("explicit invalid role_id must not silently fallback")
+
     cli_payload = run_cli_json()
     assert_supervisor_contract(cli_payload)
 
