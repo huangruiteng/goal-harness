@@ -512,10 +512,14 @@ def assert_agent_without_advancement_candidate_and_only_monitor_work_stays_quiet
     assert scheduler["codex_app"]["recommended_interval_minutes"] == 15, scheduler
     assert scheduler["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
     assert scheduler["codex_app"]["example_progression_minutes"] == [15, 30, 60], scheduler
-    assert scheduler["codex_cli_tui"]["unchanged_poll_limit"] == 3, scheduler
-    assert scheduler["codex_cli_tui"]["final_quota_replan_check"]["enabled"] is True, scheduler
-    assert scheduler["claude_code_loop"]["after_limit"] == "stop_loop", scheduler
-    assert scheduler["claude_code_loop"]["unchanged_poll_limit"] == 3, scheduler
+    assert scheduler["unchanged_poll"]["limits"]["codex_cli_tui"] == 3, scheduler
+    assert scheduler["unchanged_poll"]["final_quota_replan_check_enabled"] is True, scheduler
+    assert scheduler["unchanged_poll"]["after_limits"]["claude_code_loop"] == "stop_loop", scheduler
+    assert scheduler["unchanged_poll"]["limits"]["claude_code_loop"] == 3, scheduler
+    assert "local_scheduler" not in scheduler, scheduler
+    assert "codex_cli_tui" not in scheduler, scheduler
+    assert "claude_code_loop" not in scheduler, scheduler
+    assert "cold_path_detail" not in scheduler, scheduler
     reset = scheduler["reset_policy"]
     assert reset["schema_version"] == "scheduler_reset_policy_v0", reset
     assert reset["profile_action"] == "backoff_until_material_transition", reset
