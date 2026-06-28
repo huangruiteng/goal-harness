@@ -254,8 +254,13 @@ todo text. If a dashboard or controller needs the new checklist immediately,
 refresh the status projection after the write:
 
 ```bash
-loopx refresh-state --goal-id <goal-id>
+loopx refresh-state --goal-id <goal-id> --agent-id <registered-agent>
 ```
+
+For multi-agent goals, `refresh-state` requires an explicit `--agent-id`.
+The default scoped refresh is an agent-lane run: it is useful for keeping the
+same turn's writeback/accounting identity intact, but it does not replace the
+goal-level status route.
 
 ## Lifecycle Contract
 
@@ -364,7 +369,9 @@ loopx refresh-state \
   --goal-id <goal-id> \
   --classification <public-safe-progress-classification> \
   --delivery-batch-scale multi_surface \
-  --delivery-outcome outcome_progress
+  --delivery-outcome outcome_progress \
+  --agent-id <primary-agent> \
+  --progress-scope goal
 ```
 
 This keeps validated side-agent product work from being misread as another

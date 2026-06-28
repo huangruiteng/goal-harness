@@ -23,6 +23,7 @@ from .todo_contract import (
     TODO_TASK_CLASS_BLOCKER,
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
+    normalize_todo_claimed_by,
 )
 
 
@@ -32,7 +33,9 @@ RECOMMENDED_ACTION_SOURCE_EXPLICIT = "explicit_arg"
 RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION = "active_state_next_action"
 RECOMMENDED_ACTION_SOURCE_AGENT_TODO_FALLBACK = "agent_todo_fallback"
 RECOMMENDED_ACTION_SOURCE_DEFAULT = "default_refresh_action"
+GOAL_PROGRESS_SCOPE = "goal"
 AGENT_LANE_PROGRESS_SCOPE = "agent_lane"
+PROGRESS_SCOPE_CHOICES = (GOAL_PROGRESS_SCOPE, AGENT_LANE_PROGRESS_SCOPE)
 RECOMMENDED_ACTION_SECTION_LINE_LIMIT = 16
 BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
@@ -139,6 +142,44 @@ def normalize_repair_delta_kinds(values: list[str] | None) -> list[str]:
             continue
         seen.add(item)
         normalized.append(item)
+    return normalized
+
+
+def registered_agents_for_goal(registry_goal: dict[str, Any] | None) -> list[str]:
+    coordination = (
+        registry_goal.get("coordination")
+        if registry_goal and isinstance(registry_goal.get("coordination"), dict)
+        else {}
+    )
+    registered_raw = coordination.get("registered_agents") if isinstance(coordination, dict) else []
+    registered_values = registered_raw if isinstance(registered_raw, list) else []
+    registered_agents: list[str] = []
+    for value in registered_values:
+        candidate = value.get("id") if isinstance(value, dict) else value
+        normalized = normalize_todo_claimed_by(candidate)
+        if normalized:
+            registered_agents.append(normalized)
+    return registered_agents
+
+
+def primary_agent_for_goal(registry_goal: dict[str, Any] | None) -> str | None:
+    coordination = (
+        registry_goal.get("coordination")
+        if registry_goal and isinstance(registry_goal.get("coordination"), dict)
+        else {}
+    )
+    return normalize_todo_claimed_by(coordination.get("primary_agent") if coordination else None)
+
+
+def normalize_progress_scope(value: str | None) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    validate_public_safe_text("progress_scope", normalized)
+    if normalized not in PROGRESS_SCOPE_CHOICES:
+        raise ValueError(
+            "--progress-scope must be one of: " + ", ".join(PROGRESS_SCOPE_CHOICES)
+        )
     return normalized
 
 
@@ -401,6 +442,7 @@ def build_state_refresh_record(
     registry_goal: dict[str, Any] | None,
     delivery_batch_scale: str | None = None,
     delivery_outcome: str | None = None,
+    progress_scope: str | None = None,
     agent_id: str | None = None,
     agent_lane: str | None = None,
     autonomous_replan_recorded: bool = False,
@@ -455,9 +497,11 @@ def build_state_refresh_record(
         }
         if repair_delta_contract:
             record["autonomous_replan_ack"]["delta_contract"] = repair_delta_contract
+    if progress_scope:
+        record["progress_scope"] = progress_scope
     if agent_id:
-        record["progress_scope"] = AGENT_LANE_PROGRESS_SCOPE
         record["agent_id"] = agent_id
+    if progress_scope == AGENT_LANE_PROGRESS_SCOPE and agent_id:
         record["agent_lane"] = agent_lane or agent_id
     return record
 
@@ -598,6 +642,7 @@ def refresh_state_run(
     delivery_outcome: str | None = None,
     agent_id: str | None = None,
     agent_lane: str | None = None,
+    progress_scope: str | None = None,
     autonomous_replan_recorded: bool = False,
     repair_delta_kinds: list[str] | None = None,
     dry_run: bool,
@@ -613,6 +658,7 @@ def refresh_state_run(
         validate_public_safe_text("agent_lane", normalized_agent_lane)
     if normalized_agent_lane and not normalized_agent_id:
         raise ValueError("--agent-lane requires --agent-id so the lane has an owner")
+    normalized_progress_scope = normalize_progress_scope(progress_scope)
     normalized_delivery_batch_scale = (
         require_delivery_batch_scale(delivery_batch_scale).value if delivery_batch_scale else None
     )
@@ -628,26 +674,45 @@ def refresh_state_run(
         project_override=project,
         state_file_override=state_file,
     )
-    if normalized_agent_id and registry_goal:
-        coordination = registry_goal.get("coordination") if isinstance(registry_goal.get("coordination"), dict) else {}
-        registered_raw = coordination.get("registered_agents") if isinstance(coordination, dict) else []
-        registered_agents = []
-        registered_values = registered_raw if isinstance(registered_raw, list) else []
-        for value in registered_values:
-            if isinstance(value, dict):
-                registered_agents.append(str(value.get("id") or ""))
-            else:
-                registered_agents.append(str(value or ""))
-        registered_agents = [value for value in registered_agents if value]
-        if registered_agents and normalized_agent_id not in registered_agents:
-            raise ValueError(
-                f"agent_id {normalized_agent_id!r} is not registered for goal {safe_goal_id!r}"
-            )
     if not resolved_state_file.exists():
         raise FileNotFoundError(f"state file does not exist: {resolved_state_file}")
     state_text = resolved_state_file.read_text(encoding="utf-8")
     expected_write_state_text = state_text
     normalized_next_action = normalize_next_action_text(next_action) if next_action else None
+    registered_agents = registered_agents_for_goal(registry_goal)
+    primary_agent = primary_agent_for_goal(registry_goal)
+    known_agents = {agent for agent in registered_agents if agent}
+    if primary_agent:
+        known_agents.add(primary_agent)
+    multi_agent_goal = len(known_agents) > 1
+    if normalized_agent_id and known_agents and normalized_agent_id not in known_agents:
+        raise ValueError(
+            f"agent_id {normalized_agent_id!r} is not registered for goal {safe_goal_id!r}"
+        )
+    if multi_agent_goal and not normalized_agent_id:
+        raise ValueError(
+            "multi-agent refresh-state requires --agent-id; text inference is disabled"
+        )
+    if not normalized_progress_scope:
+        normalized_progress_scope = (
+            AGENT_LANE_PROGRESS_SCOPE if normalized_agent_id else GOAL_PROGRESS_SCOPE
+        )
+    if normalized_progress_scope == AGENT_LANE_PROGRESS_SCOPE:
+        if not normalized_agent_id:
+            raise ValueError("--progress-scope agent_lane requires --agent-id")
+        if normalized_next_action:
+            raise ValueError(
+                "agent-lane refresh-state cannot update the durable active-state Next Action; "
+                "rerun without --next-action or use --progress-scope goal with the primary agent"
+            )
+    if normalized_progress_scope == GOAL_PROGRESS_SCOPE:
+        if normalized_agent_lane:
+            raise ValueError("--agent-lane requires --progress-scope agent_lane")
+        if primary_agent and normalized_agent_id and normalized_agent_id != primary_agent:
+            raise ValueError(
+                "goal-scope refresh-state requires the primary agent "
+                f"{primary_agent!r}; got {normalized_agent_id!r}"
+            )
     generated_at = now_local()
     active_state_next_action_update: dict[str, Any] | None = None
     if normalized_next_action:
@@ -703,6 +768,7 @@ def refresh_state_run(
         registry_goal=registry_goal,
         delivery_batch_scale=normalized_delivery_batch_scale,
         delivery_outcome=normalized_delivery_outcome,
+        progress_scope=normalized_progress_scope,
         agent_id=normalized_agent_id or None,
         agent_lane=normalized_agent_lane or None,
         autonomous_replan_recorded=effective_autonomous_replan_recorded,
@@ -741,6 +807,18 @@ def refresh_state_run(
         "json_path": str(json_path),
         "markdown_path": str(markdown_path),
     }
+    record_state = record.get("state") if isinstance(record.get("state"), dict) else {}
+    record_frontmatter = (
+        record_state.get("frontmatter")
+        if isinstance(record_state.get("frontmatter"), dict)
+        else {}
+    )
+    index_record["state"] = {
+        "sha256_16": record_state.get("sha256_16"),
+        "frontmatter": {
+            "updated_at": record_frontmatter.get("updated_at"),
+        },
+    }
     if normalized_delivery_batch_scale:
         index_record["delivery_batch_scale"] = normalized_delivery_batch_scale
     if normalized_delivery_outcome:
@@ -749,9 +827,11 @@ def refresh_state_run(
         index_record["autonomous_replan_ack"] = record["autonomous_replan_ack"]
         if requested_classification != classification:
             index_record["requested_classification"] = requested_classification
+    if normalized_progress_scope:
+        index_record["progress_scope"] = normalized_progress_scope
     if normalized_agent_id:
-        index_record["progress_scope"] = AGENT_LANE_PROGRESS_SCOPE
         index_record["agent_id"] = normalized_agent_id
+    if normalized_progress_scope == AGENT_LANE_PROGRESS_SCOPE and normalized_agent_id:
         index_record["agent_lane"] = normalized_agent_lane or normalized_agent_id
     payload = {
         "ok": True,

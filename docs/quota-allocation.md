@@ -635,8 +635,8 @@ When available, `quota should-run` also keeps next-action signals separate:
 recommendation, and `agent_lane_next_action` is the current `--agent-id`
 slice. If the active-state and latest-run actions differ,
 `next_action_projection_warning` asks the executor to explicitly write back the
-intended durable route with `refresh-state --next-action` or keep treating the
-signals as distinct.
+intended durable route with a primary goal-scope `refresh-state --next-action`
+or keep treating the signals as distinct.
 `refresh-state` records `recommended_action_source` so hosts can tell whether a
 run recommendation came from an explicit argument, durable `## Next Action`, an
 Agent Todo compatibility fallback, or the generic default. Dispatch still comes
