@@ -146,9 +146,16 @@ def main() -> int:
             assert profile["protected_scope"], profile
             assert profile["stop_conditions"], profile
             command = lane["visible_launch_command"]
-            assert "LoopX role profile" in command, command
+            assert profile["schema_version"] == "auto_research_role_profile_v0", profile
+            assert profile["required_skill"] == "loopx-auto-research", profile
+            assert profile["agent_id"] == lane["agent_id"], profile
+            assert profile["lane_id"] == lane["lane_id"], profile
+            assert profile["stop_conditions"], profile
+            assert "[LoopX role profile]" in command, command
+            assert "LOOPX_ROLE_PROFILE_JSON" in command, command
             assert "LOOPX_ROLE_ID" in command, command
             assert "LOOPX_ROLE_PROFILE_REF" in command, command
+            assert "LOOPX_REQUIRED_SKILL" in command, command
             assert "quota should-run" in command, command
             assert "auto-research frontier" in command, command
             assert "codex-cli-bootstrap-message" in command, command
