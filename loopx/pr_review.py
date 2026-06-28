@@ -43,10 +43,33 @@ RUNTIME_OR_CLI_PREFIXES = (
     "backend/",
     "app/",
     "apps/",
-    "loopx/",
     "scripts/",
     "bin/",
     "tools/",
+)
+
+CODE_EXTENSIONS = (
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".kts",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".m",
+    ".mm",
 )
 
 UI_PREFIXES = (
@@ -76,6 +99,13 @@ def _redact_text(value: object, *, limit: int = 320) -> str:
     if len(text) > limit:
         return text[: max(0, limit - 1)].rstrip() + "..."
     return text
+
+
+def _join_short(items: list[str], *, limit: int = 3, fallback: str = "未提供") -> str:
+    compact = [str(item).strip() for item in items if str(item).strip()]
+    if not compact:
+        return fallback
+    return "、".join(compact[:limit])
 
 
 def _as_dict(value: object) -> dict[str, Any]:
@@ -294,6 +324,8 @@ def _file_area(path: str) -> str:
         return "app_or_ui_surface"
     if path.startswith(RUNTIME_OR_CLI_PREFIXES):
         return "product_runtime"
+    if lowered.endswith(CODE_EXTENSIONS):
+        return "product_runtime"
     if path.endswith((".toml", ".yaml", ".yml", ".json", ".ini")) or name in {
         "package.json",
         "pyproject.toml",
@@ -339,6 +371,141 @@ def _area_counts(files: list[dict[str, Any]]) -> dict[str, int]:
         area = str(item.get("area") or "other")
         counts[area] = counts.get(area, 0) + 1
     return counts
+
+
+AREA_LABELS = {
+    "public_entry_or_policy": "README/政策入口",
+    "public_docs": "公开文档",
+    "test_or_example": "smoke/示例",
+    "app_or_ui_surface": "前端/展示面",
+    "product_runtime": "运行时/CLI",
+    "ci_or_release": "CI/发布",
+    "build_or_config": "构建配置",
+    "other": "其他文件",
+}
+
+
+RISK_LEVEL_LABELS = {
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "unknown": "未知",
+}
+
+
+def _area_phrase(areas: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for area, count in sorted(areas.items(), key=lambda item: (-int(item[1] or 0), str(item[0]))):
+        label = AREA_LABELS.get(str(area), str(area))
+        parts.append(f"{label} {count}")
+    return _join_short(parts, limit=4, fallback="未知区域")
+
+
+def _top_file_phrase(files: list[dict[str, Any]], *, limit: int = 3) -> str:
+    return _join_short([str(item.get("path") or "") for item in files if item.get("path")], limit=limit, fallback="未返回关键文件")
+
+
+def _int_or_zero(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _file_churn(item: dict[str, Any]) -> int:
+    return _int_or_zero(item.get("additions")) + _int_or_zero(item.get("deletions"))
+
+
+def _check_brief_phrase(checks: dict[str, Any]) -> str:
+    counts = _as_dict(checks.get("counts"))
+    if checks.get("failures"):
+        return f"{len(_as_list(checks.get('failures')))} fail"
+    if checks.get("pending"):
+        return f"{len(_as_list(checks.get('pending')))} pending"
+    if counts.get("success"):
+        return f"{counts.get('success')} pass"
+    if int(checks.get("total") or 0) == 0:
+        return "无 checks"
+    return str(checks.get("summary") or "unknown")
+
+
+def _review_order(files: list[dict[str, Any]], *, limit: int = 5) -> list[str]:
+    ranked = sorted(files, key=_file_churn, reverse=True)
+    return [str(file.get("path") or "") for file in ranked[:limit] if file.get("path")]
+
+
+def _metadata_risk_hint(pr: dict[str, Any], files: list[dict[str, Any]], checks: dict[str, Any]) -> dict[str, Any]:
+    areas = _area_counts(files)
+    changed = int(pr.get("changedFiles") or len(files) or 0)
+    additions = int(pr.get("additions") or 0)
+    deletions = int(pr.get("deletions") or 0)
+    has_runtime = any(
+        str(item.get("area")) in {"product_runtime", "app_or_ui_surface", "ci_or_release", "build_or_config"}
+        for item in files
+    )
+    if checks.get("failures") or changed >= 12 or additions + deletions >= 800:
+        level = "high"
+    elif has_runtime or checks.get("pending") or not checks.get("total"):
+        level = "medium"
+    else:
+        level = "low"
+    return {
+        "schema_version": "pr_metadata_risk_hint_v0",
+        "level": level,
+        "basis": [
+            f"areas={_area_phrase(areas)}",
+            f"scale={changed} files +{additions}/-{deletions}",
+            f"checks={_check_brief_phrase(checks)}",
+        ],
+        "disclaimer": "Metadata-only hint for queue ordering; agentloop must read the PR diff before judging main risk.",
+    }
+
+
+def _section(label: str, word_hint: str, instruction: str) -> dict[str, str]:
+    return {
+        "label": label,
+        "word_hint": word_hint,
+        "content": "",
+        "agent_instruction": instruction,
+    }
+
+
+def _review_template(item: dict[str, Any]) -> dict[str, Any]:
+    key_files = [file for file in _as_list(item.get("key_files")) if isinstance(file, dict)]
+    sections = [
+        _section(
+            "动机",
+            "40-80字",
+            "读 PR title/body/diff 后填写：这个 PR 为什么存在，想解决哪个用户或维护者问题。",
+        ),
+        _section(
+            "改动思路",
+            "40-100字",
+            "读关键 diff 后填写：作者采用什么路线解决问题，不要只复述文件名。",
+        ),
+        _section(
+            "具体改动",
+            "60-140字",
+            "读 diff 后填写：具体改了哪些模块、协议、命令、文档或测试，只保留决策相关细节。",
+        ),
+        _section(
+            "对主干的风险",
+            "40-100字",
+            "读 diff 和 checks 后填写：合入 main 可能破坏什么，哪些验证能覆盖。",
+        ),
+        _section(
+            "我的整体评价",
+            "30-80字",
+            "读完整 PR 后填写：approve / request changes / defer / merge after checks，并给一句理由。",
+        ),
+    ]
+    return {
+        "schema_version": "pr_review_five_block_template_v0",
+        "purpose": "Empty scaffold only; agentloop fills it after reading PR body and diff.",
+        "sections": sections,
+        "review_order": _review_order(key_files),
+        "output_hint": "Keep each PR concise; the filled five-block review is usually 100-200 Chinese characters total for small PRs and longer only when risk demands it.",
+    }
 
 
 def _check_name(item: dict[str, Any]) -> str:
@@ -418,110 +585,6 @@ def _risk_notes(pr: dict[str, Any], files: list[dict[str, Any]]) -> list[str]:
     return notes
 
 
-def _file_paths(files: list[dict[str, Any]]) -> list[str]:
-    return [str(item.get("path") or "") for item in files if item.get("path")]
-
-
-def _matches_any(path: str, prefixes: tuple[str, ...]) -> bool:
-    return any(path.startswith(prefix) for prefix in prefixes)
-
-
-def _main_regression_analysis(pr: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
-    paths = _file_paths(files)
-    areas = _area_counts(files)
-    checks = _checks(pr)
-    state = str(pr.get("state") or "").upper()
-    changed = int(pr.get("changedFiles") or len(files) or 0)
-    additions = int(pr.get("additions") or 0)
-    deletions = int(pr.get("deletions") or 0)
-
-    potential_regressions: list[str] = []
-    bug_risks: list[str] = []
-    verification_focus: list[str] = []
-
-    if any(path.startswith(("loopx/quota.py", "loopx/status.py", "loopx/todos.py", "loopx/todo_contract.py")) for path in paths):
-        potential_regressions.append(
-            "Control-plane routing can regress: user gates, agent lane selection, monitor due projection, or quota spend/no-spend decisions may change on main."
-        )
-        bug_risks.append("A small projection mismatch can strand automation behind a wrong gate or hide runnable work.")
-        verification_focus.append("Run focused quota/status/todo smokes and inspect one live quota/status packet after merge.")
-    if any(path.startswith("loopx/cli_commands/") or path == "loopx/cli.py" for path in paths):
-        potential_regressions.append(
-            "CLI compatibility can regress: flags, JSON schema, markdown output, or shell-facing command examples may change for existing users."
-        )
-        bug_risks.append("Existing automation may parse older fields or rely on previous default command behavior.")
-        verification_focus.append("Run the affected CLI smoke plus one live command against public-safe GitHub metadata or fixture data.")
-    if any(path.startswith("loopx/benchmark_adapters/") or "skillsbench" in path.lower() or "terminal_bench" in path.lower() for path in paths):
-        potential_regressions.append(
-            "Benchmark launch or attribution behavior can regress: readiness blockers, attempt accounting, runner boundaries, or public/private evidence filtering may shift."
-        )
-        bug_risks.append("A benchmark helper change can misclassify a blocked launch as an attempted run, or expose raw benchmark evidence if boundaries slip.")
-        verification_focus.append("Run the adapter's focused public smoke; avoid raw task text, trajectories, verifier output, and private logs.")
-    if any(_matches_any(path, UI_PREFIXES) for path in paths):
-        potential_regressions.append(
-            "Frontstage/dashboard rendering can regress: routes, first viewport, responsive layout, hover affordances, or public-safe projection display may change."
-        )
-        bug_risks.append("A visual or routing change may look correct in fixture data but fail in the browser or hide important review context.")
-        verification_focus.append("Run browser/frontstage smoke or capture the affected route when the first screen or interaction changes.")
-    if any(path.startswith(".github/workflows/") or path.endswith(("pyproject.toml", "package.json", "uv.lock")) for path in paths):
-        potential_regressions.append(
-            "Build, install, or CI behavior can regress: dependency resolution, workflow triggers, or required checks may change for main."
-        )
-        bug_risks.append("A config-only diff can block future PR validation even when runtime code is unchanged.")
-        verification_focus.append("Check workflow syntax or the smallest install/build command that exercises the changed config.")
-    if areas and set(areas) <= {"public_docs", "test_or_example"}:
-        potential_regressions.append(
-            "Runtime regression risk is low, but public guidance or smoke expectations can drift from shipped behavior."
-        )
-        bug_risks.append("Docs-only or smoke-only changes can bless stale contracts if the example no longer matches the real CLI/runtime path.")
-        verification_focus.append("Run `git diff --check` and the touched smoke; compare docs examples with current CLI help when command syntax is involved.")
-    if not potential_regressions:
-        potential_regressions.append("Main impact is localized to the touched files; verify the stated scope matches the diff before merge.")
-        bug_risks.append("Unknown-area changes may still affect consumers if they alter shared data, examples, or public contracts.")
-        verification_focus.append("Review changed files directly and run the narrowest smoke that exercises the touched surface.")
-
-    if checks.get("failures"):
-        bug_risks.append("Failing checks are present; merging would carry known red validation into main.")
-    elif checks.get("pending"):
-        bug_risks.append("Pending checks leave main-risk unresolved until they complete.")
-    elif not checks.get("total"):
-        bug_risks.append("No status-check rollup was available; rely on explicit local validation evidence before merge.")
-
-    if changed >= 12 or additions + deletions >= 800:
-        bug_risks.append("Large diff size increases reviewer miss risk; split by area or require stronger smoke coverage.")
-        verification_focus.append("Review by area buckets and confirm each high-risk area has direct validation.")
-
-    if state == "MERGED":
-        verification_focus.append("Because this is already merged, prioritize post-merge canary, regression symptoms, and follow-up todos over merge readiness.")
-    else:
-        verification_focus.append("Before merge, confirm branch policy, conflict state, public/private boundary, and required checks.")
-
-    high_area = (
-        any(path.startswith(("loopx/quota.py", "loopx/status.py", "loopx/todos.py", "loopx/todo_contract.py")) for path in paths)
-        or any(path.startswith("loopx/benchmark_adapters/") for path in paths)
-        or bool(checks.get("failures"))
-    )
-    if high_area or changed >= 12 or additions + deletions >= 800:
-        risk_level = "high"
-    elif any(str(item.get("area")) in {"product_runtime", "app_or_ui_surface", "ci_or_release", "build_or_config"} for item in files):
-        risk_level = "medium"
-    else:
-        risk_level = "low"
-
-    return {
-        "schema_version": "main_regression_analysis_v0",
-        "risk_level": risk_level,
-        "risk_summary": _redact_text(
-            f"{risk_level} main regression risk across {', '.join(sorted(areas)) or 'unknown'}; "
-            f"{changed} file(s), +{additions}/-{deletions}."
-        ),
-        "potential_regressions": potential_regressions[:5],
-        "bug_risks": bug_risks[:6],
-        "verification_focus": verification_focus[:6],
-        "post_merge_review": state == "MERGED",
-    }
-
-
 def _review_depth(files: list[dict[str, Any]]) -> str:
     areas = {str(item.get("area") or "") for item in files}
     if "product_runtime" in areas:
@@ -565,6 +628,19 @@ def _review_priority(pr: dict[str, Any], files: list[dict[str, Any]]) -> tuple[i
     return (bucket, -_parse_updated_epoch(activity_at))
 
 
+def _review_sequence_entry(item: dict[str, Any], *, rank: int) -> dict[str, Any]:
+    return {
+        "rank": rank,
+        "number": item.get("number"),
+        "title": item.get("title"),
+        "url": item.get("url"),
+        "state": item.get("state"),
+        "review_depth": item.get("review_depth"),
+        "risk_hint_level": _as_dict(item.get("metadata_risk_hint")).get("level"),
+        "why_now": _review_why_now(item),
+    }
+
+
 def _normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
     files = _files(pr)
     checks = _checks(pr)
@@ -602,20 +678,17 @@ def _normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
         "checks": checks,
         "review_depth": _review_depth(files),
         "risk_notes": _risk_notes(pr, files),
-        "main_regression_analysis": _main_regression_analysis(pr, files),
-        "review_prompts": [
-            "What user or maintainer value does this PR unlock now?",
-            "Do the touched files match that stated scope?",
-            "Are validation evidence and risk boundaries strong enough for merge?",
-            "What could regress on main, and which focused validation would catch it?",
-        ],
+        "metadata_risk_hint": _metadata_risk_hint(pr, files, checks),
+        "review_goal": "Fill the five-block review template after reading the PR body and diff.",
         "evidence_commands": [
             f"gh pr view {number} --json title,body,files,commits,statusCheckRollup",
-            f"gh pr diff {number} --stat",
+            f"gh pr diff {number} --name-only",
+            f"gh pr diff {number} --patch",
         ]
         if number
         else [],
     }
+    item["review_template"] = _review_template(item)
     return item
 
 
@@ -638,19 +711,7 @@ def build_pr_review_packet(
     ]
     normalized_all.sort(key=lambda item: _review_priority(item, item.get("key_files") or []))
     normalized = normalized_all[: max(1, limit)]
-    review_sequence = [
-        {
-            "rank": index,
-            "number": item.get("number"),
-            "title": item.get("title"),
-            "url": item.get("url"),
-            "state": item.get("state"),
-            "review_depth": item.get("review_depth"),
-            "main_risk_level": _as_dict(item.get("main_regression_analysis")).get("risk_level"),
-            "why_now": _review_why_now(item),
-        }
-        for index, item in enumerate(normalized, start=1)
-    ]
+    review_sequence = [_review_sequence_entry(item, rank=index) for index, item in enumerate(normalized, start=1)]
     open_review_required = [
         item
         for item in normalized
@@ -663,6 +724,33 @@ def build_pr_review_packet(
     first = review_sequence[0] if review_sequence else None
     review_attention_count = len(open_review_required) + len(merged_items)
     open_items = [item for item in normalized if str(item.get("state") or "").upper() == "OPEN"]
+    unmerged_items = [item for item in normalized if str(item.get("state") or "").upper() != "MERGED"]
+    review_groups = {
+        "unmerged": {
+            "schema_version": "pr_review_group_v0",
+            "group_id": "unmerged",
+            "title": "Unmerged PRs",
+            "intent": "Review before merge: decide approve, request changes, defer, or wait for checks.",
+            "count": len(unmerged_items),
+            "pr_numbers": [item.get("number") for item in unmerged_items],
+            "review_sequence": [
+                _review_sequence_entry(item, rank=index)
+                for index, item in enumerate(unmerged_items, start=1)
+            ],
+        },
+        "merged": {
+            "schema_version": "pr_review_group_v0",
+            "group_id": "merged",
+            "title": "Merged PRs",
+            "intent": "Post-merge audit: check outcome, regression risk, and follow-up quality without blocking already-merged work.",
+            "count": len(merged_items),
+            "pr_numbers": [item.get("number") for item in merged_items],
+            "review_sequence": [
+                _review_sequence_entry(item, rank=index)
+                for index, item in enumerate(merged_items, start=1)
+            ],
+        },
+    }
     headline = (
         (
             f"{len(normalized)} PR(s) in review window: "
@@ -689,11 +777,13 @@ def build_pr_review_packet(
             },
             "source": source,
             "include": [
-                "motivation",
+                "pull_request_list",
+                "review_groups",
+                "review_template",
                 "change_scope",
                 "checks",
+                "metadata_risk_hint",
                 "risk_notes",
-                "main_regression_analysis",
                 "review_sequence",
             ],
             "privacy_mode": "public_safe_github_metadata",
@@ -714,6 +804,7 @@ def build_pr_review_packet(
             "recommended_first_pr": first,
         },
         "review_sequence": review_sequence,
+        "review_groups": review_groups,
         "pull_requests": normalized,
         "actions": [
             {
@@ -772,9 +863,30 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         f"- since: `{request.get('since') or 'not set'}`",
         f"- headline: {summary.get('headline')}",
         f"- counts: total=`{summary.get('total_pr_count')}`, open=`{summary.get('open_pr_count')}`, merged=`{summary.get('merged_pr_count')}`, review_attention=`{summary.get('review_attention_count')}`, draft=`{summary.get('draft_count')}`",
+        "- tool contract: run `loopx pr-review` first and use its `review_groups`; use ad hoc `gh` commands only after selecting a PR from this packet.",
         "",
-        "## Review Sequence",
+        "## Unmerged PRs",
     ]
+    review_groups = _as_dict(payload.get("review_groups"))
+    unmerged = _as_dict(review_groups.get("unmerged"))
+    merged = _as_dict(review_groups.get("merged"))
+
+    def append_group(group: dict[str, Any]) -> None:
+        sequence = [item for item in _as_list(group.get("review_sequence")) if isinstance(item, dict)]
+        if not sequence:
+            lines.append("- none")
+            return
+        for item in sequence:
+            lines.append(
+                f"{item.get('rank')}. [#{item.get('number')} {item.get('title')}]({item.get('url')}) "
+                f"[{item.get('state')}] - "
+                f"{item.get('review_depth')} / risk_hint=`{item.get('risk_hint_level')}`: {item.get('why_now')}"
+            )
+
+    append_group(unmerged)
+    lines.extend(["", "## Merged PRs"])
+    append_group(merged)
+    lines.extend(["", "## Combined Review Sequence"])
     sequence = [item for item in _as_list(payload.get("review_sequence")) if isinstance(item, dict)]
     if not sequence:
         lines.append("- none")
@@ -782,26 +894,35 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             f"{item.get('rank')}. [#{item.get('number')} {item.get('title')}]({item.get('url')}) "
             f"[{item.get('state')}] - "
-            f"{item.get('review_depth')} / main_risk=`{item.get('main_risk_level')}`: {item.get('why_now')}"
+            f"{item.get('review_depth')} / risk_hint=`{item.get('risk_hint_level')}`: {item.get('why_now')}"
         )
 
     for pr in [item for item in _as_list(payload.get("pull_requests")) if isinstance(item, dict)]:
+        template = _as_dict(pr.get("review_template"))
         lines.extend(
             [
                 "",
                 f"## PR #{pr.get('number')}: {pr.get('title')}",
+                "",
+                "> Agentloop should fill the five-block review after reading the PR body and diff. The template below is intentionally blank.",
                 "",
                 f"- url: {pr.get('url')}",
                 f"- state: `{pr.get('state')}`",
                 f"- merged_at: `{pr.get('merged_at') or 'n/a'}`",
                 f"- branch: `{pr.get('head_ref')}` -> `{pr.get('base_ref')}`",
                 f"- status: review=`{pr.get('review_decision')}`, merge=`{pr.get('merge_state')}`, draft=`{pr.get('is_draft')}`",
-                f"- motivation: {pr.get('motivation')}",
                 f"- scale: files=`{_as_dict(pr.get('scale')).get('changed_files')}`, +`{_as_dict(pr.get('scale')).get('additions')}`, -`{_as_dict(pr.get('scale')).get('deletions')}`",
                 f"- areas: `{json.dumps(pr.get('areas') or {}, ensure_ascii=False)}`",
                 f"- checks: {_as_dict(pr.get('checks')).get('summary')}",
             ]
         )
+        risk_hint = _as_dict(pr.get("metadata_risk_hint"))
+        if risk_hint:
+            lines.append(
+                f"- metadata risk hint: `{risk_hint.get('level')}` "
+                f"({'; '.join(str(item) for item in _as_list(risk_hint.get('basis')))})"
+            )
+            lines.append(f"- risk hint disclaimer: {risk_hint.get('disclaimer')}")
         commits = [item for item in _as_list(pr.get("commit_headlines")) if item]
         if commits:
             lines.append("- commits: " + "; ".join(f"`{item}`" for item in commits))
@@ -809,32 +930,28 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         if key_files:
             lines.append("- key files:")
             for item in key_files[:8]:
-                lines.append(f"  - `{item.get('path')}` ({item.get('area')})")
+                lines.append(
+                    f"  - `{item.get('path')}` ({item.get('area')}, "
+                    f"+{_int_or_zero(item.get('additions'))}/-{_int_or_zero(item.get('deletions'))})"
+                )
+        commands = [item for item in _as_list(pr.get("evidence_commands")) if item]
+        if commands:
+            lines.append("- suggested read commands:")
+            for item in commands[:4]:
+                lines.append(f"  - `{item}`")
+        review_order = [str(item) for item in _as_list(template.get("review_order")) if item]
+        if review_order:
+            lines.append("- 推荐阅读顺序: " + " -> ".join(f"`{item}`" for item in review_order))
         risks = [item for item in _as_list(pr.get("risk_notes")) if item]
         lines.append("- risk notes: " + ("; ".join(str(item) for item in risks) if risks else "none"))
-        main_risk = _as_dict(pr.get("main_regression_analysis"))
-        if main_risk:
-            lines.append(
-                f"- main regression risk: `{main_risk.get('risk_level')}` - {main_risk.get('risk_summary')}"
-            )
-            regressions = [item for item in _as_list(main_risk.get("potential_regressions")) if item]
-            if regressions:
-                lines.append("- potential main regressions:")
-                for item in regressions[:4]:
-                    lines.append(f"  - {item}")
-            bug_risks = [item for item in _as_list(main_risk.get("bug_risks")) if item]
-            if bug_risks:
-                lines.append("- bug risks:")
-                for item in bug_risks[:4]:
-                    lines.append(f"  - {item}")
-            verification = [item for item in _as_list(main_risk.get("verification_focus")) if item]
-            if verification:
-                lines.append("- verification focus:")
-                for item in verification[:4]:
-                    lines.append(f"  - {item}")
-        prompts = [item for item in _as_list(pr.get("review_prompts")) if item]
-        if prompts:
-            lines.append("- review prompts: " + " / ".join(str(item) for item in prompts))
+        sections = [item for item in _as_list(template.get("sections")) if isinstance(item, dict)]
+        if sections:
+            lines.append("- 五块模板（留空给 agentloop 填写）:")
+            for item in sections:
+                lines.append(
+                    f"  - {item.get('label')}（{item.get('word_hint')}）："
+                    f" {item.get('agent_instruction')}"
+                )
 
     lines.extend(["", "## Boundary", "- Public PR metadata only; raw/private material is omitted."])
     return "\n".join(lines)
