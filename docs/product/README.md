@@ -15,6 +15,10 @@ runtime contract, benchmark route, or launch draft.
   Arbor-inspired but LoopX-native design for turning research hypotheses into
   todo-linked, agent-scoped, evidence-backed work without adding a single
   leader agent.
+- [Auto-research command path](../guides/auto-research-command-path.md): the
+  operator-facing path from a clean workspace to an inspectable visible
+  multi-agent rehearsal, including artifacts, digital employees, progress
+  checks, stop, and takeover controls.
 - [Auto-research product metrics](auto-research-product-metrics.md):
   user-facing value metrics for auto research, including time to first scored
   attempt, useful hypotheses per day, held-out lift, negative-evidence reuse,
