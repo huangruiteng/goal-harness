@@ -14,6 +14,9 @@ incident report, or launch draft.
 - [Newcomer command path](guides/newcomer-command-path.md): the minimal product
   path for `/loopx`, `/loopx <goal>`, and one CLI quickstart before the full
   command catalog.
+- [Auto-research command path](guides/auto-research-command-path.md): the
+  shortest visible route from a clean workspace to an inspectable multi-agent
+  auto-research rehearsal with stop and takeover controls.
 - [Product vision](product/vision.md): long-term product direction, Loop Agent
   definition, maintainer-first management surface, and open-source anchor
   strategy.
@@ -74,6 +77,7 @@ incident report, or launch draft.
 
 - [Getting started](guides/getting-started.md)
 - [Newcomer command path](guides/newcomer-command-path.md)
+- [Auto-research command path](guides/auto-research-command-path.md)
 - [Integration guide](integration.md)
 - [Benchmark developer workflow](benchmark-developer-workflow.md)
 - [Attention queue](attention-queue.md)
