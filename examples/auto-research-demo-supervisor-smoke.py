@@ -61,19 +61,36 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
         "control-plane-guard",
     ], payload
     for lane in lanes:
+        profile = lane["role_profile"]
+        assert profile["schema_version"] == "auto_research_role_profile_v0", profile
+        assert profile["agent_id"] == lane["agent_id"], profile
+        assert profile["lane_id"] == lane["lane_id"], profile
+        assert profile["required_skill"] == "loopx-auto-research", profile
+        assert profile["role_id"], profile
+        assert profile["phase"], profile
+        assert profile["allowed_actions"], profile
+        assert profile["write_scope"], profile
+        assert profile["protected_scope"], profile
+        assert profile["stop_conditions"], profile
+        assert profile["takeover_controls"], profile
         assert "quota should-run" in lane["quota_guard"], lane
         assert f"--agent-id {lane['agent_id']}" in lane["quota_guard"], lane
         assert "auto-research frontier" in lane["frontier"], lane
         assert "codex-cli-bootstrap-message" in lane["bootstrap_message"], lane
+        assert "[LoopX role profile]" in lane["visible_launch_command"], lane
+        assert "LOOPX_ROLE_PROFILE_JSON" in lane["visible_launch_command"], lane
+        assert "LOOPX_REQUIRED_SKILL" in lane["visible_launch_command"], lane
         assert lane["visible_codex_tui"] == "codex", lane
         phases = [item["phase"] for item in lane["lane_timeline"]]
         assert phases == [
+            "role_profile",
             "quota_guard",
             "frontier_projection",
             "bootstrap_prompt",
             "visible_codex",
         ], lane
-        assert lane["lane_timeline"][0]["command_ref"] == "quota_guard", lane
+        assert lane["lane_timeline"][0]["command_ref"] == "role_profile", lane
+        assert lane["lane_timeline"][1]["command_ref"] == "quota_guard", lane
         assert "operator is attached" in lane["lane_timeline"][-1]["continue_when"], lane
 
     start_script = "\n".join(payload["commands"]["start_script"])
@@ -182,6 +199,9 @@ def main() -> int:
     assert "# LoopX Auto Research Demo Supervisor" in markdown, markdown
     assert "leader_agent_required: `False`" in markdown, markdown
     assert "## Lane Timeline" in markdown, markdown
+    assert "## Role Profiles" in markdown, markdown
+    assert "required_skill: `loopx-auto-research`" in markdown, markdown
+    assert "`role_profile` via `role_profile`" in markdown, markdown
     assert "`quota_guard` via `quota_guard`" in markdown, markdown
     assert "## One-Click Dry Run" in markdown, markdown
     assert "copy_paste_dry_run_rehearsal" in markdown, markdown

@@ -25,6 +25,7 @@ AUTO_RESEARCH_ROLLOUT_APPEND_SCHEMA_VERSION = "auto_research_rollout_append_v0"
 AUTO_RESEARCH_QUICKSTART_SCHEMA_VERSION = "auto_research_quickstart_v0"
 AUTO_RESEARCH_DEMO_SUPERVISOR_SCHEMA_VERSION = "auto_research_demo_supervisor_plan_v0"
 AUTO_RESEARCH_DEMO_ACCEPTANCE_PACKET_SCHEMA_VERSION = "auto_research_demo_acceptance_packet_v0"
+AUTO_RESEARCH_ROLE_PROFILE_SCHEMA_VERSION = "auto_research_role_profile_v0"
 AUTO_RESEARCH_DEFAULT_GOAL_ID = "loopx-auto-research-knn"
 AUTO_RESEARCH_DEFAULT_OBJECTIVE = "Improve exact k-nearest-neighbor inference under a protected evaluator."
 AUTO_RESEARCH_QUICKSTART_TEMPLATE = "knn-exact"
@@ -51,6 +52,92 @@ AUTO_RESEARCH_DEMO_DEFAULT_LANES = (
         "Turn accepted evidence into public-safe showcase and value-metric summaries.",
     ),
 )
+
+AUTO_RESEARCH_DEMO_LANE_PROFILES: dict[str, dict[str, Any]] = {
+    "hypothesis-runner": {
+        "role_id": "evidence_runner",
+        "display_name": "Hypothesis runner",
+        "phase": "frontier_selected",
+        "capability_token": "evidence_runner",
+        "allowed_actions": [
+            "claim_attempt",
+            "edit_allowed_scope",
+            "run_dev_eval",
+            "write_evidence",
+        ],
+        "write_scope": ["examples/auto_research_knn_pack/**", "experiments/**", "solution.py"],
+        "protected_scope": ["protected_eval.py", "eval.py", "data/**"],
+        "skill_section": "Evidence runner",
+        "handoff_outputs": [
+            "auto_research_evidence_packet_v0",
+            "branch_or_artifact_ref",
+            "retry_or_retirement_rationale",
+        ],
+    },
+    "evidence-promoter": {
+        "role_id": "evidence_verifier",
+        "display_name": "Evidence promoter",
+        "phase": "evidence_recorded",
+        "capability_token": "evidence_verifier",
+        "allowed_actions": [
+            "classify_evidence",
+            "write_promotion_candidate",
+            "write_retirement_candidate",
+            "write_gate_todo",
+        ],
+        "write_scope": [
+            "research_evidence_event_v0",
+            "promotion_candidates/**",
+            "retirement_candidates/**",
+        ],
+        "protected_scope": ["protected_eval.py", "eval.py", "data/**"],
+        "skill_section": "Evidence verifier",
+        "handoff_outputs": [
+            "evaluation_summary",
+            "promotion_or_retirement_candidate",
+            "gate_todo",
+        ],
+    },
+    "control-plane-guard": {
+        "role_id": "research_curator",
+        "display_name": "Control-plane guard",
+        "phase": "contract_ready",
+        "capability_token": "research_curator",
+        "allowed_actions": [
+            "run_quota_status_check",
+            "validate_public_boundary",
+            "record_gate_or_blocker",
+            "verify_takeover_controls",
+        ],
+        "write_scope": ["research_contract_v0", "gate_todos/**", "boundary_notes/**"],
+        "protected_scope": ["credentials", "raw_logs", "session_files", "private_material"],
+        "skill_section": "Control-plane guard",
+        "handoff_outputs": [
+            "boundary_check",
+            "operator_gate_todo",
+            "takeover_acceptance_note",
+        ],
+    },
+    "research-narrator": {
+        "role_id": "product_narrator",
+        "display_name": "Research narrator",
+        "phase": "research_showcase_projection_v0",
+        "capability_token": "product_narrator",
+        "allowed_actions": [
+            "render_read_only_projection",
+            "summarize_promoted_retired_retry_evidence",
+            "request_first_screen_review",
+        ],
+        "write_scope": ["research_showcase_projection_v0", "docs/product/**", "apps/dashboard/**"],
+        "protected_scope": ["raw_logs", "private_material", "protected_eval.py", "data/**"],
+        "skill_section": "Projection narrator",
+        "handoff_outputs": [
+            "research_showcase_projection_v0",
+            "public_safe_value_summary",
+            "first_screen_review_request",
+        ],
+    },
+}
 
 HYPOTHESIS_STATUSES = {
     "proposed",
@@ -623,6 +710,74 @@ def _env_bootstrap_command(*, cli_bin: str, goal_id: str, agent_id: str) -> str:
     )
 
 
+def _demo_role_profile(*, goal_id: str, lane: dict[str, str]) -> dict[str, Any]:
+    lane_id = _compact_public_token(lane.get("lane_id"), field="lane_id")
+    agent_id = _compact_public_token(lane.get("agent_id"), field="agent_id")
+    template = AUTO_RESEARCH_DEMO_LANE_PROFILES.get(lane_id) or {
+        "role_id": "research_curator",
+        "display_name": "Research lane",
+        "phase": "contract_ready",
+        "capability_token": "research_curator",
+        "allowed_actions": ["inspect_frontier", "record_blocker"],
+        "write_scope": ["research_contract_v0", "gate_todos/**"],
+        "protected_scope": ["credentials", "raw_logs", "session_files", "private_material"],
+        "skill_section": "Research curator",
+        "handoff_outputs": ["blocker_or_next_action"],
+    }
+    profile = {
+        "schema_version": AUTO_RESEARCH_ROLE_PROFILE_SCHEMA_VERSION,
+        "goal_id": goal_id,
+        "agent_id": agent_id,
+        "lane_id": lane_id,
+        "role_id": template["role_id"],
+        "display_name": template["display_name"],
+        "phase": template["phase"],
+        "capability_token": template["capability_token"],
+        "required_skill": "loopx-auto-research",
+        "skill_section": template["skill_section"],
+        "allowed_actions": list(template["allowed_actions"]),
+        "write_scope": list(template["write_scope"]),
+        "protected_scope": list(template["protected_scope"]),
+        "agents_overlay": ["AGENTS.md"],
+        "stop_conditions": [
+            "quota should-run returns false",
+            "frontier is empty, contradictory, or claimed by another agent",
+            "protected scope would be edited",
+            "private material, raw logs, session files, or credentials are required",
+            "operator gate is projected",
+        ],
+        "takeover_controls": [
+            "tmux attach before accepting any Codex prompt",
+            "normal terminal interrupt for one lane",
+            "tmux kill-session for whole demo abort",
+        ],
+        "handoff_outputs": list(template["handoff_outputs"]),
+        "identity_resolution_order": [
+            "role_profile",
+            "quota_should_run",
+            "auto_research_frontier",
+            "AGENTS.md",
+            "loopx-auto-research skill section",
+        ],
+    }
+    return profile
+
+
+def _role_profile_shell_prefix(role_profile: dict[str, Any]) -> str:
+    profile_json = json.dumps(role_profile, sort_keys=True, separators=(",", ":"))
+    return (
+        f"export LOOPX_AGENT_ID={_shell_arg(str(role_profile['agent_id']))}; "
+        f"export LOOPX_ROLE_ID={_shell_arg(str(role_profile['role_id']))}; "
+        f"export LOOPX_ROLE_PHASE={_shell_arg(str(role_profile['phase']))}; "
+        f"export LOOPX_ROLE_PROFILE_REF={_shell_arg(str(role_profile['schema_version']))}; "
+        f"export LOOPX_REQUIRED_SKILL={_shell_arg(str(role_profile['required_skill']))}; "
+        f"LOOPX_ROLE_PROFILE_JSON={_shell_arg(profile_json)}; "
+        "export LOOPX_ROLE_PROFILE_JSON; "
+        "printf '\\n[LoopX role profile]\\n'; "
+        "printf '%s\\n' \"$LOOPX_ROLE_PROFILE_JSON\"; "
+    )
+
+
 _QUOTA_GATE_PY = (
     "import json,sys; "
     "p=json.load(sys.stdin); "
@@ -640,10 +795,13 @@ def _env_lane_launch_command(
     frontier_command: str,
     bootstrap_command: str,
     codex_bin: str,
+    role_profile: dict[str, Any],
 ) -> str:
+    role_profile_prefix = _role_profile_shell_prefix(role_profile)
     return (
         "set -euo pipefail; "
         'cd "$LOOPX_PROJECT"; '
+        f"{role_profile_prefix}"
         "printf '\\n[LoopX quota guard]\\n'; "
         f"QUOTA_PACKET=\"$({quota_command})\"; "
         "printf '%s\\n' \"$QUOTA_PACKET\"; "
@@ -711,11 +869,13 @@ def build_auto_research_demo_supervisor_plan(
         quota_command = _env_quota_command(cli_bin=cli, goal_id=goal, agent_id=agent_id)
         frontier_command = _env_frontier_command(cli_bin=cli, goal_id=goal, agent_id=agent_id)
         bootstrap_command = _env_bootstrap_command(cli_bin=cli, goal_id=goal, agent_id=agent_id)
+        role_profile = _demo_role_profile(goal_id=goal, lane=lane)
         pane_plans.append(
             {
                 "lane_id": lane_id,
                 "agent_id": agent_id,
                 "responsibility": lane["responsibility"],
+                "role_profile": role_profile,
                 "window_name": lane_id,
                 "quota_guard": quota_command,
                 "frontier": frontier_command,
@@ -726,14 +886,23 @@ def build_auto_research_demo_supervisor_plan(
                     frontier_command=frontier_command,
                     bootstrap_command=bootstrap_command,
                     codex_bin=codex,
+                    role_profile=role_profile,
                 ),
                 "start_sequence": [
+                    "print role_profile_v0 identity before any quota/frontier/bootstrap command",
                     "run quota_guard and stop when user_channel.action_required=true",
                     "render the lane frontier from LoopX state",
                     "print the public-safe bootstrap message for this visible TUI",
                     "start Codex CLI visibly; do not inject hidden prompts into an existing session",
                 ],
                 "lane_timeline": [
+                    {
+                        "phase": "role_profile",
+                        "command_ref": "role_profile",
+                        "operator_visible_signal": "agent_id, role_id, phase, required skill, write boundary, stop conditions, and takeover controls",
+                        "continue_when": "profile matches quota/frontier identity for this lane",
+                        "stop_when": "profile conflicts with quota, frontier, AGENTS.md, or required skill",
+                    },
                     {
                         "phase": "quota_guard",
                         "command_ref": "quota_guard",
@@ -816,6 +985,7 @@ def build_auto_research_demo_supervisor_plan(
             "leader_agent_required": False,
             "supervisor_role": "host_shell_layout_only",
             "source_of_truth": [
+                "role_profile_v0",
                 "quota_should_run",
                 "todo_claims",
                 "auto_research_frontier",
@@ -859,6 +1029,7 @@ def build_auto_research_demo_supervisor_plan(
                 "commands.start_script",
                 "commands.attach",
                 "commands.stop",
+                "lanes[].role_profile",
                 "lanes[].quota_guard",
                 "lanes[].frontier",
                 "lanes[].bootstrap_message",
@@ -868,6 +1039,7 @@ def build_auto_research_demo_supervisor_plan(
             ],
             "operator_can_accept_when": [
                 "the rehearsal script prints the real start script without executing it",
+                "every lane prints role_profile_v0 before quota, frontier, bootstrap, or Codex startup",
                 "every lane has a quota guard before frontier/bootstrap/Codex startup",
                 "the attach command is visible before any Codex prompt is accepted",
                 "the stop command and terminal interrupt path are visible",
@@ -875,6 +1047,7 @@ def build_auto_research_demo_supervisor_plan(
             ],
             "operator_must_reject_when": [
                 "a lane can start without quota should-run",
+                "a lane lacks a role_profile_v0 identity packet",
                 "the packet hides attach/stop controls",
                 "the packet embeds local absolute paths, credentials, raw sessions, or private links",
                 "the supervisor becomes a leader or writes LoopX state directly",
@@ -891,6 +1064,7 @@ def build_auto_research_demo_supervisor_plan(
             ],
             "visible_status_cues": [
                 "frontier window shows the shared research frontier",
+                "each lane window prints its role profile before quota/frontier/bootstrap",
                 "each lane window prints its own quota guard before Codex starts",
                 "each lane window prints its own auto-research frontier before Codex starts",
                 "bootstrap message is visible in the same pane that would run Codex",
@@ -1018,6 +1192,22 @@ def build_auto_research_demo_acceptance_packet(
         {
             "lane_id": _compact_public_token(lane.get("lane_id"), field="acceptance.lane_id"),
             "agent_id": _compact_public_token(lane.get("agent_id"), field="acceptance.agent_id"),
+            "role_profile_visible": isinstance(lane.get("role_profile"), dict),
+            "role_id": _compact_optional_token(
+                (lane.get("role_profile") or {}).get("role_id") if isinstance(lane.get("role_profile"), dict) else None,
+                field="acceptance.role_id",
+                default="missing_role",
+            ),
+            "phase": _compact_optional_token(
+                (lane.get("role_profile") or {}).get("phase") if isinstance(lane.get("role_profile"), dict) else None,
+                field="acceptance.phase",
+                default="missing_phase",
+            ),
+            "required_skill": _compact_optional_token(
+                (lane.get("role_profile") or {}).get("required_skill") if isinstance(lane.get("role_profile"), dict) else None,
+                field="acceptance.required_skill",
+                default="missing_skill",
+            ),
             "quota_guard_visible": _command_available(lane.get("quota_guard")),
             "frontier_visible": _command_available(lane.get("frontier")),
             "bootstrap_visible": _command_available(lane.get("bootstrap_message")),
@@ -1030,7 +1220,10 @@ def build_auto_research_demo_acceptance_packet(
         for lane in lanes
     ]
     lanes_ready = bool(lane_checks) and all(
-        check["quota_guard_visible"] and check["frontier_visible"] and check["bootstrap_visible"]
+        check["role_profile_visible"]
+        and check["quota_guard_visible"]
+        and check["frontier_visible"]
+        and check["bootstrap_visible"]
         for check in lane_checks
     )
 
@@ -1107,6 +1300,7 @@ def build_auto_research_demo_acceptance_packet(
         "lane_checks": lane_checks,
         "operator_checklist": [
             "Run the dry-run rehearsal first and inspect the printed start script.",
+            "Confirm every lane prints role_profile_v0 with agent_id, role_id, phase, allowed writes, required skill, stop conditions, and takeover controls.",
             "Confirm every lane prints quota should-run before frontier, bootstrap, or Codex.",
             "Confirm attach and stop commands are visible before accepting any Codex prompt.",
             "Confirm the board is read-only and still experimental.",
@@ -2991,6 +3185,34 @@ def render_auto_research_markdown(payload: dict[str, object]) -> str:
             lines.append(
                 f"- `{item.get('lane_id')}` / `{item.get('agent_id')}`: {item.get('responsibility')}"
             )
+        lines.extend(["", "## Role Profiles", ""])
+        for item in lanes:
+            if not isinstance(item, dict):
+                continue
+            profile = item.get("role_profile") if isinstance(item.get("role_profile"), dict) else {}
+            if not profile:
+                continue
+            lines.append(f"### {item.get('lane_id')}")
+            lines.append(f"- role_id: `{profile.get('role_id')}`")
+            lines.append(f"- phase: `{profile.get('phase')}`")
+            lines.append(f"- required_skill: `{profile.get('required_skill')}`")
+            lines.append(f"- skill_section: `{profile.get('skill_section')}`")
+            lines.append(
+                "- allowed_actions: `"
+                + ",".join(str(action) for action in profile.get("allowed_actions") or [])
+                + "`"
+            )
+            lines.append(
+                "- write_scope: `"
+                + ",".join(str(scope) for scope in profile.get("write_scope") or [])
+                + "`"
+            )
+            lines.append(
+                "- stop_conditions: `"
+                + " | ".join(str(condition) for condition in profile.get("stop_conditions") or [])
+                + "`"
+            )
+            lines.append("")
         lines.extend(["", "## Lane Timeline", ""])
         for item in lanes:
             if not isinstance(item, dict):
