@@ -17,6 +17,7 @@ import loopx.pr_review as pr_review_module
 from loopx.pr_review import _github_search_date
 
 FIXTURE = REPO_ROOT / "examples" / "fixtures" / "pr-review.public.json"
+PR_REVIEW_SKILL = REPO_ROOT / "skills" / "loopx-pr-review" / "SKILL.md"
 PRIVATE_PATTERNS = [
     re.compile(r"/" + r"Users/[A-Za-z0-9._-]+/"),
     re.compile(r"/" + r"private/"),
@@ -45,6 +46,21 @@ def assert_public_safe(payload: dict[str, object]) -> None:
 
 
 def main() -> int:
+    skill_text = " ".join(PR_REVIEW_SKILL.read_text(encoding="utf-8").split())
+    for phrase in (
+        "Use when the visible request starts with `/loopx-pr-review`",
+        "loopx --format json pr-review --state all",
+        "agent_response_contract",
+        "review_groups",
+        "pull_requests[].review_template",
+        "pull_requests[].evidence_commands",
+        "Do not pipe the first packet through `jq`",
+        "Do not fill the five-block review from title, labels, changed-file counts, or metadata risk hints alone",
+        "Do not use this skill to approve",
+        "Route those decisions to `loopx-pr-merge`",
+    ):
+        assert phrase in skill_text, phrase
+
     assert _github_search_date("2026-06-28T00:00:00+08:00") == "2026-06-27"
     assert _github_search_date("2026-06-28T00:00:00Z") == "2026-06-28"
     calls: list[list[str]] = []
@@ -164,6 +180,29 @@ def main() -> int:
     assert risk_hint["level"] == "low", risk_hint
     assert "Metadata-only" in risk_hint["disclaimer"], risk_hint
     assert "quota.py" not in json.dumps(risk_hint), risk_hint
+    response_contract = payload["agent_response_contract"]
+    assert response_contract["schema_version"] == "pr_review_agent_response_contract_v0", response_contract
+    assert response_contract["table_only_response_allowed"] is False, response_contract
+    assert response_contract["slash_prefix_dominates_intent"] is True, response_contract
+    assert response_contract["stats_only_requires_explicit_opt_out"] is True, response_contract
+    assert response_contract["queue_table_role"] == "preface_only", response_contract
+    assert response_contract["required_packet_fields_to_preserve"] == [
+        "agent_response_contract",
+        "review_groups",
+        "pull_requests[].review_template",
+        "pull_requests[].evidence_commands",
+    ], response_contract
+    assert response_contract["required_final_sections"] == [
+        "动机",
+        "改动思路",
+        "具体改动",
+        "对主干的风险",
+        "我的整体评价",
+    ], response_contract
+    assert any("Do not stop at the queue/table summary" in item for item in response_contract["instructions"])
+    assert any("open, closed, merged, today" in item for item in response_contract["instructions"])
+    assert any("drops agent_response_contract" in item or "Do not pipe the JSON packet" in item for item in response_contract["instructions"])
+    assert any("intended checked-out LoopX worktree" in item for item in response_contract["instructions"])
     merged = next(item for item in payload["pull_requests"] if item["number"] == 770)
     merged_risk_hint = merged["metadata_risk_hint"]
     assert merged_risk_hint["level"] == "medium", merged_risk_hint
@@ -228,6 +267,10 @@ def main() -> int:
     assert "state_filter: `all`" in markdown, markdown
     assert "merged=`" in markdown, markdown
     assert "tool contract: run `loopx pr-review` first" in markdown, markdown
+    assert "final answer contract: queue/table is only a preface" in markdown, markdown
+    assert "## Agent Output Contract" in markdown, markdown
+    assert "Do not stop at the queue/table summary" in markdown, markdown
+    assert "Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`" in markdown, markdown
     assert "## Unmerged PRs" in markdown, markdown
     assert "## Merged PRs" in markdown, markdown
     assert "#770" in markdown, markdown
