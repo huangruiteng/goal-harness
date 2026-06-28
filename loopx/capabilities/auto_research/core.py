@@ -3375,7 +3375,7 @@ def render_auto_research_markdown(payload: dict[str, object]) -> str:
                 f"- `{item.get('lane_id')}` / `{item.get('agent_id')}` / `{item.get('role_id')}`: "
                 f"{item.get('responsibility')}"
             )
-        lines.extend(["", "## Role Profiles", ""])
+        lines.extend(["", "## Role Profile Summary", ""])
         for item in lanes:
             if not isinstance(item, dict):
                 continue
