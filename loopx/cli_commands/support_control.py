@@ -27,7 +27,13 @@ from ..registry import (
     render_registry_markdown,
     resolve_state_file,
 )
-from ..self_update import build_update_plan, execute_update_plan, render_update_plan_markdown
+from ..self_update import (
+    build_rollback_plan,
+    build_update_plan,
+    execute_rollback_plan,
+    execute_update_plan,
+    render_update_plan_markdown,
+)
 from ..state_backup import (
     build_state_backup_plan,
     execute_state_backup_plan,
@@ -246,6 +252,11 @@ def register_support_control_commands(
     update_mode.add_argument("--check", action="store_true", help="Only report install freshness and update source.")
     update_mode.add_argument("--dry-run", action="store_true", help="Preview the update plan without installing.")
     update_mode.add_argument("--execute", action="store_true", help="Run the installer and validate with loopx doctor.")
+    update_mode.add_argument(
+        "--rollback",
+        metavar="RELEASE_ID",
+        help="Repoint the user-local loopx command to a release id, or use `previous` for the prior snapshot.",
+    )
     update_parser.add_argument(
         "--repo",
         help="GitHub repo owner/name used by the installer archive. Defaults to LOOPX_REPO or huangruiteng/loopx.",
@@ -502,15 +513,19 @@ def handle_support_control_command(
 
     if args.command == "update":
         try:
-            payload = build_update_plan(
-                repo=args.repo,
-                ref=args.ref,
-                archive_url=args.archive_url,
-                check_only=args.check,
-                execute=args.execute,
-            )
-            if args.execute:
-                payload = execute_update_plan(payload, timeout_seconds=args.timeout_seconds)
+            if args.rollback:
+                payload = build_rollback_plan(release_id=args.rollback)
+                payload = execute_rollback_plan(payload, timeout_seconds=args.timeout_seconds)
+            else:
+                payload = build_update_plan(
+                    repo=args.repo,
+                    ref=args.ref,
+                    archive_url=args.archive_url,
+                    check_only=args.check,
+                    execute=args.execute,
+                )
+                if args.execute:
+                    payload = execute_update_plan(payload, timeout_seconds=args.timeout_seconds)
         except Exception as exc:
             payload = {
                 "ok": False,
