@@ -6,6 +6,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -477,6 +478,12 @@ def _launch_auto_research_with_tmux(
         started_lanes.append(lane_id)
     if attach:
         subprocess.run([tmux_bin, "attach", "-t", session], check=True, env=env)
+    acceptance = _tmux_visible_launch_acceptance(
+        tmux_bin=tmux_bin,
+        session=session,
+        expected_lanes=started_lanes,
+        env=env,
+    )
     return {
         "schema_version": "auto_research_demo_launch_result_v0",
         "executed": True,
@@ -484,11 +491,101 @@ def _launch_auto_research_with_tmux(
         "session_name": session,
         "started_lane_count": len(started_lanes),
         "started_lanes": started_lanes,
+        "surviving_lane_count": len(acceptance["surviving_lanes"]),
+        "surviving_lanes": acceptance["surviving_lanes"],
         "attach_command": f"{tmux_bin} attach -t {session}",
         "stop_command": f"{tmux_bin} kill-session -t {session}",
         "workspace_mode": workspace_mode,
         "attach_requested": attach,
         "operator_takeover": "attach to the tmux session, interrupt any lane, or kill the session",
+        "visible_acceptance": acceptance,
+    }
+
+
+def _tmux_visible_launch_acceptance(
+    *,
+    tmux_bin: str,
+    session: str,
+    expected_lanes: list[str],
+    env: dict[str, str],
+) -> dict[str, object]:
+    """Read back tmux pane evidence so launch success is not only process creation."""
+
+    # Give shells a short moment to render preflight markers before capture.
+    time.sleep(0.2)
+    list_result = subprocess.run(
+        [tmux_bin, "list-windows", "-t", session, "-F", "#{window_name}"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    observed_windows = [
+        line.strip()
+        for line in list_result.stdout.splitlines()
+        if line.strip()
+    ]
+    surviving_lanes = [lane for lane in expected_lanes if lane in observed_windows]
+    required_markers = [
+        "[LoopX quota guard]",
+        "[bootstrap-or-stop]",
+    ]
+    lane_checks: list[dict[str, object]] = []
+    for lane in expected_lanes:
+        capture_result = subprocess.run(
+            [tmux_bin, "capture-pane", "-pt", f"{session}:{lane}", "-S", "-200"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        capture = capture_result.stdout
+        role_profile_visible = (
+            "[LoopX role profile]" in capture
+            or "[LoopX role_profile]" in capture
+        )
+        markers_present = [marker for marker in required_markers if marker in capture]
+        if role_profile_visible:
+            markers_present.insert(0, "[LoopX role profile]")
+        frontier_or_blocker_visible = (
+            "[LoopX auto-research frontier]" in capture
+            or "[LoopX blocked reason]" in capture
+        )
+        lane_checks.append(
+            {
+                "lane_id": lane,
+                "window_survived": lane in surviving_lanes,
+                "capture_available": capture_result.returncode == 0,
+                "role_profile_visible": role_profile_visible,
+                "quota_packet_visible": "[LoopX quota guard]" in capture,
+                "frontier_or_blocked_reason_visible": frontier_or_blocker_visible,
+                "bootstrap_or_stop_visible": "[bootstrap-or-stop]" in capture,
+                "markers_present": markers_present,
+            }
+        )
+    accepted = (
+        list_result.returncode == 0
+        and len(surviving_lanes) == len(expected_lanes)
+        and all(
+            item["role_profile_visible"]
+            and item["quota_packet_visible"]
+            and item["frontier_or_blocked_reason_visible"]
+            and item["bootstrap_or_stop_visible"]
+            for item in lane_checks
+        )
+    )
+    return {
+        "schema_version": "auto_research_visible_launch_acceptance_v0",
+        "accepted": accepted,
+        "observed_windows": observed_windows,
+        "expected_lanes": expected_lanes,
+        "surviving_lanes": surviving_lanes,
+        "missing_lanes": [lane for lane in expected_lanes if lane not in surviving_lanes],
+        "pane_checks": lane_checks,
+        "takeover_controls_visible": {
+            "attach_command": f"{tmux_bin} attach -t {session}",
+            "stop_command": f"{tmux_bin} kill-session -t {session}",
+        },
     }
 
 
