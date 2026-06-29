@@ -48,6 +48,11 @@ from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
     run_skillsbench_remote_command_file_bridge_probe,
     skillsbench_remote_command_file_bridge_command_is_fixture_probe,
 )
+from loopx.benchmark_case_state import (  # noqa: E402
+    BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID,
+    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
+    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
+)
 from loopx.status import (  # noqa: E402
     build_skillsbench_post_run_debug_gate,
     compact_benchmark_run,
@@ -71,12 +76,14 @@ from scripts.skillsbench_automation_loop import (  # noqa: E402
     PRODUCT_MODE_MIN_FORMAL_MAX_ROUNDS,
     PRODUCT_MODE_CASE_STATE_PATH,
     PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION,
+    RUNNER_CONFIG_PUBLIC_FILENAME,
     RUNNER_PREREQUISITES_PUBLIC_FILENAME,
     SkillsBenchProductModeNoLifecycleRequests,
     VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN,
     _tail,
     _apply_agent_message_only_no_tool_calls_attribution,
     _blind_loop_persistent_continuation_clause,
+    _build_goal_start_product_mode_control_score,
     _build_product_mode_user,
     _copy_loopx_source_subset,
     _host_local_acp_launch_command,
@@ -7577,6 +7584,176 @@ def test_skillsbench_agent_bridge_closeout_requires_successful_commands() -> Non
         assert contract.get("closeout_satisfied") is not True, compact
 
 
+def test_skillsbench_goal_start_repeated_selected_todo_complete_is_diagnosed() -> None:
+    selected_todo_id = BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
+    command_records = [
+        {
+            "subcommand": "todo claim",
+            "todo_id": selected_todo_id,
+            "goal_id": "skillsbench-case",
+        },
+        {
+            "subcommand": "todo update",
+            "todo_id": selected_todo_id,
+            "goal_id": "skillsbench-case",
+        },
+    ]
+    command_records.extend(
+        {
+            "subcommand": "todo complete",
+            "todo_id": selected_todo_id,
+            "goal_id": "skillsbench-case",
+        }
+        for _ in range(7)
+    )
+    command_records.extend({"subcommand": "refresh-state"} for _ in range(7))
+    with tempfile.TemporaryDirectory(prefix="skillsbench-repeat-complete-") as tmp:
+        trace_dir = Path(tmp)
+        write_json(
+            trace_dir / "worker-agent-ops.compact.json",
+            {
+                "schema_version": "skillsbench_host_local_acp_relay_public_trace_v0",
+                "ok": True,
+                "route": "loopx-goal-start-product-mode",
+                "trace_kind": "remote_command_file_bridge_agent_operations",
+                "benchmark_id": "skillsbench@1.1",
+                "task_id": "paratransit-routing",
+                "remote_command_file_bridge_agent_operations": {
+                    "schema_version": (
+                        "skillsbench_remote_command_file_bridge_agent_operations_v0"
+                    ),
+                    "request_count": len(command_records),
+                    "success_count": len(command_records),
+                    "failure_count": 0,
+                    "operation_counts": {"exec": len(command_records)},
+                    "returncode_counts": {"0": len(command_records)},
+                    "loopx_cli_call_count": len(command_records),
+                    "loopx_cli_subcommand_counts": {
+                        "todo claim": 1,
+                        "todo update": 1,
+                        "todo complete": 7,
+                        "refresh-state": 7,
+                    },
+                    "successful_loopx_cli_subcommand_counts": {
+                        "todo claim": 1,
+                        "todo update": 1,
+                        "todo complete": 7,
+                        "refresh-state": 7,
+                    },
+                    "successful_loopx_cli_command_records": command_records,
+                    "loopx_state_read_count": 0,
+                    "loopx_state_write_count": len(command_records),
+                    "task_facing_operation_count": 0,
+                    "raw_material_recorded": False,
+                },
+                "boundary": {
+                    "raw_command_recorded": False,
+                    "raw_stdout_recorded": False,
+                    "raw_stderr_recorded": False,
+                    "raw_task_text_recorded": False,
+                    "raw_logs_recorded": False,
+                    "raw_trajectory_recorded": False,
+                    "credential_values_recorded": False,
+                    "host_paths_recorded": False,
+                    "remote_paths_recorded": False,
+                },
+            },
+        )
+        plan = {
+            "host_local_acp_relay_trace_dir": str(trace_dir),
+            "runner_prerequisites": {
+                "goal_start_product_mode": True,
+                "goal_start_plan_required": True,
+                "goal_start_planned_todo_count_expected": 3,
+                "remote_command_file_bridge_agent_operation_trace_required": True,
+                "planned_todo_ids": list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS),
+                "planned_todo_texts_public_safe": list(
+                    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS
+                ),
+            },
+        }
+        trace = {
+            "schema_version": "skillsbench_loopx_controller_trace_v0",
+            "route": "loopx-goal-start-product-mode",
+            "trace_publicness": "public_counts_only_no_task_text_no_verifier_output",
+        }
+        _merge_host_local_acp_relay_trace_summary(plan, trace)
+        assert (
+            trace[
+                "remote_command_file_bridge_agent_successful_loopx_command_records"
+            ][2]["todo_id"]
+            == selected_todo_id
+        ), trace
+
+        compact = {
+            "interaction_counters": {
+                **trace,
+                "goal_start_product_mode": True,
+                "goal_start_plan_observed": True,
+                "planner_before_todo_write": True,
+                "same_priority_order_preserved": True,
+                "planned_todo_count": 3,
+                "planned_p0_count": 1,
+                "selected_p0_todo_id": selected_todo_id,
+                "planned_todo_ids": list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS),
+                "planned_todo_texts_public_safe": list(
+                    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS
+                ),
+                "non_selected_todos_preserved_open_or_deferred": True,
+            }
+        }
+        control = _build_goal_start_product_mode_control_score(compact, plan)
+        assert control["satisfied"] is False, control
+        assert control["agent_todo_complete_count"] == 7, control
+        assert control["agent_todo_complete_unique_todo_count"] == 1, control
+        assert control["selected_todo_complete_count"] == 7, control
+        assert control["selected_todo_duplicate_complete_count"] == 6, control
+        assert control["non_selected_todo_complete_count"] == 0, control
+        assert control["quota_spend_missing_after_repeated_complete"] is True, control
+        snapshot = control["goal_start_todo_snapshot"]
+        assert len(snapshot["planned_todos"]) == 3, snapshot
+        assert snapshot["planned_todos"][0]["status"] == "done_observed", snapshot
+        assert snapshot["planned_todos"][1]["status"] == (
+            "open_or_deferred_observed"
+        ), snapshot
+        assert snapshot["completed_todo_ids"] == [selected_todo_id], snapshot
+
+        compact["goal_start_product_mode_control_score"] = control
+        timeline = skillsbench_loop._build_case_event_timeline(compact, plan)
+        goal_event = next(
+            event
+            for event in timeline["events"]
+            if event["event"] == "ranked_todo_plan_selected_p0_lifecycle"
+        )
+        assert goal_event["selected_todo_duplicate_complete_count"] == 6, goal_event
+        assert (
+            goal_event["quota_spend_missing_after_repeated_complete"] is True
+        ), goal_event
+
+        recompacted = compact_benchmark_run(
+            {
+                "schema_version": "benchmark_run_v0",
+                "source_runner": "official_skillsbench_benchflow_result",
+                "benchmark_id": "skillsbench@1.1",
+                "case_id": "paratransit-routing",
+                "arm_id": "loopx",
+                "goal_start_product_mode_control_score": control,
+                "interaction_counters": compact["interaction_counters"],
+                "case_event_timeline": timeline,
+            }
+        )
+        recompacted_snapshot = recompacted["goal_start_product_mode_control_score"][
+            "goal_start_todo_snapshot"
+        ]
+        assert recompacted_snapshot["planned_todos"][0]["complete_count"] == 7
+        assert (
+            recompacted["interaction_counters"][
+                "remote_command_file_bridge_agent_successful_loopx_command_records"
+            ][2]["todo_id"]
+            == selected_todo_id
+        )
+
+
 def test_skillsbench_product_mode_recompact_prefers_corroborated_solver_gap() -> None:
     compact = compact_benchmark_run(
         {
@@ -9503,6 +9680,117 @@ def test_skillsbench_runner_failure_recovers_zero_score_from_controller_trace() 
         assert "PRIVATE_INTERRUPTION_DETAIL_SHOULD_NOT_ESCAPE" not in json.dumps(
             compact
         ), compact
+
+
+def test_skillsbench_runner_failure_recovers_passing_score_from_verifier_artifact() -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="skillsbench-verifier-artifact-recovery-"
+    ) as tmp:
+        args = parse_args(
+            [
+                "--task-id",
+                "paratransit-routing",
+                "--route",
+                "loopx-goal-start-product-mode",
+                "--jobs-dir",
+                str(Path(tmp) / "jobs"),
+                "--job-name",
+                "skillsbench-paratransit-verifier-artifact-fixture",
+                "--max-rounds",
+                "16",
+                "--outer-timeout-sec",
+                "3600",
+                "--product-mode-soft-verify-policy",
+                "every-round",
+                "--soft-verifier-timeout-sec",
+                "600",
+            ]
+        )
+        plan = build_plan(args)
+        run_dir = Path(plan["result_json"]).parent
+        verifier_dir = run_dir / "verifier"
+        verifier_dir.mkdir(parents=True, exist_ok=True)
+        (verifier_dir / "reward.txt").write_text("1\n", encoding="utf-8")
+        write_json(
+            verifier_dir / "ctrf.json",
+            {
+                "summary": {
+                    "tests": 7,
+                    "passed": 7,
+                    "failed": 0,
+                    "pending": 0,
+                    "skipped": 0,
+                    "start": 1.0,
+                    "stop": 2.0,
+                }
+            },
+        )
+
+        compact = build_runner_failure_compact(
+            args,
+            plan,
+            TimeoutError("PRIVATE_TIMEOUT_DETAIL_SHOULD_NOT_ESCAPE"),
+        )
+
+        assert compact["runner_return_status"] == (
+            "interrupted_after_verifier_reward_artifact"
+        ), compact
+        assert compact["official_score_status"] == "completed", compact
+        assert compact["official_score"] == 1.0, compact
+        assert compact["official_task_score"] == {
+            "kind": "skillsbench_verifier_reward_recovered_from_verifier_artifact",
+            "passed": True,
+            "value": 1.0,
+        }, compact
+        assert compact["score_failure_attribution"] == "none", compact
+        assert compact["attempt_accounting"]["official_score_attempt_countable"] is True
+        assert compact["attempt_accounting"]["failure_class"] == "none"
+        assert compact["verifier_reward_artifact_recovery"]["passed"] is True
+        assert compact["verifier_reward_artifact_recovery"][
+            "official_result_json_materialized"
+        ] is False
+        assert compact["verifier_reward_artifact_discovery"]["status"] == "found"
+        assert compact["verifier_ctrf_summary"]["tests"] == 7
+        assert compact["verifier_ctrf_summary"]["passed"] == 7
+        assert compact["validation"]["verifier_reward_artifact_recovered"] is True
+        assert compact["validation"]["official_case_success"] is True
+        assert "skillsbench_runner_interrupted_after_verifier_reward_artifact" in compact[
+            "failure_attribution_labels"
+        ], compact
+        assert "skillsbench_result_json_missing_after_runner_exit" not in compact[
+            "failure_attribution_labels"
+        ], compact
+
+        runner_config = compact["runner_config"]
+        assert runner_config["route"] == "loopx-goal-start-product-mode"
+        assert runner_config["max_rounds"] == 16
+        assert runner_config["outer_timeout_sec"] == 3600
+        assert runner_config["product_mode_soft_verify_policy"] == "every-round"
+        assert runner_config["soft_verifier_timeout_sec"] == 600
+        assert runner_config["raw_command_recorded"] is False
+        assert runner_config["raw_env_recorded"] is False
+
+        public_runner_config_path = (
+            Path(plan["jobs_dir"]) / plan["job_name"] / RUNNER_CONFIG_PUBLIC_FILENAME
+        )
+        assert public_runner_config_path.exists(), public_runner_config_path
+        persisted_runner_config = json.loads(
+            public_runner_config_path.read_text(encoding="utf-8")
+        )
+        assert persisted_runner_config["max_rounds"] == 16
+        rollout_config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+        assert rollout_config["loopx_runner_config"]["outer_timeout_sec"] == 3600
+        assert rollout_config["loopx_runner_config_public"] is True
+        assert rollout_config["loopx_runner_config_raw_command_recorded"] is False
+        assert rollout_config["loopx_runner_config_raw_env_recorded"] is False
+
+        events = {event["event"]: event for event in compact["case_event_timeline"]["events"]}
+        assert events["official_score_closeout"]["status"] == "passed"
+        gate = compact["post_run_debug_gate"]
+        assert gate["packet_complete"] is True, gate
+        assert gate["case_closeout_complete"] is True, gate
+        assert gate["normal_progress_allowed"] is True, gate
+        assert "PRIVATE_TIMEOUT_DETAIL_SHOULD_NOT_ESCAPE" not in json.dumps(compact)
 
 
 def test_skillsbench_runner_failure_compact_attributes_agent_no_requests() -> None:
@@ -11805,6 +12093,7 @@ if __name__ == "__main__":
     test_skillsbench_runner_failure_compact_closeout()
     test_skillsbench_runner_failure_case_event_timeline_is_compacted()
     test_skillsbench_runner_failure_recovers_zero_score_from_controller_trace()
+    test_skillsbench_runner_failure_recovers_passing_score_from_verifier_artifact()
     test_skillsbench_runner_failure_prefers_structured_preflight_blocker()
     test_skillsbench_runner_failure_marks_pre_agent_install_stage()
     test_skillsbench_runner_failure_marks_build_stall_timeout()

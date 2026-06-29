@@ -81,6 +81,8 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LOOPX_AGENT_ID,
     BENCHMARK_CASE_LOOPX_CLI_PATH,
+    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
+    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
     BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
     BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
     BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
@@ -154,6 +156,7 @@ DEFAULT_PRODUCT_MODE_SOFT_VERIFY_POLICY = "every-round"
 DEFAULT_MAX_ROUNDS = 16
 PRODUCT_MODE_MIN_FORMAL_MAX_ROUNDS = 10
 RUNNER_PREREQUISITES_PUBLIC_FILENAME = "runner_prerequisites.public.json"
+RUNNER_CONFIG_PUBLIC_FILENAME = "runner_config.public.json"
 HOST_LOCAL_ACP_TARGET_ENV_KEYS = (
     "AI_ADDR",
     "AI_PORT",
@@ -1962,6 +1965,21 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
             for key in target_keys
             if isinstance(key, str) and key in HOST_LOCAL_ACP_TARGET_ENV_KEYS
         ][: len(HOST_LOCAL_ACP_TARGET_ENV_KEYS)]
+    planned_todo_ids = _goal_start_public_todo_id_list(value.get("planned_todo_ids"))
+    if planned_todo_ids:
+        compact["planned_todo_ids"] = planned_todo_ids
+    planned_todo_texts = _goal_start_public_text_list(
+        value.get("planned_todo_texts_public_safe")
+    )
+    if planned_todo_texts:
+        compact["planned_todo_texts_public_safe"] = planned_todo_texts
+    command_records = _goal_start_public_command_records(
+        value.get("remote_command_file_bridge_agent_successful_loopx_command_records")
+    )
+    if command_records:
+        compact[
+            "remote_command_file_bridge_agent_successful_loopx_command_records"
+        ] = command_records
     for field in (
         "host_local_acp_codex_exec_preflight_bridge_returncode_counts",
         "host_local_acp_codex_exec_preflight_bridge_failure_category_counts",
@@ -3581,6 +3599,228 @@ def _goal_start_subcommand_count(
     )
 
 
+_GOAL_START_TODO_ID_RE = re.compile(r"^todo_[A-Za-z0-9_-]{6,80}$")
+_GOAL_START_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
+
+
+def _goal_start_safe_todo_id(value: Any) -> str:
+    text = _case_timeline_safe_string(value, limit=100)
+    return text if _GOAL_START_TODO_ID_RE.match(text) else ""
+
+
+def _goal_start_safe_goal_id(value: Any) -> str:
+    text = _case_timeline_safe_string(value, limit=140)
+    return text if _GOAL_START_GOAL_ID_RE.match(text) else ""
+
+
+def _goal_start_public_text_list(value: Any, *, limit: int = 8) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = _case_timeline_safe_string(item, limit=180)
+        if text:
+            result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _goal_start_public_todo_id_list(value: Any, *, limit: int = 16) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        todo_id = _goal_start_safe_todo_id(item)
+        if todo_id and todo_id not in result:
+            result.append(todo_id)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _goal_start_public_command_records(*values: Any) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    allowed_subcommands = {
+        "quota should-run",
+        "todo claim",
+        "todo update",
+        "todo complete",
+        "refresh-state",
+        "quota spend-slot",
+        "status",
+        "diagnose",
+    }
+    for value in values:
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            subcommand = _case_timeline_safe_string(
+                item.get("subcommand"),
+                limit=80,
+            )
+            if subcommand not in allowed_subcommands:
+                continue
+            record: dict[str, str] = {"subcommand": subcommand}
+            todo_id = _goal_start_safe_todo_id(item.get("todo_id"))
+            if todo_id:
+                record["todo_id"] = todo_id
+            goal_id = _goal_start_safe_goal_id(item.get("goal_id"))
+            if goal_id:
+                record["goal_id"] = goal_id
+            records.append(record)
+            if len(records) >= 128:
+                return records
+    return records
+
+
+def _goal_start_planned_todo_packet(
+    counters: dict[str, Any],
+    runner_prerequisites: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    ids = (
+        _goal_start_public_todo_id_list(counters.get("planned_todo_ids"))
+        or _goal_start_public_todo_id_list(
+            runner_prerequisites.get("planned_todo_ids")
+        )
+    )
+    texts = (
+        _goal_start_public_text_list(counters.get("planned_todo_texts_public_safe"))
+        or _goal_start_public_text_list(
+            runner_prerequisites.get("planned_todo_texts_public_safe")
+        )
+    )
+    if not ids and (
+        counters.get("goal_start_product_mode") is True
+        or runner_prerequisites.get("goal_start_product_mode") is True
+        or runner_prerequisites.get("goal_start_plan_required") is True
+    ):
+        ids = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS)
+    if not texts and ids:
+        texts = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS)
+    return ids[:8], texts[:8]
+
+
+def _build_goal_start_todo_snapshot(
+    *,
+    counters: dict[str, Any],
+    runner_prerequisites: dict[str, Any],
+    selected_p0_todo_id: str,
+    agent_claim_count: int,
+    agent_update_count: int,
+    agent_complete_count: int,
+    selected_todo_claimed: bool,
+    selected_todo_updated_before_solver: bool,
+) -> dict[str, Any]:
+    planned_ids, planned_texts = _goal_start_planned_todo_packet(
+        counters,
+        runner_prerequisites,
+    )
+    if not selected_p0_todo_id and planned_ids:
+        selected_p0_todo_id = planned_ids[0]
+    records = _goal_start_public_command_records(
+        counters.get("remote_command_file_bridge_agent_successful_loopx_command_records"),
+        runner_prerequisites.get(
+            "remote_command_file_bridge_agent_successful_loopx_command_records"
+        ),
+    )
+    counts_by_todo: dict[str, dict[str, int]] = {}
+    complete_without_todo_id = 0
+    for record in records:
+        subcommand = record.get("subcommand", "")
+        if subcommand not in {"todo claim", "todo update", "todo complete"}:
+            continue
+        todo_id = _goal_start_safe_todo_id(record.get("todo_id"))
+        if not todo_id:
+            if subcommand == "todo complete":
+                complete_without_todo_id += 1
+            continue
+        counts = counts_by_todo.setdefault(
+            todo_id,
+            {"claim": 0, "update": 0, "complete": 0},
+        )
+        counts[subcommand.split()[1]] += 1
+
+    inferred_identity = False
+    if not records and selected_p0_todo_id:
+        selected_counts = counts_by_todo.setdefault(
+            selected_p0_todo_id,
+            {"claim": 0, "update": 0, "complete": 0},
+        )
+        if agent_claim_count > 0 or selected_todo_claimed:
+            selected_counts["claim"] = max(selected_counts["claim"], agent_claim_count)
+        if agent_update_count > 0 or selected_todo_updated_before_solver:
+            selected_counts["update"] = max(
+                selected_counts["update"],
+                agent_update_count,
+            )
+        if agent_complete_count > 0:
+            selected_counts["complete"] = max(
+                selected_counts["complete"],
+                agent_complete_count,
+            )
+            inferred_identity = True
+
+    completed_ids = sorted(
+        todo_id
+        for todo_id, counts in counts_by_todo.items()
+        if counts.get("complete", 0) > 0
+    )
+    selected_counts = counts_by_todo.get(
+        selected_p0_todo_id,
+        {"claim": 0, "update": 0, "complete": 0},
+    )
+    selected_complete_count = max(0, selected_counts.get("complete", 0))
+    selected_duplicate_complete_count = max(0, selected_complete_count - 1)
+    non_selected_complete_count = sum(
+        max(0, counts.get("complete", 0))
+        for todo_id, counts in counts_by_todo.items()
+        if todo_id != selected_p0_todo_id
+    )
+
+    planned_todos: list[dict[str, Any]] = []
+    for index, todo_id in enumerate(planned_ids):
+        counts = counts_by_todo.get(todo_id, {"claim": 0, "update": 0, "complete": 0})
+        complete_count = max(0, counts.get("complete", 0))
+        if complete_count > 0:
+            status = "done_observed"
+        elif todo_id == selected_p0_todo_id:
+            status = "open_or_in_progress_observed"
+        else:
+            status = "open_or_deferred_observed"
+        item: dict[str, Any] = {
+            "todo_id": todo_id,
+            "role": "selected_p0" if todo_id == selected_p0_todo_id else "supporting",
+            "status": status,
+            "claim_count": max(0, counts.get("claim", 0)),
+            "update_count": max(0, counts.get("update", 0)),
+            "complete_count": complete_count,
+        }
+        if index < len(planned_texts):
+            item["text_public_safe"] = planned_texts[index]
+        planned_todos.append(item)
+
+    return {
+        "schema_version": "skillsbench_goal_start_todo_snapshot_v0",
+        "raw_material_recorded": False,
+        "planned_todos": planned_todos,
+        "planned_todo_ids": planned_ids,
+        "planned_todo_texts_public_safe": planned_texts,
+        "selected_p0_todo_id": selected_p0_todo_id,
+        "completed_todo_ids": completed_ids[:8],
+        "completed_todo_id_count": len(completed_ids),
+        "selected_todo_complete_count": selected_complete_count,
+        "selected_todo_duplicate_complete_count": selected_duplicate_complete_count,
+        "non_selected_todo_complete_count": non_selected_complete_count,
+        "todo_complete_without_todo_id_count": complete_without_todo_id,
+        "todo_identity_attribution": (
+            "inferred_from_counts" if inferred_identity else "command_record_observed"
+        ),
+    }
+
+
 def _build_goal_start_product_mode_control_score(
     compact: dict[str, Any],
     plan: dict[str, Any],
@@ -3643,11 +3883,21 @@ def _build_goal_start_product_mode_control_score(
         or runner_prerequisites.get("selected_p0_todo_id"),
         limit=100,
     )
+    planned_todo_ids, planned_todo_texts = _goal_start_planned_todo_packet(
+        counters,
+        runner_prerequisites,
+    )
+    if not selected_p0_todo_id and planned_todo_ids:
+        selected_p0_todo_id = planned_todo_ids[0]
     planned_todo_count = _case_timeline_max_int(counters.get("planned_todo_count"))
+    if planned_todo_ids:
+        planned_todo_count = max(planned_todo_count, len(planned_todo_ids))
     expected_todo_count = _case_timeline_max_int(
         runner_prerequisites.get("goal_start_planned_todo_count_expected")
     )
     planned_p0_count = _case_timeline_max_int(counters.get("planned_p0_count"))
+    if selected_p0_todo_id:
+        planned_p0_count = max(planned_p0_count, 1)
     closeout_spend_count = _case_timeline_max_int(
         counters.get("remote_command_file_bridge_agent_quota_spend_slot_count"),
         runner_prerequisites.get(
@@ -3709,6 +3959,38 @@ def _build_goal_start_product_mode_control_score(
     selected_todo_completed_before_spend = bool(
         counters.get("selected_todo_completed_before_spend") is True
         or (agent_complete_count > 0 and selected_todo_spend_observed)
+    )
+    todo_snapshot = _build_goal_start_todo_snapshot(
+        counters=counters,
+        runner_prerequisites=runner_prerequisites,
+        selected_p0_todo_id=selected_p0_todo_id,
+        agent_claim_count=agent_claim_count,
+        agent_update_count=agent_update_count,
+        agent_complete_count=agent_complete_count,
+        selected_todo_claimed=selected_todo_claimed,
+        selected_todo_updated_before_solver=selected_todo_updated_before_solver,
+    )
+    selected_todo_complete_count = _case_timeline_max_int(
+        todo_snapshot.get("selected_todo_complete_count")
+    )
+    selected_todo_duplicate_complete_count = _case_timeline_max_int(
+        todo_snapshot.get("selected_todo_duplicate_complete_count")
+    )
+    non_selected_todo_complete_count = _case_timeline_max_int(
+        todo_snapshot.get("non_selected_todo_complete_count")
+    )
+    todo_complete_without_todo_id_count = _case_timeline_max_int(
+        todo_snapshot.get("todo_complete_without_todo_id_count")
+    )
+    completed_todo_id_count = _case_timeline_max_int(
+        todo_snapshot.get("completed_todo_id_count")
+    )
+    selected_todo_completed_observed = bool(
+        selected_todo_complete_count > 0 or agent_complete_count > 0
+    )
+    quota_spend_missing_after_repeated_complete = bool(
+        selected_todo_duplicate_complete_count > 0
+        and not selected_todo_spend_observed
     )
     last_decision = _case_timeline_safe_string(counters.get("last_decision"), limit=100)
     premature_done_signal_count = _case_timeline_max_int(
@@ -3794,18 +4076,32 @@ def _build_goal_start_product_mode_control_score(
         "selected_todo_claimed": selected_todo_claimed,
         "selected_todo_updated_before_solver": selected_todo_updated_before_solver,
         "selected_todo_completed_before_spend": selected_todo_completed_before_spend,
+        "selected_todo_completed_observed": selected_todo_completed_observed,
         "selected_todo_spend_observed": selected_todo_spend_observed,
         "non_selected_todos_preserved_open_or_deferred": (
             counters.get("non_selected_todos_preserved_open_or_deferred") is True
+        ),
+        "quota_spend_missing_after_repeated_complete": (
+            quota_spend_missing_after_repeated_complete
         ),
         "premature_done_signal_count": premature_done_signal_count,
         "premature_done_stop_reason": premature_done_stop_reason,
         "agent_todo_claim_count": agent_claim_count,
         "agent_todo_update_count": agent_update_count,
         "agent_todo_complete_count": agent_complete_count,
+        "agent_todo_complete_unique_todo_count": completed_todo_id_count,
+        "selected_todo_complete_count": selected_todo_complete_count,
+        "selected_todo_duplicate_complete_count": (
+            selected_todo_duplicate_complete_count
+        ),
+        "non_selected_todo_complete_count": non_selected_todo_complete_count,
+        "todo_complete_without_todo_id_count": todo_complete_without_todo_id_count,
         "agent_quota_spend_slot_count": max(closeout_spend_count, agent_spend_count),
         "driver_todo_claim_count": driver_claim_count,
         "driver_todo_update_count": driver_update_count,
+        "planned_todo_ids": planned_todo_ids,
+        "planned_todo_texts_public_safe": planned_todo_texts,
+        "goal_start_todo_snapshot": todo_snapshot,
         "component_results": component_results,
     }
 
@@ -3906,8 +4202,31 @@ def _build_case_event_timeline(
             selected_todo_completed_before_spend=goal_start_control_score.get(
                 "selected_todo_completed_before_spend"
             ),
+            selected_todo_completed_observed=goal_start_control_score.get(
+                "selected_todo_completed_observed"
+            ),
             selected_todo_spend_observed=goal_start_control_score.get(
                 "selected_todo_spend_observed"
+            ),
+            selected_todo_complete_count=goal_start_control_score.get(
+                "selected_todo_complete_count"
+            ),
+            selected_todo_duplicate_complete_count=goal_start_control_score.get(
+                "selected_todo_duplicate_complete_count"
+            ),
+            agent_todo_complete_unique_todo_count=goal_start_control_score.get(
+                "agent_todo_complete_unique_todo_count"
+            ),
+            non_selected_todo_complete_count=goal_start_control_score.get(
+                "non_selected_todo_complete_count"
+            ),
+            todo_complete_without_todo_id_count=goal_start_control_score.get(
+                "todo_complete_without_todo_id_count"
+            ),
+            quota_spend_missing_after_repeated_complete=(
+                goal_start_control_score.get(
+                    "quota_spend_missing_after_repeated_complete"
+                )
             ),
             non_selected_todos_preserved_open_or_deferred=(
                 goal_start_control_score.get(
@@ -5716,7 +6035,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "benchflow_final_verifier_timeout_enabled": (
                 int(args.final_verifier_timeout_sec or 0) > 0
             ),
+            "benchflow_final_verifier_timeout_sec": int(
+                args.final_verifier_timeout_sec or 0
+            ),
             "benchflow_final_verifier_timeout_raw_command_recorded": False,
+            "benchflow_verifier_prep_timeout_sec": int(
+                args.verifier_prep_timeout_sec or 0
+            ),
         },
         "public_boundary": {
             "leaderboard_upload": False,
@@ -5731,6 +6056,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         launch_plan["app_server_goal_worker_contract"] = (
             app_server_goal_worker_contract
         )
+    launch_plan["runner_config"] = _public_runner_config(launch_plan)
     return launch_plan
 
 
@@ -5753,6 +6079,119 @@ def _public_runner_output_capture(plan: dict[str, Any]) -> dict[str, Any] | None
         "raw_output_public": False,
         "private_log_path_public": False,
     }
+
+
+def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
+    """Return stable public runner knobs needed for posthoc attribution."""
+
+    config: dict[str, Any] = {
+        "schema_version": "skillsbench_runner_config_v0",
+        "raw_command_recorded": False,
+        "raw_env_recorded": False,
+    }
+    string_fields = (
+        "benchmark_id",
+        "task_id",
+        "route",
+        "agent",
+        "model",
+        "sandbox",
+        "run_group_id",
+        "job_name",
+        "rollout_name",
+        "treatment_prompt_style",
+    )
+    for field in string_fields:
+        value = plan.get(field)
+        if isinstance(value, str) and value:
+            config[field] = value[:180]
+    int_fields = (
+        "max_rounds",
+        "outer_timeout_sec",
+        "sandbox_setup_timeout_sec",
+        "agent_idle_timeout_sec",
+        "build_stall_timeout_sec",
+    )
+    for field in int_fields:
+        value = plan.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            config[field] = value
+    for field in ("include_task_skills", "host_local_acp_launch"):
+        value = plan.get(field)
+        if isinstance(value, bool):
+            config[field] = value
+    prerequisites = plan.get("runner_prerequisites")
+    if isinstance(prerequisites, dict):
+        policy = prerequisites.get("benchflow_intermediate_soft_verify_policy")
+        if isinstance(policy, str) and policy:
+            config["product_mode_soft_verify_policy"] = policy[:80]
+        for source, target in (
+            (
+                "benchflow_intermediate_soft_verify_timeout_sec",
+                "soft_verifier_timeout_sec",
+            ),
+            ("benchflow_final_verifier_timeout_sec", "final_verifier_timeout_sec"),
+            ("benchflow_verifier_prep_timeout_sec", "verifier_prep_timeout_sec"),
+            (
+                "benchflow_agent_timeout_host_local_acp_exec_timeout_sec",
+                "local_codex_exec_timeout_sec",
+            ),
+        ):
+            value = prerequisites.get(source)
+            if isinstance(value, int) and not isinstance(value, bool):
+                config[target] = value
+    return config
+
+
+def _runner_config_public_path(plan: dict[str, Any]) -> Path | None:
+    jobs_dir = str(plan.get("jobs_dir") or "")
+    job_name = str(plan.get("job_name") or "")
+    if not jobs_dir or not job_name:
+        return None
+    return Path(jobs_dir).expanduser() / job_name / RUNNER_CONFIG_PUBLIC_FILENAME
+
+
+def _rollout_config_json_path(plan: dict[str, Any]) -> Path | None:
+    result_json = str(plan.get("result_json") or "")
+    if not result_json:
+        return None
+    return Path(result_json).expanduser().parent / "config.json"
+
+
+def _write_public_runner_config(plan: dict[str, Any]) -> Path | None:
+    config = _public_runner_config(plan)
+    if not config:
+        return None
+    plan["runner_config"] = config
+    path = _runner_config_public_path(plan)
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(config, indent=2, sort_keys=True, default=_json_default)
+            + "\n",
+            encoding="utf-8",
+        )
+    rollout_config_path = _rollout_config_json_path(plan)
+    if rollout_config_path is not None:
+        payload: dict[str, Any] = {}
+        if rollout_config_path.exists():
+            try:
+                loaded = json.loads(rollout_config_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                loaded = {}
+            if isinstance(loaded, dict):
+                payload = loaded
+        payload["loopx_runner_config"] = config
+        payload["loopx_runner_config_public"] = True
+        payload["loopx_runner_config_raw_command_recorded"] = False
+        payload["loopx_runner_config_raw_env_recorded"] = False
+        rollout_config_path.parent.mkdir(parents=True, exist_ok=True)
+        rollout_config_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, default=_json_default)
+            + "\n",
+            encoding="utf-8",
+        )
+    return path
 
 
 async def run_benchflow_case_with_private_output(
@@ -6324,6 +6763,7 @@ def _merge_host_local_acp_relay_trace_summary(
     agent_bridge_operation_counts: dict[str, int] = {}
     agent_bridge_loopx_subcommand_counts: dict[str, int] = {}
     agent_bridge_successful_loopx_subcommand_counts: dict[str, int] = {}
+    agent_bridge_successful_loopx_command_records: list[dict[str, str]] = []
     agent_bridge_returncode_counts: dict[str, int] = {}
     agent_bridge_failure_category_counts: dict[str, int] = {}
     driver_lifecycle_trace_count = 0
@@ -6456,6 +6896,15 @@ def _merge_host_local_acp_relay_trace_summary(
                     target_counts[safe_key] = (
                         target_counts.get(safe_key, 0) + max(0, value)
                     )
+            agent_bridge_successful_loopx_command_records.extend(
+                _goal_start_public_command_records(
+                    agent_ops.get("successful_loopx_cli_command_records")
+                )
+            )
+            if len(agent_bridge_successful_loopx_command_records) > 128:
+                agent_bridge_successful_loopx_command_records = (
+                    agent_bridge_successful_loopx_command_records[:128]
+                )
         elif trace_kind == "remote_command_file_bridge_driver_lifecycle_checkpoint":
             checkpoint = (
                 payload.get("remote_command_file_bridge_driver_lifecycle_checkpoint")
@@ -6687,6 +7136,9 @@ def _merge_host_local_acp_relay_trace_summary(
     trace[
         "remote_command_file_bridge_agent_successful_loopx_subcommand_counts"
     ] = dict(sorted(agent_bridge_successful_loopx_subcommand_counts.items()))
+    trace[
+        "remote_command_file_bridge_agent_successful_loopx_command_records"
+    ] = agent_bridge_successful_loopx_command_records
     trace["remote_command_file_bridge_agent_returncode_counts"] = dict(
         sorted(agent_bridge_returncode_counts.items())
     )
@@ -6847,6 +7299,9 @@ def _merge_host_local_acp_relay_trace_summary(
     prerequisites[
         "remote_command_file_bridge_agent_successful_loopx_subcommand_counts"
     ] = dict(sorted(agent_bridge_successful_loopx_subcommand_counts.items()))
+    prerequisites[
+        "remote_command_file_bridge_agent_successful_loopx_command_records"
+    ] = agent_bridge_successful_loopx_command_records
     prerequisites["remote_command_file_bridge_agent_returncode_counts"] = dict(
         sorted(agent_bridge_returncode_counts.items())
     )
@@ -7656,6 +8111,24 @@ def _sync_relay_closeout_counts_into_compact(
         )
     ):
         product_contract["closeout_satisfied"] = True
+    elif (
+        product_contract.get("agent_bridge_todo_closeout_count", 0) > 1
+        and product_contract.get("agent_bridge_refresh_state_count", 0) > 0
+        and product_contract.get("agent_bridge_quota_spend_slot_count", 0) <= 0
+    ):
+        product_contract["quota_spend_missing_after_repeated_complete"] = True
+        product_contract["missing_reason"] = (
+            "quota_spend_missing_after_repeated_todo_closeout"
+        )
+    command_records = _goal_start_public_command_records(
+        runner_prerequisites.get(
+            "remote_command_file_bridge_agent_successful_loopx_command_records"
+        )
+    )
+    if command_records:
+        interaction_counters[
+            "remote_command_file_bridge_agent_successful_loopx_command_records"
+        ] = command_records
 
 
 def _record_product_mode_depth_gate_gap(
@@ -9228,6 +9701,8 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             "goal_start_product_mode",
             "goal_start_plan_observed",
             "planned_todo_count",
+            "planned_todo_ids",
+            "planned_todo_texts_public_safe",
             "planned_p0_count",
             "planner_before_todo_write",
             "same_priority_order_preserved",
@@ -9995,6 +10470,9 @@ def reduce_result(
     runner_output_capture = _public_runner_output_capture(plan)
     if runner_output_capture:
         compact["runner_output_capture"] = runner_output_capture
+    runner_config = _public_runner_config(plan)
+    if runner_config:
+        compact["runner_config"] = runner_config
     goal_start_control_score = _build_goal_start_product_mode_control_score(
         compact,
         plan,
@@ -10027,6 +10505,7 @@ def reduce_official_result_after_runner_exception(
         return None
 
     compact = reduce_result(args, result_path, plan)
+    _write_public_runner_config(plan)
     _write_public_runner_prerequisites(plan)
     compact["runner_return_status"] = (
         "official_result_recovered_after_runner_exception"
@@ -10124,6 +10603,11 @@ def _product_mode_lifecycle_contract_from_controller_counters(
         and refresh_state_count > 0
         and quota_spend_count > 0
     )
+    quota_spend_missing_after_repeated_complete = bool(
+        todo_closeout_count > 1
+        and refresh_state_count > 0
+        and quota_spend_count <= 0
+    )
     operation_trace_status = str(
         counters.get("remote_command_file_bridge_agent_operation_trace_status")
         or ""
@@ -10158,7 +10642,10 @@ def _product_mode_lifecycle_contract_from_controller_counters(
         elif state_read_count <= 0 or state_write_count <= 0:
             missing_reason = "missing_case_local_loopx_state_read_or_write"
         elif not closeout_satisfied:
-            missing_reason = "missing_case_local_loopx_closeout"
+            if quota_spend_missing_after_repeated_complete:
+                missing_reason = "quota_spend_missing_after_repeated_todo_closeout"
+            else:
+                missing_reason = "missing_case_local_loopx_closeout"
 
     contract: dict[str, Any] = {
         "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
@@ -10171,6 +10658,9 @@ def _product_mode_lifecycle_contract_from_controller_counters(
         "checkpoint_count": driver_checkpoint_count,
         "closeout_required": required,
         "closeout_satisfied": closeout_satisfied,
+        "quota_spend_missing_after_repeated_complete": (
+            quota_spend_missing_after_repeated_complete
+        ),
         "agent_operation_trace_required": required,
         "agent_operation_trace_satisfied": operation_trace_satisfied,
         "agent_operation_trace_status": operation_trace_status,
@@ -10331,6 +10821,8 @@ def _recover_runner_failure_score_from_controller_trace(
         "skillsbench_runner_interrupted_before_official_result",
         "skillsbench_result_json_missing_after_runner_exit",
         "official_score_missing",
+        "skillsbench_runner_failed_before_agent_install",
+        "skillsbench_runner_setup_error",
     }
     labels = [
         label
@@ -10398,6 +10890,263 @@ def _recover_runner_failure_score_from_controller_trace(
     return True
 
 
+def _read_verifier_reward_artifact(path: Path) -> float | None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    first_token = text.split()[0]
+    try:
+        value = float(first_token)
+    except ValueError:
+        return None
+    if value != value:
+        return None
+    return value
+
+
+def _read_verifier_ctrf_summary(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    compact: dict[str, Any] = {
+        "schema_version": "skillsbench_verifier_ctrf_summary_v0",
+        "raw_output_recorded": False,
+    }
+    for field in (
+        "tests",
+        "passed",
+        "failed",
+        "pending",
+        "skipped",
+        "other",
+        "suites",
+    ):
+        value = summary.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            compact[field] = value
+    for field in ("start", "stop"):
+        value = summary.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            compact[field] = float(value)
+    return compact
+
+
+def _discover_verifier_reward_artifact(plan: dict[str, Any]) -> dict[str, Any] | None:
+    result_path = Path(str(plan.get("result_json") or "")).expanduser()
+    jobs_dir = Path(str(plan.get("jobs_dir") or "")).expanduser()
+    job_name = str(plan.get("job_name") or "")
+    job_root = jobs_dir / job_name
+    rollout_name = str(plan.get("rollout_name") or "")
+    task_id = str(plan.get("task_id") or "")
+    expected = result_path.parent / "verifier" / "reward.txt"
+    candidates: list[Path] = []
+    if expected.exists():
+        candidates.append(expected)
+    if job_root.exists():
+        for path in job_root.rglob("verifier/reward.txt"):
+            if path.is_file() and path not in candidates:
+                candidates.append(path)
+    ranked: list[tuple[int, float, Path, list[str]]] = []
+    for candidate in candidates:
+        score = 0
+        reasons: list[str] = []
+        rollout_dir = candidate.parent.parent
+        if candidate == expected:
+            score += 100
+            reasons.append("planned_rollout_verifier_reward_path")
+        if rollout_name and rollout_dir.name == rollout_name:
+            score += 80
+            reasons.append("parent_matches_requested_rollout")
+        elif task_id and rollout_dir.name.startswith(f"{task_id}__"):
+            score += 20
+            reasons.append("parent_matches_task_rollout_prefix")
+        reward = _read_verifier_reward_artifact(candidate)
+        if reward is not None:
+            score += 50
+            reasons.append("reward_txt_parseable")
+        try:
+            mtime = candidate.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        if score > 0:
+            ranked.append((score, mtime, candidate, reasons))
+    discovery: dict[str, Any] = {
+        "schema_version": "skillsbench_verifier_reward_artifact_discovery_v0",
+        "selection_policy": "planned_reward_path_then_job_root_scan",
+        "candidate_count": len(candidates),
+        "raw_logs_read": False,
+        "raw_task_text_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+    }
+    if not ranked:
+        discovery["status"] = "missing"
+        plan["verifier_reward_artifact_discovery"] = discovery
+        return None
+    ranked.sort(key=lambda item: (item[0], item[1], str(item[2])), reverse=True)
+    top_score, _mtime, selected, reasons = ranked[0]
+    reward = _read_verifier_reward_artifact(selected)
+    if reward is None:
+        discovery["status"] = "unparseable"
+        plan["verifier_reward_artifact_discovery"] = discovery
+        return None
+    tied_top_count = sum(1 for score, _mtime, _path, _reasons in ranked if score == top_score)
+    discovery.update(
+        {
+            "status": "found",
+            "matched_candidate_count": len(ranked),
+            "top_score_candidate_count": tied_top_count,
+            "selected_relative_to_job": _safe_relative_to(selected, job_root),
+            "selection_reasons": reasons,
+            "reward_present": True,
+        }
+    )
+    ctrf_summary = _read_verifier_ctrf_summary(selected.parent / "ctrf.json")
+    if ctrf_summary:
+        discovery["ctrf_summary_present"] = True
+    plan["verifier_reward_artifact_discovery"] = discovery
+    return {
+        "reward_path": selected,
+        "reward": reward,
+        "passed": reward >= 1.0,
+        "discovery": discovery,
+        "ctrf_summary": ctrf_summary,
+    }
+
+
+def _recover_runner_failure_score_from_verifier_artifact(
+    compact: dict[str, Any],
+    plan: dict[str, Any],
+) -> bool:
+    artifact = _discover_verifier_reward_artifact(plan)
+    if artifact is None:
+        return False
+
+    from loopx.benchmark_core import (
+        BenchmarkFailureClass,
+        build_benchmark_attempt_accounting,
+        canonical_lifecycle,
+    )
+
+    reward = float(artifact["reward"])
+    passed = bool(artifact["passed"])
+    attribution = _runner_failure_trace_score_attribution(
+        reward=reward,
+        passed=passed,
+    )
+    compact["runner_return_status"] = "interrupted_after_verifier_reward_artifact"
+    compact["official_score_status"] = "completed"
+    compact["official_score"] = reward
+    compact["official_task_score"] = {
+        "kind": "skillsbench_verifier_reward_recovered_from_verifier_artifact",
+        "value": reward,
+        "passed": passed,
+    }
+    compact["official_score_source"] = (
+        "official_skillsbench_rollout_verifier_reward_txt_after_runner_interruption"
+    )
+    compact["score_failure_attribution"] = attribution
+    compact["first_blocker"] = attribution
+    compact["repeat_blocked_by"] = attribution
+    compact["verifier_reward_artifact_recovery"] = {
+        "schema_version": "skillsbench_verifier_reward_artifact_recovery_v0",
+        "status": "official_score_recovered_from_verifier_reward_artifact",
+        "official_result_json_materialized": False,
+        "reward_present": True,
+        "reward": reward,
+        "passed": passed,
+        "raw_logs_read": False,
+        "raw_task_text_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+    }
+    discovery = artifact.get("discovery")
+    if isinstance(discovery, dict):
+        compact["verifier_reward_artifact_discovery"] = discovery
+    ctrf_summary = artifact.get("ctrf_summary")
+    if isinstance(ctrf_summary, dict):
+        compact["verifier_ctrf_summary"] = ctrf_summary
+    stale_missing_score_labels = {
+        "skillsbench_runner_interrupted_before_official_result",
+        "skillsbench_result_json_missing_after_runner_exit",
+        "official_score_missing",
+        "skillsbench_runner_failed_before_agent_install",
+        "skillsbench_runner_setup_error",
+    }
+    labels = [
+        label
+        for label in compact.get("failure_attribution_labels", [])
+        if isinstance(label, str) and label and label not in stale_missing_score_labels
+    ]
+    for label in (
+        attribution,
+        "skillsbench_runner_interrupted_after_verifier_reward_artifact",
+    ):
+        if label != "none" and label not in labels:
+            labels.append(label)
+    compact["failure_attribution_labels"] = labels
+    runner_failure = compact.get("runner_failure")
+    if isinstance(runner_failure, dict):
+        runner_failure["failure_class"] = (
+            "skillsbench_runner_interrupted_after_verifier_reward_artifact"
+        )
+        runner_failure["score_recovered_from_verifier_artifact"] = True
+    compact["attempt_accounting"] = build_benchmark_attempt_accounting(
+        lifecycle=canonical_lifecycle(
+            process_started=True,
+            runner_accepted_args=True,
+            job_root_materialized=True,
+            trial_started=True,
+            worker_started=True,
+            result_written=False,
+            verifier_scored=True,
+        ),
+        failure_label=attribution,
+        failure_class=(
+            BenchmarkFailureClass.NONE
+            if passed
+            else BenchmarkFailureClass.SOLVER_FAILED
+        ),
+        official_score_attempted=True,
+    )
+    progress = compact.get("progress")
+    if isinstance(progress, dict):
+        progress.update(
+            {
+                "n_completed_trials": 1,
+                "n_errored_trials": 0,
+                "n_running_trials": 0,
+                "n_pending_trials": 0,
+            }
+        )
+    validation = compact.get("validation")
+    if not isinstance(validation, dict):
+        validation = {}
+    validation.update(
+        {
+            "official_verifier_status": "passed" if passed else "completed",
+            "official_verifier_validation_present": True,
+            "official_case_success": passed,
+            "verifier_reward_artifact_recovered": True,
+            "official_result_json_materialized": False,
+            "raw_verifier_output_read": False,
+        }
+    )
+    compact["validation"] = validation
+    return True
+
+
 def build_runner_failure_compact(
     args: argparse.Namespace,
     plan: dict[str, Any],
@@ -10425,6 +11174,7 @@ def build_runner_failure_compact(
         exc,
         cleanup_if_missing=True,
     )
+    _write_public_runner_config(plan)
     _write_public_runner_prerequisites(plan)
 
     exception_type, attribution, labels = skillsbench_runner_error_attribution(
@@ -10549,7 +11299,12 @@ def build_runner_failure_compact(
     runner_output_capture = _public_runner_output_capture(plan)
     if runner_output_capture:
         reduced["runner_output_capture"] = runner_output_capture
-    _recover_runner_failure_score_from_controller_trace(reduced, plan)
+    runner_config = _public_runner_config(plan)
+    if runner_config:
+        reduced["runner_config"] = runner_config
+    recovered = _recover_runner_failure_score_from_controller_trace(reduced, plan)
+    if not recovered:
+        _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
     reduced["case_event_timeline"] = _build_case_event_timeline(reduced, plan)
     reduced["post_run_debug_gate"] = build_skillsbench_post_run_debug_gate(reduced)
     return reduced
@@ -10679,6 +11434,9 @@ def _build_runner_exception_closeout_payload(
         return recovered_payload, 0
 
     closeout_recorded = False
+    recovered_after_runner_exception = False
+    official_task_score = None
+    score_failure_attribution = None
     try:
         compact = build_runner_failure_compact(args, plan, exc)
         compact_path = Path(plan["compact_benchmark_run_json"])
@@ -10691,17 +11449,25 @@ def _build_runner_exception_closeout_payload(
         ledger_update = update_ledger(args, compact, compact_path=compact_path)
         history_append = append_history(args, compact_path)
         closeout_recorded = True
+        recovered_after_runner_exception = (
+            compact.get("official_score_status") == "completed"
+        )
+        official_task_score = compact.get("official_task_score")
+        score_failure_attribution = compact.get("score_failure_attribution")
     except Exception:
         compact_path = None
         ledger_update = None
         history_append = None
     payload = {
-        "ok": False,
+        "ok": recovered_after_runner_exception,
         "error_type": type(exc).__name__,
         "error_recorded": closeout_recorded,
         "compact_closeout_recorded": closeout_recorded,
+        "recovered_after_runner_exception": recovered_after_runner_exception,
         "task_id": args.task_id,
         "compact_benchmark_run_json": str(compact_path) if compact_path else None,
+        "official_task_score": official_task_score,
+        "score_failure_attribution": score_failure_attribution,
         "ledger_update": ledger_update,
         "history_append": history_append,
     }
@@ -11281,6 +12047,8 @@ async def async_main(
     ):
         _run_host_local_acp_codex_exec_preflight(args, plan)
 
+    if not args.reduce_only:
+        _write_public_runner_config(plan)
     ensure_benchflow_runtime(args)
     if args.reduce_only:
         _hydrate_reduce_only_public_runner_prerequisites(plan)
@@ -11297,6 +12065,7 @@ async def async_main(
             run_benchflow_case_with_private_output(args, plan),
             timeout=args.outer_timeout_sec,
         )
+        _write_public_runner_config(plan)
         _write_public_runner_prerequisites(plan)
     compact = reduce_result(args, result_path, plan)
     compact_path = Path(plan["compact_benchmark_run_json"])
