@@ -1393,6 +1393,88 @@ def assert_side_agent_scope_wait_mentions_blocking_owner() -> None:
     assert "blocking handoff" in guard["interaction_contract"]["agent_channel"]["primary_action"], guard
 
 
+def assert_side_agent_replans_route_continuation_before_blocking_wait() -> None:
+    route_review_gate = {
+        "index": 1,
+        "text": "[P0-review] Review the delivered visible launch slice before the route advances.",
+        "role": "agent",
+        "status": "open",
+        "priority": "P0-review",
+        "task_class": "advancement_task",
+        "action_kind": "route_review_gate",
+        "claimed_by": "codex-main-control",
+        "blocks_agent": "codex-side-bypass",
+        "todo_id": "todo_route_review_gate",
+        "unblocks_todo_id": "todo_delivered_visible_launch_slice",
+        "route_id": "auto_research_e2e",
+        "route_continuation_replan_required": True,
+        "route_continuation_reason": (
+            "the delivered slice is review-gated, but the same route has an "
+            "independent next e2e slice that must be projected as a todo"
+        ),
+    }
+    agent_todos = {
+        "schema_version": "todo_summary_v0",
+        "source_section": "Agent Todo",
+        "total_count": 1,
+        "open_count": 1,
+        "done_count": 0,
+        "first_open_items": [route_review_gate],
+        "items": [route_review_gate],
+    }
+    payload = status_payload(
+        status="route_continuation_review_gated",
+        has_agent_todo=False,
+        next_action="Continue the visible launch e2e route after the review gate.",
+        coordination={
+            "primary_agent": "codex-main-control",
+            "registered_agents": ["codex-main-control", "codex-side-bypass"],
+        },
+    )
+    item = payload["attention_queue"]["items"][0]
+    item["project_asset"]["agent_todos"] = agent_todos
+    item["agent_todos"] = agent_todos
+
+    guard = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    assert guard["decision"] == "successor_replan_required", guard
+    assert guard["should_run"] is True, guard
+    assert guard["normal_delivery_allowed"] is False, guard
+    assert guard["actionable_by_codex"] is True, guard
+    assert "agent_lane_next_action" not in guard, guard
+    frontier = guard["agent_scope_frontier"]
+    assert frontier["action"] == "successor_replan_required", frontier
+    assert frontier["quiet_noop_allowed"] is False, frontier
+    assert frontier["requires_replan"] is True, frontier
+    assert frontier["candidate_counts"]["route_continuation_replan_candidate_count"] == 1, frontier
+    assert frontier["route_continuation_replan_candidates"][0]["route_id"] == "auto_research_e2e", frontier
+    assert (
+        guard["agent_todo_summary"]["current_agent_route_continuation_replan_count"] == 1
+    ), guard
+    assert guard["agent_todo_summary"]["unclaimed_route_continuation_replan_count"] == 0, guard
+    assert guard["agent_todo_summary"]["route_continuation_replan_count"] == 1, guard
+    assert guard["agent_todo_summary"]["current_agent_handoff_gate_count"] == 1, guard
+    hint = guard["agent_lane_frontier_hint"]
+    assert hint["schema_version"] == "agent_lane_frontier_hint_v0", hint
+    assert hint["decision"] == "add_next_advancement", hint
+    assert hint["reason_code"] == "route_continuation_replan_required", hint
+    assert hint["quiet_noop_allowed"] is False, hint
+    assert "loopx todo add" in hint["next_cli_action"], hint
+    contract = guard["interaction_contract"]
+    assert contract["mode"] == "successor_replan_required", contract
+    assert contract["agent_channel"]["must_attempt"] is True, contract
+    assert contract["agent_channel"]["delivery_allowed"] is False, contract
+    assert contract["agent_channel"]["quiet_noop_allowed"] is False, contract
+    assert "loopx todo add" in contract["cli_channel"]["next_cli_actions"][0], contract
+    markdown = render_quota_should_run_markdown(guard)
+    assert "agent_scope_frontier: action=successor_replan_required" in markdown, markdown
+    assert "route_continuation_replan_required" in markdown, markdown
+    assert "agent_scope_route_continuation_replan_candidates" in markdown, markdown
+
+
 def assert_scoped_user_gate_does_not_steal_other_agent_fallback() -> None:
     gated_action = (
         "[P0] Sync the local long-horizon protocol packet into the approved "
@@ -2043,6 +2125,7 @@ def main() -> int:
     assert_side_agent_next_action_projects_without_stealing_goal_next_action()
     assert_side_agent_waits_when_only_other_agent_has_claimed_work()
     assert_side_agent_scope_wait_mentions_blocking_owner()
+    assert_side_agent_replans_route_continuation_before_blocking_wait()
     assert_scoped_user_gate_does_not_steal_other_agent_fallback()
     assert_side_agent_replans_when_deferred_successor_is_ready()
     assert_side_agent_can_take_unclaimed_work()
