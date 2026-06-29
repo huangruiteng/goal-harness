@@ -91,6 +91,7 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
         assert "[LoopX role profile]" in lane["visible_launch_command"], lane
         assert "LOOPX_ROLE_PROFILE_JSON" in lane["visible_launch_command"], lane
         assert "LOOPX_REQUIRED_SKILL" in lane["visible_launch_command"], lane
+        assert "bootstrap-or-stop" in lane["visible_launch_command"], lane
         assert lane["visible_codex_tui"] == "codex", lane
         phases = [item["phase"] for item in lane["lane_timeline"]]
         assert phases == [

@@ -969,6 +969,18 @@ _QUOTA_GATE_PY = (
     "sys.exit(0 if ok else 42)"
 )
 
+_QUOTA_BLOCKER_SUMMARY_PY = (
+    "import json,sys; "
+    "p=json.load(sys.stdin); "
+    "ic=p.get('interaction_contract',{}); "
+    "u=ic.get('user_channel',{}); "
+    "a=ic.get('agent_channel',{}); "
+    "reason=u.get('reason') or p.get('reason') or p.get('recommended_action') or 'blocked'; "
+    "primary=a.get('primary_action') or p.get('recommended_action') or ''; "
+    "print('reason=' + str(reason)); "
+    "print('primary_action=' + str(primary))"
+)
+
 
 def _env_lane_launch_command(
     *,
@@ -980,21 +992,51 @@ def _env_lane_launch_command(
     role_profile: dict[str, Any],
 ) -> str:
     role_profile_prefix = _role_profile_shell_prefix(role_profile)
+    keep_visible = 'printf "\\n[user takeover]\\ninspect this pane; interrupt, close, or retry manually\\n"; exec "${SHELL:-/bin/sh}"'
     return (
-        "set -euo pipefail; "
+        "set -uo pipefail; "
         f"export LOOPX_ROLE_ID={_shell_arg(role_id)}; "
         f"export LOOPX_ROLE_PROFILE_REF={_shell_arg(AUTO_RESEARCH_ROLE_PROFILE_REF)}; "
         'cd "$LOOPX_PROJECT"; '
         f"{role_profile_prefix}"
         "printf '\\n[LoopX quota guard]\\n'; "
-        f"QUOTA_PACKET=\"$({quota_command})\"; "
+        f"QUOTA_PACKET=\"$({quota_command} 2>&1)\"; "
+        "QUOTA_STATUS=$?; "
         "printf '%s\\n' \"$QUOTA_PACKET\"; "
+        "if [ \"$QUOTA_STATUS\" -ne 0 ]; then "
+        "printf '\\n[LoopX blocked reason]\\n'; "
+        "printf 'quota_command_failed exit=%s\\n' \"$QUOTA_STATUS\"; "
+        "printf '\\n[bootstrap-or-stop]\\nstopped_before_frontier\\n'; "
+        f"{keep_visible}; "
+        "fi; "
         f"printf '%s\\n' \"$QUOTA_PACKET\" | python3 -c {_shell_arg(_QUOTA_GATE_PY)}; "
+        "QUOTA_GATE_STATUS=$?; "
+        "if [ \"$QUOTA_GATE_STATUS\" -ne 0 ]; then "
+        "printf '\\n[LoopX blocked reason]\\n'; "
+        f"printf '%s\\n' \"$QUOTA_PACKET\" | python3 -c {_shell_arg(_QUOTA_BLOCKER_SUMMARY_PY)} || true; "
+        "printf '\\n[bootstrap-or-stop]\\nstopped_before_frontier\\n'; "
+        f"{keep_visible}; "
+        "fi; "
         "printf '\\n[LoopX auto-research frontier]\\n'; "
         f"{frontier_command}; "
+        "FRONTIER_STATUS=$?; "
+        "if [ \"$FRONTIER_STATUS\" -ne 0 ]; then "
+        "printf '\\n[LoopX blocked reason]\\n'; "
+        "printf 'frontier_command_failed exit=%s\\n' \"$FRONTIER_STATUS\"; "
+        "printf '\\n[bootstrap-or-stop]\\nstopped_before_bootstrap\\n'; "
+        f"{keep_visible}; "
+        "fi; "
+        "printf '\\n[bootstrap-or-stop]\\ncontinuing_to_visible_bootstrap\\n'; "
         "printf '\\n[Codex bootstrap prompt]\\n'; "
-        f"BOOTSTRAP_PROMPT=\"$({bootstrap_command})\"; "
+        f"BOOTSTRAP_PROMPT=\"$({bootstrap_command} 2>&1)\"; "
+        "BOOTSTRAP_STATUS=$?; "
         "printf '%s\\n' \"$BOOTSTRAP_PROMPT\"; "
+        "if [ \"$BOOTSTRAP_STATUS\" -ne 0 ]; then "
+        "printf '\\n[LoopX blocked reason]\\n'; "
+        "printf 'bootstrap_command_failed exit=%s\\n' \"$BOOTSTRAP_STATUS\"; "
+        "printf '\\n[bootstrap-or-stop]\\nstopped_before_codex\\n'; "
+        f"{keep_visible}; "
+        "fi; "
         "printf '\\n[Starting visible Codex CLI]\\n'; "
         f"exec {_shell_arg(codex_bin)} \"$BOOTSTRAP_PROMPT\""
     )
@@ -3460,9 +3502,17 @@ def render_auto_research_markdown(payload: dict[str, object]) -> str:
             lines.append(f"- launcher: `{launch_result.get('launcher')}`")
             lines.append(f"- executed: `{launch_result.get('executed')}`")
             lines.append(f"- started_lanes: `{launch_result.get('started_lane_count')}`")
+            lines.append(f"- surviving_lanes: `{launch_result.get('surviving_lane_count')}`")
             lines.append(f"- attach: `{launch_result.get('attach_command')}`")
             lines.append(f"- stop: `{launch_result.get('stop_command')}`")
             lines.append(f"- takeover: {launch_result.get('operator_takeover')}")
+            acceptance = (
+                launch_result.get("visible_acceptance")
+                if isinstance(launch_result.get("visible_acceptance"), dict)
+                else {}
+            )
+            if acceptance:
+                lines.append(f"- visible_acceptance: `{acceptance.get('accepted')}`")
         lines.extend(["", "## Shell Plan", ""])
         for line in commands.get("start_script") or []:
             lines.append(f"- `{line}`")

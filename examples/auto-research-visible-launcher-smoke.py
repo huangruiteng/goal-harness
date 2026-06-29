@@ -64,10 +64,24 @@ def main() -> int:
                 [
                     "#!/usr/bin/env python3",
                     "import json, os, sys",
+                    f"LANES = {json.dumps(['frontier', 'research-curator', 'hypothesis-mapper', 'evidence-runner', 'evidence-verifier'])}",
                     "with open(os.environ['FAKE_TMUX_LOG'], 'a', encoding='utf-8') as f:",
                     "    f.write(json.dumps(sys.argv[1:]) + '\\n')",
                     "if len(sys.argv) > 1 and sys.argv[1] == 'has-session':",
                     "    raise SystemExit(1)",
+                    "if len(sys.argv) > 1 and sys.argv[1] == 'list-windows':",
+                    "    print('\\n'.join(LANES))",
+                    "    raise SystemExit(0)",
+                    "if len(sys.argv) > 1 and sys.argv[1] == 'capture-pane':",
+                    "    print('[LoopX role profile]')",
+                    "    print('lane_id=' + (sys.argv[sys.argv.index('-pt') + 1].split(':')[-1] if '-pt' in sys.argv else 'unknown'))",
+                    "    print('[LoopX quota guard]')",
+                    "    print('{\"interaction_contract\":{\"user_channel\":{\"action_required\":false},\"agent_channel\":{\"delivery_allowed\":true}}}')",
+                    "    print('[LoopX auto-research frontier]')",
+                    "    print('{\"schema_version\":\"decentralized_research_frontier_v0\"}')",
+                    "    print('[bootstrap-or-stop]')",
+                    "    print('continuing_to_visible_bootstrap')",
+                    "    raise SystemExit(0)",
                     "raise SystemExit(0)",
                     "",
                 ]
@@ -132,9 +146,26 @@ def main() -> int:
         launch = payload["launch_result"]
         assert launch["launcher"] == "tmux", launch
         assert launch["started_lane_count"] == 4, launch
+        assert launch["surviving_lane_count"] == 4, launch
+        assert launch["surviving_lanes"] == [
+            "research-curator",
+            "hypothesis-mapper",
+            "evidence-runner",
+            "evidence-verifier",
+        ], launch
         assert launch["attach_command"] == "tmux attach -t loopx-auto-research-smoke", launch
         assert launch["stop_command"] == "tmux kill-session -t loopx-auto-research-smoke", launch
         assert launch["workspace_mode"] == "explicit_workspace", launch
+        acceptance = launch["visible_acceptance"]
+        assert acceptance["schema_version"] == "auto_research_visible_launch_acceptance_v0", acceptance
+        assert acceptance["accepted"] is True, acceptance
+        assert acceptance["missing_lanes"] == [], acceptance
+        for pane in acceptance["pane_checks"]:
+            assert pane["window_survived"] is True, pane
+            assert pane["role_profile_visible"] is True, pane
+            assert pane["quota_packet_visible"] is True, pane
+            assert pane["frontier_or_blocked_reason_visible"] is True, pane
+            assert pane["bootstrap_or_stop_visible"] is True, pane
         assert workspace.is_dir(), workspace
 
         for lane in payload["lanes"]:
@@ -159,12 +190,15 @@ def main() -> int:
             assert "quota should-run" in command, command
             assert "auto-research frontier" in command, command
             assert "codex-cli-bootstrap-message" in command, command
+            assert "bootstrap-or-stop" in command, command
             assert 'exec codex "$BOOTSTRAP_PROMPT"' in command, command
 
         log_entries = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
         assert log_entries[0][:1] == ["has-session"], log_entries
         assert any(entry[:1] == ["new-session"] for entry in log_entries), log_entries
         assert sum(1 for entry in log_entries if entry[:1] == ["new-window"]) == 4, log_entries
+        assert any(entry[:1] == ["list-windows"] for entry in log_entries), log_entries
+        assert sum(1 for entry in log_entries if entry[:1] == ["capture-pane"]) == 4, log_entries
         assert_public_safe(payload)
 
     print("auto-research-visible-launcher-smoke ok")
