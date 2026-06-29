@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo="${LOOPX_REPO:-huangruiteng/loopx}"
-ref="${LOOPX_REF:-main}"
+ref="${LOOPX_REF:-stable}"
 archive_url="${LOOPX_ARCHIVE_URL:-https://codeload.github.com/$repo/tar.gz/$ref}"
 
 need() {

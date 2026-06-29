@@ -11,7 +11,7 @@ from .doctor import NO_CLONE_INSTALL_URL, collect_doctor
 
 UPDATE_PLAN_SCHEMA_VERSION = "loopx_update_plan_v0"
 DEFAULT_UPDATE_REPO = "huangruiteng/loopx"
-DEFAULT_UPDATE_REF = "main"
+DEFAULT_UPDATE_REF = "stable"
 
 
 def _source_config(
@@ -21,14 +21,23 @@ def _source_config(
     archive_url: str | None,
 ) -> dict[str, Any]:
     selected_repo = repo or os.environ.get("LOOPX_REPO") or DEFAULT_UPDATE_REPO
-    selected_ref = ref or os.environ.get("LOOPX_REF") or DEFAULT_UPDATE_REF
-    selected_archive_url = archive_url or os.environ.get("LOOPX_ARCHIVE_URL")
+    ref_override = ref or os.environ.get("LOOPX_REF")
+    selected_ref = ref_override or DEFAULT_UPDATE_REF
+    archive_url_override = archive_url or os.environ.get("LOOPX_ARCHIVE_URL")
+    selected_archive_url = archive_url_override
     if not selected_archive_url:
         selected_archive_url = f"https://codeload.github.com/{selected_repo}/tar.gz/{selected_ref}"
+    if archive_url_override:
+        channel = "github_archive_url_override"
+    elif ref_override:
+        channel = "github_archive_override"
+    else:
+        channel = "github_archive_stable"
     return {
-        "channel": "github_archive",
+        "channel": channel,
         "repo": selected_repo,
         "ref": selected_ref,
+        "ref_source": "default_stable" if not ref_override else "override",
         "archive_url": selected_archive_url,
         "installer_url": NO_CLONE_INSTALL_URL,
     }

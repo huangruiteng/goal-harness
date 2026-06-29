@@ -252,7 +252,7 @@ def register_support_control_commands(
     )
     update_parser.add_argument(
         "--ref",
-        help="Git ref used by the installer archive. Defaults to LOOPX_REF or main.",
+        help="Git ref used by the installer archive. Defaults to LOOPX_REF or stable.",
     )
     update_parser.add_argument(
         "--archive-url",

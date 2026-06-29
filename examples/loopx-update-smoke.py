@@ -12,7 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.self_update import build_update_plan
+from loopx.self_update import DEFAULT_UPDATE_REF, build_update_plan
 
 
 def fake_doctor_payload() -> dict[str, object]:
@@ -62,6 +62,15 @@ def test_module_plan() -> None:
     assert payload["plan"]["mutates_release_install"] is False, payload
     assert payload["plan"]["backup"]["available"] is True, payload
     assert "LOOPX_ARCHIVE_URL=https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
+
+
+def test_default_source_uses_stable_ref() -> None:
+    payload = build_update_plan(doctor_payload=fake_doctor_payload())
+    assert payload["source"]["ref"] == DEFAULT_UPDATE_REF == "stable", payload
+    assert payload["source"]["channel"] == "github_archive_stable", payload
+    assert payload["source"]["ref_source"] == "default_stable", payload
+    assert "/tar.gz/stable" in payload["source"]["archive_url"], payload
+    assert "LOOPX_REF=stable" in payload["plan"]["install_command"], payload
 
 
 def test_fresh_check_is_noop_recommendation() -> None:
@@ -114,6 +123,7 @@ def test_cli_check() -> None:
 
 def main() -> int:
     test_module_plan()
+    test_default_source_uses_stable_ref()
     test_fresh_check_is_noop_recommendation()
     test_cli_check()
     print("loopx-update-smoke ok")
