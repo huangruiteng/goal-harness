@@ -28,6 +28,10 @@ snapshot under `~/.local/share/loopx/releases/`, installs the
 `loopx` wrapper under `~/.local/bin`, and installs the reusable Codex
 skills under `~/.codex/skills`.
 
+By default, the archive source is the public `stable` ref. Maintainers can
+override it with `LOOPX_REF=main` when intentionally testing or repairing from
+the current repository head.
+
 It intentionally skips `loopx-canary` by default because there is no
 durable live checkout in this mode. Contributors who want a canary should clone
 the repository and run `scripts/install-local.sh`.
@@ -73,6 +77,10 @@ loopx doctor
 The update command plans the source archive, reports the installed release
 snapshot, preserves runtime state under `~/.codex/loopx`, and refreshes the
 executable and skills together when `--execute` is accepted.
+
+`loopx update` uses the same `stable` ref by default. Use `loopx update --ref
+main` only when you intentionally want a dev/head refresh instead of the stable
+channel.
 
 Re-running the curl installer is still the repair/fallback path when the local
 wrapper or release snapshot is broken enough that `loopx update` cannot run.

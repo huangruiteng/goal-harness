@@ -17,6 +17,11 @@ export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```
 
+The installer and `loopx update` use the public `stable` ref by default. Use
+`LOOPX_REF=main` or `loopx update --ref main` only for maintainer/dev repair
+when you intentionally want the current repository head instead of the stable
+channel.
+
 For a user who already installed from the archive, update through the explicit
 CLI flow:
 
@@ -42,6 +47,10 @@ loopx-canary doctor
 
 The no-clone path is the user default. The clone-plus-canary path is the
 maintainer validation path.
+
+Before promoting a stable install/update recommendation, maintainers must move
+the public `stable` ref to the release commit that passed this gate. Do not
+claim stable-channel readiness while `stable` is missing or stale.
 
 ## Compatibility Gate
 
