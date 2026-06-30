@@ -15,6 +15,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GUIDE = REPO_ROOT / "docs" / "guides" / "auto-research-command-path.md"
 GOAL_ID = "loopx-auto-research-knn"
+TRACKING_GOAL_ID = "loopx-meta"
 AGENT_ID = "codex-side-bypass"
 SESSION = "loopx-auto-research-one-click-smoke"
 
@@ -151,6 +152,8 @@ def main() -> int:
                 GOAL_ID,
                 "--agent-id",
                 AGENT_ID,
+                "--tracking-goal-id",
+                TRACKING_GOAL_ID,
                 "--reasoning-effort",
                 "high",
                 "--execute",
@@ -172,6 +175,14 @@ def main() -> int:
         payload = json.loads(result.stdout)
         assert payload["ok"] is True, payload
         assert payload["mode"] == "execute", payload
+        assert payload["goal_id"] == GOAL_ID, payload
+        assert payload["tracking_goal_id"] == TRACKING_GOAL_ID, payload
+        route = payload["route_contract"]
+        assert route["frontier_goal_id"] == GOAL_ID, payload
+        assert route["visible_lanes_read_goal_id"] == GOAL_ID, payload
+        assert route["tracking_goal_id"] == TRACKING_GOAL_ID, payload
+        assert route["tracking_goal_drives_frontier"] is False, payload
+        assert route["dedicated_positive_demo_frontier"] is True, payload
         assert payload["execution_kind"] == "deterministic_replay", payload
         assert payload["result_source"] == "generated_quickstart_pack_protected_eval_replay", payload
         assert payload["reasoning_effort"] == "high", payload
@@ -228,6 +239,9 @@ def main() -> int:
         log_entries = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
         assert any(entry[:1] == ["new-session"] for entry in log_entries), log_entries
         assert sum(1 for entry in log_entries if entry[:1] == ["new-window"]) == 3, log_entries
+        command_text = "\n".join(" ".join(entry) for entry in log_entries)
+        assert f"--goal-id {GOAL_ID}" in command_text, command_text
+        assert f"--goal-id {TRACKING_GOAL_ID}" not in command_text, command_text
         assert any(entry[:1] == ["list-windows"] for entry in log_entries), log_entries
         assert sum(1 for entry in log_entries if entry[:1] == ["capture-pane"]) == 3, log_entries
 

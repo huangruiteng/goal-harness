@@ -335,6 +335,13 @@ def register_auto_research_commands(
         help="Research goal id for the positive demo evidence.",
     )
     demo_e2e_parser.add_argument(
+        "--tracking-goal-id",
+        help=(
+            "Optional parent/productization goal id for status writeback context. "
+            "Visible lanes still inspect --goal-id as the research frontier."
+        ),
+    )
+    demo_e2e_parser.add_argument(
         "--objective",
         default=AUTO_RESEARCH_DEFAULT_OBJECTIVE,
         help="Compact public-safe research objective for the generated contract.",
@@ -684,6 +691,7 @@ def handle_auto_research_command(
             payload = run_auto_research_demo_e2e(
                 agent_id=args.agent_id,
                 goal_id=args.goal_id,
+                tracking_goal_id=args.tracking_goal_id,
                 objective=args.objective,
                 output_dir=args.output_dir,
                 execute=args.execute,

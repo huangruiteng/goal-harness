@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .core import (
     AUTO_RESEARCH_DEMO_E2E_SCHEMA_VERSION,
+    AUTO_RESEARCH_DEFAULT_GOAL_ID,
     AUTO_RESEARCH_PROJECTION_SCHEMA_VERSION,
     build_auto_research_board_projection,
     build_auto_research_demo_acceptance_packet,
@@ -182,6 +183,7 @@ def _command_text(
     execute: bool,
     launch_visible: bool = False,
     live_evidence: bool = False,
+    tracking_goal_id: str | None = None,
 ) -> str:
     parts = [
         shlex.quote(cli_bin),
@@ -194,6 +196,8 @@ def _command_text(
         "--agent-id",
         shlex.quote(agent_id),
     ]
+    if tracking_goal_id:
+        parts.extend(["--tracking-goal-id", shlex.quote(tracking_goal_id)])
     if execute:
         parts.append("--execute")
     if launch_visible:
@@ -226,6 +230,7 @@ def run_auto_research_demo_e2e(
     *,
     agent_id: str,
     goal_id: str,
+    tracking_goal_id: str | None,
     objective: str,
     output_dir: str,
     execute: bool,
@@ -249,6 +254,9 @@ def run_auto_research_demo_e2e(
     if live_evidence_path and not execute:
         raise ValueError("--live-evidence requires --execute")
 
+    tracking_goal = tracking_goal_id.strip() if isinstance(tracking_goal_id, str) else ""
+    if tracking_goal == goal_id:
+        tracking_goal = ""
     supervisor = build_auto_research_demo_supervisor_plan(
         goal_id=goal_id,
         session_name=session_name,
@@ -264,6 +272,19 @@ def run_auto_research_demo_e2e(
         "execution_kind": "deterministic_replay" if execute else "deterministic_replay_preview",
         "result_source": "generated_quickstart_pack_protected_eval_replay",
         "goal_id": goal_id,
+        "tracking_goal_id": tracking_goal or None,
+        "route_contract": {
+            "schema_version": "auto_research_demo_frontier_route_v0",
+            "frontier_goal_id": goal_id,
+            "tracking_goal_id": tracking_goal or None,
+            "tracking_goal_drives_frontier": False,
+            "visible_lanes_read_goal_id": goal_id,
+            "dedicated_positive_demo_frontier": goal_id == AUTO_RESEARCH_DEFAULT_GOAL_ID,
+            "reason": (
+                "Use --goal-id for the research frontier that visible lanes inspect. "
+                "--tracking-goal-id is metadata for the parent productization goal and must not reroute panes."
+            ),
+        },
         "agent_id": agent_id,
         "reasoning_effort": reasoning_effort,
         "commands": {
@@ -272,6 +293,7 @@ def run_auto_research_demo_e2e(
                 goal_id=goal_id,
                 agent_id=agent_id,
                 execute=True,
+                tracking_goal_id=tracking_goal or None,
             ),
             "deterministic_replay_with_visible_lanes": _command_text(
                 cli_bin=cli_bin,
@@ -279,6 +301,7 @@ def run_auto_research_demo_e2e(
                 agent_id=agent_id,
                 execute=True,
                 launch_visible=True,
+                tracking_goal_id=tracking_goal or None,
             ),
             "live_codex_claim_from_evidence": _command_text(
                 cli_bin=cli_bin,
@@ -286,6 +309,7 @@ def run_auto_research_demo_e2e(
                 agent_id=agent_id,
                 execute=True,
                 live_evidence=True,
+                tracking_goal_id=tracking_goal or None,
             ),
         },
         "supervisor": {
