@@ -164,10 +164,10 @@ Then run `loopx doctor`. Work only from the current project root: if LoopX state
 already exists, reuse it and do not create or overwrite a goal; if the project
 is not connected, prefer `loopx connect`, and use `loopx bootstrap` only when
 goal state clearly needs initialization. Ensure `.loopx/`, `.codex/goals/`,
-and `.local/` are ignored. If this is Codex App, set or refresh this thread's
-heartbeat automation automatically from the LoopX generated task body; do not
-ask me to manually run `heartbeat-prompt`. Then stop and report the project
-connection status, current user gate, top agent todo, and next safe action.
+and `.local/` are ignored. If this is Codex App, set the heartbeat automation to start at 3 minutes.
+Automatically refresh it from the LoopX generated task body; do not ask me to
+manually run `heartbeat-prompt`. Then stop and report the project connection
+status, current user gate, top agent todo, and next safe action.
 ```
 
 Then start a real E2E exploration in normal language:
@@ -202,7 +202,9 @@ path, the agent asks a concrete question; if a safe fallback exists, it keeps
 working; if nothing material changed, it backs off or quiet-stops instead of
 spending compute forever. The agent may use `heartbeat-prompt --thin`
 internally to wire Codex App, but users do not need to run that command in the
-recommended path.
+recommended path. After the 3-minute bootstrap cadence, Codex App cadence
+should follow `quota should-run.scheduler_hint` for backoff and reset-to-initial
+updates.
 
 ### Codex CLI
 
