@@ -1195,6 +1195,111 @@ def assert_launch_then_poll_todo_without_handle_routes_to_advancement() -> None:
     assert first_items[0]["action_kind"] == "run_eval", guard
 
 
+def assert_side_agent_monitor_watch_without_handle_stays_quiet() -> None:
+    monitor_todo = (
+        "[P0] Observe launched external demo worker via compact public-safe "
+        "markers only."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="external_demo_worker_launched_v0",
+            next_action=(
+                "Observe launched external demo worker until a compact public-safe "
+                "result marker arrives."
+            ),
+            coordination={
+                "primary_agent": "codex-main-control",
+                "registered_agents": ["codex-main-control", "codex-side-bypass"],
+            },
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": monitor_todo,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "continuous_monitor",
+                    "action_kind": "monitor",
+                    "claimed_by": "codex-side-bypass",
+                    "todo_id": "todo_side_external_observe",
+                }
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    lane = guard["work_lane_contract"]
+    assert guard["decision"] == "skip", guard
+    assert guard["should_run"] is False, guard
+    assert guard["effective_action"] == "monitor_quiet_skip", guard
+    assert lane["lane"] == "continuous_monitor", lane
+    assert lane["monitor_kind"] == "todo_monitor", lane
+    assert lane["must_attempt_work"] is False, lane
+    assert "external_evidence_observation" not in guard, guard
+    assert guard["execution_obligation"]["must_attempt_work"] is False, guard
+    interaction = guard["interaction_contract"]
+    assert interaction["mode"] == "monitor_quiet_skip", interaction
+    assert interaction["agent_channel"]["quiet_noop_allowed"] is True, interaction
+    hint = guard["agent_lane_frontier_hint"]
+    assert hint["reason_code"] == "only_current_agent_monitor_work_remains", hint
+
+
+def assert_side_agent_monitor_watch_with_handle_requires_observation() -> None:
+    target_key = "external-demo-worker:run-42"
+    monitor_todo = (
+        "[P0] Observe launched external demo worker via compact public-safe "
+        "markers only."
+    )
+    guard = build_quota_should_run(
+        status_payload(
+            status="external_demo_worker_launched_v0",
+            next_action=(
+                "Observe launched external demo worker until a compact public-safe "
+                "result marker arrives."
+            ),
+            coordination={
+                "primary_agent": "codex-main-control",
+                "registered_agents": ["codex-main-control", "codex-side-bypass"],
+            },
+            agent_todo_items=[
+                {
+                    "index": 1,
+                    "text": monitor_todo,
+                    "role": "agent",
+                    "status": "open",
+                    "priority": "P0",
+                    "task_class": "continuous_monitor",
+                    "action_kind": "monitor",
+                    "claimed_by": "codex-side-bypass",
+                    "todo_id": "todo_side_external_observe",
+                    "target_key": target_key,
+                }
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id="codex-side-bypass",
+    )
+    lane = guard["work_lane_contract"]
+    assert guard["decision"] == "observe", guard
+    assert guard["should_run"] is True, guard
+    assert guard["effective_action"] == "external_evidence_observe", guard
+    assert lane["lane"] == "continuous_monitor", lane
+    assert lane["monitor_kind"] == "external_evidence", lane
+    assert lane["must_attempt_work"] is True, lane
+    observation = guard["external_evidence_observation"]
+    assert observation["kind"] == "launched_external_work_monitor", observation
+    assert observation["must_attempt_observation"] is True, observation
+    assert observation["monitor_handle"]["schema_version"] == "projected_monitor_handle_v0", observation
+    assert observation["monitor_handle"]["target_key"] == target_key, observation
+    assert observation["monitor_handle"]["todo_id"] == "todo_side_external_observe", observation
+    assert observation["monitor_handle"]["claimed_by"] == "codex-side-bypass", observation
+    assert guard["execution_obligation"]["must_attempt_work"] is True, guard
+    interaction = guard["interaction_contract"]
+    assert interaction["mode"] == "external_evidence_observation", interaction
+    assert interaction["agent_channel"]["must_attempt"] is True, interaction
+    assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
+
+
 def assert_side_agent_next_action_projects_without_stealing_goal_next_action() -> None:
     primary_action = "[P0] Run the primary benchmark monitor owned by main control."
     side_action = (
@@ -2136,6 +2241,8 @@ def main() -> int:
     assert_behavior_regression_suite_routes_to_advancement()
     assert_launched_external_observation_does_not_preempt_advancement_backlog()
     assert_launch_then_poll_todo_without_handle_routes_to_advancement()
+    assert_side_agent_monitor_watch_without_handle_stays_quiet()
+    assert_side_agent_monitor_watch_with_handle_requires_observation()
     assert_side_agent_next_action_projects_without_stealing_goal_next_action()
     assert_side_agent_waits_when_only_other_agent_has_claimed_work()
     assert_side_agent_scope_wait_mentions_blocking_owner()

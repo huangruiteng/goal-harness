@@ -159,6 +159,7 @@ DEPENDENCY_OBSERVATION_CLASSIFICATION_HINTS = (
     "dependency_monitor",
 )
 EXTERNAL_EVIDENCE_OBSERVATION_SCHEMA_VERSION = "external_evidence_observation_obligation_v0"
+PROJECTED_MONITOR_HANDLE_SCHEMA_VERSION = "projected_monitor_handle_v0"
 INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 AUTOMATION_LIVENESS_SCHEMA_VERSION = "automation_liveness_v0"
@@ -386,6 +387,8 @@ def _external_evidence_poll_signal(
     ):
         return None
 
+    scoped_monitor_handle = _projected_monitor_handle(agent_todo_summary)
+    scoped_monitor_watch = _scoped_monitor_watch_without_advancement(agent_todo_summary)
     project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
     action_texts = [
         str(value or "").strip()
@@ -463,12 +466,14 @@ def _external_evidence_poll_signal(
     direct_observe = direct_observe_action or direct_observe_todo or direct_observe_state
     if not direct_observe and not launched_wait:
         return None
+    if scoped_monitor_watch and not scoped_monitor_handle:
+        return None
 
     observation_target = next((text for text in action_texts if text), None) or next(
         (text for text in todo_texts if text),
         "",
     )
-    return {
+    signal = {
         "source": "active_state_or_latest_run",
         "trigger": "implicit_launched_external_poll",
         "observation_target": observation_target,
@@ -481,6 +486,71 @@ def _external_evidence_poll_signal(
             else "state"
         ),
     }
+    if scoped_monitor_handle:
+        signal["monitor_handle"] = scoped_monitor_handle
+    return signal
+
+
+def _todo_summary_monitor_items(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(summary, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for key in (
+        "monitor_due_items",
+        "current_agent_claimed_monitor_items",
+        "monitor_open_items",
+        "claimed_monitor_open_items",
+        "first_open_items",
+    ):
+        values = summary.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            if not _todo_item_is_actionable_open(value):
+                continue
+            if _todo_task_class(value) != TODO_TASK_CLASS_MONITOR:
+                continue
+            identity = (normalize_todo_id(value.get("todo_id")) or "", id(value))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            items.append(value)
+    return items
+
+
+def _projected_monitor_handle(summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    for item in _todo_summary_monitor_items(summary):
+        target_key = str(item.get("target_key") or "").strip()
+        if not target_key:
+            continue
+        handle: dict[str, Any] = {
+            "schema_version": PROJECTED_MONITOR_HANDLE_SCHEMA_VERSION,
+            "target_key": target_key,
+        }
+        todo_id = normalize_todo_id(item.get("todo_id"))
+        if todo_id:
+            handle["todo_id"] = todo_id
+        claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
+        if claimed_by:
+            handle["claimed_by"] = claimed_by
+        next_due_at = str(item.get("next_due_at") or "").strip()
+        if next_due_at:
+            handle["next_due_at"] = next_due_at
+        return handle
+    return None
+
+
+def _scoped_monitor_watch_without_advancement(summary: dict[str, Any] | None) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    if not _todo_summary_claim_scope_agent_id(summary):
+        return False
+    if not _todo_summary_monitor_items(summary):
+        return False
+    return _open_todo_task_counts(summary).get("advancement", 0) <= 0
 
 
 def _post_handoff_latest_run(item: dict[str, Any]) -> dict[str, Any]:
@@ -581,7 +651,7 @@ def _external_evidence_observation_obligation(
     if poll_signal and poll_signal.get("observation_target"):
         observation_target = str(poll_signal.get("observation_target") or observation_target)
 
-    return {
+    obligation = {
         "schema_version": EXTERNAL_EVIDENCE_OBSERVATION_SCHEMA_VERSION,
         "required": True,
         "kind": "external_evidence_monitor" if explicit_wait else "launched_external_work_monitor",
@@ -622,6 +692,10 @@ def _external_evidence_observation_obligation(
             "compact transition or blocker writeback"
         ),
     }
+    monitor_handle = poll_signal.get("monitor_handle") if isinstance(poll_signal, dict) else None
+    if isinstance(monitor_handle, dict) and monitor_handle:
+        obligation["monitor_handle"] = monitor_handle
+    return obligation
 
 
 def _focus_wait_quota(payload: dict[str, Any]) -> dict[str, Any]:
