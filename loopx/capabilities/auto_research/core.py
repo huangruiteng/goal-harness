@@ -3477,6 +3477,7 @@ def render_auto_research_markdown(payload: dict[str, object]) -> str:
         acceptance = payload.get("acceptance") if isinstance(payload.get("acceptance"), dict) else {}
         supervisor = payload.get("supervisor") if isinstance(payload.get("supervisor"), dict) else {}
         commands = payload.get("commands") if isinstance(payload.get("commands"), dict) else {}
+        route = payload.get("route_contract") if isinstance(payload.get("route_contract"), dict) else {}
         live_codex = (
             payload.get("live_codex_e2e")
             if isinstance(payload.get("live_codex_e2e"), dict)
@@ -3490,6 +3491,9 @@ def render_auto_research_markdown(payload: dict[str, object]) -> str:
             f"- execution_kind: `{payload.get('execution_kind')}`",
             f"- result_source: `{payload.get('result_source')}`",
             f"- goal_id: `{payload.get('goal_id')}`",
+            f"- tracking_goal_id: `{payload.get('tracking_goal_id')}`",
+            f"- frontier_goal_id: `{route.get('frontier_goal_id')}`",
+            f"- tracking_goal_drives_frontier: `{route.get('tracking_goal_drives_frontier')}`",
             f"- agent_id: `{payload.get('agent_id')}`",
             f"- reasoning_effort: `{payload.get('reasoning_effort')}`",
             f"- replay_executed: `{replay.get('executed')}`",

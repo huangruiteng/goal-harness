@@ -61,6 +61,13 @@ That command is the user-facing UX for a replay-backed visible demo. Generic
 launcher internals stay inside LoopX; the operator does not need to know the
 module or implementation path.
 
+When this demo is being advanced from a broader productization goal such as
+`loopx-meta`, do not change `--goal-id` to that meta goal. Keep
+`--goal-id loopx-auto-research-knn` so the visible lanes read the positive
+auto-research frontier. Add `--tracking-goal-id loopx-meta` only when the
+caller needs metadata that says which parent goal is tracking the product work;
+tracking metadata never drives the visible lane frontier.
+
 If you want to inspect before opening visible Codex lanes, start with the
 read-only dry-run. It tells the operator which command will run the
 deterministic positive replay:

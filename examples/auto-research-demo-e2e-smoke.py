@@ -14,6 +14,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOAL_ID = "loopx-auto-research-knn"
+TRACKING_GOAL_ID = "loopx-meta"
 AGENT_ID = "codex-side-bypass"
 GUIDE = REPO_ROOT / "docs" / "guides" / "auto-research-command-path.md"
 
@@ -58,10 +59,23 @@ def run_cli(args: list[str], *, registry: Path, runtime_root: Path) -> subproces
     )
 
 
-def assert_e2e_payload(payload: dict[str, Any], *, executed: bool) -> None:
+def assert_e2e_payload(
+    payload: dict[str, Any],
+    *,
+    executed: bool,
+    tracking_goal_id: str | None = None,
+) -> None:
     assert payload["ok"] is True, payload
     assert payload["schema_version"] == "auto_research_demo_e2e_result_v0", payload
     assert payload["goal_id"] == GOAL_ID, payload
+    assert payload["tracking_goal_id"] == tracking_goal_id, payload
+    route = payload["route_contract"]
+    assert route["schema_version"] == "auto_research_demo_frontier_route_v0", payload
+    assert route["frontier_goal_id"] == GOAL_ID, payload
+    assert route["visible_lanes_read_goal_id"] == GOAL_ID, payload
+    assert route["tracking_goal_id"] == tracking_goal_id, payload
+    assert route["tracking_goal_drives_frontier"] is False, payload
+    assert route["dedicated_positive_demo_frontier"] is True, payload
     assert payload["agent_id"] == AGENT_ID, payload
     assert payload["reasoning_effort"] == "high", payload
     assert payload["execution_kind"] in {
@@ -141,12 +155,21 @@ def main() -> int:
                 GOAL_ID,
                 "--agent-id",
                 AGENT_ID,
+                "--tracking-goal-id",
+                TRACKING_GOAL_ID,
                 "--execute",
             ],
             registry=registry,
             runtime_root=runtime_root,
         )
-        assert_e2e_payload(json.loads(executed.stdout), executed=True)
+        executed_payload = json.loads(executed.stdout)
+        assert_e2e_payload(executed_payload, executed=True, tracking_goal_id=TRACKING_GOAL_ID)
+        replay_command = executed_payload["commands"]["deterministic_replay"]
+        visible_command = executed_payload["commands"]["deterministic_replay_with_visible_lanes"]
+        assert f"--goal-id {GOAL_ID}" in replay_command, replay_command
+        assert f"--goal-id {GOAL_ID}" in visible_command, visible_command
+        assert f"--tracking-goal-id {TRACKING_GOAL_ID}" in replay_command, replay_command
+        assert f"--tracking-goal-id {TRACKING_GOAL_ID}" in visible_command, visible_command
 
         markdown = run_cli(
             [
@@ -162,6 +185,8 @@ def main() -> int:
         ).stdout
         assert "# LoopX Auto Research Demo Replay" in markdown, markdown
         assert "execution_kind: `deterministic_replay_preview`" in markdown, markdown
+        assert "frontier_goal_id: `loopx-auto-research-knn`" in markdown, markdown
+        assert "tracking_goal_drives_frontier: `False`" in markdown, markdown
         assert "live_codex_e2e_claim_allowed: `False`" in markdown, markdown
         assert "live_codex_e2e_evidence_source: `not_collected_from_codex_lane_output`" in markdown, markdown
         assert "reasoning_effort: `high`" in markdown, markdown
@@ -175,6 +200,8 @@ def main() -> int:
         assert "--reasoning-effort high" in guide, guide
         assert "--execute" in guide, guide
         assert "--launch-visible" in guide, guide
+        assert "--tracking-goal-id loopx-meta" in guide, guide
+        assert "tracking metadata never drives the visible lane frontier" in guide, guide
         assert "--attach" in guide, guide
         assert "--replace-existing" in guide, guide
         assert "tmux kill-session -t loopx-auto-research" in guide, guide
