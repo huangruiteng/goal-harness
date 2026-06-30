@@ -524,6 +524,27 @@ loopx heartbeat-prompt --thin --goal-id your-project-goal
 loopx quota spend-slot --goal-id your-project-goal --slots 1 --source heartbeat --execute
 ```
 
+The `next_automatic_turn` reported by `quota plan` is only an advisory
+scheduling hint: it chooses the highest-compute eligible goal, while
+operator-gated, focus-waiting, waiting, throttled, paused, and health-blocked
+goals stay out of the eligible lane.
+
+For stalled control-plane repair, `control_plane.self_repair.enabled=true` lets
+`quota should-run` return a bounded `decision=self_repair` contract; missing
+policy defaults off. When the payload includes a `gate_prompt` or
+`operator_question`, the target heartbeat should proactively ask that concrete
+user/controller gate and do not call the turn "no new user action" while they
+remain open. Even after a bounded safe-bypass step, its report still has to
+list existing open user todos. When `notify_user_on_open_todo=true`, skip
+delivery work and quota spend for that blocker-push turn.
+
+When `should_run=false` but `safe_bypass_allowed=true`, the heartbeat may still
+do one bounded read-only steering or analysis step. See
+`docs/quota-allocation.md` for the full allocation contract. After an automatic
+turn actually spends delivery compute, append one spend event. Do not append
+spend for quiet `should_run=false` skips, preflight failures, or pure dry-run
+previews.
+
 Three rules matter in daily use:
 
 - surface concrete user gates instead of summarizing them as "waiting for
