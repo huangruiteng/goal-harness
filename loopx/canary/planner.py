@@ -288,7 +288,17 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
         "title": "Control-plane refactor safety",
         "purpose": "Sample hot-path route, policy seam, and interface budget checks for quota/status refactors.",
         "catalog_families": ["Work Routing", "State And Boundary", "Planning Governance"],
-        "trigger_hints": ("refactor", "quota.py", "status.py", "control-plane", "policy seam"),
+        "trigger_hints": (
+            "refactor",
+            "quota.py",
+            "status.py",
+            "control-plane",
+            "policy seam",
+            "work-lane policy",
+            "resume_when",
+            "resume_ready",
+            "loopx/policies/monitor_todo.py",
+        ),
         "checks": [
             {
                 "command": "python3 examples/control-plane-risk-characterization-smoke.py",
@@ -299,6 +309,11 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 "command": "python3 examples/hot-path-interface-budget-smoke.py",
                 "tier": "default",
                 "reason": "keeps hot-path payload and module growth bounded",
+            },
+            {
+                "command": "python3 examples/quota-resume-gated-open-todo-smoke.py",
+                "tier": "default",
+                "reason": "guards resume_when-gated open todos from entering executable quota lanes early",
             },
             {
                 "command": "python3 examples/work-lane-contract-smoke.py",

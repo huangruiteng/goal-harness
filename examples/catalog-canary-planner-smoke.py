@@ -139,6 +139,26 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     refactor_profile_ids = {profile["id"] for profile in refactor_payload["domain_profiles"]}
     assert "control-plane-refactor" in refactor_profile_ids, refactor_payload
 
+    work_lane_policy_payload = build_catalog_canary_plan(
+        changed_files=["loopx/policies/monitor_todo.py"],
+        surfaces=["resume_when resume_ready work-lane policy seam"],
+        max_checks_per_profile=3,
+    )
+    work_lane_profiles = {
+        profile["id"]: profile for profile in work_lane_policy_payload["domain_profiles"]
+    }
+    assert "control-plane-refactor" in work_lane_profiles, work_lane_policy_payload
+    work_lane_commands = [
+        check["command"] for check in work_lane_profiles["control-plane-refactor"]["checks"]
+    ]
+    assert "python3 examples/quota-resume-gated-open-todo-smoke.py" in work_lane_commands, (
+        work_lane_profiles["control-plane-refactor"]
+    )
+    assert all(
+        check["tier"] == "default"
+        for check in work_lane_profiles["control-plane-refactor"]["checks"]
+    ), work_lane_profiles["control-plane-refactor"]
+
     status_payload = build_catalog_canary_plan(
         changed_files=["loopx/status.py"],
         surfaces=["status --goal-id read-path"],
