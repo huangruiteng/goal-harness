@@ -109,6 +109,15 @@ def parse_release_id_time(release_id: str | None) -> datetime | None:
         return None
 
 
+def short_revision(value: Any, *, length: int = 12) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return text[:length] if len(text) > length else text
+
+
 def build_install_freshness(
     *,
     command_path: Path | None,
@@ -163,6 +172,12 @@ def build_install_freshness(
     manifest_source = (
         manifest_body.get("source") if isinstance(manifest_body.get("source"), dict) else {}
     )
+    manifest_source_git_commit = manifest_source.get("git_commit")
+    manifest_source_revision = (
+        manifest_source_git_commit
+        or manifest_source.get("git_ref")
+        or manifest_source.get("ref")
+    )
     manifest_skills = (
         manifest_body.get("skills") if isinstance(manifest_body.get("skills"), dict) else {}
     )
@@ -186,6 +201,12 @@ def build_install_freshness(
         "manifest_source_kind": manifest_source.get("kind"),
         "manifest_source_repo": manifest_source.get("repo"),
         "manifest_source_ref": manifest_source.get("ref"),
+        "manifest_source_git_commit": manifest_source_git_commit,
+        "manifest_source_git_commit_short": short_revision(manifest_source_git_commit),
+        "manifest_source_git_ref": manifest_source.get("git_ref"),
+        "manifest_source_git_dirty": manifest_source.get("git_dirty"),
+        "manifest_source_revision": manifest_source_revision,
+        "manifest_source_revision_short": short_revision(manifest_source_revision),
         "manifest_archive_sha256": manifest_source.get("archive_sha256"),
         "manifest_skills_digest": manifest_skills.get("digest"),
     }
@@ -598,7 +619,12 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
     freshness = payload.get("install_freshness") if isinstance(payload.get("install_freshness"), dict) else {}
     if freshness:
         manifest_source_repo = freshness.get("manifest_source_repo") or freshness.get("manifest_source_kind")
-        manifest_source_ref = freshness.get("manifest_source_ref") or "n/a"
+        manifest_source_ref = (
+            freshness.get("manifest_source_git_ref")
+            or freshness.get("manifest_source_ref")
+            or freshness.get("manifest_source_git_commit_short")
+            or "n/a"
+        )
         lines.extend(
             [
                 "",
@@ -612,6 +638,8 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
                 f"- reason: `{freshness.get('reason')}`",
                 f"- release_manifest_available: `{freshness.get('release_manifest_available')}`",
                 f"- manifest_source: `{manifest_source_repo}` @ `{manifest_source_ref}`",
+                f"- manifest_source_git_commit: `{freshness.get('manifest_source_git_commit_short')}`",
+                f"- manifest_source_git_dirty: `{freshness.get('manifest_source_git_dirty')}`",
                 f"- manifest_archive_sha256: `{freshness.get('manifest_archive_sha256')}`",
                 f"- manifest_skills_digest: `{freshness.get('manifest_skills_digest')}`",
                 "- upgrade_command:",

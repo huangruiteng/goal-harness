@@ -21,6 +21,15 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.doctor import add_promotion_readiness_freshness, build_install_freshness  # noqa: E402
 
 
+def git_output(args: list[str]) -> str:
+    return subprocess.run(
+        ["git", "-C", str(REPO_ROOT), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def run_install(env: dict[str, str], release_id: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(INSTALL_SCRIPT)],
@@ -94,6 +103,7 @@ def main() -> int:
             "PATH": os.environ.get("PATH", ""),
             "SHELL": "/bin/zsh",
         }
+        source_commit = git_output(["rev-parse", "HEAD"])
 
         install = run_install(env, "install-smoke-initial")
         assert "loopx installed locally" in install.stdout, install.stdout
@@ -134,6 +144,8 @@ def main() -> int:
         assert release_manifest["package"]["name"] == "loopx", release_manifest
         assert release_manifest["package"]["version"], release_manifest
         assert release_manifest["source"]["kind"] == "local_checkout", release_manifest
+        assert release_manifest["source"]["git_commit"] == source_commit, release_manifest
+        assert isinstance(release_manifest["source"]["git_dirty"], bool), release_manifest
         assert release_manifest["skills"]["digest"], release_manifest
         assert release_manifest["skills"]["items"]["loopx-project"]["sha256"], release_manifest
         canary_wrapper = bin_dir / "loopx-canary"
@@ -262,6 +274,9 @@ def main() -> int:
         assert freshness["release_manifest_available"] is True, freshness
         assert freshness["release_manifest_path"] == str(release_manifest_path), freshness
         assert freshness["manifest_source_kind"] == "local_checkout", freshness
+        assert freshness["manifest_source_git_commit"] == source_commit, freshness
+        assert freshness["manifest_source_git_commit_short"] == source_commit[:12], freshness
+        assert freshness["manifest_source_revision"] == source_commit, freshness
         assert freshness["manifest_skills_digest"] == release_manifest["skills"]["digest"], freshness
         assert "install-from-github.sh" in freshness["upgrade_command"], freshness
         assert "loopx doctor" in freshness["upgrade_command"], freshness
@@ -275,6 +290,9 @@ def main() -> int:
         assert doctor_payload["release_manifest"]["available"] is True, doctor_payload
         assert doctor_payload["release_manifest"]["path"] == str(release_manifest_path), doctor_payload
         assert doctor_payload["release_manifest"]["manifest"]["source"]["kind"] == "local_checkout", doctor_payload
+        assert (
+            doctor_payload["release_manifest"]["manifest"]["source"]["git_commit"] == source_commit
+        ), doctor_payload
         assert doctor_payload["release_manifest"]["manifest"]["skills"]["digest"] == release_manifest["skills"]["digest"], doctor_payload
         assert doctor_payload["skill"]["path"] == str(skill), doctor_payload
         assert doctor_payload["skill"]["exists"] is True, doctor_payload
@@ -341,6 +359,8 @@ def main() -> int:
         assert "schema_version: `loopx_install_freshness_v0`" in doctor_markdown, doctor_markdown
         assert "status: `unknown`" in doctor_markdown, doctor_markdown
         assert "release_manifest_available: `True`" in doctor_markdown, doctor_markdown
+        assert f"manifest_source_git_commit: `{source_commit[:12]}`" in doctor_markdown, doctor_markdown
+        assert "manifest_source: `local_checkout` @ `n/a`" not in doctor_markdown, doctor_markdown
         assert "manifest_skills_digest:" in doctor_markdown, doctor_markdown
         assert "install-from-github.sh" in doctor_markdown, doctor_markdown
         assert "latest_promotion_readiness: available=`True`" in doctor_markdown, doctor_markdown
