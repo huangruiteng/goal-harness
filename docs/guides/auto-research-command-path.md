@@ -34,8 +34,30 @@ loopx doctor
 
 ## 0. Prove The Positive E2E Path
 
-Start with the one-command replay before opening visible Codex lanes. The
-dry-run is read-only and tells the operator which command will run the positive
+The smallest visible demo is one command. It runs the deterministic positive
+replay, then opens the visible multi-agent panes through the normal
+auto-research surface:
+
+```bash
+loopx --registry "$LOOPX_REGISTRY" \
+  --runtime-root "$LOOPX_RUNTIME_ROOT" \
+  --format json auto-research demo-e2e \
+  --goal-id loopx-auto-research-knn \
+  --agent-id codex-side-bypass \
+  --reasoning-effort high \
+  --execute \
+  --launch-visible \
+  --launcher tmux \
+  --workspace ./loopx-auto-research-demo \
+  --create-workspace \
+  --attach
+```
+
+That command is the user-facing UX. Generic launcher internals stay inside
+LoopX; the operator does not need to know the module or implementation path.
+
+If you want to inspect before opening visible Codex lanes, start with the
+read-only dry-run. It tells the operator which command will run the positive
 replay:
 
 ```bash
@@ -68,7 +90,8 @@ Expected positive result:
 - the board is rollout-backed and has at least one promotion candidate;
 - `acceptance.ready_for_real_launch` is `true`.
 
-For a full visible demo, add the visible lane launcher:
+For a full visible demo after an explicit replay step, add the visible lane
+launcher:
 
 ```bash
 loopx --registry "$LOOPX_REGISTRY" \
