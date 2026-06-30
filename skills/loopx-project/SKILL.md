@@ -209,6 +209,14 @@ If a registered goal returns `automation_prompt_upgrade.required=true`, treat
 the installed automation prompt as stale and regenerate it with
 `heartbeat-prompt --agent-id ... --agent-scope ...`.
 
+If the default `loopx` payload contradicts the just-merged source checkout or a
+`PYTHONPATH=<checkout> python3 -m loopx.cli ...` cross-check, pause delivery and
+run `loopx doctor` before trusting quota. The installed command is normally a
+release snapshot wrapper, so a self-merged fix may require refreshing the local
+install from the latest trusted checkout with `scripts/install-local.sh`; rerun
+the default `loopx` command after the refresh and only spend quota after the
+runtime payload matches the repaired source behavior.
+
 If the response has `state=operator_gate`, treat it as a user/controller
 interaction, not a silent skip. Read `gate_prompt`, `operator_question`,
 `recommended_action`, `next_handoff_condition`, `missing_gates`, and
