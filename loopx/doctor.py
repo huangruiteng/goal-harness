@@ -54,7 +54,7 @@ REQUIRED_INSTALLED_SKILL_PHRASES = {
     "loopx-self-repair": (
         "Build a compact evidence packet",
         "loopx --format json diagnose --goal-id <goal-id>",
-        "loopx --format json status --limit 20",
+        "loopx --format json status --goal-id <goal-id> --limit 20",
         "registry-declared active state file",
         "references/repair-patterns.md",
         "Repair at the lowest durable layer",
@@ -283,7 +283,7 @@ def installed_skill_summary(skills_root: Path) -> dict[str, dict[str, Any]]:
     return summaries
 
 
-def latest_promotion_readiness_event(runtime_root: Path) -> dict[str, Any]:
+def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = None) -> dict[str, Any]:
     goals_dir = runtime_root / "goals"
     if not goals_dir.exists():
         return {
@@ -293,8 +293,9 @@ def latest_promotion_readiness_event(runtime_root: Path) -> dict[str, Any]:
         }
 
     matches: list[dict[str, Any]] = []
-    for index_path in goals_dir.glob("*/runs/index.jsonl"):
-        goal_id = index_path.parent.parent.name
+    index_glob = f"{goal_id}/runs/index.jsonl" if goal_id else "*/runs/index.jsonl"
+    for index_path in goals_dir.glob(index_glob):
+        current_goal_id = index_path.parent.parent.name
         try:
             lines = index_path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -316,7 +317,7 @@ def latest_promotion_readiness_event(runtime_root: Path) -> dict[str, Any]:
             matches.append(
                 {
                     "available": True,
-                    "goal_id": str(item.get("goal_id") or goal_id),
+                    "goal_id": str(item.get("goal_id") or current_goal_id),
                     "generated_at": item.get("generated_at"),
                     "classification": classification,
                     "delivery_batch_scale": item.get("delivery_batch_scale"),
@@ -331,7 +332,12 @@ def latest_promotion_readiness_event(runtime_root: Path) -> dict[str, Any]:
         return {
             "available": False,
             "runtime_root": str(runtime_root),
-            "reason": "no canary promotion readiness run found",
+            "goal_id": goal_id,
+            "reason": (
+                f"no canary promotion readiness run found for `{goal_id}`"
+                if goal_id
+                else "no canary promotion readiness run found"
+            ),
         }
     matches.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
     latest = matches[0]

@@ -9262,6 +9262,7 @@ def build_attention_queue(
     global_registry: dict[str, Any],
     runtime_root: Path | None = None,
     include_task_graph: bool = False,
+    goal_id_filter: str | None = None,
 ) -> dict[str, Any]:
     health_items: list[dict[str, Any]] = []
     history_items: list[dict[str, Any]] = []
@@ -9475,6 +9476,14 @@ def build_attention_queue(
         if finding.get("severity") not in {"high", "action"}:
             continue
         goal_id = str(finding.get("goal_id") or "global-registry")
+        if goal_id_filter:
+            finding_goal_ids = [
+                str(item)
+                for item in (finding.get("goal_ids") or [])
+                if str(item or "").strip()
+            ]
+            if goal_id != goal_id_filter and goal_id_filter not in finding_goal_ids:
+                continue
         live_items = live_quota_items_by_goal.get(goal_id, [])
         if finding.get("kind") in SOURCE_REGISTRY_SHADOW_FINDINGS and live_items:
             for item in live_items:
@@ -9508,6 +9517,9 @@ def build_attention_queue(
         "watching_monitor": sum(1 for item in items if item["waiting_on"] == MONITOR_SIGNAL_WAITING_ON),
         "items": items,
     }
+    if goal_id_filter:
+        queue["goal_filter"] = goal_id_filter
+        queue["goal_filter_applied"] = True
     if backlog_candidates:
         queue["autonomous_backlog_candidates"] = backlog_candidates
     if monitor_candidates:
@@ -9897,6 +9909,7 @@ def build_promotion_readiness_summary(
     history: dict[str, Any],
     *,
     runtime_root: Path | None = None,
+    goal_id_filter: str | None = None,
 ) -> dict[str, Any]:
     latest: dict[str, Any] | None = None
     latest_at: datetime | None = None
@@ -9917,7 +9930,10 @@ def build_promotion_readiness_summary(
             latest = run
 
     if latest is None and runtime_root is not None:
-        full_scan_latest = latest_promotion_readiness_event(runtime_root)
+        full_scan_latest = latest_promotion_readiness_event(
+            runtime_root,
+            goal_id=goal_id_filter,
+        )
         if full_scan_latest.get("available"):
             latest = full_scan_latest
             source = "run_history_full_scan"
@@ -10337,9 +10353,11 @@ def collect_status(
     scan_roots: list[Path],
     limit: int,
     include_task_graph: bool = False,
+    goal_id: str | None = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
     control_plane_limit = max(display_limit, STATUS_CONTROL_PLANE_CONTEXT_LIMIT)
+    goal_filter = str(goal_id or "").strip() or None
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     global_registry = collect_global_registry_health(
@@ -10351,7 +10369,7 @@ def collect_status(
     history = collect_history(
         registry_path=registry_path,
         runtime_root=runtime_root,
-        goal_id=None,
+        goal_id=goal_filter,
         limit=control_plane_limit,
         include_runtime_goals=include_runtime_goals,
     )
@@ -10367,12 +10385,14 @@ def collect_status(
         global_registry=global_registry,
         runtime_root=runtime_root,
         include_task_graph=include_task_graph,
+        goal_id_filter=goal_filter,
     )
     run_history = build_run_history(history, display_limit=display_limit)
     event_ledger_summary = build_event_ledger_summary(history)
     promotion_readiness_summary = build_promotion_readiness_summary(
         history,
         runtime_root=runtime_root,
+        goal_id_filter=goal_filter,
     )
     promotion_gate = build_promotion_gate(
         registry_path=registry_path,
@@ -10393,6 +10413,7 @@ def collect_status(
         "goal_count": history.get("goal_count"),
         "run_count": history.get("run_count"),
         "status_contract": build_status_contract(),
+        "goal_filter": goal_filter,
         "contract": {
             "ok": contract.get("ok"),
             "summary": contract.get("summary"),
@@ -10435,6 +10456,8 @@ def render_status_markdown(payload: dict[str, Any]) -> str:
             f"minimum_dashboard_schema_version={status_contract.get('minimum_dashboard_schema_version')}, "
             f"producer={status_contract.get('producer')}"
         )
+    if payload.get("goal_filter"):
+        lines.append(f"- goal_filter: `{payload.get('goal_filter')}`")
 
     contract = payload.get("contract") if isinstance(payload.get("contract"), dict) else {}
     summary = contract.get("summary") if isinstance(contract.get("summary"), dict) else {}

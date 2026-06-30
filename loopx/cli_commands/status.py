@@ -59,6 +59,13 @@ def register_status_commands(
     )
     status_parser.add_argument("--limit", type=int, default=5)
     status_parser.add_argument(
+        "--goal-id",
+        help=(
+            "Optional goal id to focus the status projection. The default remains "
+            "the global dashboard/status view."
+        ),
+    )
+    status_parser.add_argument(
         "--agent-id",
         help=(
             "Registered agent id for adding agent-lane next-action projection "
@@ -224,6 +231,7 @@ def handle_status_command(
             scan_roots=_scan_roots(args),
             limit=max(0, args.limit),
             include_task_graph=args.include_task_graph,
+            goal_id=args.goal_id,
         )
         if args.agent_id:
             attach_agent_lane_next_actions(payload, agent_id=args.agent_id)
