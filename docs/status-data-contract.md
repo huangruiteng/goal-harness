@@ -251,6 +251,7 @@ goals must stay out of the eligible lane even when they have a high
   "runtime_root": "./runtime",
   "goal_count": 3,
   "run_count": 2,
+  "goal_filter": null,
   "status_contract": {
     "schema_version": 2,
     "minimum_dashboard_schema_version": 2,
@@ -438,6 +439,13 @@ goals must stay out of the eligible lane even when they have a high
   }
 }
 ```
+
+By default `loopx status` is the multi-goal dashboard/control-plane view.
+`loopx status --goal-id <goal-id>` keeps global health fields such as
+`contract` and `global_registry`, but focuses goal-scoped sections such as
+`attention_queue`, `run_history`, `event_ledger_summary`, `usage_summary`, and
+`todo_index` on the requested goal. Use `loopx diagnose --goal-id <goal-id>`
+when an agent needs the richer reasoning packet for one goal.
 
 Consumers should treat unknown fields as additive. Required fields for a
 first-screen UI are `ok`, `contract`, and `attention_queue`.

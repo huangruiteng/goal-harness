@@ -718,6 +718,13 @@ Inside a project:
 loopx status
 ```
 
+To focus the status projection on one goal while preserving global health
+fields, pass the goal id:
+
+```bash
+loopx --format json status --goal-id <STABLE_GOAL_ID>
+```
+
 Outside a project, `loopx status` should fall back to:
 
 ```text

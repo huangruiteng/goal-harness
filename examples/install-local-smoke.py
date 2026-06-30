@@ -216,15 +216,14 @@ def main() -> int:
         for phrase in (
             "Build a compact evidence packet",
             "loopx --format json diagnose --goal-id <goal-id>",
-            "loopx --format json status --limit 20",
-            "intentionally a registry/dashboard view rather than a goal-filtered command",
+            "loopx --format json status --goal-id <goal-id> --limit 20",
+            "status` defaults to the registry/dashboard view, but accepts `--goal-id`",
             "registry-declared active state file",
             "references/repair-patterns.md",
             "Repair at the lowest durable layer",
             "Do not solve contradictory payloads by guessing",
         ):
             assert phrase in self_repair_text, phrase
-        assert "status --goal-id <goal-id>" not in self_repair_text, self_repair_text
         self_repair_patterns = (
             codex_home
             / "skills"
