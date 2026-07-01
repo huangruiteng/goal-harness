@@ -41,6 +41,10 @@ class CodexAppServerGoalTurn:
     session_event_count: int = 0
     session_log_observed: bool = False
     session_task_complete_observed: bool = False
+    stream_eof_observed: bool = False
+    stream_error_observed: bool = False
+    process_exit_observed: bool = False
+    process_returncode: int | None = None
     notifications: list[str] = field(default_factory=list)
     _responses: "queue.Queue[dict[str, Any] | Exception] | None" = field(
         default=None,
@@ -287,6 +291,11 @@ def _record_turn_event(
     raise_on_error: bool,
 ) -> bool:
     if isinstance(msg, EOFError):
+        turn.stream_eof_observed = True
+        returncode = turn.process.poll()
+        if returncode is not None:
+            turn.process_exit_observed = True
+            turn.process_returncode = int(returncode)
         if raise_on_error:
             raise CodexAppServerGoalDriverError(
                 "codex app-server exited before turn completion"
@@ -294,6 +303,7 @@ def _record_turn_event(
         turn.notifications.append("stream/eof")
         return False
     if isinstance(msg, Exception):
+        turn.stream_error_observed = True
         if raise_on_error:
             raise CodexAppServerGoalDriverError(str(msg))
         turn.notifications.append("stream/error")
@@ -429,6 +439,10 @@ def observe_codex_app_server_goal_turn(
     """Drain app-server turn events without making completion a success gate."""
     if turn._responses is None:
         return bool(turn.turn_completed_observed)
+    returncode = turn.process.poll()
+    if returncode is not None:
+        turn.process_exit_observed = True
+        turn.process_returncode = int(returncode)
     if _observe_codex_session_events(turn):
         return True
     deadline = time.monotonic() + max(0.0, timeout_sec)
@@ -441,6 +455,12 @@ def observe_codex_app_server_goal_turn(
         except queue.Empty:
             if _observe_codex_session_events(turn):
                 return True
+            returncode = turn.process.poll()
+            if returncode is not None:
+                turn.process_exit_observed = True
+                turn.process_returncode = int(returncode)
+                if not turn.turn_completed_observed:
+                    turn.notifications.append("process/exited")
             if not until_completed or time.monotonic() >= deadline:
                 return bool(turn.turn_completed_observed)
             continue
@@ -767,6 +787,10 @@ def compact_turn_metadata(turn: CodexAppServerGoalTurn) -> dict[str, Any]:
         "session_log_observed": bool(turn.session_log_observed),
         "session_event_count": int(turn.session_event_count),
         "session_task_complete_observed": bool(turn.session_task_complete_observed),
+        "stream_eof_observed": bool(turn.stream_eof_observed),
+        "stream_error_observed": bool(turn.stream_error_observed),
+        "process_exit_observed": bool(turn.process_exit_observed),
+        "process_returncode": turn.process_returncode,
         "assistant_message_present": bool(assistant_message),
         "assistant_message_chars": len(assistant_message),
         "assistant_message_sha256": sha256(assistant_message.encode()).hexdigest()
