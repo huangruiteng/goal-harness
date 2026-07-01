@@ -31,6 +31,7 @@ from loopx.benchmark_case_state import (  # noqa: E402
 )
 from loopx.codex_goal_baseline import stable_text_digest  # noqa: E402
 from scripts.codex_app_server_goal_driver import (  # noqa: E402
+    CodexAppServerGoalDriverError,
     compact_turn_metadata,
     observe_codex_app_server_goal_turn,
     start_codex_app_server_goal_turn,
@@ -127,6 +128,25 @@ def _effective_action_observed(turn: Any) -> bool:
     return False
 
 
+def _terminal_app_server_failure(turn: Any) -> str:
+    if bool(getattr(turn, "turn_completed_observed", False)):
+        return ""
+    if bool(getattr(turn, "stream_eof_observed", False)):
+        return "codex_app_server_stream_eof_before_completion"
+    if bool(getattr(turn, "stream_error_observed", False)):
+        return "codex_app_server_stream_error_before_completion"
+    process = getattr(turn, "process", None)
+    returncode = None
+    if process is not None:
+        try:
+            returncode = process.poll()
+        except Exception:
+            returncode = None
+    if returncode is not None or bool(getattr(turn, "process_exit_observed", False)):
+        return "codex_app_server_process_exited_before_completion"
+    return ""
+
+
 def _wait_for_worker_turn_completion(
     turn: Any,
     *,
@@ -141,6 +161,9 @@ def _wait_for_worker_turn_completion(
         first_action_deadline = started_at + max(0.1, first_action_timeout_sec)
     while time.monotonic() < deadline:
         observe_codex_app_server_goal_turn(turn, timeout_sec=0.0, raise_on_error=False)
+        terminal_failure = _terminal_app_server_failure(turn)
+        if terminal_failure:
+            raise CodexAppServerGoalDriverError(terminal_failure)
         if turn.turn_completed_observed:
             return True
         if (
@@ -151,6 +174,9 @@ def _wait_for_worker_turn_completion(
             raise TimeoutError("codex_exec_first_action_timeout")
         time.sleep(max(0.1, poll_interval_sec))
     observe_codex_app_server_goal_turn(turn, timeout_sec=0.0, raise_on_error=False)
+    terminal_failure = _terminal_app_server_failure(turn)
+    if terminal_failure:
+        raise CodexAppServerGoalDriverError(terminal_failure)
     return bool(turn.turn_completed_observed)
 
 
@@ -193,9 +219,11 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
                     raise TimeoutError(
                         "timed out waiting for app-server worker turn completion"
                     )
-            except TimeoutError as exc:
+            except (TimeoutError, CodexAppServerGoalDriverError) as exc:
                 if str(exc) == "codex_exec_first_action_timeout":
                     worker_error_type = "codex_exec_first_action_timeout"
+                elif str(exc).startswith("codex_app_server_"):
+                    worker_error_type = str(exc)
                 else:
                     worker_error_type = "codex_app_server_turn_timeout"
         compact = compact_turn_metadata(turn)

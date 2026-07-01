@@ -148,6 +148,33 @@ for line in sys.stdin:
     print(json.dumps({"id": mid, "result": result}), flush=True)
 """
 
+FAKE_CODEX_EXIT_AFTER_TURN_START = """#!/usr/bin/env python3
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    mid = msg.get("id")
+    method = msg.get("method")
+    if method == "initialized":
+        continue
+    if method == "initialize":
+        result = {"serverInfo": {"name": "fake-codex"}}
+    elif method == "thread/start":
+        result = {"thread": {"id": "thread-skillsbench"}}
+    elif method == "thread/goal/set":
+        result = {"goal": {"threadId": "thread-skillsbench", "status": "active"}}
+    elif method == "thread/goal/get":
+        result = {"goal": {"threadId": "thread-skillsbench", "status": "active"}}
+    elif method == "turn/start":
+        result = {"turn": {"id": "turn-skillsbench", "status": "running"}}
+        print(json.dumps({"id": mid, "result": result}), flush=True)
+        raise SystemExit(0)
+    else:
+        result = {}
+    print(json.dumps({"id": mid, "result": result}), flush=True)
+"""
+
 FAKE_CODEX_THOUGHT_ONLY_NO_COMPLETION = """#!/usr/bin/env python3
 import json
 import sys
@@ -967,6 +994,65 @@ def test_host_worker_fails_closed_on_first_action_timeout() -> None:
         assert not list(work.glob(".loopx_app_server_goal_worker_response_*.txt"))
 
 
+def test_host_worker_fails_fast_when_app_server_stream_closes() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-app-goal-worker-eof-") as tmp:
+        root = Path(tmp)
+        fake = root / "codex"
+        prompt = root / "prompt.txt"
+        output = root / "worker.compact.json"
+        private_response = root / "private-response.txt"
+        fake.write_text(FAKE_CODEX_EXIT_AFTER_TURN_START, encoding="utf-8")
+        fake.chmod(0o755)
+        prompt.write_text("Private task instruction placeholder.", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(WORKER_SCRIPT),
+                "--task-id",
+                "llm-prefix-cache-replay",
+                "--codex-bin",
+                str(fake),
+                "--work-dir",
+                str(root / "work"),
+                "--prompt-file",
+                str(prompt),
+                "--output-json",
+                str(output),
+                "--response-text-file",
+                str(private_response),
+                "--response-timeout-sec",
+                "5",
+                "--turn-timeout-sec",
+                "60",
+                "--first-action-timeout-sec",
+                "60",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        assert result.returncode == 1, result
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["ok"] is False, payload
+        assert (
+            payload["error_type"]
+            == "codex_app_server_stream_eof_before_completion"
+        ), payload
+        assert (
+            payload["worker_contract"]["first_blocker"]
+            == "codex_app_server_stream_eof_before_completion"
+        ), payload
+        assert payload["turn"]["turn_id_present"] is True, payload
+        assert payload["turn"]["turn_completed_observed"] is False, payload
+        assert payload["turn"]["stream_eof_observed"] is True, payload
+        assert payload["turn"]["process_exit_observed"] is True, payload
+        assert payload["turn"]["process_returncode"] == 0, payload
+        assert "process/exited" in payload["turn"]["notifications"], payload
+        assert not private_response.exists(), payload
+
+
 def test_host_worker_treats_thought_delta_as_no_effective_first_action() -> None:
     with tempfile.TemporaryDirectory(prefix="skillsbench-app-goal-worker-thought-only-") as tmp:
         root = Path(tmp)
@@ -1744,7 +1830,7 @@ def test_app_server_goal_launcher_defaults_first_action_watchdog() -> None:
         {"app_server_goal_worker_trace_dir": "/tmp/worker-traces"},
     )
     index = command.index("--first-action-timeout-sec")
-    assert command[index + 1] == "3600", command
+    assert command[index + 1] == "900", command
 
 
 def test_app_server_goal_launcher_allows_explicit_first_action_disable() -> None:
@@ -2271,6 +2357,7 @@ if __name__ == "__main__":
     test_host_worker_contract_only_cli()
     test_host_worker_waits_for_completion_and_keeps_public_json_compact()
     test_host_worker_fails_closed_on_first_action_timeout()
+    test_host_worker_fails_fast_when_app_server_stream_closes()
     test_acp_relay_delegates_to_app_server_goal_worker()
     test_acp_relay_materializes_lifecycle_trace_before_prompt()
     test_acp_relay_streams_public_keepalive_while_worker_runs()
