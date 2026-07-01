@@ -382,6 +382,7 @@ def filtered_todo_summary(
     role: str,
     status: str | None = None,
     todo_id: str | None = None,
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
     items = list((summary or {}).get("items") or [])
     normalized_status = normalize_todo_status(status)
@@ -394,6 +395,23 @@ def filtered_todo_summary(
             for item in items
             if normalize_todo_id(item.get("todo_id")) == normalized_todo_id
         ]
+    normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
+    if normalized_agent_id:
+        if role == "agent":
+            items = [
+                item
+                for item in items
+                if not normalize_todo_claimed_by(item.get("claimed_by"))
+                or normalize_todo_claimed_by(item.get("claimed_by")) == normalized_agent_id
+            ]
+        elif role == "user":
+            items = [
+                item
+                for item in items
+                if bool(item.get("global_gate"))
+                or not normalize_todo_blocks_agent(item.get("blocks_agent"))
+                or normalize_todo_blocks_agent(item.get("blocks_agent")) == normalized_agent_id
+            ]
     source_section = str((summary or {}).get("source_section") or TODO_SECTION_HEADINGS[role])
     return (
         compact_todo_group(
@@ -513,12 +531,16 @@ def list_goal_todos(
     role: str | None = None,
     status: str | None = None,
     todo_id: str | None = None,
+    agent_id: str | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
 ) -> dict[str, Any]:
     normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
     if todo_id and not normalized_todo_id:
         raise ValueError("todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+    normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
+    if agent_id and not normalized_agent_id:
+        raise ValueError("agent_id must be a public-safe agent token such as codex-main-control")
     registry = load_registry(registry_path)
     goal, resolved_project, resolved_state_file = resolve_goal_state(
         registry=registry,
@@ -565,13 +587,17 @@ def list_goal_todos(
     roles = [role] if role else ["user", "agent"]
     summaries: dict[str, dict[str, Any]] = {}
     todos: list[dict[str, Any]] = []
+    unfiltered_count = 0
     for item_role in roles:
         key = f"{item_role}_todos"
+        raw_summary = fields.get(key) if isinstance(fields, dict) else None
+        unfiltered_count += len((raw_summary or {}).get("items") or [])
         summary = filtered_todo_summary(
-            fields.get(key) if isinstance(fields, dict) else None,
+            raw_summary,
             role=item_role,
             status=status,
             todo_id=normalized_todo_id,
+            agent_id=normalized_agent_id,
         )
         summaries[key] = summary
         todos.extend(summary.get("items") or [])
@@ -591,6 +617,13 @@ def list_goal_todos(
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
     }
+    if normalized_agent_id:
+        payload["agent_id_filter"] = normalized_agent_id
+        payload["unfiltered_todo_count"] = unfiltered_count
+        payload["filter_semantics"] = (
+            "agent todos include unclaimed items plus claimed_by=<agent>; "
+            "user todos include global, unscoped legacy, and blocks_agent=<agent> gates"
+        )
     if normalized_todo_id:
         payload["todo_id_filter"] = normalized_todo_id
         payload["matched"] = bool(todos)
@@ -1949,6 +1982,14 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
             f"- todo_count: `{payload.get('todo_count')}`",
             f"- state_file: `{payload.get('state_file')}`",
         ]
+        if payload.get("agent_id_filter"):
+            lines.extend(
+                [
+                    f"- agent_id_filter: `{payload.get('agent_id_filter')}`",
+                    f"- unfiltered_todo_count: `{payload.get('unfiltered_todo_count')}`",
+                    f"- filter_semantics: `{payload.get('filter_semantics')}`",
+                ]
+            )
         projection = payload.get("state_event_projection")
         if isinstance(projection, dict):
             lines.extend(
