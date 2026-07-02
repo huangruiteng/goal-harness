@@ -43,17 +43,20 @@ def main() -> int:
     launcher_source = (REPO_ROOT / "loopx/visible_multi_agent_launcher.py").read_text(
         encoding="utf-8"
     )
+    runtime_scripts_source = (
+        REPO_ROOT / "loopx/capabilities/multi_agent/runtime_scripts.py"
+    ).read_text(encoding="utf-8")
     demo_e2e_source = (
         REPO_ROOT / "loopx/capabilities/auto_research/demo_e2e.py"
     ).read_text(encoding="utf-8")
-    assert "raw JSON is not printed in visible panes" in launcher_source
-    assert "Use $LOOPX_PANE_LOOPX for human-readable output" in launcher_source
-    assert "$LOOPX_PANE_LOOPX_JSON <command>" in launcher_source
-    assert "$LOOPX_PANE_ARTIFACT_DIR/<name>.public.json" in launcher_source
-    assert "It injects --format json unless you pass an explicit --format." in launcher_source
-    assert "$LOOPX_PANE_LOOPX_JSON is a command path, not an output file." in launcher_source
+    assert "raw JSON is not printed in visible panes" in runtime_scripts_source
+    assert "Use $LOOPX_PANE_LOOPX for human-readable output" in runtime_scripts_source
+    assert "$LOOPX_PANE_LOOPX_JSON <command>" in runtime_scripts_source
+    assert "$LOOPX_PANE_ARTIFACT_DIR/<name>.public.json" in runtime_scripts_source
+    assert "It injects --format json unless you pass an explicit --format." in runtime_scripts_source
+    assert "$LOOPX_PANE_LOOPX_JSON is a command path, not an output file." in runtime_scripts_source
     assert "LOOPX_PANE_WORKER_TURN" in launcher_source
-    assert "loopx-pane-a2a-tick" in launcher_source
+    assert "loopx-pane-a2a-tick" in runtime_scripts_source
     assert "role_prompt_inside_codex_tui" in launcher_source
     assert "model_reasoning_effort" in launcher_source
     assert "codex_stream_filter" not in launcher_source
