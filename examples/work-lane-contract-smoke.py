@@ -1293,6 +1293,8 @@ def assert_side_agent_monitor_watch_with_handle_requires_observation() -> None:
     assert observation["monitor_handle"]["target_key"] == target_key, observation
     assert observation["monitor_handle"]["todo_id"] == "todo_side_external_observe", observation
     assert observation["monitor_handle"]["claimed_by"] == "codex-side-bypass", observation
+    assert observation["monitor_handle"]["target_text"] == monitor_todo, observation
+    assert observation["observation_target"] == monitor_todo, observation
     assert guard["execution_obligation"]["must_attempt_work"] is True, guard
     interaction = guard["interaction_contract"]
     assert interaction["mode"] == "external_evidence_observation", interaction

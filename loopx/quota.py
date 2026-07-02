@@ -484,10 +484,15 @@ def _external_evidence_poll_signal(
     if scoped_monitor_watch and not scoped_monitor_handle:
         return None
 
-    observation_target = next((text for text in action_texts if text), None) or next(
-        (text for text in todo_texts if text),
-        "",
+    scoped_monitor_target = (
+        str(scoped_monitor_handle.get("target_text") or "").strip()
+        if isinstance(scoped_monitor_handle, dict)
+        else ""
     )
+    observation_target = scoped_monitor_target or next(
+        (text for text in action_texts if text),
+        None,
+    ) or next((text for text in todo_texts if text), "")
     signal = {
         "source": "active_state_or_latest_run",
         "trigger": "implicit_launched_external_poll",
@@ -554,6 +559,9 @@ def _projected_monitor_handle(summary: dict[str, Any] | None) -> dict[str, Any] 
         next_due_at = str(item.get("next_due_at") or "").strip()
         if next_due_at:
             handle["next_due_at"] = next_due_at
+        target_text = str(item.get("title") or item.get("text") or "").strip()
+        if target_text:
+            handle["target_text"] = target_text[:320]
         return handle
     return None
 
