@@ -12,10 +12,12 @@ Use the deeper showcase and protocol docs only after this path is clear:
 
 ## Start From A Clean Workspace
 
-Use a user-owned empty directory for the visible demo, while keeping LoopX state
-in the normal shared control plane. This keeps research scratch files separate
+Use a user-owned directory for the visible demo, while keeping LoopX state in
+the normal shared control plane. This keeps research scratch files separate
 from the LoopX repository but lets every lane read the same registry, quota,
-todo, frontier, and rollout-event state.
+todo, frontier, and rollout-event state. For the smoothest first run, start
+from a directory the Codex CLI already trusts, or from a plain non-git demo
+directory you own.
 
 ```bash
 mkdir -p loopx-auto-research-demo
@@ -41,26 +43,32 @@ measured gain. It is intentionally small and still does not claim that visible
 Codex lanes authored the research result unless a compact live evidence packet
 is supplied.
 
-To run the multi-round path and open visible panes through the normal auto-research
-surface:
+To run the multi-round path and open visible panes through the normal
+auto-research surface, use the human-facing command:
 
 ```bash
 loopx --registry "$LOOPX_REGISTRY" \
   --runtime-root "$LOOPX_RUNTIME_ROOT" \
-  --format json auto-research demo-e2e \
+  auto-research demo-e2e \
   --agent-id codex-side-bypass \
   --reasoning-effort high \
   --execute \
-  --launcher tmux \
-  --workspace . \
-  --create-workspace
+  --replace-existing
 ```
 
 That command is the user-facing UX for a multi-round visible demo. It creates a
 fresh isolated demo goal by default, runs the LoopX worker-loop, launches the
-visible tmux lanes, and attaches to the session. Generic launcher internals stay
-inside LoopX; the operator does not need to know the module or implementation
-path.
+visible tmux lanes, and attaches to the session. Each tmux window should open as
+a real interactive Codex CLI TUI role, not as a JSON/status stream. Generic
+launcher internals stay inside LoopX; the operator does not need to know the
+module or implementation path.
+
+Visible Codex TUI panes default to the caller's current workspace, not to a
+demo-local git worktree. The demo registry, runtime root, queue, and evidence
+state stay isolated, but the first screen should not be a generated worktree
+trust prompt. If you want an explicit scratch location, pass
+`--workspace "$HOME/loopx-auto-research-demo" --create-workspace`; avoid
+pointing `--workspace` at the demo-local control-plane directory.
 
 When this demo is being advanced from a broader productization goal such as
 `loopx-meta`, do not change `--goal-id` to that meta goal. Omit `--goal-id` for
@@ -76,7 +84,7 @@ multi-round positive path:
 ```bash
 loopx --registry "$LOOPX_REGISTRY" \
   --runtime-root "$LOOPX_RUNTIME_ROOT" \
-  --format json auto-research demo-e2e \
+  auto-research demo-e2e \
   --agent-id codex-side-bypass \
   --reasoning-effort high
 ```
@@ -86,7 +94,7 @@ When the dry-run looks right, run the multi-round positive path:
 ```bash
 loopx --registry "$LOOPX_REGISTRY" \
   --runtime-root "$LOOPX_RUNTIME_ROOT" \
-  --format json auto-research demo-e2e \
+  auto-research demo-e2e \
   --agent-id codex-side-bypass \
   --reasoning-effort high \
   --execute
@@ -106,11 +114,11 @@ loopx --registry "$LOOPX_REGISTRY" \
 ```
 
 To start tmux panes but stay in the current shell, use `--no-attach`. Visible
-panes default to human-readable LoopX output. The pane-local `$LOOPX_PANE_LOOPX`
-wrapper rewrites accidental visible JSON requests to markdown, and
-`$LOOPX_PANE_LOOPX_JSON` is reserved for redirected machine artifacts; it refuses
-to dump raw JSON directly into a visible terminal or a Codex-visible pipe unless
-the launcher explicitly sets `LOOPX_MACHINE_JSON=1`.
+panes default to the Codex CLI TUI. The pane-local `$LOOPX_PANE_LOOPX` wrapper
+is for human-readable LoopX commands inside that TUI, and
+`$LOOPX_PANE_LOOPX_JSON` is reserved for redirected machine artifacts. Raw JSON
+should not be dumped into the first visible screen; future control surfaces can
+render those artifacts separately.
 
 Expected minimal E2E result:
 
@@ -259,13 +267,18 @@ The default visible digital employees are:
 | `codex-product-capability:research-curator` | Research curator | Keeps the research contract, protected boundary, metric, stop policy, evidence review, and operator gates explicit. |
 | `codex-side-bypass:hypothesis-mapper` | Hypothesis mapper | Turns ideas into todo-backed hypotheses, successor links, and retirement rationale. |
 | `codex-main-control:evidence-runner` | Evidence runner | Executes one selected hypothesis under an isolated attempt boundary when mutation is required and preserves scored or unscored evidence. |
+| `codex-value-explorer:evidence-verifier` | Evidence verifier | Checks holdout/verification evidence, classifies claims, and keeps promotion boundaries explicit. |
 
-Each pane must route through its own quota/frontier/bootstrap path. The
-supervisor only makes those panes visible. The panes share the same LoopX
-goal surface: registry, runtime root, frontier, todo projection, and evidence
-graph. Do not move every pane into an unrelated empty workspace; isolate only
-mutating evidence-runner attempts with a claimed git worktree or equivalent
-execution boundary.
+Each Codex TUI role must route through its own quota/frontier/worker-turn path
+inside the pane. The supervisor only makes those roles visible and interactive.
+The panes share the same LoopX goal surface: registry, runtime root, frontier,
+todo projection, and evidence graph. Do not move every pane into an unrelated
+empty workspace; isolate only mutating evidence-runner attempts with a claimed
+git worktree or equivalent execution boundary.
+Visible Codex TUI panes should default to the caller's workspace or an explicit
+user-owned scratch workspace. They should not default into the demo-local
+control-plane repository or generated lane worktrees, because that exposes
+workspace-trust prompts before the user sees the actual research roles.
 
 For compatibility or product experiments, `--agent` can still name explicit
 lanes, including a separate evidence-verifier lane.
@@ -275,9 +288,10 @@ lanes, including a separate evidence-verifier lane.
 The visible panes should do work through the same CLI path a heartbeat worker
 uses: each turn re-reads quota, frontier, todo projection, and rollout evidence
 before writing anything.
-The user-facing terminal should show the role, selected todo, action, blocker,
-and Codex CLI stream; raw JSON belongs in `.public.json` artifacts, not on the
-first visible screen.
+The user-facing terminal should first show the Codex CLI TUI. Role progress,
+selected todo, action, and blocker summaries should appear as normal Codex
+interaction when the role runs LoopX commands; raw JSON belongs in
+`.public.json` artifacts, not on the first visible screen.
 
 ```bash
 loopx --registry "$LOOPX_REGISTRY" \
