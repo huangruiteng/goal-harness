@@ -6154,13 +6154,14 @@ def pr_merged_condition(target: str, rollout_events: list[dict[str, Any]]) -> di
 def apply_resume_conditions(
     items: list[dict[str, Any]],
     *,
+    resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
 ) -> None:
-    by_id = {
-        str(item.get("todo_id") or ""): item
-        for item in items
-        if str(item.get("todo_id") or "")
-    }
+    by_id: dict[str, dict[str, Any]] = {}
+    for source_item in [*(resume_source_items or []), *items]:
+        todo_id = normalize_todo_id(source_item.get("todo_id"))
+        if todo_id:
+            by_id[todo_id] = source_item
     for item in items:
         resume_when = normalize_todo_resume_when(item.get("resume_when"))
         if not resume_when:
@@ -6182,6 +6183,9 @@ def apply_resume_conditions(
                 if isinstance(target_item, dict)
                 else None
             )
+            if isinstance(target_item, dict):
+                condition["target_archive_state"] = target_item.get("archive_state")
+                condition["target_source_section"] = target_item.get("source_section")
             condition["satisfied"] = condition["target_status"] == "done"
         elif kind == TODO_RESUME_KIND_PR_MERGED and target:
             condition.update(pr_merged_condition(target, rollout_events or []))
@@ -6206,6 +6210,7 @@ def compact_todo_group(
     source_section: str | None,
     role: str | None = None,
     preferred_todo_ids: set[str] | None = None,
+    resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
 ) -> dict[str, Any] | None:
@@ -6217,7 +6222,29 @@ def compact_todo_group(
         else item
         for item in items
     ]
-    apply_resume_conditions(items, rollout_events=rollout_events)
+    structured_resume_source_items = [
+        structured_todo_item(
+            item,
+            role=item.get("role") if isinstance(item.get("role"), str) else None,
+            source_section=(
+                item.get("source_section")
+                if isinstance(item.get("source_section"), str)
+                else source_section
+            ),
+            archive_state=(
+                str(item.get("archive_state"))
+                if item.get("archive_state") is not None
+                else "active"
+            ),
+        )
+        for item in (resume_source_items or [])
+        if isinstance(item, dict)
+    ]
+    apply_resume_conditions(
+        items,
+        resume_source_items=structured_resume_source_items,
+        rollout_events=rollout_events,
+    )
     open_items = [item for item in items if not item.get("done")]
     terminal_items = [item for item in items if item.get("done")]
     deferred_items = [item for item in terminal_items if todo_item_is_deferred(item)]
@@ -6422,33 +6449,49 @@ def parse_active_state_todos(
     role: str | None = None
     source_sections: dict[str, str | None] = {"user": None, "agent": None}
     items: dict[str, list[dict[str, Any]]] = {"user": [], "agent": []}
+    archive_items: list[dict[str, Any]] = []
+    archive_mode = False
+    archive_source_section: str | None = None
     current_todo: dict[str, Any] | None = None
 
     for line in state_text.splitlines():
         if line.startswith("## "):
             heading = line.lstrip("#").strip()
+            normalized_heading = heading.strip().lower()
+            archive_mode = any(
+                marker in normalized_heading for marker in TODO_ARCHIVE_HEADER_MARKERS
+            )
+            archive_source_section = heading if archive_mode else None
             role = todo_role_for_heading(heading)
             current_todo = None
             if role and source_sections[role] is None:
                 source_sections[role] = heading
             continue
-        if role is None:
+        if role is None and not archive_mode:
             continue
         match = TODO_TASK_PATTERN.match(line)
         if match:
             marker, text = match.groups()
             status = todo_status_from_marker(marker)
+            target_items = archive_items if archive_mode else items[str(role)]
             todo: dict[str, Any] = {
-                "index": len(items[role]) + 1,
+                "index": len(target_items) + 1,
                 "done": todo_done_for_status(status),
                 "status": status,
                 "text": normalize_todo_text(text),
             }
+            if archive_mode:
+                todo["archive_state"] = "archive"
+                todo["source_section"] = archive_source_section
+            else:
+                todo["archive_state"] = "active"
+                todo["source_section"] = source_sections[str(role)]
+                todo["role"] = role
             if goal is not None:
                 materials = extract_review_materials(text, goal=goal, state_path=state_path)
                 if materials:
                     todo["review_materials"] = materials
-            items[role].append(todo)
+            target_items.append(todo)
             current_todo = todo
             continue
         if current_todo is None or not line.startswith((" ", "\t")):
@@ -6462,11 +6505,16 @@ def parse_active_state_todos(
             current_todo["text"] = normalize_todo_text(f"{current_todo.get('text', '')} {continuation}")
 
     result: dict[str, Any] = {}
+    archived_resume_source_items = [
+        item for item in archive_items if normalize_todo_id(item.get("todo_id"))
+    ]
+    resume_source_items = [*items["user"], *items["agent"], *archived_resume_source_items]
     user = compact_todo_group(
         items["user"],
         source_section=source_sections["user"],
         role="user",
         preferred_todo_ids=preferred_todo_ids,
+        resume_source_items=resume_source_items,
         rollout_events=rollout_events,
         item_limit=item_limit,
     )
@@ -6475,6 +6523,7 @@ def parse_active_state_todos(
         source_section=source_sections["agent"],
         role="agent",
         preferred_todo_ids=preferred_todo_ids,
+        resume_source_items=resume_source_items,
         rollout_events=rollout_events,
         item_limit=item_limit,
     )

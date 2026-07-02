@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.quota import build_quota_should_run  # noqa: E402
-from loopx.status import compact_todo_group  # noqa: E402
+from loopx.status import compact_todo_group, parse_active_state_todos  # noqa: E402
 
 
 GOAL_ID = "resume-gated-open-todo-fixture"
@@ -19,8 +19,11 @@ PRIMARY_AGENT = "codex-main-control"
 BLOCKING_TODO_ID = "todo_projection_refresh"
 GATED_TODO_ID = "todo_projection_wording"
 FALLBACK_TODO_ID = "todo_catalog_canary"
+ARCHIVED_DONE_TODO_ID = "todo_archived_pr_merge"
+ARCHIVE_GATED_MONITOR_ID = "todo_archive_gated_monitor"
 GATED_ACTION = "[P0] Review refreshed projection wording."
 FALLBACK_ACTION = "[P1] Continue catalog-driven product canary coverage."
+ARCHIVE_MONITOR_ACTION = "[P1] Monitor product refactor/catalog canary continuation."
 
 
 def build_agent_todos(*, prerequisite_status: str) -> dict:
@@ -176,9 +179,66 @@ def assert_ready_open_resume_todo_can_run() -> None:
     assert quota_payload["recommended_action"] == GATED_ACTION, quota_payload
 
 
+def assert_archived_done_resume_target_wakes_claimed_monitor() -> None:
+    fields = parse_active_state_todos(
+        "# Active Goal State\n\n"
+        "## Agent Todo\n\n"
+        f"- [ ] {ARCHIVE_MONITOR_ACTION}\n"
+        "  <!-- loopx:todo "
+        f"todo_id={ARCHIVE_GATED_MONITOR_ID} "
+        "status=open "
+        "task_class=continuous_monitor "
+        "claimed_by=codex-product-capability "
+        f"resume_when=todo_done:{ARCHIVED_DONE_TODO_ID} "
+        "cadence=6h "
+        "next_due_at=2026-01-01T00:00:00+00:00 "
+        "-->\n\n"
+        "## Completed Work Archive\n\n"
+        "- [x] [P0] Merge predecessor PR.\n"
+        "  <!-- loopx:todo "
+        f"todo_id={ARCHIVED_DONE_TODO_ID} "
+        "status=done "
+        "task_class=advancement_task "
+        "claimed_by=codex-main-control "
+        f"unblocks_todo_id={ARCHIVE_GATED_MONITOR_ID} "
+        "-->\n"
+    )
+    agent_todos = fields["agent_todos"]
+    active_ids = {item["todo_id"] for item in agent_todos["items"]}
+    assert ARCHIVE_GATED_MONITOR_ID in active_ids, agent_todos
+    assert ARCHIVED_DONE_TODO_ID not in active_ids, agent_todos
+
+    monitor = next(
+        item for item in agent_todos["items"] if item["todo_id"] == ARCHIVE_GATED_MONITOR_ID
+    )
+    assert monitor["resume_ready"] is True, monitor
+    assert monitor["resume_condition"]["target_status"] == "done", monitor
+    assert monitor["resume_condition"]["target_archive_state"] == "archive", monitor
+
+    monitor_open_ids = {
+        item["todo_id"] for item in agent_todos["monitor_open_items"]
+    }
+    assert ARCHIVE_GATED_MONITOR_ID in monitor_open_ids, agent_todos
+    assert agent_todos["monitor_due_count"] == 1, agent_todos
+
+    quota_payload = build_quota_should_run(
+        status_payload(agent_todos, next_action=ARCHIVE_MONITOR_ACTION),
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    summary = quota_payload["agent_todo_summary"]
+    current_agent_monitor_ids = {
+        item["todo_id"] for item in summary["current_agent_claimed_monitor_items"]
+    }
+    assert ARCHIVE_GATED_MONITOR_ID in current_agent_monitor_ids, quota_payload
+    assert summary["current_agent_claimed_monitor_count"] == 1, quota_payload
+    assert summary["monitor_due_count"] == 1, quota_payload
+
+
 def main() -> int:
     assert_not_ready_open_resume_todo_is_not_executable()
     assert_ready_open_resume_todo_can_run()
+    assert_archived_done_resume_target_wakes_claimed_monitor()
     print("quota-resume-gated-open-todo-smoke ok")
     return 0
 
