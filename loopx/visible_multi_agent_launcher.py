@@ -9,11 +9,18 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
-
-TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION = "tui_multi_agent_runner_contract_v0"
-INTERACTIVE_TUI_CONTRACT_SCHEMA_VERSION = "multi_agent_visible_interactive_tui_contract_v0"
-VISIBLE_LAUNCHER_ACCEPTANCE_CONTRACT_SCHEMA_VERSION = (
-    "multi_agent_visible_launcher_acceptance_contract_v0"
+from .capabilities.multi_agent.contract import (
+    GENERIC_MULTI_AGENT_ROLE_PROFILE_SCHEMA_VERSION,
+    INTERACTIVE_TUI_CONTRACT_SCHEMA_VERSION,
+    TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION,
+    VISIBLE_LAUNCHER_ACCEPTANCE_CONTRACT_SCHEMA_VERSION,
+    as_string_list as _as_string_list,
+    build_compact_human_status,
+    build_generic_role_profile,
+    build_tui_multi_agent_runner_contract,
+    generic_role_prompt as _generic_role_prompt,
+    positive_int_value as _positive_int_value,
+    role_skill_profile as _role_skill_profile,
 )
 
 
@@ -309,100 +316,6 @@ def resolve_visible_launcher(*, requested: str, tmux_bin: str) -> str:
     return "tmux"
 
 
-def build_tui_multi_agent_runner_contract(
-    *,
-    session_name: str,
-    lane_count: int,
-    attach_command: str,
-    stop_command: str,
-    retry_command: str,
-    all_lane_workspace_isolation: bool,
-) -> dict[str, object]:
-    """Describe the reusable visible-TUI runner without domain-specific steps."""
-
-    return {
-        "schema_version": TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION,
-        "runner_surface": "tmux_codex_cli_tui",
-        "coordination_model": {
-            "leader_required": False,
-            "state_bus": "loopx_registry_runtime_todo_quota_frontier",
-            "selection": "agent_scoped_quota_should_run_frontier",
-            "handoff": "todo_and_public_safe_evidence",
-        },
-        "tmux_lifecycle": {
-            "session_name": session_name,
-            "lane_count": lane_count,
-            "one_window_per_role": True,
-            "remain_on_exit": True,
-            "replace_existing": "execute_flag_only",
-            "attach_command": attach_command,
-            "stop_command": stop_command,
-            "retry_command": retry_command,
-        },
-        "lane_runtime_env": {
-            "shared": [
-                "LOOPX_PROJECT",
-                "LOOPX_REGISTRY",
-                "LOOPX_RUNTIME_ROOT",
-                "LOOPX_VISIBLE_SESSION",
-                "LOOPX_VISIBLE_ARTIFACT_DIR",
-            ],
-            "role_identity": [
-                "LOOPX_ROLE_ID",
-                "LOOPX_ROLE_PROFILE_REF",
-                "LOOPX_GOAL_ID",
-                "LOOPX_AGENT_ID",
-            ],
-            "pane_tools": [
-                "LOOPX_PANE_LOOPX",
-                "LOOPX_PANE_LOOPX_JSON",
-                "LOOPX_PANE_ARTIFACT_DIR",
-                "LOOPX_PANE_A2A_TICK",
-                "LOOPX_PANE_WORKER_TURN",
-                "LOOPX_PANE_WORKER_LOOP",
-            ],
-            "workspace_policy": (
-                "shared_goal_surface_by_default; mutating lanes may opt into lane workspaces"
-            ),
-            "all_lane_workspace_isolation": all_lane_workspace_isolation,
-        },
-        "role_prompt_and_skill": {
-            "bootstrap_prompt": "written_to_public_artifact_then_passed_to_codex_tui",
-            "role_profile": "role-local public json artifact",
-            "skill_materialization": ".codex/skills/<skill>/SKILL.md",
-            "worker_local_skill_only": True,
-        },
-        "pane_local_a2a": {
-            "tick_command": "$LOOPX_PANE_A2A_TICK",
-            "first_action": "run $LOOPX_PANE_A2A_TICK inside the Codex TUI",
-            "reads": ["quota should-run", "agent-scoped frontier"],
-            "runs": ["LOOPX_PANE_WORKER_TURN", "LOOPX_PANE_WORKER_LOOP"],
-            "bounded_rounds_env": "LOOPX_PANE_TICK_ROUNDS",
-            "machine_json_policy": "file_or_explicit_machine_channel_only",
-            "machine_json_destination": "$LOOPX_PANE_ARTIFACT_DIR/*.public.json",
-            "human_default": "markdown_status_inside_codex_tui",
-        },
-        "user_takeover": {
-            "interactive_codex_tui": True,
-            "may_type_into_each_role": True,
-            "attach": attach_command,
-            "stop": stop_command,
-        },
-        "debug_artifacts": {
-            "machine_json": "redirected_public_artifacts_only",
-            "launcher_scripts": "runtime_local_debug_files",
-            "raw_transcripts": False,
-            "credentials": False,
-        },
-        "boundaries": {
-            "domain_specific_research_logic": False,
-            "runs_agent_processes_in_dry_run": False,
-            "writes_loopx_state_in_dry_run": False,
-            "spends_quota_in_dry_run": False,
-        },
-    }
-
-
 def build_visible_lane_command(
     *,
     role_id: str,
@@ -608,84 +521,6 @@ def build_visible_multi_agent_payload(
     }
 
 
-def _as_string_list(value: object) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
-    if isinstance(value, Iterable):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
-
-
-def _positive_int_value(value: object, *, default: int) -> int:
-    try:
-        parsed = int(str(value).strip())
-    except Exception:
-        return default
-    return parsed if parsed > 0 else default
-
-
-def _role_skill_profile(skill: object) -> dict[str, str]:
-    if not skill:
-        return {}
-    if isinstance(skill, str):
-        source = skill.strip()
-        if not source:
-            return {}
-        name = Path(source).parent.name or Path(source).stem or "worker-skill"
-        return {"required_skill": name, "worker_skill_source": source}
-    if not isinstance(skill, dict):
-        return {}
-    name = str(skill.get("name") or skill.get("skill_name") or "").strip()
-    source = str(skill.get("source") or skill.get("path") or "").strip()
-    if not name and source:
-        name = Path(source).parent.name or Path(source).stem
-    if not name or not source:
-        return {}
-    return {"required_skill": name, "worker_skill_source": source}
-
-
-def _generic_role_prompt(
-    *,
-    goal_id: str,
-    agent_id: str,
-    role_id: str,
-    scope: str,
-    handoff_hints: list[str],
-    skill_name: str | None,
-) -> str:
-    lines = [
-        "LoopX multi-agent role",
-        f"Goal: {goal_id}",
-        f"Agent: {agent_id}",
-        f"Role: {role_id}",
-    ]
-    if scope:
-        lines.extend(["", "Scope:", scope])
-    if skill_name:
-        lines.extend(["", "Local skill:", f"Use ${skill_name} when it applies to this role."])
-    lines.extend(
-        [
-            "",
-            "How to work:",
-            "- Treat LoopX state as the shared A2A surface.",
-            "- First action: immediately run `$LOOPX_PANE_A2A_TICK` in this Codex TUI. Do not ask the user to start it.",
-            "- The tick reads your quota/frontier and then runs this role's worker-turn when configured.",
-            "- When the tick completes, summarize what changed, what remains blocked, and stay interactive for user takeover.",
-            "- For machine reads, run `$LOOPX_PANE_LOOPX_JSON` as the command and redirect output into `$LOOPX_PANE_ARTIFACT_DIR/<name>.public.json`; it defaults to `--format json`.",
-            "- Never write output to `$LOOPX_PANE_LOOPX_JSON`; it is the executable wrapper, not an artifact path.",
-            "- Write compact public-safe evidence before completing or handing off a todo.",
-            "- The user may type into this pane; respond like a normal Codex CLI agent.",
-        ]
-    )
-    if handoff_hints:
-        lines.append("")
-        lines.append("Handoff hints:")
-        lines.extend(f"- {hint}" for hint in handoff_hints)
-    return "\n".join(lines)
-
-
 def build_visible_multi_agent_payload_from_spec(
     spec: dict[str, object],
     *,
@@ -741,18 +576,15 @@ def build_visible_multi_agent_payload_from_spec(
             default=1,
         )
         tick_sleep_seconds = _positive_int_value(raw_role.get("tick_sleep_seconds"), default=3)
-        role_profile = {
-            "schema_version": "generic_multi_agent_role_profile_v0",
-            "role_id": role_id,
-            "agent_id": agent_id,
-            "agent_scope": scope,
-            "responsibility": responsibility,
-            "handoff_hints": handoff_hints,
-        }
-        extra_profile = raw_role.get("role_profile")
-        if isinstance(extra_profile, dict):
-            role_profile.update(extra_profile)
-        role_profile.update(skill_profile)
+        role_profile = build_generic_role_profile(
+            role_id=role_id,
+            agent_id=agent_id,
+            scope=scope,
+            responsibility=responsibility,
+            handoff_hints=handoff_hints,
+            skill_profile=skill_profile,
+            extra_profile=raw_role.get("role_profile"),
+        )
         lane_slug = _script_slug(lane_id)
         role_profile_json = json.dumps(role_profile, ensure_ascii=False, sort_keys=True)
         role_profile_command = (
@@ -842,6 +674,7 @@ def build_visible_multi_agent_payload_from_spec(
                     "worker_loop_command",
                 ],
                 "role_count": len(lanes),
+                "role_profile_schema_version": GENERIC_MULTI_AGENT_ROLE_PROFILE_SCHEMA_VERSION,
                 "uses_generic_runner": True,
                 "domain_specific": False,
             },
@@ -868,6 +701,7 @@ def build_visible_multi_agent_payload_from_spec(
             },
         }
     )
+    packet["compact_human_status"] = build_compact_human_status(packet)
     return packet
 
 

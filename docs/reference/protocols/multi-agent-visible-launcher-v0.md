@@ -17,6 +17,23 @@ This contract intentionally sits between two existing surfaces:
 The visible launcher may plan or start panes, but it must not become a leader
 agent, hidden scheduler, promotion authority, or second source of truth.
 
+## Kernel Module
+
+The reusable product kernel lives in
+`loopx/capabilities/multi_agent/contract.py`. Domain capabilities should depend
+on that module for:
+
+- `tui_multi_agent_runner_contract_v0`;
+- `generic_multi_agent_role_profile_v0`;
+- pane-local A2A prompt rules;
+- artifact-only machine JSON policy;
+- compact human status for launch previews.
+
+The host launcher in `loopx/visible_multi_agent_launcher.py` owns tmux process
+execution and Codex TUI acceptance only. Auto-research, benchmark demos, and
+future custom teams should not duplicate runner schema, role-profile
+normalization, attach/stop semantics, or pane-local tick instructions.
+
 ## User-Facing Spec
 
 Most callers should not author `multi_agent_visible_launcher_v0` packets by

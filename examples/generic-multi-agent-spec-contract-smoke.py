@@ -22,6 +22,11 @@ from loopx.visible_multi_agent_launcher import (  # noqa: E402
     TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION,
     build_visible_multi_agent_payload_from_spec,
 )
+from loopx.capabilities.multi_agent.contract import (  # noqa: E402
+    GENERIC_MULTI_AGENT_COMPACT_STATUS_SCHEMA_VERSION,
+    GENERIC_MULTI_AGENT_ROLE_PROFILE_SCHEMA_VERSION,
+    build_tui_multi_agent_runner_contract,
+)
 
 
 PRIVATE_MARKERS = [
@@ -114,6 +119,7 @@ def main() -> int:
             "worker_loop_command",
         ],
         "role_count": 2,
+        "role_profile_schema_version": GENERIC_MULTI_AGENT_ROLE_PROFILE_SCHEMA_VERSION,
         "uses_generic_runner": True,
         "domain_specific": False,
     }, payload
@@ -128,6 +134,17 @@ def main() -> int:
     assert runner["pane_local_a2a"]["machine_json_destination"] == "$LOOPX_PANE_ARTIFACT_DIR/*.public.json", runner
     assert runner["role_prompt_and_skill"]["worker_local_skill_only"] is True, runner
     assert runner["boundaries"]["domain_specific_research_logic"] is False, runner
+    direct_runner = build_tui_multi_agent_runner_contract(
+        session_name="loopx-direct-kernel-smoke",
+        lane_count=2,
+        attach_command="tmux attach -t loopx-direct-kernel-smoke",
+        stop_command="tmux kill-session -t loopx-direct-kernel-smoke",
+        retry_command="rerun after state refresh",
+        all_lane_workspace_isolation=False,
+    )
+    assert direct_runner["schema_version"] == TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION
+    assert direct_runner["pane_local_a2a"]["tick_command"] == "$LOOPX_PANE_A2A_TICK"
+    assert direct_runner["boundaries"]["domain_specific_research_logic"] is False
 
     tui = payload["interactive_tui_contract"]
     assert tui["schema_version"] == INTERACTIVE_TUI_CONTRACT_SCHEMA_VERSION, tui
@@ -168,6 +185,12 @@ def main() -> int:
         assert "auto_start_pane_local_a2a_tick" in lane["lane_timeline"], lane
 
     assert payload["cli_contract"]["machine_json_policy"] == "artifact_only_in_visible_panes", payload
+    compact = payload["compact_human_status"]
+    assert compact["schema_version"] == GENERIC_MULTI_AGENT_COMPACT_STATUS_SCHEMA_VERSION, compact
+    assert compact["role_count"] == 2, compact
+    assert compact["first_action"] == "$LOOPX_PANE_A2A_TICK", compact
+    assert compact["machine_json_policy"] == "artifact_only_in_visible_panes", compact
+    assert [role["lane_id"] for role in compact["roles"]] == ["planner", "builder"], compact
     assert payload["boundary"]["starts_visible_processes"] is False, payload
     assert payload["boundary"]["writes_loopx_state"] is False, payload
     assert payload["boundary"]["spends_loopx_quota"] is False, payload
