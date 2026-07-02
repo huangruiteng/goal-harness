@@ -204,6 +204,11 @@ def main() -> int:
             "$LOOPX_PANE_ARTIFACT_DIR/*.public.json"
         ), dry_packet
         assert dry_packet["runner_contract"]["boundaries"]["domain_specific_research_logic"] is False, dry_packet
+        compact = dry_packet["compact_human_status"]
+        assert compact["schema_version"] == "generic_multi_agent_compact_status_v0", compact
+        assert compact["role_count"] == 2, compact
+        assert compact["first_action"] == "$LOOPX_PANE_A2A_TICK", compact
+        assert compact["user_takeover"] == "attach to the session and type into any role pane", compact
         assert dry_packet["interactive_tui_contract"]["schema_version"] == "multi_agent_visible_interactive_tui_contract_v0", dry_packet
         assert dry_packet["interactive_tui_contract"]["runner_contract"] == RUNNER_CONTRACT_SCHEMA_VERSION, dry_packet
         assert dry_packet["interactive_tui_contract"]["machine_json_policy"] == "file_or_explicit_machine_channel_only", dry_packet
@@ -281,7 +286,12 @@ def main() -> int:
         launcher_source = (ROOT / "loopx/visible_multi_agent_launcher.py").read_text(
             encoding="utf-8"
         )
+        contract_source = (ROOT / "loopx/capabilities/multi_agent/contract.py").read_text(
+            encoding="utf-8"
+        )
         assert "scoped_loopx_wrapper" in launcher_source
+        assert "build_tui_multi_agent_runner_contract" in contract_source
+        assert "generic_multi_agent_compact_status_v0" in contract_source
         assert "demo_local_wrapper" not in launcher_source
 
     smoke_source = Path(__file__).read_text(encoding="utf-8").lower()
