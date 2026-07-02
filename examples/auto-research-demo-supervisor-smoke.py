@@ -53,6 +53,28 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
     assert payload["mode"] == "dry_run", payload
     assert payload["goal_id"] == GOAL_ID, payload
 
+    layering = payload["layer_minimality_contract"]
+    assert (
+        layering["schema_version"] == "multi_agent_three_layer_minimality_contract_v0"
+    ), layering
+    assert layering["product_id"] == "auto-research", layering
+    assert layering["preset_id"] == "auto_research_thin_preset", layering
+    assert layering["principle"] == (
+        "user_and_preset_stay_thin_kernel_owns_reusable_mechanics"
+    ), layering
+    assert layering["user_layer"]["fields"] == [
+        "topic_or_objective",
+        "rounds",
+        "role_overrides",
+        "data_or_eval_entrypoint",
+    ], layering
+    assert "research_roles" in layering["preset_layer"]["owns"], layering
+    assert "metric_evidence_loop" in layering["preset_layer"]["owns"], layering
+    assert "multi_agent_runner" in layering["preset_layer"]["forbidden"], layering
+    assert "pane_local_a2a_tick" in layering["preset_layer"]["forbidden"], layering
+    assert "compact_human_status" in layering["kernel_layer"]["owns"], layering
+    assert layering["acceptance"]["preset_has_no_runner_process_logic"] is True, layering
+
     kernel = payload["auto_research"]
     assert kernel["schema_version"] == "auto_research_visible_demo_kernel_v0", payload
     assert kernel["uses_generic_runner"] is True, payload

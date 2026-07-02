@@ -77,6 +77,9 @@ def main() -> int:
     launcher_source = (ROOT / "loopx/visible_multi_agent_launcher.py").read_text(
         encoding="utf-8"
     )
+    contract_source = (ROOT / "loopx/capabilities/multi_agent/contract.py").read_text(
+        encoding="utf-8"
+    )
     assert "from ...visible_multi_agent_launcher import execute_visible_multi_agent_launcher" in auto_research_cli
     forbidden_defs = [
         "def _launch_auto_research_with_tmux",
@@ -94,18 +97,18 @@ def main() -> int:
     assert "loopx-pane-a2a-tick" in launcher_source
     assert "LOOPX_PANE_WORKER_TURN" in launcher_source
     assert "LOOPX_PANE_TICK_ROUNDS" in launcher_source
-    assert "First action: immediately run `$LOOPX_PANE_A2A_TICK`" in launcher_source
+    assert "First action: immediately run `$LOOPX_PANE_A2A_TICK`" in contract_source
     assert "LOOPX_VISIBLE_FORCE_MARKDOWN" in launcher_source
     assert "machine_json_command=$LOOPX_PANE_LOOPX_JSON artifact_dir=$LOOPX_PANE_ARTIFACT_DIR" in launcher_source
     assert "$LOOPX_PANE_LOOPX_JSON is a command path, not an output file." in launcher_source
     assert "It injects --format json unless you pass an explicit --format." in launcher_source
-    assert "Never write output to `$LOOPX_PANE_LOOPX_JSON`" in launcher_source
+    assert "Never write output to `$LOOPX_PANE_LOOPX_JSON`" in contract_source
     assert "LoopX machine JSON hidden" in launcher_source
     assert "LOOPX_ALLOW_TTY_JSON" in launcher_source
     assert "stat.S_ISREG" in launcher_source
     assert "LOOPX_MACHINE_JSON=1 explicitly" in launcher_source
-    assert "multi_agent_visible_interactive_tui_contract_v0" in launcher_source
-    assert TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION in launcher_source
+    assert "multi_agent_visible_interactive_tui_contract_v0" in contract_source
+    assert TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION in contract_source
     assert "build_tui_multi_agent_runner_contract" in launcher_source
     assert "LOOPX_CODEX_TUI_MODE=interactive" in launcher_source
     assert "LOOPX_CODEX_TRUST_WORKSPACE" in launcher_source

@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL = ROOT / "docs/reference/protocols/multi-agent-visible-launcher-v0.md"
+THREE_LAYER = ROOT / "docs/reference/protocols/multi-agent-three-layer-minimality-v0.md"
 LOCAL_PLAN = ROOT / "docs/reference/protocols/local-agent-launch-plan-v0.md"
 AUTO_RESEARCH_PROFILE = ROOT / "docs/reference/protocols/auto-research-role-profile-v0.md"
 AUTO_RESEARCH_GUIDE = ROOT / "docs/guides/auto-research-command-path.md"
@@ -49,6 +50,7 @@ def assert_public_safe(text: str, label: str) -> None:
 
 def main() -> int:
     protocol = read(PROTOCOL)
+    three_layer = read(THREE_LAYER)
     local_plan = read(LOCAL_PLAN)
     auto_research_profile = read(AUTO_RESEARCH_PROFILE)
     auto_research_guide = read(AUTO_RESEARCH_GUIDE)
@@ -57,6 +59,7 @@ def main() -> int:
     changed_public_docs = "\n".join(
         [
             protocol,
+            three_layer,
             protocol_index,
             docs_index,
         ]
@@ -71,9 +74,12 @@ def main() -> int:
             "local_agent_launch_plan_v0",
             "Domain capabilities",
             "not become a leader agent",
+            "multi_agent_three_layer_minimality_contract_v0",
+            "both the user-facing recipe and the domain preset stay thin",
             "Kernel Module",
             "loopx/capabilities/multi_agent/contract.py",
             "generic_multi_agent_role_profile_v0",
+            "multi_agent_three_layer_minimality_contract_v0",
             "compact human status",
             "visible_multi_agent_launcher.py",
             "Ownership Split",
@@ -141,6 +147,20 @@ def main() -> int:
         assert phrase not in protocol, f"forbidden phrase present: {phrase}"
 
     require(
+        three_layer,
+        [
+            "multi_agent_three_layer_minimality_contract_v0",
+            "User layer",
+            "Preset layer",
+            "Kernel layer",
+            "user_and_preset_stay_thin_kernel_owns_reusable_mechanics",
+            "The goal is not only to minimize the user's snippet",
+            "Auto-research is one preset on top of the generic kernel",
+            "another multi-agent product can reuse the same kernel",
+        ],
+        source=THREE_LAYER,
+    )
+    require(
         local_plan,
         [
             "local_agent_launch_plan_v0",
@@ -173,7 +193,12 @@ def main() -> int:
     )
     require(
         protocol_index,
-        ["multi_agent_visible_launcher_v0", "multi-agent-visible-launcher-v0.md"],
+        [
+            "multi_agent_three_layer_minimality_contract_v0",
+            "multi-agent-three-layer-minimality-v0.md",
+            "multi_agent_visible_launcher_v0",
+            "multi-agent-visible-launcher-v0.md",
+        ],
         source=PROTOCOL_INDEX,
     )
     require(

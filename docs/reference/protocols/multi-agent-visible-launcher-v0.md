@@ -17,6 +17,11 @@ This contract intentionally sits between two existing surfaces:
 The visible launcher may plan or start panes, but it must not become a leader
 agent, hidden scheduler, promotion authority, or second source of truth.
 
+The launcher also follows
+[`multi_agent_three_layer_minimality_contract_v0`](multi-agent-three-layer-minimality-v0.md):
+both the user-facing recipe and the domain preset stay thin, while the generic
+kernel owns runner/TUI/tick/todo/evidence/status mechanics.
+
 ## Kernel Module
 
 The reusable product kernel lives in
@@ -25,6 +30,7 @@ on that module for:
 
 - `tui_multi_agent_runner_contract_v0`;
 - `generic_multi_agent_role_profile_v0`;
+- `multi_agent_three_layer_minimality_contract_v0`;
 - pane-local A2A prompt rules;
 - artifact-only machine JSON policy;
 - compact human status for launch previews.
