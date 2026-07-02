@@ -11,6 +11,19 @@ VISIBLE_LAUNCHER_ACCEPTANCE_CONTRACT_SCHEMA_VERSION = (
 )
 GENERIC_MULTI_AGENT_ROLE_PROFILE_SCHEMA_VERSION = "generic_multi_agent_role_profile_v0"
 GENERIC_MULTI_AGENT_COMPACT_STATUS_SCHEMA_VERSION = "generic_multi_agent_compact_status_v0"
+THREE_LAYER_MINIMALITY_CONTRACT_SCHEMA_VERSION = (
+    "multi_agent_three_layer_minimality_contract_v0"
+)
+
+GENERIC_MULTI_AGENT_KERNEL_MECHANICS = (
+    "multi_agent_runner",
+    "real_codex_tui_panes",
+    "workspace_and_trust_safe_launch",
+    "pane_local_a2a_tick",
+    "todo_evidence_status_protocol",
+    "compact_human_status",
+    "default_role_prompt_scaffolding",
+)
 
 
 def positive_int_value(value: object, *, default: int) -> int:
@@ -205,6 +218,67 @@ def build_tui_multi_agent_runner_contract(
             "runs_agent_processes_in_dry_run": False,
             "writes_loopx_state_in_dry_run": False,
             "spends_quota_in_dry_run": False,
+        },
+    }
+
+
+def build_three_layer_minimality_contract(
+    *,
+    product_id: str,
+    preset_id: str,
+    user_intent_fields: Iterable[object] | None = None,
+    preset_responsibilities: Iterable[object] | None = None,
+    preset_forbidden_mechanics: Iterable[object] | None = None,
+    kernel_mechanics: Iterable[object] | None = None,
+    extension_points: Iterable[object] | None = None,
+) -> dict[str, object]:
+    """Describe how a product preset stays thin on the generic kernel.
+
+    The contract is intentionally product-agnostic: callers supply the preset's
+    domain responsibilities, while this module records the shared mechanics that
+    must remain in the reusable multi-agent kernel.
+    """
+
+    intent_fields = as_string_list(user_intent_fields) or ["objective"]
+    preset_owns = as_string_list(preset_responsibilities)
+    kernel_owns = as_string_list(kernel_mechanics) or list(GENERIC_MULTI_AGENT_KERNEL_MECHANICS)
+    forbidden = as_string_list(preset_forbidden_mechanics) or kernel_owns
+    extensions = as_string_list(extension_points)
+    return {
+        "schema_version": THREE_LAYER_MINIMALITY_CONTRACT_SCHEMA_VERSION,
+        "product_id": product_id,
+        "preset_id": preset_id,
+        "principle": "user_and_preset_stay_thin_kernel_owns_reusable_mechanics",
+        "line_budget_goal": {
+            "user_layer": "few_field_intent_or_config",
+            "preset_layer": "small_domain_defaults_and_handoff_contract",
+            "kernel_layer": "shared_multi_agent_runtime_and_state_protocol",
+        },
+        "user_layer": {
+            "owns": "intent",
+            "fields": intent_fields,
+            "forbidden": [
+                "tmux_or_process_lifecycle",
+                "quota_frontier_protocol_details",
+                "pane_local_tick_commands",
+                "raw_worker_or_status_plumbing",
+            ],
+        },
+        "preset_layer": {
+            "owns": preset_owns,
+            "forbidden": forbidden,
+            "must_remain_reusable": True,
+        },
+        "kernel_layer": {
+            "owns": kernel_owns,
+            "cross_product_reuse_required": True,
+        },
+        "extension_points": extensions,
+        "acceptance": {
+            "user_can_copy_small_recipe": True,
+            "preset_has_no_runner_process_logic": True,
+            "kernel_contract_is_domain_agnostic": True,
+            "other_multi_agent_products_can_reuse_kernel": True,
         },
     }
 

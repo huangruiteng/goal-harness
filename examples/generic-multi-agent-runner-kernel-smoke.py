@@ -14,9 +14,11 @@ sys.path.insert(0, str(ROOT))
 from loopx.capabilities.multi_agent.contract import (  # noqa: E402
     GENERIC_MULTI_AGENT_COMPACT_STATUS_SCHEMA_VERSION,
     GENERIC_MULTI_AGENT_ROLE_PROFILE_SCHEMA_VERSION,
+    THREE_LAYER_MINIMALITY_CONTRACT_SCHEMA_VERSION,
     TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION,
     build_compact_human_status,
     build_generic_role_profile,
+    build_three_layer_minimality_contract,
     build_tui_multi_agent_runner_contract,
     generic_role_prompt,
     role_skill_profile,
@@ -92,6 +94,22 @@ def main() -> int:
     assert compact["role_count"] == 2, compact
     assert compact["roles"][0]["tick"] == "$LOOPX_PANE_A2A_TICK", compact
     assert compact["machine_json_policy"] == "artifact_only_in_visible_panes", compact
+
+    layering = build_three_layer_minimality_contract(
+        product_id="customer-support",
+        preset_id="support_triage_preset",
+        user_intent_fields=["inbox", "rounds"],
+        preset_responsibilities=["triage_roles", "handoff_hints", "resolution_policy"],
+        extension_points=["role_overrides", "ticket_adapter"],
+    )
+    assert layering["schema_version"] == THREE_LAYER_MINIMALITY_CONTRACT_SCHEMA_VERSION, layering
+    assert layering["principle"] == (
+        "user_and_preset_stay_thin_kernel_owns_reusable_mechanics"
+    ), layering
+    assert layering["user_layer"]["fields"] == ["inbox", "rounds"], layering
+    assert "multi_agent_runner" in layering["kernel_layer"]["owns"], layering
+    assert "pane_local_a2a_tick" in layering["preset_layer"]["forbidden"], layering
+    assert layering["acceptance"]["other_multi_agent_products_can_reuse_kernel"] is True, layering
 
     source = (ROOT / "loopx/capabilities/multi_agent/contract.py").read_text(encoding="utf-8")
     assert "auto" + "_research" not in source

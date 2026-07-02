@@ -6,7 +6,7 @@ import shlex
 from collections.abc import Iterable
 from typing import Any
 
-from .defaults import AUTO_RESEARCH_DEFAULT_GOAL_ID
+from .defaults import AUTO_RESEARCH_DEFAULT_GOAL_ID, build_auto_research_layer_contract
 from ...visible_multi_agent_launcher import build_visible_multi_agent_payload_from_spec
 
 
@@ -230,6 +230,7 @@ def build_auto_research_demo_supervisor_plan(
         {
             "schema_version": AUTO_RESEARCH_DEMO_SUPERVISOR_SCHEMA_VERSION,
             "mode": "dry_run",
+            "layer_minimality_contract": build_auto_research_layer_contract(),
             "auto_research": {
                 "schema_version": "auto_research_visible_demo_kernel_v0",
                 "uses_generic_runner": True,
