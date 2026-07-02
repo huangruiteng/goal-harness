@@ -24,9 +24,8 @@ kernel owns runner/TUI/tick/todo/evidence/status mechanics.
 
 ## Kernel Module
 
-The reusable product kernel lives in
-`loopx/capabilities/multi_agent/contract.py`. Domain capabilities should depend
-on that module for:
+The reusable product kernel lives in `loopx/capabilities/multi_agent/`.
+Domain capabilities should depend on that package for:
 
 - `tui_multi_agent_runner_contract_v0`;
 - `generic_multi_agent_role_profile_v0`;
@@ -34,11 +33,14 @@ on that module for:
 - pane-local A2A prompt rules;
 - artifact-only machine JSON policy;
 - compact human status for launch previews.
+- runtime scripts for scoped LoopX wrappers, pane-local A2A ticks, and Codex
+  TUI exec.
 
 The host launcher in `loopx/visible_multi_agent_launcher.py` owns tmux process
 execution and Codex TUI acceptance only. Auto-research, benchmark demos, and
 future custom teams should not duplicate runner schema, role-profile
-normalization, attach/stop semantics, or pane-local tick instructions.
+normalization, attach/stop semantics, pane-local tick scripts, or machine JSON
+wrapper policy.
 
 ## User-Facing Spec
 

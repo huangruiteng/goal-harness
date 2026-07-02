@@ -16,9 +16,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from loopx.capabilities.multi_agent.runtime_scripts import (  # noqa: E402
+    CODEX_TUI_EXEC_PY as _CODEX_TUI_EXEC_PY,
+    SCOPED_LOOPX_WRAPPER_PY as _SCOPED_LOOPX_WRAPPER_PY,
+)
 from loopx.visible_multi_agent_launcher import (  # noqa: E402
-    _CODEX_TUI_EXEC_PY,
-    _SCOPED_LOOPX_WRAPPER_PY,
     TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION,
     build_visible_multi_agent_payload,
     build_visible_multi_agent_payload_from_spec,
@@ -80,6 +82,9 @@ def main() -> int:
     contract_source = (ROOT / "loopx/capabilities/multi_agent/contract.py").read_text(
         encoding="utf-8"
     )
+    runtime_source = (ROOT / "loopx/capabilities/multi_agent/runtime_scripts.py").read_text(
+        encoding="utf-8"
+    )
     assert "from ...visible_multi_agent_launcher import execute_visible_multi_agent_launcher" in auto_research_cli
     forbidden_defs = [
         "def _launch_auto_research_with_tmux",
@@ -90,6 +95,10 @@ def main() -> int:
     leaked_defs = [name for name in forbidden_defs if name in auto_research_cli]
     assert not leaked_defs, leaked_defs
     assert "demo_local_wrapper" not in launcher_source
+    assert "_SCOPED_LOOPX_WRAPPER_PY = r" not in launcher_source
+    assert "_CODEX_TUI_EXEC_PY = r" not in launcher_source
+    assert "SCOPED_LOOPX_WRAPPER_PY = r" in runtime_source
+    assert "CODEX_TUI_EXEC_PY = r" in runtime_source
     assert "scoped_loopx_wrapper" in launcher_source
     assert "LOOPX_PANE_LOOPX_JSON" in launcher_source
     assert "LOOPX_PANE_ARTIFACT_DIR" in launcher_source
@@ -99,14 +108,14 @@ def main() -> int:
     assert "LOOPX_PANE_TICK_ROUNDS" in launcher_source
     assert "First action: immediately run `$LOOPX_PANE_A2A_TICK`" in contract_source
     assert "LOOPX_VISIBLE_FORCE_MARKDOWN" in launcher_source
-    assert "machine_json_command=$LOOPX_PANE_LOOPX_JSON artifact_dir=$LOOPX_PANE_ARTIFACT_DIR" in launcher_source
-    assert "$LOOPX_PANE_LOOPX_JSON is a command path, not an output file." in launcher_source
-    assert "It injects --format json unless you pass an explicit --format." in launcher_source
+    assert "machine_json_command=$LOOPX_PANE_LOOPX_JSON artifact_dir=$LOOPX_PANE_ARTIFACT_DIR" in runtime_source
+    assert "$LOOPX_PANE_LOOPX_JSON is a command path, not an output file." in runtime_source
+    assert "It injects --format json unless you pass an explicit --format." in runtime_source
     assert "Never write output to `$LOOPX_PANE_LOOPX_JSON`" in contract_source
-    assert "LoopX machine JSON hidden" in launcher_source
-    assert "LOOPX_ALLOW_TTY_JSON" in launcher_source
-    assert "stat.S_ISREG" in launcher_source
-    assert "LOOPX_MACHINE_JSON=1 explicitly" in launcher_source
+    assert "LoopX machine JSON hidden" in runtime_source
+    assert "LOOPX_ALLOW_TTY_JSON" in runtime_source
+    assert "stat.S_ISREG" in runtime_source
+    assert "LOOPX_MACHINE_JSON=1 explicitly" in runtime_source
     assert "multi_agent_visible_interactive_tui_contract_v0" in contract_source
     assert TUI_MULTI_AGENT_RUNNER_CONTRACT_SCHEMA_VERSION in contract_source
     assert "build_tui_multi_agent_runner_contract" in launcher_source
@@ -116,8 +125,8 @@ def main() -> int:
     assert "LOOPX_CODEX_REASONING_EFFORT" in launcher_source
     assert "export BOOTSTRAP_PROMPT" in launcher_source
     assert "_persist_codex_workspace_trust" in launcher_source
-    assert "rev-parse\", \"--show-toplevel" in launcher_source
-    assert "trust_level=" in launcher_source and "trusted" in launcher_source
+    assert "rev-parse\", \"--show-toplevel" in runtime_source
+    assert "trust_level=" in runtime_source and "trusted" in runtime_source
     assert "trust_prompt_blocked" in launcher_source
     assert "Do you trust the contents of this directory?" in launcher_source
     assert "pre_codex_character_stream" in launcher_source

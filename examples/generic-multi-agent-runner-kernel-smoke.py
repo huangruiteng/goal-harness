@@ -23,6 +23,10 @@ from loopx.capabilities.multi_agent.contract import (  # noqa: E402
     generic_role_prompt,
     role_skill_profile,
 )
+from loopx.capabilities.multi_agent.runtime_scripts import (  # noqa: E402
+    CODEX_TUI_EXEC_PY,
+    SCOPED_LOOPX_WRAPPER_PY,
+)
 
 
 def main() -> int:
@@ -110,10 +114,18 @@ def main() -> int:
     assert "multi_agent_runner" in layering["kernel_layer"]["owns"], layering
     assert "pane_local_a2a_tick" in layering["preset_layer"]["forbidden"], layering
     assert layering["acceptance"]["other_multi_agent_products_can_reuse_kernel"] is True, layering
+    assert "LoopX machine JSON hidden" in SCOPED_LOOPX_WRAPPER_PY
+    assert "loopx-pane-a2a-tick" in SCOPED_LOOPX_WRAPPER_PY
+    assert "LOOPX_MACHINE_JSON=1 explicitly" in SCOPED_LOOPX_WRAPPER_PY
+    assert "LOOPX_CODEX_TRUST_WORKSPACE" in CODEX_TUI_EXEC_PY
+    assert "trust_level" in CODEX_TUI_EXEC_PY
 
     source = (ROOT / "loopx/capabilities/multi_agent/contract.py").read_text(encoding="utf-8")
-    assert "auto" + "_research" not in source
-    assert "quickstart" not in source.lower()
+    runtime_source = (ROOT / "loopx/capabilities/multi_agent/runtime_scripts.py").read_text(
+        encoding="utf-8"
+    )
+    assert "auto" + "_research" not in source + runtime_source
+    assert "quickstart" not in (source + runtime_source).lower()
     json.dumps(compact, sort_keys=True)
     print("generic-multi-agent-runner-kernel-smoke ok")
     return 0
