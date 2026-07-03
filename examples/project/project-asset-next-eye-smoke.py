@@ -23,6 +23,10 @@ from loopx.status import (  # noqa: E402
     enrich_project_asset,
     project_asset_summary_is_public_safe,
 )
+from loopx.projections.project_asset import (  # noqa: E402
+    project_asset_quota_state,
+    project_asset_user_todo_open_count,
+)
 
 
 USER_TODO = "Review the owner decision before approving delivery."
@@ -101,6 +105,39 @@ def assert_status_project_asset_next_eye() -> None:
     assert project_asset_summary_is_public_safe(asset), asset
 
 
+def assert_project_asset_cadence_input_fallbacks() -> None:
+    project_asset = {
+        "quota": {"state": "eligible"},
+        "user_todos": {"open_count": "2"},
+    }
+    assert project_asset_quota_state(quota=None, project_asset=project_asset) == "eligible"
+    assert (
+        project_asset_quota_state(
+            quota={"state": "operator_gate"},
+            project_asset=project_asset,
+        )
+        == "operator_gate"
+    )
+    assert (
+        project_asset_user_todo_open_count(user_todos=None, project_asset=project_asset)
+        == 2
+    )
+    assert (
+        project_asset_user_todo_open_count(
+            user_todos={"open_count": 0},
+            project_asset=project_asset,
+        )
+        == 0
+    )
+    assert (
+        project_asset_user_todo_open_count(
+            user_todos={"open_count": "not-an-int"},
+            project_asset=project_asset,
+        )
+        is None
+    )
+
+
 def assert_status_project_asset_safe_command_contract() -> None:
     item = {
         "goal_id": "next-eye-command-fixture",
@@ -164,6 +201,7 @@ def assert_dashboard_first_screen_render_contract() -> None:
 
 def main() -> int:
     assert_status_project_asset_next_eye()
+    assert_project_asset_cadence_input_fallbacks()
     assert_status_project_asset_safe_command_contract()
     assert_status_project_asset_monitor_display_contract()
     assert_dashboard_first_screen_render_contract()

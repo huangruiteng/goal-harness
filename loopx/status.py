@@ -69,10 +69,12 @@ from .projections.project_asset import (
     completed_todo_archive_warning,
     project_asset_handoff_check_projection,
     project_asset_latest_validation,
+    project_asset_quota_state,
     project_asset_quota_summary,
     project_asset_summary_is_public_safe,
     project_asset_todo_projection_metadata,
     project_asset_todo_projection_gap,
+    project_asset_user_todo_open_count,
 )
 from .promotion_gate import build_promotion_gate
 from .quota import quota_status, quota_with_handoff_outcome_floor
@@ -8182,22 +8184,11 @@ def enrich_project_asset(
     readiness = project_asset_handoff_readiness(item, latest_runs=latest_runs)
     if readiness:
         item["handoff_readiness"] = readiness
-    quota_state = ""
-    if isinstance(quota, dict):
-        quota_state = str(quota.get("state") or "").strip()
-    if not quota_state and isinstance(project_asset.get("quota"), dict):
-        quota_state = str(project_asset["quota"].get("state") or "").strip()
-    user_todo_open_count = None
-    if isinstance(user_todos, dict):
-        try:
-            user_todo_open_count = int(user_todos.get("open_count"))
-        except (TypeError, ValueError):
-            user_todo_open_count = None
-    elif isinstance(project_asset.get("user_todos"), dict):
-        try:
-            user_todo_open_count = int(project_asset["user_todos"].get("open_count"))
-        except (TypeError, ValueError):
-            user_todo_open_count = None
+    quota_state = project_asset_quota_state(quota=quota, project_asset=project_asset)
+    user_todo_open_count = project_asset_user_todo_open_count(
+        user_todos=user_todos,
+        project_asset=project_asset,
+    )
     cadence_hint = build_long_task_cadence_hint(
         execution_profile=(
             project_asset.get("execution_profile")
@@ -8206,7 +8197,7 @@ def enrich_project_asset(
         ),
         latest_runs=latest_runs,
         handoff_readiness=readiness,
-        quota_state=quota_state or None,
+        quota_state=quota_state,
         user_todo_open_count=user_todo_open_count,
     )
     project_asset["long_task_cadence_hint"] = cadence_hint
