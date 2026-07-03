@@ -65,15 +65,11 @@ from .projections.project_asset import (
     SECRET_LIKE_SURFACE_PATTERN,
     TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
     TODO_PROJECTION_VIEW_SCHEMA_VERSION,
+    build_project_asset,
     completed_todo_archive_warning,
-    project_asset_gate,
     project_asset_latest_validation,
-    project_asset_next_safe_command,
-    project_asset_owner,
     project_asset_quota_summary,
     project_asset_summary_is_public_safe,
-    project_asset_stop_condition,
-    project_asset_support_mode,
     project_asset_todo_projection_metadata,
     project_asset_todo_projection_gap,
 )
@@ -8238,45 +8234,6 @@ def enrich_project_asset(
     )
     project_asset["long_task_cadence_hint"] = cadence_hint
     item["long_task_cadence_hint"] = cadence_hint
-
-
-def build_project_asset(
-    *,
-    status: str,
-    waiting_on: str,
-    recommended_action: str,
-    operator_question: str | None,
-    agent_command: str | None,
-    missing_gates: list[str] | None,
-    next_handoff_condition: str | None,
-) -> dict[str, Any]:
-    asset = {
-        "owner": project_asset_owner(waiting_on),
-        "gate": project_asset_gate(
-            waiting_on=waiting_on,
-            operator_question=operator_question,
-            missing_gates=missing_gates,
-            status=status,
-        ),
-        "support_mode": project_asset_support_mode(
-            waiting_on=waiting_on,
-            operator_question=operator_question,
-            missing_gates=missing_gates,
-            status=status,
-            recommended_action=recommended_action,
-            agent_command=agent_command,
-        ),
-        "next_action": recommended_action,
-        "stop_condition": project_asset_stop_condition(
-            waiting_on=waiting_on,
-            next_handoff_condition=next_handoff_condition,
-            agent_command=agent_command,
-        ),
-    }
-    next_safe_command = project_asset_next_safe_command(agent_command)
-    if next_safe_command:
-        asset["next_safe_command"] = next_safe_command
-    return asset
 
 
 def active_state_todo_fields(
