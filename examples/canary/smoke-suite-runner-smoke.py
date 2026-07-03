@@ -136,6 +136,42 @@ def assert_catalog_profile_preview_is_supported() -> None:
     assert payload["catalog_plan"]["planned_check_count"] == 1, payload
 
 
+def assert_named_smoke_profile_expands_to_suite_selection() -> None:
+    payload = build_canary_smoke_suite_run(
+        suite="default-public",
+        profiles=["core-control-plane"],
+        execute=False,
+    )
+    assert payload["ok"] is True, payload
+    assert payload["suite"] == "full-public", payload
+    assert payload["catalog_plan"] is None, payload
+    assert payload["selection_inputs"]["profiles"] == ["core-control-plane"], payload
+    assert payload["selection_inputs"]["smoke_profiles"] == ["core-control-plane"], payload
+    assert payload["selection_inputs"]["catalog_profiles"] == [], payload
+    assert "quota" in payload["selection_inputs"]["modules"], payload
+    assert "benchmark" in payload["selection_inputs"]["exclude_modules"], payload
+    scripts = [check["normalized"]["script"] for check in payload["selected_checks"]]
+    assert scripts, payload
+    assert any(script.startswith("examples/control_plane/") for script in scripts), payload
+    assert all("benchmark" not in script for script in scripts), payload
+    assert all("skillsbench" not in script for script in scripts), payload
+
+
+def assert_named_smoke_profile_can_mix_with_catalog_profile() -> None:
+    payload = build_canary_smoke_suite_run(
+        suite="default-public",
+        profiles=["canary-runner", "repo-architecture-budget"],
+        execute=False,
+    )
+    assert payload["ok"] is True, payload
+    assert payload["selection_inputs"]["smoke_profiles"] == ["canary-runner"], payload
+    assert payload["selection_inputs"]["catalog_profiles"] == ["repo-architecture-budget"], payload
+    assert payload["catalog_plan"]["planned_check_count"] == 1, payload
+    commands = [check["command"] for check in payload["selected_checks"]]
+    assert any("examples/canary/" in command for command in commands), payload
+    assert any("examples/control_plane/repo-python-line-budget-smoke.py" in command for command in commands), payload
+
+
 def assert_cli_json_preview_works() -> None:
     completed = subprocess.run(
         [
@@ -166,6 +202,39 @@ def assert_cli_json_preview_works() -> None:
     assert payload["schema_version"] == "canary_smoke_suite_run_v0", payload
     assert payload["selected_check_count"] == 2, payload
     assert payload["selection_inputs"]["exclude_modules"] == ["benchmark"], payload
+    assert payload["executes_checks"] is False, payload
+
+
+def assert_cli_named_smoke_profile_preview_works() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "--format",
+            "json",
+            "canary",
+            "smoke-suite",
+            "--profile",
+            "canary-runner",
+            "--limit",
+            "3",
+            "--no-execute",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True, payload
+    assert payload["suite"] == "full-public", payload
+    assert payload["selected_check_count"] == 3, payload
+    assert payload["selection_inputs"]["smoke_profiles"] == ["canary-runner"], payload
+    assert payload["selection_inputs"]["catalog_profiles"] == [], payload
+    scripts = [check["normalized"]["script"] for check in payload["selected_checks"]]
+    assert any(script.startswith("examples/canary/") for script in scripts), payload
+    assert all("benchmark" not in script for script in scripts), payload
     assert payload["executes_checks"] is False, payload
 
 
@@ -357,7 +426,10 @@ def main() -> int:
     assert_subdirectory_smoke_selection_is_supported()
     assert_legacy_root_script_selector_matches_moved_smokes()
     assert_catalog_profile_preview_is_supported()
+    assert_named_smoke_profile_expands_to_suite_selection()
+    assert_named_smoke_profile_can_mix_with_catalog_profile()
     assert_cli_json_preview_works()
+    assert_cli_named_smoke_profile_preview_works()
     assert_execution_reports_progress_indices()
     assert_git_probe_contract_is_explicit()
     assert_readonly_run_rejects_and_restores_tracked_side_effects()

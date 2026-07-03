@@ -51,7 +51,10 @@ def pytest_addoption(parser) -> None:
         action="append",
         default=[],
         dest="loopx_smoke_profiles",
-        help="Catalog profile selector passed through to the LoopX runner. Repeat or comma-separate.",
+        help=(
+            "Smoke-suite or catalog profile selector passed through to the LoopX "
+            "runner. Repeat or comma-separate."
+        ),
     )
     group.addoption(
         "--loopx-smoke-family",

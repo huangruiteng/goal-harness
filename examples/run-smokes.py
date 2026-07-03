@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
         "--profile",
         action="append",
         default=[],
-        help="Run catalog profile checks instead of the default full script set.",
+        help="Run a named smoke-suite profile or catalog profile.",
     )
     parser.add_argument(
         "--family",

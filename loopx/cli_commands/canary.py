@@ -195,7 +195,11 @@ def _add_canary_selector_args(parser: argparse.ArgumentParser) -> None:
         "--profile",
         action="append",
         default=[],
-        help="Force-select a current-repo profile such as 'monitor-scheduler'. Repeat for multiple profiles.",
+        help=(
+            "Force-select a current-repo catalog profile, or a smoke-suite profile "
+            "when used with `canary smoke-suite`, such as core-control-plane. "
+            "Repeat for multiple profiles."
+        ),
     )
     parser.add_argument(
         "--include-deep-checks",
@@ -270,7 +274,7 @@ def register_canary_commands(
 
     smoke_parser = canary_sub.add_parser(
         "smoke-suite",
-        help="Run or preview public smoke scripts as a full suite, module subset, or catalog profile.",
+        help="Run or preview public smoke scripts as a full suite, module subset, smoke profile, or catalog profile.",
     )
     add_subcommand_format(smoke_parser)
     _add_canary_selector_args(smoke_parser)
