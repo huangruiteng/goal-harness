@@ -18,6 +18,10 @@ AUTO_RESEARCH_HOLDOUT_SUCCESSOR_TEXT = (
     "[P0-auto-research-live] Run held-out validation for the dev-supported "
     "hypothesis, append public-safe evidence, and summarize promotion readiness."
 )
+AUTO_RESEARCH_VALIDATED_SUMMARY_SUCCESSOR_TEXT = (
+    "[P0-auto-research-live] Summarize held-out validation, promotion readiness, "
+    "and the public claim boundary for the supported hypothesis."
+)
 AUTO_RESEARCH_HOLDOUT_SUCCESSOR_CONDITION = {
     "all": [
         {
@@ -31,6 +35,16 @@ AUTO_RESEARCH_HOLDOUT_SUCCESSOR_CONDITION = {
             "op": "eq",
             "value": 0,
             "fail_reason": "holdout_already_validated",
+        },
+    ]
+}
+AUTO_RESEARCH_VALIDATED_SUMMARY_SUCCESSOR_CONDITION = {
+    "all": [
+        {
+            "path": "decision_summary.validated_promotion_candidate_count",
+            "op": "gt",
+            "value": 0,
+            "fail_reason": "no_validated_promotion_candidate",
         },
     ]
 }
@@ -117,6 +131,16 @@ AUTO_RESEARCH_ROLE_PROFILES: dict[str, dict[str, object]] = {
                 "task_class": "advancement_task",
                 "action_kind": "run_holdout_eval",
                 "text": AUTO_RESEARCH_HOLDOUT_SUCCESSOR_TEXT,
+                "todo_command_template": AUTO_RESEARCH_SUCCESSOR_TODO_COMMAND_TEMPLATE,
+            },
+            {
+                "after_action": "run_holdout_eval",
+                "condition": AUTO_RESEARCH_VALIDATED_SUMMARY_SUCCESSOR_CONDITION,
+                "target_agent_id": "codex-value-explorer",
+                "target_role_id": "evidence_verifier",
+                "task_class": "advancement_task",
+                "action_kind": "write_evaluation_summary",
+                "text": AUTO_RESEARCH_VALIDATED_SUMMARY_SUCCESSOR_TEXT,
                 "todo_command_template": AUTO_RESEARCH_SUCCESSOR_TODO_COMMAND_TEMPLATE,
             }
         ],

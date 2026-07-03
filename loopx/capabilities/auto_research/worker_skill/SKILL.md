@@ -154,7 +154,8 @@ Allowed actions:
 - run dev or holdout evaluation only when the contract permits it;
 - build an `auto_research_evidence_packet_v0` or equivalent public-safe event;
 - create only the role-declared successor todo, such as a holdout validation
-  todo, when the profile's `successor_todos.condition` is satisfied.
+  todo or post-holdout verifier summary todo, when the profile's
+  `successor_todos.condition` is satisfied.
 
 Successor routing belongs here, not in a central projector: the role profile
 must name the target agent and provide the `todo_command_template`, typically a

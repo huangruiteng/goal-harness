@@ -616,6 +616,7 @@ def _discover_visible_live_evidence(
             ):
                 candidates.extend(artifact_root.glob(f"*/{artifact_name}"))
             candidates = sorted(set(candidates))
+        loaded: list[dict[str, object]] = []
         for candidate in candidates:
             try:
                 raw = json.loads(candidate.read_text(encoding="utf-8"))
@@ -627,13 +628,20 @@ def _discover_visible_live_evidence(
             if not lane_agent_id:
                 continue
             try:
-                return load_live_codex_e2e_evidence(
-                    evidence_path=str(candidate),
-                    goal_id=goal_id,
-                    agent_id=lane_agent_id,
+                loaded.append(
+                    load_live_codex_e2e_evidence(
+                        evidence_path=str(candidate),
+                        goal_id=goal_id,
+                        agent_id=lane_agent_id,
+                    )
                 )
             except ValueError:
                 continue
+        for evidence in loaded:
+            if evidence.get("holdout_metric") is not None:
+                return evidence
+        if loaded and time.monotonic() >= deadline:
+            return loaded[0]
         if time.monotonic() >= deadline:
             return None
         time.sleep(0.5)

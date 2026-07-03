@@ -1099,6 +1099,33 @@ def run_auto_research_worker_turn(
             todo_id=todo_id,
             agent_id=agent_id,
         )
+        role_id = auto_research_role_id_for_action(action)
+        successor_todos = _maybe_add_role_successor_todos(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            source_todo_id=todo_id,
+            agent_id=agent_id,
+            role_id=role_id,
+            action=action,
+            decision_summary=summary_artifact["decision_summary"],
+            execute=True,
+        )
+        followup = _legacy_followup_from_successor_todos(successor_todos)
+        live_evidence: dict[str, object] | None = None
+        if visible_lanes_accepted:
+            live_evidence = build_live_codex_e2e_evidence_from_packet(
+                packet=packet,
+                append_result=append_result,
+                agent_id=agent_id,
+                lane_count=lane_count,
+                visible_lanes_accepted=True,
+            )
+            _write_json(live_evidence_path, live_evidence)
+        live_lane_evidence = (
+            live_evidence.get("lane_evidence")
+            if isinstance(live_evidence, dict) and isinstance(live_evidence.get("lane_evidence"), dict)
+            else {}
+        )
         completion = (
             _complete_selected_todo(
                 registry_path=registry_path,
@@ -1141,6 +1168,14 @@ def run_auto_research_worker_turn(
                     "validated_promotion_candidate_count"
                 ],
             },
+            "live_evidence": {
+                "written": live_evidence is not None,
+                "evidence_source": live_evidence.get("source") if live_evidence else None,
+                "holdout_metric": live_lane_evidence.get("holdout_metric"),
+            },
+            "role_id": role_id,
+            "successor_todos": successor_todos,
+            "followup": followup,
             "artifact": _artifact_summary("holdout_validation", filename="evaluation-summary.public.json"),
             "artifact_status": "holdout_evidence_appended",
             "completion": completion,
