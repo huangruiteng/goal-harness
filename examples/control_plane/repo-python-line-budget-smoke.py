@@ -29,16 +29,16 @@ LEGACY_OVERSIZED_LIMITS = {
     "examples/control_plane/work-lane-contract-smoke.py": 2336,
     "loopx/benchmark_adapters/skillsbench_acp_relay.py": 3144,
     "loopx/benchmark_adapters/terminal_bench.py": 10045,
-    "loopx/benchmark_ledger.py": 3732,
+    "loopx/benchmark_ledger.py": 3745,
     "loopx/capabilities/content_ops/surface.py": 2549,
     "loopx/capabilities/lark/kanban.py": 3034,
     "loopx/codex_cli_probe.py": 3546,
     "loopx/quota.py": 10628,
-    "loopx/status.py": 11745,
+    "loopx/status.py": 11758,
     "loopx/terminal_bench_agent.py": 2056,
     "loopx/todos.py": 2105,
     "scripts/harbor_host_codex_goal_agent.py": 2140,
-    "scripts/skillsbench_automation_loop.py": 16774,
+    "scripts/skillsbench_automation_loop.py": 16791,
 }
 
 

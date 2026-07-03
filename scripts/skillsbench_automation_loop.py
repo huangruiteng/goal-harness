@@ -108,6 +108,9 @@ from loopx.benchmark_adapters.skillsbench import (  # noqa: E402
     build_skillsbench_run_permission_policy,
     build_skillsbench_worker_handshake_preflight,
 )
+from loopx.benchmark_adapters.skillsbench_verifier_bootstrap import (  # noqa: E402
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution,
+)
 from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER,
     SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_PROMPT,
@@ -13871,6 +13874,13 @@ def reduce_result(
                         if item not in existing_labels:
                             existing_labels.append(item)
                     compact["failure_attribution_labels"] = existing_labels
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+        compact,
+        task_staging=task_staging,
+        setup_preflight=_public_task_setup_preflight(
+            plan.get("task_setup_preflight")
+        ),
+    )
     if task_staging:
         compact["task_staging"] = task_staging
     discovery = plan.get("result_discovery")
@@ -14757,6 +14767,13 @@ def build_runner_failure_compact(
     recovered = _recover_runner_failure_score_from_controller_trace(reduced, plan)
     if not recovered:
         _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+        reduced,
+        task_staging=_effective_public_task_staging(plan),
+        setup_preflight=_public_task_setup_preflight(
+            plan.get("task_setup_preflight")
+        ),
+    )
     reduced["case_event_timeline"] = _build_case_event_timeline(reduced, plan)
     post_run_debug_gate = build_skillsbench_post_run_debug_gate(reduced)
     reduced["post_run_debug_gate"] = post_run_debug_gate
