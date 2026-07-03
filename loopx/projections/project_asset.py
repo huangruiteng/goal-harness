@@ -26,6 +26,15 @@ def _compact_text(text: str, *, limit: int) -> str:
     return compact[: limit - 1].rstrip() + "…"
 
 
+def project_asset_public_safe_compact_text(value: Any, *, limit: int = 220) -> str | None:
+    text = _compact_text(str(value or ""), limit=limit)
+    if not text:
+        return None
+    if LOCAL_PATH_SURFACE_PATTERN.search(text) or SECRET_LIKE_SURFACE_PATTERN.search(text):
+        return None
+    return text
+
+
 def completed_todo_archive_warning(
     agent_todos: dict[str, Any] | None,
     *,
@@ -175,3 +184,9 @@ def project_asset_latest_validation(run: dict[str, Any] | None) -> dict[str, Any
 def project_asset_summary_is_public_safe(project_asset: dict[str, Any]) -> bool:
     text = repr(project_asset)
     return not LOCAL_PATH_SURFACE_PATTERN.search(text) and not SECRET_LIKE_SURFACE_PATTERN.search(text)
+
+
+def project_asset_next_safe_command(agent_command: str | None) -> str | None:
+    if not agent_command:
+        return None
+    return project_asset_public_safe_compact_text(agent_command, limit=320)

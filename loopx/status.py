@@ -65,6 +65,7 @@ from .projections.project_asset import (
     completed_todo_archive_warning,
     project_asset_gate,
     project_asset_latest_validation,
+    project_asset_next_safe_command,
     project_asset_owner,
     project_asset_quota_summary,
     project_asset_summary_is_public_safe,
@@ -7299,12 +7300,6 @@ def autonomous_replan_obligation_from_runs(
         }
     ]
     return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
-
-
-def project_asset_next_safe_command(agent_command: str | None) -> str | None:
-    if not agent_command:
-        return None
-    return public_safe_compact_text(agent_command, limit=320)
 
 
 def open_todo_items(
