@@ -9,6 +9,8 @@ DEFAULT_MONITOR_SIGNAL_WAITING_ON = "monitor_signal"
 DEFAULT_MONITOR_DISPLAY_STOP_CONDITION = (
     "stop until a material monitor transition, regression, or concrete blocker appears"
 )
+TODO_PROJECTION_VIEW_SCHEMA_VERSION = "todo_projection_view_v0"
+TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION = "todo_projection_detail_pointer_v0"
 PROJECT_ASSET_TODO_PROJECTION_GAP_SCHEMA_VERSION = "project_asset_todo_projection_gap_v0"
 LOCAL_PATH_SURFACE_PATTERN = re.compile(
     r"(?<!<)/(?:Users|Volumes|var/folders|tmp|private/tmp)/[^\s`'\"<>]+"
@@ -191,6 +193,37 @@ def project_asset_next_safe_command(agent_command: str | None) -> str | None:
     if not agent_command:
         return None
     return project_asset_public_safe_compact_text(agent_command, limit=320)
+
+
+def project_asset_todo_projection_metadata(
+    *,
+    role: str | None,
+    item_limit: int,
+    deferred_item_limit: int,
+) -> dict[str, dict[str, Any]]:
+    todo_role = str(role or "").strip().lower()
+    if todo_role == "user":
+        canonical_source = "attention_queue.items[].user_todos"
+    elif todo_role == "agent":
+        canonical_source = "attention_queue.items[].agent_todos"
+    else:
+        canonical_source = "attention_queue.items[].{user_todos,agent_todos}"
+    return {
+        "projection_view": {
+            "schema_version": TODO_PROJECTION_VIEW_SCHEMA_VERSION,
+            "view": "project_asset_overview",
+            "truth": "derived",
+            "canonical_source": canonical_source,
+            "item_limit": item_limit,
+            "deferred_item_limit": deferred_item_limit,
+        },
+        "detail_pointer": {
+            "schema_version": TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
+            "cold_path": "loopx status --format json",
+            "active_state_source": "registry goal state_file",
+            "full_list_included": False,
+        },
+    }
 
 
 def project_asset_todo_projection_gap(
