@@ -5,6 +5,9 @@ from typing import Any
 
 DEFAULT_MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE = 12
 DEFAULT_MONITOR_SIGNAL_WAITING_ON = "monitor_signal"
+DEFAULT_MONITOR_DISPLAY_STOP_CONDITION = (
+    "keep monitoring quietly until the observed signal changes or a user/controller gate appears"
+)
 
 
 def completed_todo_archive_warning(
@@ -75,3 +78,51 @@ def project_asset_gate(
     if waiting_on == monitor_signal_waiting_on:
         return "none"
     return "none"
+
+
+def project_asset_stop_condition(
+    *,
+    waiting_on: str,
+    next_handoff_condition: str | None,
+    agent_command: str | None,
+    monitor_signal_waiting_on: str = DEFAULT_MONITOR_SIGNAL_WAITING_ON,
+    monitor_display_stop_condition: str = DEFAULT_MONITOR_DISPLAY_STOP_CONDITION,
+) -> str:
+    if next_handoff_condition:
+        return next_handoff_condition
+    if waiting_on == "user_or_controller":
+        return "stop until the user or controller decision is recorded"
+    if waiting_on == "controller":
+        return "stop until the controller or owner resolves this gate"
+    if waiting_on == "external_evidence":
+        return "stop until external evidence changes"
+    if waiting_on == monitor_signal_waiting_on:
+        return monitor_display_stop_condition
+    if agent_command:
+        return "stop if the command fails or needs write, production, or additional approval"
+    return "stop if the next action needs reward, gate approval, write control, or production access"
+
+
+def project_asset_support_mode(
+    *,
+    waiting_on: str,
+    operator_question: str | None,
+    missing_gates: list[str] | None,
+    status: str,
+    recommended_action: str,
+    agent_command: str | None,
+    monitor_signal_waiting_on: str = DEFAULT_MONITOR_SIGNAL_WAITING_ON,
+) -> str:
+    surface = " ".join(
+        str(value or "")
+        for value in (status, recommended_action, agent_command, " ".join(missing_gates or []))
+    ).lower()
+    if "reward" in surface:
+        return "reward_capture"
+    if operator_question or missing_gates or waiting_on in {"user_or_controller", "controller"}:
+        return "decision_support"
+    if waiting_on in {"external_evidence", monitor_signal_waiting_on}:
+        return "read_only_observer"
+    if agent_command or waiting_on == "codex":
+        return "selective_assist"
+    return "read_only_observer"
