@@ -71,6 +71,10 @@ def main() -> int:
             "first action is the pane-local A2A tick",
             "machine JSON is written to public artifacts",
             "todos and evidence are the only handoff authority",
+            "validated visible proof promotes the existing preset as\nthe reference recipe",
+            "fixed-prompt wake, pane-local A2A tick,\nrunner lifecycle, compact status, and public artifact routing stay in the\ngeneric multi-agent kernel",
+            "must not grow a private\nlauncher or hidden workflow driver",
+            "a promoted auto-research proof demonstrates the same one-command visible\n  path",
             "Auto-research should stay a reference preset, not the kernel",
             "implement it in the\nmulti-agent kernel first",
         ],
@@ -90,6 +94,10 @@ def main() -> int:
             "Multi-agent product recipe",
             "multi-agent-product-recipe.md",
             "copy the pattern without copying auto-research code",
+            "The validated visible proof is promoted into this existing command path",
+            "the operator runs one command",
+            "the generic multi-agent kernel supplies runner, wake, pane-local tick, status",
+            "fixed-prompt wake causes each pane to run\nits local A2A tick",
         ],
         source=AUTO_RESEARCH_GUIDE,
     )
@@ -98,6 +106,7 @@ def main() -> int:
         "auto-research owns the runner",
         "preset owns tmux",
         "hidden workflow engine",
+        "auto-research private launcher",
         "raw JSON should be visible first",
     ]
     for phrase in forbidden:

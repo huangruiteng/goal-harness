@@ -163,6 +163,14 @@ Both commands should open real interactive Codex CLI TUI panes. The first
 screen should be the role TUI, not raw JSON, shell streams, a hidden executor,
 or a generated worktree trust prompt.
 
+For auto-research, a validated visible proof promotes the existing preset as
+the reference recipe only when the proof keeps that layer split intact. The
+operator still gets one command, but fixed-prompt wake, pane-local A2A tick,
+runner lifecycle, compact status, and public artifact routing stay in the
+generic multi-agent kernel. The auto-research preset may provide roles,
+handoff hints, seed todos, and evidence defaults; it must not grow a private
+launcher or hidden workflow driver to make the demo look shorter.
+
 ## Attach, Stop, Retry
 
 Every visible multi-agent product should expose the same host controls:
@@ -195,6 +203,9 @@ A new product preset is healthy when:
   not dumped into the first visible screen;
 - todos and evidence are the only handoff authority;
 - attach, stop, and retry are available without product-specific host logic;
+- a promoted auto-research proof demonstrates the same one-command visible
+  path with real Codex TUI panes, fixed-prompt wake, pane-local A2A ticks, and
+  compact public-safe live evidence when lane-authored evidence is claimed;
 - no raw logs, credentials, private material, absolute local paths, or
   generated transcripts enter committed docs or fixtures.
 

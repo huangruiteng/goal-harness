@@ -20,6 +20,26 @@ human status.
 Use the [multi-agent product recipe](multi-agent-product-recipe.md) when a new
 product wants to copy the pattern without copying auto-research code.
 
+## Promotion Decision
+
+The validated visible proof is promoted into this existing command path, not
+into a second auto-research runner. The public recipe remains:
+
+- the operator runs one command;
+- the user layer supplies only topic, objective, rounds, reasoning effort, and
+  optional role overrides;
+- the auto-research preset supplies research roles, handoff hints, seed todos,
+  and evidence defaults;
+- the generic multi-agent kernel supplies runner, wake, pane-local tick, status,
+  attach, retry, and stop mechanics.
+
+A visible proof is ready for this path only when the configured roles open as
+real interactive Codex CLI panes, the fixed-prompt wake causes each pane to run
+its local A2A tick, role output is summarized through LoopX todo/evidence/status
+artifacts, and any live evidence packet is compact and public-safe. The proof
+must not depend on raw logs, private artifacts, credentials, local absolute
+paths, or a product-specific launcher hidden inside the auto-research preset.
+
 ## Start From A Clean Workspace
 
 Use a user-owned directory for the visible demo, while keeping LoopX state in
