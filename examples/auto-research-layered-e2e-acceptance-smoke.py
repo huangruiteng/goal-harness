@@ -26,6 +26,7 @@ EXPECTED_ACTIONS = [
     "run_dev_eval",
     "summarize_evidence",
     "run_holdout_eval",
+    "write_evaluation_summary",
 ]
 
 
@@ -235,8 +236,8 @@ def assert_two_round_outcome(payload: dict[str, Any]) -> None:
     assert worker_loop["schema_version"] == "auto_research_worker_loop_v0", worker_loop
     assert worker_loop["mode"] == "execute", worker_loop
     assert worker_loop["selected_actions"] == EXPECTED_ACTIONS, worker_loop
-    assert worker_loop["executed_turn_count"] == 5, worker_loop
-    assert worker_loop["completed_turn_count"] == 5, worker_loop
+    assert worker_loop["executed_turn_count"] == 6, worker_loop
+    assert worker_loop["completed_turn_count"] == 6, worker_loop
     assert worker_loop["stop_reason"] == "no_runnable_frontier", worker_loop
 
     turns = worker_loop["turns"]
@@ -245,6 +246,9 @@ def assert_two_round_outcome(payload: dict[str, Any]) -> None:
     dev_turn = next(turn for turn in executed if turn["selected_action"] == "run_dev_eval")
     summary_turn = next(turn for turn in executed if turn["selected_action"] == "summarize_evidence")
     holdout_turn = next(turn for turn in executed if turn["selected_action"] == "run_holdout_eval")
+    evaluation_turn = next(
+        turn for turn in executed if turn["selected_action"] == "write_evaluation_summary"
+    )
     assert dev_turn["round"] == 1, dev_turn
     assert dev_turn["dev_metric"] == 4.0, dev_turn
     assert dev_turn["appended_count"] == 2, dev_turn
@@ -256,6 +260,8 @@ def assert_two_round_outcome(payload: dict[str, Any]) -> None:
     assert holdout_turn["best_holdout_metric"] == 4.5, holdout_turn
     assert holdout_turn["claim_allowed"] is True, holdout_turn
     assert holdout_turn["appended_count"] == 1, holdout_turn
+    assert evaluation_turn["round"] == 2, evaluation_turn
+    assert evaluation_turn["completion_status"] == "done", evaluation_turn
     assert sum(int(turn.get("appended_count") or 0) for turn in turns) >= 3, turns
 
     tonight = payload["tonight_experience"]

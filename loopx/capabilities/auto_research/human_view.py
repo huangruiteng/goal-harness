@@ -20,6 +20,49 @@ def _join_or_none(values: object) -> str:
     return "none"
 
 
+def _dict_value(payload: dict[str, object], key: str) -> dict[str, object]:
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _string_value(payload: dict[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _render_operator_commands(payload: dict[str, object]) -> list[str]:
+    commands = _dict_value(payload, "commands")
+    user_contract = _dict_value(payload, "user_contract") or payload
+    one_click_start = _dict_value(user_contract, "one_click_start")
+    visible_launch = _dict_value(payload, "visible_launch")
+    launch_result = _dict_value(visible_launch, "launch_result")
+    default_start = (
+        _string_value(one_click_start, "command")
+        or _string_value(commands, "one_question_start_with_visible_wake")
+        or _string_value(commands, "one_question_start")
+    )
+    takeover_start = _string_value(one_click_start, "operator_takeover_command")
+    attach_semantics = _string_value(one_click_start, "attach_semantics")
+    attach_command = _string_value(launch_result, "attach_command")
+    stop_command = _string_value(launch_result, "stop_command")
+    lines = ["", "## Operator Commands", ""]
+    if default_start:
+        lines.append(f"- evidence-first start: `{default_start}`")
+    if takeover_start:
+        lines.append(f"- immediate takeover: `{takeover_start}`")
+    if attach_semantics:
+        lines.append(f"- attach_semantics: {attach_semantics}")
+    if attach_command:
+        lines.append(f"- tmux attach: `{attach_command}`")
+    if stop_command:
+        lines.append(f"- tmux stop: `{stop_command}`")
+    if len(lines) == 3:
+        return []
+    return lines
+
+
 def _render_user_contract(payload: dict[str, object]) -> str:
     brief = payload.get("research_brief") if isinstance(payload.get("research_brief"), dict) else {}
     plan = payload.get("action_plan") if isinstance(payload.get("action_plan"), list) else []
@@ -74,9 +117,15 @@ def _render_user_contract(payload: dict[str, object]) -> str:
             "## One-Click Start",
             "",
             f"- command: `{one_click_start.get('command')}`",
+            f"- operator_takeover: `{one_click_start.get('operator_takeover_command')}`",
             f"- preview: `{one_click_start.get('preview_command')}`",
             f"- starts: `{one_click_start.get('starts')}`",
             f"- coordination_model: `{one_click_start.get('coordination_model')}`",
+        ]
+    )
+    lines.extend(_render_operator_commands(payload))
+    lines.extend(
+        [
             "",
             "## Next Executable Step",
             "",
@@ -265,6 +314,7 @@ def _render_demo_e2e(payload: dict[str, object]) -> str:
         f"- visible_holdout_delta_over_dev: `{improvement.get('holdout_delta_over_dev')}`",
         f"- supervisor_lanes: `{supervisor.get('lane_count')}`",
     ]
+    lines.extend(_render_operator_commands(payload))
     return "\n".join(lines) + "\n"
 
 
@@ -383,7 +433,10 @@ def _render_supervisor(payload: dict[str, object]) -> str:
             "",
             f"- mode: `{one_click.get('mode')}`",
             "- command: `loopx auto-research start \"<open question>\" --execute`",
+            "- operator_takeover: `loopx auto-research start \"<open question>\" --execute --attach`",
             f"- machine_json_policy: `{cli_contract.get('machine_json_policy')}`",
+            f"- tmux attach: `{tmux_lifecycle.get('attach_command')}`",
+            f"- tmux stop: `{tmux_lifecycle.get('stop_command')}`",
         ]
     )
     return "\n".join(lines) + "\n"
