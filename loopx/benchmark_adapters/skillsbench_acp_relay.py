@@ -468,9 +468,9 @@ def _prompt_with_app_server_closeout_instruction(prompt_text: str) -> str:
 
 def _normalized_app_server_goal_prompt_style(style: str | None) -> str:
     text = str(style or "").strip().lower()
-    if text in {"native-goal", "cli-exec-like"}:
+    if text in {"bridge-only", "native-goal", "cli-exec-like"}:
         return text
-    return "native-goal"
+    return "bridge-only"
 
 
 def _recoverable_codex_turn_failure_message(category: str) -> str:
@@ -526,7 +526,7 @@ class CodexExecConfig:
     stream_heartbeat_interval_sec: float = 120.0
     first_action_timeout_sec: float = 0.0
     app_server_goal_followup_max: int = 0
-    app_server_goal_prompt_style: str = "native-goal"
+    app_server_goal_prompt_style: str = "bridge-only"
     bridge_idle_timeout_sec: float = 0.0
     task_output_quiet_timeout_sec: float = 0.0
     reasoning_effort: str | None = None

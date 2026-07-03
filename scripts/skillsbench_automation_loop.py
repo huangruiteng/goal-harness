@@ -1109,7 +1109,7 @@ def _host_local_acp_launch_command(
                     )
                 ),
                 "--app-server-goal-prompt-style",
-                str(getattr(args, "app_server_goal_prompt_style", "native-goal")),
+                str(getattr(args, "app_server_goal_prompt_style", "bridge-only")),
             ]
         )
         if worker_trace_dir:
@@ -7933,8 +7933,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     app_server_reasoning_effort = _effective_app_server_reasoning_effort(args)
     codex_cli_reasoning_effort = _effective_codex_cli_reasoning_effort(args)
     app_server_goal_prompt_style = str(
-        getattr(args, "app_server_goal_prompt_style", "native-goal")
-        or "native-goal"
+        getattr(args, "app_server_goal_prompt_style", "bridge-only")
+        or "bridge-only"
     )
     codex_api_egress_preflight = _public_codex_api_egress_contract(
         args,
@@ -14725,13 +14725,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--app-server-goal-prompt-style",
-        choices=("native-goal", "cli-exec-like"),
-        default="native-goal",
+        choices=("bridge-only", "native-goal", "cli-exec-like"),
+        default="bridge-only",
         help=(
-            "Prompt framing for codex-app-server-goal-baseline. native-goal "
-            "preserves the existing app-server Goal closeout/lifecycle "
-            "framing; cli-exec-like keeps the worker prompt closer to the "
-            "Codex exec bridge prompt for diagnostic canaries."
+            "Prompt framing for codex-app-server-goal-baseline. bridge-only "
+            "keeps the bare app-server baseline to task prompt plus sandbox "
+            "bridge; native-goal adds app closeout framing; cli-exec-like keeps "
+            "the worker prompt closer to Codex exec for diagnostic compatibility."
         ),
     )
     parser.add_argument("--max-verifier-output-chars", type=int, default=0)
