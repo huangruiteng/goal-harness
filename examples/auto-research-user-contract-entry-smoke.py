@@ -84,6 +84,12 @@ def assert_contract(payload: dict[str, Any]) -> None:
     ), one_click_start
     assert one_click_start["command"].startswith("loopx auto-research start "), one_click_start
     assert one_click_start["command"].endswith(" --execute"), one_click_start
+    assert (
+        one_click_start["operator_takeover_command_template"]
+        == 'loopx auto-research start "<open question>" --execute --attach'
+    ), one_click_start
+    assert one_click_start["operator_takeover_command"].endswith(" --execute --attach")
+    assert "operator takeover first" in one_click_start["attach_semantics"], one_click_start
     assert one_click_start["preview_command"].startswith("loopx auto-research start "), one_click_start
     assert one_click_start["starts"] == "visible_codex_tui_lanes", one_click_start
     assert one_click_start["uses_generic_kernel"] is True, one_click_start
@@ -146,7 +152,7 @@ def assert_start_wake_contract() -> None:
     default_visible = Namespace(
         execute=True,
         headless=False,
-        wake_visible_after_launch=True,
+        wake_visible_after_launch=None,
         attach=False,
         no_attach=False,
     )
@@ -155,6 +161,38 @@ def assert_start_wake_contract() -> None:
         _start_attach_visible(
             default_visible,
             wake_visible_after_launch=_start_wake_visible_after_launch(default_visible),
+        )
+        is False
+    )
+
+    attach_takeover = Namespace(
+        execute=True,
+        headless=False,
+        wake_visible_after_launch=None,
+        attach=True,
+        no_attach=False,
+    )
+    assert _start_wake_visible_after_launch(attach_takeover) is False
+    assert (
+        _start_attach_visible(
+            attach_takeover,
+            wake_visible_after_launch=_start_wake_visible_after_launch(attach_takeover),
+        )
+        is True
+    )
+
+    explicit_wake = Namespace(
+        execute=True,
+        headless=False,
+        wake_visible_after_launch=True,
+        attach=False,
+        no_attach=False,
+    )
+    assert _start_wake_visible_after_launch(explicit_wake) is True
+    assert (
+        _start_attach_visible(
+            explicit_wake,
+            wake_visible_after_launch=_start_wake_visible_after_launch(explicit_wake),
         )
         is False
     )

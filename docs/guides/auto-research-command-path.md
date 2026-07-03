@@ -83,8 +83,8 @@ own LoopX state and tick when runnable work remains.
 
 The user still only supplies one open question; agent ids, pane-local tick
 commands, evidence schemas, and runner wiring stay inside the kernel. Pass
-`--no-wake-visible-after-launch --attach` only when you want to skip the default
-evidence-first wake and immediately enter the tmux session.
+`--attach` when you want to skip the default evidence-first wake and immediately
+enter the tmux session.
 By default, visible panes open in a stable user-owned workspace under
 `~/loopx-auto-research/<run>/visible-workspace` so the first screen does not
 land in a generated temp directory. Pass `--workspace` to choose a different
@@ -177,14 +177,14 @@ loopx --registry "$LOOPX_REGISTRY" \
 
 That command starts visible panes, wakes each pane with the fixed
 decentralized A2A prompt, and keeps the current shell available for the compact
-JSON result. To attach immediately instead, opt out of the default wake first:
+JSON result. To attach immediately instead, pass `--attach`; that means
+operator takeover first and skips the default evidence-first wake:
 
 ```bash
 loopx --registry "$LOOPX_REGISTRY" \
   --runtime-root "$LOOPX_RUNTIME_ROOT" \
   auto-research start "How should we evaluate autonomous research agents?" \
   --execute \
-  --no-wake-visible-after-launch \
   --attach
 ```
 
