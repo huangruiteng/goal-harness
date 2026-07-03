@@ -1182,10 +1182,10 @@ def test_host_worker_contract_only_cli() -> None:
     assert contract["route"] == ROUTE, contract
     assert contract["worker_adapter"]["script"] == "scripts/skillsbench_host_codex_goal_worker.py", contract
     assert contract["worker_adapter"]["reasoning_effort"] == "high", contract
-    assert contract["worker_adapter"]["prompt_style"] == "native-goal", contract
+    assert contract["worker_adapter"]["prompt_style"] == "bridge-only", contract
     assert payload["loopx_mode"] == "codex_goal_mode_baseline", payload
     assert payload["loopx_access_packet_mode"] == "none", payload
-    assert payload["app_server_goal_prompt_style"] == "native-goal", payload
+    assert payload["app_server_goal_prompt_style"] == "bridge-only", payload
     assert payload["loopx_case_lifecycle_packet_injected"] is False, payload
     assert payload["benchmark_case_lifecycle_contract"] is None, payload
 
@@ -1236,33 +1236,33 @@ def test_host_worker_treatment_lifecycle_packet_is_public_safe() -> None:
     assert "/Users/" not in prompt
 
 
-def test_host_worker_cli_exec_like_prompt_style_suppresses_lifecycle_packet() -> None:
+def test_host_worker_bridge_prompt_styles_suppress_lifecycle_packet() -> None:
     worker = _load_worker_module()
-    args = worker.parse_args(
-        [
-            "--task-id",
-            "tictoc-unnecessary-abort-detection",
-            "--contract-only",
-            "--app-server-goal-prompt-style",
-            "cli-exec-like",
-            "--loopx-mode",
-            "codex_loopx",
-            "--loopx-access-packet-mode",
-            "compact",
-            "--loopx-case-id",
-            "tictoc-unnecessary-abort-detection",
-            "--loopx-arm-id",
-            "loopx_prompt_polling_test",
-            "--loopx-max-rounds",
-            "5",
-        ]
-    )
-    packet, contract = worker.build_loopx_case_lifecycle_packet(args)
-    assert packet == ""
-    assert contract is None
-    payload = worker.build_contract_payload(args)
-    assert payload["worker_adapter"]["prompt_style"] == "cli-exec-like", payload
-
+    for style in ("bridge-only", "cli-exec-like"):
+        args = worker.parse_args(
+            [
+                "--task-id",
+                "tictoc-unnecessary-abort-detection",
+                "--contract-only",
+                "--app-server-goal-prompt-style",
+                style,
+                "--loopx-mode",
+                "codex_loopx",
+                "--loopx-access-packet-mode",
+                "compact",
+                "--loopx-case-id",
+                "tictoc-unnecessary-abort-detection",
+                "--loopx-arm-id",
+                "loopx_prompt_polling_test",
+                "--loopx-max-rounds",
+                "5",
+            ]
+        )
+        packet, contract = worker.build_loopx_case_lifecycle_packet(args)
+        assert packet == ""
+        assert contract is None
+        payload = worker.build_contract_payload(args)
+        assert payload["worker_adapter"]["prompt_style"] == style, payload
 
 def test_host_worker_waits_for_completion_and_keeps_public_json_compact() -> None:
     with tempfile.TemporaryDirectory(prefix="skillsbench-app-goal-worker-") as tmp:
@@ -2505,7 +2505,7 @@ def _app_server_goal_command_args(first_action_timeout: int | None) -> Namespace
         local_acp_relay_command="",
         route=ROUTE,
         app_server_reasoning_effort="high",
-        app_server_goal_prompt_style="native-goal",
+        app_server_goal_prompt_style="bridge-only",
         app_server_acp_heartbeat_interval_sec=120.0,
         dataset="skillsbench@1.1",
         task_id="llm-prefix-cache-replay",
@@ -3025,7 +3025,7 @@ if __name__ == "__main__":
     test_launcher_plan_only_marks_bridge_ready_when_explicit()
     test_launcher_plan_only_marks_runner_ready_with_host_acp_launch()
     test_host_worker_contract_only_cli()
-    test_host_worker_cli_exec_like_prompt_style_suppresses_lifecycle_packet()
+    test_host_worker_bridge_prompt_styles_suppress_lifecycle_packet()
     test_host_worker_waits_for_completion_and_keeps_public_json_compact()
     test_host_worker_recovers_when_first_turn_only_echoes_context()
     test_host_worker_can_run_normal_no_reward_followup()

@@ -115,13 +115,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--app-server-goal-prompt-style",
-        choices=("native-goal", "cli-exec-like"),
-        default="native-goal",
+        choices=("bridge-only", "native-goal", "cli-exec-like"),
+        default="bridge-only",
         help=(
-            "Prompt framing for --app-server-goal-worker. native-goal keeps "
-            "the app-server closeout/lifecycle framing; cli-exec-like keeps "
-            "the worker prompt closer to the Codex exec bridge prompt for "
-            "diagnostic canaries."
+            "Prompt framing for --app-server-goal-worker. bridge-only keeps "
+            "the bare app-server baseline to task prompt plus sandbox bridge; "
+            "native-goal adds app closeout framing; cli-exec-like keeps the "
+            "worker prompt closer to the Codex exec bridge prompt for "
+            "diagnostic compatibility."
         ),
     )
     parser.add_argument(

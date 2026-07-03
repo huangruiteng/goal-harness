@@ -799,7 +799,7 @@ def build_skillsbench_app_server_goal_worker_contract(
     cwd: str = "<skillsbench-task-workspace>",
     model: str = SKILLSBENCH_DEFAULT_MODEL,
     reasoning_effort: str = "high",
-    prompt_style: str = "native-goal",
+    prompt_style: str = "bridge-only",
     codex_bin: str = "codex",
     sandbox: str = "workspace-write",
     approval_policy: str = "never",
@@ -826,9 +826,9 @@ def build_skillsbench_app_server_goal_worker_contract(
     safe_task_id = _skillsbench_public_safe_label(task_id, limit=120)
     blockers = [str(item) for item in known_blockers if str(item)]
     safe_prompt_style = _skillsbench_public_safe_label(prompt_style, limit=40)
-    if safe_prompt_style not in {"native-goal", "cli-exec-like"}:
+    if safe_prompt_style not in {"bridge-only", "native-goal", "cli-exec-like"}:
         blockers.append("skillsbench_app_server_goal_prompt_style_invalid")
-        safe_prompt_style = "native-goal"
+        safe_prompt_style = "bridge-only"
     if not safe_dataset:
         safe_dataset = SKILLSBENCH_DEFAULT_DATASET
         blockers.append("skillsbench_dataset_not_public_safe")

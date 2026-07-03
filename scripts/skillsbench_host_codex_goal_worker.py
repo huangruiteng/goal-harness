@@ -42,7 +42,7 @@ SKILLS_INSTRUCTIONS_END_MARKER = "</skills_instructions>"
 NORMAL_FOLLOWUP_PROMPT = """Continue the same SkillsBench task in this existing Goal thread.
 Do not use or infer verifier, reward, pass/fail, hidden-test, or gold-answer feedback; none is being provided.
 Review your prior work, improve the scored output if needed using only the visible task, workspace, and bridge context already available in this thread, and end the turn once the best task-required output exists."""
-APP_SERVER_GOAL_PROMPT_STYLES = ("native-goal", "cli-exec-like")
+APP_SERVER_GOAL_PROMPT_STYLES = ("bridge-only", "native-goal", "cli-exec-like")
 
 
 def _json_default(value: Any) -> str:
@@ -68,12 +68,12 @@ def _public_safe_label(value: Any, *, limit: int = 80) -> str:
 
 def _app_server_goal_prompt_style(args: argparse.Namespace) -> str:
     style = str(
-        getattr(args, "app_server_goal_prompt_style", "native-goal")
-        or "native-goal"
+        getattr(args, "app_server_goal_prompt_style", "bridge-only")
+        or "bridge-only"
     )
     if style in APP_SERVER_GOAL_PROMPT_STYLES:
         return style
-    return "native-goal"
+    return "bridge-only"
 
 
 def build_contract_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -97,7 +97,7 @@ def build_contract_payload(args: argparse.Namespace) -> dict[str, Any]:
 def build_loopx_case_lifecycle_packet(
     args: argparse.Namespace,
 ) -> tuple[str, dict[str, object] | None]:
-    if _app_server_goal_prompt_style(args) == "cli-exec-like":
+    if _app_server_goal_prompt_style(args) in {"bridge-only", "cli-exec-like"}:
         return "", None
     if args.loopx_mode != "codex_loopx":
         return "", None
@@ -633,10 +633,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--app-server-goal-prompt-style",
         choices=APP_SERVER_GOAL_PROMPT_STYLES,
-        default="native-goal",
+        default="bridge-only",
         help=(
             "Prompt framing for native app-server Goal worker turns. "
-            "native-goal preserves the current app-server Goal contract; "
+            "bridge-only keeps the bare app-server baseline to task prompt "
+            "plus sandbox bridge only; native-goal adds app closeout framing; "
             "cli-exec-like suppresses app-only lifecycle prompt injection so "
             "canaries can isolate task framing versus Codex exec."
         ),
