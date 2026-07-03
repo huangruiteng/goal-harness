@@ -59,6 +59,11 @@ from .projections.task_graph import (
     TASK_GRAPH_SOURCE_OF_TRUTH,
     build_task_graph_projection as _build_task_graph_projection_read_model,
 )
+from .projections.project_asset import (
+    completed_todo_archive_warning,
+    project_asset_gate,
+    project_asset_owner,
+)
 from .promotion_gate import build_promotion_gate
 from .quota import quota_status, quota_with_handoff_outcome_floor
 from .registry import registry_goals
@@ -7291,67 +7296,6 @@ def autonomous_replan_obligation_from_runs(
         }
     ]
     return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
-
-
-def completed_todo_archive_warning(agent_todos: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(agent_todos, dict):
-        return None
-    try:
-        done_count = int(agent_todos.get("done_count") or 0)
-    except (TypeError, ValueError):
-        done_count = 0
-    if done_count <= MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE:
-        return None
-    try:
-        open_count = int(agent_todos.get("open_count") or 0)
-    except (TypeError, ValueError):
-        open_count = 0
-    return {
-        "kind": "completed_agent_todo_archive_required",
-        "requires_archive": True,
-        "archive_section": "Completed Work Archive",
-        "active_done_count": done_count,
-        "active_open_count": open_count,
-        "max_active_done_count": MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
-        "recommended_action": (
-            "move older completed Agent Todo entries into a dedicated Completed Work Archive "
-            "until the active Agent Todo section keeps only current open work and a small recent-done tail"
-        ),
-    }
-
-
-def project_asset_owner(waiting_on: str) -> str:
-    if waiting_on == "codex":
-        return "codex"
-    if waiting_on == "external_evidence":
-        return "external_evidence"
-    if waiting_on == MONITOR_SIGNAL_WAITING_ON:
-        return MONITOR_SIGNAL_WAITING_ON
-    if waiting_on == "controller":
-        return "controller"
-    if waiting_on == "user_or_controller":
-        return "user_or_controller"
-    return waiting_on or "unknown"
-
-
-def project_asset_gate(
-    *,
-    waiting_on: str,
-    operator_question: str | None,
-    missing_gates: list[str] | None,
-    status: str,
-) -> str:
-    if operator_question:
-        return "operator_question"
-    if missing_gates:
-        return str(missing_gates[0])
-    if waiting_on in {"user_or_controller", "controller"}:
-        return status or waiting_on
-    if waiting_on == "external_evidence":
-        return "external_evidence"
-    if waiting_on == MONITOR_SIGNAL_WAITING_ON:
-        return "none"
-    return "none"
 
 
 def project_asset_stop_condition(
