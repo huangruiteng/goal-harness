@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .planner import REPO_ROOT, build_catalog_canary_plan, flatten_catalog_canary_checks
+from .smoke_profiles import resolve_smoke_suite_profiles
 
 
 CANARY_RUN_SCHEMA_VERSION = "catalog_canary_run_v0"
@@ -377,7 +378,6 @@ def build_canary_smoke_suite_run(
     sweep without hiding the smaller profile/module loops used while developing.
     """
 
-    normalized_suite = suite if suite in SMOKE_SUITE_CHOICES else "default-public"
     modules = list(modules or [])
     exclude_modules = list(exclude_modules or [])
     scripts = list(scripts or [])
@@ -385,9 +385,28 @@ def build_canary_smoke_suite_run(
     profiles = list(profiles or [])
     changed_files = list(changed_files or [])
     surfaces = list(surfaces or [])
-    catalog_selector_requested = bool(families or profiles or changed_files or surfaces)
+    profile_resolution = resolve_smoke_suite_profiles(
+        suite=suite,
+        suite_choices=SMOKE_SUITE_CHOICES,
+        modules=modules,
+        exclude_modules=exclude_modules,
+        profiles=profiles,
+    )
+    normalized_suite = str(profile_resolution["suite"])
+    modules = list(profile_resolution["modules"])
+    exclude_modules = list(profile_resolution["exclude_modules"])
+    smoke_profiles = list(profile_resolution["smoke_profiles"])
+    catalog_profiles = list(profile_resolution["catalog_profiles"])
+    profile_expansions = list(profile_resolution["profile_expansions"])
+    catalog_selector_requested = bool(families or catalog_profiles or changed_files or surfaces)
     suite_requested = normalized_suite != "catalog-plan"
-    if catalog_selector_requested and not modules and not scripts and normalized_suite == "default-public":
+    if (
+        catalog_selector_requested
+        and not modules
+        and not scripts
+        and not smoke_profiles
+        and normalized_suite == "default-public"
+    ):
         suite_requested = False
 
     selected: list[dict[str, Any]] = []
@@ -408,7 +427,7 @@ def build_canary_smoke_suite_run(
             changed_files=changed_files,
             surfaces=surfaces,
             families=families,
-            profiles=profiles,
+            profiles=catalog_profiles,
             include_deep_checks=include_deep_checks,
             max_checks_per_family=max_checks_per_family,
             max_checks_per_profile=max_checks_per_profile,
@@ -564,6 +583,9 @@ def build_canary_smoke_suite_run(
             "surfaces": surfaces,
             "families": families,
             "profiles": profiles,
+            "smoke_profiles": smoke_profiles,
+            "catalog_profiles": catalog_profiles,
+            "profile_expansions": profile_expansions,
             "include_deep_checks": include_deep_checks,
             "max_checks_per_family": max_checks_per_family,
             "max_checks_per_profile": max_checks_per_profile,
@@ -580,7 +602,8 @@ def build_canary_smoke_suite_run(
             "Smoke-suite run executes repository-local public smoke scripts with "
             "shell-free argv, per-check timeouts, and continue-on-failure reporting. "
             "Use --suite full-public for a full sweep, --module/--script for local "
-            "development, or catalog selectors such as --profile for canary-plan modules."
+            "development, recognized --profile values for named smoke-suite profiles, "
+            "or catalog selectors such as --profile for canary-plan modules."
         ),
     }
 
