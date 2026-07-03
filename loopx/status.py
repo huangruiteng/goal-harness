@@ -62,7 +62,9 @@ from .projections.task_graph import (
 from .projections.project_asset import (
     completed_todo_archive_warning,
     project_asset_gate,
+    project_asset_latest_validation,
     project_asset_owner,
+    project_asset_quota_summary,
     project_asset_stop_condition,
     project_asset_support_mode,
 )
@@ -7655,34 +7657,6 @@ def autonomous_monitor_candidates(
         allowed_waiting_on={"codex", MONITOR_SIGNAL_WAITING_ON},
         limit=limit,
     )
-
-
-def project_asset_quota_summary(quota: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(quota, dict):
-        return None
-    summary: dict[str, Any] = {
-        "compute": quota.get("compute"),
-        "state": quota.get("state"),
-        "spent_slots": quota.get("spent_slots"),
-        "allowed_slots": quota.get("allowed_slots"),
-    }
-    if quota.get("reason"):
-        summary["reason"] = normalize_todo_text(str(quota.get("reason") or ""), limit=220)
-    return summary
-
-
-def project_asset_latest_validation(run: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(run, dict):
-        return None
-    signal: dict[str, Any] = {}
-    for field in ("generated_at", "classification"):
-        value = run.get(field)
-        if value:
-            signal[field] = value
-    summary = run.get("health_check") or run.get("recommended_action")
-    if summary:
-        signal["summary"] = normalize_todo_text(str(summary), limit=260)
-    return signal or None
 
 
 def _subagent_state(run: dict[str, Any]) -> str | None:

@@ -10,6 +10,13 @@ DEFAULT_MONITOR_DISPLAY_STOP_CONDITION = (
 )
 
 
+def _compact_text(text: str, *, limit: int) -> str:
+    compact = " ".join(text.strip().split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
 def completed_todo_archive_warning(
     agent_todos: dict[str, Any] | None,
     *,
@@ -126,3 +133,31 @@ def project_asset_support_mode(
     if agent_command or waiting_on == "codex":
         return "selective_assist"
     return "read_only_observer"
+
+
+def project_asset_quota_summary(quota: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(quota, dict):
+        return None
+    summary: dict[str, Any] = {
+        "compute": quota.get("compute"),
+        "state": quota.get("state"),
+        "spent_slots": quota.get("spent_slots"),
+        "allowed_slots": quota.get("allowed_slots"),
+    }
+    if quota.get("reason"):
+        summary["reason"] = _compact_text(str(quota.get("reason") or ""), limit=220)
+    return summary
+
+
+def project_asset_latest_validation(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(run, dict):
+        return None
+    signal: dict[str, Any] = {}
+    for field in ("generated_at", "classification"):
+        value = run.get(field)
+        if value:
+            signal[field] = value
+    summary = run.get("health_check") or run.get("recommended_action")
+    if summary:
+        signal["summary"] = _compact_text(str(summary), limit=260)
+    return signal or None
