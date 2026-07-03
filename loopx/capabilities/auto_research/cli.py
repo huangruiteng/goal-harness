@@ -111,11 +111,12 @@ def _default_auto_research_start_workspace(goal_id: str) -> str:
 def _start_wake_visible_after_launch(args: argparse.Namespace) -> bool:
     """Return whether `auto-research start` should wake visible lanes after launch."""
 
-    return bool(
-        args.execute
-        and not args.headless
-        and getattr(args, "wake_visible_after_launch", True)
-    )
+    if not args.execute or args.headless:
+        return False
+    wake_setting = getattr(args, "wake_visible_after_launch", None)
+    if wake_setting is None and getattr(args, "attach", False):
+        return False
+    return bool(wake_setting is not False)
 
 
 def _start_attach_visible(args: argparse.Namespace, *, wake_visible_after_launch: bool) -> bool:
@@ -205,7 +206,7 @@ def register_auto_research_commands(
     start_parser.add_argument(
         "--wake-visible-after-launch",
         action="store_true",
-        default=True,
+        default=None,
         help=(
             "After launching visible panes, broadcast the fixed decentralized A2A wake prompt. "
             "This is the default for visible --execute and is kept for explicitness."
@@ -216,8 +217,8 @@ def register_auto_research_commands(
         dest="wake_visible_after_launch",
         action="store_false",
         help=(
-            "Disable the default fixed-prompt wake after visible launch. "
-            "Use this when you want to attach immediately and let lanes wait for manual input."
+            "Disable the default fixed-prompt wake after visible launch while keeping "
+            "the tmux session in the background unless --attach is also passed."
         ),
     )
     start_parser.add_argument(
@@ -229,8 +230,8 @@ def register_auto_research_commands(
         "--attach",
         action="store_true",
         help=(
-            "With visible --execute, attach to tmux after launch. "
-            "Default wake records evidence first; pass --no-wake-visible-after-launch to attach immediately."
+            "With visible --execute, attach to tmux after launch and skip the default wake so "
+            "operator takeover happens first."
         ),
     )
     start_parser.add_argument(
@@ -855,10 +856,10 @@ def handle_auto_research_command(
             if args.no_attach and args.attach:
                 raise ValueError("--attach cannot be combined with --no-attach")
             wake_visible_after_launch = _start_wake_visible_after_launch(args)
-            if wake_visible_after_launch and args.attach:
+            if args.wake_visible_after_launch is True and args.attach:
                 raise ValueError(
-                    "--attach cannot be combined with the default visible wake; "
-                    "pass --no-wake-visible-after-launch when operator takeover should happen first"
+                    "--attach cannot be combined with --wake-visible-after-launch; "
+                    "choose operator takeover (--attach) or evidence-first wake (--no-attach)"
                 )
             goal_id, goal_surface_mode = _resolve_demo_goal_surface(
                 goal_id=args.goal_id,

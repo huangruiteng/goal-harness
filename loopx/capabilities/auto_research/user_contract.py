@@ -44,6 +44,7 @@ def build_auto_research_user_contract(
         },
     ][:todo_limit]
     start_command = f"loopx auto-research start {shlex.quote(question)} --execute"
+    takeover_command = f"{start_command} --attach"
     return {
         "ok": True,
         "schema_version": AUTO_RESEARCH_USER_CONTRACT_SCHEMA_VERSION,
@@ -73,9 +74,16 @@ def build_auto_research_user_contract(
             "schema_version": "auto_research_one_click_start_v0",
             "command_template": 'loopx auto-research start "<open question>" --execute',
             "command": start_command,
+            "operator_takeover_command_template": (
+                'loopx auto-research start "<open question>" --execute --attach'
+            ),
+            "operator_takeover_command": takeover_command,
             "preview_command_template": 'loopx auto-research start "<open question>"',
             "preview_command": f"loopx auto-research start {shlex.quote(question)}",
             "starts": "visible_codex_tui_lanes",
+            "attach_semantics": (
+                "--attach means operator takeover first; it skips the default evidence-first wake."
+            ),
             "uses_generic_kernel": True,
             "coordination_model": "decentralized_state_a2a",
             "user_does_not_choose": [
