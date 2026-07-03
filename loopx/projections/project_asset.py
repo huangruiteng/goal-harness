@@ -177,6 +177,38 @@ def project_asset_quota_summary(quota: dict[str, Any] | None) -> dict[str, Any] 
     return summary
 
 
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def project_asset_quota_state(
+    *,
+    quota: dict[str, Any] | None,
+    project_asset: dict[str, Any],
+) -> str | None:
+    quota_state = ""
+    if isinstance(quota, dict):
+        quota_state = str(quota.get("state") or "").strip()
+    if not quota_state and isinstance(project_asset.get("quota"), dict):
+        quota_state = str(project_asset["quota"].get("state") or "").strip()
+    return quota_state or None
+
+
+def project_asset_user_todo_open_count(
+    *,
+    user_todos: dict[str, Any] | None,
+    project_asset: dict[str, Any],
+) -> int | None:
+    if isinstance(user_todos, dict):
+        return _optional_int(user_todos.get("open_count"))
+    if isinstance(project_asset.get("user_todos"), dict):
+        return _optional_int(project_asset["user_todos"].get("open_count"))
+    return None
+
+
 def project_asset_latest_validation(run: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(run, dict):
         return None
