@@ -892,7 +892,9 @@ def assert_agent_without_advancement_candidate_and_only_monitor_work_stays_quiet
     assert scheduler["action"] == "backoff_until_material_transition", scheduler
     assert scheduler["codex_app"]["recommended_interval_minutes"] == 15, scheduler
     assert scheduler["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
-    assert scheduler["codex_app"]["example_progression_minutes"] == [15, 30, 60], scheduler
+    # Monitor-only backoff is capped by the monitor cadence, so a 15m monitor
+    # should not be backed off beyond its next useful poll interval.
+    assert scheduler["codex_app"]["example_progression_minutes"] == [15, 15, 15], scheduler
     assert scheduler["unchanged_poll"]["limits"]["codex_cli_tui"] == 3, scheduler
     assert scheduler["unchanged_poll"]["final_quota_replan_check_enabled"] is True, scheduler
     assert scheduler["unchanged_poll"]["after_limits"]["claude_code_loop"] == "stop_loop", scheduler

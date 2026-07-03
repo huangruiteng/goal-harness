@@ -57,6 +57,7 @@ def scheduler_reset_profile_snapshot(scheduler: dict) -> dict:
         "codex_app_initial_interval_minutes": codex_app["recommended_interval_minutes"],
         "codex_app_initial_rrule": codex_app["recommended_rrule"],
         "codex_app_max_interval_minutes": codex_app["max_interval_minutes"],
+        "codex_app_progression_minutes": codex_app["example_progression_minutes"],
         "unchanged_poll_backoff_multiplier": codex_app["unchanged_poll_backoff_multiplier"],
         "local_scheduler_unchanged_poll_limit": limits["local_scheduler"],
         "claude_code_loop_unchanged_poll_limit": limits["claude_code_loop"],
