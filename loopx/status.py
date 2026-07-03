@@ -63,6 +63,8 @@ from .projections.project_asset import (
     LOCAL_PATH_SURFACE_PATTERN,
     PROJECT_ASSET_TODO_PROJECTION_GAP_SCHEMA_VERSION,
     SECRET_LIKE_SURFACE_PATTERN,
+    TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
+    TODO_PROJECTION_VIEW_SCHEMA_VERSION,
     completed_todo_archive_warning,
     project_asset_gate,
     project_asset_latest_validation,
@@ -72,6 +74,7 @@ from .projections.project_asset import (
     project_asset_summary_is_public_safe,
     project_asset_stop_condition,
     project_asset_support_mode,
+    project_asset_todo_projection_metadata,
     project_asset_todo_projection_gap,
 )
 from .promotion_gate import build_promotion_gate
@@ -466,8 +469,6 @@ GITHUB_PULL_URL_PATTERN = re.compile(
     r"^https://github\.com/(?P<repo>[a-z0-9_.-]{1,80}/[a-z0-9_.-]{1,100})/pull/(?P<number>[1-9][0-9]{0,8})/?$",
     re.IGNORECASE,
 )
-TODO_PROJECTION_VIEW_SCHEMA_VERSION = "todo_projection_view_v0"
-TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION = "todo_projection_detail_pointer_v0"
 ISSUE_META_SURFACE_SCHEMA_VERSION = "issue_meta_surface_v0"
 ISSUE_META_SURFACE_ITEM_SCHEMA_VERSION = "issue_meta_surface_item_v0"
 MAX_DEPENDENCY_BLOCKERS = 4
@@ -7370,32 +7371,18 @@ def project_asset_todo_summary(
     done_count = todos.get("done_count", 0)
     total_count = todos.get("total_count", 0)
     todo_role = str(role or todos.get("role") or "").strip().lower()
-    if todo_role == "user":
-        canonical_source = "attention_queue.items[].user_todos"
-    elif todo_role == "agent":
-        canonical_source = "attention_queue.items[].agent_todos"
-    else:
-        canonical_source = "attention_queue.items[].{user_todos,agent_todos}"
+    metadata = project_asset_todo_projection_metadata(
+        role=todo_role,
+        item_limit=MAX_PROJECT_ASSET_TODO_ITEMS,
+        deferred_item_limit=MAX_DEFERRED_TODO_VISIBILITY_ITEMS,
+    )
     summary: dict[str, Any] = {
         "schema_version": todos.get("schema_version") or "todo_summary_v0",
         "source_section": "project_asset",
         "open": open_count,
         "done": done_count,
         "total": total_count,
-        "projection_view": {
-            "schema_version": TODO_PROJECTION_VIEW_SCHEMA_VERSION,
-            "view": "project_asset_overview",
-            "truth": "derived",
-            "canonical_source": canonical_source,
-            "item_limit": MAX_PROJECT_ASSET_TODO_ITEMS,
-            "deferred_item_limit": MAX_DEFERRED_TODO_VISIBILITY_ITEMS,
-        },
-        "detail_pointer": {
-            "schema_version": TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
-            "cold_path": "loopx status --format json",
-            "active_state_source": "registry goal state_file",
-            "full_list_included": False,
-        },
+        **metadata,
     }
     open_items = open_todo_items(todos, limit=MAX_PROJECT_ASSET_TODO_ITEMS)
     claimed_open_count = sum(1 for item in open_items if item.get("claimed_by"))
