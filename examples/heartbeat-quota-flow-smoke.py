@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,24 @@ def run_cli(root: Path, *args: str, registry_path: Path, runtime: Path) -> dict:
         text=True,
     )
     return json.loads(result.stdout)
+
+
+def run_projected_loopx_command(
+    root: Path,
+    command: str,
+    *extra_args: str,
+    registry_path: Path,
+    runtime: Path,
+) -> dict:
+    tokens = shlex.split(command)
+    assert tokens and tokens[0] == "loopx", command
+    return run_cli(
+        root,
+        *tokens[1:],
+        *extra_args,
+        registry_path=registry_path,
+        runtime=runtime,
+    )
 
 
 def run_cli_result(root: Path, *args: str, registry_path: Path, runtime: Path) -> tuple[int, dict]:
@@ -776,27 +795,6 @@ def main() -> int:
         assert ack["ok"] is True, ack
         assert ack.get("delivery_outcome") is None, ack
 
-        post_ack_poll_count = count_events(runtime, "quota_monitor_poll")
-        for index in range(2):
-            poll = run_cli(
-                root,
-                "quota",
-                "monitor-poll",
-                "--goal-id",
-                GOAL_ID,
-                "--source",
-                "heartbeat",
-                "--execute",
-                "--scan-path",
-                str(project),
-                registry_path=registry_path,
-                runtime=runtime,
-            )
-            assert poll["ok"] is True, poll
-            assert poll["classification"] == "quota_monitor_poll", poll
-            assert count_spend_events(runtime) == 1, poll
-            assert count_events(runtime, "quota_monitor_poll") == post_ack_poll_count + index + 1, poll
-
         post_ack_guard = run_cli(
             root,
             "quota",
@@ -815,6 +813,68 @@ def main() -> int:
             post_ack_guard["heartbeat_recommendation"]["recommended_mode"]
             == "monitor_quiet_until_material_transition"
         ), post_ack_guard
+        post_ack_interaction = post_ack_guard["interaction_contract"]
+        assert post_ack_interaction["mode"] == "monitor_quiet_skip", post_ack_interaction
+        post_ack_actions = post_ack_interaction["cli_channel"]["next_cli_actions"]
+        post_ack_monitor_poll_action = post_ack_actions[0]
+        assert shlex.split(post_ack_monitor_poll_action) == [
+            "loopx",
+            "quota",
+            "monitor-poll",
+            "--goal-id",
+            GOAL_ID,
+            "--execute",
+        ], post_ack_interaction
+
+        post_ack_poll_count = count_events(runtime, "quota_monitor_poll")
+        for index in range(2):
+            if index == 0:
+                poll = run_projected_loopx_command(
+                    root,
+                    post_ack_monitor_poll_action,
+                    "--scan-path",
+                    str(project),
+                    registry_path=registry_path,
+                    runtime=runtime,
+                )
+            else:
+                poll = run_cli(
+                    root,
+                    "quota",
+                    "monitor-poll",
+                    "--goal-id",
+                    GOAL_ID,
+                    "--source",
+                    "heartbeat",
+                    "--execute",
+                    "--scan-path",
+                    str(project),
+                    registry_path=registry_path,
+                    runtime=runtime,
+                )
+            assert poll["ok"] is True, poll
+            assert poll["classification"] == "quota_monitor_poll", poll
+            assert count_spend_events(runtime) == 1, poll
+            assert count_events(runtime, "quota_monitor_poll") == post_ack_poll_count + index + 1, poll
+
+        post_poll_guard = run_cli(
+            root,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--scan-path",
+            str(project),
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert post_poll_guard["effective_action"] == "monitor_quiet_skip", post_poll_guard
+        assert post_poll_guard["execution_obligation"]["must_attempt_work"] is False, post_poll_guard
+        assert post_poll_guard.get("autonomous_replan_obligation") is None, post_poll_guard
+        assert (
+            post_poll_guard["heartbeat_recommendation"]["recommended_mode"]
+            == "monitor_quiet_until_material_transition"
+        ), post_poll_guard
 
     with tempfile.TemporaryDirectory(prefix="loopx-external-evidence-observation-") as tmp:
         root = Path(tmp)
