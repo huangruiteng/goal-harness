@@ -1,0 +1,74 @@
+.TH LOOPX 1 "2026-07-03" "LoopX 0.1.4" "User Commands"
+.SH NAME
+loopx \- control-plane helper for long-running agent work
+.SH SYNOPSIS
+.B loopx
+[\fB--registry\fR \fIPATH\fR]
+[\fB--runtime-root\fR \fIPATH\fR]
+[\fB--format\fR \fImarkdown|json\fR]
+\fICOMMAND\fR
+[\fIARGS\fR]
+.br
+.B loopx
+\fICOMMAND\fR
+\fB--help\fR
+.br
+.B loopx commands
+.SH DESCRIPTION
+LoopX keeps long-running agent work moving by preserving goals, todos, gates,
+quota, and evidence between agent turns.
+.PP
+The default command surface is intentionally short. New users should start with
+the agent slash command path, then use the CLI for install checks, status,
+diagnosis, and handoff packets.
+.SH START HERE
+.TP
+.B /loopx
+Ask the agent to inspect LoopX status, gates, todos, and next action.
+.TP
+.B /loopx <goal text>
+Start or continue one concrete long-running goal through the agent.
+.TP
+.B loopx doctor
+Check install, PATH, release snapshot, skills, and import health.
+.TP
+.B loopx bootstrap-command-pack --project .
+Generate a setup packet for a manual shell or first agent handoff.
+.SH DAILY COMMANDS
+.TP
+.B loopx status
+Show current goals, gates, attention queue, and next action.
+.TP
+.B loopx diagnose --goal-id <goal-id>
+Build a compact evidence packet when behavior is surprising.
+.TP
+.B loopx review-packet --goal-id <goal-id>
+Render a handoff or review packet for operator judgment.
+.TP
+.B loopx todo --help
+Show todo add, claim, complete, update, supersede, and archive forms.
+.TP
+.B loopx quota should-run
+Decide whether the next agent turn should run.
+.SH MORE COMMANDS
+.TP
+.B loopx commands
+Show the grouped command reference.
+.TP
+.B loopx COMMAND --help
+Show flags for one command.
+.TP
+.B docs/guides/newcomer-command-path.md
+Explains the minimal product path for new users.
+.TP
+.B docs/guides/getting-started.md#command-reference
+Keeps the longer operator and contributor command catalog.
+.SH INSTALL NOTES
+The LoopX local installer writes this manual to
+\fI$HOME/.local/share/man/man1/loopx.1.gz\fR by default and adds
+\fI$HOME/.local/share/man\fR to MANPATH in the selected shell profile.
+If the current shell has not reloaded that profile, run:
+.PP
+.B MANPATH="$HOME/.local/share/man:${MANPATH:-}" man loopx
+.SH SEE ALSO
+.BR man (1)

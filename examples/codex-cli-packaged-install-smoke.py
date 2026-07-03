@@ -39,6 +39,7 @@ def main() -> None:
                 "scripts",
                 "skills",
                 "docs",
+                "man",
                 "examples",
                 "README.md",
                 "pyproject.toml",
@@ -62,6 +63,7 @@ def main() -> None:
 
         installed = home / ".local" / "bin" / "loopx"
         assert installed.exists(), installed
+        assert (home / ".local" / "share" / "man" / "man1" / "loopx.1.gz").is_file()
         assert not (home / ".local" / "bin" / "goal-harness").exists()
         doctor = subprocess.run(
             [str(installed), "doctor"],

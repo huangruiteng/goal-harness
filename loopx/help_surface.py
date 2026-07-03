@@ -1,0 +1,194 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+GLOBAL_OPTIONS_WITH_VALUE = {"--registry", "--runtime-root", "--format"}
+GLOBAL_OPTIONS_WITH_EQUALS = tuple(f"{option}=" for option in sorted(GLOBAL_OPTIONS_WITH_VALUE))
+HELP_FLAGS = {"-h", "--help"}
+
+
+COMMAND_GROUPS: list[dict[str, object]] = [
+    {
+        "title": "Start here",
+        "commands": [
+            {
+                "command": "/loopx",
+                "purpose": "Ask the agent to inspect LoopX status, gates, todos, and next action.",
+            },
+            {
+                "command": "/loopx <goal text>",
+                "purpose": "Start or continue one concrete long-running goal through the agent.",
+            },
+            {
+                "command": "loopx doctor",
+                "purpose": "Check install, PATH, release snapshot, skills, and import health.",
+            },
+            {
+                "command": "loopx bootstrap-command-pack --project .",
+                "purpose": "Generate a setup packet for a manual shell or first agent handoff.",
+            },
+        ],
+    },
+    {
+        "title": "Daily operator commands",
+        "commands": [
+            {"command": "loopx status", "purpose": "Show goals, gates, attention queue, and next action."},
+            {
+                "command": "loopx diagnose --goal-id <goal-id>",
+                "purpose": "Build a compact evidence packet when behavior is surprising.",
+            },
+            {
+                "command": "loopx review-packet --goal-id <goal-id>",
+                "purpose": "Render a handoff or review packet for operator judgment.",
+            },
+            {"command": "loopx todo --help", "purpose": "Show todo lifecycle commands."},
+            {"command": "loopx quota should-run", "purpose": "Decide whether the next agent turn should run."},
+            {"command": "loopx history --goal-id <goal-id>", "purpose": "Read compact run history."},
+        ],
+    },
+    {
+        "title": "Setup and automation commands",
+        "commands": [
+            {"command": "loopx bootstrap / loopx connect", "purpose": "Create or connect project-local state."},
+            {
+                "command": "loopx new-project-prompt",
+                "purpose": "Generate a copy-paste project connection prompt for an agent.",
+            },
+            {
+                "command": "loopx codex-cli-bootstrap-message",
+                "purpose": "Generate the visible Codex CLI TUI setup message.",
+            },
+            {"command": "loopx heartbeat-prompt", "purpose": "Generate a guarded heartbeat automation body."},
+            {"command": "loopx upgrade-plan", "purpose": "Plan default heartbeat upgrade propagation."},
+            {"command": "loopx update", "purpose": "Check, dry-run, or execute the no-clone update path."},
+        ],
+    },
+    {
+        "title": "Maintainer and adapter commands",
+        "commands": [
+            {"command": "loopx check", "purpose": "Run contract and public/private boundary checks."},
+            {"command": "loopx registry", "purpose": "Inspect registered goals and adapters."},
+            {"command": "loopx sync-global", "purpose": "Merge project state into the shared registry."},
+            {"command": "loopx register-agent", "purpose": "Register an automation agent."},
+            {"command": "loopx lark-kanban", "purpose": "Project LoopX state into a Feishu/Lark Base board."},
+            {"command": "loopx issue-fix", "purpose": "Build public-safe issue or PR fix workflow packets."},
+            {"command": "loopx auto-research", "purpose": "Project public-safe research frontiers."},
+            {"command": "loopx multi-agent", "purpose": "Launch visible role-scoped Codex TUI agents."},
+            {"command": "loopx canary", "purpose": "Plan or run catalog-informed smoke profiles."},
+            {"command": "loopx benchmark", "purpose": "Use fixture-only benchmark runner skeletons by default."},
+        ],
+    },
+]
+
+
+def _program_name(program: str) -> str:
+    name = program.rsplit("/", 1)[-1]
+    if name in {"loopx", "cli.py", "__main__.py"}:
+        return "loopx"
+    if program.endswith("loopx.cli") or " -m loopx.cli" in program:
+        return "loopx"
+    return program or "loopx"
+
+
+def top_level_help_requested(argv: list[str]) -> bool:
+    if not argv:
+        return True
+    help_positions = [index for index, value in enumerate(argv) if value in HELP_FLAGS]
+    if not help_positions:
+        return False
+    help_index = help_positions[0]
+    index = 0
+    while index < help_index:
+        value = argv[index]
+        if value in GLOBAL_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        if value.startswith(GLOBAL_OPTIONS_WITH_EQUALS):
+            index += 1
+            continue
+        return False
+    return True
+
+
+def render_concise_help(program: str = "loopx") -> str:
+    program = _program_name(program)
+    return "\n".join(
+        [
+            "LoopX keeps long-running agent work moving by preserving goals, todos, gates, quota,",
+            "and evidence between agent turns.",
+            "",
+            "Usage:",
+            f"  {program} [global options] <command> [command options]",
+            f"  {program} <command> --help",
+            "",
+            "Start here:",
+            "  /loopx                         Ask the agent to inspect LoopX state.",
+            "  /loopx <goal text>             Start or continue a concrete long-running goal.",
+            "  loopx doctor                   Check install, PATH, release snapshot, and skills.",
+            "  loopx bootstrap-command-pack --project .",
+            "                                  Generate a setup packet for a manual shell path.",
+            "",
+            "Daily operator commands:",
+            "  loopx status                   Show current goals, gates, and next action.",
+            "  loopx diagnose --goal-id ID    Build a compact evidence packet.",
+            "  loopx todo --help              Add, claim, complete, update, or archive todos.",
+            "  loopx quota should-run         Decide whether the next agent turn should run.",
+            "",
+            "Global options:",
+            "  --registry PATH   --runtime-root PATH   --format markdown|json",
+            "",
+            "More:",
+            "  loopx commands                 Show grouped command reference.",
+            "  loopx <command> --help         Show flags for one command.",
+            "  man loopx                      Open the installed manual page.",
+            "  docs/guides/newcomer-command-path.md",
+            "",
+        ]
+    )
+
+
+def build_command_reference_payload() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "schema_version": "loopx_command_reference_v0",
+        "summary": "Grouped LoopX command reference for operators and contributors.",
+        "groups": COMMAND_GROUPS,
+        "more": [
+            "loopx <command> --help",
+            "man loopx",
+            "docs/guides/getting-started.md#command-reference",
+        ],
+    }
+
+
+def render_command_reference_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# LoopX command reference",
+        "",
+        str(payload.get("summary") or ""),
+        "",
+    ]
+    groups = payload.get("groups") if isinstance(payload.get("groups"), list) else []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        title = str(group.get("title") or "Commands")
+        lines.extend([f"## {title}", ""])
+        commands = group.get("commands") if isinstance(group.get("commands"), list) else []
+        for command in commands:
+            if not isinstance(command, dict):
+                continue
+            name = str(command.get("command") or "").strip()
+            purpose = str(command.get("purpose") or "").strip()
+            if name and purpose:
+                lines.append(f"- `{name}` - {purpose}")
+        lines.append("")
+    lines.extend(
+        [
+            "For command-specific flags, run `loopx <command> --help`.",
+            "For the manual page, run `man loopx` after installing LoopX.",
+            "",
+        ]
+    )
+    return "\n".join(lines)

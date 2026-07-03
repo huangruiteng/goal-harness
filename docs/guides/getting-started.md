@@ -253,7 +253,8 @@ loopx doctor
 
 The installer downloads a GitHub archive, writes a stable local release snapshot
 under `~/.local/share/loopx/releases/`, installs the CLI wrapper under
-`~/.local/bin`, and installs the reusable LoopX skills under
+`~/.local/bin`, installs the `man loopx` page under
+`~/.local/share/man`, and installs the reusable LoopX skills under
 `~/.codex/skills`.
 
 `loopx doctor` reports `install_freshness`. For a productized upgrade path, use
@@ -288,6 +289,8 @@ The checkout installer creates:
 
 - `~/.local/bin/loopx`, pointing at a stable local release snapshot;
 - `~/.local/bin/loopx-canary`, pointing at the live checkout;
+- `~/.local/share/man/man1/loopx.1.gz`, so `man loopx` opens the short
+  operator manual after the shell profile reloads;
 - the LoopX Codex skills under `~/.codex/skills`.
 
 Those global skills are the intended product surface for reusable LoopX
@@ -299,9 +302,10 @@ checkout to the default local release.
 
 ## Global Skill Install, Update, Repair, And Cleanup
 
-`scripts/install-local.sh` manages two reusable local surfaces:
+`scripts/install-local.sh` manages three reusable local surfaces:
 
 - the CLI wrappers under `~/.local/bin`;
+- the local manual page under `~/.local/share/man`;
 - the LoopX Codex skills under `~/.codex/skills`.
 
 For a no-clone install, use `loopx update` to refresh the release snapshot and
@@ -829,7 +833,8 @@ sync-global             merge project registry into the global registry
 check                   run contract and public/private boundary checks
 ```
 
-Use `loopx <command> --help` for command-specific flags.
+Use `loopx commands` for the grouped CLI reference, `loopx <command> --help`
+for command-specific flags, or `man loopx` for the installed operator manual.
 
 ## Repository Quality Guard
 

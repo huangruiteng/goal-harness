@@ -56,6 +56,7 @@ def main() -> int:
 
         home = root / "home"
         bin_dir = home / ".local" / "bin"
+        man_root = home / ".local" / "share" / "man"
         codex_home = home / ".codex"
         profile = home / ".zshrc"
         home.mkdir()
@@ -75,6 +76,7 @@ def main() -> int:
         install = run([str(clone / "scripts" / "install-local.sh")], cwd=clone, env=env)
         assert "loopx installed locally" in install.stdout, install.stdout
         assert f"- executable: {bin_dir / 'loopx'}" in install.stdout, install.stdout
+        assert f"- manpage: {man_root / 'man1' / 'loopx.1.gz'}" in install.stdout, install.stdout
         assert f"- canary executable: {bin_dir / 'loopx-canary'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
@@ -91,6 +93,10 @@ def main() -> int:
         release_root = wrapper.resolve().parents[1]
         assert release_root != clone, release_root
         assert (release_root / "loopx" / "cli.py").is_file(), release_root
+        assert (man_root / "man1" / "loopx.1.gz").is_file()
+        assert 'export MANPATH="$HOME/.local/share/man:${MANPATH:-}"' in profile.read_text(
+            encoding="utf-8"
+        )
         assert (codex_home / "skills" / "loopx-project" / "SKILL.md").is_file()
         assert (codex_home / "skills" / "loopx-pr-review" / "SKILL.md").is_file()
         assert (codex_home / "skills" / "loopx-self-repair" / "SKILL.md").is_file()

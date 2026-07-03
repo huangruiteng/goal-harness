@@ -8,6 +8,8 @@ bin_dir="${LOOPX_BIN_DIR:-$HOME/.local/bin}"
 shell_profile="${LOOPX_SHELL_PROFILE:-}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 skills_dir="${LOOPX_SKILLS_DIR:-$codex_home/skills}"
+man_root="${LOOPX_MAN_ROOT:-$HOME/.local/share/man}"
+man_dir="${LOOPX_MAN_DIR:-$man_root/man1}"
 install_skill="${LOOPX_INSTALL_SKILL:-1}"
 install_canary="${LOOPX_INSTALL_CANARY:-1}"
 releases_dir="${LOOPX_RELEASES_DIR:-$HOME/.local/share/loopx/releases}"
@@ -107,6 +109,7 @@ copy_path "$repo_root/loopx" "$release_tmp/loopx"
 copy_path "$repo_root/scripts" "$release_tmp/scripts"
 copy_path "$repo_root/skills" "$release_tmp/skills"
 copy_path "$repo_root/docs" "$release_tmp/docs"
+copy_path "$repo_root/man" "$release_tmp/man"
 copy_path "$repo_root/examples" "$release_tmp/examples"
 copy_path "$repo_root/apps" "$release_tmp/apps"
 copy_path "$repo_root/.github" "$release_tmp/.github"
@@ -154,6 +157,38 @@ if [[ -n "$shell_profile" ]]; then
       fi
     } >>"$shell_profile"
   fi
+  if ! grep -F "$man_root" "$shell_profile" >/dev/null 2>&1 \
+    && ! grep -F '$HOME/.local/share/man' "$shell_profile" >/dev/null 2>&1; then
+    {
+      printf '\n# LoopX local manual\n'
+      if [[ "$man_root" == "$HOME/.local/share/man" ]]; then
+        printf 'export MANPATH="$HOME/.local/share/man:${MANPATH:-}"\n'
+      else
+        printf 'export MANPATH="%s:${MANPATH:-}"\n' "$man_root"
+      fi
+    } >>"$shell_profile"
+  fi
+fi
+
+man_line="- manpage: skipped (source missing)"
+man_source="$release_dir/man/loopx.1"
+man_target="$man_dir/loopx.1.gz"
+if [[ -f "$man_source" ]]; then
+  mkdir -p "$man_dir"
+  MAN_SOURCE="$man_source" MAN_TARGET="$man_target" "${LOOPX_PYTHON:-python3}" - <<'PY'
+from pathlib import Path
+import gzip
+import os
+import shutil
+
+source = Path(os.environ["MAN_SOURCE"])
+target = Path(os.environ["MAN_TARGET"])
+target.parent.mkdir(parents=True, exist_ok=True)
+with source.open("rb") as raw, gzip.open(target, "wb", compresslevel=9) as zipped:
+    shutil.copyfileobj(raw, zipped)
+PY
+  chmod 0644 "$man_target"
+  man_line="- manpage: $man_target"
 fi
 
 export PATH="$bin_dir:$PATH"
@@ -206,6 +241,8 @@ cat <<EOF
 loopx installed locally
 - executable: $bin_dir/loopx
 - release: $release_dir
+- manual root: $man_root
+$man_line
 $canary_line
 - executable compatibility: none
 $legacy_line
@@ -215,5 +252,7 @@ $claude_line
 
 Current shell can use it with:
   export PATH="$bin_dir:\$PATH"
+  export MANPATH="$man_root:\${MANPATH:-}"
   loopx doctor
+  man loopx
 EOF

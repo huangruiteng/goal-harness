@@ -77,3 +77,5 @@ the product path:
   installation, debugging, or maintainer workflows.
 - Contributors may still use the full command reference in
   [Getting started](getting-started.md#command-reference).
+- Installed users can run `man loopx` or `loopx commands` when they need a
+  grouped operator reference instead of the first-run path.

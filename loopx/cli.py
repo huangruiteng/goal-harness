@@ -76,6 +76,12 @@ from .cli_rollout import (
     append_benchmark_run_rollout_event,
     append_cli_rollout_event,
 )
+from .help_surface import (
+    build_command_reference_payload,
+    render_command_reference_markdown,
+    render_concise_help,
+    top_level_help_requested,
+)
 from .paths import DEFAULT_RUNTIME_ROOT, default_registry_path, global_registry_path
 
 
@@ -109,6 +115,11 @@ def user_supplied_registry(argv: list[str] | None) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+    if top_level_help_requested(raw_argv):
+        print(render_concise_help(sys.argv[0] if argv is None else "loopx"), end="")
+        return 0
+
     parser = argparse.ArgumentParser(description="LoopX control-plane helper.")
     parser.add_argument("--version", action="version", version=f"loopx {__version__}")
     parser.add_argument("--registry", default=str(default_registry_path()), help="Path to a project-local registry.")
@@ -117,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     register_version_command(sub, add_subcommand_format)
+
+    commands_parser = sub.add_parser(
+        "commands",
+        help="Show grouped LoopX command reference for operators and contributors.",
+    )
+    add_subcommand_format(commands_parser)
 
     register_bootstrap_connect_command(sub)
 
@@ -205,6 +222,14 @@ def main(argv: list[str] | None = None) -> int:
     version_result = handle_version_command(args, output_format=output_format, print_payload=print_payload)
     if version_result is not None:
         return version_result
+
+    if args.command == "commands":
+        print_payload(
+            build_command_reference_payload(),
+            output_format(args),
+            render_command_reference_markdown,
+        )
+        return 0
 
     bootstrap_connect_result = handle_bootstrap_connect_command(
         args,
