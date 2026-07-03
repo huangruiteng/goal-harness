@@ -60,11 +60,14 @@ from .projections.task_graph import (
     build_task_graph_projection as _build_task_graph_projection_read_model,
 )
 from .projections.project_asset import (
+    LOCAL_PATH_SURFACE_PATTERN,
+    SECRET_LIKE_SURFACE_PATTERN,
     completed_todo_archive_warning,
     project_asset_gate,
     project_asset_latest_validation,
     project_asset_owner,
     project_asset_quota_summary,
+    project_asset_summary_is_public_safe,
     project_asset_stop_condition,
     project_asset_support_mode,
 )
@@ -427,10 +430,6 @@ LIFECYCLE_PRIORITY = (
     "run_recorded",
 )
 SECTION_HEADING_PATTERN = re.compile(r"^##+\s+(.+?)\s*$")
-LOCAL_PATH_SURFACE_PATTERN = re.compile(r"(?<!<)/(?:Users|Volumes|var/folders|tmp|private/tmp)/[^\s`'\"<>]+")
-SECRET_LIKE_SURFACE_PATTERN = re.compile(
-    r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]{16,}|(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
-)
 USER_TODO_HEADER_MARKERS = (
     "user todo",
     "owner review reading queue",
@@ -7867,11 +7866,6 @@ def active_state_projection_warning(goal: dict[str, Any], current_run: dict[str,
         "latest_run_classification": current_run.get("classification"),
         "recommended_action": "run refresh-state before trusting latest_run-derived routing",
     }
-
-
-def project_asset_summary_is_public_safe(project_asset: dict[str, Any]) -> bool:
-    text = repr(project_asset)
-    return not LOCAL_PATH_SURFACE_PATTERN.search(text) and not SECRET_LIKE_SURFACE_PATTERN.search(text)
 
 
 def is_handoff_ready_run(run: dict[str, Any]) -> bool:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -7,6 +8,14 @@ DEFAULT_MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE = 12
 DEFAULT_MONITOR_SIGNAL_WAITING_ON = "monitor_signal"
 DEFAULT_MONITOR_DISPLAY_STOP_CONDITION = (
     "stop until a material monitor transition, regression, or concrete blocker appears"
+)
+LOCAL_PATH_SURFACE_PATTERN = re.compile(
+    r"(?<!<)/(?:Users|Volumes|var/folders|tmp|private/tmp)/[^\s`'\"<>]+"
+)
+SECRET_LIKE_SURFACE_PATTERN = re.compile(
+    r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]{16,}|"
+    r"(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|"
+    r"\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
 )
 
 
@@ -161,3 +170,8 @@ def project_asset_latest_validation(run: dict[str, Any] | None) -> dict[str, Any
     if summary:
         signal["summary"] = _compact_text(str(summary), limit=260)
     return signal or None
+
+
+def project_asset_summary_is_public_safe(project_asset: dict[str, Any]) -> bool:
+    text = repr(project_asset)
+    return not LOCAL_PATH_SURFACE_PATTERN.search(text) and not SECRET_LIKE_SURFACE_PATTERN.search(text)
