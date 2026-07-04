@@ -556,6 +556,9 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         todo["task_class"] = task_class
     if action_kind:
         todo["action_kind"] = action_kind
+    unblocks_todo_id = normalize_todo_id(payload.get("unblocks_todo_id"))
+    if unblocks_todo_id:
+        todo["unblocks_todo_id"] = unblocks_todo_id
     for key in TODO_MONITOR_METADATA_FIELDS:
         if payload.get(key):
             todo[key] = compact_text(payload[key])
@@ -598,10 +601,16 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
     elif event_type == TODO_COMPLETED:
         todo["status"] = TODO_STATUS_DONE
         todo["done"] = True
-        if payload.get("evidence"):
-            todo["evidence"] = compact_text(payload["evidence"])
-        if payload.get("reason"):
-            todo["reason"] = compact_text(payload["reason"])
+        for key in (
+            "evidence",
+            "reason",
+            "note",
+            "completed_at",
+            "updated_at",
+            "no_followup",
+        ):
+            if payload.get(key) is not None:
+                todo[key] = compact_text(payload[key])
     todo["last_event_id"] = event.get("event_id")
     todo["last_append_sequence"] = event.get("append_sequence")
 
@@ -701,10 +710,13 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         task_class=item.get("task_class"),
         action_kind=item.get("action_kind"),
         claimed_by=item.get("claimed_by"),
+        unblocks_todo_id=item.get("unblocks_todo_id"),
+        no_followup=True if item.get("no_followup") == "true" else None,
         **monitor_metadata,
         note=item.get("note"),
         evidence=item.get("evidence"),
         reason=item.get("reason"),
+        completed_at=item.get("completed_at"),
         updated_at=item.get("updated_at"),
     )
     if metadata:
