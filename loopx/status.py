@@ -169,6 +169,10 @@ from .control_plane.runtime.run_compaction import (
     compact_operator_gate_resume_contract as _compact_operator_gate_resume_contract_read_model,
     compact_run_base as _compact_run_base_read_model,
 )
+from .control_plane.runtime.public_safety import (
+    public_safe_compact_list as _public_safe_compact_list_read_model,
+    public_safe_compact_text as _public_safe_compact_text_read_model,
+)
 from .control_plane.runtime.run_history import (
     build_run_history as _build_run_history_read_model,
     latest_run as _latest_run_read_model,
@@ -596,25 +600,21 @@ AUTONOMOUS_RUN_HISTORY_STALL_PATTERN = re.compile(
     r"(?i)(?:monitor|observe|observation|poll|watch|quiet|no[-_ ]?op|no[-_ ]?progress|stalled?|unchanged|dependency|停转|无进展|重复|反复|观察|轮询)"
 )
 def public_safe_compact_text(value: Any, *, limit: int = 220) -> str | None:
-    text = normalize_todo_text(str(value or ""), limit=limit)
-    if not text:
-        return None
-    if LOCAL_PATH_SURFACE_PATTERN.search(text) or SECRET_LIKE_SURFACE_PATTERN.search(text):
-        return None
-    return text
+    return _public_safe_compact_text_read_model(
+        value,
+        limit=limit,
+        normalize_text=normalize_todo_text,
+        local_path_surface_pattern=LOCAL_PATH_SURFACE_PATTERN,
+        secret_like_surface_pattern=SECRET_LIKE_SURFACE_PATTERN,
+    )
 
 
 def public_safe_compact_list(value: Any, *, limit: int = MAX_SUBAGENT_SCOPE_ITEMS) -> list[str]:
-    values = value if isinstance(value, list) else [value] if value else []
-    result: list[str] = []
-    for item in values:
-        text = public_safe_compact_text(item, limit=160)
-        if not text:
-            continue
-        result.append(text)
-        if len(result) >= limit:
-            break
-    return result
+    return _public_safe_compact_list_read_model(
+        value,
+        limit=limit,
+        compact_text=public_safe_compact_text,
+    )
 
 
 def compact_session_runtime_readonly_projection(value: Any) -> dict[str, Any] | None:
