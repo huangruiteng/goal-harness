@@ -7,8 +7,8 @@ dashboard use, development checks, and command discovery.
 
 If you are new to LoopX, start with the shorter
 [Newcomer command path](newcomer-command-path.md): it reduces the product
-surface to `/loopx`, `/loopx <goal>`, and one manual CLI quickstart. This page
-keeps the full operator and contributor detail.
+surface to the host LoopX task entry, project connection, and one manual CLI
+quickstart. This page keeps the full operator and contributor detail.
 
 ## Codex App And Other Agent Setup
 
@@ -29,16 +29,16 @@ curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/ins
 export PATH="$HOME/.local/bin:$PATH"
 
 Then run `loopx doctor`. Work only from the current project root:
-1. If LoopX state already exists, reuse it and do not create or overwrite a
-   goal.
+1. If LoopX state already exists, reuse it and do not create or overwrite the
+   active objective.
 2. If the project is not connected, prefer `loopx connect`; use
-   `loopx bootstrap` only when goal state clearly needs initialization.
+   `loopx bootstrap` only when project state clearly needs initialization.
 3. Ensure `.loopx/`, `.codex/goals/`, and `.local/` are ignored.
 4. Set up the thin LoopX heartbeat for this surface. For Codex App, start the
    recurring automation at 3 minutes, then follow
    `quota should-run.scheduler_hint` for backoff and self-stop behavior.
-5. Stop after setup and report the goal id, current user gate, top agent todo,
-   and next safe action.
+5. Stop after setup and report the active state id, current user gate, top
+   agent todo, and next safe action.
 
 Do not commit `.loopx/`, `.codex/goals/`, `.local/`, live ACTIVE_GOAL_STATE
 files, runtime registries, raw logs, credentials, or private local paths. Do
@@ -63,6 +63,32 @@ Success looks like this:
 - the project has `.codex/goals/<goal-id>/ACTIVE_GOAL_STATE.md`;
 - `loopx status` shows the goal and who should act next;
 - local runtime state is ignored, not committed.
+
+## Command Skill Registration
+
+The installer also registers the LoopX command family for host surfaces that
+can discover user-installed skills:
+
+- Codex CLI / IDE / App: explicit LoopX command-facade skills under
+  `~/.codex/skills/loopx*`. Codex does not currently support user-defined
+  native top-level `/loopx` slash commands, so invoke these through `$loopx` or
+  `/skills`. Only these command facades include `agents/openai.yaml` with
+  `allow_implicit_invocation: false`; richer workflow skills such as
+  `loopx-project` and `loopx-pr-review` keep their normal implicit behavior.
+- Claude Code: lightweight user skills under `~/.claude/skills/loopx*`, so the
+  command family can appear as Claude Code slash commands without enabling the
+  opt-in MCP/hook adapter.
+
+To refresh those files after an upgrade, run:
+
+```bash
+loopx slash-commands --install
+```
+
+The command updates files that LoopX owns, including older LoopX-generated
+files with known legacy signatures. If a same-name file has no LoopX managed
+marker or legacy signature, LoopX leaves it untouched and reports
+`skipped_user_file`.
 
 ## Local State Backup
 
@@ -106,18 +132,19 @@ it with the official no-clone installer:
 curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
 
 Then run `loopx doctor`. Work only from this project root: if LoopX state
-already exists, reuse it and do not create or overwrite a goal; if the project
+already exists, reuse it and do not create or overwrite the active objective; if the project
 is not connected, prefer `loopx connect`, and use `loopx bootstrap` only when
-goal state clearly needs initialization. Ensure `.loopx/`, `.codex/goals/`,
+project state clearly needs initialization. Ensure `.loopx/`, `.codex/goals/`,
 and `.local/` are ignored. Keep me in this TUI, do not use hidden headless
 execution. After the project is connected, generate the thin heartbeat prompt
-and set the current Codex CLI goal to `/goal <thin task_body>`. Then stop and
-report the goal id, current user gate, top agent todo, and next safe action.
+and set the current Codex CLI task body with `/goal <thin task_body>`. Then
+stop and report the active state id, current user gate, top agent todo, and
+next safe action.
 ```
 
 The generated paste block is a setup-first rewrite of the App onboarding
 experience, not the heartbeat body itself. The first useful response should
-show the current goal id, concrete user gate if one exists, top user todo if
+show the current state id, concrete user gate if one exists, top user todo if
 any, top agent todo, and next safe action before longer delivery work. The
 setup turn should not spend quota for delivery unless the user explicitly asks
 it to do delivery in the setup turn. The agent should still generate
@@ -423,7 +450,7 @@ your-project/
   goals/<goal-id>/runs/
 ```
 
-Treat live goal state and registries as local runtime data. Add these paths to
+Treat live objective state and registries as local runtime data. Add these paths to
 the connected project `.gitignore` before committing:
 
 ```gitignore
@@ -473,7 +500,7 @@ loopx demo
 Expected first-run signals:
 
 - the output contains `ok: True`;
-- a project-local registry and active goal state were created under
+- a project-local registry and active objective state were created under
   `/tmp/loopx-demo`;
 - one user todo and one agent todo are visible;
 - `refresh-state` appended a compact run;
@@ -731,7 +758,7 @@ Keep private:
 - task ids and internal document links;
 - production logs and raw experiment metrics;
 - credentials and auth material;
-- user-specific active goal state and local registries;
+- user-specific active objective state and local registries;
 - raw agent sessions or benchmark traces.
 
 Run the public/private scan before publishing docs or examples:

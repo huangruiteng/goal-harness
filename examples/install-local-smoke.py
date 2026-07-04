@@ -193,6 +193,8 @@ def main() -> int:
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
+        assert f"codex skills: {codex_home / 'skills'}" in install.stdout, install.stdout
+        assert f"claude skills: {home / '.claude' / 'skills'}" in install.stdout, install.stdout
 
         wrapper = bin_dir / "loopx"
         assert wrapper.is_symlink(), wrapper
@@ -284,6 +286,23 @@ def main() -> int:
             assert phrase in pr_review_text, phrase
         auto_research_skill = codex_home / "skills" / "loopx-auto-research" / "SKILL.md"
         assert not auto_research_skill.exists(), auto_research_skill
+        loopx_prompt = codex_home / "prompts" / "loopx.md"
+        assert not loopx_prompt.exists(), loopx_prompt
+        loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
+        loopx_command_skill_text = loopx_command_skill.read_text(encoding="utf-8")
+        assert "surface=codex-skills" in loopx_command_skill_text, loopx_command_skill_text
+        loopx_openai_metadata = codex_home / "skills" / "loopx" / "agents" / "openai.yaml"
+        loopx_openai_metadata_text = loopx_openai_metadata.read_text(encoding="utf-8")
+        assert "allow_implicit_invocation: false" in loopx_openai_metadata_text, loopx_openai_metadata_text
+        claude_loopx_skill = home / ".claude" / "skills" / "loopx" / "SKILL.md"
+        claude_loopx_skill_text = claude_loopx_skill.read_text(encoding="utf-8")
+        assert "surface=claude-skills" in claude_loopx_skill_text, claude_loopx_skill_text
+        assert not (home / ".claude" / "commands" / "loopx.md").exists(), (
+            "default installer must not install the opt-in Claude adapter command"
+        )
+        assert not (home / ".claude" / "settings.json").exists(), (
+            "default installer must not install Claude adapter hooks/settings"
+        )
         doc_registry_skill = codex_home / "skills" / "loopx-doc-registry" / "SKILL.md"
         doc_registry_text = " ".join(doc_registry_skill.read_text(encoding="utf-8").split())
         for phrase in (
@@ -320,6 +339,19 @@ def main() -> int:
         assert (
             codex_home / "skills" / "loopx-self-repair" / "agents" / "openai.yaml"
         ).is_file()
+        for implicit_skill_name in (
+            "loopx-project",
+            "loopx-pr-review",
+            "loopx-doc-registry",
+            "loopx-self-repair",
+        ):
+            implicit_metadata = codex_home / "skills" / implicit_skill_name / "agents" / "openai.yaml"
+            if implicit_metadata.exists():
+                implicit_metadata_text = implicit_metadata.read_text(encoding="utf-8")
+                assert "allow_implicit_invocation: false" not in implicit_metadata_text, (
+                    implicit_skill_name,
+                    implicit_metadata_text,
+                )
 
         cli_env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
         runtime_run_dir = home / ".codex" / "loopx" / "goals" / "loopx-meta" / "runs"
