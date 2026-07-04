@@ -148,7 +148,10 @@ section, or abstraction, pass a scope-fit review:
   layers just because several files share a similar shape.
 - Treat large or hot files as warning signals. When a change would grow an
   already oversized module, first look for a narrow read model, domain helper,
-  or bounded-context home with a compatibility wrapper left behind.
+  or bounded-context home. For internal module moves, update active call sites
+  and delete the old entry point; leave a compatibility wrapper only when a
+  real external import, persisted state, CLI/API contract, or migration window
+  requires it.
 - Distinguish duplicate knowledge from duplicate-looking code. Collapse shared
   state rules, protocol semantics, serialization contracts, and lifecycle
   invariants; avoid a parameter-heavy abstraction when two callers merely look
