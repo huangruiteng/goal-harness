@@ -199,8 +199,11 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
             assert "run_holdout_eval" in profile["allowed_actions"], profile
         if lane["role_id"] == "evaluator_promoter":
             successors = profile["successor_todos"]
-            assert successors[0]["after_action"] == "write_evaluation_summary", profile
-            assert successors[0]["target_role_id"] == "hypothesis_proposer", profile
+            assert any(
+                item["after_action"] == "write_evaluation_summary"
+                and item["target_role_id"] == "hypothesis_proposer"
+                for item in successors
+            ), profile
 
         assert "quota should-run" in lane["quota_guard"], lane
         assert f"--agent-id {lane['agent_id']}" in lane["quota_guard"], lane
@@ -209,8 +212,8 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
         assert lane["pane_local_a2a"]["tick_command"] == "$LOOPX_PANE_A2A_TICK", lane
         assert lane["pane_local_a2a"]["worker_turn_configured"] is True, lane
         assert lane["pane_local_a2a"]["auto_start"] is True, lane
-        assert lane["pane_local_a2a"]["tick_rounds"] == 4, lane
-        assert lane["pane_local_a2a"]["tick_sleep_seconds"] == 3, lane
+        assert lane["pane_local_a2a"]["tick_rounds"] == 8, lane
+        assert lane["pane_local_a2a"]["tick_sleep_seconds"] == 1, lane
         assert lane["lane_timeline"] == [
             "role_profile",
             "auto_start_pane_local_a2a_tick",
@@ -223,8 +226,8 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
         assert "LOOPX_PANE_BOOTSTRAP_PROMPT" in command, lane
         assert "LOOPX_ROLE_PROFILE_ARTIFACT" in command, lane
         assert "LOOPX_PANE_WORKER_TURN" in command, lane
-        assert "LOOPX_PANE_TICK_ROUNDS=4" in command, lane
-        assert "LOOPX_PANE_TICK_SLEEP_SECONDS=3" in command, lane
+        assert "LOOPX_PANE_TICK_ROUNDS=8" in command, lane
+        assert "LOOPX_PANE_TICK_SLEEP_SECONDS=1" in command, lane
         assert "pane-a2a-tick.output.txt" in command, lane
         assert "auto-research worker-turn" in command, lane
         assert "LOOPX_AUTO_RESEARCH_OUTPUT_LANGUAGE" in command, lane

@@ -62,6 +62,12 @@ def main() -> int:
             },
             {
                 "round": 2,
+                "agent_id": "agent-a",
+                "executed": True,
+                "completion_status": "done",
+            },
+            {
+                "round": 2,
                 "agent_id": "agent-b",
                 "selected_todo_id": "todo_holdout",
                 "selected_action": "run_holdout_eval",
@@ -98,11 +104,13 @@ def main() -> int:
     assert ledger["coordination_model"] == "decentralized_state_a2a", ledger
     assert ledger["round_unit"] == "collective_agent_pass", ledger
     assert ledger["expected_lane_count"] == 2, ledger
-    assert ledger["lane_outcome_count"] == 3, ledger
+    assert ledger["lane_outcome_count"] == 4, ledger
     assert ledger["completed_lane_turn_count"] == 3, ledger
     assert ledger["collective_round_indexes"] == [1, 2], ledger
     assert ledger["collective_round_count"] == 2, ledger
     assert ledger["full_participation_round_indexes"] == [1], ledger
+    assert ledger["synchronous_full_participation_round_count"] == 1, ledger
+    assert ledger["asynchronous_full_participation_round_count"] == 1, ledger
     assert ledger["full_participation_round_count"] == 1, ledger
     assert ledger["full_participation_verified"] is False, ledger
     assert ledger["multi_round_interaction_verified"] is True, ledger
