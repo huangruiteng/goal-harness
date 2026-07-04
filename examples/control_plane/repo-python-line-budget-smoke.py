@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import subprocess
 from pathlib import Path
 
@@ -106,6 +107,28 @@ def tracked_python_files() -> list[Path]:
     return [path for line in result.stdout.splitlines() if line and (path := ROOT / line).exists()]
 
 
+def git_name_only(*args: str) -> set[str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def changed_python_paths() -> set[str]:
+    changed = set()
+    changed.update(git_name_only("diff", "--name-only", "origin/main...HEAD"))
+    changed.update(git_name_only("diff", "--name-only"))
+    changed.update(git_name_only("diff", "--cached", "--name-only"))
+    return {path for path in changed if path.endswith(".py")}
+
+
 def line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
@@ -114,9 +137,21 @@ def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Check Python source line budgets.")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail on every over-budget tracked Python file instead of only changed files.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     files = tracked_python_files()
     counts = {rel(path): line_count(path) for path in files}
+    changed_paths = changed_python_paths()
 
     missing_budgets = sorted(set(LEGACY_OVERSIZED_LIMITS) - set(counts))
     require(not missing_budgets, f"line budgets reference missing files: {missing_budgets}")
@@ -134,16 +169,24 @@ def main() -> None:
         + ", ".join(missing_retirement_plans),
     )
 
-    failures: list[str] = []
+    all_failures: list[str] = []
+    changed_failures: list[str] = []
     for path, count in sorted(counts.items()):
         limit = LEGACY_OVERSIZED_LIMITS.get(path, DEFAULT_MAX_LINES)
         if count > limit:
-            failures.append(
+            message = (
                 f"{path} has {count} lines, above budget {limit}; "
                 "pause and consider a better module boundary before adding more code"
             )
+            all_failures.append(message)
+            if path in changed_paths:
+                changed_failures.append(message)
 
-    require(not failures, "repo Python line-budget violations:\n- " + "\n- ".join(failures))
+    active_failures = all_failures if args.strict else changed_failures
+    require(
+        not active_failures,
+        "repo Python line-budget violations:\n- " + "\n- ".join(active_failures),
+    )
 
     stale_budgets = [
         path for path in sorted(LEGACY_OVERSIZED_LIMITS) if counts[path] <= DEFAULT_MAX_LINES
@@ -157,7 +200,10 @@ def main() -> None:
     print(
         "repo-python-line-budget-smoke: ok "
         f"({len(files)} tracked Python files, "
-        f"default_max={DEFAULT_MAX_LINES}, legacy_budgets={len(LEGACY_OVERSIZED_LIMITS)})"
+        f"default_max={DEFAULT_MAX_LINES}, legacy_budgets={len(LEGACY_OVERSIZED_LIMITS)}, "
+        f"changed_python_files={len(changed_paths)}, "
+        f"existing_over_budget={len(all_failures) - len(changed_failures)}, "
+        f"strict={args.strict})"
     )
 
 

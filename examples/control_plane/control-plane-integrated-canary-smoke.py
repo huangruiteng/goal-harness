@@ -29,8 +29,10 @@ from loopx.event_sourced_state import (  # noqa: E402
 GOAL_ID = "control-plane-integrated-canary"
 MONITOR_GOAL_ID = "control-plane-integrated-monitor-canary"
 AGENT_ID = "codex-product-capability"
+PRIMARY_AGENT_ID = "codex-main-control"
 CANARY_TODO_ID = "todo_integrated_canary"
 CANARY_TODO_TITLE = "Design bounded status/quota/review-packet/event/read-path canary"
+SUCCESSOR_TODO_TITLE = "Continue integrated event-sourced successor routing canary"
 MONITOR_TODO_ID = "todo_integrated_due_monitor"
 MONITOR_TARGET_KEY = "integrated-due-monitor-watch"
 VALIDATED_PROGRESS_CLASSIFICATION = "integrated_canary_validated_progress"
@@ -84,8 +86,11 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                             "allowed_slots": 10,
                         },
                         "coordination": {
-                            "registered_agents": [AGENT_ID],
-                            "primary_agent": AGENT_ID,
+                            "registered_agents": [PRIMARY_AGENT_ID, AGENT_ID],
+                            "primary_agent": PRIMARY_AGENT_ID,
+                        },
+                        "workspace_guard_policy": {
+                            "side_agent_independent_worktree_required": False,
                         },
                         "authority_sources": [],
                     }
@@ -338,6 +343,11 @@ def assert_bounded_delivery_state_machine_bundle(quota_payload: dict[str, Any]) 
     assert liveness["pause_allowed"] is False, liveness
     assert liveness["automation_action"] == "execute_bounded_work", liveness
 
+    identity = quota_payload["agent_identity"]
+    assert identity["role"] == "side-agent", identity
+    assert identity["primary_agent"] == PRIMARY_AGENT_ID, identity
+    assert quota_payload["agent_lane_next_action"]["preserves_goal_next_action"] is True, quota_payload
+
 
 def assert_scheduler_ack_state_machine(
     registry_path: Path,
@@ -387,6 +397,94 @@ def assert_scheduler_ack_state_machine(
     assert steady_codex_app["host_action"] == "none", steady_payload
     assert "recommended_rrule" not in steady_codex_app, steady_payload
     return steady_payload
+
+
+def assert_event_todo_completion_successor_state_machine(
+    registry_path: Path,
+    runtime_root: Path,
+) -> str:
+    completed = run_cli(
+        registry_path,
+        runtime_root,
+        "todo",
+        "complete",
+        "--goal-id",
+        GOAL_ID,
+        "--role",
+        "agent",
+        "--todo-id",
+        CANARY_TODO_ID,
+        "--claimed-by",
+        AGENT_ID,
+        "--side-agent-self-merged",
+        "--evidence",
+        "fixture event-projected todo completion passed",
+        "--next-agent-todo",
+        SUCCESSOR_TODO_TITLE,
+        "--next-claimed-by",
+        AGENT_ID,
+        "--next-task-class",
+        "advancement_task",
+        "--next-action-kind",
+        "state_machine_canary_refactor",
+    )
+    assert completed["ok"] is True, completed
+    assert completed["source"] == "event_log", completed
+    assert completed["completed"] is True, completed
+    assert completed["side_agent_self_merged"] is True, completed
+    assert completed["todo_id"] == CANARY_TODO_ID, completed
+    assert completed["status"] == "done", completed
+    assert len(completed["next_todos"]) == 1, completed
+    successor = completed["next_todos"][0]
+    successor_id = successor["todo_id"]
+    assert successor["source"] == "event_log", completed
+    assert successor["claimed_by"] == AGENT_ID, completed
+    assert successor["task_class"] == "advancement_task", completed
+    assert successor["action_kind"] == "state_machine_canary_refactor", completed
+
+    listed = run_cli(
+        registry_path,
+        runtime_root,
+        "todo",
+        "list",
+        "--goal-id",
+        GOAL_ID,
+        "--role",
+        "agent",
+        "--agent-id",
+        AGENT_ID,
+    )
+    assert listed["source"] in {
+        "event_projection",
+        "event_projection_with_markdown_overlay",
+    }, listed
+    by_id = {item["todo_id"]: item for item in listed["todos"]}
+    assert by_id[CANARY_TODO_ID]["status"] == "done", listed
+    assert by_id[CANARY_TODO_ID]["evidence"] == "fixture event-projected todo completion passed", listed
+    assert by_id[successor_id]["status"] == "open", listed
+    assert by_id[successor_id]["claimed_by"] == AGENT_ID, listed
+    assert by_id[successor_id]["unblocks_todo_id"] == CANARY_TODO_ID, listed
+    assert "todo_succession_warning" not in listed["agent_todos"], listed
+
+    routed = run_cli(
+        registry_path,
+        runtime_root,
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+    )
+    assert routed["decision"] == "run", routed
+    assert routed["effective_action"] == "normal_run", routed
+    assert routed["agent_lane_next_action"]["todo_id"] == successor_id, routed
+    assert routed["agent_lane_next_action"]["title"] == SUCCESSOR_TODO_TITLE, routed
+    assert routed["agent_lane_next_action"]["preserves_goal_next_action"] is True, routed
+    assert routed["active_state_next_action"] == "Keep the fixture-only integrated canary under two minutes.", routed
+    assert routed["interaction_contract"]["mode"] == "bounded_delivery", routed
+    assert routed["scheduler_hint"]["action"] == "run_now", routed
+    return successor_id
 
 
 def assert_refresh_and_spend_state_machine(registry_path: Path, runtime_root: Path) -> None:
@@ -577,6 +675,7 @@ def run_fixture_canary(root: Path) -> None:
     assert_event_projected_agent_todo(quota_payload["agent_todo_summary"])
     assert_bounded_delivery_state_machine_bundle(quota_payload)
     assert_scheduler_ack_state_machine(registry_path, runtime_root, quota_payload)
+    assert_event_todo_completion_successor_state_machine(registry_path, runtime_root)
     assert_refresh_and_spend_state_machine(registry_path, runtime_root)
 
     packet_payload = run_cli(
@@ -591,7 +690,8 @@ def run_fixture_canary(root: Path) -> None:
     assert packet_payload["ok"] is True, packet_payload
     assert packet_payload["status"] in allowed_status, packet_payload
     assert packet_payload["project_asset_source"] == "project_asset", packet_payload
-    assert CANARY_TODO_TITLE in packet_payload["project_agent_handoff"], packet_payload
+    assert SUCCESSOR_TODO_TITLE in packet_payload["project_agent_handoff"], packet_payload
+    assert CANARY_TODO_TITLE not in packet_payload["project_agent_handoff"], packet_payload
     assert packet_payload["handoff_interface_budget"]["within_budget"] is True, packet_payload
     assert_due_monitor_poll_state_machine(root)
 

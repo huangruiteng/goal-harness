@@ -21,7 +21,6 @@ from .status import (
     compact_todo_group,
     normalize_todo_text,
     parse_active_state_todos,
-    parse_timestamp,
 )
 from .control_plane.todos.contract import (
     TODO_MONITOR_METADATA_FIELDS,
@@ -47,6 +46,16 @@ from .control_plane.todos.contract import (
     todo_done_for_status,
     todo_marker_for_status,
     todo_status_from_marker,
+)
+from .control_plane.todos.event_writeback import (
+    complete_event_projected_goal_todo,
+    event_projection_todo_context,
+)
+from .control_plane.todos.monitor_metadata import require_monitor_metadata_scope
+from .control_plane.todos.text import (
+    inherit_todo_priority,
+    normalize_new_todo,
+    todo_priority_prefix,
 )
 
 
@@ -123,80 +132,6 @@ def _attach_todo_write_correctness_dry_run_packet(
         changed=changed,
     )
     return payload
-TODO_PRIORITY_PREFIX_PATTERN = re.compile(r"^\[(P[0-4])\]\s+", re.IGNORECASE)
-MONITOR_CADENCE_PATTERN = re.compile(
-    r"^\s*(?P<count>[1-9][0-9]{0,4})\s*"
-    r"(?P<unit>s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$",
-    re.IGNORECASE,
-)
-
-
-def normalize_new_todo(text: str) -> str:
-    compact = " ".join(text.strip().split())
-    if not compact:
-        raise ValueError("todo text must not be empty")
-    return compact
-
-
-def todo_priority_prefix(text: str | None) -> str | None:
-    match = TODO_PRIORITY_PREFIX_PATTERN.match(str(text or "").strip())
-    if not match:
-        return None
-    return match.group(1).upper()
-
-
-def inherit_todo_priority(next_text: str, source_text: str | None) -> str:
-    normalized = normalize_new_todo(next_text)
-    if todo_priority_prefix(normalized):
-        return normalized
-    source_priority = todo_priority_prefix(source_text)
-    if not source_priority:
-        return normalized
-    return f"[{source_priority}] {normalized}"
-
-
-def normalize_monitor_metadata(metadata: dict[str, Any] | None) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for key, value in (metadata or {}).items():
-        if key not in TODO_MONITOR_METADATA_FIELDS:
-            continue
-        candidate = str(value or "").strip()
-        if candidate:
-            normalized[key] = candidate
-    if "cadence" in normalized and not MONITOR_CADENCE_PATTERN.match(normalized["cadence"]):
-        raise ValueError("--cadence must look like 30m, 2h, or 1d")
-    if "next_due_at" in normalized and parse_timestamp(normalized["next_due_at"]) is None:
-        raise ValueError("--next-due-at must be an ISO timestamp")
-    if "expires_at" in normalized and parse_timestamp(normalized["expires_at"]) is None:
-        raise ValueError("--expires-at must be an ISO timestamp")
-    if "last_checked_at" in normalized and parse_timestamp(normalized["last_checked_at"]) is None:
-        raise ValueError("--last-checked-at must be an ISO timestamp")
-    if "consecutive_no_change" in normalized:
-        try:
-            int(normalized["consecutive_no_change"])
-        except ValueError as exc:
-            raise ValueError("--consecutive-no-change must be an integer") from exc
-    if "material_change" in normalized and normalized["material_change"] not in {"true", "false"}:
-        raise ValueError("--material-change metadata must be true or false")
-    return normalized
-
-
-def require_monitor_metadata_scope(
-    *,
-    monitor_metadata: dict[str, Any] | None,
-    role: str,
-    task_class: str | None,
-) -> dict[str, str]:
-    normalized = normalize_monitor_metadata(monitor_metadata)
-    if not normalized:
-        return {}
-    if role != "agent" or task_class != "continuous_monitor":
-        raise ValueError(
-            "monitor schedule metadata requires --role agent --task-class continuous_monitor"
-        )
-    return normalized
-
-
 def resolve_todo_state_path(
     *,
     registry_path: Path,
@@ -1683,6 +1618,37 @@ def complete_goal_todo(
                 effective_next_claimed_by = handoff_agent
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")
+        if not find_todo_block(lines, todo_id=todo_id, role=role):
+            event_context = event_projection_todo_context(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                state_path=resolved_state_file,
+                todo_id=todo_id,
+                role=role,
+            )
+            if event_context:
+                event_context["state_file"] = resolved_state_file
+                event_context["project"] = resolved_project
+                return complete_event_projected_goal_todo(
+                    goal_id=goal_id,
+                    context=event_context,
+                    evidence=evidence,
+                    note=note,
+                    no_followup=no_followup,
+                    claimed_by=effective_claimed_by,
+                    clear_claim=clear_claim,
+                    next_agent_todo=next_agent_todo,
+                    next_user_todo=next_user_todo,
+                    next_claimed_by=effective_next_claimed_by,
+                    next_task_class=next_task_class,
+                    next_action_kind=next_action_kind,
+                    side_agent_completion=side_agent_completion,
+                    side_agent_self_merged=side_agent_self_merged,
+                    registered_agents=registered_agents,
+                    primary_agent=primary_agent,
+                    updated_at=updated_at,
+                    dry_run=dry_run,
+                )
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
