@@ -13,11 +13,14 @@ if str(ROOT) not in sys.path:
 
 from loopx import quota as quota_module  # noqa: E402
 from loopx.control_plane.scheduler.monitor_todo import (  # noqa: E402
+    monitor_cadence_delta,
+    monitor_next_due_at,
     monitor_todo_is_actionable_open,
     monitor_todo_is_due,
     monitor_todo_is_expired,
     monitor_todo_missing_schedule,
     monitor_todo_next_due_at,
+    parse_monitor_counter,
 )
 from loopx.status import (  # noqa: E402
     todo_item_is_actionable_open,
@@ -94,6 +97,20 @@ def main() -> int:
     assert_policy_matches_wrappers(unscheduled, due=False, expired=False)
     assert monitor_todo_missing_schedule(unscheduled, now=NOW) is True, unscheduled
     assert monitor_todo_next_due_at({"next_due_at": "2026-01-01T00:00:00"}) == NOW
+    assert parse_monitor_counter("3") == quota_module._parse_monitor_counter("3")
+    assert parse_monitor_counter("not-a-number") == 0
+    assert monitor_cadence_delta("2h") == quota_module._monitor_cadence_delta("2h")
+    assert monitor_next_due_at(
+        generated_at="2026-01-01T00:00:00+00:00",
+        cadence="5m",
+    ) == quota_module._monitor_next_due_at(
+        generated_at="2026-01-01T00:00:00+00:00",
+        cadence="5m",
+    )
+    assert monitor_next_due_at(
+        generated_at="ignored",
+        explicit_next_due_at="2026-01-01T00:05:00+00:00",
+    ) == "2026-01-01T00:05:00+00:00"
     print("monitor-todo-policy-seam-smoke ok")
     return 0
 

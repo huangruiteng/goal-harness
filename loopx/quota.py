@@ -68,6 +68,11 @@ from .control_plane.scheduler.scheduler_hint import (
     normalize_scheduler_rrule,
     scheduler_backoff_packet,
 )
+from .control_plane.scheduler.monitor_todo import (
+    monitor_cadence_delta as scheduler_monitor_cadence_delta,
+    monitor_next_due_at as scheduler_monitor_next_due_at,
+    parse_monitor_counter as scheduler_parse_monitor_counter,
+)
 from .control_plane.scheduler.state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_SURFACE,
@@ -7184,36 +7189,12 @@ def _allows_no_spend_external_monitor_poll(decision: dict[str, Any]) -> bool:
     return bool(decision.get("external_evidence_observation"))
 
 
-MONITOR_CADENCE_PATTERN = re.compile(
-    r"^\s*(?P<count>[1-9][0-9]{0,4})\s*"
-    r"(?P<unit>s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$",
-    re.IGNORECASE,
-)
-
-
 def _parse_monitor_counter(value: Any) -> int:
-    try:
-        return max(0, int(str(value or "0").strip()))
-    except ValueError:
-        return 0
+    return scheduler_parse_monitor_counter(value)
 
 
 def _monitor_cadence_delta(value: Any) -> timedelta | None:
-    candidate = str(value or "").strip()
-    if not candidate:
-        return None
-    match = MONITOR_CADENCE_PATTERN.match(candidate)
-    if not match:
-        return None
-    count = int(match.group("count"))
-    unit = match.group("unit").lower()
-    if unit.startswith("s"):
-        return timedelta(seconds=count)
-    if unit.startswith("m"):
-        return timedelta(minutes=count)
-    if unit.startswith("h"):
-        return timedelta(hours=count)
-    return timedelta(days=count)
+    return scheduler_monitor_cadence_delta(value)
 
 
 def _monitor_next_due_at(
@@ -7222,18 +7203,11 @@ def _monitor_next_due_at(
     cadence: Any = None,
     explicit_next_due_at: Any = None,
 ) -> str | None:
-    explicit = str(explicit_next_due_at or "").strip()
-    if explicit:
-        if _parse_timestamp(explicit) is None:
-            raise ValueError("--next-due-at must be an ISO timestamp")
-        return explicit
-    delta = _monitor_cadence_delta(cadence)
-    if delta is None:
-        return None
-    checked_at = _parse_timestamp(generated_at)
-    if checked_at is None:
-        checked_at = datetime.now(timezone.utc)
-    return (checked_at + delta).astimezone().replace(microsecond=0).isoformat()
+    return scheduler_monitor_next_due_at(
+        generated_at=generated_at,
+        cadence=cadence,
+        explicit_next_due_at=explicit_next_due_at,
+    )
 
 
 def _quota_decision_due_monitor_item(decision: dict[str, Any]) -> dict[str, Any]:
