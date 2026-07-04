@@ -113,6 +113,9 @@ def main() -> int:
     assert "LOOPX_PANE_BOOTSTRAP_PROMPT" in launcher_source
     assert "loopx-build-codex-bootstrap-prompt" in runtime_source
     assert "LoopX Agent Bootstrap Context" in runtime_source
+    assert "codex-visible-first-prompt.public.txt" in launcher_source
+    assert "LOOPX_CODEX_FULL_BOOTSTRAP_ARTIFACT" in launcher_source
+    assert "不要把完整 bootstrap 合约当作用户首屏复述" in runtime_source
     assert "selected_todo_id" in runtime_source
     assert "claim_allowed_rule" in runtime_source
     assert "Honor the role prompt's human output language" in contract_source
@@ -138,6 +141,7 @@ def main() -> int:
     assert "LOOPX_CODEX_BIN" in launcher_source
     assert "LOOPX_CODEX_REASONING_EFFORT" in launcher_source
     assert "export BOOTSTRAP_PROMPT" in launcher_source
+    assert "VISIBLE_PROMPT_ARTIFACT" in launcher_source
     assert "pane_input_ready_verified" in launcher_source
     assert "tmux_paste_buffer_after_codex_tui_first_turn_ready" in launcher_source
     assert "prompt_submit_checks" in launcher_source

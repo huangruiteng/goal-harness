@@ -510,9 +510,11 @@ def build_visible_lane_command(
         "printf '\\n[LoopX pane A2A blocked]\\n'; "
         "printf 'tick_exit=%s artifact=%s\\n' \"$PANE_A2A_TICK_STATUS\" \"$LOOPX_PANE_TICK_OUTPUT_ARTIFACT\"; "
         "fi; "
-        '"$LOOPX_PANE_BOOTSTRAP_PROMPT" "$BOOTSTRAP_ARTIFACT"; '
+        'VISIBLE_PROMPT_ARTIFACT="$LOOPX_PANE_ARTIFACT_DIR/codex-visible-first-prompt.public.txt"; '
+        'export LOOPX_CODEX_FULL_BOOTSTRAP_ARTIFACT="$BOOTSTRAP_ARTIFACT"; '
+        '"$LOOPX_PANE_BOOTSTRAP_PROMPT" "$BOOTSTRAP_ARTIFACT" "$VISIBLE_PROMPT_ARTIFACT"; '
         "export LOOPX_CODEX_TUI_MODE=interactive; "
-        "export LOOPX_CODEX_TUI_PROMPT_ARTIFACT=\"$BOOTSTRAP_ARTIFACT\"; "
+        "export LOOPX_CODEX_TUI_PROMPT_ARTIFACT=\"$VISIBLE_PROMPT_ARTIFACT\"; "
         f"{codex_exec_env}"
         f"exec python3 -c {_q(_CODEX_TUI_EXEC_PY)}"
     )
