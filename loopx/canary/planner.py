@@ -482,8 +482,12 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "status --goal-id",
             "status data",
             "goal status",
+            "runtime handoff",
+            "handoff_readiness",
+            "post_handoff_run",
             "loopx/status.py",
             "loopx/cli_commands/status",
+            "loopx/control_plane/handoff/project_handoff.py",
         ),
         "checks": [
             {
@@ -495,6 +499,14 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 "command": "python3 examples/control_plane/status-quota-review-packet-parity-smoke.py",
                 "tier": "default",
                 "reason": "guards scoped status, agent quota, review-packet handoff, and scheduler_hint parity on one fixture",
+            },
+            {
+                "command": "python3 examples/control_plane/runtime-handoff-status-read-path-smoke.py",
+                "tier": "default",
+                "reason": (
+                    "guards compact runtime handoff history through status, quota should-run, "
+                    "and review-packet handoff-only read paths"
+                ),
             },
             {
                 "command": "python3 examples/control_plane/run-compaction-readmodel-smoke.py",

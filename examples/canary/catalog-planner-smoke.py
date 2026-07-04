@@ -324,7 +324,9 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     status_commands = [check["command"] for check in status_profiles["status-read-path"]["checks"]]
     assert "python3 examples/control_plane/status-goal-filter-smoke.py" in status_commands, status_payload
     assert "python3 examples/control_plane/status-quota-review-packet-parity-smoke.py" in status_commands, status_payload
-    assert "python3 examples/control_plane/run-compaction-readmodel-smoke.py" in status_commands, status_payload
+    assert "python3 examples/control_plane/runtime-handoff-status-read-path-smoke.py" in status_commands, (
+        status_payload
+    )
     assert all(check["tier"] == "default" for check in status_profiles["status-read-path"]["checks"]), status_payload
     assert status_profiles["status-read-path"]["deep_checks_available"] is True, status_payload
     assert status_profiles["status-read-path"]["deep_checks_included"] is False, status_payload
@@ -332,7 +334,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     status_wide_payload = build_catalog_canary_plan(
         changed_files=["loopx/status.py"],
         surfaces=["status --goal-id read-path"],
-        max_checks_per_profile=4,
+        max_checks_per_profile=5,
     )
     status_wide_profiles = {
         profile["id"]: profile for profile in status_wide_payload["domain_profiles"]
@@ -340,9 +342,27 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     status_wide_commands = [
         check["command"] for check in status_wide_profiles["status-read-path"]["checks"]
     ]
+    assert "python3 examples/control_plane/run-compaction-readmodel-smoke.py" in status_wide_commands, (
+        status_wide_payload
+    )
     assert "python3 examples/control_plane/goal-channel-readmodel-smoke.py" in status_wide_commands, (
         status_wide_payload
     )
+
+    runtime_handoff_payload = build_catalog_canary_plan(
+        changed_files=["loopx/control_plane/handoff/project_handoff.py"],
+        surfaces=["runtime handoff post_handoff_run status read-path"],
+    )
+    runtime_handoff_profiles = {
+        profile["id"]: profile for profile in runtime_handoff_payload["domain_profiles"]
+    }
+    assert "status-read-path" in runtime_handoff_profiles, runtime_handoff_payload
+    runtime_handoff_commands = [
+        check["command"] for check in runtime_handoff_profiles["status-read-path"]["checks"]
+    ]
+    assert "python3 examples/control_plane/runtime-handoff-status-read-path-smoke.py" in (
+        runtime_handoff_commands
+    ), runtime_handoff_payload
 
     review_packet_payload = build_catalog_canary_plan(
         changed_files=["loopx/review_packet.py", "loopx/cli_commands/status.py"],
