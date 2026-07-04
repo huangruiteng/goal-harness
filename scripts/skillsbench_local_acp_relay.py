@@ -91,6 +91,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--codex-api-proxy",
+        default=None,
+        help=(
+            "Private HTTP proxy URL injected into the Codex CLI /goal process "
+            "environment. The raw URL must not be written to public compact "
+            "artifacts."
+        ),
+    )
+    parser.add_argument(
         "--response-timeout-sec",
         type=float,
         default=30.0,
@@ -228,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             rollout_name=args.rollout_name,
             approval_policy=args.approval_policy,
             reasoning_effort=args.reasoning_effort,
+            codex_api_proxy=args.codex_api_proxy,
             response_timeout_sec=args.response_timeout_sec,
             worker_script=args.worker_script,
             stream_heartbeat_interval_sec=args.stream_heartbeat_interval_sec,

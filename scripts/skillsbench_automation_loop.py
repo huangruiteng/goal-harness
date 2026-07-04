@@ -956,6 +956,13 @@ def _host_local_acp_launch_command(
             command.extend(["--worker-public-trace-dir", worker_trace_dir])
     elif args.route == CODEX_CLI_GOAL_BASELINE_ROUTE:
         command.extend(["--codex-cli-goal-worker"])
+        proxy_url, _proxy_source = _codex_api_reverse_tunnel_proxy(args)
+        if (
+            proxy_url
+            and args.host_local_acp_launch
+            and _codex_api_egress_resolved_mode(args) == "reverse-tunnel"
+        ):
+            command.extend(["--codex-api-proxy", proxy_url])
         if relay_trace_dir:
             command.extend(["--worker-public-trace-dir", relay_trace_dir])
     elif relay_trace_dir:
@@ -1207,7 +1214,10 @@ def _codex_api_egress_preflight_required(args: argparse.Namespace) -> bool:
     requested = _codex_api_egress_requested_mode(args)
     if requested in {"reverse-tunnel", "direct"}:
         return True
-    return getattr(args, "route", "") == "codex-app-server-goal-baseline"
+    return getattr(args, "route", "") in {
+        "codex-app-server-goal-baseline",
+        CODEX_CLI_GOAL_BASELINE_ROUTE,
+    }
 
 
 def _codex_api_egress_requested_mode(args: argparse.Namespace | None) -> str:
@@ -1224,9 +1234,12 @@ def _codex_api_egress_resolved_mode(args: argparse.Namespace | None) -> str:
         return "not_required"
     requested = _codex_api_egress_requested_mode(args)
     if requested == "auto":
-        # Formal remote app-server benchmark runs must use the reverse tunnel
-        # path by default; direct egress is only for explicit local debugging.
-        if getattr(args, "route", "") == "codex-app-server-goal-baseline":
+        # Formal remote Goal benchmark runs must use the reverse tunnel path by
+        # default; direct egress is only for explicit local debugging.
+        if getattr(args, "route", "") in {
+            "codex-app-server-goal-baseline",
+            CODEX_CLI_GOAL_BASELINE_ROUTE,
+        }:
             return "reverse-tunnel"
         return "not_required"
     return requested

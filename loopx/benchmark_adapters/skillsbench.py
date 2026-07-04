@@ -44,6 +44,7 @@ SKILLSBENCH_LOOPX_PRODUCT_MODE_TREATMENT_ROUTES = frozenset(
 )
 SKILLSBENCH_ROUTES = (
     "codex-acp-blind-loop-baseline",
+    "codex-cli-goal-baseline",
     "loopx-blind-loop-treatment",
     "loopx-prompt-polling-test",
     "codex-app-server-goal-baseline",
@@ -215,6 +216,37 @@ def skillsbench_route_contract(route: str) -> dict[str, Any]:
                 "run LoopX outer automation with a fixed blind loop budget; "
                 "do not return official reward, pass/fail, verifier error, or "
                 "verifier output to the in-case agent during the loop"
+            ),
+        }
+    if route == "codex-cli-goal-baseline":
+        return {
+            "mode": "skillsbench_codex_cli_goal_baseline",
+            "arm_id": "codex_cli_goal_baseline",
+            "source_runner": "loopx_skillsbench_host_codex_cli_goal_worker",
+            "inner_codex_goal_mode": True,
+            "native_goal_mode_requested": True,
+            "native_goal_mode_invoked": True,
+            "native_goal_mode_confirmation_status": (
+                "requires_cli_slash_goal_compact_proof"
+            ),
+            "codex_acp_protocol_used": False,
+            "skillsbench_route_semantics": (
+                "host_codex_cli_tui_slash_goal_no_reward_feedback"
+            ),
+            "curated_skills_visible": False,
+            "loopx_automation_loop": False,
+            "loopx_inside_case": False,
+            "blind_loop": False,
+            "official_feedback_blinded": True,
+            "reward_feedback_forwarded": False,
+            "case_semantics_changed_by_harness": False,
+            "official_score_comparable_to_native_codex": True,
+            "official_score_comparable_to_loopx_treatment": True,
+            "first_blocker": "skillsbench_codex_cli_goal_tui_compact_proof_missing",
+            "next_action": (
+                "launch SkillsBench through the host Codex CLI TUI /goal "
+                "surface, ingest compact no-upload evidence, and require "
+                "goal-active plus task-facing bridge evidence for route health"
             ),
         }
     if route == SKILLSBENCH_RAW_CODEX_AUTONOMOUS_ROUTE:
@@ -1849,6 +1881,14 @@ def build_skillsbench_benchmark_run(
                 ]
                 if route == "codex-app-server-goal-baseline"
                 else [
+                    "codex_cli_goal_worker",
+                    "cli_tui_slash_goal",
+                    "fixture_only",
+                    "no_upload",
+                    "single_task_planned",
+                ]
+                if route == "codex-cli-goal-baseline"
+                else [
                     "ordinary_codex_cli_actor",
                     "fixed_blind_loop_budget",
                     "fixture_only",
@@ -1986,6 +2026,8 @@ def build_skillsbench_benchmark_run(
                 if route == "codex-acp-blind-loop-baseline"
                 else "codex_app_server_goal_worker"
                 if route == "codex-app-server-goal-baseline"
+                else "codex_cli_goal_tui_worker"
+                if route == "codex-cli-goal-baseline"
                 else "runner_only"
             ),
             "inner_case_actor": (
@@ -2002,6 +2044,8 @@ def build_skillsbench_benchmark_run(
                 if route == "codex-goal-mode-baseline"
                 else "host_codex_app_server_goal_worker"
                 if route == "codex-app-server-goal-baseline"
+                else "host_codex_cli_goal_tui_worker"
+                if route == "codex-cli-goal-baseline"
                 else "codex_acp_with_curated_skills"
             ),
             "blind_loop": contract["blind_loop"],
@@ -3428,18 +3472,30 @@ def build_skillsbench_benchflow_result_benchmark_run(
         if is_oracle_runner
         else contract["official_score_comparable_to_loopx_treatment"]
     )
-    agent_kwargs_keys = [
-        "benchflow_agent=oracle",
-        "sandbox=docker",
-        "no_upload",
-        "single_task",
-        "no_model_api",
-    ] if is_oracle_runner else [
-        "benchflow_agent=codex-acp",
-        "sandbox=docker",
-        "no_upload",
-        "single_task",
-    ]
+    agent_kwargs_keys = (
+        [
+            "benchflow_agent=oracle",
+            "sandbox=docker",
+            "no_upload",
+            "single_task",
+            "no_model_api",
+        ]
+        if is_oracle_runner
+        else [
+            "benchflow_agent=codex-cli-goal",
+            "cli_tui_slash_goal",
+            "sandbox=docker",
+            "no_upload",
+            "single_task",
+        ]
+        if route == "codex-cli-goal-baseline"
+        else [
+            "benchflow_agent=codex-acp",
+            "sandbox=docker",
+            "no_upload",
+            "single_task",
+        ]
+    )
     outer_controller = (
         "official_skillsbench_oracle_validation"
         if is_oracle_runner
@@ -3453,6 +3509,8 @@ def build_skillsbench_benchflow_result_benchmark_run(
         if route == "raw-codex-autonomous-max5"
         else "fixed_blind_loop_runner"
         if route == "codex-acp-blind-loop-baseline"
+        else "codex_cli_goal_tui_worker"
+        if route == "codex-cli-goal-baseline"
         else "runner_only"
     )
     inner_case_actor = (
@@ -3469,6 +3527,8 @@ def build_skillsbench_benchflow_result_benchmark_run(
         }
         else "codex_acp_goal_prompt_request_unconfirmed_native_goal_mode"
         if route == "codex-goal-mode-baseline"
+        else "host_codex_cli_goal_tui_worker"
+        if route == "codex-cli-goal-baseline"
         else "codex_acp_with_curated_skills"
     )
 

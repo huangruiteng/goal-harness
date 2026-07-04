@@ -58,6 +58,7 @@ def _assert_cli_goal_route_requires_materialized_solver_bridge() -> None:
 def _assert_cli_goal_plan_and_relay_command() -> None:
     sys.path.insert(0, str(REPO_ROOT))
     from loopx.benchmark_core.loop_protocol import CODEX_CLI_GOAL_BASELINE_ROUTE
+    from loopx.benchmark_adapters.skillsbench import skillsbench_route_contract
     from scripts.skillsbench_automation_loop import (
         _host_local_acp_launch_command,
         build_plan,
@@ -92,9 +93,16 @@ def _assert_cli_goal_plan_and_relay_command() -> None:
             ]
         )
         plan = build_plan(args)
+        assert plan["codex_api_egress_preflight"]["required"] is True, plan
+        assert plan["codex_api_egress_preflight"]["resolved_mode"] == (
+            "reverse-tunnel"
+        ), plan
+        contract = skillsbench_route_contract(CODEX_CLI_GOAL_BASELINE_ROUTE)
         prerequisites = plan["runner_prerequisites"]
         assert plan["route"] == CODEX_CLI_GOAL_BASELINE_ROUTE, plan
         assert plan["agent"] == "codex-cli-goal", plan
+        assert contract["arm_id"] == "codex_cli_goal_baseline", contract
+        assert contract["native_goal_mode_invoked"] is True, contract
         assert plan["codex_cli_reasoning_effort"] == "xhigh", plan
         assert prerequisites["container_codex_acp_install_skipped"] is True
         assert prerequisites["remote_command_file_bridge_command_configured"] is True
@@ -111,6 +119,37 @@ def _assert_cli_goal_plan_and_relay_command() -> None:
         assert "--remote-command-file-bridge-command" in command, command
         bridge_index = command.index("--remote-command-file-bridge-command")
         assert command[bridge_index + 1] == "python bridge.py", command
+
+        proxy_url = "http://127.0.0.1:18182"
+        args_with_proxy = parse_args(
+            [
+                "--route",
+                CODEX_CLI_GOAL_BASELINE_ROUTE,
+                "--host-local-acp-launch",
+                "--remote-command-file-bridge-ready",
+                "--remote-command-file-bridge-solver-command",
+                "python bridge.py",
+                "--reasoning-effort",
+                "xhigh",
+                "--codex-api-reverse-tunnel-proxy",
+                proxy_url,
+                "--plan-only",
+                "--skillsbench-root",
+                str(skillsbench_root),
+                "--jobs-dir",
+                str(temp_path / "jobs-with-proxy"),
+                "--ledger-path",
+                str(temp_path / "ledger-with-proxy.json"),
+                "--global-ledger-path",
+                str(temp_path / "global-ledger-with-proxy.json"),
+            ]
+        )
+        proxy_plan = build_plan(args_with_proxy)
+        proxy_command = _host_local_acp_launch_command(args_with_proxy, proxy_plan)
+        assert "--codex-api-proxy" in proxy_command, proxy_command
+        proxy_index = proxy_command.index("--codex-api-proxy")
+        assert proxy_command[proxy_index + 1] == proxy_url, proxy_command
+        assert proxy_url not in json.dumps(proxy_plan, sort_keys=True), proxy_plan
 
 
 def _assert_cli_goal_trace_merges_into_public_prerequisites() -> None:
@@ -193,11 +232,90 @@ def _assert_cli_goal_trace_merges_into_public_prerequisites() -> None:
     assert public_prerequisites["codex_cli_goal_tui_stages"] == ["goal_achieved"]
 
 
+def _assert_cli_goal_tui_ready_wait_tolerates_startup_warnings() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    from loopx.benchmark_adapters.skillsbench_acp_relay import (
+        CodexExecConfig,
+        SkillsBenchLocalAcpRelay,
+    )
+
+    relay = SkillsBenchLocalAcpRelay(CodexExecConfig())
+    captures = iter(
+        [
+            "",
+            "Codex startup\nMCP server failed: HTTP request failed\n› \n",
+        ]
+    )
+
+    def fake_capture(_tmux_name: str) -> str:
+        try:
+            return next(captures)
+        except StopIteration:
+            return "Codex startup\nMCP server failed: HTTP request failed\n› \n"
+
+    relay._tmux_capture = fake_capture  # type: ignore[method-assign]
+    assert relay._wait_for_codex_cli_tui_ready(
+        "fake-session",
+        timeout_sec=1.0,
+        settle_sec=0.0,
+    )
+
+
+def _assert_cli_goal_codex_api_proxy_is_runtime_only() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    from loopx.benchmark_adapters.skillsbench_acp_relay import (
+        CodexExecConfig,
+        SkillsBenchLocalAcpRelay,
+    )
+
+    proxy_url = "http://127.0.0.1:18182"
+    with tempfile.TemporaryDirectory() as temp:
+        trace_dir = Path(temp) / "trace"
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(
+                codex_api_proxy=proxy_url,
+                worker_public_trace_dir=str(trace_dir),
+            )
+        )
+        env = relay._codex_cli_tui_environment()
+        for key in (
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "ALL_PROXY",
+            "https_proxy",
+            "http_proxy",
+            "all_proxy",
+        ):
+            assert env[key] == proxy_url, env
+        assert "127.0.0.1" in env["NO_PROXY"], env
+
+        shell_command = relay._codex_cli_tui_shell_command(["codex", "--version"])
+        assert shell_command.startswith("env "), shell_command
+        assert "HTTPS_PROXY=" in shell_command, shell_command
+
+        relay._publish_codex_cli_goal_trace(
+            ok=False,
+            stage="goal_failed",
+            goal_active_observed=False,
+            goal_terminal_observed=True,
+            first_action_observed=False,
+            bridge_summary_path=None,
+        )
+        traces = list(trace_dir.glob("*.compact.json"))
+        assert len(traces) == 1, traces
+        payload = json.loads(traces[0].read_text(encoding="utf-8"))
+        assert proxy_url not in json.dumps(payload, sort_keys=True), payload
+        assert payload["codex_cli_goal"]["codex_api_proxy_env_injected"] is True
+        assert payload["codex_cli_goal"]["codex_api_proxy_raw_url_recorded"] is False
+
+
 def main() -> int:
     _assert_app_server_goal_route_deprecated()
     _assert_cli_goal_route_requires_materialized_solver_bridge()
     _assert_cli_goal_plan_and_relay_command()
     _assert_cli_goal_trace_merges_into_public_prerequisites()
+    _assert_cli_goal_tui_ready_wait_tolerates_startup_warnings()
+    _assert_cli_goal_codex_api_proxy_is_runtime_only()
     print("skillsbench-codex-cli-goal-route-smoke ok")
     return 0
 
