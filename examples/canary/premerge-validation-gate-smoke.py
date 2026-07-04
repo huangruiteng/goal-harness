@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -13,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.canary.premerge import (  # noqa: E402
+    _gate_status,
     build_premerge_validation_gate,
     downgrade_inherited_baseline_failures,
 )
@@ -121,6 +124,51 @@ def assert_cli_json_preview() -> None:
     assert selector_sources is None or isinstance(selector_sources, dict), payload
 
 
+def assert_no_changes_does_not_mask_direct_failures() -> None:
+    status = _gate_status(
+        execute=True,
+        changed_files=[],
+        direct_checks=[{"ok": False, "status": "failed", "id": "diff_check_committed"}],
+        catalog_run={"ok": True},
+        risk_profile_run=None,
+        boundary_run=None,
+        manual_holds=[],
+    )
+    assert status["status"] == "failed", status
+    assert status["merge_gate_passed"] is False, status
+
+
+def assert_installed_wrapper_premerge_redirects_to_checkout() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        release_root = Path(temp_dir) / "release"
+        scripts_dir = release_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        wrapper = scripts_dir / "loopx"
+        shutil.copy2(REPO_ROOT / "scripts" / "loopx", wrapper)
+        completed = subprocess.run(
+            [
+                str(wrapper),
+                "--format",
+                "json",
+                "canary",
+                "premerge",
+                "--changed-file",
+                "loopx/canary/premerge.py",
+                "--no-execute",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True, payload
+    assert payload["gate"]["status"] == "preview_only", payload
+    assert Path(payload["repo_root"]).resolve() == REPO_ROOT.resolve(), payload
+
+
 def assert_inherited_line_budget_red_is_advisory_only() -> None:
     inherited_run = {
         "ok": False,
@@ -142,6 +190,24 @@ def assert_inherited_line_budget_red_is_advisory_only() -> None:
     assert downgraded["failure_count"] == 0, downgraded
     assert downgraded["advisory_failure_count"] == 1, downgraded
     assert downgraded["selected_checks"][0]["status"] == "advisory_inherited_failure", downgraded
+
+    extensionless_path_run = {
+        "ok": False,
+        "warning_count": 0,
+        "selected_checks": [
+            {
+                "ok": False,
+                "status": "failed",
+                "command": "python3 examples/control_plane/repo-python-line-budget-smoke.py",
+                "stderr_tail": "loopx/benchmark_adapters/skillsbench_acp_relay.py has 3775 lines",
+            }
+        ],
+    }
+    extensionless_path_downgraded = downgrade_inherited_baseline_failures(
+        extensionless_path_run,
+        changed_files=["scripts/loopx"],
+    )
+    assert extensionless_path_downgraded["ok"] is True, extensionless_path_downgraded
 
     current_diff_run = {
         "ok": False,
@@ -169,6 +235,8 @@ def main() -> None:
     assert_changed_python_gets_compile_check()
     assert_benchmark_sensitive_change_blocks_self_merge()
     assert_cli_json_preview()
+    assert_no_changes_does_not_mask_direct_failures()
+    assert_installed_wrapper_premerge_redirects_to_checkout()
     assert_inherited_line_budget_red_is_advisory_only()
     print("premerge-validation-gate-smoke ok")
 
