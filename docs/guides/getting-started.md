@@ -64,6 +64,32 @@ Success looks like this:
 - `loopx status` shows the goal and who should act next;
 - local runtime state is ignored, not committed.
 
+## Slash Command Registration
+
+The installer also registers the LoopX command family for the host surfaces
+that can discover user-installed prompts or skills:
+
+- Codex CLI / IDE: Markdown prompts under `~/.codex/prompts`, so `/loopx`
+  or the fallback `/prompts:loopx` can start from the slash menu after the host
+  refreshes its prompt list.
+- Codex App: lightweight command skills under `~/.codex/skills/loopx*`, while
+  the full LoopX skills such as `loopx-project` and `loopx-pr-review` keep the
+  richer workflow instructions.
+- Claude Code: lightweight user skills under `~/.claude/skills/loopx*`, so the
+  command family can appear as Claude Code slash commands without enabling the
+  opt-in MCP/hook adapter.
+
+To refresh those files after an upgrade, run:
+
+```bash
+loopx slash-commands --install
+```
+
+The command updates files that LoopX owns, including older LoopX-generated
+files with known legacy signatures. If a same-name file has no LoopX managed
+marker or legacy signature, LoopX leaves it untouched and reports
+`skipped_user_file`.
+
 ## Local State Backup
 
 Before risky migrations, local scheduler changes, or release-install repair,

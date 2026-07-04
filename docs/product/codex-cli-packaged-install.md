@@ -26,7 +26,12 @@ loopx doctor
 The installer downloads a GitHub archive, creates a stable local release
 snapshot under `~/.local/share/loopx/releases/`, installs the
 `loopx` wrapper under `~/.local/bin`, and installs the reusable Codex
-skills under `~/.codex/skills`.
+skills under `~/.codex/skills`. It also refreshes the lightweight slash-command
+facades:
+
+- `~/.codex/prompts/loopx*.md` for Codex CLI / IDE prompt discovery;
+- `~/.codex/skills/loopx*/SKILL.md` for Codex App skill discovery;
+- `~/.claude/skills/loopx*/SKILL.md` for Claude Code slash-command discovery.
 
 By default, the archive source is the public `stable` ref. Maintainers can
 override it with `LOOPX_REF=main` when intentionally testing or repairing from

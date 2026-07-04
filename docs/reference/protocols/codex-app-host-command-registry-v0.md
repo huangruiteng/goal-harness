@@ -158,6 +158,7 @@ Every host command must expose a deterministic CLI fallback:
 
 ```bash
 loopx slash-commands
+loopx slash-commands --install
 loopx bootstrap-command-pack --project .
 loopx bootstrap-command-pack --project . --goal-text "<goal text>"
 loopx global-summary
@@ -166,6 +167,24 @@ loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota s
 
 If host command parsing is unavailable, the user or a skill fallback can still
 run these commands and preserve the same LoopX state machine.
+
+## Userland Registration Fallback
+
+Until every host exposes a native command registry, LoopX installs slash-command
+facades into the user-level discovery locations that current hosts already
+support:
+
+- `~/.codex/prompts/loopx*.md` for Codex CLI / IDE prompt commands;
+- `~/.codex/skills/loopx*/SKILL.md` for Codex App skill-based command
+  discovery;
+- `~/.claude/skills/loopx*/SKILL.md` for Claude Code skill-based slash
+  commands.
+
+This fallback does not replace host parsing. It gives users a working `/loopx`
+entry point now, while preserving the same CLI baselines and permission
+boundaries defined above. The installer overwrites LoopX-managed files and
+known legacy LoopX-generated command files, but it skips same-name user files
+without a LoopX managed marker or legacy signature.
 
 ## Acceptance Checks
 
