@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard repo-local control-plane code against legacy projection shims."""
+"""Guard repo-local control-plane code against legacy root/shim namespaces."""
 
 from __future__ import annotations
 
@@ -10,6 +10,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_IMPORT = "loopx.projections"
 LEGACY_PACKAGE_PREFIX = "loopx/projections/"
+LEGACY_ROOT_MODULES = {
+    "loopx/task_lease.py": "loopx.control_plane.work_items.task_lease",
+}
 TEXT_SUFFIXES = {".py", ".md"}
 SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache"}
 
@@ -74,6 +77,16 @@ def assert_no_tracked_legacy_projection_package() -> None:
     )
 
 
+def assert_moved_root_modules_stay_in_bounded_contexts() -> None:
+    files = set(tracked_files())
+    offenders = sorted(path for path in LEGACY_ROOT_MODULES if path in files)
+    assert offenders == [], {
+        "reason": "moved root control-plane modules should stay in their owning bounded contexts",
+        "offenders": offenders,
+        "expected_modules": {path: LEGACY_ROOT_MODULES[path] for path in offenders},
+    }
+
+
 def assert_repo_local_imports_use_bounded_contexts() -> None:
     offenders: list[str] = []
     for path in tracked_text_files():
@@ -91,6 +104,7 @@ def assert_repo_local_imports_use_bounded_contexts() -> None:
 
 def main() -> int:
     assert_no_tracked_legacy_projection_package()
+    assert_moved_root_modules_stay_in_bounded_contexts()
     assert_repo_local_imports_use_bounded_contexts()
     print("bounded-context-namespace-smoke ok")
     return 0

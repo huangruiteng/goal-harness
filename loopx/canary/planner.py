@@ -634,6 +634,11 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
         "trigger_hints": ("state write", "refresh-state", "todo write", "idempotency", "revision", "lease"),
         "checks": [
             {
+                "command": "python3 examples/control_plane/task-lease-runtime-smoke.py",
+                "tier": "default",
+                "reason": "guards shipped task_lease_v0 CLI/runtime ownership, TTL, conflict, transfer, and release behavior",
+            },
+            {
                 "command": "python3 examples/control_plane/local-state-write-correctness-contract-smoke.py",
                 "tier": "default",
                 "reason": "checks local state write correctness contract fixtures",
