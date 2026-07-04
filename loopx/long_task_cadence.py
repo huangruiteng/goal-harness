@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .delivery_batch_scale import DeliveryBatchScale, normalize_delivery_batch_scale
-from .delivery_outcome import (
+from .control_plane.work_items.delivery_batch_scale import DeliveryBatchScale, normalize_delivery_batch_scale
+from .control_plane.work_items.delivery_outcome import (
     DeliveryOutcome,
     DeliveryTurnKind,
     normalize_delivery_outcome,

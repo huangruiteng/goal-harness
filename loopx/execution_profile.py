@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .delivery_outcome import DeliveryOutcome
+from .control_plane.work_items.delivery_outcome import DeliveryOutcome
 
 
 DEFAULT_EXECUTION_PROFILE: dict[str, Any] = {

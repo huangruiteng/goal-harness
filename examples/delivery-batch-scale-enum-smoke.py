@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.delivery_batch_scale import (  # noqa: E402
+from loopx.control_plane.work_items.delivery_batch_scale import (  # noqa: E402
     DELIVERY_BATCH_SCALE_CHOICES,
     SMALL_DELIVERY_BATCH_SCALES,
     UNKNOWN_DELIVERY_BATCH_SCALE,

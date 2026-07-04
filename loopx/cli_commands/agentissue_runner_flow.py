@@ -26,8 +26,8 @@ from ..benchmark_adapters.agentissue import (
     materialize_agentissue_codex_cli_runner_target_handoff,
     materialize_agentissue_codex_cli_runner_workflow_check,
 )
-from ..delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
-from ..delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..control_plane.work_items.delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
+from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from ..global_registry import sync_project_registry_to_global
 from ..history import append_benchmark_run, render_benchmark_run_append_markdown
 from ..status import compact_benchmark_run

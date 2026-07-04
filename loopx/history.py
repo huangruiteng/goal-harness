@@ -9,8 +9,8 @@ from typing import Any, Callable
 
 from .authority import goal_authority_registry_summary
 from .control_plane import compact_control_plane_policy
-from .delivery_batch_scale import require_delivery_batch_scale
-from .delivery_outcome import require_delivery_outcome
+from .control_plane.work_items.delivery_batch_scale import require_delivery_batch_scale
+from .control_plane.work_items.delivery_outcome import require_delivery_outcome
 from .doctor import PROMOTION_READINESS_CLASSIFICATIONS
 from .execution_profile import compact_execution_profile
 from .paths import resolve_runtime_root

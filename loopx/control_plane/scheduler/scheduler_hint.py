@@ -8,7 +8,7 @@ from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Any
 
-from ...delivery_outcome import DeliveryOutcome
+from ..work_items.delivery_outcome import DeliveryOutcome
 from .state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_SURFACE,

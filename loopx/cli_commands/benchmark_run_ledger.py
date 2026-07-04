@@ -35,8 +35,8 @@ from ..benchmark_ledger import (
     BENCHMARK_RUN_LEDGER_DEFAULT_PATH,
     update_benchmark_run_ledger,
 )
-from ..delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
-from ..delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..control_plane.work_items.delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
+from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from ..global_registry import sync_project_registry_to_global
 from ..history import (
     append_benchmark_run,
