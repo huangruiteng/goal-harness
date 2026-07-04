@@ -14,6 +14,11 @@ from ..canary.planner import (
     render_catalog_canary_plan_markdown,
     render_catalog_canary_profiles_markdown,
 )
+from ..canary.premerge import (
+    PREMERGE_TIERS,
+    build_premerge_validation_gate,
+    render_premerge_validation_gate_markdown,
+)
 from ..canary.runner import (
     build_canary_smoke_suite_profiles,
     build_canary_smoke_suite_run,
@@ -381,6 +386,35 @@ def register_canary_commands(
         help="Pattern priority to audit. Defaults to P0 and P1; repeat for multiple priorities.",
     )
 
+    premerge_parser = canary_sub.add_parser(
+        "premerge",
+        help="Run a risk-based pre-merge validation gate for the current diff.",
+    )
+    add_subcommand_format(premerge_parser)
+    _add_canary_selector_args(premerge_parser)
+    premerge_parser.add_argument(
+        "--tier",
+        choices=sorted(PREMERGE_TIERS),
+        default="standard",
+        help="Validation depth. standard runs bounded catalog and risk-profile checks.",
+    )
+    premerge_parser.add_argument(
+        "--no-execute",
+        action="store_true",
+        help="Preview the selected merge gate without running checks.",
+    )
+    premerge_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=120.0,
+        help="Per-check timeout for executed validation checks.",
+    )
+    premerge_parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop smoke-suite sections after the first failed check.",
+    )
+
 
 def handle_canary_command(
     args: argparse.Namespace,
@@ -462,7 +496,23 @@ def handle_canary_command(
             priorities=list(args.priority or []) or None,
         )
         renderer = render_catalog_canary_coverage_audit_markdown
+    elif args.canary_command == "premerge":
+        changed_files, git_diff_selector = _resolve_canary_changed_files(args)
+        payload = build_premerge_validation_gate(
+            changed_files=changed_files,
+            base_ref=str(getattr(args, "git_diff_base", "origin/main") or "origin/main"),
+            tier=str(args.tier or "standard"),
+            execute=not bool(args.no_execute),
+            timeout_seconds=float(args.timeout_seconds or 120.0),
+            fail_fast=bool(args.fail_fast),
+            include_deep_checks=bool(args.include_deep_checks),
+        )
+        _attach_selector_sources(payload, git_diff_selector=git_diff_selector)
+        renderer = render_premerge_validation_gate_markdown
     else:
-        raise ValueError("canary requires `profiles`, `plan`, `run`, `smoke-suite`, or `coverage-audit`")
+        raise ValueError(
+            "canary requires `profiles`, `plan`, `run`, `smoke-suite`, "
+            "`coverage-audit`, or `premerge`"
+        )
     print_payload(payload, output_format(args), renderer)
     return 0 if payload.get("ok") else 1
