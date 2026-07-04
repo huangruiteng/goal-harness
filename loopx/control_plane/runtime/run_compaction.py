@@ -178,3 +178,65 @@ def compact_run_base(
         compact["subagent_count"] = len(subagents)
 
     return compact
+
+
+def attach_run_summary_projections(
+    compact: dict[str, Any],
+    run: dict[str, Any],
+    *,
+    compact_benchmark_run: RunProjection,
+    worker_bridge_ingest_health_note: RunProjection,
+    compact_benchmark_result: RunProjection,
+    compact_benchmark_comparison: RunProjection,
+    benchmark_comparison_decision_note: RunProjection,
+    compact_benchmark_learning_ledger: RunProjection,
+    compact_benchmark_experiment_report: RunProjection,
+    benchmark_experiment_report_readiness_note: RunProjection,
+    benchmark_experiment_report_replay_decision: RunProjection,
+    compact_active_user_assisted_pilot: RunProjection,
+    compact_session_runtime_projection_from_run: RunProjection,
+) -> dict[str, Any]:
+    """Attach optional read-path summaries to a compact run payload."""
+    result = dict(compact)
+
+    benchmark_run = compact_benchmark_run(run)
+    if benchmark_run:
+        result["benchmark_run_summary"] = benchmark_run
+        health_note = worker_bridge_ingest_health_note(benchmark_run)
+        if health_note:
+            result["worker_bridge_ingest_health_note"] = health_note
+
+    benchmark_result = compact_benchmark_result(run)
+    if benchmark_result:
+        result["benchmark_result_summary"] = benchmark_result
+
+    benchmark_comparison = compact_benchmark_comparison(run)
+    if benchmark_comparison:
+        result["benchmark_comparison_summary"] = benchmark_comparison
+        decision_note = benchmark_comparison_decision_note(benchmark_comparison)
+        if decision_note:
+            result["benchmark_comparison_decision_note"] = decision_note
+
+    benchmark_learning_ledger = compact_benchmark_learning_ledger(run)
+    if benchmark_learning_ledger:
+        result["benchmark_learning_ledger_summary"] = benchmark_learning_ledger
+
+    benchmark_report = compact_benchmark_experiment_report(run)
+    if benchmark_report:
+        result["benchmark_experiment_report_summary"] = benchmark_report
+        readiness_note = benchmark_experiment_report_readiness_note(benchmark_report)
+        if readiness_note:
+            result["benchmark_experiment_report_readiness_note"] = readiness_note
+            replay_decision = benchmark_experiment_report_replay_decision(readiness_note)
+            if replay_decision:
+                result["benchmark_experiment_report_replay_decision"] = replay_decision
+
+    active_user_pilot = compact_active_user_assisted_pilot(run)
+    if active_user_pilot:
+        result["active_user_assisted_pilot_summary"] = active_user_pilot
+
+    session_projection = compact_session_runtime_projection_from_run(run)
+    if session_projection:
+        result["session_runtime_projection"] = session_projection
+
+    return result

@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from loopx import status as status_module  # noqa: E402
 from loopx.projections import run_compaction as run_compaction_read_model  # noqa: E402
+from loopx.session_runtime import SESSION_RUNTIME_READONLY_PROJECTION_SCHEMA_VERSION  # noqa: E402
 
 
 def assert_run_compaction_wrapper_parity() -> None:
@@ -108,6 +109,30 @@ def _direct_compact_run_base(run: dict[str, object]) -> dict[str, object]:
     )
 
 
+def _direct_compact_run(run: dict[str, object]) -> dict[str, object]:
+    return run_compaction_read_model.attach_run_summary_projections(
+        _direct_compact_run_base(run),
+        run,
+        compact_benchmark_run=status_module.compact_benchmark_run,
+        worker_bridge_ingest_health_note=status_module.worker_bridge_ingest_health_note,
+        compact_benchmark_result=status_module.compact_benchmark_result,
+        compact_benchmark_comparison=status_module.compact_benchmark_comparison,
+        benchmark_comparison_decision_note=status_module.benchmark_comparison_decision_note,
+        compact_benchmark_learning_ledger=status_module.compact_benchmark_learning_ledger,
+        compact_benchmark_experiment_report=status_module.compact_benchmark_experiment_report,
+        benchmark_experiment_report_readiness_note=(
+            status_module.benchmark_experiment_report_readiness_note
+        ),
+        benchmark_experiment_report_replay_decision=(
+            status_module.benchmark_experiment_report_replay_decision
+        ),
+        compact_active_user_assisted_pilot=status_module.compact_active_user_assisted_pilot,
+        compact_session_runtime_projection_from_run=(
+            status_module.compact_session_runtime_projection_from_run
+        ),
+    )
+
+
 def assert_compact_run_base_parity() -> None:
     mapped_run = {
         "generated_at": "2026-07-04T00:02:00Z",
@@ -152,9 +177,67 @@ def assert_compact_run_base_parity() -> None:
     )
 
 
+def assert_compact_run_summary_projection_parity() -> None:
+    session_runtime_run = {
+        "generated_at": "2026-07-04T00:04:00Z",
+        "run_id": "run-session-runtime",
+        "goal_id": "loopx-meta",
+        "classification": "session_runtime_readonly_projection",
+        "session_runtime_readonly_projection": {
+            "schema_version": SESSION_RUNTIME_READONLY_PROJECTION_SCHEMA_VERSION,
+            "goal_id": "loopx-meta",
+            "source": {
+                "host_kind": "codex-app",
+                "latest_fact_at": "2026-07-04T00:03:30Z",
+                "source_refs": {"status": ["latest"], "quota": ["should-run"]},
+            },
+            "boundary": {
+                "runtime_writeback_allowed": True,
+                "runtime_mutation_allowed": False,
+                "raw_logs_copied": False,
+                "credentials_copied": False,
+                "raw_material_key_names": ["raw_logs", "credentials"],
+            },
+            "first_screen": {
+                "waiting_on": "codex",
+                "first_agent_todo": "continue status read-path cleanup",
+                "recommended_action": "run compact parity smoke",
+                "agent_can_continue": True,
+                "user_action_required": False,
+            },
+            "work_lane_contract": {
+                "lane": "advancement_task",
+                "must_attempt_work": True,
+                "monitor_only": False,
+            },
+            "attention_item": {
+                "kind": "agent_todo",
+                "priority": "P2",
+                "title": "Continue control-plane cleanup",
+                "waiting_on": "codex",
+            },
+            "private_note": "not compacted",
+        },
+    }
+    compact = status_module.compact_run(session_runtime_run)
+    assert compact == _direct_compact_run(session_runtime_run)
+    session_projection = compact["session_runtime_projection"]
+    assert session_projection["schema_version"] == SESSION_RUNTIME_READONLY_PROJECTION_SCHEMA_VERSION
+    assert session_projection["mode"] == "read_only"
+    assert session_projection["goal_id"] == "loopx-meta"
+    assert session_projection["source"]["source_ref_counts"] == {"status": 1, "quota": 1}
+    assert session_projection["boundary"]["runtime_writeback_allowed"] is True
+    assert session_projection["boundary"]["runtime_mutation_allowed"] is False
+    assert session_projection["first_screen"]["agent_can_continue"] is True
+    assert session_projection["work_lane_contract"]["lane"] == "advancement_task"
+    assert session_projection["attention_item"]["priority"] == "P2"
+    assert "private_note" not in session_projection
+
+
 def main() -> None:
     assert_run_compaction_wrapper_parity()
     assert_compact_run_base_parity()
+    assert_compact_run_summary_projection_parity()
 
 
 if __name__ == "__main__":

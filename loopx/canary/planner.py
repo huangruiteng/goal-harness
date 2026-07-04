@@ -407,6 +407,11 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 "reason": "guards scoped status, agent quota, review-packet handoff, and scheduler_hint parity on one fixture",
             },
             {
+                "command": "python3 examples/control_plane/run-compaction-readmodel-smoke.py",
+                "tier": "default",
+                "reason": "guards status wrapper parity for compact run read-model and summary projection attachment",
+            },
+            {
                 "command": "python3 examples/control_plane/goal-channel-readmodel-smoke.py",
                 "tier": "default",
                 "reason": "guards status wrapper parity for goal-channel projection attachment",

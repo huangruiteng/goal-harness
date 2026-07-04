@@ -205,10 +205,25 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     status_commands = [check["command"] for check in status_profiles["status-read-path"]["checks"]]
     assert "python3 examples/control_plane/status-goal-filter-smoke.py" in status_commands, status_payload
     assert "python3 examples/control_plane/status-quota-review-packet-parity-smoke.py" in status_commands, status_payload
-    assert "python3 examples/control_plane/goal-channel-readmodel-smoke.py" in status_commands, status_payload
+    assert "python3 examples/control_plane/run-compaction-readmodel-smoke.py" in status_commands, status_payload
     assert all(check["tier"] == "default" for check in status_profiles["status-read-path"]["checks"]), status_payload
     assert status_profiles["status-read-path"]["deep_checks_available"] is True, status_payload
     assert status_profiles["status-read-path"]["deep_checks_included"] is False, status_payload
+
+    status_wide_payload = build_catalog_canary_plan(
+        changed_files=["loopx/status.py"],
+        surfaces=["status --goal-id read-path"],
+        max_checks_per_profile=4,
+    )
+    status_wide_profiles = {
+        profile["id"]: profile for profile in status_wide_payload["domain_profiles"]
+    }
+    status_wide_commands = [
+        check["command"] for check in status_wide_profiles["status-read-path"]["checks"]
+    ]
+    assert "python3 examples/control_plane/goal-channel-readmodel-smoke.py" in status_wide_commands, (
+        status_wide_payload
+    )
 
     review_packet_payload = build_catalog_canary_plan(
         changed_files=["loopx/review_packet.py", "loopx/cli_commands/status.py"],
