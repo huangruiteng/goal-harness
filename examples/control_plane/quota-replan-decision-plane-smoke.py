@@ -61,6 +61,20 @@ def primary_claimed_advancement() -> dict:
     }
 
 
+def side_agent_claimed_advancement() -> dict:
+    return {
+        "index": 2,
+        "todo_id": "todo_side_canary_refactor",
+        "text": "[P1] Continue the next non-benchmark canary/refactor batch.",
+        "role": "agent",
+        "status": "open",
+        "priority": "P1",
+        "task_class": "advancement_task",
+        "action_kind": "canary_refactor_next_batch",
+        "claimed_by": SIDE_AGENT,
+    }
+
+
 def blocking_handoff_review() -> dict:
     return {
         "index": 2,
@@ -196,6 +210,34 @@ def assert_replan_beats_monitor_quiet_skip() -> None:
     assert "goal_frontier_projection: replan_required=True" in markdown, markdown
     assert "deferred_ready=0 acceptance_gaps=0" in markdown, markdown
     assert "autonomous_replan_decision: decision=autonomous_replan_required" in markdown, markdown
+
+
+def assert_replan_preserves_current_agent_runnable_frontier() -> None:
+    guard = build_quota_should_run(
+        status_payload([monitor_item(), side_agent_claimed_advancement()]),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["effective_action"] == "autonomous_replan_required", guard
+    assert guard["should_run"] is True, guard
+    assert guard["interaction_contract"]["mode"] == "autonomous_replan", guard
+    lane_action = guard["agent_lane_next_action"]
+    assert lane_action["todo_id"] == "todo_side_canary_refactor", guard
+    assert lane_action["selected_by"] == "current_agent_claimed_todo", guard
+    assert lane_action["preserves_goal_next_action"] is True, guard
+    primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
+    assert "todo_side_canary_refactor" in primary_action, guard
+    assert "bounded autonomous replan" in primary_action, guard
+    cli_actions = guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
+    assert "todo_side_canary_refactor" in cli_actions[0], guard
+    frontier = guard["goal_frontier_projection"]["remaining_advancement_frontier"]
+    assert frontier["current_agent_claimed_advancement_count"] == 1, guard
+    assert guard["goal_route_hint"]["current_agent_next_action"]["todo_id"] == (
+        "todo_side_canary_refactor"
+    ), guard
+    markdown = render_quota_should_run_markdown(guard)
+    assert "agent_lane_next_action: todo_id=todo_side_canary_refactor" in markdown, markdown
 
 
 def assert_agent_vision_gap_derives_replan() -> None:
@@ -338,6 +380,7 @@ def assert_blocking_handoff_gate_beats_derived_monitor_replan() -> None:
 
 def main() -> None:
     assert_replan_beats_monitor_quiet_skip()
+    assert_replan_preserves_current_agent_runnable_frontier()
     assert_agent_vision_gap_derives_replan()
     assert_replan_beats_agent_scope_wait()
     assert_empty_monitor_frontier_derives_replan()
