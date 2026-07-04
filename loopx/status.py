@@ -109,6 +109,10 @@ from .control_plane.todos.active_state_todo_parser import (
 from .control_plane.work_items.attention_item import (
     attention_item as _attention_item_read_model,
 )
+from .control_plane.work_items.attention_queue import (
+    build_attention_queue_projection as _build_attention_queue_projection_read_model,
+    merge_global_registry_findings as _merge_global_registry_findings_read_model,
+)
 from .control_plane.work_items.attention_routing import (
     goal_attention as _goal_attention_read_model,
 )
@@ -6188,6 +6192,22 @@ def autonomous_monitor_candidates(
     )
 
 
+def build_attention_queue_projection(
+    *,
+    items: list[dict[str, Any]],
+    goal_id_filter: str | None,
+    autonomous_backlog_candidates: dict[str, Any] | None,
+    autonomous_monitor_candidates: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return _build_attention_queue_projection_read_model(
+        items=items,
+        goal_id_filter=goal_id_filter,
+        autonomous_backlog_candidates=autonomous_backlog_candidates,
+        autonomous_monitor_candidates=autonomous_monitor_candidates,
+        monitor_signal_waiting_on=MONITOR_SIGNAL_WAITING_ON,
+    )
+
+
 def _subagent_state(run: dict[str, Any]) -> str | None:
     return _subagent_state_read_model(
         run,
@@ -6571,6 +6591,24 @@ def compact_global_registry_shadow_finding(finding: dict[str, Any]) -> dict[str,
 
 def attach_global_registry_shadow_finding(item: dict[str, Any], finding: dict[str, Any]) -> None:
     _attach_global_registry_shadow_finding_read_model(item, finding)
+
+
+def merge_global_registry_attention_findings(
+    *,
+    health_items: list[dict[str, Any]],
+    history_items: list[dict[str, Any]],
+    findings: list[Any],
+    goal_id_filter: str | None,
+) -> None:
+    _merge_global_registry_findings_read_model(
+        health_items=health_items,
+        history_items=history_items,
+        findings=findings,
+        goal_id_filter=goal_id_filter,
+        source_registry_shadow_findings=SOURCE_REGISTRY_SHADOW_FINDINGS,
+        attention_item=attention_item,
+        attach_global_registry_shadow_finding=attach_global_registry_shadow_finding,
+    )
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -7135,66 +7173,24 @@ def build_attention_queue(
             )
             history_items.append(item)
 
-    live_quota_items_by_goal: dict[str, list[dict[str, Any]]] = {}
-    for item in history_items:
-        if isinstance(item.get("quota"), dict):
-            live_quota_items_by_goal.setdefault(str(item.get("goal_id") or ""), []).append(item)
-
-    for finding in global_registry.get("findings") or []:
-        if not isinstance(finding, dict):
-            continue
-        if finding.get("severity") not in {"high", "action"}:
-            continue
-        goal_id = str(finding.get("goal_id") or "global-registry")
-        if goal_id_filter:
-            finding_goal_ids = [
-                str(item)
-                for item in (finding.get("goal_ids") or [])
-                if str(item or "").strip()
-            ]
-            if goal_id != goal_id_filter and goal_id_filter not in finding_goal_ids:
-                continue
-        live_items = live_quota_items_by_goal.get(goal_id, [])
-        if finding.get("kind") in SOURCE_REGISTRY_SHADOW_FINDINGS and live_items:
-            for item in live_items:
-                attach_global_registry_shadow_finding(item, finding)
-            continue
-        health_items.append(
-            attention_item(
-                goal_id=goal_id,
-                status=str(finding.get("kind") or "global_registry_finding"),
-                waiting_on="codex",
-                severity=str(finding.get("severity") or "action"),
-                recommended_action=str(finding.get("recommended_action") or "inspect global registry health"),
-                source="global_registry",
-            )
-        )
+    merge_global_registry_attention_findings(
+        health_items=health_items,
+        history_items=history_items,
+        findings=global_registry.get("findings") or [],
+        goal_id_filter=goal_id_filter,
+    )
 
     items = [*health_items, *history_items]
     attach_dependency_blockers(items)
     backlog_candidates = autonomous_backlog_candidates(items)
     monitor_candidates = autonomous_monitor_candidates(items)
 
-    queue = {
-        "available": True,
-        "item_count": len(items),
-        "needs_user_or_controller": sum(
-            1 for item in items if item["waiting_on"] in {"user_or_controller", "controller"}
-        ),
-        "needs_controller": sum(1 for item in items if item["waiting_on"] == "controller"),
-        "needs_codex": sum(1 for item in items if item["waiting_on"] == "codex"),
-        "watching_external_evidence": sum(1 for item in items if item["waiting_on"] == "external_evidence"),
-        "watching_monitor": sum(1 for item in items if item["waiting_on"] == MONITOR_SIGNAL_WAITING_ON),
-        "items": items,
-    }
-    if goal_id_filter:
-        queue["goal_filter"] = goal_id_filter
-        queue["goal_filter_applied"] = True
-    if backlog_candidates:
-        queue["autonomous_backlog_candidates"] = backlog_candidates
-    if monitor_candidates:
-        queue["autonomous_monitor_candidates"] = monitor_candidates
-    return queue
+    return build_attention_queue_projection(
+        items=items,
+        goal_id_filter=goal_id_filter,
+        autonomous_backlog_candidates=backlog_candidates,
+        autonomous_monitor_candidates=monitor_candidates,
+    )
 
 
 def compact_human_reward(reward: Any) -> dict[str, Any] | None:
