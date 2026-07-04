@@ -2787,6 +2787,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_verifier_prep_timeout_sec",
         "benchflow_final_verifier_timeout_sec",
         "benchflow_final_verifier_timeout_override_count",
+        "benchflow_final_verifier_outer_timeout_override_count",
         "benchflow_verifier_prep_timeout_override_count",
         "benchflow_verify_prep_timeout_override_count",
         "benchflow_soft_verify_prep_timeout_override_count",
@@ -3556,6 +3557,7 @@ def install_benchflow_verifier_prep_timeout_override(
 
         override_count = 0
         final_timeout_override_count = 0
+        final_timeout_outer_override_count = 0
         soft_timeout_override_count = 0
 
         async def exec_with_verifier_prep_timeout(*args: Any, **kwargs: Any) -> Any:
@@ -3592,6 +3594,30 @@ def install_benchflow_verifier_prep_timeout_override(
             phase_timeout_sec = final_verifier_timeout_sec
         elif phase == "soft_verify" and soft_timeout_enabled:
             phase_timeout_sec = soft_verifier_timeout_sec
+
+        task_verifier_config = None
+        original_task_verifier_timeout_sec = None
+        task_verifier_timeout_overridden = False
+        if phase == "verify" and final_timeout_enabled:
+            task = getattr(self, "_task", None)
+            task_config = getattr(task, "config", None)
+            task_verifier_config = getattr(task_config, "verifier", None)
+            original_task_verifier_timeout_sec = getattr(
+                task_verifier_config,
+                "timeout_sec",
+                None,
+            )
+            if original_task_verifier_timeout_sec != final_verifier_timeout_sec:
+                try:
+                    setattr(
+                        task_verifier_config,
+                        "timeout_sec",
+                        final_verifier_timeout_sec,
+                    )
+                    task_verifier_timeout_overridden = True
+                    final_timeout_outer_override_count += 1
+                except Exception:
+                    task_verifier_config = None
 
         try:
             env.exec = exec_with_verifier_prep_timeout
@@ -3661,6 +3687,15 @@ def install_benchflow_verifier_prep_timeout_override(
             raise
         finally:
             env.exec = original_exec
+            if task_verifier_timeout_overridden and task_verifier_config is not None:
+                try:
+                    setattr(
+                        task_verifier_config,
+                        "timeout_sec",
+                        original_task_verifier_timeout_sec,
+                    )
+                except Exception:
+                    pass
             phase_key = f"benchflow_{phase}_prep_timeout_override_count"
             total_key = "benchflow_verifier_prep_timeout_override_count"
             prerequisites[phase_key] = (
@@ -3682,6 +3717,19 @@ def install_benchflow_verifier_prep_timeout_override(
                     trace[count_key] = (
                         int(trace.get(count_key) or 0)
                         + final_timeout_override_count
+                    )
+            if final_timeout_outer_override_count:
+                count_key = (
+                    "benchflow_final_verifier_outer_timeout_override_count"
+                )
+                prerequisites[count_key] = (
+                    int(prerequisites.get(count_key) or 0)
+                    + final_timeout_outer_override_count
+                )
+                if isinstance(trace, dict):
+                    trace[count_key] = (
+                        int(trace.get(count_key) or 0)
+                        + final_timeout_outer_override_count
                     )
             if soft_timeout_override_count:
                 count_key = (

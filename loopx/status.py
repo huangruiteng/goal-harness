@@ -2417,6 +2417,7 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_verifier_prep_timeout_sec",
         "benchflow_final_verifier_timeout_sec",
         "benchflow_final_verifier_timeout_override_count",
+        "benchflow_final_verifier_outer_timeout_override_count",
         "benchflow_verifier_prep_timeout_override_count",
         "benchflow_verify_prep_timeout_override_count",
         "benchflow_soft_verify_prep_timeout_override_count",
