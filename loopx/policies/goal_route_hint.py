@@ -12,7 +12,7 @@ from ..todo_contract import (
     normalize_todo_status,
     normalize_todo_task_class,
 )
-from ..todo_handoff_gate import HandoffGateState
+from ..control_plane.todos.handoff_gate import HandoffGateState
 
 
 GOAL_ROUTE_HINT_SCHEMA_VERSION = "goal_route_hint_v0"

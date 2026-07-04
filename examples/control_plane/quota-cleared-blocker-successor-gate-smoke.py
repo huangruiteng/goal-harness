@@ -13,7 +13,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from loopx.quota import build_quota_should_run  # noqa: E402
 from loopx.status import compact_todo_group  # noqa: E402
-from loopx.todo_handoff_gate import build_todo_handoff_gate_states  # noqa: E402
+from loopx.control_plane.todos.handoff_gate import (  # noqa: E402
+    build_todo_handoff_gate_states,
+)
 
 
 GOAL_ID = "cleared-blocker-successor-gate-fixture"

@@ -25,7 +25,7 @@ from ...todo_contract import (
     normalize_todo_task_class,
     todo_done_for_status,
 )
-from ...todo_handoff_gate import build_todo_handoff_gate_states
+from .handoff_gate import build_todo_handoff_gate_states
 from ...todo_projection import (
     todo_claimed_visibility_items as projection_todo_claimed_visibility_items,
     todo_item_is_actionable_open as projection_todo_item_is_actionable_open,

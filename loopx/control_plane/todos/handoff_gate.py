@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Iterable
 
-from .todo_contract import (
+from ...todo_contract import (
     TODO_RESUME_KIND_TODO_DONE,
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,
