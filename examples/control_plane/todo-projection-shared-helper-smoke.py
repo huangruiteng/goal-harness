@@ -30,7 +30,7 @@ from loopx.status import (  # noqa: E402
     todo_item_is_deferred as status_todo_item_is_deferred,
     todo_projection_sort_key,
 )
-from loopx.todo_contract import (  # noqa: E402
+from loopx.control_plane.todos.contract import (  # noqa: E402
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
 )

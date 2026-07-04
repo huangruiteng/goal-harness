@@ -23,7 +23,7 @@ from .status import (
     parse_active_state_todos,
     parse_timestamp,
 )
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_MONITOR_METADATA_FIELDS,
     TODO_STATUS_DONE,
     TODO_STATUS_OPEN,

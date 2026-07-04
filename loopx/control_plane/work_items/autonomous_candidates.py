@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from ...todo_contract import normalize_todo_action_kind, normalize_todo_task_class
+from ..todos.contract import normalize_todo_action_kind, normalize_todo_task_class
 
 
 AUTONOMOUS_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4][^\]]*)\]\s*(.+)$", re.I)

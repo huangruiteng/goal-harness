@@ -78,7 +78,7 @@ from .scheduler_state import (
     write_scheduler_state,
 )
 from .state_projection import is_user_wait_text, next_action_projection_warning
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,

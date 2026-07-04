@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Optional
 
-from ...todo_contract import (
+from .contract import (
     TODO_RESUME_KIND_PR_MERGED,
     TODO_RESUME_KIND_TODO_DONE,
     TODO_TASK_CLASS_ADVANCEMENT,

@@ -19,7 +19,7 @@ from .control_plane.goals.goal_vision import normalize_goal_vision_packet
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
 from .state_projection import state_projection_gap_warning
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
     TODO_TASK_CLASS_MONITOR,

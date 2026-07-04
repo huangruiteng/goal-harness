@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...rollout_event_log import load_rollout_events, rollout_event_log_path
-from ...todo_contract import normalize_todo_id, normalize_todo_status, todo_done_for_status
+from .contract import normalize_todo_id, normalize_todo_status, todo_done_for_status
 from .todo_summary import compact_todo_item
 
 

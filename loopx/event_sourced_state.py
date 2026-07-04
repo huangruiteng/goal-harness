@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .file_lock import exclusive_file_lock
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_STATUS_DONE,
     TODO_STATUS_BLOCKED,
     TODO_STATUS_DEFERRED,

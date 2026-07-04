@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.boundary_authority import build_checkpointed_boundary_authority_entry  # noqa: E402
 from loopx.quota import build_quota_should_run, render_quota_should_run_markdown  # noqa: E402
 from loopx.status import compact_todo_group, project_asset_todo_summary  # noqa: E402
-from loopx.todo_contract import format_todo_metadata_line, parse_todo_metadata_line  # noqa: E402
+from loopx.control_plane.todos.contract import format_todo_metadata_line, parse_todo_metadata_line  # noqa: E402
 
 
 GOAL_ID = "action-scope-guard-fixture"

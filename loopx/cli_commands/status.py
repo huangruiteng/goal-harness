@@ -16,7 +16,7 @@ from ..status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
 )
-from ..todo_contract import normalize_todo_claimed_by
+from ..control_plane.todos.contract import normalize_todo_claimed_by
 
 
 PrintPayload = Callable[

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...todo_contract import (
+from ..todos.contract import (
     normalize_required_capabilities,
     normalize_target_capabilities,
     normalize_todo_blocks_agent,

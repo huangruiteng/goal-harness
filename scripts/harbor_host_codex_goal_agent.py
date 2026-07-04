@@ -60,7 +60,7 @@ from loopx.benchmark_core.loop_protocol import (
     classify_loopx_treatment_claim,
     render_loop_contract_packet_lines,
 )
-from loopx.todo_contract import todo_terminal_for_status
+from loopx.control_plane.todos.contract import todo_terminal_for_status
 
 LONG_RUN_DEFAULT_GOAL_TIMEOUT_SEC = 21600.0
 

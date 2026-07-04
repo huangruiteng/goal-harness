@@ -149,7 +149,7 @@ FAMILY_SELECTOR_HINTS: dict[str, tuple[str, ...]] = {
         "connector",
         "public/private",
         "loopx/todos.py",
-        "loopx/todo_contract.py",
+        "loopx/control_plane/todos/contract.py",
         "loopx/status.py",
         "loopx/state_projection.py",
         "loopx/boundary_authority.py",
@@ -566,7 +566,7 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "todo metadata",
             "todo detail",
             "loopx/todos.py",
-            "loopx/todo_contract.py",
+            "loopx/control_plane/todos/contract.py",
             "loopx/cli_commands/todo",
         ),
         "checks": [

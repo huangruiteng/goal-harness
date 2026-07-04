@@ -11,7 +11,7 @@ from .agent_registry import registered_agent_ids_for_goal
 from .history import STRUCTURED_INDEX_KEYS, collect_history, load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs, resolve_runtime_root
 from .registry import inspect_registry, inspect_registry_boundary, registry_goals, resolve_state_file
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,
     TODO_TASK_CLASS_USER_GATE,

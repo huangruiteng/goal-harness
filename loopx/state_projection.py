@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_TASK_PATTERN,
     build_todo_id,
     compact_todo_text,
