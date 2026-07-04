@@ -68,6 +68,7 @@ def assert_profiles_come_from_catalog_matrix() -> None:
     state_write_commands = [
         check["command"] for check in domain_profiles["state-write-correctness"]["checks"]
     ]
+    assert "python3 examples/control_plane/task-lease-runtime-smoke.py" in state_write_commands
     assert "python3 examples/control_plane/todo-write-correctness-smoke.py" in state_write_commands
 
 

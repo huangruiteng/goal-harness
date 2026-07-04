@@ -4,7 +4,7 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
-from ..task_lease import (
+from ..control_plane.work_items.task_lease import (
     TaskLeaseError,
     acquire_task_lease,
     inspect_task_lease,

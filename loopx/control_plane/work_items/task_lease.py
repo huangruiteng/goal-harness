@@ -6,10 +6,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .file_lock import exclusive_file_lock
-from .history import load_registry
-from .paths import resolve_runtime_root
-from .control_plane.todos.contract import (
+from ...file_lock import exclusive_file_lock
+from ...history import load_registry
+from ...paths import resolve_runtime_root
+from ..todos.contract import (
     normalize_required_write_scopes,
     normalize_todo_claimed_by,
     normalize_todo_id,
