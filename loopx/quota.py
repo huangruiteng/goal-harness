@@ -1035,6 +1035,7 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
         "resume_condition",
         "resume_ready",
         "no_followup",
+        "successor_todo_ids",
         "target_key",
         "cadence",
         "next_due_at",
@@ -1048,6 +1049,9 @@ def _compact_todo_summary_item(item: dict[str, Any], *, text: str | None = None)
         "route_continuation_reason",
         "route_id",
         "route_key",
+        "completed_at",
+        "updated_at",
+        "superseded_by",
     ):
         if item.get(key) is not None:
             compact[key] = item.get(key)
@@ -1993,6 +1997,59 @@ def _is_user_gate_todo_item(item: dict[str, Any]) -> bool:
     return any(hint in action_kind for hint in USER_GATE_ACTION_KIND_HINTS)
 
 
+def _compact_todo_succession_warning_item(item: dict[str, Any]) -> dict[str, Any]:
+    compact = _compact_todo_summary_item(item)
+    for key in (
+        "done",
+        "succession_tracked",
+        "recommended_action",
+    ):
+        if item.get(key) is not None:
+            compact[key] = item.get(key)
+    return compact
+
+
+def _todo_succession_warning_lanes(value: dict[str, Any]) -> dict[str, Any]:
+    warning = value.get("todo_succession_warning")
+    warning = warning if isinstance(warning, dict) else {}
+    source_items = (
+        warning.get("items")
+        if isinstance(warning.get("items"), list)
+        else value.get("completed_without_successor_items")
+    )
+    items = [
+        _compact_todo_succession_warning_item(item)
+        for item in (source_items or [])
+        if isinstance(item, dict)
+    ][:TODO_BACKLOG_ITEM_LIMIT]
+    count = warning.get("count", value.get("completed_without_successor_count"))
+    try:
+        count = max(0, int(count))
+    except (TypeError, ValueError):
+        count = len(items)
+    if count <= 0 and not items:
+        return {}
+
+    payload = {
+        "schema_version": warning.get("schema_version", "todo_succession_warning_v0"),
+        "reason_code": warning.get(
+            "reason_code",
+            "completed_advancement_without_successor",
+        ),
+        "count": count,
+        "items": items,
+        "recommended_action": warning.get(
+            "recommended_action",
+            "record no_followup=true or add/link a successor todo",
+        ),
+    }
+    return {
+        "completed_without_successor_count": count,
+        "completed_without_successor_items": items,
+        "todo_succession_warning": payload,
+    }
+
+
 def _summarize_user_todos(
     value: Any,
     *,
@@ -2125,6 +2182,7 @@ def _summarize_user_todos(
             agent_identity=agent_identity,
         )
     )
+    summary.update(_todo_succession_warning_lanes(value))
     if claimed_open_items or value.get("claimed_open_count"):
         summary["claimed_open_count"] = value.get("claimed_open_count", len(claimed_open_items))
         summary["unclaimed_open_count"] = value.get(
@@ -8820,7 +8878,34 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             summary_parts.insert(2, f"unclaimed={summary.get('unclaimed_open_count', 0)}")
         if summary.get("monitor_due_count"):
             summary_parts.append(f"monitor_due={summary.get('monitor_due_count')}")
+        if summary.get("completed_without_successor_count"):
+            summary_parts.append(
+                f"succession_warning={summary.get('completed_without_successor_count')}"
+            )
         lines.append(f"- {label}_summary: {' '.join(summary_parts)}")
+        succession_warning = (
+            summary.get("todo_succession_warning")
+            if isinstance(summary.get("todo_succession_warning"), dict)
+            else {}
+        )
+        if succession_warning:
+            warning_items = (
+                succession_warning.get("items")
+                if isinstance(succession_warning.get("items"), list)
+                else []
+            )
+            todo_ids = [
+                str(item.get("todo_id"))
+                for item in warning_items[:3]
+                if isinstance(item, dict) and item.get("todo_id")
+            ]
+            todo_ids_text = ",".join(todo_ids) if todo_ids else "n/a"
+            lines.append(
+                f"- {label}_succession_warning: "
+                f"reason={succession_warning.get('reason_code')} "
+                f"count={succession_warning.get('count')} "
+                f"todo_ids={todo_ids_text}"
+            )
         first_open = summary.get("first_open_items") if isinstance(summary.get("first_open_items"), list) else []
         for todo in first_open[:3]:
             if not isinstance(todo, dict):
