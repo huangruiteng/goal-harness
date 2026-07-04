@@ -213,12 +213,50 @@ if [[ "$install_skill" != "0" && -d "$skills_source" ]]; then
   skill_line="${skill_line%$'\n'}"
 fi
 
+slash_line="- slash commands: skipped"
+install_slash_commands="${LOOPX_INSTALL_SLASH_COMMANDS:-1}"
+slash_surfaces="${LOOPX_INSTALL_SLASH_COMMAND_SURFACES:-all}"
+if [[ "$install_slash_commands" != "0" ]]; then
+  slash_args=(slash-commands --install)
+  IFS=',' read -ra slash_surface_list <<<"$slash_surfaces"
+  for slash_surface in "${slash_surface_list[@]}"; do
+    if [[ -n "$slash_surface" ]]; then
+      slash_args+=(--surface "$slash_surface")
+    fi
+  done
+  if slash_json="$("$bin_dir/loopx" --format json "${slash_args[@]}" 2>/dev/null)"; then
+    slash_line="$(LOOPX_SLASH_INSTALL_JSON="$slash_json" "${LOOPX_PYTHON:-python3}" - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["LOOPX_SLASH_INSTALL_JSON"])
+summary = payload.get("summary") or {}
+counts = summary.get("status_counts") or {}
+count_text = ",".join(f"{key}={counts[key]}" for key in sorted(counts)) or "none"
+parts = []
+if summary.get("codex_prompt_dir"):
+    parts.append(f"codex prompts: {summary['codex_prompt_dir']}")
+if summary.get("codex_skill_dir"):
+    parts.append(f"codex skills: {summary['codex_skill_dir']}")
+if summary.get("claude_skill_dir"):
+    parts.append(f"claude skills: {summary['claude_skill_dir']}")
+if not parts:
+    parts.append("no supported surfaces selected")
+print(f"- slash commands: {'; '.join(parts)} ({count_text})")
+PY
+)"
+  else
+    slash_line="- slash commands: install attempted; run manually: loopx slash-commands --install"
+  fi
+fi
+
 # loopx Claude Code adapter: OPT-IN, OFF by default — the normal loopx install
-# never touches ~/.claude. The run loop is Claude Code's native /loop; loopx
-# provides the should_run protocol (MCP) + a /loopx setup helper, and NO global
-# hooks by default. Enable explicitly with LOOPX_INSTALL_CLAUDE=1 (installs at
-# USER scope: MCP + /loopx command). Add the optional should_run gate later with
-# `install.py --scope <user|project> --harden`. Prefer PROJECT scope:
+# does not install MCP, hooks, or settings. The lightweight slash-command
+# skills above may write ~/.claude/skills so Claude Code can discover /loopx,
+# while the run-loop adapter remains explicit. Enable the adapter with
+# LOOPX_INSTALL_CLAUDE=1 (installs at USER scope: MCP + /loopx command). Add
+# the optional should_run gate later with `install.py --scope <user|project>
+# --harden`. Prefer PROJECT scope:
 # `python <release>/loopx/claude_goal_mode/scripts/install.py --scope project`.
 claude_installer="$release_dir/loopx/claude_goal_mode/scripts/install.py"
 install_claude="${LOOPX_INSTALL_CLAUDE:-0}"
@@ -248,6 +286,7 @@ $canary_line
 $legacy_line
 - profile: $shell_profile
 $skill_line
+$slash_line
 $claude_line
 
 Current shell can use it with:

@@ -1,0 +1,362 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from .slash_commands import build_slash_command_catalog
+
+
+SCHEMA_VERSION = "loopx_slash_command_install_v0"
+MANAGED_MARKER_PREFIX = "<!-- loopx-managed-slash-command:v1"
+LEGACY_UPGRADABLE_SIGNATURES = (
+    "loopx goal-mode setup (NOT Claude Code's built-in /goal)",
+    "The output is loopx control-plane SETUP",
+    "goalmode_cmd.py",
+)
+EXISTING_LOOPX_CAPABILITY_SKILL_SIGNATURES = (
+    "# LoopX PR Review",
+    "Run `loopx pr-review` first",
+)
+
+
+def _managed_marker(*, command: str, surface: str) -> str:
+    return f"{MANAGED_MARKER_PREFIX} command={command} surface={surface} -->"
+
+
+def _front_matter(*, fields: dict[str, str]) -> str:
+    lines = ["---"]
+    for key, value in fields.items():
+        escaped = value.replace('"', '\\"')
+        lines.append(f'{key}: "{escaped}"')
+    lines.append("---")
+    return "\n".join(lines)
+
+
+def _prompt_body(
+    *,
+    command: str,
+    title: str,
+    description: str,
+    argument_hint: str,
+    instructions: list[str],
+    surface: str,
+    front_matter_name: str | None = None,
+) -> str:
+    fields = {
+        "description": description,
+        "argument-hint": argument_hint,
+    }
+    if front_matter_name:
+        fields = {"name": front_matter_name, **fields}
+    return "\n\n".join(
+        [
+            _front_matter(fields=fields),
+            _managed_marker(command=command, surface=surface),
+            f"# {title}",
+            f"Treat this as the LoopX `{command}` slash command.",
+            "\n".join(instructions),
+            "Keep public/private boundaries intact and do not perform external writes unless the active LoopX state or owner explicitly authorizes them.",
+        ]
+    ) + "\n"
+
+
+def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = [
+        {
+            "command": "/loopx",
+            "name": "loopx",
+            "description": "Inspect LoopX state, or start a concrete LoopX goal when arguments are provided.",
+            "argument_hint": "[goal text]",
+            "instructions": [
+                "Visible command arguments: `$ARGUMENTS`.",
+                f"If arguments are present, preserve them as the goal text and run `{cli_bin} bootstrap-command-pack --project . --goal-text \"$ARGUMENTS\"` before planning work.",
+                f"If arguments are empty, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
+                "When a goal is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, run quota, and take one bounded allowed step.",
+            ],
+        },
+        {
+            "command": "/loopx-global-summary",
+            "name": "loopx-global-summary",
+            "description": "Read the compact global LoopX progress digest.",
+            "argument_hint": "[optional focus]",
+            "instructions": [
+                "Visible command arguments: `$ARGUMENTS`.",
+                f"Run `{cli_bin} global-summary` first and summarize the visible goals, gates, monitor status, and next safe actions.",
+                "This command is read-only unless the user explicitly asks for a state update.",
+            ],
+        },
+        {
+            "command": "/loopx-global-gates",
+            "name": "loopx-global-gates",
+            "description": "List open LoopX user/controller gates and what each blocks.",
+            "argument_hint": "[optional focus]",
+            "instructions": [
+                "Visible command arguments: `$ARGUMENTS`.",
+                f"Run `{cli_bin} global-summary` first, then focus the answer on open gates, blocked work, owner decisions, and exact next questions.",
+                "This command is read-only unless the user explicitly asks for a state update.",
+            ],
+        },
+        {
+            "command": "/loopx-global-todos",
+            "name": "loopx-global-todos",
+            "description": "List runnable, blocked, deferred-ready, and review LoopX todos across visible goals.",
+            "argument_hint": "[optional focus]",
+            "instructions": [
+                "Visible command arguments: `$ARGUMENTS`.",
+                f"Run `{cli_bin} global-summary` first, then focus the answer on prioritized todos and ownership across visible LoopX goals.",
+                "This command is read-only unless the user explicitly asks for a state update.",
+            ],
+        },
+        {
+            "command": "/loopx-global-risks",
+            "name": "loopx-global-risks",
+            "description": "Show stale LoopX runs, boundary risks, failing checks, and rollback candidates.",
+            "argument_hint": "[optional focus]",
+            "instructions": [
+                "Visible command arguments: `$ARGUMENTS`.",
+                f"Run `{cli_bin} global-summary` first, then focus the answer on stale work, public/private boundary risks, failing checks, and rollback candidates.",
+                "This command is read-only unless the user explicitly asks for a state update.",
+            ],
+        },
+        {
+            "command": "/loopx-pr-review",
+            "name": "loopx-pr-review",
+            "description": "Run the LoopX PR-review packet first, then review selected PR groups with evidence.",
+            "argument_hint": "[--repo owner/repo] [--state open|merged|all] [--since ISO]",
+            "instructions": [
+                "Visible command arguments: `$ARGUMENTS`.",
+                "Use the installed `loopx-pr-review` skill when available.",
+                f"Run `{cli_bin} --format json pr-review $ARGUMENTS` first and keep `agent_response_contract`, `review_groups`, `pull_requests[].review_template`, and `pull_requests[].evidence_commands` visible.",
+                "Do not reconstruct the PR queue manually from ad hoc GitHub calls before reading the LoopX packet.",
+                "This command is read-only; do not comment, approve, merge, rerun CI, or spend quota unless separately authorized.",
+            ],
+        },
+    ]
+    if include_legacy_aliases:
+        legacy_specs = []
+        for canonical in specs:
+            name = canonical["name"]
+            if not str(name).startswith("loopx-global-"):
+                continue
+            legacy_name = str(name).replace("loopx-global-", "loop-global-", 1)
+            legacy_specs.append(
+                {
+                    **canonical,
+                    "command": "/" + legacy_name,
+                    "name": legacy_name,
+                    "description": canonical["description"] + " Legacy alias for the canonical /loopx-global-* command.",
+                }
+            )
+        specs.extend(legacy_specs)
+    return specs
+
+
+def _is_legacy_upgradable_loopx_file(existing: str) -> bool:
+    return any(signature in existing for signature in LEGACY_UPGRADABLE_SIGNATURES)
+
+
+def _is_existing_loopx_capability_skill(existing: str) -> bool:
+    return any(signature in existing for signature in EXISTING_LOOPX_CAPABILITY_SKILL_SIGNATURES)
+
+
+def _target_status(path: Path, content: str, *, execute: bool) -> str:
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        if MANAGED_MARKER_PREFIX not in existing:
+            if _is_legacy_upgradable_loopx_file(existing):
+                if execute:
+                    path.write_text(content, encoding="utf-8")
+                return "upgraded_legacy_managed"
+            if path.name == "SKILL.md" and _is_existing_loopx_capability_skill(existing):
+                return "preserved_existing_loopx_skill"
+            return "skipped_user_file"
+        if existing == content:
+            return "unchanged"
+        if execute:
+            path.write_text(content, encoding="utf-8")
+        return "updated"
+    if execute:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return "created" if execute else "would_create"
+
+
+def _codex_home(value: str | None = None) -> Path:
+    raw = value or os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    return Path(raw).expanduser()
+
+
+def _claude_home(value: str | None = None) -> Path:
+    raw = value or os.environ.get("CLAUDE_HOME") or str(Path.home() / ".claude")
+    return Path(raw).expanduser()
+
+
+def _normalize_surfaces(surfaces: list[str] | None) -> list[str]:
+    requested = surfaces or ["all"]
+    normalized: list[str] = []
+    for surface in requested:
+        if surface == "all":
+            candidates = ["codex", "claude-code"]
+        elif surface in {"codex-cli", "codex-app"}:
+            candidates = ["codex"]
+        else:
+            candidates = [surface]
+        for candidate in candidates:
+            if candidate not in normalized:
+                normalized.append(candidate)
+    return normalized
+
+
+def install_slash_commands(
+    *,
+    execute: bool,
+    surfaces: list[str] | None = None,
+    cli_bin: str = "loopx",
+    include_legacy_aliases: bool = True,
+    codex_home: str | None = None,
+    claude_home: str | None = None,
+) -> dict[str, Any]:
+    specs = _command_prompt_specs(cli_bin=cli_bin, include_legacy_aliases=include_legacy_aliases)
+    effective_surfaces = _normalize_surfaces(surfaces)
+    codex_root = _codex_home(codex_home)
+    claude_root = _claude_home(claude_home)
+    installed: list[dict[str, Any]] = []
+
+    if "codex" in effective_surfaces:
+        prompt_dir = codex_root / "prompts"
+        skill_dir = codex_root / "skills"
+        for spec in specs:
+            path = prompt_dir / f"{spec['name']}.md"
+            content = _prompt_body(
+                command=str(spec["command"]),
+                title=f"LoopX {spec['command']}",
+                description=str(spec["description"]),
+                argument_hint=str(spec["argument_hint"]),
+                instructions=list(spec["instructions"]),
+                surface="codex-prompts",
+            )
+            status = _target_status(path, content, execute=execute)
+            installed.append(
+                {
+                    "surface": "codex",
+                    "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                    "mechanism": "codex_custom_prompts",
+                    "command": spec["command"],
+                    "path": str(path),
+                    "status": status,
+                    "invoke_as": [str(spec["command"]), f"/prompts:{spec['name']}"],
+                }
+            )
+            skill_path = skill_dir / str(spec["name"]) / "SKILL.md"
+            skill_content = _prompt_body(
+                command=str(spec["command"]),
+                title=f"LoopX {spec['command']}",
+                description=str(spec["description"]),
+                argument_hint=str(spec["argument_hint"]),
+                instructions=list(spec["instructions"]),
+                surface="codex-skills",
+                front_matter_name=str(spec["name"]),
+            )
+            skill_status = _target_status(skill_path, skill_content, execute=execute)
+            installed.append(
+                {
+                    "surface": "codex",
+                    "host_surfaces": ["codex-app"],
+                    "mechanism": "codex_skills",
+                    "command": spec["command"],
+                    "path": str(skill_path),
+                    "status": skill_status,
+                    "invoke_as": [str(spec["command"])],
+                }
+            )
+
+    if "claude-code" in effective_surfaces:
+        skills_dir = claude_root / "skills"
+        for spec in specs:
+            path = skills_dir / str(spec["name"]) / "SKILL.md"
+            content = _prompt_body(
+                command=str(spec["command"]),
+                title=f"LoopX {spec['command']}",
+                description=str(spec["description"]),
+                argument_hint=str(spec["argument_hint"]),
+                instructions=list(spec["instructions"]),
+                surface="claude-skills",
+                front_matter_name=str(spec["name"]),
+            )
+            status = _target_status(path, content, execute=execute)
+            installed.append(
+                {
+                    "surface": "claude-code",
+                    "mechanism": "claude_code_skills",
+                    "command": spec["command"],
+                    "path": str(path),
+                    "status": status,
+                    "invoke_as": [str(spec["command"])],
+                }
+            )
+
+    status_counts: dict[str, int] = {}
+    for item in installed:
+        status = str(item["status"])
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    return {
+        "ok": True,
+        "schema_version": SCHEMA_VERSION,
+        "execute": execute,
+        "requested_surfaces": surfaces or ["all"],
+        "effective_surfaces": effective_surfaces,
+        "catalog_schema_version": build_slash_command_catalog(
+            cli_bin=cli_bin,
+            include_legacy_aliases=include_legacy_aliases,
+        )["schema_version"],
+        "summary": {
+            "codex_prompt_dir": str(codex_root / "prompts") if "codex" in effective_surfaces else None,
+            "codex_skill_dir": str(codex_root / "skills") if "codex" in effective_surfaces else None,
+            "claude_skill_dir": str(claude_root / "skills") if "claude-code" in effective_surfaces else None,
+            "status_counts": status_counts,
+            "skip_policy": "LoopX-managed files are upgraded; same-name user files without a LoopX managed marker or legacy signature are never overwritten",
+        },
+        "installed": installed,
+        "notes": [
+            "Codex CLI/IDE discover top-level Markdown custom prompts in CODEX_HOME/prompts; restart the host if the slash list is already open.",
+            "Codex App command discovery also includes installed Codex skills; prompt-file support depends on the host version.",
+            "Claude Code discovers user skills from CLAUDE_HOME/skills and exposes each skill name as a slash command.",
+        ],
+    }
+
+
+def render_slash_command_install_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# LoopX Slash Command Install",
+        "",
+        f"- execute: `{payload.get('execute')}`",
+        f"- surfaces: `{','.join(payload.get('effective_surfaces') or [])}`",
+        f"- skip policy: `{payload.get('summary', {}).get('skip_policy')}`",
+    ]
+    codex_prompt_dir = payload.get("summary", {}).get("codex_prompt_dir")
+    codex_skill_dir = payload.get("summary", {}).get("codex_skill_dir")
+    claude_skill_dir = payload.get("summary", {}).get("claude_skill_dir")
+    if codex_prompt_dir:
+        lines.append(f"- codex prompts: `{codex_prompt_dir}`")
+    if codex_skill_dir:
+        lines.append(f"- codex skills: `{codex_skill_dir}`")
+    if claude_skill_dir:
+        lines.append(f"- claude skills: `{claude_skill_dir}`")
+    counts = payload.get("summary", {}).get("status_counts") or {}
+    if isinstance(counts, dict) and counts:
+        count_text = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+        lines.append(f"- statuses: `{count_text}`")
+    skipped = [
+        item for item in payload.get("installed") or []
+        if isinstance(item, dict) and item.get("status") == "skipped_user_file"
+    ]
+    if skipped:
+        lines.append("")
+        lines.append("Skipped user-owned files:")
+        for item in skipped:
+            lines.append(f"- `{item.get('command')}` at `{item.get('path')}`")
+    lines.append("")
+    lines.append("Restart the host if its slash-command menu was already open.")
+    return "\n".join(lines)

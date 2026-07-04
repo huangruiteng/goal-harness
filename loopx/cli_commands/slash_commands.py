@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
+from ..slash_command_install import (
+    install_slash_commands,
+    render_slash_command_install_markdown,
+)
 from ..slash_commands import build_slash_command_catalog, render_slash_command_catalog_markdown
 
 
@@ -32,6 +36,33 @@ def register_slash_commands_command(
         action="store_true",
         help="Hide legacy /loop-global-* aliases from the command catalog.",
     )
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Install LoopX slash-command prompt/skill files for supported hosts.",
+    )
+    parser.add_argument(
+        "--surface",
+        action="append",
+        choices=["all", "codex", "codex-cli", "codex-app", "claude-code"],
+        help=(
+            "Host surface to install. Repeatable. Defaults to all "
+            "(Codex prompts plus Claude Code skills)."
+        ),
+    )
+    parser.add_argument(
+        "--codex-home",
+        help="Codex home for prompt installation. Defaults to CODEX_HOME or ~/.codex.",
+    )
+    parser.add_argument(
+        "--claude-home",
+        help="Claude Code home for skill installation. Defaults to CLAUDE_HOME or ~/.claude.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what slash-command files would be installed without writing them.",
+    )
 
 
 def handle_slash_commands_command(
@@ -42,6 +73,17 @@ def handle_slash_commands_command(
 ) -> int | None:
     if args.command != "slash-commands":
         return None
+    if args.install or args.dry_run:
+        payload = install_slash_commands(
+            execute=bool(args.install and not args.dry_run),
+            surfaces=args.surface,
+            cli_bin=args.cli_bin,
+            include_legacy_aliases=not bool(args.no_legacy_aliases),
+            codex_home=args.codex_home,
+            claude_home=args.claude_home,
+        )
+        print_payload(payload, output_format(args), render_slash_command_install_markdown)
+        return 0
     payload = build_slash_command_catalog(
         cli_bin=args.cli_bin,
         include_legacy_aliases=not bool(args.no_legacy_aliases),

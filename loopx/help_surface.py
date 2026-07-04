@@ -28,6 +28,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx bootstrap-command-pack --project .",
                 "purpose": "Generate a setup packet for a manual shell or first agent handoff.",
             },
+            {
+                "command": "loopx slash-commands --install",
+                "purpose": "Refresh host slash-command prompt and skill files.",
+            },
         ],
     },
     {
@@ -64,7 +68,7 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             },
             {
                 "command": "Claude Code /loop",
-                "purpose": "Enable the opt-in adapter, start `/loopx <goal>`, then let Claude Code `/loop` tick it.",
+                "purpose": "Use installed slash skills for `/loopx`; enable the adapter only when native `/loop` should be gated by LoopX.",
             },
             {
                 "command": "Other agent or shell",
@@ -172,7 +176,7 @@ def render_concise_help(program: str = "loopx") -> str:
             "Run the loop:",
             "  Codex App      use /loopx <goal>; let the app set the heartbeat automation.",
             "  Codex CLI      keep visible TUI; run loopx codex-cli-bootstrap-message.",
-            "  Claude Code    enable the adapter, start /loopx <goal>, then run /loop.",
+            "  Claude Code    use installed /loopx skills; adapter only for gated native /loop.",
             "  Other agents   need a CLI/task/automation/loop hook, or run LoopX manually.",
             "",
             "Global options:",
@@ -180,6 +184,7 @@ def render_concise_help(program: str = "loopx") -> str:
             "",
             "More:",
             "  loopx commands                 Show grouped command reference.",
+            "  loopx slash-commands           Show/install slash command prompt and skill files.",
             "  loopx <command> --help         Show flags for one command.",
             "  man loopx                      Open the installed manual page.",
             "  docs/guides/newcomer-command-path.md",
