@@ -322,6 +322,7 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "loopx/control_plane/scheduler/monitor_poll_writeback.py",
             "loopx/control_plane/scheduler/monitor_target.py",
             "loopx/control_plane/scheduler/scheduler_hint.py",
+            "loopx/control_plane/work_items/interaction_contract.py",
             "loopx/control_plane/todos/handoff_gate.py",
             "loopx/control_plane/work_items/execution_obligation.py",
             "loopx/control_plane/work_items/goal_route_hint.py",
@@ -417,8 +418,10 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "scheduler-ack",
             "monitor_target",
             "monitor_poll_writeback",
+            "interaction_contract.py",
             "loopx/control_plane/scheduler/monitor_poll_writeback.py",
             "loopx/control_plane/scheduler/monitor_target.py",
+            "loopx/control_plane/work_items/interaction_contract.py",
             "loopx/control_plane/work_items/execution_obligation.py",
             "loopx/control_plane/work_items/goal_route_hint.py",
             "loopx/control_plane/work_items/outcome_followthrough.py",
@@ -434,6 +437,14 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 "reason": (
                     "exercises event-sourced todo projection, status, quota interaction contract, "
                     "work-lane contract, scheduler ack, refresh-state, spend-slot, and review-packet handoff together"
+                ),
+            },
+            {
+                "command": "python3 examples/control_plane/interaction-contract-state-machine-smoke.py",
+                "tier": "default",
+                "reason": (
+                    "guards interaction/protocol state-machine modes across active work, user notice, "
+                    "monitor quiet, autonomous replan, agent-scope wait, and successor replan"
                 ),
             },
             {
