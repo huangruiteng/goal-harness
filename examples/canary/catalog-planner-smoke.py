@@ -190,7 +190,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
             "complex control-plane state-machine interaction_contract "
             "scheduler_hint work_lane_contract goal_frontier"
         ],
-        max_checks_per_profile=4,
+        max_checks_per_profile=5,
     )
     state_machine_profiles = {
         profile["id"]: profile for profile in state_machine_payload["domain_profiles"]
@@ -201,6 +201,10 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     assert "python3 examples/control_plane/control-plane-integrated-canary-smoke.py" in state_machine_commands, (
         state_machine_profile
     )
+    assert (
+        "python3 examples/control_plane/side-agent-self-iteration-state-machine-smoke.py"
+        in state_machine_commands
+    ), state_machine_profile
     assert "python3 examples/control_plane/interaction-contract-state-machine-smoke.py" in state_machine_commands, (
         state_machine_profile
     )
