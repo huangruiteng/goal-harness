@@ -22,6 +22,7 @@ from .control_plane.todos.contract import (
     normalize_todo_action_kind,
     normalize_todo_claimed_by,
     normalize_todo_id,
+    normalize_todo_id_list,
     normalize_todo_status,
     parse_todo_metadata_line,
     todo_done_for_status,
@@ -611,6 +612,9 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
         ):
             if payload.get(key) is not None:
                 todo[key] = compact_text(payload[key])
+        successor_todo_ids = normalize_todo_id_list(payload.get("successor_todo_ids"))
+        if successor_todo_ids:
+            todo["successor_todo_ids"] = successor_todo_ids
     todo["last_event_id"] = event.get("event_id")
     todo["last_append_sequence"] = event.get("append_sequence")
 
@@ -711,6 +715,7 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         action_kind=item.get("action_kind"),
         claimed_by=item.get("claimed_by"),
         unblocks_todo_id=item.get("unblocks_todo_id"),
+        successor_todo_ids=item.get("successor_todo_ids"),
         no_followup=True if item.get("no_followup") == "true" else None,
         **monitor_metadata,
         note=item.get("note"),

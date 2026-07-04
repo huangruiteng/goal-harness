@@ -18,6 +18,7 @@ from .contract import (
     normalize_todo_decision_scope,
     normalize_todo_global_gate,
     normalize_todo_id,
+    normalize_todo_id_list,
     normalize_todo_no_followup,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
@@ -666,17 +667,7 @@ def active_next_action_todo_ids(value: Any) -> set[str]:
 
 
 def _normalized_todo_id_list(value: Any) -> list[str]:
-    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
-    todo_ids: list[str] = []
-    for raw_value in raw_values:
-        for match in re.findall(r"\btodo_[A-Za-z0-9_-]+\b", str(raw_value or "")):
-            todo_id = normalize_todo_id(match)
-            if todo_id and todo_id not in todo_ids:
-                todo_ids.append(todo_id)
-        todo_id = normalize_todo_id(raw_value)
-        if todo_id and todo_id not in todo_ids:
-            todo_ids.append(todo_id)
-    return todo_ids
+    return normalize_todo_id_list(value)
 
 
 def todo_successor_todo_ids(

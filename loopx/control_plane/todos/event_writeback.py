@@ -20,6 +20,7 @@ from .contract import (
     build_todo_id,
     normalize_todo_claimed_by,
     normalize_todo_id,
+    normalize_todo_id_list,
     todo_done_for_status,
 )
 from .text import (
@@ -210,6 +211,7 @@ def complete_event_projected_goal_todo(
     evidence: str | None,
     note: str | None,
     no_followup: bool,
+    successor_todo_ids: list[str] | None,
     claimed_by: str | None,
     clear_claim: bool,
     next_agent_todo: str | None,
@@ -242,6 +244,9 @@ def complete_event_projected_goal_todo(
         completion_payload["note"] = note
     if no_followup:
         completion_payload["no_followup"] = "true"
+    normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
+    if normalized_successor_todo_ids:
+        completion_payload["successor_todo_ids"] = normalized_successor_todo_ids
     store = AppendOnlyStateEventStore(Path(context["event_log_path"]))
     already_done = todo_done_for_status(str(item.get("status") or TODO_STATUS_OPEN))
     completion_event = make_state_event(
@@ -323,6 +328,7 @@ def complete_event_projected_goal_todo(
         "claimed_by": normalize_todo_claimed_by(effective_claimed_by),
         "task_class": item.get("task_class"),
         "action_kind": item.get("action_kind"),
+        "successor_todo_ids": normalized_successor_todo_ids,
         "next_todos": next_results,
         "side_agent_self_merged": bool(side_agent_completion and side_agent_self_merged),
         "state_file": str(context.get("state_file") or ""),

@@ -229,6 +229,22 @@ def normalize_todo_id(value: Any) -> str | None:
     return None
 
 
+def normalize_todo_id_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+    todo_ids: list[str] = []
+    for raw_value in raw_values:
+        for match in re.findall(r"\btodo_[A-Za-z0-9_-]+\b", str(raw_value or "")):
+            todo_id = normalize_todo_id(match)
+            if todo_id and todo_id not in todo_ids:
+                todo_ids.append(todo_id)
+        todo_id = normalize_todo_id(raw_value)
+        if todo_id and todo_id not in todo_ids:
+            todo_ids.append(todo_id)
+    return todo_ids
+
+
 def normalize_required_write_scopes(value: Any) -> list[str]:
     if value is None:
         return []
@@ -489,6 +505,10 @@ def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
             todo_id = normalize_todo_id(value)
             if todo_id:
                 metadata["unblocks_todo_id"] = todo_id
+        elif key in {"successor_todo_id", "successor_todo_ids"}:
+            todo_ids = normalize_todo_id_list(value)
+            if todo_ids:
+                metadata["successor_todo_ids"] = todo_ids
         elif key == "resume_when":
             resume_when = normalize_todo_resume_when(value)
             if resume_when:
@@ -525,6 +545,7 @@ def format_todo_metadata_line(
     blocks_agent: str | None = None,
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
+    successor_todo_ids: Any = None,
     resume_when: str | None = None,
     no_followup: bool | None = None,
     target_key: str | None = None,
@@ -618,6 +639,14 @@ def format_todo_metadata_line(
         raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
     if normalized_unblocks_todo_id:
         fields.append(f"unblocks_todo_id={encode_metadata_value(normalized_unblocks_todo_id)}")
+    normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
+    if successor_todo_ids and not normalized_successor_todo_ids:
+        raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
+    if normalized_successor_todo_ids:
+        fields.append(
+            "successor_todo_ids="
+            f"{encode_metadata_value(','.join(normalized_successor_todo_ids))}"
+        )
     normalized_resume_when = normalize_todo_resume_when(resume_when)
     if resume_when and not normalized_resume_when:
         raise ValueError("resume_when must be public-safe, e.g. todo_done:todo_ab12cd34ef56 or pr_merged:#532")

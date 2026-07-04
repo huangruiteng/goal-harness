@@ -16,6 +16,7 @@ from .control_plane.todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_global_gate,
     normalize_todo_id,
+    normalize_todo_id_list,
     normalize_todo_no_followup,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
@@ -86,6 +87,7 @@ TODO_METADATA_KEYS = (
     "blocks_agent",
     "global_gate",
     "unblocks_todo_id",
+    "successor_todo_ids",
     "resume_when",
     "no_followup",
     "target_key",
@@ -393,6 +395,9 @@ def _normalize_structured_todo_item(
     unblocks_todo_id = normalize_todo_id(item.get("unblocks_todo_id"))
     if unblocks_todo_id:
         normalized["unblocks_todo_id"] = unblocks_todo_id
+    successor_todo_ids = normalize_todo_id_list(item.get("successor_todo_ids"))
+    if successor_todo_ids:
+        normalized["successor_todo_ids"] = successor_todo_ids
     resume_when = normalize_todo_resume_when(item.get("resume_when"))
     if resume_when:
         normalized["resume_when"] = resume_when
