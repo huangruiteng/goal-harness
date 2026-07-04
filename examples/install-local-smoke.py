@@ -193,6 +193,9 @@ def main() -> int:
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
+        assert f"codex prompts: {codex_home / 'prompts'}" in install.stdout, install.stdout
+        assert f"codex skills: {codex_home / 'skills'}" in install.stdout, install.stdout
+        assert f"claude skills: {home / '.claude' / 'skills'}" in install.stdout, install.stdout
 
         wrapper = bin_dir / "loopx"
         assert wrapper.is_symlink(), wrapper
@@ -284,6 +287,25 @@ def main() -> int:
             assert phrase in pr_review_text, phrase
         auto_research_skill = codex_home / "skills" / "loopx-auto-research" / "SKILL.md"
         assert not auto_research_skill.exists(), auto_research_skill
+        loopx_prompt = codex_home / "prompts" / "loopx.md"
+        loopx_prompt_text = loopx_prompt.read_text(encoding="utf-8")
+        assert "loopx-managed-slash-command:v1 command=/loopx surface=codex-prompts" in loopx_prompt_text
+        assert "bootstrap-command-pack --project . --goal-text" in loopx_prompt_text
+        loopx_global_prompt = codex_home / "prompts" / "loopx-global-summary.md"
+        loopx_global_prompt_text = loopx_global_prompt.read_text(encoding="utf-8")
+        assert "loopx global-summary" in loopx_global_prompt_text, loopx_global_prompt_text
+        loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
+        loopx_command_skill_text = loopx_command_skill.read_text(encoding="utf-8")
+        assert "surface=codex-skills" in loopx_command_skill_text, loopx_command_skill_text
+        claude_loopx_skill = home / ".claude" / "skills" / "loopx" / "SKILL.md"
+        claude_loopx_skill_text = claude_loopx_skill.read_text(encoding="utf-8")
+        assert "surface=claude-skills" in claude_loopx_skill_text, claude_loopx_skill_text
+        assert not (home / ".claude" / "commands" / "loopx.md").exists(), (
+            "default installer must not install the opt-in Claude adapter command"
+        )
+        assert not (home / ".claude" / "settings.json").exists(), (
+            "default installer must not install Claude adapter hooks/settings"
+        )
         doc_registry_skill = codex_home / "skills" / "loopx-doc-registry" / "SKILL.md"
         doc_registry_text = " ".join(doc_registry_skill.read_text(encoding="utf-8").split())
         for phrase in (
