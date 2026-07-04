@@ -444,6 +444,23 @@ def _is_monitor_only_lane(
     )
 
 
+def _monitor_only_lane_has_future_schedule(
+    agent_todo_summary: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(agent_todo_summary, dict):
+        return False
+    if "monitor_due_count" not in agent_todo_summary:
+        return False
+    if "monitor_schedule_gap_count" not in agent_todo_summary:
+        return False
+    if safe_non_negative_int(agent_todo_summary.get("monitor_due_count")) > 0:
+        return False
+    if safe_non_negative_int(agent_todo_summary.get("monitor_schedule_gap_count")) > 0:
+        return False
+    monitor_items = agent_todo_summary.get("monitor_open_items")
+    return isinstance(monitor_items, list) and len(monitor_items) > 0
+
+
 def _blocking_handoff_gate_count(
     agent_todo_summary: dict[str, Any] | None,
     *,
@@ -557,6 +574,8 @@ def derive_goal_frontier_replan_obligation_from_summaries(
     if agent_counts.get("monitor", 0) <= 0:
         return None
     if agent_counts.get("advancement", 0) > 0 or total_frontier_advancement > 0:
+        return None
+    if _monitor_only_lane_has_future_schedule(agent_todo_summary):
         return None
 
     return {

@@ -468,6 +468,50 @@ def todo_summary_monitor_schedule_gap_count(
     )
 
 
+def todo_summary_has_only_future_scoped_monitor_work(summary: dict[str, Any] | None) -> bool:
+    """Return true when the scoped agent has only non-due monitor work left."""
+
+    agent_id = todo_summary_claim_scope_agent_id(summary)
+    if not agent_id or not isinstance(summary, dict):
+        return False
+    if not todo_summary_monitor_items(summary):
+        return False
+    if todo_summary_monitor_due_count(summary) > 0:
+        return False
+    if todo_summary_monitor_schedule_gap_count(summary) > 0:
+        return False
+    if _positive_int(summary.get("current_agent_claimed_advancement_count")) > 0:
+        return False
+
+    for key in (
+        "current_agent_claimed_advancement_items",
+        "unclaimed_priority_open_items",
+        "first_executable_items",
+        "executable_backlog_items",
+    ):
+        values = summary.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            if not todo_item_is_actionable_open(item):
+                continue
+            if todo_item_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+                continue
+            if todo_item_claimed_by_agent_or_unclaimed(item, agent_id=agent_id):
+                return False
+    return True
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
 def todo_summary_first_executable_item(
     summary: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
