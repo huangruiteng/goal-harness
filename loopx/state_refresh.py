@@ -13,7 +13,7 @@ from .feedback import validate_local_control_text, validate_public_safe_text
 from .file_lock import exclusive_file_lock
 from .global_registry import sync_project_registry_to_global
 from .history import load_registry, reserve_unique_run_paths, unique_run_paths
-from .local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
+from .control_plane.runtime.local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
 from .paths import resolve_runtime_root
 from .control_plane.goals.goal_vision import normalize_goal_vision_packet
 from .registry import registry_goals, resolve_state_file

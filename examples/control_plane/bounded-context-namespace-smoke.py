@@ -18,11 +18,13 @@ LEGACY_ROOT_MODULES = {
     "loopx/decision_scope.py": "loopx.control_plane.todos.decision_scope",
     "loopx/delivery_batch_scale.py": "loopx.control_plane.work_items.delivery_batch_scale",
     "loopx/delivery_outcome.py": "loopx.control_plane.work_items.delivery_outcome",
+    "loopx/local_state_write_correctness.py": "loopx.control_plane.runtime.local_state_write_correctness",
     "loopx/scheduler_state.py": "loopx.control_plane.scheduler.state",
     "loopx/status_projection_cache.py": "loopx.control_plane.runtime.status_projection_cache",
     "loopx/task_lease.py": "loopx.control_plane.work_items.task_lease",
 }
 CANONICAL_MODULES = {
+    "loopx.control_plane.runtime.local_state_write_correctness",
     "loopx.control_plane.runtime.status_projection_cache",
     "loopx.control_plane.todos.decision_scope",
     "loopx.control_plane.scheduler.state",
