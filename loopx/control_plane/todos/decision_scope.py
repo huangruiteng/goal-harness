@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .control_plane.todos.contract import (
+from .contract import (
     normalize_todo_decision_scope,
     normalize_todo_id,
     normalize_todo_required_decision_scopes,

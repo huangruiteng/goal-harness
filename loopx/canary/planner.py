@@ -137,7 +137,7 @@ FAMILY_SELECTOR_HINTS: dict[str, tuple[str, ...]] = {
         "deferred",
         "gate",
         "loopx/operator_gate.py",
-        "loopx/decision_scope.py",
+        "loopx/control_plane/todos/decision_scope.py",
         "loopx/feedback.py",
     ),
     "State And Boundary": (
@@ -567,6 +567,7 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "todo detail",
             "loopx/todos.py",
             "loopx/control_plane/todos/contract.py",
+            "loopx/control_plane/todos/decision_scope.py",
             "loopx/cli_commands/todo",
         ),
         "checks": [
