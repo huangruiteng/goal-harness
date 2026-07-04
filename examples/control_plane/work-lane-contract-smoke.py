@@ -743,7 +743,7 @@ def assert_mixed_monitor_and_advancement_routes_to_advancement() -> None:
     assert [item["task_class"] for item in first_items] == ["advancement_task", "continuous_monitor"], guard
 
 
-def assert_not_due_monitor_only_requires_replan_before_quiet() -> None:
+def assert_not_due_monitor_only_quiets_until_material_transition() -> None:
     guard = build_quota_should_run(
         status_payload(
             status="monitor_schedule_waiting",
@@ -763,13 +763,15 @@ def assert_not_due_monitor_only_requires_replan_before_quiet() -> None:
         goal_id=GOAL_ID,
     )
     lane = guard["work_lane_contract"]
-    assert guard["decision"] == "autonomous_replan_required", guard
-    assert guard["effective_action"] == "autonomous_replan_required", guard
+    assert guard["decision"] == "skip", guard
+    assert guard["effective_action"] == "monitor_quiet_skip", guard
     assert lane["lane"] == "continuous_monitor", lane
-    assert lane["monitor_kind"] == "todo_monitor", lane
-    assert lane["must_attempt_work"] is False, lane
-    assert guard["heartbeat_recommendation"]["recommended_mode"] == "autonomous_replan_required", guard
-    assert guard["interaction_contract"]["mode"] == "autonomous_replan", guard
+    assert lane["obligation"] == "quiet_until_material_monitor_transition", lane
+    assert guard["heartbeat_recommendation"]["recommended_mode"] == "monitor_quiet_until_material_transition", guard
+    assert guard["interaction_contract"]["mode"] == "monitor_quiet_skip", guard
+    assert guard["interaction_contract"]["agent_channel"]["quiet_noop_allowed"] is True, guard
+    assert guard["goal_frontier_projection"]["replan_required"] is False, guard
+    assert guard.get("autonomous_replan_obligation") is None, guard
     assert guard["agent_todo_summary"]["monitor_due_count"] == 0, guard
 
 
@@ -2299,7 +2301,7 @@ def main() -> int:
     assert_structured_todo_lane_registration_beats_text_fallback()
     assert_structured_monitor_registration_beats_action_text()
     assert_mixed_monitor_and_advancement_routes_to_advancement()
-    assert_not_due_monitor_only_requires_replan_before_quiet()
+    assert_not_due_monitor_only_quiets_until_material_transition()
     assert_due_monitor_only_requires_attempt()
     assert_due_monitor_lower_priority_does_not_preempt_advancement()
     assert_due_monitor_higher_priority_preempts_advancement()

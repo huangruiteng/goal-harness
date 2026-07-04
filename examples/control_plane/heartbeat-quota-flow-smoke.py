@@ -422,6 +422,95 @@ def write_external_monitor_advancement_fixture(root: Path) -> tuple[Path, Path, 
     return project, runtime, registry_path
 
 
+def write_scoped_future_external_monitor_fixture(root: Path) -> tuple[Path, Path, Path]:
+    project = root / "scoped-future-external-monitor-project"
+    runtime = root / "scoped-future-external-monitor-runtime"
+    state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_path = project / state_file
+    registry_path = project / ".loopx" / "registry.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        "---\n"
+        "status: external_worker_running_v0\n"
+        "owner_mode: goal\n"
+        'objective: "Exercise agent-scoped future monitor projection."\n'
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Scoped Future External Monitor Fixture\n\n"
+        "## Next Action\n\n"
+        "- Observe active external worker via compact public-safe markers only.\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] [P1-monitor] Observe active external worker via compact markers only; "
+        "if no new result exists, quiet no-op without quota spend.\n"
+        "  <!-- loopx:todo todo_id=todo_side_future_external_monitor status=open "
+        "task_class=continuous_monitor action_kind=monitor_external_worker "
+        "claimed_by=codex-side-bypass target_key=external-worker:fixture "
+        "cadence=1d next_due_at=2999-01-01T00:00:00+00:00 "
+        "last_checked_at=2026-01-01T00:00:00+00:00 material_change=false -->\n",
+        encoding="utf-8",
+    )
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "heartbeat-flow-fixture",
+                        "status": "external_worker_running_v0",
+                        "repo": str(REPO_ROOT),
+                        "state_file": str(state_path),
+                        "adapter": {
+                            "kind": "harness_self_improvement",
+                            "status": "connected-read-only",
+                        },
+                        "coordination": {
+                            "registered_agents": [
+                                "codex-main-control",
+                                "codex-side-bypass",
+                            ],
+                            "primary_agent": "codex-main-control",
+                        },
+                        "authority_sources": [],
+                        "quota": {
+                            "compute": 1.0,
+                            "window_hours": 24,
+                            "allowed_slots": 5,
+                        },
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runs_dir = runtime / "goals" / GOAL_ID / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    progress_record = {
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        "goal_id": GOAL_ID,
+        "classification": "external_worker_running_v0",
+        "recommended_action": "Observe active external worker via compact public-safe markers only.",
+        "health_check": "state_file 1/1; registry_goal 1/1",
+        "delivery_batch_scale": "single_surface",
+        "json_path": str(runs_dir / "2026-01-01T00-00-00+00-00.json"),
+        "markdown_path": str(runs_dir / "2026-01-01T00-00-00+00-00.md"),
+    }
+    Path(progress_record["json_path"]).write_text(json.dumps(progress_record) + "\n", encoding="utf-8")
+    Path(progress_record["markdown_path"]).write_text(
+        "# Fixture Future External Monitor\n",
+        encoding="utf-8",
+    )
+    with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(progress_record) + "\n")
+    return project, runtime, registry_path
+
+
 def write_operator_gate_fixture(root: Path) -> tuple[Path, Path, Path]:
     project = root / "operator-gate-project"
     runtime = root / "operator-gate-runtime"
@@ -673,36 +762,35 @@ def main() -> int:
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert first_guard["effective_action"] == "autonomous_replan_required", first_guard
-        assert first_guard["should_run"] is True, first_guard
-        assert first_guard["heartbeat_recommendation"]["recommended_mode"] == "autonomous_replan_required", first_guard
-        obligation = first_guard["autonomous_replan_obligation"]
-        assert obligation["triggers"][0]["kind"] == "frontier_exhausted_monitor_lane", obligation
-        assert obligation["stall_threshold"] == 1, obligation
-        assert obligation["guidance_actions"] == [
-            "create_successor",
-            "supersede_monitor",
-            "set_watch_expiry",
-            "record_no_followup",
-        ], obligation
-        assert "another monitor-only quiet poll" in obligation["recommended_action"], obligation
-        assert first_guard["execution_obligation"]["kind"] == "autonomous_replan_required", first_guard
-        assert first_guard["execution_obligation"]["must_attempt_work"] is True, first_guard
-        assert first_guard["automation_liveness"]["automation_action"] == "execute_bounded_work", first_guard
+        assert first_guard["decision"] == "skip", first_guard
+        assert first_guard["effective_action"] == "monitor_quiet_skip", first_guard
+        assert first_guard["should_run"] is False, first_guard
+        assert first_guard["heartbeat_recommendation"]["recommended_mode"] == (
+            "monitor_quiet_until_material_transition"
+        ), first_guard
+        assert first_guard.get("autonomous_replan_obligation") is None, first_guard
+        assert first_guard["execution_obligation"]["kind"] == "monitor_quiet_skip", first_guard
+        assert first_guard["execution_obligation"]["must_attempt_work"] is False, first_guard
+        assert first_guard["automation_liveness"]["automation_action"] == "keep_active_quiet", first_guard
         assert first_guard["automation_liveness"]["pause_allowed"] is False, first_guard
-        assert first_guard["scheduler_hint"]["action"] == "run_now", first_guard
-        assert first_guard["scheduler_hint"]["codex_app"]["recommended_interval_minutes"] == 3, first_guard
-        assert first_guard["scheduler_hint"]["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=3", first_guard
+        assert first_guard["scheduler_hint"]["action"] == "backoff_until_material_transition", first_guard
+        assert first_guard["scheduler_hint"]["cadence_class"] == "monitor_wait", first_guard
+        assert first_guard["scheduler_hint"]["codex_app"]["recommended_interval_minutes"] == 15, first_guard
+        assert first_guard["scheduler_hint"]["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", first_guard
         reset = first_guard["scheduler_hint"]["reset_policy"]
-        assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=3", reset
+        assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=15", reset
         assert "reset_condition_summary" not in reset, reset
-        assert "automation=execute_bounded_work" in first_guard["protocol_action_packet"]["summary"], first_guard
+        frontier = first_guard["goal_frontier_projection"]
+        assert frontier["monitor_only_lanes"]["present"] is True, frontier
+        assert frontier["monitor_only_lanes"]["quiet_until_material_transition"] is True, frontier
+        assert frontier["replan_required"] is False, frontier
+        assert "automation=keep_active_quiet" in first_guard["protocol_action_packet"]["summary"], first_guard
         assert count_events(runtime, "quota_monitor_poll") == 0, first_guard
         interaction = first_guard["interaction_contract"]
-        assert interaction["mode"] == "autonomous_replan", interaction
-        assert interaction["agent_channel"]["must_attempt"] is True, interaction
-        assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
-        assert interaction["cli_channel"]["spend_after_validation"] is True, interaction
+        assert interaction["mode"] == "monitor_quiet_skip", interaction
+        assert interaction["agent_channel"]["must_attempt"] is False, interaction
+        assert interaction["agent_channel"]["quiet_noop_allowed"] is True, interaction
+        assert interaction["cli_channel"]["spend_after_validation"] is False, interaction
 
         refresh = run_cli(
             root,
@@ -1005,6 +1093,41 @@ def main() -> int:
         assert poll["after"]["effective_action"] == "normal_run", poll
         assert count_spend_events(runtime) == 0, poll
         assert count_events(runtime, "quota_monitor_poll") == 1, poll
+
+    with tempfile.TemporaryDirectory(prefix="loopx-scoped-future-external-monitor-") as tmp:
+        root = Path(tmp)
+        project, runtime, registry_path = write_scoped_future_external_monitor_fixture(root)
+        guard = run_cli(
+            root,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            "codex-side-bypass",
+            "--scan-path",
+            str(project),
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert guard["decision"] != "observe", guard
+        assert guard["effective_action"] != "external_evidence_observe", guard
+        assert "external_evidence_observation" not in guard, guard
+        lane = guard["work_lane_contract"]
+        assert lane["lane"] == "continuous_monitor", lane
+        assert lane["obligation"] == "quiet_until_material_monitor_transition", lane
+        assert lane["must_attempt_work"] is False, lane
+        hint = guard["agent_lane_frontier_hint"]
+        assert hint["decision"] == "quiet_noop_blocker", hint
+        assert hint["reason_code"] == "only_current_agent_monitor_work_remains", hint
+        if guard["effective_action"] == "monitor_quiet_skip":
+            interaction = guard["interaction_contract"]
+            assert interaction["mode"] == "monitor_quiet_skip", interaction
+            assert interaction["agent_channel"]["must_attempt"] is False, interaction
+            assert interaction["agent_channel"]["quiet_noop_allowed"] is True, interaction
+        else:
+            assert guard["effective_action"] == "side_agent_workspace_repair", guard
+            assert guard["workspace_guard"]["blocks_delivery"] is True, guard
 
     with tempfile.TemporaryDirectory(prefix="loopx-external-evidence-projection-") as tmp:
         root = Path(tmp)

@@ -608,7 +608,7 @@ def assert_due_monitor_poll_state_machine(root: Path) -> None:
     assert monitor_payload["todo_writeback"]["next_due_at"], monitor_payload
     assert monitor_payload["todo_writeback"]["consecutive_no_change"] == 1, monitor_payload
 
-    replan_payload = run_cli(
+    quiet_payload = run_cli(
         registry_path,
         runtime_root,
         "quota",
@@ -618,17 +618,19 @@ def assert_due_monitor_poll_state_machine(root: Path) -> None:
         "--agent-id",
         AGENT_ID,
     )
-    assert replan_payload["decision"] == "autonomous_replan_required", replan_payload
-    assert replan_payload["effective_action"] == "autonomous_replan_required", replan_payload
-    assert replan_payload["execution_obligation"]["must_attempt_work"] is True, replan_payload
-    assert replan_payload["execution_obligation"]["kind"] == "autonomous_replan_required", replan_payload
-    assert replan_payload["interaction_contract"]["mode"] == "autonomous_replan", replan_payload
-    assert replan_payload["work_lane_contract"]["obligation"] == "quiet_until_material_monitor_transition", replan_payload
-    assert replan_payload["work_lane_contract"]["must_attempt_work"] is False, replan_payload
-    assert replan_payload["goal_frontier_projection"]["monitor_only_lanes"]["present"] is True, replan_payload
-    assert replan_payload["goal_frontier_projection"]["replan_required"] is True, replan_payload
-    assert replan_payload["agent_todo_summary"]["monitor_due_count"] == 0, replan_payload
-    assert replan_payload["scheduler_hint"]["cadence_class"] == "active_work", replan_payload
+    assert quiet_payload["decision"] == "skip", quiet_payload
+    assert quiet_payload["effective_action"] == "monitor_quiet_skip", quiet_payload
+    assert quiet_payload["execution_obligation"]["must_attempt_work"] is False, quiet_payload
+    assert quiet_payload["execution_obligation"]["kind"] == "monitor_quiet_skip", quiet_payload
+    assert quiet_payload["interaction_contract"]["mode"] == "monitor_quiet_skip", quiet_payload
+    assert quiet_payload["work_lane_contract"]["obligation"] == (
+        "quiet_until_material_monitor_transition"
+    ), quiet_payload
+    assert quiet_payload["work_lane_contract"]["must_attempt_work"] is False, quiet_payload
+    assert quiet_payload["goal_frontier_projection"]["monitor_only_lanes"]["present"] is True, quiet_payload
+    assert quiet_payload["goal_frontier_projection"]["replan_required"] is False, quiet_payload
+    assert quiet_payload["agent_todo_summary"]["monitor_due_count"] == 0, quiet_payload
+    assert quiet_payload["scheduler_hint"]["cadence_class"] == "monitor_wait", quiet_payload
 
 
 def run_fixture_canary(root: Path) -> None:

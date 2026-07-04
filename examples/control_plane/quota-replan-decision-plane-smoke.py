@@ -38,8 +38,12 @@ SIDE_AGENT_REPLAN_OBLIGATION = {
 }
 
 
-def monitor_item() -> dict:
-    return {
+def monitor_item(
+    *,
+    cadence: str | None = "15m",
+    next_due_at: str | None = FUTURE_DUE_AT,
+) -> dict:
+    item = {
         "index": 1,
         "todo_id": "todo_monitor_wait",
         "text": "[P1-monitor] Monitor a fixture signal only when material transition appears.",
@@ -50,9 +54,12 @@ def monitor_item() -> dict:
         "action_kind": "monitor",
         "claimed_by": SIDE_AGENT,
         "target_key": "fixture-signal",
-        "cadence": "15m",
-        "next_due_at": FUTURE_DUE_AT,
     }
+    if cadence is not None:
+        item["cadence"] = cadence
+    if next_due_at is not None:
+        item["next_due_at"] = next_due_at
+    return item
 
 
 def primary_claimed_advancement() -> dict:
@@ -189,7 +196,7 @@ def agent_vision_gap_run() -> dict:
 
 def assert_replan_beats_monitor_quiet_skip() -> None:
     guard = build_quota_should_run(
-        status_payload([monitor_item()]),
+        status_payload([monitor_item()], replan_obligation=SIDE_AGENT_REPLAN_OBLIGATION),
         goal_id=GOAL_ID,
         agent_id=SIDE_AGENT,
     )
@@ -209,6 +216,7 @@ def assert_replan_beats_monitor_quiet_skip() -> None:
         "ready_todo_ids": [],
     }, guard
     assert guard["goal_frontier_projection"]["acceptance_gaps"] == [], guard
+    assert guard["autonomous_replan_scope"]["applies"] is True, guard
     assert guard["autonomous_replan_decision"]["decision_plane"] == (
         "goal_frontier_before_lane_quiet_or_agent_scope_wait"
     ), guard
@@ -217,6 +225,25 @@ def assert_replan_beats_monitor_quiet_skip() -> None:
     assert "goal_frontier_projection: replan_required=True" in markdown, markdown
     assert "deferred_ready=0 acceptance_gaps=0" in markdown, markdown
     assert "autonomous_replan_decision: decision=autonomous_replan_required" in markdown, markdown
+
+
+def assert_future_scheduled_monitor_quiets_without_generated_replan() -> None:
+    guard = build_quota_should_run(
+        status_payload([monitor_item()], replan_obligation=None),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "skip", guard
+    assert guard["effective_action"] == "monitor_quiet_skip", guard
+    assert guard["should_run"] is False, guard
+    assert guard["heartbeat_recommendation"]["recommended_mode"] == (
+        "monitor_quiet_until_material_transition"
+    ), guard
+    assert guard["interaction_contract"]["mode"] == "monitor_quiet_skip", guard
+    assert guard["interaction_contract"]["agent_channel"]["must_attempt"] is False, guard
+    assert guard["interaction_contract"]["agent_channel"]["quiet_noop_allowed"] is True, guard
+    assert guard["goal_frontier_projection"]["replan_required"] is False, guard
+    assert guard.get("autonomous_replan_obligation") is None, guard
 
 
 def assert_replan_preserves_current_agent_runnable_frontier() -> None:
@@ -335,21 +362,28 @@ def assert_unscoped_replan_defaults_to_primary_agent() -> None:
     assert monitor_side_guard.get("autonomous_replan_obligation") is None, monitor_side_guard
 
 
-def assert_empty_monitor_frontier_derives_replan() -> None:
+def assert_monitor_schedule_gap_requires_bounded_repair() -> None:
     guard = build_quota_should_run(
-        status_payload([monitor_item()], replan_obligation=None),
+        status_payload([monitor_item(cadence=None, next_due_at=None)], replan_obligation=None),
         goal_id=GOAL_ID,
         agent_id=SIDE_AGENT,
     )
-    assert guard["decision"] == "autonomous_replan_required", guard
-    assert guard["effective_action"] == "autonomous_replan_required", guard
+    assert guard["decision"] == "run", guard
+    assert guard["effective_action"] == "normal_run", guard
     assert guard["should_run"] is True, guard
-    assert guard["interaction_contract"]["mode"] == "autonomous_replan", guard
+    assert guard["interaction_contract"]["mode"] == "bounded_delivery", guard
     assert guard["interaction_contract"]["agent_channel"]["must_attempt"] is True, guard
-    obligation = guard["autonomous_replan_obligation"]
-    assert obligation["required"] is True, guard
-    assert obligation["triggers"][0]["kind"] == "frontier_exhausted_monitor_lane", guard
-    assert guard["goal_frontier_projection"]["replan_required"] is True, guard
+    assert guard.get("autonomous_replan_obligation") is None, guard
+    assert guard["execution_obligation"]["kind"] == "work_lane_contract", guard
+    assert guard["execution_obligation"]["contract_obligation"] == (
+        "repair_monitor_schedule_metadata"
+    ), guard
+    lane = guard["work_lane_contract"]
+    assert lane["lane"] == "advancement_task", lane
+    assert lane["monitor_kind"] == "todo_monitor_schedule_gap", lane
+    assert lane["obligation"] == "repair_monitor_schedule_metadata", lane
+    assert lane["monitor_schedule_gap_count"] == 1, lane
+    assert guard["goal_frontier_projection"]["replan_required"] is False, guard
     assert guard["goal_frontier_projection"]["remaining_advancement_frontier"] == {
         "current_agent_claimed_advancement_count": 0,
         "unclaimed_advancement_count": 0,
@@ -429,11 +463,12 @@ def assert_blocking_handoff_gate_beats_derived_monitor_replan() -> None:
 
 def main() -> None:
     assert_replan_beats_monitor_quiet_skip()
+    assert_future_scheduled_monitor_quiets_without_generated_replan()
     assert_replan_preserves_current_agent_runnable_frontier()
     assert_agent_vision_gap_derives_replan()
     assert_agent_scoped_replan_beats_agent_scope_wait()
     assert_unscoped_replan_defaults_to_primary_agent()
-    assert_empty_monitor_frontier_derives_replan()
+    assert_monitor_schedule_gap_requires_bounded_repair()
     assert_agent_ack_survives_other_agent_run_and_monitor_poll()
     assert_blocking_handoff_gate_beats_derived_monitor_replan()
     print("quota-replan-decision-plane-smoke ok")

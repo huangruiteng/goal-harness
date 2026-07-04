@@ -135,6 +135,7 @@ from .control_plane.todos.projection import (
     todo_priority_label as projection_todo_priority_label,
     todo_priority_rank as projection_todo_priority_rank,
     todo_projection_sort_key as projection_todo_projection_sort_key,
+    todo_summary_has_only_future_scoped_monitor_work as projection_todo_summary_has_only_future_scoped_monitor_work,
     todo_summary_claim_scope_agent_id as projection_todo_summary_claim_scope_agent_id,
     todo_summary_first_executable_item as projection_todo_summary_first_executable_item,
     todo_summary_monitor_items as projection_todo_summary_monitor_items,
@@ -448,6 +449,8 @@ def _external_evidence_poll_signal(
 
     scoped_monitor_handle = _projected_monitor_handle(agent_todo_summary)
     scoped_monitor_watch = _scoped_monitor_watch_without_advancement(agent_todo_summary)
+    if _todo_summary_has_only_future_scoped_monitor_work(agent_todo_summary):
+        return None
     project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
     action_texts = [
         str(value or "").strip()
@@ -3675,6 +3678,10 @@ def _todo_summary_monitor_schedule_gap_count(
         summary,
         gap_items=gap_items,
     )
+
+
+def _todo_summary_has_only_future_scoped_monitor_work(summary: dict[str, Any] | None) -> bool:
+    return projection_todo_summary_has_only_future_scoped_monitor_work(summary)
 
 
 def _first_executable_todo_item(agent_todo_summary: dict[str, Any] | None) -> dict[str, Any] | None:
