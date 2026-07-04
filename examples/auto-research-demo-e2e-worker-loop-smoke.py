@@ -338,6 +338,7 @@ def main() -> int:
         visible_loaded_collective = visible_loaded_payload["collective_research_rounds"]
         assert visible_loaded_collective["round_unit"] == "collective_agent_pass", visible_loaded_collective
         assert visible_loaded_collective["collective_round_count"] == 4, visible_loaded_collective
+        assert visible_loaded_collective["full_participation_verified"] is False, visible_loaded_collective
         assert visible_loaded_collective["multi_round_research_verified"] is False, visible_loaded_collective
         assert visible_loaded_collective["holdout_improvement_count"] == 1, visible_loaded_collective
         assert visible_loaded_wake["wakeup_model"] == "fixed_prompt_broadcast", visible_loaded_wake
@@ -373,6 +374,8 @@ def main() -> int:
         assert visible_loaded_readiness["collective_research_rounds"]["holdout_improvement_count"] == 1, visible_loaded_readiness
         loaded_improvement = visible_loaded_readiness["improvement_summary"]
         assert loaded_improvement["baseline_metric"] == 1.0, loaded_improvement
+        assert loaded_improvement["dev_metric_sequence"] == [4.0], loaded_improvement
+        assert loaded_improvement["holdout_metric_sequence"] == [4.5], loaded_improvement
         assert loaded_improvement["final_dev_metric"] == 4.0, loaded_improvement
         assert loaded_improvement["final_holdout_metric"] == 4.5, loaded_improvement
         assert loaded_improvement["best_metric_source"] == "final_holdout", loaded_improvement
@@ -422,6 +425,7 @@ def main() -> int:
         fake_bin = temp / "bin"
         fake_bin.mkdir()
         fake_codex = fake_bin / "fake-codex-tui"
+        fake_loopx = fake_bin / "loopx-under-test"
         codex_invocations = temp / "codex-invocations.txt"
         fake_codex.write_text(
             "#!/usr/bin/env sh\n"
@@ -435,6 +439,12 @@ def main() -> int:
             encoding="utf-8",
         )
         fake_codex.chmod(0o755)
+        fake_loopx.write_text(
+            "#!/usr/bin/env sh\n"
+            f"exec {shlex.quote(sys.executable)} -m loopx.cli \"$@\"\n",
+            encoding="utf-8",
+        )
+        fake_loopx.chmod(0o755)
         registry = temp / "registry.json"
         runtime_root = temp / "runtime"
         registry.write_text(
@@ -607,8 +617,10 @@ def main() -> int:
                         session_name,
                         "--codex-bin",
                         "fake-codex-tui",
+                        "--cli-bin",
+                        str(fake_loopx),
                         "--visible-live-evidence-wait-seconds",
-                        "8",
+                        "24",
                     ],
                     cwd=workspace,
                     env=env,
@@ -647,15 +659,17 @@ def main() -> int:
                 assert visible_proof["evidence_source"] == "visible_launcher_artifact", visible_proof
                 assert visible_proof["visible_lanes_launched"] is True, visible_proof
                 assert visible_proof["pane_local_a2a_rounds_loaded"] is True, visible_proof
-                assert visible_proof["pane_local_a2a_round_count"] >= 4, visible_proof
+                assert visible_proof["pane_local_a2a_round_count"] >= 8, visible_proof
                 assert visible_proof["pane_local_a2a_multi_tick_verified"] is True, visible_proof
                 assert visible_proof["collective_research_rounds_loaded"] is True, visible_proof
                 assert visible_proof["decentralized_a2a_rounds_verified"] is False, visible_proof
+                assert visible_proof["collective_research_round_count"] >= 8, visible_proof
+                assert visible_proof["holdout_improvement_count"] == 2, visible_proof
                 assert visible_proof["cadence_wake_loaded"] is True, visible_proof
                 assert visible_proof["cadence_wake_verified"] is True, visible_proof
                 live_evidence = visible_payload.get("live_worker_evidence", {"loaded": False})
                 assert live_evidence["loaded"] is True, live_evidence
-                assert live_evidence["holdout_metric"] == 4.5, live_evidence
+                assert live_evidence["holdout_metric"] == 5.2, live_evidence
                 visible_rounds = visible_payload["visible_pane_a2a_rounds"]
                 assert visible_rounds["source"] == "visible_launcher_artifact", visible_rounds
                 assert visible_rounds["coordination_model"] == "decentralized_state_a2a", visible_rounds
@@ -725,18 +739,20 @@ def main() -> int:
                 assert visible_readiness["missing_requirements"] == [
                     "collective_research_multi_round_verified",
                 ], visible_readiness
-                assert visible_readiness["rounds"]["max_completed"] >= 4, visible_readiness
+                assert visible_readiness["rounds"]["max_completed"] >= 8, visible_readiness
                 assert visible_readiness["rounds"]["counts_as_collective_research_round"] is False, visible_readiness
+                assert visible_readiness["collective_research_rounds"]["count"] >= 8, visible_readiness
                 assert visible_readiness["collective_research_rounds"]["multi_round_verified"] is False, visible_readiness
+                assert visible_readiness["collective_research_rounds"]["holdout_improvement_count"] == 2, visible_readiness
                 improvement = visible_readiness["improvement_summary"]
                 assert improvement["baseline_metric"] == 1.0, improvement
-                assert improvement["dev_metric_sequence"] == [], improvement
-                assert improvement["holdout_metric_sequence"] == [4.5], improvement
-                assert improvement["holdout_improvement_count"] == 1, improvement
-                assert improvement["best_metric"] == 4.5, improvement
+                assert improvement["dev_metric_sequence"] == [4.0, 4.8], improvement
+                assert improvement["holdout_metric_sequence"] == [4.5, 5.2], improvement
+                assert improvement["holdout_improvement_count"] == 2, improvement
+                assert improvement["best_metric"] == 5.2, improvement
                 assert improvement["best_metric_source"] == "final_holdout", improvement
                 assert improvement["improved_over_baseline"] is True, improvement
-                assert improvement["holdout_delta_over_dev"] is None, improvement
+                assert abs(improvement["holdout_delta_over_dev"] - 0.4) < 0.000001, improvement
                 assert "auto-research start" in visible_readiness["one_command"], visible_readiness
                 assert visible_readiness["one_command"].endswith("--execute"), visible_readiness
                 assert "--wake-visible-after-launch" not in visible_readiness["one_command"], visible_readiness
