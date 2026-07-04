@@ -306,12 +306,12 @@ def _gate_status(
     for run in [catalog_run, risk_profile_run, boundary_run]:
         if isinstance(run, dict) and not run.get("ok"):
             run_failures.append(run)
-    if not changed_files:
+    if direct_failures or run_failures:
+        status = "failed"
+    elif not changed_files:
         status = "no_changes"
     elif manual_holds:
         status = "manual_review_required"
-    elif direct_failures or run_failures:
-        status = "failed"
     elif not execute:
         status = "preview_only"
     else:
@@ -355,7 +355,9 @@ def downgrade_inherited_baseline_failures(
     changed = {_norm_path(path) for path in changed_files if _norm_path(path)}
     changed_mentions = {path for path in changed}
     for path in list(changed):
-        changed_mentions.add(Path(path).name)
+        basename = Path(path).name
+        if Path(path).suffix:
+            changed_mentions.add(basename)
 
     changed_any = False
     for check in run.get("selected_checks", []):

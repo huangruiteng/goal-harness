@@ -12,6 +12,42 @@ done
 script_dir="$(cd -P "$(dirname "$script_path")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
+loopx_command=""
+loopx_subcommand=""
+skip_next_arg=0
+for arg in "$@"; do
+  if [[ "$skip_next_arg" == "1" ]]; then
+    skip_next_arg=0
+    continue
+  fi
+  case "$arg" in
+    --format|--registry|--runtime-root|--goal-id|--agent-id|--git-diff-base|--tier|--timeout-seconds|--changed-file|--catalog|--surface|--family|--profile|--suite|--module|--exclude-module|--script|--limit|--offset|--max-checks-per-family|--max-checks-per-profile)
+      skip_next_arg=1
+      continue
+      ;;
+    --*)
+      continue
+      ;;
+  esac
+  if [[ -z "$loopx_command" ]]; then
+    loopx_command="$arg"
+  elif [[ -z "$loopx_subcommand" ]]; then
+    loopx_subcommand="$arg"
+    break
+  fi
+done
+
+if [[ "$loopx_command" == "canary" && "$loopx_subcommand" == "premerge" ]]; then
+  checkout_root=""
+  if command -v git >/dev/null 2>&1; then
+    checkout_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  fi
+  if [[ -n "$checkout_root" && -f "$checkout_root/loopx/cli.py" && -d "$checkout_root/examples" ]]; then
+    # Pre-merge validation must exercise the checkout under review, not a stale release snapshot.
+    repo_root="$checkout_root"
+  fi
+fi
+
 python_bin="${LOOPX_PYTHON:-}"
 if [[ -z "$python_bin" ]]; then
   python_bin="python3"
