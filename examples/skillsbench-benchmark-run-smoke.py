@@ -1649,8 +1649,14 @@ def test_skillsbench_final_verifier_timeout_override_can_extend_timeout() -> Non
     class FakeRollout:
         def __init__(self) -> None:
             self._env = types.SimpleNamespace()
+            self._task = types.SimpleNamespace(
+                config=types.SimpleNamespace(
+                    verifier=types.SimpleNamespace(timeout_sec=300)
+                )
+            )
 
         async def verify(self) -> None:
+            assert self._task.config.verifier.timeout_sec == 1800
             return await self._env.exec("/verifier/test.sh", timeout_sec=900)
 
         async def soft_verify(self) -> None:
@@ -1680,10 +1686,14 @@ def test_skillsbench_final_verifier_timeout_override_can_extend_timeout() -> Non
         FakeRollout.soft_verify = original_soft_verify
 
     assert calls == [("/verifier/test.sh", {"timeout_sec": 1800})], calls
+    assert rollout._task.config.verifier.timeout_sec == 300
     prereqs = plan["runner_prerequisites"]
     assert prereqs["benchflow_final_verifier_timeout_enabled"] is True, prereqs
     assert prereqs["benchflow_final_verifier_timeout_sec"] == 1800, prereqs
     assert prereqs["benchflow_final_verifier_timeout_override_count"] == 1, prereqs
+    assert (
+        prereqs["benchflow_final_verifier_outer_timeout_override_count"] == 1
+    ), prereqs
     assert "benchflow_final_verifier_timeout_triggered" not in prereqs, prereqs
     assert prereqs["benchflow_final_verifier_timeout_raw_command_recorded"] is False
     assert "test.sh" not in json.dumps(prereqs)
