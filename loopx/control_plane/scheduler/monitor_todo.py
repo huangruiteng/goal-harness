@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..todos.contract import (
@@ -9,6 +10,12 @@ from ..todos.contract import (
     normalize_todo_resume_when,
     normalize_todo_status,
     normalize_todo_task_class,
+)
+
+MONITOR_CADENCE_PATTERN = re.compile(
+    r"^\s*(?P<count>[1-9][0-9]{0,4})\s*"
+    r"(?P<unit>s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$",
+    re.IGNORECASE,
 )
 
 
@@ -22,6 +29,51 @@ def parse_monitor_timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def parse_monitor_counter(value: Any) -> int:
+    try:
+        return max(0, int(str(value or "0").strip()))
+    except ValueError:
+        return 0
+
+
+def monitor_cadence_delta(value: Any) -> timedelta | None:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    match = MONITOR_CADENCE_PATTERN.match(candidate)
+    if not match:
+        return None
+    count = int(match.group("count"))
+    unit = match.group("unit").lower()
+    if unit.startswith("s"):
+        return timedelta(seconds=count)
+    if unit.startswith("m"):
+        return timedelta(minutes=count)
+    if unit.startswith("h"):
+        return timedelta(hours=count)
+    return timedelta(days=count)
+
+
+def monitor_next_due_at(
+    *,
+    generated_at: str,
+    cadence: Any = None,
+    explicit_next_due_at: Any = None,
+) -> str | None:
+    explicit = str(explicit_next_due_at or "").strip()
+    if explicit:
+        if parse_monitor_timestamp(explicit) is None:
+            raise ValueError("--next-due-at must be an ISO timestamp")
+        return explicit
+    delta = monitor_cadence_delta(cadence)
+    if delta is None:
+        return None
+    checked_at = parse_monitor_timestamp(generated_at)
+    if checked_at is None:
+        checked_at = datetime.now(timezone.utc)
+    return (checked_at + delta).astimezone().replace(microsecond=0).isoformat()
 
 
 def monitor_todo_task_class(item: dict[str, Any], *, task_text: str | None = None) -> str:
