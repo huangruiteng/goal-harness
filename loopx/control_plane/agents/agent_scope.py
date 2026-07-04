@@ -4,7 +4,7 @@ from enum import Enum
 import re
 from typing import Any
 
-from ...decision_scope import todo_gate_relation, todo_gate_relation_blocks_agent
+from ..todos.decision_scope import todo_gate_relation, todo_gate_relation_blocks_agent
 from ...policies.work_lane import work_lane_contract_requires_current_agent_attempt
 from ..todos.contract import (
     TODO_STATUS_OPEN,

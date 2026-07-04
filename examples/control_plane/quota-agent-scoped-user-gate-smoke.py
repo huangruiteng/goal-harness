@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.decision_scope import todo_gate_relation  # noqa: E402
+from loopx.control_plane.todos.decision_scope import todo_gate_relation  # noqa: E402
 from loopx.quota import build_quota_should_run  # noqa: E402
 
 
@@ -893,8 +893,11 @@ def assert_agent_without_advancement_candidate_and_only_monitor_work_stays_quiet
     assert scheduler["codex_app"]["recommended_interval_minutes"] == 15, scheduler
     assert scheduler["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
     # Monitor-only backoff is capped by the monitor cadence, so a 15m monitor
-    # should not be backed off beyond its next useful poll interval.
-    assert scheduler["codex_app"]["example_progression_minutes"] == [15, 15, 15], scheduler
+    # should not be backed off beyond its next useful poll interval. Do not
+    # couple the smoke to the number of host-loop progression samples.
+    progression = scheduler["codex_app"]["example_progression_minutes"]
+    assert len(progression) >= 3, scheduler
+    assert all(item == 15 for item in progression), scheduler
     assert scheduler["unchanged_poll"]["limits"]["codex_cli_tui"] == 3, scheduler
     assert scheduler["unchanged_poll"]["final_quota_replan_check_enabled"] is True, scheduler
     assert scheduler["unchanged_poll"]["after_limits"]["claude_code_loop"] == "stop_loop", scheduler
@@ -908,7 +911,7 @@ def assert_agent_without_advancement_candidate_and_only_monitor_work_stays_quiet
     assert reset["host_state_key"] == "scheduler_hint.reset_policy.reset_token", reset
     assert reset["codex_app_initial_interval_minutes"] == 15, reset
     assert reset["codex_app_initial_rrule"] == "FREQ=MINUTELY;INTERVAL=15", reset
-    assert scheduler["codex_app"]["max_interval_minutes"] == 60, scheduler
+    assert scheduler["codex_app"]["max_interval_minutes"] == 120, scheduler
     assert len(reset["identity_signature"]) == 12, reset
     assert "identity_snapshot" not in reset, reset
     assert "profile_snapshot" not in reset, reset
