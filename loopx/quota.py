@@ -3459,6 +3459,9 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
             "write a compact blocker when it is absent"
         )
     if mode == "autonomous_replan":
+        lane_action = _protocol_first_candidate_action(payload)
+        if lane_action:
+            return f"run one bounded autonomous replan slice around {lane_action}"
         return "run one bounded self-repair or replan segment before another quiet no-op"
     if mode == "monitor_quiet_skip":
         return "record at most one no-spend monitor-poll event, rerun the guard, then stay quiet if unchanged"
@@ -3606,8 +3609,15 @@ def _interaction_next_cli_actions(payload: dict[str, Any], *, mode: str) -> list
             f"loopx --format json quota should-run --goal-id {goal_id}{agent_arg}",
         ]
     if mode == "autonomous_replan":
+        lane_action = _protocol_first_candidate_action(payload)
+        first_action = (
+            "run one bounded autonomous replan slice around "
+            f"{lane_action}; write back the selected todo/frontier changes"
+            if lane_action
+            else "run one bounded autonomous replan slice and write back the selected next action/todo changes"
+        )
         return [
-            "run one bounded autonomous replan slice and write back the selected next action/todo changes",
+            first_action,
             f"loopx refresh-state --goal-id {goal_id} --classification autonomous_replan_recorded --autonomous-replan-recorded --repair-delta-kind <delta_kind> --delivery-batch-scale <scale> --delivery-outcome <outcome>",
             f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute",
         ]
@@ -6171,7 +6181,7 @@ def build_quota_should_run(
             allow_unrelated_gate=bool(quota.get("safe_bypass_allowed")),
         )
         agent_lane_next_action = None
-        if not due_monitor_attempt and not replan_decision_allowed:
+        if not due_monitor_attempt:
             agent_lane_next_action = _agent_lane_next_action(
                 agent_identity=agent_identity,
                 agent_todo_summary=agent_todo_summary,
@@ -6186,10 +6196,11 @@ def build_quota_should_run(
                     )
                 ),
             )
-            selected_recommended_action = _selected_action_with_agent_lane(
-                selected_recommended_action,
-                agent_lane_next_action=agent_lane_next_action,
-            )
+            if not replan_decision_allowed:
+                selected_recommended_action = _selected_action_with_agent_lane(
+                    selected_recommended_action,
+                    agent_lane_next_action=agent_lane_next_action,
+                )
         agent_scope_frontier = None
         if not replan_decision_allowed:
             agent_scope_frontier = _agent_scope_no_candidate_frontier(
