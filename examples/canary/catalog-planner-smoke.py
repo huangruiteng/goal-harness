@@ -278,7 +278,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     assert "python3 examples/cli-version-command-modularization-smoke.py" in commands, cli_profile
 
     todo_payload = build_catalog_canary_plan(
-        changed_files=["loopx/todos.py", "loopx/todo_contract.py"],
+        changed_files=["loopx/todos.py", "loopx/control_plane/todos/contract.py"],
         surfaces=["todo lifecycle todo claim todo list"],
     )
     todo_profiles = {profile["id"]: profile for profile in todo_payload["domain_profiles"]}

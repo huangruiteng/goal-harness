@@ -12,7 +12,7 @@ public-safe map over the current repository contracts, especially:
   derived runtime names;
 - [`interaction-catalog.md`](interaction-catalog.md) for reusable interaction
   patterns;
-- [`loopx/todo_contract.py`](../../../loopx/todo_contract.py) for todo status,
+- [`loopx/control_plane/todos/contract.py`](../../../loopx/control_plane/todos/contract.py) for todo status,
   task class, decision scope, resume, claim, and monitor metadata fields;
 - [`loopx/quota.py`](../../../loopx/quota.py) for `quota should-run`, runtime
   states, `effective_action`, `interaction_contract`, spend, and monitor poll

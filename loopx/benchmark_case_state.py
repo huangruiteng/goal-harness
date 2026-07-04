@@ -4,7 +4,7 @@ import posixpath
 import re
 import shlex
 
-from .todo_contract import build_todo_id
+from .control_plane.todos.contract import build_todo_id
 
 BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION = (
     "loopx_benchmark_case_active_state_v1"

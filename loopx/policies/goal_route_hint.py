@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..state_projection import actions_are_projection_aligned
-from ..todo_contract import (
+from ..control_plane.todos.contract import (
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     normalize_todo_blocks_agent,

@@ -11,7 +11,7 @@ from .project_prompt import (
     render_quota_spend_command,
     render_refresh_state_command,
 )
-from .todo_contract import normalize_todo_claimed_by
+from .control_plane.todos.contract import normalize_todo_claimed_by
 
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."

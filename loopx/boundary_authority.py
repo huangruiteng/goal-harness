@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from .todo_contract import normalize_required_write_scopes
+from .control_plane.todos.contract import normalize_required_write_scopes
 
 
 CHECKPOINTED_BOUNDARY_AUTHORITY_SCHEMA_VERSION = "checkpointed_boundary_authority_v0"

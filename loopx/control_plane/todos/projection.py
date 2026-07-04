@@ -14,7 +14,7 @@ from ..scheduler.monitor_todo import (
     monitor_todo_next_due_at,
     monitor_todo_task_class,
 )
-from ...todo_contract import (
+from .contract import (
     TODO_STATUS_DEFERRED,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,

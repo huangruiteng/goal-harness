@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from ...materials import extract_review_materials
-from ...todo_contract import (
+from .contract import (
     TODO_TASK_PATTERN,
     normalize_todo_id,
     parse_todo_metadata_line,

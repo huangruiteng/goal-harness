@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from ...todo_contract import (
+from ..todos.contract import (
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_MONITOR,
     normalize_todo_resume_when,

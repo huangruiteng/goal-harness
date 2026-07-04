@@ -15,7 +15,7 @@ from .control_plane import compact_control_plane_policy, control_plane_policy_su
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .quota import goal_quota_config
 from .registry import read_json, registry_goals
-from .todo_contract import normalize_todo_claimed_by
+from .control_plane.todos.contract import normalize_todo_claimed_by
 
 
 WAITING_ON_CHOICES = (

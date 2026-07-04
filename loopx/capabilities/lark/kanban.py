@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 
-from ...todo_contract import (
+from ...control_plane.todos.contract import (
     TODO_STATUS_BLOCKED,
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from loopx.todo_contract import (
+from loopx.control_plane.todos.contract import (
     normalize_todo_resume_when,
     normalize_todo_status,
     todo_done_for_status,
