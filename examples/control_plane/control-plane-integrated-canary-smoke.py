@@ -27,9 +27,12 @@ from loopx.event_sourced_state import (  # noqa: E402
 
 
 GOAL_ID = "control-plane-integrated-canary"
+MONITOR_GOAL_ID = "control-plane-integrated-monitor-canary"
 AGENT_ID = "codex-product-capability"
 CANARY_TODO_ID = "todo_integrated_canary"
 CANARY_TODO_TITLE = "Design bounded status/quota/review-packet/event/read-path canary"
+MONITOR_TODO_ID = "todo_integrated_due_monitor"
+MONITOR_TARGET_KEY = "integrated-due-monitor-watch"
 VALIDATED_PROGRESS_CLASSIFICATION = "integrated_canary_validated_progress"
 DEFAULT_MAX_SECONDS = 120.0
 
@@ -96,6 +99,68 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     )
     runtime.mkdir(parents=True, exist_ok=True)
     return registry_path, state_file, event_log
+
+
+def write_monitor_fixture(root: Path) -> tuple[Path, Path]:
+    project = root / "monitor-project"
+    runtime = root / "monitor-runtime"
+    state_file = project / ".codex" / "goals" / MONITOR_GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    registry_path = project / ".loopx" / "registry.json"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text(
+        "---\n"
+        "status: active\n"
+        "updated_at: 2026-06-27T00:00:00+00:00\n"
+        "---\n\n"
+        "# Control Plane Monitor Canary\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] [P1-monitor] Monitor integrated state-machine transition and write back only material transitions.\n"
+        f"  <!-- loopx:todo todo_id={MONITOR_TODO_ID} status=open "
+        "task_class=continuous_monitor action_kind=monitor "
+        f"claimed_by={AGENT_ID} target_key={MONITOR_TARGET_KEY} "
+        "cadence=5m next_due_at=2000-01-01T00:00:00+00:00 -->\n",
+        encoding="utf-8",
+    )
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": "2026-06-27T00:00:00+00:00",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": MONITOR_GOAL_ID,
+                        "domain": "control-plane-canary",
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": f".codex/goals/{MONITOR_GOAL_ID}/ACTIVE_GOAL_STATE.md",
+                        "adapter": {
+                            "kind": "generic_project_goal_v0",
+                            "status": "connected",
+                        },
+                        "quota": {
+                            "compute": 1.0,
+                            "window_hours": 24,
+                            "slot_minutes": 1,
+                            "allowed_slots": 10,
+                        },
+                        "coordination": {
+                            "registered_agents": [AGENT_ID],
+                            "primary_agent": AGENT_ID,
+                        },
+                        "authority_sources": [],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runtime.mkdir(parents=True, exist_ok=True)
+    return registry_path, runtime
 
 
 def append_event_todos(event_log: Path) -> None:
@@ -393,6 +458,81 @@ def assert_refresh_and_spend_state_machine(registry_path: Path, runtime_root: Pa
     assert spent_payload["quota"]["state"] == "eligible", spent_payload
 
 
+def assert_due_monitor_poll_state_machine(root: Path) -> None:
+    registry_path, runtime_root = write_monitor_fixture(root)
+
+    quota_payload = run_cli(
+        registry_path,
+        runtime_root,
+        "quota",
+        "should-run",
+        "--goal-id",
+        MONITOR_GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+    )
+    assert quota_payload["ok"] is True, quota_payload
+    assert quota_payload["should_run"] is True, quota_payload
+    assert quota_payload["effective_action"] == "normal_run", quota_payload
+    lane = quota_payload["work_lane_contract"]
+    assert lane["monitor_kind"] == "todo_monitor_due", lane
+    assert lane["obligation"] == "attempt_due_monitor", lane
+    assert lane["selected_todo_id"] == MONITOR_TODO_ID, lane
+    contract = quota_payload["interaction_contract"]
+    assert contract["agent_channel"]["must_attempt"] is True, contract
+    assert contract["agent_channel"]["quiet_noop_allowed"] is False, contract
+    assert contract["cli_channel"]["spend_allowed_now"] is False, contract
+
+    monitor_payload = run_cli(
+        registry_path,
+        runtime_root,
+        "quota",
+        "monitor-poll",
+        "--goal-id",
+        MONITOR_GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        MONITOR_TODO_ID,
+        "--result-hash",
+        "unchanged-integrated-monitor",
+        "--cadence",
+        "5m",
+        "--execute",
+    )
+    assert monitor_payload["ok"] is True, monitor_payload
+    assert monitor_payload["appended"] is True, monitor_payload
+    assert monitor_payload["dry_run"] is False, monitor_payload
+    assert monitor_payload["delivery_outcome"] == "surface_only", monitor_payload
+    assert monitor_payload["material_change"] is False, monitor_payload
+    assert monitor_payload["monitor_event"]["material_change"] is False, monitor_payload
+    assert monitor_payload["todo_writeback"]["todo_id"] == MONITOR_TODO_ID, monitor_payload
+    assert monitor_payload["todo_writeback"]["next_due_at"], monitor_payload
+    assert monitor_payload["todo_writeback"]["consecutive_no_change"] == 1, monitor_payload
+
+    replan_payload = run_cli(
+        registry_path,
+        runtime_root,
+        "quota",
+        "should-run",
+        "--goal-id",
+        MONITOR_GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+    )
+    assert replan_payload["decision"] == "autonomous_replan_required", replan_payload
+    assert replan_payload["effective_action"] == "autonomous_replan_required", replan_payload
+    assert replan_payload["execution_obligation"]["must_attempt_work"] is True, replan_payload
+    assert replan_payload["execution_obligation"]["kind"] == "autonomous_replan_required", replan_payload
+    assert replan_payload["interaction_contract"]["mode"] == "autonomous_replan", replan_payload
+    assert replan_payload["work_lane_contract"]["obligation"] == "quiet_until_material_monitor_transition", replan_payload
+    assert replan_payload["work_lane_contract"]["must_attempt_work"] is False, replan_payload
+    assert replan_payload["goal_frontier_projection"]["monitor_only_lanes"]["present"] is True, replan_payload
+    assert replan_payload["goal_frontier_projection"]["replan_required"] is True, replan_payload
+    assert replan_payload["agent_todo_summary"]["monitor_due_count"] == 0, replan_payload
+    assert replan_payload["scheduler_hint"]["cadence_class"] == "active_work", replan_payload
+
+
 def run_fixture_canary(root: Path) -> None:
     registry_path, _, event_log = write_fixture(root)
     runtime_root = root / "runtime"
@@ -453,6 +593,7 @@ def run_fixture_canary(root: Path) -> None:
     assert packet_payload["project_asset_source"] == "project_asset", packet_payload
     assert CANARY_TODO_TITLE in packet_payload["project_agent_handoff"], packet_payload
     assert packet_payload["handoff_interface_budget"]["within_budget"] is True, packet_payload
+    assert_due_monitor_poll_state_machine(root)
 
 
 def parse_args() -> argparse.Namespace:
