@@ -16,7 +16,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.status_projection_cache import write_status_projection_cache
+from loopx.control_plane.runtime.status_projection_cache import write_status_projection_cache
 
 GOAL_ID = "status-projection-cache-fixture"
 AGENT_ID = "codex-main-control"

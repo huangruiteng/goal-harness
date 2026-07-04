@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .history import load_registry
-from .paths import resolve_runtime_root
+from ...history import load_registry
+from ...paths import resolve_runtime_root
 
 
 STATUS_PROJECTION_CACHE_SCHEMA_VERSION = "status_projection_cache_v0"

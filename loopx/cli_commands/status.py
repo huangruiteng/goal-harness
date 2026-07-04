@@ -11,7 +11,7 @@ from ..handoff_budget import build_handoff_interface_budget
 from ..quota import build_quota_should_run
 from ..review_packet import build_review_packet, render_review_packet_markdown
 from ..status import collect_status, render_status_markdown
-from ..status_projection_cache import (
+from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
