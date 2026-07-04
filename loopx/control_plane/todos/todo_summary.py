@@ -49,8 +49,10 @@ MAX_TODO_VISIBILITY_LANE_ITEMS = 16
 MAX_DEFERRED_TODO_VISIBILITY_ITEMS = 8
 MAX_MONITOR_DUE_ITEMS = 1
 MAX_DEPENDENCY_BLOCKERS = 4
+MAX_COMPLETED_SUCCESSION_WARNING_ITEMS = 5
 
 TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
+TODO_SUCCESSION_WARNING_SCHEMA_VERSION = "todo_succession_warning_v0"
 AttentionItemBuilder = Callable[..., dict[str, Any]]
 GoalLifecycleFields = Callable[[dict[str, Any], Optional[dict[str, Any]]], dict[str, Any]]
 PublicSafeText = Callable[..., Optional[str]]
@@ -285,6 +287,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "resume_condition",
         "resume_ready",
         "no_followup",
+        "successor_todo_ids",
         "target_key",
         "cadence",
         "next_due_at",
@@ -662,6 +665,116 @@ def active_next_action_todo_ids(value: Any) -> set[str]:
     return todo_ids
 
 
+def _normalized_todo_id_list(value: Any) -> list[str]:
+    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+    todo_ids: list[str] = []
+    for raw_value in raw_values:
+        for match in re.findall(r"\btodo_[A-Za-z0-9_-]+\b", str(raw_value or "")):
+            todo_id = normalize_todo_id(match)
+            if todo_id and todo_id not in todo_ids:
+                todo_ids.append(todo_id)
+        todo_id = normalize_todo_id(raw_value)
+        if todo_id and todo_id not in todo_ids:
+            todo_ids.append(todo_id)
+    return todo_ids
+
+
+def todo_successor_todo_ids(
+    item: dict[str, Any],
+    *,
+    items: list[dict[str, Any]],
+) -> list[str]:
+    successor_ids = _normalized_todo_id_list(item.get("successor_todo_ids"))
+    superseded_by = normalize_todo_id(item.get("superseded_by"))
+    if superseded_by and superseded_by not in successor_ids:
+        successor_ids.append(superseded_by)
+
+    source_todo_id = normalize_todo_id(item.get("todo_id"))
+    if not source_todo_id:
+        return successor_ids
+
+    for candidate in items:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_id = normalize_todo_id(candidate.get("todo_id"))
+        if not candidate_id or candidate_id == source_todo_id:
+            continue
+        if todo_item_task_class(candidate) != TODO_TASK_CLASS_ADVANCEMENT:
+            continue
+        resume_when = normalize_todo_resume_when(candidate.get("resume_when")) or ""
+        resume_kind, separator, resume_target = resume_when.partition(":")
+        candidate_unblocks = normalize_todo_id(candidate.get("unblocks_todo_id"))
+        if candidate_unblocks != source_todo_id and not (
+            separator
+            and resume_kind == TODO_RESUME_KIND_TODO_DONE
+            and normalize_todo_id(resume_target) == source_todo_id
+        ):
+            continue
+        if candidate_id not in successor_ids:
+            successor_ids.append(candidate_id)
+    return successor_ids
+
+
+def todo_item_is_succession_tracked_completion(item: dict[str, Any]) -> bool:
+    if not item.get("done"):
+        return False
+    if todo_item_is_deferred(item):
+        return False
+    if todo_item_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+        return False
+    return any(
+        item.get(key) is not None
+        for key in (
+            "action_kind",
+            "claimed_by",
+            "completed_at",
+            "updated_at",
+            "required_write_scopes",
+            "required_capabilities",
+            "target_capabilities",
+            "decision_scope",
+            "required_decision_scopes",
+            "unblocks_todo_id",
+            "resume_when",
+            "blocks_agent",
+            "global_gate",
+        )
+    )
+
+
+def _completed_succession_sort_key(item: dict[str, Any]) -> tuple[str, int]:
+    try:
+        index = int(item.get("index"))
+    except (TypeError, ValueError):
+        index = 0
+    timestamp = str(item.get("updated_at") or item.get("completed_at") or "")
+    return (timestamp, index)
+
+
+def completed_without_successor_items(
+    done_items: list[dict[str, Any]],
+    *,
+    all_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    gap_items: list[dict[str, Any]] = []
+    for item in done_items:
+        if not todo_item_is_succession_tracked_completion(item):
+            continue
+        if normalize_todo_no_followup(item.get("no_followup")) is True:
+            continue
+        if todo_successor_todo_ids(item, items=all_items):
+            continue
+        compact = compact_todo_item(item)
+        for key in ("note", "evidence", "reason"):
+            compact.pop(key, None)
+        compact["succession_tracked"] = True
+        compact["recommended_action"] = (
+            "record no_followup=true or add/link a successor todo"
+        )
+        gap_items.append(compact)
+    return sorted(gap_items, key=_completed_succession_sort_key, reverse=True)
+
+
 def compact_todo_group(
     items: list[dict[str, Any]],
     *,
@@ -771,6 +884,10 @@ def compact_todo_group(
         for item in executable_items
         if normalize_todo_id(item.get("todo_id")) in preferred_ids
     ]
+    successor_gap_items = completed_without_successor_items(
+        done_items,
+        all_items=items,
+    )
     summary = {
         "schema_version": "todo_summary_v0",
         "source_section": source_section,
@@ -850,6 +967,20 @@ def compact_todo_group(
     handoff_gates = build_todo_handoff_gate_states(items)
     if handoff_gates:
         summary["handoff_gates"] = handoff_gates
+    if successor_gap_items:
+        compact_gap_items = successor_gap_items[:MAX_COMPLETED_SUCCESSION_WARNING_ITEMS]
+        summary["completed_without_successor_count"] = len(successor_gap_items)
+        summary["completed_without_successor_items"] = compact_gap_items
+        summary["todo_succession_warning"] = {
+            "schema_version": TODO_SUCCESSION_WARNING_SCHEMA_VERSION,
+            "reason_code": "completed_advancement_without_successor",
+            "count": len(successor_gap_items),
+            "items": compact_gap_items,
+            "recommended_action": (
+                "record no_followup=true on completed tracked work, "
+                "or add/link a successor todo before closing the slice"
+            ),
+        }
     if active_next_action_items:
         summary["active_next_action_items"] = [
             compact_active_next_action_todo_item(item)
