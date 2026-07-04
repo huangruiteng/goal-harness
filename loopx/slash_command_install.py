@@ -81,13 +81,13 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
         {
             "command": "/loopx",
             "name": "loopx",
-            "description": "Inspect LoopX state, or start a concrete LoopX goal when arguments are provided.",
-            "argument_hint": "[goal text]",
+            "description": "Inspect LoopX state, or start concrete project work when arguments are provided.",
+            "argument_hint": "[task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                f"If arguments are present, preserve them as the goal text and run `{cli_bin} bootstrap-command-pack --project . --goal-text \"$ARGUMENTS\"` before planning work.",
+                f"If arguments are present, preserve them as the task text and run `{cli_bin} bootstrap-command-pack --project . --goal-text \"$ARGUMENTS\"` before planning work.",
                 f"If arguments are empty, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
-                "When a goal is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, run quota, and take one bounded allowed step.",
+                "When project work is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, run quota, and take one bounded allowed step.",
             ],
         },
         {
@@ -97,7 +97,7 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[optional focus]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                f"Run `{cli_bin} global-summary` first and summarize the visible goals, gates, monitor status, and next safe actions.",
+                f"Run `{cli_bin} global-summary` first and summarize visible projects, gates, monitor status, and next safe actions.",
                 "This command is read-only unless the user explicitly asks for a state update.",
             ],
         },
@@ -115,11 +115,11 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
         {
             "command": "/loopx-global-todos",
             "name": "loopx-global-todos",
-            "description": "List runnable, blocked, deferred-ready, and review LoopX todos across visible goals.",
+            "description": "List runnable, blocked, deferred-ready, and review LoopX todos across visible projects.",
             "argument_hint": "[optional focus]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                f"Run `{cli_bin} global-summary` first, then focus the answer on prioritized todos and ownership across visible LoopX goals.",
+                f"Run `{cli_bin} global-summary` first, then focus the answer on prioritized todos and ownership across visible projects.",
                 "This command is read-only unless the user explicitly asks for a state update.",
             ],
         },

@@ -8,7 +8,7 @@ For Codex CLI users, the first successful path is:
 1. Open Codex CLI TUI in a project repo.
 2. Paste one LoopX start message.
 3. If `loopx` is missing, let the agent run the no-clone installer.
-4. Return to the same TUI with current goal, gate, todo, and next safe action.
+4. Return to the same TUI with current objective, gate, todo, and next safe action.
 
 The user should not have to clone this repository before learning whether
 LoopX helps their project.
@@ -55,7 +55,7 @@ The agent-first start message can now be stricter about install repair:
 ```text
 Start LoopX for this repo. If `loopx` is missing, install it with
 the official no-clone GitHub installer, then connect this project. Show me the
-current goal, concrete user gate if any, top todos, and next safe action before
+current objective, concrete user gate if any, top todos, and next safe action before
 running longer work. Keep me in this Codex CLI TUI unless I explicitly accept a
 headless fallback.
 ```

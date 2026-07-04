@@ -7,8 +7,8 @@ structured handoff packet. LoopX CLI remains the source of truth.
 
 This contract sits above:
 
-- [`loopx_goal_command_v0`](loopx-goal-command-v0.md) for project-local
-  `/loopx` and `/loopx <goal text>`.
+- [`loopx_goal_command_v0`](loopx-goal-command-v0.md) for the project-local
+  `/loopx` status entry and `/loopx <task text>` start entry.
 - [`global_manager_command_v0`](global-manager-command-v0.md) for read-only
   `/loopx-global-*` manager commands.
 - [`host_integration_surface_v0`](host-integration-surface-v0.md) for general
@@ -24,7 +24,7 @@ The host registry should expose this minimal command set:
 | Command | Canonical target | Default authority |
 | --- | --- | --- |
 | `/loopx` | `loopx bootstrap-command-pack --project .` | Read/status-first. |
-| `/loopx <goal text>` | `loopx bootstrap-command-pack --project . --goal-text "<goal text>"` | Explicit project-local goal-start intent. |
+| `/loopx <task text>` | `loopx bootstrap-command-pack --project . --goal-text "<task text>"` | Explicit project-local start intent. |
 | `/loopx-global-summary` | `global_manager_command_v0` summary request | Read-only global control-plane digest. |
 | `/loopx-global-gates` | `global_manager_command_v0` gates request | Read-only gate inbox. |
 | `/loopx-global-todos` | `global_manager_command_v0` todos request | Read-only work queue view. |
@@ -50,11 +50,11 @@ Example registry entry:
       "mutation_policy": "read_first"
     },
     {
-      "command": "/loopx <goal text>",
-      "kind": "project_goal_start",
+      "command": "/loopx <task text>",
+      "kind": "project_task_start",
       "protocol": "loopx_goal_command_v0",
-      "cli_baseline": "loopx bootstrap-command-pack --project . --goal-text \"<goal text>\"",
-      "mutation_policy": "explicit_goal_start"
+      "cli_baseline": "loopx bootstrap-command-pack --project . --goal-text \"<task text>\"",
+      "mutation_policy": "explicit_project_start"
     },
     {
       "command": "/loopx-global-summary",
@@ -77,8 +77,8 @@ message:
    message.
 2. Canonicalize legacy `/loop-global-*` aliases to `/loopx-global-*`.
 3. Treat `/loopx` with no trailing text as bootstrap/status preview.
-4. Treat text after `/loopx` as explicit goal-start text. Preserve the exact
-   user goal text in the handoff packet, but quote it safely for CLI display.
+4. Treat text after `/loopx` as explicit task text. Preserve the exact
+   user task text in the handoff packet, but quote it safely for CLI display.
 5. Fail closed for unknown `/loopx-*` commands and return `loopx slash-commands`
    help instead of falling through to ordinary chat.
 
@@ -98,11 +98,11 @@ Required fields:
 | --- | --- |
 | `project_root` | Absolute local root for CLI execution; omit from public packets. |
 | `project_root_label` | Public-safe label such as repo name or `current workspace`. |
-| `goal_id` | Use the registry goal id when known; otherwise let `bootstrap-command-pack` infer or propose one. |
+| `goal_id` | Existing runtime state id field; keep the field name for CLI compatibility, but present it to users as the active state id. |
 | `agent_id` | Registered LoopX agent id when the host is acting for an agent. |
 | `host_surface` | `chat_box`, `command_palette`, `codex_cli_tui`, or another compact host label. |
 
-If the host cannot resolve a project root, `/loopx` and `/loopx <goal text>`
+If the host cannot resolve a project root, `/loopx` and `/loopx <task text>`
 must produce a setup/help packet, not state writes. Global commands may still
 run against the shared global registry when available.
 
@@ -115,14 +115,14 @@ After parsing, the host hands the agent or CLI a compact packet:
   "schema_version": "codex_app_host_command_handoff_v0",
   "command": "/loopx",
   "raw_command": "/loopx design an issue-fix workflow",
-  "canonical_command": "/loopx <goal text>",
-  "goal_text": "design an issue-fix workflow",
+  "canonical_command": "/loopx <task text>",
+  "task_text": "design an issue-fix workflow",
   "host_surface": "chat_box",
   "project_root_label": "current workspace",
   "goal_id": "loopx-meta",
   "agent_id": "codex-product-capability",
   "protocol": "loopx_goal_command_v0",
-  "cli_preview": "loopx bootstrap-command-pack --project . --goal-text \"<goal text>\"",
+  "cli_preview": "loopx bootstrap-command-pack --project . --goal-text \"<task text>\"",
   "authority": {
     "read_allowed": true,
     "project_local_write_allowed": true,
@@ -144,8 +144,8 @@ visible user intent into the existing CLI lifecycle:
 
 - `/loopx` can read status and preview command packs. It stops before writes
   that need confirmation.
-- `/loopx <goal text>` is explicit intent to start a project-local LoopX goal:
-  plan first, write ordered todos, refresh state, run `quota should-run`, and
+- `/loopx <task text>` is explicit intent to start project-local work: plan
+  first, write ordered todos, refresh state, run `quota should-run`, and
   execute only when the guard allows.
 - `/loopx-global-*` commands are read-only and must not approve gates, add
   todos, spend quota, merge PRs, publish externally, or pause/resume loops.
@@ -160,7 +160,7 @@ Every host command must expose a deterministic CLI fallback:
 loopx slash-commands
 loopx slash-commands --install
 loopx bootstrap-command-pack --project .
-loopx bootstrap-command-pack --project . --goal-text "<goal text>"
+loopx bootstrap-command-pack --project . --goal-text "<task text>"
 loopx global-summary
 loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <goal-id> --agent-id <agent-id>
 ```
@@ -191,12 +191,13 @@ signature.
 
 A host command registry implementation is acceptable when:
 
-1. `/loopx` and `/loopx <goal text>` route to `loopx_goal_command_v0`.
+1. `/loopx` and `/loopx <task text>` route to `loopx_goal_command_v0`.
 2. `/loopx-global-summary`, `/loopx-global-gates`, `/loopx-global-todos`, and
    `/loopx-global-risks` route to `global_manager_command_v0`.
 3. Legacy `/loop-global-*` inputs canonicalize to `/loopx-global-*`.
 4. Unknown `/loopx-*` commands fail closed with `loopx slash-commands` help.
-5. The handoff packet includes project root label, optional goal id, agent id,
-   protocol, authority, and CLI fallback, without public local absolute paths.
+5. The handoff packet includes project root label, optional active state id,
+   agent id, protocol, authority, and CLI fallback, without public local
+   absolute paths.
 6. Host parsing is treated as the preferred path, while skill-level recognition
    remains only a compatibility fallback.
