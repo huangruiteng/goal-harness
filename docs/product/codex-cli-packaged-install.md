@@ -29,9 +29,16 @@ snapshot under `~/.local/share/loopx/releases/`, installs the
 skills under `~/.codex/skills`. It also refreshes the lightweight slash-command
 facades:
 
-- `~/.codex/prompts/loopx*.md` for Codex CLI / IDE prompt discovery;
-- `~/.codex/skills/loopx*/SKILL.md` for Codex App skill discovery;
+- `~/.codex/skills/loopx*/SKILL.md` for explicit Codex command-facade
+  invocation through `$loopx` or `/skills`;
 - `~/.claude/skills/loopx*/SKILL.md` for Claude Code slash-command discovery.
+
+Current verified Codex CLI builds still reject user-installed `/loopx` and
+`/prompts:loopx` commands, so the packaged install reports Codex CLI as an
+unsupported native slash surface. For an explicit Codex skill invocation, use
+`$loopx` or choose `loopx` from `/skills`. For the visible long-running TUI
+loop, use `loopx codex-cli-bootstrap-message --project .`, paste the generated
+setup into the TUI, then set the generated `/goal <thin task_body>`.
 
 By default, the archive source is the public `stable` ref. Maintainers can
 override it with `LOOPX_REF=main` when intentionally testing or repairing from

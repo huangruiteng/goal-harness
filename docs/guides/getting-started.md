@@ -64,17 +64,17 @@ Success looks like this:
 - `loopx status` shows the goal and who should act next;
 - local runtime state is ignored, not committed.
 
-## Slash Command Registration
+## Command Skill Registration
 
-The installer also registers the LoopX command family for the host surfaces
-that can discover user-installed prompts or skills:
+The installer also registers the LoopX command family for host surfaces that
+can discover user-installed skills:
 
-- Codex CLI / IDE: Markdown prompts under `~/.codex/prompts`, so `/loopx`
-  or the fallback `/prompts:loopx` can start from the slash menu after the host
-  refreshes its prompt list.
-- Codex App: lightweight command skills under `~/.codex/skills/loopx*`, while
-  the full LoopX skills such as `loopx-project` and `loopx-pr-review` keep the
-  richer workflow instructions.
+- Codex CLI / IDE / App: explicit LoopX command-facade skills under
+  `~/.codex/skills/loopx*`. Codex does not currently support user-defined
+  native top-level `/loopx` slash commands, so invoke these through `$loopx` or
+  `/skills`. Only these command facades include `agents/openai.yaml` with
+  `allow_implicit_invocation: false`; richer workflow skills such as
+  `loopx-project` and `loopx-pr-review` keep their normal implicit behavior.
 - Claude Code: lightweight user skills under `~/.claude/skills/loopx*`, so the
   command family can appear as Claude Code slash commands without enabling the
   opt-in MCP/hook adapter.

@@ -193,7 +193,6 @@ def main() -> int:
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
-        assert f"codex prompts: {codex_home / 'prompts'}" in install.stdout, install.stdout
         assert f"codex skills: {codex_home / 'skills'}" in install.stdout, install.stdout
         assert f"claude skills: {home / '.claude' / 'skills'}" in install.stdout, install.stdout
 
@@ -288,15 +287,13 @@ def main() -> int:
         auto_research_skill = codex_home / "skills" / "loopx-auto-research" / "SKILL.md"
         assert not auto_research_skill.exists(), auto_research_skill
         loopx_prompt = codex_home / "prompts" / "loopx.md"
-        loopx_prompt_text = loopx_prompt.read_text(encoding="utf-8")
-        assert "loopx-managed-slash-command:v1 command=/loopx surface=codex-prompts" in loopx_prompt_text
-        assert "bootstrap-command-pack --project . --goal-text" in loopx_prompt_text
-        loopx_global_prompt = codex_home / "prompts" / "loopx-global-summary.md"
-        loopx_global_prompt_text = loopx_global_prompt.read_text(encoding="utf-8")
-        assert "loopx global-summary" in loopx_global_prompt_text, loopx_global_prompt_text
+        assert not loopx_prompt.exists(), loopx_prompt
         loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
         loopx_command_skill_text = loopx_command_skill.read_text(encoding="utf-8")
         assert "surface=codex-skills" in loopx_command_skill_text, loopx_command_skill_text
+        loopx_openai_metadata = codex_home / "skills" / "loopx" / "agents" / "openai.yaml"
+        loopx_openai_metadata_text = loopx_openai_metadata.read_text(encoding="utf-8")
+        assert "allow_implicit_invocation: false" in loopx_openai_metadata_text, loopx_openai_metadata_text
         claude_loopx_skill = home / ".claude" / "skills" / "loopx" / "SKILL.md"
         claude_loopx_skill_text = claude_loopx_skill.read_text(encoding="utf-8")
         assert "surface=claude-skills" in claude_loopx_skill_text, claude_loopx_skill_text
@@ -342,6 +339,19 @@ def main() -> int:
         assert (
             codex_home / "skills" / "loopx-self-repair" / "agents" / "openai.yaml"
         ).is_file()
+        for implicit_skill_name in (
+            "loopx-project",
+            "loopx-pr-review",
+            "loopx-doc-registry",
+            "loopx-self-repair",
+        ):
+            implicit_metadata = codex_home / "skills" / implicit_skill_name / "agents" / "openai.yaml"
+            if implicit_metadata.exists():
+                implicit_metadata_text = implicit_metadata.read_text(encoding="utf-8")
+                assert "allow_implicit_invocation: false" not in implicit_metadata_text, (
+                    implicit_skill_name,
+                    implicit_metadata_text,
+                )
 
         cli_env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
         runtime_run_dir = home / ".codex" / "loopx" / "goals" / "loopx-meta" / "runs"

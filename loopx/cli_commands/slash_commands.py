@@ -39,20 +39,20 @@ def register_slash_commands_command(
     parser.add_argument(
         "--install",
         action="store_true",
-        help="Install LoopX slash-command prompt/skill files for supported hosts.",
+        help="Install LoopX command skill files for supported hosts.",
     )
     parser.add_argument(
         "--surface",
         action="append",
-        choices=["all", "codex", "codex-cli", "codex-app", "claude-code"],
+        choices=["all", "codex", "codex-cli", "codex-app", "codex-ide", "claude-code"],
         help=(
             "Host surface to install. Repeatable. Defaults to all "
-            "(Codex prompts plus Claude Code skills)."
+            "(Codex explicit skills plus Claude Code skills)."
         ),
     )
     parser.add_argument(
         "--codex-home",
-        help="Codex home for prompt installation. Defaults to CODEX_HOME or ~/.codex.",
+        help="Codex home for skill installation. Defaults to CODEX_HOME or ~/.codex.",
     )
     parser.add_argument(
         "--claude-home",

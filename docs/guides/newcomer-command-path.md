@@ -33,7 +33,7 @@ matches the surface you already use:
 | Surface | Start with | What keeps it moving |
 | --- | --- | --- |
 | Codex App | `/loopx <goal text>` in the project thread | The app heartbeat automation. Let the agent install or refresh the generated LoopX heartbeat body; start at the bootstrap cadence, then follow `quota should-run.scheduler_hint`. |
-| Codex CLI | `codex` from the project root, then `/loopx <goal text>` | The visible TUI goal. Use `loopx codex-cli-bootstrap-message --project .` when you need a generated setup prompt, and keep the executor visible to the user. |
+| Codex CLI | `codex` from the project root, then paste `loopx codex-cli-bootstrap-message --project .` output | Current verified Codex CLI builds do not load user-installed `/loopx` or `/prompts:loopx` commands. Keep the executor visible, then set the generated `/goal <thin task_body>`. |
 | Claude Code | Install LoopX, then `/loopx <goal text>` | The installer registers lightweight slash-command skills. Enable the opt-in adapter only when Claude Code's native `/loop` should be gated by LoopX `should_run`. |
 | Other agent or shell | `loopx bootstrap-command-pack --project .` | A CLI, task, automation, heartbeat, or scheduler hook must run the next turn. If the surface has no such hook, LoopX can track state but the user drives it manually. |
 

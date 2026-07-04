@@ -174,17 +174,18 @@ Until every host exposes a native command registry, LoopX installs slash-command
 facades into the user-level discovery locations that current hosts already
 support:
 
-- `~/.codex/prompts/loopx*.md` for Codex CLI / IDE prompt commands;
-- `~/.codex/skills/loopx*/SKILL.md` for Codex App skill-based command
-  discovery;
+- `~/.codex/skills/loopx*/SKILL.md` for explicit Codex command-facade
+  invocation through `$loopx` or `/skills`;
 - `~/.claude/skills/loopx*/SKILL.md` for Claude Code skill-based slash
   commands.
 
-This fallback does not replace host parsing. It gives users a working `/loopx`
-entry point now, while preserving the same CLI baselines and permission
-boundaries defined above. The installer overwrites LoopX-managed files and
-known legacy LoopX-generated command files, but it skips same-name user files
-without a LoopX managed marker or legacy signature.
+This fallback does not replace host parsing. It gives users an explicit Codex
+skill entry point now, while preserving the same CLI baselines and permission
+boundaries defined above. The Codex command facades are explicit-only; the
+richer workflow skills remain available for implicit invocation. The installer
+overwrites LoopX-managed files and known legacy LoopX-generated command files,
+but it skips same-name user files without a LoopX managed marker or legacy
+signature.
 
 ## Acceptance Checks
 

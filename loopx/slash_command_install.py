@@ -33,7 +33,7 @@ def _front_matter(*, fields: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
-def _prompt_body(
+def _skill_body(
     *,
     command: str,
     title: str,
@@ -49,16 +49,31 @@ def _prompt_body(
     }
     if front_matter_name:
         fields = {"name": front_matter_name, **fields}
+    surface_label = "slash command" if surface == "claude-skills" else "explicit LoopX command skill"
     return "\n\n".join(
         [
             _front_matter(fields=fields),
             _managed_marker(command=command, surface=surface),
             f"# {title}",
-            f"Treat this as the LoopX `{command}` slash command.",
+            f"Treat this as the LoopX `{command}` {surface_label}.",
             "\n".join(instructions),
             "Keep public/private boundaries intact and do not perform external writes unless the active LoopX state or owner explicitly authorizes them.",
         ]
     ) + "\n"
+
+
+def _openai_skill_metadata(*, command: str, display_name: str, short_description: str) -> str:
+    return "\n".join(
+        [
+            f"# {_managed_marker(command=command, surface='codex-skill-metadata')}",
+            "interface:",
+            f'  display_name: "{display_name}"',
+            f'  short_description: "{short_description}"',
+            "policy:",
+            "  allow_implicit_invocation: false",
+            "",
+        ]
+    )
 
 
 def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list[dict[str, Any]]:
@@ -182,6 +197,17 @@ def _target_status(path: Path, content: str, *, execute: bool) -> str:
     return "created" if execute else "would_create"
 
 
+def _retire_managed_file(path: Path, *, execute: bool) -> str | None:
+    if not path.exists():
+        return None
+    existing = path.read_text(encoding="utf-8")
+    if MANAGED_MARKER_PREFIX not in existing:
+        return "skipped_user_file"
+    if execute:
+        path.unlink()
+    return "retired_managed_file" if execute else "would_retire_managed_file"
+
+
 def _codex_home(value: str | None = None) -> Path:
     raw = value or os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
     return Path(raw).expanduser()
@@ -198,7 +224,9 @@ def _normalize_surfaces(surfaces: list[str] | None) -> list[str]:
     for surface in requested:
         if surface == "all":
             candidates = ["codex", "claude-code"]
-        elif surface in {"codex-cli", "codex-app"}:
+        elif surface == "codex":
+            candidates = ["codex"]
+        elif surface in {"codex-app", "codex-ide", "codex-cli"}:
             candidates = ["codex"]
         else:
             candidates = [surface]
@@ -225,31 +253,26 @@ def install_slash_commands(
 
     if "codex" in effective_surfaces:
         prompt_dir = codex_root / "prompts"
+        for spec in specs:
+            prompt_path = prompt_dir / f"{spec['name']}.md"
+            retire_status = _retire_managed_file(prompt_path, execute=execute)
+            if retire_status:
+                installed.append(
+                    {
+                        "surface": "codex",
+                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "mechanism": "retired_codex_custom_prompt",
+                        "command": spec["command"],
+                        "path": str(prompt_path),
+                        "status": retire_status,
+                        "invoke_as": [],
+                    }
+                )
+
         skill_dir = codex_root / "skills"
         for spec in specs:
-            path = prompt_dir / f"{spec['name']}.md"
-            content = _prompt_body(
-                command=str(spec["command"]),
-                title=f"LoopX {spec['command']}",
-                description=str(spec["description"]),
-                argument_hint=str(spec["argument_hint"]),
-                instructions=list(spec["instructions"]),
-                surface="codex-prompts",
-            )
-            status = _target_status(path, content, execute=execute)
-            installed.append(
-                {
-                    "surface": "codex",
-                    "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
-                    "mechanism": "codex_custom_prompts",
-                    "command": spec["command"],
-                    "path": str(path),
-                    "status": status,
-                    "invoke_as": [str(spec["command"]), f"/prompts:{spec['name']}"],
-                }
-            )
             skill_path = skill_dir / str(spec["name"]) / "SKILL.md"
-            skill_content = _prompt_body(
+            skill_content = _skill_body(
                 command=str(spec["command"]),
                 title=f"LoopX {spec['command']}",
                 description=str(spec["description"]),
@@ -262,12 +285,62 @@ def install_slash_commands(
             installed.append(
                 {
                     "surface": "codex",
-                    "host_surfaces": ["codex-app"],
-                    "mechanism": "codex_skills",
+                    "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                    "mechanism": "codex_explicit_skills",
                     "command": spec["command"],
                     "path": str(skill_path),
                     "status": skill_status,
-                    "invoke_as": [str(spec["command"])],
+                    "invoke_as": [f"${spec['name']}", "/skills"],
+                }
+            )
+            metadata_path = skill_path.parent / "agents" / "openai.yaml"
+            if skill_status not in {"skipped_user_file", "preserved_existing_loopx_skill"}:
+                metadata = _openai_skill_metadata(
+                    command=str(spec["command"]),
+                    display_name=f"LoopX {spec['command']}",
+                    short_description=str(spec["description"]),
+                )
+                metadata_status = _target_status(metadata_path, metadata, execute=execute)
+                installed.append(
+                    {
+                        "surface": "codex",
+                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "mechanism": "codex_skill_openai_metadata",
+                        "command": spec["command"],
+                        "path": str(metadata_path),
+                        "status": metadata_status,
+                        "invoke_as": [f"${spec['name']}", "/skills"],
+                    }
+                )
+            elif skill_status == "preserved_existing_loopx_skill":
+                retire_status = _retire_managed_file(metadata_path, execute=execute)
+                if retire_status:
+                    installed.append(
+                        {
+                            "surface": "codex",
+                            "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                            "mechanism": "retired_codex_command_metadata",
+                            "command": spec["command"],
+                            "path": str(metadata_path),
+                            "status": retire_status,
+                            "invoke_as": [],
+                        }
+                    )
+        for spec in specs:
+            installed.append(
+                {
+                    "surface": "codex",
+                    "host_surfaces": ["codex-cli"],
+                    "mechanism": "unsupported_native_slash_registry",
+                    "command": spec["command"],
+                    "path": None,
+                    "status": "unsupported_host_surface",
+                    "invoke_as": [],
+                    "reason": (
+                        "Current Codex does not support user-defined native top-level slash "
+                        "commands. Use explicit skills instead."
+                    ),
+                    "fallback": "Use `$loopx` or `/skills` to explicitly invoke the LoopX skill; for the visible TUI loop, run `loopx codex-cli-bootstrap-message --project .`, paste the setup message, then set `/goal <thin task_body>`.",
                 }
             )
 
@@ -275,7 +348,7 @@ def install_slash_commands(
         skills_dir = claude_root / "skills"
         for spec in specs:
             path = skills_dir / str(spec["name"]) / "SKILL.md"
-            content = _prompt_body(
+            content = _skill_body(
                 command=str(spec["command"]),
                 title=f"LoopX {spec['command']}",
                 description=str(spec["description"]),
@@ -312,7 +385,7 @@ def install_slash_commands(
             include_legacy_aliases=include_legacy_aliases,
         )["schema_version"],
         "summary": {
-            "codex_prompt_dir": str(codex_root / "prompts") if "codex" in effective_surfaces else None,
+            "codex_prompt_dir": None,
             "codex_skill_dir": str(codex_root / "skills") if "codex" in effective_surfaces else None,
             "claude_skill_dir": str(claude_root / "skills") if "claude-code" in effective_surfaces else None,
             "status_counts": status_counts,
@@ -320,8 +393,8 @@ def install_slash_commands(
         },
         "installed": installed,
         "notes": [
-            "Codex CLI/IDE discover top-level Markdown custom prompts in CODEX_HOME/prompts; restart the host if the slash list is already open.",
-            "Codex App command discovery also includes installed Codex skills; prompt-file support depends on the host version.",
+            "Codex does not currently support user-defined native top-level slash commands; use explicit skill invocation through `$loopx` or `/skills`.",
+            "Only explicit LoopX command-facade skills are installed with agents/openai.yaml policy allow_implicit_invocation=false; richer workflow skills stay implicit.",
             "Claude Code discovers user skills from CLAUDE_HOME/skills and exposes each skill name as a slash command.",
         ],
     }
@@ -357,6 +430,12 @@ def render_slash_command_install_markdown(payload: dict[str, Any]) -> str:
         lines.append("Skipped user-owned files:")
         for item in skipped:
             lines.append(f"- `{item.get('command')}` at `{item.get('path')}`")
+    notes = [note for note in payload.get("notes") or [] if isinstance(note, str)]
+    if notes:
+        lines.append("")
+        lines.append("Notes:")
+        for note in notes:
+            lines.append(f"- {note}")
     lines.append("")
     lines.append("Restart the host if its slash-command menu was already open.")
     return "\n".join(lines)
