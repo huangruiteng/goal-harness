@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.local_state_write_correctness import (  # noqa: E402
+from loopx.control_plane.runtime.local_state_write_correctness import (  # noqa: E402
     shadow_validate_local_state_write_correctness_packet,
 )
 
