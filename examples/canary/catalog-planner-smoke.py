@@ -205,6 +205,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     status_commands = [check["command"] for check in status_profiles["status-read-path"]["checks"]]
     assert "python3 examples/control_plane/status-goal-filter-smoke.py" in status_commands, status_payload
     assert "python3 examples/control_plane/status-quota-review-packet-parity-smoke.py" in status_commands, status_payload
+    assert "python3 examples/control_plane/goal-channel-readmodel-smoke.py" in status_commands, status_payload
     assert all(check["tier"] == "default" for check in status_profiles["status-read-path"]["checks"]), status_payload
     assert status_profiles["status-read-path"]["deep_checks_available"] is True, status_payload
     assert status_profiles["status-read-path"]["deep_checks_included"] is False, status_payload

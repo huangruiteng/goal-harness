@@ -211,6 +211,9 @@ from .control_plane.goals.global_registry_health import (
     collect_global_registry_health as _collect_global_registry_health_read_model,
     global_registry_finding as _global_registry_finding_read_model,
 )
+from .control_plane.goals.goal_channel import (
+    attach_goal_channel_projection as _attach_goal_channel_projection_read_model,
+)
 from .control_plane.work_items.issue_meta_surface import (
     parse_issue_meta_surface as _parse_issue_meta_surface_read_model,
 )
@@ -6932,22 +6935,11 @@ def attach_goal_channel_projection(
     goal: dict[str, Any],
     goal_latest_runs: list[dict[str, Any]],
 ) -> None:
-    """Attach a read-only frontstage projection to a status attention item."""
-
-    run_history_goal = dict(goal)
-    run_history_goal["latest_runs"] = goal_latest_runs
-    quota_payload: dict[str, Any] = {
-        "status": item.get("status"),
-        "waiting_on": item.get("waiting_on"),
-        "recommended_action": item.get("recommended_action"),
-    }
-    if isinstance(item.get("quota"), dict):
-        quota_payload["quota"] = item["quota"]
-    item["goal_channel_projection"] = build_goal_channel_projection(
-        goal_id=str(item.get("goal_id") or goal.get("id") or ""),
-        status_item=item,
-        quota_payload=quota_payload,
-        run_history_goal=run_history_goal,
+    _attach_goal_channel_projection_read_model(
+        item,
+        goal=goal,
+        goal_latest_runs=goal_latest_runs,
+        build_goal_channel_projection=build_goal_channel_projection,
     )
 
 
