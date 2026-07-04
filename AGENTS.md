@@ -74,6 +74,13 @@ submission behavior, permission boundaries, or launch new benchmark jobs.
 After self-merging, sync local `main`, leave unrelated untracked local artifacts
 alone, and continue with the next safe project batch.
 
+Before self-merging non-trivial LoopX changes, run
+`loopx canary premerge --from-git-diff` or an equivalent risk-based validation
+set. The PR comment must name the changed surfaces, checks run, failures/skips,
+manual holds, and why the coverage is enough. One hand-picked smoke is not
+enough for runtime, quota/status, scheduler, todo, install, dashboard,
+benchmark-boundary, or public/private evidence changes.
+
 ## First-Screen Review Gate
 
 Treat the first visible screen of public product surfaces as owner-reviewed
