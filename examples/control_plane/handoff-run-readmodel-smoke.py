@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx import status as status_module  # noqa: E402
-from loopx.projections import handoff_runs as handoff_run_read_model  # noqa: E402
+from loopx.control_plane.handoff import handoff_runs as handoff_run_read_model  # noqa: E402
 
 
 def _projection_is_handoff_ready(run: dict[str, object]) -> bool:

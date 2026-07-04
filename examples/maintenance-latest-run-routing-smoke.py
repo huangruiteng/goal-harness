@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.quota import build_quota_should_run  # noqa: E402
-from loopx.projections.autonomous_candidates import (  # noqa: E402
+from loopx.control_plane.work_items.autonomous_candidates import (  # noqa: E402
     autonomous_todo_candidates as build_autonomous_todo_candidates,
 )
 from loopx.status import (  # noqa: E402

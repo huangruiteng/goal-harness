@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from loopx import status as status_module  # noqa: E402
 from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet  # noqa: E402
-from loopx.projections import run_compaction as run_compaction_read_model  # noqa: E402
+from loopx.control_plane.runtime import run_compaction as run_compaction_read_model  # noqa: E402
 from loopx.policies import goal_frontier as legacy_goal_frontier  # noqa: E402
 from loopx.policies import goal_vision as legacy_goal_vision  # noqa: E402
 from loopx.control_plane.goals import goal_frontier as goal_frontier_read_model  # noqa: E402

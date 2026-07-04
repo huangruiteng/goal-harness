@@ -93,9 +93,9 @@ def assert_domain_checks_precede_family_checks() -> None:
     assert payload["ok"] is True, payload
     commands = [check["command"] for check in payload["selected_checks"]]
     assert commands == [
+        "python3 examples/control_plane/bounded-context-namespace-smoke.py",
         "python3 examples/control_plane/control-plane-risk-characterization-smoke.py",
         "python3 examples/control_plane/hot-path-interface-budget-smoke.py",
-        "python3 examples/control_plane/quota-resume-gated-open-todo-smoke.py",
     ], payload
     assert all(check["source"] == "domain_profile" for check in payload["selected_checks"]), payload
 

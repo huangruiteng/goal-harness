@@ -156,6 +156,7 @@ def assert_named_smoke_profile_expands_to_suite_selection() -> None:
     scripts = [check["normalized"]["script"] for check in payload["selected_checks"]]
     assert scripts, payload
     assert any(script.startswith("examples/control_plane/") for script in scripts), payload
+    assert "examples/control_plane/bounded-context-namespace-smoke.py" in scripts, payload
     assert all("benchmark" not in script for script in scripts), payload
     assert all("skillsbench" not in script for script in scripts), payload
 

@@ -322,6 +322,11 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
         ),
         "checks": [
             {
+                "command": "python3 examples/control_plane/bounded-context-namespace-smoke.py",
+                "tier": "default",
+                "reason": "prevents repo-local code and smokes from depending on legacy projection shims after bounded-context moves",
+            },
+            {
                 "command": "python3 examples/control_plane/control-plane-risk-characterization-smoke.py",
                 "tier": "default",
                 "reason": "characterizes shared control-plane routing, scheduler, and review-packet risks",

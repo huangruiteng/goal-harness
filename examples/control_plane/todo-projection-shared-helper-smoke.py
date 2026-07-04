@@ -21,7 +21,7 @@ from loopx.quota import (  # noqa: E402
     _todo_task_class as quota_todo_task_class,
     build_quota_should_run,
 )
-from loopx.projections.agent_scope import (  # noqa: E402
+from loopx.control_plane.agents.agent_scope import (  # noqa: E402
     _todo_item_claimed_by_agent_or_unclaimed as agent_scope_todo_item_claimed_by_agent_or_unclaimed,
 )
 from loopx.status import (  # noqa: E402

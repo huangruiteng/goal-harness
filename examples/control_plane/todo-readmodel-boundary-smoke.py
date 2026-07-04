@@ -12,10 +12,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx import status as status_module  # noqa: E402
-from loopx.projections import attention_item as attention_item_read_model  # noqa: E402
-from loopx.projections import autonomous_candidates as autonomous_read_model  # noqa: E402
-from loopx.projections import global_registry_shadow as global_registry_shadow_read_model  # noqa: E402
-from loopx.projections import todo_summary as todo_read_model  # noqa: E402
+from loopx.control_plane.work_items import attention_item as attention_item_read_model  # noqa: E402
+from loopx.control_plane.work_items import autonomous_candidates as autonomous_read_model  # noqa: E402
+from loopx.control_plane.goals import global_registry_shadow as global_registry_shadow_read_model  # noqa: E402
+from loopx.control_plane.todos import todo_summary as todo_read_model  # noqa: E402
 
 
 def fixture_todos() -> dict:

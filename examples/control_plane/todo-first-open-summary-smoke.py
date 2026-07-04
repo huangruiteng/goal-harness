@@ -15,7 +15,7 @@ from loopx.quota import build_quota_should_run, render_quota_should_run_markdown
 from loopx.control_plane.todos.active_state_todo_parser import (  # noqa: E402
     parse_active_state_todos as parse_active_state_todos_read_model,
 )
-from loopx.projections.project_asset import build_project_asset_todo_summary  # noqa: E402
+from loopx.control_plane.work_items.project_asset import build_project_asset_todo_summary  # noqa: E402
 from loopx.review_packet import build_review_packet  # noqa: E402
 from loopx.status import (  # noqa: E402
     MAX_DEFERRED_TODO_VISIBILITY_ITEMS,

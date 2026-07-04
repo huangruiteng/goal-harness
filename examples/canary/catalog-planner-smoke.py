@@ -162,6 +162,15 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     )
     refactor_profile_ids = {profile["id"] for profile in refactor_payload["domain_profiles"]}
     assert "control-plane-refactor" in refactor_profile_ids, refactor_payload
+    refactor_profile = next(
+        profile
+        for profile in refactor_payload["domain_profiles"]
+        if profile["id"] == "control-plane-refactor"
+    )
+    refactor_commands = [check["command"] for check in refactor_profile["checks"]]
+    assert "python3 examples/control_plane/bounded-context-namespace-smoke.py" in refactor_commands, (
+        refactor_profile
+    )
     assert "repo-architecture-budget" in refactor_profile_ids, refactor_payload
     architecture_profile = next(
         profile
@@ -176,7 +185,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     work_lane_policy_payload = build_catalog_canary_plan(
         changed_files=["loopx/control_plane/scheduler/monitor_todo.py"],
         surfaces=["resume_when resume_ready work-lane policy seam"],
-        max_checks_per_profile=4,
+        max_checks_per_profile=5,
     )
     work_lane_profiles = {
         profile["id"]: profile for profile in work_lane_policy_payload["domain_profiles"]

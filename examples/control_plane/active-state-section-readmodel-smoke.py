@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.projections.active_state_sections import (  # noqa: E402
+from loopx.control_plane.goals.active_state_sections import (  # noqa: E402
     active_state_section_entries as direct_active_state_section_entries,
     active_state_sections as direct_active_state_sections,
 )

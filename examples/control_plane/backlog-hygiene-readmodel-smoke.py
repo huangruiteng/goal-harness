@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.projections.backlog_hygiene import (  # noqa: E402
+from loopx.control_plane.work_items.backlog_hygiene import (  # noqa: E402
     backlog_hygiene_warning as direct_backlog_hygiene_warning,
 )
 from loopx.status import (  # noqa: E402

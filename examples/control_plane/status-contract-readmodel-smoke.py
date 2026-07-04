@@ -13,7 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx import status as status_module  # noqa: E402
-from loopx.projections import status_contract as status_contract_read_model  # noqa: E402
+from loopx.control_plane.work_items import status_contract as status_contract_read_model  # noqa: E402
 
 
 def direct_status_contract() -> dict[str, Any]:

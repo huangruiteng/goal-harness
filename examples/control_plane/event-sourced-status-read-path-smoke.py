@@ -21,7 +21,7 @@ from loopx.event_sourced_state import (  # noqa: E402
 from loopx.control_plane.goals.active_state_event_projection import (  # noqa: E402
     active_state_event_projection_fields as active_state_event_projection_fields_read_model,
 )
-from loopx.projections import active_state_todos as active_state_todos_read_model  # noqa: E402
+from loopx.control_plane.todos import active_state_todos as active_state_todos_read_model  # noqa: E402
 from loopx.status import active_state_todo_fields  # noqa: E402
 from loopx import status as status_module  # noqa: E402
 
