@@ -50,12 +50,39 @@ CONTROLLER_READINESS_GATE_FIELDS = (
     "ok",
     "review",
 )
+RUN_BASE_COMPACT_FIELDS = (
+    "generated_at",
+    "run_id",
+    "goal_id",
+    "parent_run_id",
+    "spawned_by_goal_id",
+    "agent_role",
+    "classification",
+    "agent_id",
+    "agent_lane",
+    "progress_scope",
+    "delivery_batch_scale",
+    "delivery_outcome",
+    "lifecycle_phase",
+    "lifecycle_flags",
+    "recommended_action",
+    "health_check",
+    "result_status",
+    "approval_state",
+    "active_task_count",
+    "active_priorities",
+    "cache_check",
+    "project_map",
+    "json_exists",
+    "markdown_exists",
+)
 
 CompactProjection = Callable[[Any], Optional[dict[str, Any]]]
 LifecycleFlags = Callable[[Optional[dict[str, Any]]], list[str]]
 PrimaryLifecyclePhase = Callable[..., str]
 TextCompactor = Callable[..., Any]
 RunProjection = Callable[[dict[str, Any]], Optional[dict[str, Any]]]
+ValueProjection = Callable[[Any], Optional[dict[str, Any]]]
 SubagentRunCompactor = Callable[..., Optional[dict[str, Any]]]
 
 
@@ -130,11 +157,16 @@ def compact_run_base(
     public_safe_compact_text: TextCompactor,
     compact_subagent_run: SubagentRunCompactor,
     max_subagent_activity_items: int,
+    compact_agent_vision: ValueProjection | None = None,
 ) -> dict[str, Any]:
     compact = {field: run[field] for field in run_compact_fields if field in run}
     flags = run_lifecycle_flags(run)
     compact.setdefault("lifecycle_phase", primary_lifecycle_phase(flags, fallback="run_recorded"))
     compact.setdefault("lifecycle_flags", flags)
+
+    agent_vision = compact_agent_vision(run.get("agent_vision")) if compact_agent_vision else None
+    if agent_vision:
+        compact["agent_vision"] = agent_vision
 
     reward = compact_human_reward(run.get("human_reward"))
     if reward:

@@ -214,6 +214,13 @@ def main() -> int:
             "One successor todo plus evidence references."
         ), latest_status_vision
         assert latest_status_vision["todo_delta"] == ["create_successor"], latest_status_vision
+        assert "field_limits" not in latest_status_vision["vision_budget"], latest_status_vision
+        assert latest_status_vision["vision_budget"]["field_usage"] == {
+            "vision_summary": 63,
+            "role_scope": 38,
+            "acceptance_summary": 44,
+            "replan_trigger_summary": 49,
+        }, latest_status_vision
 
         write_json(
             invalid_path,
