@@ -163,6 +163,15 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     todo_parser.add_argument(
+        "--successor-todo-id",
+        dest="successor_todo_ids",
+        action="append",
+        help=(
+            "For todo update/complete, link an existing successor todo to the "
+            "current todo. Repeat for multiple successors."
+        ),
+    )
+    todo_parser.add_argument(
         "--resume-when",
         help=(
             "For deferred todo add/update, declare a machine-readable resume condition "
@@ -340,6 +349,7 @@ def handle_todo_command(
                     ("--blocks-agent", args.blocks_agent),
                     ("--global-gate", args.global_gate),
                     ("--unblocks-todo-id", args.unblocks_todo_id),
+                    ("--successor-todo-id", args.successor_todo_ids),
                     ("--resume-when", args.resume_when),
                     ("--monitor-target-key", args.monitor_target_key),
                     ("--cadence", args.cadence),
@@ -391,6 +401,8 @@ def handle_todo_command(
                 raise ValueError("todo add does not support --side-agent-self-merged")
             if args.no_follow_up:
                 raise ValueError("todo add does not support --no-follow-up")
+            if args.successor_todo_ids:
+                raise ValueError("todo add does not support --successor-todo-id; use todo update/complete to link existing successor work")
             payload = add_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -444,6 +456,7 @@ def handle_todo_command(
                     ("--blocks-agent", args.blocks_agent),
                     ("--global-gate", args.global_gate),
                     ("--unblocks-todo-id", args.unblocks_todo_id),
+                    ("--successor-todo-id", args.successor_todo_ids),
                     ("--resume-when", args.resume_when),
                     ("--monitor-target-key", args.monitor_target_key),
                     ("--cadence", args.cadence),
@@ -500,6 +513,7 @@ def handle_todo_command(
                 args.blocks_agent,
                 args.global_gate,
                 args.unblocks_todo_id,
+                args.successor_todo_ids,
                 args.resume_when,
                 args.no_follow_up,
                 args.monitor_target_key,
@@ -508,7 +522,7 @@ def handle_todo_command(
                 args.expires_at,
                 args.clear_claim,
             ]):
-                raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, --required-write-scope, --required-capability, --target-capability, --decision-scope, --required-decision-scope, --claimed-by, --blocks-agent, --global-gate, --unblocks-todo-id, --resume-when, --monitor-target-key, --cadence, --next-due-at, --expires-at, --no-follow-up, or --clear-claim")
+                raise ValueError("todo update requires at least one of --text, --status, --note, --evidence, --reason, --task-class, --action-kind, --required-write-scope, --required-capability, --target-capability, --decision-scope, --required-decision-scope, --claimed-by, --blocks-agent, --global-gate, --unblocks-todo-id, --successor-todo-id, --resume-when, --monitor-target-key, --cadence, --next-due-at, --expires-at, --no-follow-up, or --clear-claim")
             if args.no_follow_up and not (args.note or args.reason or args.evidence):
                 raise ValueError("--no-follow-up requires --note, --reason, or --evidence")
             if args.followups:
@@ -539,6 +553,7 @@ def handle_todo_command(
                 global_gate=bool(args.global_gate),
                 agent_id=args.agent_id,
                 unblocks_todo_id=args.unblocks_todo_id,
+                successor_todo_ids=args.successor_todo_ids,
                 resume_when=args.resume_when,
                 no_followup=True if args.no_follow_up else None,
                 monitor_metadata={
@@ -563,6 +578,10 @@ def handle_todo_command(
                 raise ValueError("todo complete does not support monitor schedule metadata; use todo update before completion")
             if args.no_follow_up and (args.next_agent_todo or args.next_user_todo):
                 raise ValueError("--no-follow-up cannot be combined with successor todos")
+            if args.no_follow_up and args.successor_todo_ids:
+                raise ValueError("--no-follow-up cannot be combined with successor todos")
+            if args.successor_todo_ids and (args.next_agent_todo or args.next_user_todo):
+                raise ValueError("--successor-todo-id links existing work and cannot be combined with --next-agent-todo or --next-user-todo")
             if args.no_follow_up and not (args.note or args.evidence):
                 raise ValueError("--no-follow-up requires --note or --evidence")
             if args.followups:
@@ -575,6 +594,7 @@ def handle_todo_command(
                 evidence=args.evidence,
                 note=args.note,
                 no_followup=bool(args.no_follow_up),
+                successor_todo_ids=args.successor_todo_ids,
                 claimed_by=args.claimed_by,
                 clear_claim=bool(args.clear_claim),
                 next_agent_todo=args.next_agent_todo,
@@ -606,6 +626,8 @@ def handle_todo_command(
                 raise ValueError("todo supersede does not support --follow-up; use `todo capture-followups`")
             if args.blocks_agent or args.global_gate or args.unblocks_todo_id or args.resume_when:
                 raise ValueError("todo supersede does not support --blocks-agent, --global-gate, --unblocks-todo-id, or --resume-when; update the source todo first so the successor can inherit dependency metadata")
+            if args.successor_todo_ids:
+                raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
             if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
                 raise ValueError("todo supersede does not support monitor schedule metadata; use todo update before supersede")
             payload = supersede_goal_todo(
@@ -634,6 +656,8 @@ def handle_todo_command(
                 raise ValueError("todo archive-completed does not support --no-follow-up")
             if args.followups:
                 raise ValueError("todo archive-completed does not support --follow-up; use `todo capture-followups`")
+            if args.successor_todo_ids:
+                raise ValueError("todo archive-completed does not support --successor-todo-id")
             payload = archive_completed_todos(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -665,6 +689,7 @@ def handle_todo_command(
                     ("--blocks-agent", args.blocks_agent),
                     ("--global-gate", args.global_gate),
                     ("--unblocks-todo-id", args.unblocks_todo_id),
+                    ("--successor-todo-id", args.successor_todo_ids),
                     ("--resume-when", args.resume_when),
                     ("--monitor-target-key", args.monitor_target_key),
                     ("--cadence", args.cadence),
@@ -715,6 +740,7 @@ def handle_todo_command(
                     ("--blocks-agent", args.blocks_agent),
                     ("--global-gate", args.global_gate),
                     ("--unblocks-todo-id", args.unblocks_todo_id),
+                    ("--successor-todo-id", args.successor_todo_ids),
                     ("--resume-when", args.resume_when),
                     ("--monitor-target-key", args.monitor_target_key),
                     ("--cadence", args.cadence),

@@ -129,6 +129,11 @@ def parsed_items(state_file: Path) -> list[dict]:
     return fields["agent_todos"]["items"]
 
 
+def parsed_agent_summary(state_file: Path) -> dict:
+    fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
+    return fields["agent_todos"]
+
+
 def assert_configured_side_agent_handoff() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-side-agent-handoff-smoke-") as tmp:
         root = Path(tmp)
@@ -451,9 +456,106 @@ def assert_no_followup_cli_metadata() -> None:
         assert item["no_followup"] is True, item
 
 
+def assert_complete_links_existing_successor() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-existing-successor-complete-smoke-") as tmp:
+        root = Path(tmp)
+        registry_path, state_file = write_fixture(root)
+        source = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            "Ship a side-agent slice that already has its next lane todo.",
+            "--claimed-by",
+            "codex-side-bypass",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "contract_refine",
+        )
+        successor = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            SIDE_CONTINUATION_TODO,
+            "--claimed-by",
+            "codex-side-bypass",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "contract_refine",
+        )
+        source_id = source["todo_id"]
+        successor_id = successor["todo_id"]
+
+        mixed_successor_modes = run_cli_error(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            source_id,
+            "--claimed-by",
+            "codex-side-bypass",
+            "--evidence",
+            "self-merged commit ghi789 after focused validation",
+            "--side-agent-self-merged",
+            "--successor-todo-id",
+            successor_id,
+            "--next-agent-todo",
+            "Duplicate successor should be rejected.",
+        )
+        assert "--successor-todo-id links existing work" in mixed_successor_modes["error"], (
+            mixed_successor_modes
+        )
+
+        completed = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            source_id,
+            "--claimed-by",
+            "codex-side-bypass",
+            "--evidence",
+            "self-merged commit ghi789 after focused validation",
+            "--side-agent-self-merged",
+            "--successor-todo-id",
+            successor_id,
+        )
+        assert completed["changed"] is True, completed
+        assert completed["side_agent_self_merged"] is True, completed
+        assert completed["next_todos"] == [], completed
+        assert completed["successor_todo_ids"] == [successor_id], completed
+
+        source_item = next(item for item in parsed_items(state_file) if item["todo_id"] == source_id)
+        assert source_item["status"] == "done", source_item
+        assert source_item["successor_todo_ids"] == [successor_id], source_item
+        successor_item = next(item for item in parsed_items(state_file) if item["todo_id"] == successor_id)
+        assert successor_item["status"] == "open", successor_item
+        assert successor_item["claimed_by"] == "codex-side-bypass", successor_item
+
+        summary = parsed_agent_summary(state_file)
+        assert summary.get("completed_without_successor_count", 0) == 0, summary
+        assert "todo_succession_warning" not in summary, summary
+
+
 def main() -> int:
     assert_configured_side_agent_handoff()
     assert_no_followup_cli_metadata()
+    assert_complete_links_existing_successor()
 
     with tempfile.TemporaryDirectory(prefix="loopx-todo-lifecycle-smoke-") as tmp:
         root = Path(tmp)

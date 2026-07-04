@@ -27,6 +27,7 @@ def todo_item(
     action_kind: str | None = None,
     claimed_by: str | None = None,
     no_followup: bool = False,
+    successor_todo_ids: list[str] | None = None,
     resume_when: str | None = None,
     unblocks_todo_id: str | None = None,
     updated_at: str | None = None,
@@ -48,6 +49,8 @@ def todo_item(
         item["claimed_by"] = claimed_by
     if no_followup:
         item["no_followup"] = True
+    if successor_todo_ids:
+        item["successor_todo_ids"] = successor_todo_ids
     if resume_when:
         item["resume_when"] = resume_when
     if unblocks_todo_id:
@@ -91,10 +94,24 @@ def build_agent_todos() -> dict:
                 updated_at="2026-07-04T18:00:00+08:00",
             ),
             todo_item(
+                todo_id="todo_with_explicit_successor",
+                text="[P2] Complete a tracked cleanup and link existing successor metadata.",
+                status="done",
+                action_kind="projection_cleanup",
+                claimed_by=AGENT_ID,
+                successor_todo_ids=["todo_explicit_successor"],
+                updated_at="2026-07-04T17:30:00+08:00",
+            ),
+            todo_item(
                 todo_id="todo_successor",
                 text="[P2] Continue after the linked cleanup.",
                 claimed_by=AGENT_ID,
                 resume_when="todo_done:todo_with_successor",
+            ),
+            todo_item(
+                todo_id="todo_explicit_successor",
+                text="[P2] Continue after the explicit successor link.",
+                claimed_by=AGENT_ID,
             ),
             {
                 "todo_id": "todo_legacy_done",
@@ -181,6 +198,9 @@ def assert_status_summary_warning() -> None:
         item["todo_id"] for item in warning["items"] if item.get("todo_id")
     }, warning
     assert "todo_with_successor" not in {
+        item["todo_id"] for item in warning["items"] if item.get("todo_id")
+    }, warning
+    assert "todo_with_explicit_successor" not in {
         item["todo_id"] for item in warning["items"] if item.get("todo_id")
     }, warning
     assert "todo_legacy_done" not in {

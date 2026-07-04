@@ -38,6 +38,7 @@ from .control_plane.todos.contract import (
     normalize_todo_decision_scope,
     normalize_todo_global_gate,
     normalize_todo_id,
+    normalize_todo_id_list,
     normalize_todo_no_followup,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
@@ -78,6 +79,7 @@ TODO_METADATA_FIELDS = (
     "blocks_agent",
     "global_gate",
     "unblocks_todo_id",
+    "successor_todo_ids",
     "resume_when",
     "no_followup",
     "target_key",
@@ -371,6 +373,7 @@ def todo_item_relations(item: dict[str, Any]) -> dict[str, Any]:
         "blocks_agent",
         "global_gate",
         "unblocks_todo_id",
+        "successor_todo_ids",
         "superseded_by",
         "resume_when",
         "resume_condition",
@@ -720,6 +723,12 @@ def metadata_line_for_block(block: dict[str, Any], updates: dict[str, Any]) -> s
             no_followup = normalize_todo_no_followup(value)
             if no_followup is not None:
                 metadata[key] = no_followup
+            else:
+                metadata.pop(key, None)
+        elif key == "successor_todo_ids":
+            todo_ids = normalize_todo_id_list(value)
+            if todo_ids:
+                metadata[key] = todo_ids
             else:
                 metadata.pop(key, None)
         elif key == "global_gate":
@@ -1203,6 +1212,7 @@ def apply_todo_update_to_lines(
     blocks_agent: str | None = None,
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
+    successor_todo_ids: list[str] | None = None,
     resume_when: str | None = None,
     no_followup: bool | None = None,
     monitor_metadata: dict[str, Any] | None = None,
@@ -1274,6 +1284,8 @@ def apply_todo_update_to_lines(
         updates["global_gate"] = global_gate
     if unblocks_todo_id:
         updates["unblocks_todo_id"] = unblocks_todo_id
+    if successor_todo_ids is not None:
+        updates["successor_todo_ids"] = successor_todo_ids
     if resume_when:
         updates["resume_when"] = resume_when
     if no_followup is not None:
@@ -1314,6 +1326,7 @@ def apply_todo_update_to_lines(
         "blocks_agent": normalize_todo_blocks_agent(effective_metadata.get("blocks_agent")),
         "global_gate": normalize_todo_global_gate(effective_metadata.get("global_gate")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
+        "successor_todo_ids": normalize_todo_id_list(effective_metadata.get("successor_todo_ids")),
         "resume_when": normalize_todo_resume_when(effective_metadata.get("resume_when")),
         "no_followup": normalize_todo_no_followup(effective_metadata.get("no_followup")),
         "target_key": effective_metadata.get("target_key"),
@@ -1346,6 +1359,7 @@ def update_goal_todo(
     global_gate: bool = False,
     agent_id: str | None = None,
     unblocks_todo_id: str | None = None,
+    successor_todo_ids: list[str] | None = None,
     resume_when: str | None = None,
     no_followup: bool | None = None,
     monitor_metadata: dict[str, Any] | None = None,
@@ -1445,6 +1459,9 @@ def update_goal_todo(
         normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+        normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
+        if successor_todo_ids and not normalized_successor_todo_ids:
+            raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
         normalized_resume_when = normalize_todo_resume_when(resume_when) if resume_when else None
         if resume_when and not normalized_resume_when:
             raise ValueError("resume_when must be public-safe, e.g. todo_done:todo_ab12cd34ef56 or pr_merged:#532")
@@ -1473,6 +1490,7 @@ def update_goal_todo(
             blocks_agent=effective_blocks_agent,
             global_gate=True if global_gate else None,
             unblocks_todo_id=normalized_unblocks_todo_id,
+            successor_todo_ids=normalized_successor_todo_ids if successor_todo_ids is not None else None,
             resume_when=normalized_resume_when,
             no_followup=no_followup,
             monitor_metadata=normalized_monitor_metadata,
@@ -1515,6 +1533,7 @@ def complete_goal_todo(
     evidence: str | None = None,
     note: str | None = None,
     no_followup: bool = False,
+    successor_todo_ids: list[str] | None = None,
     claimed_by: str | None = None,
     clear_claim: bool = False,
     next_agent_todo: str | None = None,
@@ -1618,6 +1637,9 @@ def complete_goal_todo(
                 effective_next_claimed_by = handoff_agent
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")
+        normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
+        if successor_todo_ids and not normalized_successor_todo_ids:
+            raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
         if not find_todo_block(lines, todo_id=todo_id, role=role):
             event_context = event_projection_todo_context(
                 registry_path=registry_path,
@@ -1635,6 +1657,7 @@ def complete_goal_todo(
                     evidence=evidence,
                     note=note,
                     no_followup=no_followup,
+                    successor_todo_ids=normalized_successor_todo_ids,
                     claimed_by=effective_claimed_by,
                     clear_claim=clear_claim,
                     next_agent_todo=next_agent_todo,
@@ -1659,6 +1682,7 @@ def complete_goal_todo(
             claimed_by=effective_claimed_by,
             clear_claim=clear_claim,
             no_followup=True if no_followup else None,
+            successor_todo_ids=normalized_successor_todo_ids if successor_todo_ids is not None else None,
             updated_at=updated_at,
         )
         if next_agent_todo and not effective_next_claimed_by:
