@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.projections.autonomous_replan_obligation import (  # noqa: E402
+from loopx.control_plane.work_items.autonomous_replan_obligation import (  # noqa: E402
     autonomous_replan_obligation_from_state as direct_autonomous_replan_obligation_from_state,
     build_autonomous_replan_obligation as direct_build_autonomous_replan_obligation,
 )

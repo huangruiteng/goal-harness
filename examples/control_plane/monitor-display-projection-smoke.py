@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.projections.monitor_display import (  # noqa: E402
+from loopx.control_plane.scheduler.monitor_display import (  # noqa: E402
     attention_item_is_monitor_quiet_display_candidate as direct_monitor_candidate,
     normalize_monitor_quiet_attention_display as direct_normalize_monitor_display,
     quiet_monitor_display_action as direct_quiet_monitor_display_action,

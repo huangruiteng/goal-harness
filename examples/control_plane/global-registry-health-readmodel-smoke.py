@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx import status as status_module  # noqa: E402
-from loopx.projections import global_registry_health as health_read_model  # noqa: E402
+from loopx.control_plane.goals import global_registry_health as health_read_model  # noqa: E402
 
 
 def direct_collect(

@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.projections.todo_summary import sync_connected_attention_action_from_todos  # noqa: E402
+from loopx.control_plane.todos.todo_summary import sync_connected_attention_action_from_todos  # noqa: E402
 
 
 AGENT_ACTION = "[P2] Run the first read-only project map."

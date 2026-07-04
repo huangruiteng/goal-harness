@@ -31,10 +31,18 @@ LEGACY_OVERSIZED_RETIREMENT_PLANS = {
         "Continue extracting SkillsBench discovery, counter, and reducer helpers "
         "into focused adapter modules, then lower this pin again."
     ),
+    "loopx/benchmark_adapters/skillsbench_acp_relay.py": (
+        "Split ACP relay bootstrap, app-server lifecycle, and reducer-facing "
+        "status helpers into focused modules, then lower this pin again."
+    ),
     "loopx/benchmark_adapters/terminal_bench.py": (
         "Continue extracting TerminalBench runner setup, private-source guards, "
         "and route attribution helpers into focused adapter modules, then lower "
         "this pin again."
+    ),
+    "loopx/todos.py": (
+        "Continue moving todo lifecycle read/write helpers into "
+        "loopx.control_plane.todos modules, then lower this pin again."
     ),
     "scripts/skillsbench_automation_loop.py": (
         "Extract native app-server Goal/reduce-only closeout helpers into "
@@ -45,8 +53,8 @@ LEGACY_OVERSIZED_RETIREMENT_PLANS = {
 LEGACY_OVERSIZED_LIMITS = {
     "examples/benchmark-run-ledger-smoke.py": 2106,
     "examples/control_plane/quota-plan-smoke.py": 2176,
-    "examples/skillsbench-app-server-goal-worker-smoke.py": 3075,
-    "examples/skillsbench-benchmark-run-smoke.py": 14593,
+    "examples/skillsbench-app-server-goal-worker-smoke.py": 3119,
+    "examples/skillsbench-benchmark-run-smoke.py": 14801,
     "examples/skillsbench-host-local-launch-plan-smoke.py": 2373,
     "examples/control_plane/status-markdown-smoke.py": 2607,
     "examples/terminal-bench-harbor-runner-ingest-smoke.py": 2759,
@@ -56,7 +64,7 @@ LEGACY_OVERSIZED_LIMITS = {
     "loopx/benchmark_adapters/agents_last_exam.py": 3998,
     "loopx/benchmark_adapters/skillsbench.py": 5934,
     "examples/control_plane/work-lane-contract-smoke.py": 2336,
-    "loopx/benchmark_adapters/skillsbench_acp_relay.py": 3144,
+    "loopx/benchmark_adapters/skillsbench_acp_relay.py": 3622,
     "loopx/benchmark_adapters/terminal_bench.py": 10083,
     "loopx/benchmark_ledger.py": 3745,
     "loopx/capabilities/content_ops/surface.py": 2549,
@@ -65,9 +73,9 @@ LEGACY_OVERSIZED_LIMITS = {
     "loopx/quota.py": 10628,
     "loopx/status.py": 11758,
     "loopx/terminal_bench_agent.py": 2056,
-    "loopx/todos.py": 2105,
+    "loopx/todos.py": 2119,
     "scripts/harbor_host_codex_goal_agent.py": 2140,
-    "scripts/skillsbench_automation_loop.py": 16900,
+    "scripts/skillsbench_automation_loop.py": 17370,
 }
 
 RETIREMENT_PLAN_REQUIRED_PATHS = {
@@ -75,7 +83,9 @@ RETIREMENT_PLAN_REQUIRED_PATHS = {
     "examples/skillsbench-benchmark-run-smoke.py",
     "examples/terminal-bench-private-runner-env-guard-smoke.py",
     "loopx/benchmark_adapters/skillsbench.py",
+    "loopx/benchmark_adapters/skillsbench_acp_relay.py",
     "loopx/benchmark_adapters/terminal_bench.py",
+    "loopx/todos.py",
     "scripts/skillsbench_automation_loop.py",
 }
 

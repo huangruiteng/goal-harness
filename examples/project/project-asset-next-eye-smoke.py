@@ -31,8 +31,8 @@ from loopx.status import (  # noqa: E402
     project_asset_todo_projection_gap,
     project_asset_todo_summary,
 )
-from loopx.projections import project_asset as project_asset_read_model  # noqa: E402
-from loopx.projections.project_asset import (  # noqa: E402
+from loopx.control_plane.work_items import project_asset as project_asset_read_model  # noqa: E402
+from loopx.control_plane.work_items.project_asset import (  # noqa: E402
     project_asset_quota_state,
     project_asset_user_todo_open_count,
 )

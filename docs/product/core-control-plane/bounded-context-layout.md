@@ -20,9 +20,10 @@ New control-plane code should live under `loopx.control_plane`:
 | `runtime` | Runtime/session projections and run-compaction helpers. |
 | `handoff` | Handoff readiness, handoff state, and handoff-run classification. |
 
-The legacy `loopx.projections` namespace remains available as a compatibility
-shim for existing examples and external imports, but implementation code should
-not be added there by default.
+Repo-local control-plane code, examples, and smokes should import the owning
+bounded context directly. Do not add compatibility shims for internal moves; if
+an external compatibility break matters, make it an explicit release decision
+instead of keeping a generic legacy namespace alive by default.
 
 ## Projection Boundary
 
@@ -46,11 +47,12 @@ When moving an existing module:
 
 1. Move the implementation into the owning bounded context.
 2. Update LoopX runtime imports to the new context path.
-3. Keep a thin `loopx.projections.<module>` compatibility shim when public
-   examples, docs, or downstream callers already import it.
-4. Add or keep a focused smoke that exercises both the runtime path and the
-   compatibility path.
-5. Remove the shim only in a deliberate compatibility-breaking release.
+3. Update repo-local examples, docs, and smokes to the bounded-context import
+   path in the same batch.
+4. Add or keep a focused smoke that exercises the runtime path and rejects
+   internal imports from stale legacy namespaces.
+5. Use a deliberate compatibility-breaking release note if an old public import
+   path must be removed.
 
-This keeps the kernel architecture clean without forcing every downstream
-consumer to migrate in the same PR.
+This keeps the kernel architecture clean without preserving internal shims that
+invite future code to grow in the wrong namespace.
