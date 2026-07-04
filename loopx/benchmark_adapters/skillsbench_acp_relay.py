@@ -531,6 +531,7 @@ class CodexExecConfig:
     bridge_idle_timeout_sec: float = 0.0
     task_output_quiet_timeout_sec: float = 0.0
     reasoning_effort: str | None = None
+    codex_api_proxy: str | None = None
     worker_public_trace_dir: str | None = None
     remote_command_file_bridge_command: str | None = None
     remote_command_file_bridge_agent_command: str | None = None
@@ -1117,7 +1118,7 @@ class SkillsBenchLocalAcpRelay:
             prompt_path.write_text(prompt_for_codex, encoding="utf-8")
             tmux_name = f"gh-sb-cli-goal-{uuid.uuid4().hex[:10]}"
             cmd = self._codex_cli_tui_command(cwd=cwd, model=session.get("model"))
-            shell_command = " ".join(shlex.quote(part) for part in cmd)
+            shell_command = self._codex_cli_tui_shell_command(cmd)
             goal_active_observed = False
             goal_terminal_observed = False
             goal_failed_observed = False
@@ -1143,8 +1144,21 @@ class SkillsBenchLocalAcpRelay:
                     stderr=subprocess.PIPE,
                     text=True,
                 )
-                time.sleep(1.0)
+                if not self._wait_for_codex_cli_tui_ready(tmux_name):
+                    self._tmux_kill_session(tmux_name)
+                    self._publish_codex_cli_goal_trace(
+                        ok=False,
+                        stage="tui_ready_timeout",
+                        goal_active_observed=False,
+                        goal_terminal_observed=False,
+                        first_action_observed=False,
+                        bridge_summary_path=bridge_summary_path,
+                    )
+                    return _recoverable_codex_turn_failure_message(
+                        "codex_exec_first_action_timeout"
+                    )
                 self._tmux_send_literal(tmux_name, "/goal ")
+                time.sleep(0.2)
                 subprocess.run(
                     ["tmux", "load-buffer", "-b", f"{tmux_name}-prompt", str(prompt_path)],
                     check=True,
@@ -1167,6 +1181,7 @@ class SkillsBenchLocalAcpRelay:
                     stderr=subprocess.DEVNULL,
                     text=True,
                 )
+                time.sleep(0.8)
                 self._tmux_submit_enter(tmux_name)
                 deadline = time.monotonic() + self._config.timeout_sec
                 first_action_deadline = 0.0
@@ -1394,6 +1409,52 @@ class SkillsBenchLocalAcpRelay:
             cmd.extend(["-m", str(resolved_model)])
         return cmd
 
+    def _codex_cli_tui_environment(self) -> dict[str, str]:
+        proxy_url = (self._config.codex_api_proxy or "").strip()
+        if not proxy_url:
+            for key in (
+                "HTTPS_PROXY",
+                "HTTP_PROXY",
+                "ALL_PROXY",
+                "https_proxy",
+                "http_proxy",
+                "all_proxy",
+            ):
+                value = os.environ.get(key)
+                if value:
+                    proxy_url = value.strip()
+                    break
+        if not proxy_url:
+            return {}
+        env = {
+            "HTTPS_PROXY": proxy_url,
+            "HTTP_PROXY": proxy_url,
+            "ALL_PROXY": proxy_url,
+            "https_proxy": proxy_url,
+            "http_proxy": proxy_url,
+            "all_proxy": proxy_url,
+        }
+        no_proxy_entries: list[str] = []
+        for raw in (os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "").split(","):
+            entry = raw.strip()
+            if entry and entry not in no_proxy_entries:
+                no_proxy_entries.append(entry)
+        for entry in ("localhost", "127.0.0.1", "::1"):
+            if entry not in no_proxy_entries:
+                no_proxy_entries.append(entry)
+        no_proxy = ",".join(no_proxy_entries)
+        env["NO_PROXY"] = no_proxy
+        env["no_proxy"] = no_proxy
+        return env
+
+    def _codex_cli_tui_shell_command(self, cmd: list[str]) -> str:
+        env = self._codex_cli_tui_environment()
+        if not env:
+            return " ".join(shlex.quote(part) for part in cmd)
+        env_parts = [shlex.quote(f"{key}={value}") for key, value in sorted(env.items())]
+        cmd_parts = [shlex.quote(part) for part in cmd]
+        return " ".join(["env", *env_parts, *cmd_parts])
+
     def _tmux_send_literal(self, tmux_name: str, text: str) -> None:
         subprocess.run(
             ["tmux", "send-keys", "-t", tmux_name, "-l", text],
@@ -1416,6 +1477,52 @@ class SkillsBenchLocalAcpRelay:
                 stderr=subprocess.DEVNULL,
                 text=True,
             )
+
+    def _wait_for_codex_cli_tui_ready(
+        self,
+        tmux_name: str,
+        *,
+        timeout_sec: float = 30.0,
+        settle_sec: float = 5.0,
+    ) -> bool:
+        """Wait until Codex TUI startup noise has settled before pasting /goal."""
+
+        deadline = time.monotonic() + max(1.0, float(timeout_sec or 0.0))
+        first_nonempty_at = 0.0
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            capture = self._tmux_capture(tmux_name)
+            lowered = capture.lower()
+            if not capture.strip():
+                time.sleep(0.5)
+                continue
+            if not first_nonempty_at:
+                first_nonempty_at = now
+            if self._codex_cli_tui_input_prompt_visible(capture):
+                return True
+            if any(
+                marker in lowered
+                for marker in (
+                    "what can i help",
+                    "ask codex",
+                    "message codex",
+                    "send a message",
+                    "type a message",
+                )
+            ):
+                return True
+            # Startup MCP warnings can occupy the TUI before the input box is
+            # ready. Seeing only those warnings is not enough; wait until the
+            # actual prompt marker appears.
+            time.sleep(0.5)
+        return False
+
+    def _codex_cli_tui_input_prompt_visible(self, capture: str) -> bool:
+        if not capture:
+            return False
+        if "›" in capture:
+            return True
+        return bool(re.search(r"(?m)^\\s*[>❯]\\s*(?:$|\\[)", capture))
 
     def _tmux_capture(self, tmux_name: str) -> str:
         proc = subprocess.run(
@@ -1493,6 +1600,10 @@ class SkillsBenchLocalAcpRelay:
                 "bridge_request_count": bridge_request_count,
                 "task_facing_success_count": task_facing_success_count,
                 "reasoning_effort": str(self._config.reasoning_effort or "")[:40],
+                "codex_api_proxy_env_injected": bool(
+                    self._codex_cli_tui_environment()
+                ),
+                "codex_api_proxy_raw_url_recorded": False,
                 "raw_tui_capture_recorded": False,
                 "raw_task_text_recorded": False,
                 "raw_stdout_recorded": False,
