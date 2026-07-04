@@ -120,23 +120,47 @@ def run_cli(registry_path: Path, *args: str) -> dict[str, Any]:
 
 
 def assert_cache_hit(payload: dict[str, Any]) -> None:
-    cache = payload.get("projection_cache")
-    if not isinstance(cache, dict):
-        cache = payload.get("status_projection_cache")
+    cache = cache_metadata(payload)
     assert isinstance(cache, dict), payload
     assert cache.get("schema_version") == "status_projection_cache_v0", cache
     assert cache.get("hit") is True, cache
 
 
 def assert_cache_written(payload: dict[str, Any]) -> None:
-    cache = payload.get("projection_cache")
-    if not isinstance(cache, dict):
-        cache = payload.get("status_projection_cache")
+    cache = cache_metadata(payload)
     assert isinstance(cache, dict), payload
     assert cache.get("schema_version") == "status_projection_cache_v0", cache
     assert cache.get("written") is True, cache
     assert cache.get("hit") is False, cache
     assert Path(str(cache.get("path"))).exists(), cache
+
+
+def cache_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    cache = payload.get("projection_cache")
+    if not isinstance(cache, dict):
+        cache = payload.get("status_projection_cache")
+    assert isinstance(cache, dict), payload
+    return cache
+
+
+def expire_cache_record(payload: dict[str, Any]) -> None:
+    path = Path(str(cache_metadata(payload).get("path")))
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["generated_at"] = "2000-01-01T00:00:00Z"
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def assert_cache_expired(payload: dict[str, Any]) -> None:
+    cache = cache_metadata(payload)
+    assert cache.get("schema_version") == "status_projection_cache_v0", cache
+    assert cache.get("hit") is False, cache
+    assert cache.get("miss_reason") == "expired", cache
+
+
+def assert_next_action(payload: dict[str, Any], expected_todo_id: str) -> None:
+    next_action = payload.get("agent_lane_next_action")
+    assert isinstance(next_action, dict), payload
+    assert next_action.get("todo_id") == expected_todo_id, payload
 
 
 def main() -> int:
@@ -157,6 +181,7 @@ def main() -> int:
             AGENT_ID,
         )
         assert todo_payload.get("ok") is True, todo_payload
+        initial_todo_id = str(todo_payload["todo_id"])
 
         status_write = run_cli(
             registry_path,
@@ -221,6 +246,133 @@ def main() -> int:
         assert quota_cached.get("ok") is True, quota_cached
         assert quota_cached.get("should_run") is True, quota_cached
         assert_cache_hit(quota_cached)
+        assert_next_action(quota_cached, initial_todo_id)
+
+        completed = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--todo-id",
+            initial_todo_id,
+            "--claimed-by",
+            AGENT_ID,
+            "--evidence",
+            "fixture cache state transition",
+            "--next-agent-todo",
+            "Continue after status projection cache invalidation.",
+            "--next-claimed-by",
+            AGENT_ID,
+            "--next-task-class",
+            "advancement_task",
+            "--next-action-kind",
+            "status_projection_cache_successor",
+        )
+        assert completed.get("ok") is True, completed
+        successor_id = completed["next_todos"][0]["todo_id"]
+
+        live_status = run_cli(
+            registry_path,
+            "status",
+            "--scan-path",
+            str(public_doc),
+            "--limit",
+            "5",
+        )
+        live_status_text = json.dumps(live_status, sort_keys=True)
+        assert successor_id in live_status_text, live_status
+        assert "projection_cache" not in live_status, live_status
+
+        live_quota = run_cli(
+            registry_path,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--available-capability",
+            "shell",
+            "--scan-path",
+            str(public_doc),
+            "--limit",
+            "5",
+        )
+        assert live_quota.get("ok") is True, live_quota
+        assert_next_action(live_quota, successor_id)
+        assert "status_projection_cache" not in live_quota, live_quota
+
+        stale_status = run_cli(
+            registry_path,
+            "status",
+            "--scan-path",
+            str(public_doc),
+            "--limit",
+            "5",
+            "--use-projection-cache",
+        )
+        assert_cache_hit(stale_status)
+        stale_status_text = json.dumps(stale_status, sort_keys=True)
+        assert initial_todo_id in stale_status_text, stale_status
+        assert successor_id not in stale_status_text, stale_status
+
+        stale_quota = run_cli(
+            registry_path,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--available-capability",
+            "shell",
+            "--scan-path",
+            str(public_doc),
+            "--limit",
+            "5",
+            "--use-projection-cache",
+        )
+        assert stale_quota.get("ok") is True, stale_quota
+        assert_cache_hit(stale_quota)
+        assert_next_action(stale_quota, initial_todo_id)
+
+        expire_cache_record(stale_status)
+        expire_cache_record(stale_quota)
+
+        expired_status = run_cli(
+            registry_path,
+            "status",
+            "--scan-path",
+            str(public_doc),
+            "--limit",
+            "5",
+            "--use-projection-cache",
+        )
+        assert_cache_expired(expired_status)
+        assert successor_id in json.dumps(expired_status, sort_keys=True), expired_status
+
+        expired_quota = run_cli(
+            registry_path,
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--available-capability",
+            "shell",
+            "--scan-path",
+            str(public_doc),
+            "--limit",
+            "5",
+            "--use-projection-cache",
+        )
+        assert expired_quota.get("ok") is True, expired_quota
+        assert_cache_expired(expired_quota)
+        assert_next_action(expired_quota, successor_id)
 
         public_doc.write_text(
             f"Public leak probe must still be caught by default quota scan: {PRIVATE_DOC_MARKER}\n",

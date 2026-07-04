@@ -536,6 +536,34 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "status-projection-cache",
+        "title": "Status projection cache contract",
+        "purpose": (
+            "Check opt-in status projection cache freshness, expiration fallback, "
+            "and quota next-action isolation before cache-path changes ship."
+        ),
+        "catalog_families": ["Work Routing", "State And Boundary"],
+        "trigger_hints": (
+            "projection-cache",
+            "status_projection_cache",
+            "use-projection-cache",
+            "write-projection-cache",
+            "status projection cache",
+            "loopx/control_plane/runtime/status_projection_cache.py",
+            "examples/control_plane/status-projection-cache-smoke.py",
+        ),
+        "checks": [
+            {
+                "command": "python3 examples/control_plane/status-projection-cache-smoke.py",
+                "tier": "default",
+                "reason": (
+                    "guards opt-in status projection cache freshness, expiration fallback, "
+                    "and quota next-action read-path isolation"
+                ),
+            },
+        ],
+    },
+    {
         "id": "review-packet-read-path",
         "title": "Review-packet read-path contract",
         "purpose": "Check operator review packets, handoff-only payloads, and task-graph lineage before review-packet/read-path changes ship.",

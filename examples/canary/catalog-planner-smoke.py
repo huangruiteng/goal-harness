@@ -50,6 +50,7 @@ def assert_profiles_come_from_catalog_matrix() -> None:
         "repo-architecture-budget",
         "control-plane-state-machine",
         "status-read-path",
+        "status-projection-cache",
         "review-packet-read-path",
         "event-sourced-read-path",
         "cli-command-contract",
@@ -347,6 +348,22 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     )
     assert "python3 examples/control_plane/goal-channel-readmodel-smoke.py" in status_wide_commands, (
         status_wide_payload
+    )
+
+    status_cache_payload = build_catalog_canary_plan(
+        changed_files=["loopx/control_plane/runtime/status_projection_cache.py"],
+        surfaces=["status_projection_cache projection-cache read-path"],
+        max_checks_per_profile=4,
+    )
+    status_cache_profiles = {
+        profile["id"]: profile for profile in status_cache_payload["domain_profiles"]
+    }
+    assert "status-projection-cache" in status_cache_profiles, status_cache_payload
+    status_cache_commands = [
+        check["command"] for check in status_cache_profiles["status-projection-cache"]["checks"]
+    ]
+    assert "python3 examples/control_plane/status-projection-cache-smoke.py" in status_cache_commands, (
+        status_cache_payload
     )
 
     runtime_handoff_payload = build_catalog_canary_plan(
