@@ -552,10 +552,72 @@ def assert_complete_links_existing_successor() -> None:
         assert "todo_succession_warning" not in summary, summary
 
 
+def assert_same_title_completion_creates_fresh_successor() -> None:
+    title = "[P1] Continue the next non-benchmark LoopX state-machine canary/refactor slice."
+    with tempfile.TemporaryDirectory(prefix="loopx-same-title-successor-smoke-") as tmp:
+        root = Path(tmp)
+        registry_path, state_file = write_fixture(root)
+        added = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            title,
+            "--claimed-by",
+            "codex-side-bypass",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "state_machine_canary_refactor",
+        )
+        completed = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            added["todo_id"],
+            "--claimed-by",
+            "codex-side-bypass",
+            "--evidence",
+            "self-merged commit same-title after focused validation",
+            "--side-agent-self-merged",
+            "--next-agent-todo",
+            title,
+            "--next-claimed-by",
+            "codex-side-bypass",
+            "--next-action-kind",
+            "state_machine_canary_refactor",
+        )
+        assert completed["changed"] is True, completed
+        assert completed["next_todos"][0]["added"] is True, completed
+        successor_id = completed["next_todos"][0]["todo_id"]
+        assert successor_id != added["todo_id"], completed
+        assert completed["next_todos"][0]["unblocks_todo_id"] == added["todo_id"], completed
+
+        items = parsed_items(state_file)
+        source_item = next(item for item in items if item["todo_id"] == added["todo_id"])
+        successor_item = next(item for item in items if item["todo_id"] == successor_id)
+        assert source_item["status"] == "done", source_item
+        assert successor_item["status"] == "open", successor_item
+        assert successor_item["text"] == title, successor_item
+        assert successor_item["unblocks_todo_id"] == added["todo_id"], successor_item
+
+        summary = parsed_agent_summary(state_file)
+        assert summary.get("completed_without_successor_count", 0) == 0, summary
+        assert "todo_succession_warning" not in summary, summary
+
+
 def main() -> int:
     assert_configured_side_agent_handoff()
     assert_no_followup_cli_metadata()
     assert_complete_links_existing_successor()
+    assert_same_title_completion_creates_fresh_successor()
 
     with tempfile.TemporaryDirectory(prefix="loopx-todo-lifecycle-smoke-") as tmp:
         root = Path(tmp)

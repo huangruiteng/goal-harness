@@ -631,6 +631,8 @@ def matching_todo_block(
 ) -> dict[str, Any] | None:
     expected = normalize_todo_text(text)
     for block in todo_blocks(lines, start, end, role=role, source_section=source_section):
+        if todo_done_for_status(todo_item_status(block)):
+            continue
         if normalize_todo_text(str(block.get("text") or "")) == expected:
             return block
     return None
@@ -1688,10 +1690,13 @@ def complete_goal_todo(
         if next_agent_todo and not effective_next_claimed_by:
             effective_next_claimed_by = normalize_todo_claimed_by(update_result.get("claimed_by"))
         next_blocks_agent = None
-        next_unblocks_todo_id = None
+        next_unblocks_todo_id = (
+            normalize_todo_id(str(update_result.get("todo_id") or todo_id))
+            if next_agent_todo
+            else None
+        )
         if side_agent_completion and next_agent_todo and not side_agent_self_merged:
             next_blocks_agent = effective_claimed_by
-            next_unblocks_todo_id = normalize_todo_id(str(update_result.get("todo_id") or todo_id))
         next_user_blocks_agent = None
         if next_user_todo and len(registered_agents) > 1:
             next_user_blocks_agent = effective_claimed_by or primary_agent
