@@ -17,7 +17,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.quota import (  # noqa: E402
-    _interaction_next_cli_actions,
     build_quota_plan,
     build_quota_monitor_poll_event,
     build_quota_should_run,
@@ -33,6 +32,7 @@ from loopx.quota import (  # noqa: E402
     render_quota_should_run_markdown,
     void_quota_slot,
 )
+from loopx.control_plane.work_items.interaction_contract import interaction_next_cli_actions  # noqa: E402
 
 
 SCOPED_AGENT_ID = "codex-side-bypass"
@@ -2060,7 +2060,7 @@ def assert_monitor_poll_event_carries_agent_id() -> None:
 
 
 def assert_monitor_poll_next_cli_action_preserves_agent_id() -> None:
-    actions = _interaction_next_cli_actions(
+    actions = interaction_next_cli_actions(
         {
             "goal_id": "scoped-monitor-goal",
             "agent_identity": {

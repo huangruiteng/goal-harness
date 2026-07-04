@@ -190,7 +190,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
             "complex control-plane state-machine interaction_contract "
             "scheduler_hint work_lane_contract goal_frontier"
         ],
-        max_checks_per_profile=3,
+        max_checks_per_profile=4,
     )
     state_machine_profiles = {
         profile["id"]: profile for profile in state_machine_payload["domain_profiles"]
@@ -199,6 +199,9 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     state_machine_profile = state_machine_profiles["control-plane-state-machine"]
     state_machine_commands = [check["command"] for check in state_machine_profile["checks"]]
     assert "python3 examples/control_plane/control-plane-integrated-canary-smoke.py" in state_machine_commands, (
+        state_machine_profile
+    )
+    assert "python3 examples/control_plane/interaction-contract-state-machine-smoke.py" in state_machine_commands, (
         state_machine_profile
     )
     assert "python3 examples/control_plane/heartbeat-quota-flow-smoke.py" in state_machine_commands, (
@@ -210,6 +213,24 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     assert all(check["tier"] == "default" for check in state_machine_profile["checks"]), (
         state_machine_profile
     )
+
+    interaction_contract_payload = build_catalog_canary_plan(
+        changed_files=["loopx/control_plane/work_items/interaction_contract.py"],
+        surfaces=["interaction_contract protocol_action_packet state-machine"],
+        max_checks_per_profile=4,
+    )
+    interaction_contract_profiles = {
+        profile["id"]: profile for profile in interaction_contract_payload["domain_profiles"]
+    }
+    assert "control-plane-refactor" in interaction_contract_profiles, interaction_contract_payload
+    assert "control-plane-state-machine" in interaction_contract_profiles, interaction_contract_payload
+    interaction_contract_commands = [
+        check["command"]
+        for check in interaction_contract_profiles["control-plane-state-machine"]["checks"]
+    ]
+    assert "python3 examples/control_plane/interaction-contract-state-machine-smoke.py" in (
+        interaction_contract_commands
+    ), interaction_contract_profiles["control-plane-state-machine"]
 
     bounded_context_payload = build_catalog_canary_plan(
         changed_files=["loopx/control_plane/work_items/work_lane.py"],
