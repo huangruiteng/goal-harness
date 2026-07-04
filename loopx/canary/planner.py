@@ -440,6 +440,14 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 ),
             },
             {
+                "command": "python3 examples/control_plane/side-agent-self-iteration-state-machine-smoke.py",
+                "tier": "default",
+                "reason": (
+                    "guards side-agent self-merge continuation through successor todo selection, "
+                    "agent-lane refresh, scheduler ack, quota spend, and preserved goal next action"
+                ),
+            },
+            {
                 "command": "python3 examples/control_plane/interaction-contract-state-machine-smoke.py",
                 "tier": "default",
                 "reason": (
