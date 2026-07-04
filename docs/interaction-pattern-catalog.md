@@ -1016,7 +1016,8 @@ state-machine bugs, not prompt wording bugs.
 
 **Validation**
 
-- `loopx/todo_handoff_gate.py` owns the `todo_handoff_gate_v0` projection.
+- `loopx/control_plane/todos/handoff_gate.py` owns the
+  `todo_handoff_gate_v0` projection.
 - `examples/control_plane/quota-cleared-blocker-successor-gate-smoke.py` covers
   `blocking`, `cleared_without_successor`, `cleared_with_successor`, and
   `superseded` gate states.

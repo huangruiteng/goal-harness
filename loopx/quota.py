@@ -97,7 +97,10 @@ from .todo_contract import (
     normalize_todo_status,
     normalize_todo_task_class,
 )
-from .todo_handoff_gate import HandoffGateState, build_todo_handoff_gate_states
+from .control_plane.todos.handoff_gate import (
+    HandoffGateState,
+    build_todo_handoff_gate_states,
+)
 from .todo_projection import (
     todo_claimed_visibility_items as projection_todo_claimed_visibility_items,
     todo_index_rank as projection_todo_index_rank,

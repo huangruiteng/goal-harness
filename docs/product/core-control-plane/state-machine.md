@@ -21,8 +21,8 @@ public-safe map over the current repository contracts, especially:
   for cadence/backoff/reset-token behavior;
 - [`goal_vision_replan_contract_v0`](../../reference/protocols/goal-vision-replan-contract-v0.md)
   for bounded per-agent vision, replan transitions, and goal-route projection;
-- [`loopx/todo_handoff_gate.py`](../../../loopx/todo_handoff_gate.py) for
-  cross-agent handoff gate states;
+- cross-agent handoff gate states in
+  [`loopx/control_plane/todos/handoff_gate.py`](../../../loopx/control_plane/todos/handoff_gate.py);
 - [`loopx/project_map.py`](../../../loopx/project_map.py) and
   [`loopx/bootstrap.py`](../../../loopx/bootstrap.py) for project registration,
   read-only-map opt-in, global sync, and host-loop activation.
@@ -197,7 +197,8 @@ Multi-agent routing is modeled with todo ownership and handoff gates. Review is
 not a separate kernel state. It is a todo/gate relation that can block a named
 agent until an owner route completes, reassigns, or records no follow-up.
 
-`loopx/todo_handoff_gate.py` currently projects `blocks_agent` todos into:
+`loopx/control_plane/todos/handoff_gate.py` currently projects `blocks_agent`
+todos into:
 `blocking`, `cleared_without_successor`, `cleared_with_successor`,
 `cleared_no_followup`, `superseded`, and `deferred`.
 
