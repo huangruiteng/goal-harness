@@ -13,7 +13,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint  # noqa: E402
-from loopx.policies import scheduler_hint as legacy_scheduler_hint  # noqa: E402
 from loopx.quota import AgentScopeFrontierAction, _scheduler_hint  # noqa: E402
 
 
@@ -156,7 +155,6 @@ def assert_policy_case(
 
 
 def main() -> int:
-    assert legacy_scheduler_hint.build_scheduler_hint is build_scheduler_hint
     assert_policy_case(
         "active-work",
         payload(should_run=True, effective_action="normal_run"),

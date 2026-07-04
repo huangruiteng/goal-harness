@@ -17,7 +17,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint  # noqa: E402
-from loopx.policies import scheduler_hint as legacy_scheduler_hint  # noqa: E402
 from loopx.quota import _scheduler_hint  # noqa: E402
 
 
@@ -252,7 +251,6 @@ def assert_cli_compact_and_detail_contract() -> None:
 
 
 def main() -> int:
-    assert legacy_scheduler_hint.build_scheduler_hint is build_scheduler_hint
     assert_compact_scheduler("active-work", payload(should_run=True))
     assert_compact_scheduler(
         "human-gate",

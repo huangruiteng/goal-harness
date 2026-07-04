@@ -19,7 +19,6 @@ from loopx.control_plane.scheduler.monitor_todo import (  # noqa: E402
     monitor_todo_missing_schedule,
     monitor_todo_next_due_at,
 )
-from loopx.policies import monitor_todo as legacy_monitor_todo  # noqa: E402
 from loopx.status import (  # noqa: E402
     todo_item_is_actionable_open,
     todo_item_is_due_monitor,
@@ -68,7 +67,6 @@ def assert_policy_matches_wrappers(item: dict[str, object], *, due: bool, expire
 
 
 def main() -> int:
-    assert legacy_monitor_todo.monitor_todo_is_due is monitor_todo_is_due
     assert_policy_matches_wrappers(monitor_item(), due=True, expired=False)
     assert_policy_matches_wrappers(monitor_item(next_due_at=FUTURE), due=False, expired=False)
     assert_policy_matches_wrappers(
