@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ...delivery_batch_scale import UNKNOWN_DELIVERY_BATCH_SCALE, DeliveryBatchScale, normalize_delivery_batch_scale
-from ...delivery_outcome import (
+from .delivery_batch_scale import UNKNOWN_DELIVERY_BATCH_SCALE, DeliveryBatchScale, normalize_delivery_batch_scale
+from .delivery_outcome import (
     DELIVERY_OUTCOME_NOT_CONFIGURED,
     DELIVERY_OUTCOME_UNKNOWN,
     PROGRESS_DELIVERY_OUTCOMES,

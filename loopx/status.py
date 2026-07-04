@@ -11,11 +11,11 @@ from .benchmark_adapters.skillsbench_signals import (
 )
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .contract import check_contract
-from .delivery_batch_scale import (
+from .control_plane.work_items.delivery_batch_scale import (
     SMALL_DELIVERY_BATCH_SCALES as STRUCTURED_SMALL_DELIVERY_BATCH_SCALES,
     UNKNOWN_DELIVERY_BATCH_SCALE,
 )
-from .delivery_outcome import (
+from .control_plane.work_items.delivery_outcome import (
     DELIVERY_OUTCOME_NOT_CONFIGURED,
     PROGRESS_DELIVERY_OUTCOMES,
     delivery_turn_kind_for_run,

@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES, require_delivery_batch_scale
-from .delivery_outcome import DELIVERY_OUTCOME_CHOICES, require_delivery_outcome
+from .control_plane.work_items.delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES, require_delivery_batch_scale
+from .control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES, require_delivery_outcome
 from .feedback import validate_local_control_text, validate_public_safe_text
 from .file_lock import exclusive_file_lock
 from .global_registry import sync_project_registry_to_global

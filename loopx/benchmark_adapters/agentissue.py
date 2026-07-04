@@ -6,7 +6,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from ..delivery_outcome import DeliveryOutcome
+from ..control_plane.work_items.delivery_outcome import DeliveryOutcome
 
 
 AGENTISSUE_BENCHMARK_ID = "agentissue-bench"

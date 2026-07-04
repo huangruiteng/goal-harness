@@ -3,17 +3,30 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 LEGACY_IMPORT = "loopx.projections"
 LEGACY_PACKAGE_PREFIX = "loopx/projections/"
 LEGACY_ROOT_MODULES = {
     "loopx/decision_scope.py": "loopx.control_plane.todos.decision_scope",
+    "loopx/delivery_batch_scale.py": "loopx.control_plane.work_items.delivery_batch_scale",
+    "loopx/delivery_outcome.py": "loopx.control_plane.work_items.delivery_outcome",
     "loopx/scheduler_state.py": "loopx.control_plane.scheduler.state",
     "loopx/task_lease.py": "loopx.control_plane.work_items.task_lease",
+}
+CANONICAL_MODULES = {
+    "loopx.control_plane.todos.decision_scope",
+    "loopx.control_plane.scheduler.state",
+    "loopx.control_plane.work_items.delivery_batch_scale",
+    "loopx.control_plane.work_items.delivery_outcome",
+    "loopx.control_plane.work_items.task_lease",
 }
 TEXT_SUFFIXES = {".py", ".md"}
 SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache"}
@@ -81,12 +94,31 @@ def assert_no_tracked_legacy_projection_package() -> None:
 
 def assert_moved_root_modules_stay_in_bounded_contexts() -> None:
     files = set(tracked_files())
-    offenders = sorted(path for path in LEGACY_ROOT_MODULES if path in files)
+    offenders = sorted(
+        path
+        for path in LEGACY_ROOT_MODULES
+        if path in files and (REPO_ROOT / path).exists()
+    )
     assert offenders == [], {
         "reason": "moved root control-plane modules should stay in their owning bounded contexts",
         "offenders": offenders,
         "expected_modules": {path: LEGACY_ROOT_MODULES[path] for path in offenders},
     }
+
+
+def assert_moved_root_imports_are_not_shimmed() -> None:
+    for path, canonical_module in LEGACY_ROOT_MODULES.items():
+        root_module = path[:-3].replace("/", ".")
+        assert importlib.util.find_spec(root_module) is None, {
+            "reason": "moved root control-plane imports should fail instead of using shims",
+            "root_module": root_module,
+            "canonical_module": canonical_module,
+        }
+    for canonical_module in CANONICAL_MODULES:
+        assert importlib.util.find_spec(canonical_module) is not None, {
+            "reason": "canonical bounded-context import must be available",
+            "canonical_module": canonical_module,
+        }
 
 
 def assert_repo_local_imports_use_bounded_contexts() -> None:
@@ -107,6 +139,7 @@ def assert_repo_local_imports_use_bounded_contexts() -> None:
 def main() -> int:
     assert_no_tracked_legacy_projection_package()
     assert_moved_root_modules_stay_in_bounded_contexts()
+    assert_moved_root_imports_are_not_shimmed()
     assert_repo_local_imports_use_bounded_contexts()
     print("bounded-context-namespace-smoke ok")
     return 0

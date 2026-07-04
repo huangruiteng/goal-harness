@@ -5,8 +5,8 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from ..delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
-from ..delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..control_plane.work_items.delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
+from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from ..feedback import LESSON_KINDS, append_human_reward, compact_reward, render_reward_markdown
 from ..operator_gate import (
     DEFAULT_OPERATOR_GATE,

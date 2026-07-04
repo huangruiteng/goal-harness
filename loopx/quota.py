@@ -36,7 +36,7 @@ from .control_plane import (
     control_plane_policy_summary,
     control_plane_self_repair_allows,
 )
-from .delivery_outcome import (
+from .control_plane.work_items.delivery_outcome import (
     ACCOUNTABLE_DELIVERY_OUTCOMES,
     DeliveryOutcome,
     normalize_delivery_outcome,
