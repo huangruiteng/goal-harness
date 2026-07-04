@@ -163,6 +163,7 @@ from .control_plane.scheduler.monitor_display import (
     todo_summary_open_count as _todo_summary_open_count,
 )
 from .control_plane.runtime.run_compaction import (
+    RUN_BASE_COMPACT_FIELDS,
     attach_run_summary_projections as _attach_run_summary_projections_read_model,
     compact_controller_readiness as _compact_controller_readiness_read_model,
     compact_human_reward as _compact_human_reward_read_model,
@@ -214,6 +215,9 @@ from .control_plane.goals.global_registry_health import (
 )
 from .control_plane.goals.goal_channel import (
     attach_goal_channel_projection as _attach_goal_channel_projection_read_model,
+)
+from .control_plane.goals.goal_vision import (
+    compact_goal_vision_packet as _compact_goal_vision_packet_read_model,
 )
 from .control_plane.work_items.issue_meta_surface import (
     parse_issue_meta_surface as _parse_issue_meta_surface_read_model,
@@ -525,33 +529,7 @@ SOURCE_REGISTRY_SHADOW_FINDINGS = {
 PLANNED_CONTROLLER_OPT_IN_RECOMMENDED_ACTION = (
     "先在 LoopX 完成 operator 判断；同意后项目 Agent 只执行 read-only map dry-run"
 )
-RUN_COMPACT_FIELDS = (
-    "generated_at",
-    "run_id",
-    "goal_id",
-    "parent_run_id",
-    "spawned_by_goal_id",
-    "agent_role",
-    "classification",
-    "agent_id",
-    "agent_lane",
-    "agent_vision",
-    "progress_scope",
-    "delivery_batch_scale",
-    "delivery_outcome",
-    "lifecycle_phase",
-    "lifecycle_flags",
-    "recommended_action",
-    "health_check",
-    "result_status",
-    "approval_state",
-    "active_task_count",
-    "active_priorities",
-    "cache_check",
-    "project_map",
-    "json_exists",
-    "markdown_exists",
-)
+RUN_COMPACT_FIELDS = RUN_BASE_COMPACT_FIELDS
 LIFECYCLE_PRIORITY = (
     "controller_ready",
     "reward_judged",
@@ -7217,6 +7195,7 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
         public_safe_compact_text=public_safe_compact_text,
         compact_subagent_run=compact_subagent_run,
         max_subagent_activity_items=MAX_SUBAGENT_ACTIVITY_ITEMS,
+        compact_agent_vision=_compact_goal_vision_packet_read_model,
     )
     return _attach_run_summary_projections_read_model(
         compact,

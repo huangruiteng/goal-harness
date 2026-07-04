@@ -15,7 +15,7 @@ from .global_registry import sync_project_registry_to_global
 from .history import load_registry, reserve_unique_run_paths, unique_run_paths
 from .local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
 from .paths import resolve_runtime_root
-from .policies.goal_vision import normalize_goal_vision_packet
+from .control_plane.goals.goal_vision import normalize_goal_vision_packet
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
 from .state_projection import state_projection_gap_warning

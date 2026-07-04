@@ -49,7 +49,7 @@ from .execution_profile import (
 from .long_task_cadence import long_task_cadence_hint_summary
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
 from .policies.execution_obligation import build_execution_obligation
-from .policies.goal_frontier import (
+from .control_plane.goals.goal_frontier import (
     AUTONOMOUS_REPLAN_REQUIRED_MODE,
     acceptance_gaps_from_agent_vision,
     autonomous_replan_decision_allowed,

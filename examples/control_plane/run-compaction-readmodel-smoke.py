@@ -10,7 +10,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx import status as status_module  # noqa: E402
+from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet  # noqa: E402
 from loopx.projections import run_compaction as run_compaction_read_model  # noqa: E402
+from loopx.policies import goal_frontier as legacy_goal_frontier  # noqa: E402
+from loopx.policies import goal_vision as legacy_goal_vision  # noqa: E402
+from loopx.control_plane.goals import goal_frontier as goal_frontier_read_model  # noqa: E402
 from loopx.session_runtime import SESSION_RUNTIME_READONLY_PROJECTION_SCHEMA_VERSION  # noqa: E402
 
 
@@ -106,6 +110,7 @@ def _direct_compact_run_base(run: dict[str, object]) -> dict[str, object]:
         public_safe_compact_text=status_module.public_safe_compact_text,
         compact_subagent_run=status_module.compact_subagent_run,
         max_subagent_activity_items=status_module.MAX_SUBAGENT_ACTIVITY_ITEMS,
+        compact_agent_vision=compact_goal_vision_packet,
     )
 
 
@@ -141,6 +146,34 @@ def assert_compact_run_base_parity() -> None:
         "classification": "read_only_project_map",
         "recommended_action": "continue bounded cleanup",
         "merge_decision": "self-merged after focused validation",
+        "agent_vision": {
+            "schema_version": "goal_vision_replan_contract_v0",
+            "goal_id": "loopx-meta",
+            "agent_id": "codex-product-capability",
+            "state": "vision_patch_proposed",
+            "vision_patch": {
+                "vision_summary": "Keep the next runtime read-path batch visible.",
+                "acceptance_summary": "A compact status row plus a parity smoke.",
+                "replan_trigger_summary": "The frontier moved after a bounded batch.",
+                "private_note": "not compacted",
+            },
+            "todo_delta": ["create successor", "capture smoke"],
+            "vision_budget": {
+                "schema_version": "goal_vision_budget_v0",
+                "status": "ok",
+                "field_limits": {"vision_summary": 420},
+                "field_usage": {"vision_summary": 45},
+                "total_limit": 1200,
+                "total_usage": 45,
+            },
+            "validation": {
+                "budget_checked": True,
+                "budget_status": "ok",
+                "write_correctness_checked": True,
+                "private_note": "not compacted",
+            },
+            "private_note": "not compacted",
+        },
         "human_reward": {"decision": "approve", "reward": 1, "private_note": "not compacted"},
         "operator_gate": {"decision": "approve", "operator_question": "Proceed?"},
         "operator_gate_resume_contract": {
@@ -164,7 +197,24 @@ def assert_compact_run_base_parity() -> None:
         ],
         "ignored_field": "not compacted",
     }
-    assert status_module.compact_run(mapped_run) == _direct_compact_run_base(mapped_run)
+    compact = status_module.compact_run(mapped_run)
+    assert compact == _direct_compact_run_base(mapped_run)
+    compact_vision = compact["agent_vision"]
+    assert compact_vision["vision_patch"] == {
+        "vision_summary": "Keep the next runtime read-path batch visible.",
+        "acceptance_summary": "A compact status row plus a parity smoke.",
+        "replan_trigger_summary": "The frontier moved after a bounded batch.",
+    }, compact_vision
+    assert compact_vision["todo_delta"] == ["create successor", "capture smoke"], compact_vision
+    assert compact_vision["vision_budget"] == {
+        "schema_version": "goal_vision_budget_v0",
+        "status": "ok",
+        "field_usage": {"vision_summary": 45},
+        "total_limit": 1200,
+        "total_usage": 45,
+    }, compact_vision
+    assert "private_note" not in compact_vision
+    assert "field_limits" not in compact_vision["vision_budget"]
 
     explicit_lifecycle_run = {
         "generated_at": "2026-07-04T00:03:00Z",
@@ -234,10 +284,19 @@ def assert_compact_run_summary_projection_parity() -> None:
     assert "private_note" not in session_projection
 
 
+def assert_goal_readmodel_compatibility_shims() -> None:
+    assert legacy_goal_vision.compact_goal_vision_packet is compact_goal_vision_packet
+    assert (
+        legacy_goal_frontier.build_goal_frontier_projection
+        is goal_frontier_read_model.build_goal_frontier_projection
+    )
+
+
 def main() -> None:
     assert_run_compaction_wrapper_parity()
     assert_compact_run_base_parity()
     assert_compact_run_summary_projection_parity()
+    assert_goal_readmodel_compatibility_shims()
 
 
 if __name__ == "__main__":
