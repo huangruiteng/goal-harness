@@ -236,6 +236,8 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
         assert "LOOPX_VISIBLE_TUI_SILENT_BOOTSTRAP=1" in command, lane
         assert "LOOPX_CODEX_TUI_MODE=interactive" in command, lane
         assert "LOOPX_CODEX_TUI_PROMPT_ARTIFACT" in command, lane
+        assert "LOOPX_CODEX_FULL_BOOTSTRAP_ARTIFACT" in command, lane
+        assert "codex-visible-first-prompt.public.txt" in command, lane
         assert "LOOPX_CODEX_BIN=codex" in command, lane
         assert "LOOPX_CODEX_REASONING_EFFORT=high" in command, lane
         assert "exec python3 -c" in command, lane
