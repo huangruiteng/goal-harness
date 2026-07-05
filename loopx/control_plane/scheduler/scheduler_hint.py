@@ -21,6 +21,7 @@ SCHEDULER_HINT_SCHEMA_VERSION = "scheduler_hint_v0"
 SCHEDULER_RESET_POLICY_SCHEMA_VERSION = "scheduler_reset_policy_v0"
 SCHEDULER_HINT_DETAIL_SCHEMA_VERSION = "scheduler_hint_detail_v0"
 CODEX_APP_STATEFUL_BACKOFF_SCHEMA_VERSION = "codex_app_stateful_backoff_v0"
+CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION = "codex_app_scheduler_ack_hint_v0"
 MONITOR_CADENCE_PATTERN = re.compile(r"^\s*(\d+)\s*([mhd])\s*$", re.IGNORECASE)
 MONITOR_WAIT_PROGRESSION_MINUTES = [15, 30, 60, 120]
 
@@ -51,6 +52,35 @@ def scheduler_backoff_packet(
         else {}
     )
     return scheduler_hint, codex_app, stateful_backoff
+
+
+def build_codex_app_scheduler_ack_hint(
+    *,
+    goal_id: Any,
+    agent_id: Any,
+    applied_rrule: Any,
+    reset_token: Any,
+    identity_signature: Any,
+    surface: str = CODEX_APP_SURFACE,
+    state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+) -> dict[str, Any]:
+    safe_rrule = normalize_scheduler_rrule(applied_rrule)
+    return {
+        "schema_version": CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION,
+        "after": "automation_update_rrule_success",
+        "command": "quota scheduler-ack",
+        "execute": True,
+        "args": {
+            "goal_id": str(goal_id or "").strip(),
+            "agent_id": str(agent_id or "").strip(),
+            "surface": surface,
+            "state_key": state_key,
+            "applied_rrule": safe_rrule,
+            "reset_token": str(reset_token or "").strip(),
+            "identity_signature": str(identity_signature or "").strip(),
+        },
+        "no_spend": True,
+    }
 
 
 def build_scheduler_ack_plan(
@@ -543,6 +573,14 @@ def build_scheduler_hint(
         }
         if apply_needed:
             codex_app["recommended_rrule"] = current_rrule
+            if payload.get("goal_id") and identity_value("agent_identity.agent_id"):
+                codex_app["ack_hint"] = build_codex_app_scheduler_ack_hint(
+                    goal_id=payload.get("goal_id"),
+                    agent_id=identity_value("agent_identity.agent_id"),
+                    applied_rrule=current_rrule,
+                    reset_token=reset_token,
+                    identity_signature=identity_signature,
+                )
         scheduler_hint = {
             "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
             "source": "quota.should-run",

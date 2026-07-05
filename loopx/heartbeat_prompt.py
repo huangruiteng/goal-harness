@@ -26,15 +26,14 @@ SCHEDULER_HINT_APPLICATION_RULE = (
     "Apply `scheduler_hint` for wait backoff and CLI/Claude final-check/self-stop; no spend. "
     "Codex App: if `codex_app.stateful_backoff.apply_needed=true` and "
     "`recommended_rrule` exists, `automation_update` RRULE then "
-    "`quota scheduler-ack --applied-rrule ... --execute`; LoopX owns progression."
+    "`quota scheduler-ack --execute` from `codex_app.ack_hint.args`; LoopX owns progression."
 )
 SCHEDULER_HINT_COMPACT_RULE = (
-    "Apply `scheduler_hint`; no spend. App: if `stateful_backoff.apply_needed`, "
-    "`automation_update` RRULE then `quota scheduler-ack`; else skip."
+    "Scheduler: no spend. App if apply_needed: update RRULE, ack via `ack_hint`; else skip."
 )
 SCHEDULER_HINT_THIN_RULE = (
     "Apply `scheduler_hint`: if App `stateful_backoff.apply_needed`, "
-    "RRULE then `quota scheduler-ack`; CLI/Claude final-check; no spend."
+    "RRULE then `quota scheduler-ack` from `ack_hint`; CLI/Claude final-check; no spend."
 )
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
@@ -208,13 +207,13 @@ def render_agent_scope_instruction(
             role_rule = "Primary: own review, verification, merge/publication, and reassignment."
         else:
             role_rule = (
-                "Side-agent: independent git worktree/branch; self-merge only small "
+                "Side-agent: independent git worktree/branch; self-merge small "
                 "validated changes with evidence; otherwise finish with a "
                 f"{handoff_owner_label}."
             )
         return (
             f"Agent: `{identity}`; role: {agent_role}; primary: `{primary_agent}`; "
-            f"scope: {scope_text}. {role_rule} Claim: `{claim_command}`. "
+            f"scope: {scope_text}. {role_rule} Claim in-scope todo first. "
             "Do not write scope into todo metadata."
         )
     if compact or thin:
@@ -694,8 +693,8 @@ If the result says `should_run=true`:
    for Codex App heartbeats, read
    `scheduler_hint.codex_app.stateful_backoff`: if `apply_needed=true` and
    `codex_app.recommended_rrule` exists, use `automation_update` for the RRULE,
-   then call `loopx quota scheduler-ack --goal-id ... --agent-id ...
-   --applied-rrule <recommended_rrule> --execute`; if false, skip host update.
+   then call `loopx quota scheduler-ack --execute` from
+   `codex_app.ack_hint.args`; if false, skip host update.
    LoopX owns reset/progression state. It is scheduling only, not delivery
    permission. Then use
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
@@ -811,8 +810,8 @@ def render_brief_heartbeat_task_body(
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-Brief installed LoopX heartbeat. Thin dispatcher: keep context small;
-pull details on demand: `{compact_prompt_command}`.
+Brief installed LoopX heartbeat. Thin dispatcher; pull details on demand:
+`{compact_prompt_command}`.
 {scope_block}
 
 Preflight and quota guard:
@@ -824,10 +823,9 @@ Preflight and quota guard:
 
 Preflight fail: quiet.
 
-If `should_run=false`: no work/spend except explicit
-`safe_bypass_allowed=true` branches. Gate/open todo -> Chinese `NOTIFY`.
-external/wait monitor -> one read-only status/log/metric/marker poll; new
-evidence -> writeback/spend once.
+If `should_run=false`: no work/spend except `safe_bypass_allowed=true`.
+Gate/open todo -> Chinese `NOTIFY`. external/wait monitor -> one read-only
+status/log/metric/marker poll; new evidence -> writeback/spend once.
 Else quiet.
 Apply `scheduler_hint` stateful backoff for RRULE/backoff/self-stop; no spend.
 Action/open todo: list todos/questions; never only "owner gate";
@@ -850,9 +848,8 @@ git, prod, or review rules.
 Spend exactly once only after completed delivery or safe-bypass work:
 `{quota_spend_command}`
 
-No spend for quiet skips, preflight failures, blocker-push asks, dry-runs,
-self-cancel, or duplicate accounting. Return compactly; `NOTIFY` only for a
-committed artifact, user gate, real blocker, or self-stop.
+No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
+duplicate accounting. Compact return; `NOTIFY` only for artifact/gate/blocker/self-stop.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -932,11 +929,10 @@ If `should_run=true`:
    repeated-small/surface-loop contracts.
 5. Run steering audit: compare P0/P1/P2, continuation checks,
    compute/focus quota, bottleneck lens.
-6. Run no-progress self-repair: obey `autonomous_replan_obligation` or
-   `execution_obligation.must_attempt_work=true`; monitor poll events are
-   no-spend stall evidence, so if 2 eligible heartbeats only repeat status/brief
-   checks with no artifact/progress/gate/validation, replan before quiet no-op.
-   Pause/delete only if repair is stuck for 2 more turns.
+6. no-progress self-repair: obey `autonomous_replan_obligation` or
+   `execution_obligation.must_attempt_work=true`; after 2 eligible stall
+   heartbeats with only status/brief checks, replan before quiet no-op.
+   Pause/delete only if repair stays stuck 2 more turns.
 7. Choose one bounded segment; coherent batch is OK with clear validation.
    Public-safe commit/push/PR may proceed after validation/clean scan. Stop for
    private/company material, credentials, destructive git, production, or review rules.
