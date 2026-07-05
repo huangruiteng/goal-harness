@@ -36,10 +36,12 @@ from loopx.codex_cli_goal_tui import (
     build_codex_cli_tui_command,
     codex_cli_tui_environment,
     codex_cli_tui_shell_command,
+    codex_cli_tui_input_prompt_visible,
     prewarm_codex_cli_goal_thread,
     tmux_capture,
     tmux_kill_session,
     tmux_paste_file_and_submit,
+    tmux_submit_enter,
     wait_for_codex_cli_tui_ready,
 )
 
@@ -510,6 +512,76 @@ def _codex_cli_tui_retryable_startup_blocker_stage(capture: str) -> str:
     ):
         return "rate_limit_before_goal_active"
     return ""
+
+
+def _codex_cli_tui_post_bridge_blocker_stage(
+    capture: str,
+    *,
+    prompt_visible: bool,
+) -> str:
+    """Classify public-safe Codex CLI TUI blockers after bridge activity."""
+
+    if not prompt_visible:
+        return ""
+    lowered = str(capture or "").lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+            "status 429",
+            "error 429",
+        )
+    ):
+        return "post_bridge_tui_rate_limit"
+    if any(marker in lowered for marker in ("timed out", "timeout")) and any(
+        marker in lowered for marker in ("model", "request", "error", "failed")
+    ):
+        return "post_bridge_tui_model_timeout"
+    if any(marker in lowered for marker in ("press enter", "press return")) and any(
+        marker in lowered
+        for marker in ("error", "failed", "timed out", "timeout", "model")
+    ):
+        return "post_bridge_tui_error_prompt"
+    return ""
+
+
+def _codex_cli_tui_post_bridge_recovery_action(capture: str, *, stage: str) -> str:
+    """Return a bounded public-safe recovery action for post-bridge TUI blockers."""
+
+    if stage not in {
+        "post_bridge_tui_model_timeout",
+        "post_bridge_tui_error_prompt",
+    }:
+        return ""
+    lowered = str(capture or "").lower()
+    if any(marker in lowered for marker in ("press enter", "press return")):
+        return "press_enter"
+    return ""
+
+
+def _codex_cli_tui_post_bridge_recovery_skip_reason(
+    capture: str,
+    *,
+    stage: str,
+    recovery_action: str,
+) -> str:
+    """Return why no post-bridge recovery action was taken."""
+
+    if recovery_action:
+        return ""
+    if stage == "post_bridge_tui_rate_limit":
+        return "rate_limit_no_retry"
+    if stage not in {
+        "post_bridge_tui_model_timeout",
+        "post_bridge_tui_error_prompt",
+    }:
+        return ""
+    lowered = str(capture or "").lower()
+    if not any(marker in lowered for marker in ("press enter", "press return")):
+        return "no_retry_affordance"
+    return "unsupported_recovery_action"
 
 
 def _write_process_stdin_async(
@@ -1172,6 +1244,9 @@ class SkillsBenchLocalAcpRelay:
             last_bridge_summary_size = 0
             last_bridge_activity_at = time.monotonic()
             meaningful_progress_seen = False
+            post_bridge_recovery_attempt_count = 0
+            post_bridge_recovery_action = ""
+            post_bridge_recovery_skip_reason = ""
             try:
                 subprocess.run(
                     [
@@ -1394,6 +1469,76 @@ class SkillsBenchLocalAcpRelay:
                         return _recoverable_codex_turn_failure_message(
                             "codex_exec_first_action_timeout"
                         )
+                    post_bridge_blocker_stage = ""
+                    if (
+                        bridge_activity_seen
+                        and bridge_summary_path is not None
+                        and not _bridge_summary_has_inflight_operation(
+                            bridge_summary_path
+                        )
+                    ):
+                        post_bridge_blocker_stage = (
+                            _codex_cli_tui_post_bridge_blocker_stage(
+                                capture,
+                                prompt_visible=(
+                                    codex_cli_tui_input_prompt_visible(capture)
+                                ),
+                            )
+                        )
+                    if post_bridge_blocker_stage:
+                        recovery_action = _codex_cli_tui_post_bridge_recovery_action(
+                            capture,
+                            stage=post_bridge_blocker_stage,
+                        )
+                        if (
+                            recovery_action == "press_enter"
+                            and post_bridge_recovery_attempt_count < 1
+                        ):
+                            post_bridge_recovery_attempt_count += 1
+                            post_bridge_recovery_action = recovery_action
+                            tmux_submit_enter(tmux_name)
+                            last_bridge_activity_at = now
+                            next_heartbeat = (
+                                now
+                                + max(1.0, self._config.stream_heartbeat_interval_sec)
+                            )
+                            time.sleep(1.0)
+                            continue
+                        post_bridge_recovery_skip_reason = (
+                            _codex_cli_tui_post_bridge_recovery_skip_reason(
+                                capture,
+                                stage=post_bridge_blocker_stage,
+                                recovery_action=recovery_action,
+                            )
+                        )
+                        if (
+                            not post_bridge_recovery_skip_reason
+                            and recovery_action == "press_enter"
+                        ):
+                            post_bridge_recovery_skip_reason = "retry_limit_reached"
+                        tmux_kill_session(tmux_name)
+                        self._publish_remote_bridge_agent_operations_trace(
+                            bridge_summary_path=bridge_summary_path,
+                        )
+                        self._publish_codex_cli_goal_trace(
+                            ok=False,
+                            stage=post_bridge_blocker_stage,
+                            goal_active_observed=goal_active_observed,
+                            goal_terminal_observed=goal_terminal_observed,
+                            first_action_observed=first_action_seen,
+                            bridge_summary_path=bridge_summary_path,
+                            thread_prewarm_observed=thread_prewarm_observed,
+                            post_bridge_recovery_attempt_count=(
+                                post_bridge_recovery_attempt_count
+                            ),
+                            post_bridge_recovery_action=post_bridge_recovery_action,
+                            post_bridge_recovery_skip_reason=(
+                                post_bridge_recovery_skip_reason
+                            ),
+                        )
+                        return _recoverable_codex_turn_failure_message(
+                            "codex_cli_goal_" + post_bridge_blocker_stage
+                        )
                     if (
                         bridge_activity_seen
                         and bridge_summary_path is not None
@@ -1415,6 +1560,13 @@ class SkillsBenchLocalAcpRelay:
                             first_action_observed=first_action_seen,
                             bridge_summary_path=bridge_summary_path,
                             thread_prewarm_observed=thread_prewarm_observed,
+                            post_bridge_recovery_attempt_count=(
+                                post_bridge_recovery_attempt_count
+                            ),
+                            post_bridge_recovery_action=post_bridge_recovery_action,
+                            post_bridge_recovery_skip_reason=(
+                                post_bridge_recovery_skip_reason
+                            ),
                         )
                         return _recoverable_codex_turn_failure_message(
                             "codex_exec_bridge_idle_timeout"
@@ -1448,6 +1600,9 @@ class SkillsBenchLocalAcpRelay:
                     first_action_observed=first_action_seen,
                     bridge_summary_path=bridge_summary_path,
                     thread_prewarm_observed=thread_prewarm_observed,
+                    post_bridge_recovery_attempt_count=post_bridge_recovery_attempt_count,
+                    post_bridge_recovery_action=post_bridge_recovery_action,
+                    post_bridge_recovery_skip_reason=post_bridge_recovery_skip_reason,
                 )
                 if goal_terminal_observed and not goal_failed_observed:
                     return "codex cli /goal completed"
@@ -1485,6 +1640,9 @@ class SkillsBenchLocalAcpRelay:
         first_action_observed: bool,
         bridge_summary_path: Path | None,
         thread_prewarm_observed: bool = False,
+        post_bridge_recovery_attempt_count: int = 0,
+        post_bridge_recovery_action: str = "",
+        post_bridge_recovery_skip_reason: str = "",
     ) -> None:
         if not self._config.worker_public_trace_dir:
             return
@@ -1533,6 +1691,16 @@ class SkillsBenchLocalAcpRelay:
                 "first_action_observed": bool(first_action_observed),
                 "bridge_request_count": bridge_request_count,
                 "task_facing_success_count": task_facing_success_count,
+                "post_bridge_recovery_attempt_count": max(
+                    0,
+                    int(post_bridge_recovery_attempt_count or 0),
+                ),
+                "post_bridge_recovery_action": str(
+                    post_bridge_recovery_action or ""
+                )[:40],
+                "post_bridge_recovery_skip_reason": str(
+                    post_bridge_recovery_skip_reason or ""
+                )[:80],
                 "reasoning_effort": str(self._config.reasoning_effort or "")[:40],
                 "codex_api_proxy_env_injected": bool(
                     codex_cli_tui_environment(self._config.codex_api_proxy)

@@ -47,14 +47,34 @@ def _assert_cli_goal_route_requires_materialized_solver_bridge() -> None:
         "--route",
         "codex-cli-goal-baseline",
         "--host-local-acp-launch",
-        "--remote-command-file-bridge-ready",
     )
     assert proc.returncode == 2, proc
     payload = _json_from_stderr(proc)
     assert payload["error_type"] == "SkillsBenchCodexCliGoalDriverRequired", payload
     assert payload["host_local_acp_launch"] is True, payload
-    assert payload["remote_command_file_bridge_ready"] is True, payload
+    assert payload["remote_command_file_bridge_ready"] is False, payload
     assert payload["remote_command_file_bridge_solver_command_configured"] is False
+    assert payload["remote_command_file_bridge_sandbox_auto_wiring_pending"] is False
+
+    # The real Docker bridge command is only available after BenchFlow creates
+    # the scored sandbox, so this route must allow the auto-wiring state.
+    proc = _run_runner(
+        "--route",
+        "codex-cli-goal-baseline",
+        "--host-local-acp-launch",
+        "--remote-command-file-bridge-ready",
+        "--plan-only",
+    )
+    assert proc.returncode == 0, proc
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True, payload
+    prereq = payload["launch_plan"]["runner_prerequisites"]
+    assert prereq["remote_command_file_bridge_materialized"] is True, prereq
+    assert (
+        prereq["remote_command_file_bridge_consumption_status"]
+        == "sandbox_bridge_auto_wiring_pending"
+    ), prereq
+    assert prereq["remote_command_file_bridge_agent_operation_trace_required"] is True
 
 
 def _assert_cli_goal_plan_and_relay_command() -> None:
@@ -377,6 +397,219 @@ def _assert_cli_goal_rate_limit_is_public_safe_retryable_stage() -> None:
     ]
 
 
+def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    from loopx.benchmark_adapters.skillsbench_acp_relay import (
+        CodexExecConfig,
+        SkillsBenchLocalAcpRelay,
+        _codex_cli_tui_post_bridge_blocker_stage,
+        _codex_cli_tui_post_bridge_recovery_action,
+        _codex_cli_tui_post_bridge_recovery_skip_reason,
+    )
+    from scripts.skillsbench_automation_loop import (
+        _merge_host_local_acp_relay_trace_summary,
+        _public_runner_prerequisites,
+    )
+
+    assert (
+        _codex_cli_tui_post_bridge_blocker_stage(
+            "request timed out while waiting for model\n› ",
+            prompt_visible=True,
+        )
+        == "post_bridge_tui_model_timeout"
+    )
+    assert (
+        _codex_cli_tui_post_bridge_recovery_action(
+            "request timed out while waiting for model\npress enter to retry\n› ",
+            stage="post_bridge_tui_model_timeout",
+        )
+        == "press_enter"
+    )
+    assert (
+        _codex_cli_tui_post_bridge_recovery_action(
+            "request timed out while waiting for model\n› ",
+            stage="post_bridge_tui_model_timeout",
+        )
+        == ""
+    )
+    assert (
+        _codex_cli_tui_post_bridge_recovery_skip_reason(
+            "request timed out while waiting for model\n› ",
+            stage="post_bridge_tui_model_timeout",
+            recovery_action="",
+        )
+        == "no_retry_affordance"
+    )
+    assert (
+        _codex_cli_tui_post_bridge_recovery_action(
+            "rate limit reached\npress enter to retry\n› ",
+            stage="post_bridge_tui_rate_limit",
+        )
+        == ""
+    )
+    assert (
+        _codex_cli_tui_post_bridge_recovery_skip_reason(
+            "rate limit reached\npress enter to retry\n› ",
+            stage="post_bridge_tui_rate_limit",
+            recovery_action="",
+        )
+        == "rate_limit_no_retry"
+    )
+    assert (
+        _codex_cli_tui_post_bridge_recovery_skip_reason(
+            "request timed out while waiting for model\npress enter to retry\n› ",
+            stage="post_bridge_tui_model_timeout",
+            recovery_action="press_enter",
+        )
+        == ""
+    )
+    assert (
+        _codex_cli_tui_post_bridge_blocker_stage(
+            "rate limit reached\n› ",
+            prompt_visible=True,
+        )
+        == "post_bridge_tui_rate_limit"
+    )
+    assert (
+        _codex_cli_tui_post_bridge_blocker_stage(
+            "rate limit reached\n",
+            prompt_visible=False,
+        )
+        == ""
+    )
+
+    with tempfile.TemporaryDirectory() as temp:
+        temp_path = Path(temp)
+        trace_dir = temp_path / "trace"
+        bridge_summary = temp_path / "remote-bridge-agent-ops.jsonl"
+        bridge_summary.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "record_phase": "start",
+                            "task_facing_operation": True,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "record_phase": "complete",
+                            "task_facing_operation": True,
+                            "success": True,
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(worker_public_trace_dir=str(trace_dir))
+        )
+        relay._publish_codex_cli_goal_trace(
+            ok=False,
+            stage="post_bridge_tui_error_prompt",
+            goal_active_observed=False,
+            goal_terminal_observed=False,
+            first_action_observed=True,
+            bridge_summary_path=bridge_summary,
+            post_bridge_recovery_attempt_count=1,
+            post_bridge_recovery_action="press_enter",
+        )
+        plan = {
+            "route": "codex-cli-goal-baseline",
+            "host_local_acp_relay_trace_dir": str(trace_dir),
+            "runner_prerequisites": {},
+        }
+        trace: dict[str, object] = {}
+        _merge_host_local_acp_relay_trace_summary(plan, trace)
+
+    prerequisites = plan["runner_prerequisites"]
+    assert trace["codex_cli_goal_tui_trace_present"] is True, trace
+    assert trace["codex_cli_goal_tui_stage"] == "post_bridge_tui_error_prompt"
+    assert trace["codex_cli_goal_tui_stages"] == ["post_bridge_tui_error_prompt"]
+    assert trace["codex_cli_goal_tui_first_action_observed_count"] == 1
+    assert trace["codex_cli_goal_tui_task_facing_success_count"] == 1
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_attempt_count"] == 1
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_action"] == "press_enter"
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_skip_reason"] == ""
+    assert trace["codex_cli_goal_tui_raw_material_recorded"] is False, trace
+
+    public_prerequisites = _public_runner_prerequisites(prerequisites)
+    assert public_prerequisites["codex_cli_goal_tui_stage"] == (
+        "post_bridge_tui_error_prompt"
+    )
+    assert public_prerequisites["codex_cli_goal_tui_stages"] == [
+        "post_bridge_tui_error_prompt"
+    ]
+    assert public_prerequisites["codex_cli_goal_tui_task_facing_success_count"] == 1
+    assert (
+        public_prerequisites["codex_cli_goal_tui_post_bridge_recovery_attempt_count"]
+        == 1
+    )
+    assert (
+        public_prerequisites["codex_cli_goal_tui_post_bridge_recovery_action"]
+        == "press_enter"
+    )
+
+    with tempfile.TemporaryDirectory() as temp:
+        temp_path = Path(temp)
+        trace_dir = temp_path / "trace"
+        bridge_summary = temp_path / "remote-bridge-agent-ops.jsonl"
+        bridge_summary.write_text(
+            json.dumps(
+                {
+                    "record_phase": "complete",
+                    "task_facing_operation": True,
+                    "success": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(worker_public_trace_dir=str(trace_dir))
+        )
+        relay._publish_codex_cli_goal_trace(
+            ok=False,
+            stage="post_bridge_tui_model_timeout",
+            goal_active_observed=False,
+            goal_terminal_observed=False,
+            first_action_observed=True,
+            bridge_summary_path=bridge_summary,
+            post_bridge_recovery_skip_reason="no_retry_affordance",
+        )
+        plan = {
+            "route": "codex-cli-goal-baseline",
+            "host_local_acp_relay_trace_dir": str(trace_dir),
+            "runner_prerequisites": {},
+        }
+        trace = {}
+        _merge_host_local_acp_relay_trace_summary(plan, trace)
+
+    prerequisites = plan["runner_prerequisites"]
+    assert trace["codex_cli_goal_tui_stage"] == "post_bridge_tui_model_timeout"
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_attempt_count"] == 0
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_action"] == ""
+    assert (
+        trace["codex_cli_goal_tui_post_bridge_recovery_skip_reason"]
+        == "no_retry_affordance"
+    )
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_skip_reasons"] == [
+        "no_retry_affordance"
+    ]
+    public_prerequisites = _public_runner_prerequisites(prerequisites)
+    assert (
+        public_prerequisites[
+            "codex_cli_goal_tui_post_bridge_recovery_skip_reason"
+        ]
+        == "no_retry_affordance"
+    )
+    assert public_prerequisites[
+        "codex_cli_goal_tui_post_bridge_recovery_skip_reasons"
+    ] == ["no_retry_affordance"]
+
+
 def _assert_cli_goal_active_timeout_is_public_countability_stage() -> None:
     sys.path.insert(0, str(REPO_ROOT))
     from loopx.benchmark_adapters.skillsbench_acp_relay import (
@@ -587,6 +820,7 @@ def main() -> int:
     _assert_cli_goal_trace_merges_into_public_prerequisites()
     _assert_cli_goal_tui_ready_wait_tolerates_startup_warnings()
     _assert_cli_goal_rate_limit_is_public_safe_retryable_stage()
+    _assert_cli_goal_post_bridge_blocker_is_public_safe_stage()
     _assert_cli_goal_active_timeout_is_public_countability_stage()
     _assert_cli_goal_input_is_submitted_as_one_buffer()
     _assert_cli_goal_codex_api_proxy_is_runtime_only()
