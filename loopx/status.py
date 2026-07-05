@@ -238,10 +238,8 @@ from .control_plane.runtime.session_runtime import (
 )
 from .control_plane.agents.subagent_activity import (
     MAX_SUBAGENT_ACTIVITY_ITEMS,
-    compact_subagent_run as _compact_subagent_run_read_model,
-    subagent_activity_for_goal as _subagent_activity_for_goal_read_model,
-    subagent_quota_spend as _subagent_quota_spend_read_model,
-    subagent_state as _subagent_state_read_model,
+    compact_subagent_run,
+    subagent_activity_for_goal,
 )
 from .control_plane.runtime.stale_latest_run import (
     stale_latest_run_projection_warning as _stale_latest_run_projection_warning_read_model,
@@ -6017,40 +6015,6 @@ def build_attention_queue_projection(
         autonomous_backlog_candidates=autonomous_backlog_candidates,
         autonomous_monitor_candidates=autonomous_monitor_candidates,
         monitor_signal_waiting_on=MONITOR_SIGNAL_WAITING_ON,
-    )
-
-
-def _subagent_state(run: dict[str, Any]) -> str | None:
-    return _subagent_state_read_model(
-        run,
-        public_safe_compact_text=public_safe_compact_text,
-    )
-
-
-def _subagent_quota_spend(run: dict[str, Any]) -> int:
-    return _subagent_quota_spend_read_model(run)
-
-
-def compact_subagent_run(
-    raw: dict[str, Any],
-    *,
-    parent_goal_id: str | None = None,
-    parent_run_id: str | None = None,
-) -> dict[str, Any] | None:
-    return _compact_subagent_run_read_model(
-        raw,
-        parent_goal_id=parent_goal_id,
-        parent_run_id=parent_run_id,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
-    )
-
-
-def subagent_activity_for_goal(goal: dict[str, Any]) -> dict[str, Any] | None:
-    return _subagent_activity_for_goal_read_model(
-        goal,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
     )
 
 
