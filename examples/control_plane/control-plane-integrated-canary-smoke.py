@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import tempfile
 import time
@@ -23,6 +22,11 @@ from loopx.event_sourced_state import (  # noqa: E402
     TODO_CLAIMED,
     TODO_COMPLETED,
     make_state_event,
+)
+from loopx.control_plane.testing.canary_harness import (  # noqa: E402
+    read_run_index,
+    run_json_cli,
+    write_fixture_registry,
 )
 
 
@@ -62,49 +66,19 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "task_class=advancement_task action_kind=stale_markdown -->\n",
         encoding="utf-8",
     )
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "updated_at": "2026-06-27T00:00:00+00:00",
-                "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "control-plane-canary",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
-                        "state_event_log": f".codex/goals/{GOAL_ID}/events.jsonl",
-                        "adapter": {
-                            "kind": "generic_project_goal_v0",
-                            "status": "connected",
-                        },
-                        "quota": {
-                            "compute": 1.0,
-                            "window_hours": 24,
-                            "slot_minutes": 1,
-                            "allowed_slots": 10,
-                        },
-                        "coordination": {
-                            "registered_agents": [PRIMARY_AGENT_ID, AGENT_ID],
-                            "primary_agent": PRIMARY_AGENT_ID,
-                        },
-                        "workspace_guard_policy": {
-                            "side_agent_independent_worktree_required": False,
-                        },
-                        "authority_sources": [],
-                    }
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_fixture_registry(
+        project=project,
+        runtime_root=runtime,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        domain="control-plane-canary",
+        adapter_kind="generic_project_goal_v0",
+        state_event_log=f".codex/goals/{GOAL_ID}/events.jsonl",
+        registered_agents=[PRIMARY_AGENT_ID, AGENT_ID],
+        primary_agent=PRIMARY_AGENT_ID,
+        quota_allowed_slots=10,
+        side_agent_independent_worktree_required=False,
     )
-    runtime.mkdir(parents=True, exist_ok=True)
     return registry_path, state_file, event_log
 
 
@@ -128,45 +102,17 @@ def write_monitor_fixture(root: Path) -> tuple[Path, Path]:
         "cadence=5m next_due_at=2000-01-01T00:00:00+00:00 -->\n",
         encoding="utf-8",
     )
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "updated_at": "2026-06-27T00:00:00+00:00",
-                "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": MONITOR_GOAL_ID,
-                        "domain": "control-plane-canary",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": f".codex/goals/{MONITOR_GOAL_ID}/ACTIVE_GOAL_STATE.md",
-                        "adapter": {
-                            "kind": "generic_project_goal_v0",
-                            "status": "connected",
-                        },
-                        "quota": {
-                            "compute": 1.0,
-                            "window_hours": 24,
-                            "slot_minutes": 1,
-                            "allowed_slots": 10,
-                        },
-                        "coordination": {
-                            "registered_agents": [AGENT_ID],
-                            "primary_agent": AGENT_ID,
-                        },
-                        "authority_sources": [],
-                    }
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_fixture_registry(
+        project=project,
+        runtime_root=runtime,
+        registry_path=registry_path,
+        goal_id=MONITOR_GOAL_ID,
+        domain="control-plane-canary",
+        adapter_kind="generic_project_goal_v0",
+        registered_agents=[AGENT_ID],
+        primary_agent=AGENT_ID,
+        quota_allowed_slots=10,
     )
-    runtime.mkdir(parents=True, exist_ok=True)
     return registry_path, runtime
 
 
@@ -190,48 +136,18 @@ def write_markdown_continuation_fixture(root: Path) -> tuple[Path, Path, Path]:
         "task_class=advancement_task action_kind=stale_markdown -->\n",
         encoding="utf-8",
     )
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "updated_at": "2026-06-27T00:00:00+00:00",
-                "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": MARKDOWN_GOAL_ID,
-                        "domain": "control-plane-canary",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": f".codex/goals/{MARKDOWN_GOAL_ID}/ACTIVE_GOAL_STATE.md",
-                        "adapter": {
-                            "kind": "generic_project_goal_v0",
-                            "status": "connected",
-                        },
-                        "quota": {
-                            "compute": 1.0,
-                            "window_hours": 24,
-                            "slot_minutes": 1,
-                            "allowed_slots": 10,
-                        },
-                        "coordination": {
-                            "registered_agents": [PRIMARY_AGENT_ID, AGENT_ID],
-                            "primary_agent": PRIMARY_AGENT_ID,
-                        },
-                        "workspace_guard_policy": {
-                            "side_agent_independent_worktree_required": False,
-                        },
-                        "authority_sources": [],
-                    }
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_fixture_registry(
+        project=project,
+        runtime_root=runtime,
+        registry_path=registry_path,
+        goal_id=MARKDOWN_GOAL_ID,
+        domain="control-plane-canary",
+        adapter_kind="generic_project_goal_v0",
+        registered_agents=[PRIMARY_AGENT_ID, AGENT_ID],
+        primary_agent=PRIMARY_AGENT_ID,
+        quota_allowed_slots=10,
+        side_agent_independent_worktree_required=False,
     )
-    runtime.mkdir(parents=True, exist_ok=True)
     return registry_path, runtime, project
 
 
@@ -296,25 +212,13 @@ def append_event_todos(event_log: Path) -> None:
 
 
 def run_cli(registry_path: Path, runtime_root: Path, *args: str) -> dict[str, Any]:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "loopx.cli",
-            "--registry",
-            str(registry_path),
-            "--runtime-root",
-            str(runtime_root),
-            "--format",
-            "json",
-            *args,
-        ],
+    return run_json_cli(
+        *args,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
         cwd=REPO_ROOT,
-        check=True,
-        text=True,
-        capture_output=True,
+        include_returncode=False,
     )
-    return json.loads(result.stdout)
 
 
 def find_queue_item(status_payload: dict[str, Any], *, goal_id: str = GOAL_ID) -> dict[str, Any]:
@@ -346,17 +250,6 @@ def assert_event_projected_agent_todo(summary: dict[str, Any]) -> None:
     assert item["claimed_by"] == AGENT_ID, summary
     assert item["task_class"] == "advancement_task", summary
     assert "todo_markdown_fallback" not in json.dumps(summary, sort_keys=True), summary
-
-
-def read_run_index(runtime_root: Path) -> list[dict[str, Any]]:
-    index_path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
-    if not index_path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in index_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
 
 
 def assert_bounded_delivery_state_machine_bundle(quota_payload: dict[str, Any]) -> None:
@@ -583,7 +476,7 @@ def assert_refresh_and_spend_state_machine(registry_path: Path, runtime_root: Pa
     assert refresh_payload["delivery_outcome"] == "outcome_progress", refresh_payload
 
     matching_runs = [
-        run for run in read_run_index(runtime_root)
+        run for run in read_run_index(runtime_root, GOAL_ID)
         if run.get("classification") == VALIDATED_PROGRESS_CLASSIFICATION
     ]
     assert len(matching_runs) == 1, matching_runs
