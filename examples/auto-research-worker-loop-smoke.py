@@ -118,22 +118,22 @@ def main() -> int:
         assert payload["mode"] == "execute", payload
         assert payload["max_rounds"] == 1, payload
         assert payload["turn_count"] == 4, payload
-        assert payload["selected_actions"] == [
-            "write_research_contract",
-            "propose_hypothesis",
-            "run_dev_eval",
-        ], payload
+        assert payload["stop_reason"] == "no_executed_turns", payload
+        assert payload["selected_actions"] == ["write_research_contract"], payload
 
         manual_turns = [
             turn for turn in payload["turns"] if turn.get("mode") == "manual_research_required"
         ]
+        assert [turn["agent_id"] for turn in manual_turns] == ["research-curator"], payload
         assert [turn["selected_action"] for turn in manual_turns] == [
-            "write_research_contract",
-            "propose_hypothesis",
-            "run_dev_eval",
+            "write_research_contract"
         ], payload
         no_action_turns = [turn for turn in payload["turns"] if turn.get("mode") == "no_action"]
-        assert [turn["agent_id"] for turn in no_action_turns] == ["evaluator-promoter"], payload
+        assert [turn["agent_id"] for turn in no_action_turns] == [
+            "hypothesis-proposer",
+            "research-executor",
+            "evaluator-promoter",
+        ], payload
         assert no_action_turns[0]["selected_action"] is None, payload
         assert all(turn["executed"] is False for turn in manual_turns), payload
         assert all(turn.get("completion_status") is None for turn in manual_turns), payload

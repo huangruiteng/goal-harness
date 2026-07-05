@@ -26,7 +26,6 @@ from .user_contract import build_auto_research_user_contract
 from .worker_loop import run_auto_research_worker_loop
 from ..multi_agent.collective_round_ledger import (
     build_multi_agent_collective_round_ledger,
-    summarize_multi_agent_pane_tick_artifacts,
 )
 
 
@@ -369,7 +368,7 @@ def _supervisor_summary(supervisor: dict[str, object]) -> dict[str, object]:
             "tick_command": pane_local_a2a.get("tick_command"),
             "machine_json_policy": pane_local_a2a.get("machine_json_policy"),
             "machine_json_destination": pane_local_a2a.get("machine_json_destination"),
-            "rounds_artifact": pane_local_a2a.get("rounds_artifact"),
+            "status_artifact": pane_local_a2a.get("status_artifact"),
             "human_default": pane_local_a2a.get("human_default"),
         },
         "decentralized_a2a_driver": {
@@ -424,10 +423,43 @@ def _compact_live_worker_evidence(evidence: dict[str, object]) -> dict[str, obje
     }
 
 
-def _compact_visible_pane_a2a_rounds(artifacts: list[dict[str, object]]) -> dict[str, object]:
-    summary = summarize_multi_agent_pane_tick_artifacts(artifacts)
-    summary["schema_version"] = "auto_research_visible_pane_a2a_rounds_summary_v0"
-    return summary
+def _compact_visible_pane_a2a_status(artifacts: list[dict[str, object]]) -> dict[str, object]:
+    lane_outcomes: list[dict[str, object]] = []
+    status_check_count = 0
+    for raw in artifacts:
+        checks = raw.get("checks") if isinstance(raw.get("checks"), list) else []
+        status_check_count += len(checks)
+        last = checks[-1] if checks and isinstance(checks[-1], dict) else {}
+        lane_outcomes.append(
+            {
+                "agent_id": raw.get("agent_id"),
+                "role_id": raw.get("role_id"),
+                "status": raw.get("status"),
+                "worker_configured": raw.get("worker_configured") is True,
+                "worker_label": raw.get("worker_label"),
+                "selected_todo_id": last.get("selected_todo_id"),
+                "selected_action": last.get("selected_action"),
+                "worker_status": last.get("worker_status"),
+                "counts_as_research_round": False,
+            }
+        )
+    return {
+        "schema_version": "auto_research_visible_pane_a2a_status_summary_v0",
+        "loaded": bool(artifacts),
+        "source": "visible_pane_a2a_status_artifacts",
+        "lane_count": len(artifacts),
+        "status_check_count": status_check_count,
+        "workflow_driver": False,
+        "counts_as_collective_research_round": False,
+        "lane_outcomes": lane_outcomes,
+        "public_boundary": {
+            "raw_logs_recorded": False,
+            "private_artifacts_recorded": False,
+            "absolute_paths_recorded": False,
+            "credentials_recorded": False,
+            "local_workspace_path_redacted": True,
+        },
+    }
 
 
 def _build_collective_round_summary(
@@ -629,28 +661,22 @@ def _collective_summary_from_worker_loop(
     )
 
 
-def _collective_summary_from_visible_panes_and_evidence(
+def _collective_summary_from_visible_evidence(
     *,
-    pane_rounds: dict[str, object],
+    pane_status: dict[str, object],
     evidence: dict[str, object],
     agent_count: int | None,
     expected_lanes: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    max_completed = (
-        int(pane_rounds.get("max_rounds_completed"))
-        if isinstance(pane_rounds.get("max_rounds_completed"), int)
-        and not isinstance(pane_rounds.get("max_rounds_completed"), bool)
-        else 0
-    )
     lane_outcomes = (
-        pane_rounds.get("lane_outcomes")
-        if isinstance(pane_rounds.get("lane_outcomes"), list)
+        pane_status.get("lane_outcomes")
+        if isinstance(pane_status.get("lane_outcomes"), list)
         else []
     )
     return _build_collective_round_summary(
-        source="visible_live_evidence_plus_pane_local_ticks",
+        source="visible_lane_authored_evidence",
         agent_count=agent_count,
-        collective_round_count=max_completed,
+        collective_round_count=0,
         dev_metric=_numeric_metric(evidence.get("dev_metric")),
         holdout_metric=_numeric_metric(evidence.get("holdout_metric")),
         evidence_event_count=(
@@ -660,14 +686,18 @@ def _collective_summary_from_visible_panes_and_evidence(
             else None
         ),
         expected_lanes=expected_lanes
-        or (pane_rounds.get("lanes") if isinstance(pane_rounds.get("lanes"), list) else None),
+        or (
+            pane_status.get("lanes") if isinstance(pane_status.get("lanes"), list) else None
+        ),
         lane_outcomes=lane_outcomes,
         visible_role_participation_verified=True,
-        visible_role_participation_basis="visible_pane_a2a_artifacts_plus_lane_evidence",
+        visible_role_participation_basis=(
+            "visible_status_artifacts_plus_lane_authored_evidence"
+        ),
     )
 
 
-def _discover_visible_pane_a2a_rounds(
+def _discover_visible_pane_a2a_status(
     *,
     runtime_root_arg: str | None,
     session_name: str,
@@ -683,16 +713,16 @@ def _discover_visible_pane_a2a_rounds(
     while True:
         artifacts = []
         if artifact_root.is_dir():
-            for candidate in sorted(artifact_root.glob("*/pane-a2a-rounds.public.json")):
+            for candidate in sorted(artifact_root.glob("*/pane-a2a-status.public.json")):
                 try:
                     raw = json.loads(candidate.read_text(encoding="utf-8"))
                 except Exception:
                     continue
                 if not isinstance(raw, dict):
                     continue
-                if raw.get("schema_version") != "pane_local_a2a_tick_rounds_v0":
+                if raw.get("schema_version") != "pane_local_a2a_status_check_v0":
                     continue
-                if raw.get("source") != "pane_local_a2a_tick":
+                if raw.get("source") != "pane_local_a2a_status_check":
                     continue
                 if raw.get("goal_id") != goal_id:
                     continue
@@ -709,13 +739,7 @@ def _discover_visible_pane_a2a_rounds(
                     continue
                 artifacts.append(raw)
         if artifacts:
-            summary = _compact_visible_pane_a2a_rounds(artifacts)
-            if (
-                bool(summary.get("all_requested_rounds_completed"))
-                or int(summary.get("max_rounds_requested") or 0) < 2
-                or time.monotonic() >= deadline
-            ):
-                return summary
+            return _compact_visible_pane_a2a_status(artifacts)
         if time.monotonic() >= deadline:
             return None
         time.sleep(0.5)
@@ -795,18 +819,17 @@ def _load_live_worker_evidence_into_payload(
         visible_proof["evidence_source"] = evidence_source
 
 
-def _load_visible_pane_a2a_rounds_into_payload(
+def _load_visible_pane_a2a_status_into_payload(
     *,
     payload: dict[str, object],
-    rounds: dict[str, object],
+    status: dict[str, object],
 ) -> None:
-    payload["visible_pane_a2a_rounds"] = rounds
+    payload["visible_pane_a2a_status"] = status
     visible_proof = payload["visible_worker_proof"]
     if isinstance(visible_proof, dict):
-        visible_proof["pane_local_a2a_rounds_loaded"] = bool(rounds.get("loaded"))
-        visible_proof["pane_local_a2a_round_count"] = rounds.get("max_rounds_completed")
-        visible_proof["pane_local_a2a_multi_tick_verified"] = bool(
-            rounds.get("pane_local_multi_tick_verified")
+        visible_proof["pane_local_a2a_status_loaded"] = bool(status.get("loaded"))
+        visible_proof["pane_local_a2a_status_check_count"] = status.get(
+            "status_check_count"
         )
         visible_proof["decentralized_a2a_rounds_verified"] = False
 
@@ -930,9 +953,9 @@ def _build_visible_readiness(payload: dict[str, object]) -> dict[str, object]:
         if isinstance(payload.get("visible_worker_proof"), dict)
         else {}
     )
-    rounds = (
-        payload.get("visible_pane_a2a_rounds")
-        if isinstance(payload.get("visible_pane_a2a_rounds"), dict)
+    pane_status = (
+        payload.get("visible_pane_a2a_status")
+        if isinstance(payload.get("visible_pane_a2a_status"), dict)
         else {}
     )
     collective_rounds = (
@@ -991,7 +1014,7 @@ def _build_visible_readiness(payload: dict[str, object]) -> dict[str, object]:
         "user_contract_accepted": contract_acceptance.get("accepted") is True,
         "visible_lanes_accepted": proof.get("visible_lanes_accepted") is True,
         "cadence_wake_verified": proof.get("cadence_wake_verified") is True,
-        "pane_local_tick_loaded": rounds.get("loaded") is True,
+        "pane_local_status_loaded": pane_status.get("loaded") is True,
         "collective_research_multi_round_verified": (
             collective_rounds.get("multi_round_research_verified") is True
         ),
@@ -1004,7 +1027,8 @@ def _build_visible_readiness(payload: dict[str, object]) -> dict[str, object]:
             best_metric is not None and best_metric > baseline
         ),
         "workflow_driver_false": (
-            rounds.get("workflow_driver") is False and wake.get("workflow_driver") is False
+            pane_status.get("workflow_driver") is False
+            and wake.get("workflow_driver") is False
         ),
         "kernel_driver_contract_loaded": (
             driver.get("owner_layer") == "generic_multi_agent_kernel"
@@ -1023,7 +1047,7 @@ def _build_visible_readiness(payload: dict[str, object]) -> dict[str, object]:
         "coordination_pattern": "decentralized_state_a2a",
         "wake_model": wake.get("wakeup_model"),
         "workflow_model": driver.get("driver_model")
-        or "fixed_prompt_broadcast_plus_pane_local_state_tick",
+        or "fixed_prompt_broadcast_plus_pane_local_state_check",
         "driver_owner_layer": driver.get("owner_layer"),
         "auto_research_preset_role": "thin_domain_defaults_only",
         "user_contract_invocation": contract_acceptance.get("canonical_invocation"),
@@ -1039,11 +1063,10 @@ def _build_visible_readiness(payload: dict[str, object]) -> dict[str, object]:
             if isinstance(contract_acceptance.get("checks"), dict)
             else False,
         },
-        "rounds": {
-            "scope": "pane_local_tick",
-            "max_completed": rounds.get("max_rounds_completed"),
-            "total_completed": rounds.get("rounds_completed_total"),
-            "lane_count": rounds.get("lane_count"),
+        "pane_status": {
+            "scope": "pane_local_state_check",
+            "status_check_count": pane_status.get("status_check_count"),
+            "lane_count": pane_status.get("lane_count"),
             "counts_as_collective_research_round": False,
         },
         "collective_research_rounds": {
@@ -1528,16 +1551,16 @@ def run_auto_research_demo_e2e(
                     payload=payload,
                     wake=wake_payload,
                 )
-            pane_rounds = _discover_visible_pane_a2a_rounds(
+            pane_status = _discover_visible_pane_a2a_status(
                 runtime_root_arg=visible_runtime_root_arg,
                 session_name=str(launch_result.get("session_name") or session_name),
                 goal_id=goal_id,
                 wait_seconds=visible_live_evidence_wait_seconds,
             )
-            if pane_rounds is not None:
-                _load_visible_pane_a2a_rounds_into_payload(
+            if pane_status is not None:
+                _load_visible_pane_a2a_status_into_payload(
                     payload=payload,
-                    rounds=pane_rounds,
+                    status=pane_status,
                 )
             collective_rounds = None
             live_evidence = _discover_visible_live_evidence(
@@ -1552,14 +1575,14 @@ def run_auto_research_demo_e2e(
                     evidence=live_evidence,
                     evidence_source="visible_launcher_artifact",
                 )
-                if collective_rounds is None and pane_rounds is not None:
-                    collective_rounds = _collective_summary_from_visible_panes_and_evidence(
-                        pane_rounds=pane_rounds,
+                if collective_rounds is None and pane_status is not None:
+                    collective_rounds = _collective_summary_from_visible_evidence(
+                        pane_status=pane_status,
                         evidence=payload["live_worker_evidence"],
                         agent_count=(
-                            int(pane_rounds.get("lane_count"))
-                            if isinstance(pane_rounds.get("lane_count"), int)
-                            and not isinstance(pane_rounds.get("lane_count"), bool)
+                            int(pane_status.get("lane_count"))
+                            if isinstance(pane_status.get("lane_count"), int)
+                            and not isinstance(pane_status.get("lane_count"), bool)
                             else None
                         ),
                         expected_lanes=[

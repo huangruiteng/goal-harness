@@ -79,7 +79,7 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
     assert "metric_contract_hints" in layering["preset_layer"]["owns"], layering
     assert "multi_agent_runner" in layering["preset_layer"]["forbidden"], layering
     assert "decentralized_a2a_driver" in layering["preset_layer"]["forbidden"], layering
-    assert "pane_local_a2a_tick" in layering["preset_layer"]["forbidden"], layering
+    assert "pane_local_a2a_status_check" in layering["preset_layer"]["forbidden"], layering
     assert "default_loopx_skill_bootstrap" in layering["preset_layer"]["forbidden"], layering
     assert "fixed_a2a_wake_prompt" in layering["preset_layer"]["forbidden"], layering
     assert "decentralized_a2a_driver" in layering["kernel_layer"]["owns"], layering
@@ -105,7 +105,7 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
     ], preset
     assert "multi_agent_runner" in preset["forbidden"], preset
     assert "decentralized_a2a_driver" in preset["forbidden"], preset
-    assert "pane_local_a2a_tick" in preset["forbidden"], preset
+    assert "pane_local_a2a_status_check" in preset["forbidden"], preset
     assert "default_loopx_skill_bootstrap" in preset["forbidden"], preset
     assert "fixed_a2a_wake_prompt" in preset["forbidden"], preset
     assert preset["worker_skill_scope"] == "role_specific_semantics_and_successor_todos_only", preset
@@ -119,7 +119,7 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
     assert kernel["kernel_driver"] == "decentralized_a2a_driver", payload
     assert kernel["kernel_driver_schema"] == "multi_agent_decentralized_a2a_driver_contract_v0", payload
     assert kernel["worker_turn_owner"] == "generic_multi_agent_kernel", payload
-    assert "pane_local_a2a_tick" in kernel["delegated_kernel_mechanics"], payload
+    assert "pane_local_a2a_status_check" in kernel["delegated_kernel_mechanics"], payload
     assert kernel["presentation_layers_in_kernel"] is False, payload
 
     coordination = payload["coordination_model"]
@@ -241,11 +241,12 @@ def assert_supervisor_contract(payload: dict[str, Any]) -> None:
         assert lane["pane_local_a2a"]["worker_turn_configured"] is False, lane
         assert lane["pane_local_a2a"]["auto_start"] is True, lane
         assert lane["pane_local_a2a"]["auto_start_owner"] == "codex_tui_first_turn_prompt", lane
-        assert lane["pane_local_a2a"]["tick_rounds"] == 1, lane
+        assert lane["pane_local_a2a"]["status_check_only"] is True, lane
+        assert lane["pane_local_a2a"]["counts_as_research_round"] is False, lane
         assert lane["lane_timeline"] == [
             "role_profile",
             "codex_tui",
-            "tui_first_turn_pane_local_a2a_tick",
+            "tui_first_turn_quota_frontier_status_check",
             "frontier",
         ], lane
 

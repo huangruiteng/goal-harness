@@ -63,7 +63,7 @@ def build_auto_research_layer_contract() -> dict[str, object]:
             "real_codex_tui_panes",
             "workspace_and_trust_safe_launch",
             "decentralized_a2a_driver",
-            "pane_local_a2a_tick",
+            "pane_local_a2a_status_check",
             "todo_evidence_status_protocol",
             "compact_human_status",
             "default_loopx_skill_bootstrap",

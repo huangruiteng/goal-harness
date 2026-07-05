@@ -133,7 +133,7 @@ def main() -> int:
     assert layering["kernel_layer"]["fixed_wake_prompt"] == (
         "PANE_LOCAL_A2A_WAKEUP_PROMPT"
     ), layering
-    assert "pane_local_a2a_tick" in layering["preset_layer"]["forbidden"], layering
+    assert "pane_local_a2a_status_check" in layering["preset_layer"]["forbidden"], layering
     assert (
         layering["preset_layer"]["role_skill_limit"]
         == "role_specific_semantics_and_successor_declarations_only"

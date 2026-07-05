@@ -279,17 +279,17 @@ def main() -> int:
         assert driver["schema_version"] == "multi_agent_decentralized_a2a_driver_contract_v0", driver
         assert driver["owner_layer"] == "generic_multi_agent_kernel", driver
         assert driver["driver_model"] == (
-            "fixed_prompt_broadcast_plus_pane_local_state_tick"
+            "fixed_prompt_broadcast_plus_pane_local_state_check"
         ), driver
         assert driver["broadcaster"]["decides_work"] is False, driver
         assert driver["pane"]["tick_command"] == "$LOOPX_PANE_A2A_TICK", driver
         assert driver["prompt"]["tick_summary_ref"] == "$LOOPX_PANE_TICK_SUMMARY", driver
-        assert "own_prior_tick_summary_evidence" in driver["pane"]["reads"], driver
+        assert "own_prior_status_summary" in driver["pane"]["reads"], driver
         assert driver["pane"]["cadence_action"] == (
-            "fixed_prompt_wakeup_then_own_quota_frontier_tick_when_runnable"
+            "fixed_prompt_wakeup_then_own_quota_frontier_check_when_runnable"
         ), driver
         assert driver["prompt"]["tick_summary_semantics"] == (
-            "prior_pane_tick_evidence_not_a_tick_skip_gate"
+            "prior_pane_status_not_research_evidence"
         ), driver
         assert (
             driver["acceptance"]["tick_summary_does_not_gate_wake_tick"] is True
@@ -311,7 +311,7 @@ def main() -> int:
         assert compact["role_count"] == 2, compact
         assert compact["first_action"] == "$LOOPX_PANE_A2A_TICK", compact
         assert compact["driver_model"] == (
-            "fixed_prompt_broadcast_plus_pane_local_state_tick"
+            "fixed_prompt_broadcast_plus_pane_local_state_check"
         ), compact
         assert compact["user_takeover"] == "attach to the session and type into any role pane", compact
         assert dry_packet["interactive_tui_contract"]["schema_version"] == "multi_agent_visible_interactive_tui_contract_v0", dry_packet
@@ -383,9 +383,10 @@ def main() -> int:
         assert dry_wake["broadcaster_selects_todo"] is False, dry_wake
         assert "$LOOPX_PANE_A2A_TICK" in dry_wake["prompt"], dry_wake
         assert "$LOOPX_PANE_TICK_SUMMARY" in dry_wake["prompt"], dry_wake
-        assert "Treat this fixed wake as a fresh decentralized round" in dry_wake["prompt"], dry_wake
-        assert "prior pane-local tick evidence" in dry_wake["prompt"], dry_wake
-        assert "Run the bounded $LOOPX_PANE_A2A_TICK once" in dry_wake["prompt"], dry_wake
+        assert "fresh decentralized state check" in dry_wake["prompt"], dry_wake
+        assert "not as a completed research round" in dry_wake["prompt"], dry_wake
+        assert "prior pane-local status summary" in dry_wake["prompt"], dry_wake
+        assert "Run $LOOPX_PANE_A2A_TICK once" in dry_wake["prompt"], dry_wake
         assert "\n" not in dry_wake["prompt"], dry_wake
         exec_wake = run_wake_command(
             env,

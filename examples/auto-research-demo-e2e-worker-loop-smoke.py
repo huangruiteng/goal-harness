@@ -119,11 +119,20 @@ def main() -> int:
     assert worker_loop["turn_count"] == 4, worker_loop
     assert worker_loop["executed_turn_count"] == 0, worker_loop
     assert worker_loop["completed_turn_count"] == 0, worker_loop
-    assert worker_loop["selected_actions"] == [
-        "write_research_contract",
-        "propose_hypothesis",
-        "run_dev_eval",
-        "summarize_evidence",
+    assert worker_loop["stop_reason"] == "no_executed_turns", worker_loop
+    assert worker_loop["selected_actions"] == ["write_research_contract"], worker_loop
+    manual_turns = [
+        turn for turn in worker_loop["turns"] if turn.get("mode") == "manual_research_required"
+    ]
+    assert [turn["agent_id"] for turn in manual_turns] == ["research-curator"], worker_loop
+    assert [turn["selected_action"] for turn in manual_turns] == [
+        "write_research_contract"
+    ], worker_loop
+    no_action_turns = [turn for turn in worker_loop["turns"] if turn.get("mode") == "no_action"]
+    assert [turn["agent_id"] for turn in no_action_turns] == [
+        "hypothesis-proposer",
+        "research-executor",
+        "evaluator-promoter",
     ], worker_loop
     assert all(turn.get("dev_metric") is None for turn in worker_loop["turns"]), worker_loop
     assert all(turn.get("holdout_metric") is None for turn in worker_loop["turns"]), worker_loop
