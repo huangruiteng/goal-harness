@@ -49,9 +49,7 @@ from .control_plane.work_items.task_graph import (
     build_task_graph_projection as _build_task_graph_projection_read_model,
 )
 from .control_plane.work_items.project_asset import (
-    LOCAL_PATH_SURFACE_PATTERN,
     PROJECT_ASSET_TODO_PROJECTION_GAP_SCHEMA_VERSION,
-    SECRET_LIKE_SURFACE_PATTERN,
     TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
     TODO_PROJECTION_VIEW_SCHEMA_VERSION,
     build_project_asset,
@@ -172,8 +170,8 @@ from .control_plane.runtime.run_compaction import (
     compact_run_base as _compact_run_base_read_model,
 )
 from .control_plane.runtime.public_safety import (
-    public_safe_compact_list as _public_safe_compact_list_read_model,
-    public_safe_compact_text as _public_safe_compact_text_read_model,
+    public_safe_compact_list,
+    public_safe_compact_text,
 )
 from .control_plane.runtime.run_history import (
     build_run_history as _build_run_history_read_model,
@@ -230,9 +228,9 @@ from .control_plane.work_items.lifecycle import (
     run_lifecycle_phase as _run_lifecycle_phase_read_model,
 )
 from .control_plane.runtime.session_runtime import (
-    compact_session_runtime_projection_from_run as _compact_session_runtime_projection_from_run_read_model,
-    compact_session_runtime_readonly_projection as _compact_session_runtime_readonly_projection_read_model,
     attach_session_runtime_projection,
+    compact_session_runtime_projection_from_run,
+    compact_session_runtime_readonly_projection,
     legacy_runtime_goal_attention as _legacy_runtime_goal_attention_read_model,
     session_runtime_projection_attention as _session_runtime_projection_attention_read_model,
     session_runtime_status_label as _session_runtime_status_label_read_model,
@@ -552,7 +550,6 @@ MAX_DEFERRED_TODO_VISIBILITY_ITEMS = _TODO_SUMMARY_MAX_DEFERRED_TODO_VISIBILITY_
 MAX_MONITOR_DUE_ITEMS = _TODO_SUMMARY_MAX_MONITOR_DUE_ITEMS
 MAX_DEPENDENCY_BLOCKERS = _TODO_SUMMARY_MAX_DEPENDENCY_BLOCKERS
 MAX_AUTONOMOUS_BACKLOG_CANDIDATES = _MAX_AUTONOMOUS_TODO_CANDIDATES
-MAX_SUBAGENT_SCOPE_ITEMS = 4
 MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS = _MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS_READ_MODEL
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = _MAX_AUTONOMOUS_REPLAN_TRIGGERS_READ_MODEL
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
@@ -580,38 +577,6 @@ AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS = {
 AUTONOMOUS_RUN_HISTORY_STALL_PATTERN = re.compile(
     r"(?i)(?:monitor|observe|observation|poll|watch|quiet|no[-_ ]?op|no[-_ ]?progress|stalled?|unchanged|dependency|停转|无进展|重复|反复|观察|轮询)"
 )
-def public_safe_compact_text(value: Any, *, limit: int = 220) -> str | None:
-    return _public_safe_compact_text_read_model(
-        value,
-        limit=limit,
-        normalize_text=normalize_todo_text,
-        local_path_surface_pattern=LOCAL_PATH_SURFACE_PATTERN,
-        secret_like_surface_pattern=SECRET_LIKE_SURFACE_PATTERN,
-    )
-
-
-def public_safe_compact_list(value: Any, *, limit: int = MAX_SUBAGENT_SCOPE_ITEMS) -> list[str]:
-    return _public_safe_compact_list_read_model(
-        value,
-        limit=limit,
-        compact_text=public_safe_compact_text,
-    )
-
-
-def compact_session_runtime_readonly_projection(value: Any) -> dict[str, Any] | None:
-    return _compact_session_runtime_readonly_projection_read_model(
-        value,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
-    )
-
-
-def compact_session_runtime_projection_from_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
-    return _compact_session_runtime_projection_from_run_read_model(
-        run,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
-    )
 
 
 def _compact_numeric_map(value: Any, *, keys: tuple[str, ...] | None = None) -> dict[str, Any]:
