@@ -16,7 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint  # noqa: E402
+from loopx.control_plane.scheduler.scheduler_hint import (  # noqa: E402
+    build_scheduler_ack_plan,
+    build_scheduler_hint,
+)
 from loopx.control_plane.scheduler.state import SCHEDULER_STATE_SCHEMA_VERSION  # noqa: E402
 from loopx.quota import AgentScopeFrontierAction  # noqa: E402
 from loopx.status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK  # noqa: E402
@@ -279,6 +282,102 @@ def assert_active_work_keeps_initial_cadence() -> None:
     assert "recommended_rrule" not in steady["codex_app"], steady
 
 
+def assert_scheduler_ack_plan_validation() -> None:
+    base = active_payload()
+    first = build_scheduler_hint(
+        deepcopy(base),
+        agent_scope_frontier_actions=AGENT_SCOPE_ACTIONS,
+    )
+    codex_app = first["codex_app"]
+    backoff = codex_app["stateful_backoff"]
+    plan = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id="codex-side-agent",
+        state_key=backoff["state_key"],
+        applied_rrule=codex_app["recommended_rrule"],
+        reset_token=backoff["reset_token"],
+        identity_signature=backoff["identity_signature"],
+    )
+    assert plan == {
+        "ok": True,
+        "already_applied": False,
+        "applied_rrule": codex_app["recommended_rrule"],
+        "expected_rrule": codex_app["recommended_rrule"],
+    }, plan
+
+    missing_agent = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id=None,
+        state_key=backoff["state_key"],
+        applied_rrule=codex_app["recommended_rrule"],
+    )
+    assert missing_agent["ok"] is False, missing_agent
+    assert "--agent-id" in missing_agent["reason"], missing_agent
+
+    wrong_state_key = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id="codex-side-agent",
+        state_key="wrong.state.key",
+        applied_rrule=codex_app["recommended_rrule"],
+    )
+    assert wrong_state_key["ok"] is False, wrong_state_key
+    assert "--state-key" in wrong_state_key["reason"], wrong_state_key
+
+    wrong_reset_token = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id="codex-side-agent",
+        state_key=backoff["state_key"],
+        applied_rrule=codex_app["recommended_rrule"],
+        reset_token="wrong-reset-token",
+    )
+    assert wrong_reset_token["ok"] is False, wrong_reset_token
+    assert "--reset-token" in wrong_reset_token["reason"], wrong_reset_token
+
+    wrong_identity = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id="codex-side-agent",
+        state_key=backoff["state_key"],
+        applied_rrule=codex_app["recommended_rrule"],
+        identity_signature="wrong-identity",
+    )
+    assert wrong_identity["ok"] is False, wrong_identity
+    assert "--identity-signature" in wrong_identity["reason"], wrong_identity
+
+    missing_rrule = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id="codex-side-agent",
+        state_key=backoff["state_key"],
+    )
+    assert missing_rrule["ok"] is False, missing_rrule
+    assert "--applied-rrule" in missing_rrule["reason"], missing_rrule
+
+    wrong_rrule = build_scheduler_ack_plan(
+        {"scheduler_hint": first},
+        agent_id="codex-side-agent",
+        state_key=backoff["state_key"],
+        applied_rrule="FREQ=MINUTELY;INTERVAL=99",
+    )
+    assert wrong_rrule["ok"] is False, wrong_rrule
+    assert "does not match expected" in wrong_rrule["reason"], wrong_rrule
+
+    steady = build_scheduler_hint(
+        deepcopy(base),
+        agent_scope_frontier_actions=AGENT_SCOPE_ACTIONS,
+        codex_app_scheduler_state=state_from(first),
+    )
+    steady_backoff = steady["codex_app"]["stateful_backoff"]
+    already_applied = build_scheduler_ack_plan(
+        {"scheduler_hint": steady},
+        agent_id="codex-side-agent",
+        state_key=steady_backoff["state_key"],
+    )
+    assert already_applied == {
+        "ok": True,
+        "already_applied": True,
+        "applied_rrule": "",
+    }, already_applied
+
+
 def run_cli(root: Path, *args: str, registry_path: Path, runtime: Path, project: Path) -> dict:
     command = [
         sys.executable,
@@ -479,6 +578,7 @@ def main() -> int:
     assert_policy_state_progression()
     assert_monitor_wait_progression_reaches_120()
     assert_active_work_keeps_initial_cadence()
+    assert_scheduler_ack_plan_validation()
     assert_cli_scheduler_ack_progression()
     assert_cli_scheduler_ack_uses_should_run_lookback()
     print("quota-scheduler-state-ack-smoke ok")

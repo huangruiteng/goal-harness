@@ -53,6 +53,76 @@ def scheduler_backoff_packet(
     return scheduler_hint, codex_app, stateful_backoff
 
 
+def build_scheduler_ack_plan(
+    before: dict[str, Any],
+    *,
+    agent_id: str | None,
+    state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+    applied_rrule: str | None = None,
+    reset_token: str | None = None,
+    identity_signature: str | None = None,
+) -> dict[str, Any]:
+    safe_agent_id = str(agent_id or "").strip()
+    _, codex_app, stateful_backoff = scheduler_backoff_packet(before)
+    if not safe_agent_id:
+        return {
+            "ok": False,
+            "reason": "`loopx quota scheduler-ack` requires --agent-id",
+        }
+    if not stateful_backoff:
+        return {
+            "ok": False,
+            "reason": "current quota decision has no Codex App stateful scheduler packet",
+        }
+    if str(stateful_backoff.get("state_key") or "") != state_key:
+        return {
+            "ok": False,
+            "reason": "--state-key does not match scheduler_hint.codex_app.stateful_backoff.state_key",
+        }
+    if reset_token and str(reset_token).strip() != str(stateful_backoff.get("reset_token") or ""):
+        return {
+            "ok": False,
+            "reason": "--reset-token does not match the current scheduler hint",
+        }
+    if (
+        identity_signature
+        and str(identity_signature).strip() != str(stateful_backoff.get("identity_signature") or "")
+    ):
+        return {
+            "ok": False,
+            "reason": "--identity-signature does not match the current scheduler hint",
+        }
+    safe_applied_rrule = normalize_scheduler_rrule(applied_rrule)
+    if stateful_backoff.get("apply_needed") is not True:
+        return {
+            "ok": True,
+            "already_applied": True,
+            "applied_rrule": safe_applied_rrule,
+        }
+    expected_rrule = normalize_scheduler_rrule(
+        codex_app.get("recommended_rrule") or stateful_backoff.get("current_rrule")
+    )
+    if not safe_applied_rrule:
+        return {
+            "ok": False,
+            "reason": "`loopx quota scheduler-ack` requires --applied-rrule when apply_needed=true",
+        }
+    if expected_rrule and safe_applied_rrule != expected_rrule:
+        return {
+            "ok": False,
+            "reason": (
+                f"quota scheduler-ack applied_rrule {safe_applied_rrule!r} "
+                f"does not match expected {expected_rrule!r}"
+            ),
+        }
+    return {
+        "ok": True,
+        "already_applied": False,
+        "applied_rrule": safe_applied_rrule,
+        "expected_rrule": expected_rrule,
+    }
+
+
 def _int_number(value: Any, *, default: int) -> int:
     try:
         return int(value)
