@@ -245,8 +245,8 @@ from .control_plane.agents.subagent_activity import (
     subagent_quota_spend as _subagent_quota_spend_read_model,
     subagent_state as _subagent_state_read_model,
 )
-from .control_plane.work_items.stale_latest_run import (
-    active_state_projection_warning as _active_state_projection_warning_read_model,
+from .control_plane.runtime.stale_latest_run import (
+    stale_latest_run_projection_warning as _stale_latest_run_projection_warning_read_model,
 )
 from .control_plane.work_items.status_contract import (
     build_contract_health_projection as _build_contract_health_projection_read_model,
@@ -6226,7 +6226,7 @@ def subagent_activity_for_goal(goal: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def active_state_projection_warning(goal: dict[str, Any], current_run: dict[str, Any] | None) -> dict[str, Any] | None:
-    return _active_state_projection_warning_read_model(
+    return _stale_latest_run_projection_warning_read_model(
         goal,
         current_run,
         agent_lane_progress_scope=AGENT_LANE_PROGRESS_SCOPE,

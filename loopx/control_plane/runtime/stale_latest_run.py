@@ -10,7 +10,7 @@ FrontmatterParser = Callable[[str], dict[str, str]]
 TimestampParser = Callable[[Any], Any]
 
 
-def active_state_projection_warning(
+def stale_latest_run_projection_warning(
     goal: dict[str, Any],
     current_run: dict[str, Any] | None,
     *,
