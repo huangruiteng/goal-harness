@@ -12,6 +12,7 @@ from .control_plane.agents.agent_scope import (
     AgentScopeFrontierAction,
     _action_scope_tokens_from_text,
     _agent_lane_frontier_hint,
+    _agent_scope_deferred_resume_candidates,
     _agent_scope_frontier_action,
     _agent_scope_no_candidate_frontier,
     _agent_scoped_user_gate_override,
@@ -2141,6 +2142,16 @@ def build_quota_should_run(
             agent_todo_summary=agent_todo_summary,
             work_lane_contract=work_lane_contract,
         )
+        ready_deferred_resume_candidates: list[dict[str, Any]] = []
+        if (
+            isinstance(agent_identity, dict)
+            and agent_identity.get("role") == "side-agent"
+            and isinstance(agent_todo_summary, dict)
+        ):
+            ready_deferred_resume_candidates = _agent_scope_deferred_resume_candidates(
+                agent_todo_summary,
+                agent_id=normalize_todo_claimed_by(agent_identity.get("agent_id")),
+            )
         if external_evidence_observation and not workspace_guard:
             normal_delivery_allowed = False
             should_run = True
@@ -2167,6 +2178,7 @@ def build_quota_should_run(
             and work_lane_contract.get("must_attempt_work") is False
             and heartbeat_recommendation.get("recommended_mode") == "monitor_quiet_until_material_transition"
             and heartbeat_recommendation.get("notify") == "DONT_NOTIFY"
+            and not ready_deferred_resume_candidates
         )
         if monitor_quiet_skip:
             normal_delivery_allowed = False
@@ -2246,7 +2258,10 @@ def build_quota_should_run(
                 agent_todo_summary=agent_todo_summary,
                 agent_lane_next_action=agent_lane_next_action,
                 work_lane_contract=work_lane_contract,
-                candidate_should_run=bool(should_run and normal_delivery_allowed),
+                candidate_should_run=bool(
+                    (should_run and normal_delivery_allowed)
+                    or ready_deferred_resume_candidates
+                ),
             )
         agent_lane_frontier_hint = None
         if not replan_decision_allowed:
