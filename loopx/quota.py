@@ -122,9 +122,10 @@ from .control_plane.todos.contract import (
     normalize_todo_task_class,
 )
 from .control_plane.todos.handoff_gate import (
-    HandoffGateState,
-    build_todo_handoff_gate_states,
+    build_todo_handoff_gate_lanes,
+    handoff_ready_successor_todo_ids as todo_handoff_ready_successor_todo_ids,
 )
+from .control_plane.todos.route_continuation import build_todo_route_continuation_lanes
 from .control_plane.todos.succession_warning import build_todo_succession_warning_lanes
 from .control_plane.todos.projection import (
     todo_claimed_visibility_items as projection_todo_claimed_visibility_items,
@@ -1698,155 +1699,6 @@ def _deferred_visibility_lanes(
     return lanes
 
 
-def _todo_summary_route_continuation_candidates(value: dict[str, Any]) -> list[dict[str, Any]]:
-    if not isinstance(value, dict):
-        return []
-    source_items: list[dict[str, Any]] = []
-    for key in (
-        "route_continuation_replan_candidates",
-        "route_continuation_candidates",
-    ):
-        raw_items = value.get(key) if isinstance(value.get(key), list) else []
-        source_items.extend(item for item in raw_items if isinstance(item, dict))
-
-    handoff_gates = _todo_summary_handoff_gates(value)
-    source_items.extend(
-        item
-        for item in handoff_gates
-        if isinstance(item, dict)
-        and item.get("route_continuation_replan_required") is True
-    )
-    if not source_items:
-        return []
-
-    candidates: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in source_items:
-        if item.get("route_continuation_replan_required") is False:
-            continue
-        task_class = item.get("task_class")
-        if task_class is not None and _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
-            continue
-        text = str(
-            item.get("text")
-            or item.get("title")
-            or item.get("recommended_action")
-            or item.get("route_continuation_reason")
-            or ""
-        ).strip()
-        identity = str(
-            item.get("todo_id")
-            or item.get("route_id")
-            or item.get("route_key")
-            or item.get("index")
-            or text
-        )
-        if not identity or identity in seen:
-            continue
-        seen.add(identity)
-        compact = _compact_todo_summary_item(item, text=text)
-        compact["route_continuation_replan_required"] = True
-        if item.get("route_continuation_reason") is not None:
-            compact["route_continuation_reason"] = item.get("route_continuation_reason")
-        if item.get("route_id") is not None:
-            compact["route_id"] = item.get("route_id")
-        if item.get("route_key") is not None:
-            compact["route_key"] = item.get("route_key")
-        candidates.append(compact)
-    return sorted(candidates, key=_todo_projection_sort_key)
-
-
-def _route_continuation_candidate_matches_agent(
-    item: dict[str, Any],
-    *,
-    agent_id: str,
-) -> bool:
-    blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
-    if blocks_agent:
-        return blocks_agent == agent_id
-    claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
-    return not claimed_by or claimed_by == agent_id
-
-
-def _agent_filtered_route_continuation_items(
-    items: list[dict[str, Any]],
-    *,
-    agent_id: str | None,
-    claim: str,
-) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    for item in items:
-        blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
-        claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
-        if claim == "current":
-            if not agent_id or not _route_continuation_candidate_matches_agent(
-                item,
-                agent_id=agent_id,
-            ):
-                continue
-        elif claim == "unclaimed":
-            if blocks_agent or claimed_by:
-                continue
-        elif claim == "other":
-            if not agent_id:
-                continue
-            if _route_continuation_candidate_matches_agent(item, agent_id=agent_id):
-                continue
-        selected.append(item)
-    return selected
-
-
-def _route_continuation_replan_lanes(
-    value: dict[str, Any],
-    *,
-    agent_identity: dict[str, Any] | None,
-) -> dict[str, Any]:
-    candidates = _todo_summary_route_continuation_candidates(value)
-    if not candidates:
-        return {}
-    lanes: dict[str, Any] = {
-        "route_continuation_replan_count": len(candidates),
-        "route_continuation_replan_candidates": candidates[:TODO_BACKLOG_ITEM_LIMIT],
-    }
-    agent_id = (
-        normalize_todo_claimed_by(agent_identity.get("agent_id"))
-        if isinstance(agent_identity, dict)
-        else None
-    )
-    if agent_id:
-        current_agent_candidates = _agent_filtered_route_continuation_items(
-            candidates,
-            agent_id=agent_id,
-            claim="current",
-        )
-        unclaimed_candidates = _agent_filtered_route_continuation_items(
-            candidates,
-            agent_id=agent_id,
-            claim="unclaimed",
-        )
-        other_agent_candidates = _agent_filtered_route_continuation_items(
-            candidates,
-            agent_id=agent_id,
-            claim="other",
-        )
-        lanes.update(
-            {
-                "current_agent_route_continuation_replan_candidates": current_agent_candidates[:TODO_BACKLOG_ITEM_LIMIT],
-                "unclaimed_route_continuation_replan_candidates": unclaimed_candidates[:TODO_BACKLOG_ITEM_LIMIT],
-                "other_agent_route_continuation_replan_candidates": other_agent_candidates[:TODO_BACKLOG_ITEM_LIMIT],
-                "current_agent_route_continuation_replan_count": len(current_agent_candidates),
-                "unclaimed_route_continuation_replan_count": len(unclaimed_candidates),
-                "other_agent_route_continuation_replan_count": len(other_agent_candidates),
-                "route_continuation_replan_selection_policy": (
-                    "quota may wake the current side-agent for route continuation "
-                    "replan candidates claimed by that agent or unclaimed; other-agent "
-                    "route candidates remain diagnostic visibility"
-                ),
-            }
-        )
-    return lanes
-
-
 def _todo_summary_source_items(value: dict[str, Any]) -> list[dict[str, Any]]:
     source_keys = (
         "active_next_action_items",
@@ -1866,7 +1718,7 @@ def _todo_summary_source_items(value: dict[str, Any]) -> list[dict[str, Any]]:
         "unclaimed_monitor_blocked_resume_candidates",
         "items",
     )
-    ready_successor_todo_ids = _handoff_ready_successor_todo_ids(value)
+    ready_successor_todo_ids = todo_handoff_ready_successor_todo_ids(value)
     open_items: list[dict[str, Any]] = []
     for key in source_keys:
         source_items = value.get(key) if isinstance(value.get(key), list) else []
@@ -1910,75 +1762,6 @@ def _todo_summary_monitor_writeback_contract(value: dict[str, Any] | None) -> di
 
 def _todo_summary_monitor_writeback_supported(value: dict[str, Any] | None) -> bool:
     return projection_todo_summary_monitor_writeback_supported(value)
-
-
-def _handoff_ready_successor_todo_ids(value: dict[str, Any]) -> set[str]:
-    ready: set[str] = set()
-    for gate in _todo_summary_handoff_gates(value):
-        if not isinstance(gate, dict):
-            continue
-        if str(gate.get("gate_state") or "") != HandoffGateState.CLEARED_WITH_SUCCESSOR.value:
-            continue
-        successor_ids = gate.get("successor_todo_ids")
-        if not isinstance(successor_ids, list):
-            continue
-        for todo_id in successor_ids:
-            normalized = normalize_todo_id(todo_id)
-            if normalized:
-                ready.add(normalized)
-    return ready
-
-
-def _todo_summary_handoff_gates(value: dict[str, Any]) -> list[dict[str, Any]]:
-    projected = value.get("handoff_gates")
-    if isinstance(projected, list):
-        return [item for item in projected if isinstance(item, dict)]
-    source_items = value.get("items") if isinstance(value.get("items"), list) else []
-    return build_todo_handoff_gate_states(source_items)
-
-
-def _handoff_gate_lanes(
-    value: dict[str, Any],
-    *,
-    agent_identity: dict[str, Any] | None,
-) -> dict[str, Any]:
-    handoff_gates = _todo_summary_handoff_gates(value)
-    if not handoff_gates:
-        return {}
-    lanes: dict[str, Any] = {
-        "handoff_gate_count": len(handoff_gates),
-        "handoff_gates": handoff_gates[:TODO_BACKLOG_ITEM_LIMIT],
-    }
-    agent_id = (
-        normalize_todo_claimed_by(agent_identity.get("agent_id"))
-        if isinstance(agent_identity, dict)
-        else None
-    )
-    if agent_id:
-        current_agent_items = [
-            item
-            for item in handoff_gates
-            if normalize_todo_blocks_agent(item.get("blocks_agent")) == agent_id
-        ]
-        cleared_without_successor = [
-            item
-            for item in current_agent_items
-            if item.get("gate_state")
-            == HandoffGateState.CLEARED_WITHOUT_SUCCESSOR.value
-        ]
-        lanes.update(
-            {
-                "current_agent_handoff_gate_count": len(current_agent_items),
-                "current_agent_handoff_gates": current_agent_items[:TODO_BACKLOG_ITEM_LIMIT],
-                "current_agent_cleared_without_successor_handoff_count": len(
-                    cleared_without_successor
-                ),
-                "current_agent_cleared_without_successor_handoff_gates": (
-                    cleared_without_successor[:TODO_BACKLOG_ITEM_LIMIT]
-                ),
-            }
-        )
-    return lanes
 
 
 def _is_user_gate_todo_item(item: dict[str, Any]) -> bool:
@@ -2111,15 +1894,17 @@ def _summarize_user_todos(
         )
     )
     summary.update(
-        _handoff_gate_lanes(
+        build_todo_handoff_gate_lanes(
             value,
             agent_identity=agent_identity,
+            item_limit=TODO_BACKLOG_ITEM_LIMIT,
         )
     )
     summary.update(
-        _route_continuation_replan_lanes(
+        build_todo_route_continuation_lanes(
             value,
             agent_identity=agent_identity,
+            item_limit=TODO_BACKLOG_ITEM_LIMIT,
         )
     )
     summary.update(
@@ -2267,15 +2052,17 @@ def _summarize_project_asset_todos(
         )
     )
     summary.update(
-        _handoff_gate_lanes(
+        build_todo_handoff_gate_lanes(
             value,
             agent_identity=agent_identity,
+            item_limit=TODO_BACKLOG_ITEM_LIMIT,
         )
     )
     summary.update(
-        _route_continuation_replan_lanes(
+        build_todo_route_continuation_lanes(
             value,
             agent_identity=agent_identity,
+            item_limit=TODO_BACKLOG_ITEM_LIMIT,
         )
     )
     if claimed_open_items or value.get("claimed_open_count"):

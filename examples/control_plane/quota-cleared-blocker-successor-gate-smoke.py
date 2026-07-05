@@ -14,7 +14,9 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.quota import build_quota_should_run  # noqa: E402
 from loopx.status import compact_todo_group  # noqa: E402
 from loopx.control_plane.todos.handoff_gate import (  # noqa: E402
+    build_todo_handoff_gate_lanes,
     build_todo_handoff_gate_states,
+    handoff_ready_successor_todo_ids,
 )
 
 
@@ -82,6 +84,45 @@ def agent_todo_summary(items: list[dict]) -> dict:
     if handoff_gates:
         summary["handoff_gates"] = handoff_gates
     return summary
+
+
+def assert_handoff_gate_lanes_and_ready_successors_are_todo_context_helpers() -> None:
+    review_gate = todo_item(
+        todo_id="todo_review_gate",
+        text="[P0] Review the completed launch slice.",
+        claimed_by=PRIMARY_AGENT,
+        status="done",
+        blocks_agent=BLOCKED_AGENT,
+    )
+    successor = todo_item(
+        todo_id="todo_followup_slice",
+        text="[P1] Continue the follow-up slice.",
+        claimed_by=BLOCKED_AGENT,
+        status="open",
+        unblocks_todo_id="todo_review_gate",
+    )
+    blocked_gate = todo_item(
+        todo_id="todo_unresolved_gate",
+        text="[P0] Still blocking the value explorer.",
+        claimed_by=PRIMARY_AGENT,
+        status="done",
+        blocks_agent=BLOCKED_AGENT,
+    )
+    summary = agent_todo_summary([review_gate, successor, blocked_gate])
+
+    assert handoff_ready_successor_todo_ids(summary) == {"todo_followup_slice"}, summary
+    lanes = build_todo_handoff_gate_lanes(
+        summary,
+        agent_identity={"agent_id": BLOCKED_AGENT},
+        item_limit=10,
+    )
+    assert lanes["handoff_gate_count"] == 2, lanes
+    assert lanes["current_agent_handoff_gate_count"] == 2, lanes
+    assert lanes["current_agent_cleared_without_successor_handoff_count"] == 1, lanes
+    assert (
+        lanes["current_agent_cleared_without_successor_handoff_gates"][0]["todo_id"]
+        == "todo_unresolved_gate"
+    ), lanes
 
 
 def status_payload(items: list[dict], *, recommended_action: str) -> dict:
@@ -372,6 +413,7 @@ def assert_no_followup_completed_blocker_does_not_wake_agent() -> None:
 
 
 def main() -> int:
+    assert_handoff_gate_lanes_and_ready_successors_are_todo_context_helpers()
     assert_open_blocker_waits_on_owner()
     assert_cleared_blocker_requires_successor_replan()
     assert_status_summary_projects_handoff_gate_state()

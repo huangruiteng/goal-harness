@@ -183,3 +183,73 @@ def build_todo_handoff_gate_states(items: Iterable[Any]) -> list[dict[str, Any]]
             str(item.get("todo_id") or ""),
         ),
     )
+
+
+def todo_summary_handoff_gates(value: dict[str, Any]) -> list[dict[str, Any]]:
+    projected = value.get("handoff_gates")
+    if isinstance(projected, list):
+        return [item for item in projected if isinstance(item, dict)]
+    source_items = value.get("items") if isinstance(value.get("items"), list) else []
+    return build_todo_handoff_gate_states(source_items)
+
+
+def handoff_ready_successor_todo_ids(value: dict[str, Any]) -> set[str]:
+    ready: set[str] = set()
+    for gate in todo_summary_handoff_gates(value):
+        if not isinstance(gate, dict):
+            continue
+        if str(gate.get("gate_state") or "") != HandoffGateState.CLEARED_WITH_SUCCESSOR.value:
+            continue
+        successor_ids = gate.get("successor_todo_ids")
+        if not isinstance(successor_ids, list):
+            continue
+        for todo_id in successor_ids:
+            normalized = normalize_todo_id(todo_id)
+            if normalized:
+                ready.add(normalized)
+    return ready
+
+
+def build_todo_handoff_gate_lanes(
+    value: dict[str, Any],
+    *,
+    agent_identity: dict[str, Any] | None,
+    item_limit: int,
+) -> dict[str, Any]:
+    handoff_gates = todo_summary_handoff_gates(value)
+    if not handoff_gates:
+        return {}
+    lanes: dict[str, Any] = {
+        "handoff_gate_count": len(handoff_gates),
+        "handoff_gates": handoff_gates[:item_limit],
+    }
+    agent_id = (
+        normalize_todo_claimed_by(agent_identity.get("agent_id"))
+        if isinstance(agent_identity, dict)
+        else None
+    )
+    if agent_id:
+        current_agent_items = [
+            item
+            for item in handoff_gates
+            if normalize_todo_blocks_agent(item.get("blocks_agent")) == agent_id
+        ]
+        cleared_without_successor = [
+            item
+            for item in current_agent_items
+            if item.get("gate_state")
+            == HandoffGateState.CLEARED_WITHOUT_SUCCESSOR.value
+        ]
+        lanes.update(
+            {
+                "current_agent_handoff_gate_count": len(current_agent_items),
+                "current_agent_handoff_gates": current_agent_items[:item_limit],
+                "current_agent_cleared_without_successor_handoff_count": len(
+                    cleared_without_successor
+                ),
+                "current_agent_cleared_without_successor_handoff_gates": (
+                    cleared_without_successor[:item_limit]
+                ),
+            }
+        )
+    return lanes
