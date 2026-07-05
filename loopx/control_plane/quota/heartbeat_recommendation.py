@@ -12,6 +12,7 @@ from ..work_items.work_lane_context import (
     build_work_lane_context_contract,
     latest_run_progress_scope,
 )
+from ..todos.user_gate import open_todo_count as _open_todo_count
 
 
 HEARTBEAT_READ_ONLY_MAP_ADAPTER_SUFFIX = "_read_only_map_v0"
@@ -37,15 +38,6 @@ HEARTBEAT_POST_HANDOFF_RUN_COMPACT_FIELDS = (
     "json_exists",
     "markdown_exists",
 )
-
-
-def _open_todo_count(summary: dict[str, Any] | None) -> int:
-    if not isinstance(summary, dict):
-        return 0
-    try:
-        return max(0, int(summary.get("open_count") or 0))
-    except (TypeError, ValueError):
-        return 0
 
 
 def open_todo_notify_reason(*, state: str, waiting_on: str) -> str:

@@ -13,7 +13,6 @@ from .claim_visibility import (
 from .contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
-    TODO_TASK_CLASS_USER_GATE,
 )
 from .deferred_resume import (
     build_todo_deferred_visibility_lanes,
@@ -32,35 +31,13 @@ from .projection import (
 from .route_continuation import build_todo_route_continuation_lanes
 from .succession_warning import build_todo_succession_warning_lanes
 from .summary_item import compact_todo_summary_item, todo_summary_source_items
+from .user_gate import is_user_gate_todo_item
 
 
 MONITOR_DUE_ITEM_LIMIT = 1
 TODO_BACKLOG_ITEM_LIMIT = 8
 TODO_DEFERRED_VISIBILITY_LIMIT = 8
 TODO_VISIBILITY_LANE_LIMIT = 16
-
-USER_GATE_ACTION_KIND_HINTS = (
-    "approval",
-    "approve",
-    "boundary",
-    "gate",
-    "blocker",
-    "credential",
-    "private",
-    "production",
-    "leaderboard",
-    "submission",
-    "public_claim",
-)
-
-
-def is_user_gate_todo_item(item: dict[str, Any]) -> bool:
-    if todo_item_task_class(item) == TODO_TASK_CLASS_USER_GATE:
-        return True
-    action_kind = str(item.get("action_kind") or "").strip().lower()
-    if not action_kind:
-        return False
-    return any(hint in action_kind for hint in USER_GATE_ACTION_KIND_HINTS)
 
 
 def summarize_user_todos_for_quota(
