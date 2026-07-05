@@ -21,7 +21,7 @@ def project_state_path(project: Path, goal_id: str, *, state_file: str | None = 
 def run_json_cli(
     *args: str,
     registry_path: Path,
-    runtime_root: Path,
+    runtime_root: Path | None = None,
     cwd: Path | None = None,
     include_returncode: bool = True,
 ) -> dict[str, Any]:
@@ -31,12 +31,12 @@ def run_json_cli(
         "loopx.cli",
         "--registry",
         str(registry_path),
-        "--runtime-root",
-        str(runtime_root),
         "--format",
         "json",
         *args,
     ]
+    if runtime_root is not None:
+        command[5:5] = ["--runtime-root", str(runtime_root)]
     result = subprocess.run(
         command,
         cwd=cwd or REPO_ROOT,
@@ -56,6 +56,46 @@ def run_json_cli(
     return payload
 
 
+def run_json_cli_result(
+    *args: str,
+    registry_path: Path,
+    runtime_root: Path | None = None,
+    cwd: Path | None = None,
+) -> tuple[int, dict[str, Any]]:
+    command = [
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--registry",
+        str(registry_path),
+        "--format",
+        "json",
+        *args,
+    ]
+    if runtime_root is not None:
+        command[5:5] = ["--runtime-root", str(runtime_root)]
+    result = subprocess.run(
+        command,
+        cwd=cwd or REPO_ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if not result.stdout.strip():
+        raise AssertionError(f"empty CLI output for {command!r}: {result.stderr}")
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict):
+        raise AssertionError(f"expected JSON object for {command!r}: {payload!r}")
+    payload["_returncode"] = result.returncode
+    return result.returncode, payload
+
+
+def runtime_root_from_registry(registry_path: Path) -> Path | None:
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    runtime_root = payload.get("common_runtime_root") if isinstance(payload, dict) else None
+    return Path(runtime_root) if runtime_root else None
+
+
 def write_fixture_registry(
     *,
     project: Path,
@@ -70,7 +110,7 @@ def write_fixture_registry(
     state_event_log: str | None = None,
     registered_agents: Iterable[str] = (),
     primary_agent: str | None = None,
-    quota_allowed_slots: int = 10,
+    quota_allowed_slots: int | None = 10,
     side_agent_independent_worktree_required: bool | None = None,
     extra_goal_fields: dict[str, Any] | None = None,
 ) -> Path:
@@ -92,15 +132,16 @@ def write_fixture_registry(
             "kind": adapter_kind,
             "status": adapter_status,
         },
-        "quota": {
+        "coordination": coordination,
+        "authority_sources": [],
+    }
+    if quota_allowed_slots is not None:
+        goal["quota"] = {
             "compute": 1.0,
             "window_hours": 24,
             "slot_minutes": 1,
             "allowed_slots": quota_allowed_slots,
-        },
-        "coordination": coordination,
-        "authority_sources": [],
-    }
+        }
     if state_event_log:
         goal["state_event_log"] = state_event_log
     if side_agent_independent_worktree_required is not None:
