@@ -105,6 +105,38 @@ def completed_side_agent_advancement_without_successor() -> dict:
     }
 
 
+def completed_side_agent_prerequisite_with_successor() -> dict:
+    return {
+        "index": 3,
+        "todo_id": "todo_completed_with_deferred_successor",
+        "text": "[P1] Finish the visible auto-research tick honesty prerequisite.",
+        "role": "agent",
+        "status": "done",
+        "done": True,
+        "priority": "P1",
+        "task_class": "advancement_task",
+        "action_kind": "fix_visible_auto_research_tick",
+        "claimed_by": SIDE_AGENT,
+        "successor_todo_ids": ["todo_ready_deferred_successor"],
+        "completed_at": "2026-07-05T13:36:19+08:00",
+    }
+
+
+def ready_deferred_side_agent_successor() -> dict:
+    return {
+        "index": 4,
+        "todo_id": "todo_ready_deferred_successor",
+        "text": "[P2] Follow up with higher-value research artifacts for the KNN showcase.",
+        "role": "agent",
+        "status": "deferred",
+        "priority": "P2",
+        "task_class": "advancement_task",
+        "action_kind": "improve_auto_research_artifact_value",
+        "claimed_by": SIDE_AGENT,
+        "resume_when": "todo_done:todo_completed_with_deferred_successor",
+    }
+
+
 def blocking_handoff_review() -> dict:
     return {
         "index": 2,
@@ -283,6 +315,42 @@ def assert_future_scheduled_monitor_quiets_without_generated_replan() -> None:
     assert "required_reads" not in guard, guard
     assert "required_reads" not in guard["interaction_contract"]["agent_channel"], guard
     assert "required_reads" not in guard["interaction_contract"]["cli_channel"], guard
+
+
+def assert_ready_deferred_successor_beats_monitor_quiet_skip() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            [
+                monitor_item(),
+                completed_side_agent_prerequisite_with_successor(),
+                ready_deferred_side_agent_successor(),
+            ],
+            replan_obligation=None,
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "successor_replan_required", guard
+    assert guard["effective_action"] == "successor_replan_required", guard
+    assert guard["should_run"] is True, guard
+    assert guard["normal_delivery_allowed"] is False, guard
+    assert guard["interaction_contract"]["mode"] == "successor_replan_required", guard
+    assert guard["interaction_contract"]["agent_channel"]["must_attempt"] is True, guard
+    assert guard["execution_obligation"]["contract"] == "deferred_resume_projection", guard
+    frontier = guard["agent_scope_frontier"]
+    assert frontier["deferred_resume_candidates"][0]["todo_id"] == (
+        "todo_ready_deferred_successor"
+    ), frontier
+    assert frontier["quiet_noop_allowed"] is False, frontier
+    assert frontier["requires_replan"] is True, frontier
+    goal_frontier = guard["goal_frontier_projection"]
+    assert goal_frontier["monitor_only_lanes"]["present"] is True, goal_frontier
+    assert goal_frontier["deferred_successors"]["ready_count"] == 1, goal_frontier
+    assert goal_frontier["deferred_successors"]["current_agent_ready_count"] == 1, goal_frontier
+    assert guard.get("autonomous_replan_obligation") is None, guard
+    markdown = render_quota_should_run_markdown(guard)
+    assert "agent_scope_frontier: action=successor_replan_required" in markdown, markdown
+    assert "agent_scope_deferred_resume_candidates" in markdown, markdown
 
 
 def assert_completed_advancement_without_successor_beats_monitor_quiet_skip() -> None:
@@ -547,6 +615,7 @@ def assert_blocking_handoff_gate_beats_derived_monitor_replan() -> None:
 def main() -> None:
     assert_replan_beats_monitor_quiet_skip()
     assert_future_scheduled_monitor_quiets_without_generated_replan()
+    assert_ready_deferred_successor_beats_monitor_quiet_skip()
     assert_completed_advancement_without_successor_beats_monitor_quiet_skip()
     assert_replan_preserves_current_agent_runnable_frontier()
     assert_agent_vision_gap_derives_replan()
