@@ -75,17 +75,27 @@ def main() -> int:
     assert preset["dev_eval_command"] == "bash eval.sh dev", preset
     assert preset["holdout_eval_command"] == "bash eval.sh test", preset
 
-    worker_loop = payload["worker_loop"]
-    assert worker_loop["selected_actions"] == [
+    seeded_todos = payload["visible_control_plane"]["seeded_todos"]
+    assert [todo["action_kind"] for todo in seeded_todos] == [
         "write_research_contract",
         "propose_hypothesis",
         "run_dev_eval",
-    ], worker_loop
-    evaluator_turn = next(
-        turn for turn in worker_loop["turns"] if turn["agent_id"] == "evaluator-promoter"
-    )
-    assert evaluator_turn["mode"] == "no_action", worker_loop
-    assert evaluator_turn["selected_action"] is None, worker_loop
+        "summarize_evidence",
+    ], seeded_todos
+    expected_resume = [None] + [
+        f"todo_done:{todo['todo_id']}" for todo in seeded_todos[:-1]
+    ]
+    actual_resume = [todo["resume_when"] for todo in seeded_todos]
+    assert actual_resume == expected_resume, seeded_todos
+
+    worker_loop = payload["worker_loop"]
+    assert worker_loop["selected_actions"] == ["write_research_contract"], worker_loop
+    for agent_id in ("hypothesis-proposer", "research-executor", "evaluator-promoter"):
+        waiting_turn = next(
+            turn for turn in worker_loop["turns"] if turn["agent_id"] == agent_id
+        )
+        assert waiting_turn["mode"] == "no_action", worker_loop
+        assert waiting_turn["selected_action"] is None, worker_loop
     assert all(turn.get("dev_metric") is None for turn in worker_loop["turns"]), worker_loop
     assert all(turn.get("holdout_metric") is None for turn in worker_loop["turns"]), worker_loop
 
