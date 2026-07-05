@@ -102,6 +102,7 @@ CODEX_CLI_GOAL_POST_BRIDGE_CONTINUE_PROMPT = (
     "private bridge command from the task instructions for one task-facing "
     "action, then finish with compact status."
 )
+POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT = 4
 
 
 @contextlib.contextmanager
@@ -1551,10 +1552,7 @@ class SkillsBenchLocalAcpRelay:
                             capture,
                             stage=post_bridge_blocker_stage,
                         )
-                        if (
-                            recovery_action == "press_enter"
-                            and post_bridge_recovery_attempt_count < 2
-                        ):
+                        if recovery_action == "press_enter" and post_bridge_recovery_attempt_count < POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT:
                             post_bridge_recovery_attempt_count += 1
                             post_bridge_recovery_action = recovery_action
                             tmux_submit_enter(tmux_name)
@@ -1565,10 +1563,7 @@ class SkillsBenchLocalAcpRelay:
                             )
                             time.sleep(1.0)
                             continue
-                        if (
-                            recovery_action == "typed_continue"
-                            and post_bridge_recovery_attempt_count < 2
-                        ):
+                        if recovery_action == "typed_continue" and post_bridge_recovery_attempt_count < POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT:
                             post_bridge_recovery_attempt_count += 1
                             post_bridge_recovery_action = recovery_action
                             tmux_type_text_and_submit(
