@@ -12,22 +12,37 @@ import time
 
 
 CODEX_CLI_GOAL_COMMAND_PREFIX = "/goal "
+CODEX_CLI_GOAL_OBJECTIVE_MAX_CHARS = 4000
 CODEX_CLI_GOAL_THREAD_PREWARM_MARKER = "LOOPX_GOAL_THREAD_READY"
 CODEX_CLI_GOAL_THREAD_PREWARM_PROMPT = (
     "Start this persisted Codex thread. Reply with exactly the token formed by "
     "joining LOOPX, GOAL, THREAD, and READY with underscores. Do not use tools."
 )
+CODEX_CLI_GOAL_TASK_PROMPT_FILENAME = "skillsbench-task-prompt.md"
 
 
 def build_codex_cli_goal_tui_input(objective: str) -> str:
-    """Return one pasteable TUI input that sets a Codex CLI goal.
-
-    The Codex TUI parses ``/goal`` as a slash command before later paste
-    buffers are associated with it, so the command and objective must be
-    submitted as one input buffer.
-    """
+    """Return the literal TUI input that sets a Codex CLI goal."""
 
     return f"{CODEX_CLI_GOAL_COMMAND_PREFIX}{objective}"
+
+
+def build_codex_cli_goal_file_objective(prompt_filename: str) -> str:
+    """Return a short goal objective that points Codex at private task details."""
+
+    prompt_ref = (prompt_filename or CODEX_CLI_GOAL_TASK_PROMPT_FILENAME).strip()
+    prompt_ref = prompt_ref.replace("\\", "/").lstrip("/")
+    if not prompt_ref or ".." in Path(prompt_ref).parts:
+        prompt_ref = CODEX_CLI_GOAL_TASK_PROMPT_FILENAME
+    objective = (
+        "Complete the SkillsBench task using the private task and bridge "
+        f"instructions in ./{prompt_ref}. Read that file first, follow it "
+        "exactly, and perform at least one task-facing bridge action before "
+        "reporting status."
+    )
+    if len(objective) > CODEX_CLI_GOAL_OBJECTIVE_MAX_CHARS:
+        raise ValueError("codex cli goal file objective exceeds objective cap")
+    return objective
 
 
 def build_codex_cli_tui_command(
@@ -168,6 +183,44 @@ def tmux_submit_enter(tmux_name: str) -> None:
         )
 
 
+def tmux_send_plain_enter(tmux_name: str) -> None:
+    subprocess.run(
+        ["tmux", "send-keys", "-t", tmux_name, "C-m"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+
+def codex_cli_tui_active_input_prompt_contains(
+    capture: str,
+    prompt_text: str,
+) -> bool:
+    """Return true when the pasted text still appears in the active input row."""
+
+    stripped_prompt = prompt_text.strip()
+    if not capture or not stripped_prompt:
+        return False
+    first_prompt_line = next(
+        (line.strip() for line in stripped_prompt.splitlines() if line.strip()),
+        "",
+    )
+    if not first_prompt_line:
+        return False
+    needle = first_prompt_line[: min(len(first_prompt_line), 48)]
+    for raw_line in reversed(capture.splitlines()[-12:]):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not (line.startswith("›") or re.match(r"^[>❯]\s*", line)):
+            continue
+        if needle and needle in line:
+            return True
+        return False
+    return False
+
+
 def tmux_paste_file_and_submit(
     *,
     tmux_name: str,
@@ -191,6 +244,21 @@ def tmux_paste_file_and_submit(
     )
     time.sleep(0.8)
     tmux_submit_enter(tmux_name)
+    prompt_text = prompt_path.read_text(encoding="utf-8", errors="ignore")
+    time.sleep(1.0)
+    if codex_cli_tui_active_input_prompt_contains(tmux_capture(tmux_name), prompt_text):
+        tmux_send_plain_enter(tmux_name)
+
+
+def tmux_type_text_and_submit(*, tmux_name: str, text: str) -> None:
+    """Type a short command into the TUI and submit without bracketed paste."""
+
+    tmux_send_literal(tmux_name, text)
+    time.sleep(0.2)
+    tmux_submit_enter(tmux_name)
+    time.sleep(1.0)
+    if codex_cli_tui_active_input_prompt_contains(tmux_capture(tmux_name), text):
+        tmux_send_plain_enter(tmux_name)
 
 
 def codex_cli_tui_input_prompt_visible(capture: str) -> bool:
@@ -236,6 +304,7 @@ def prewarm_codex_cli_goal_thread(
     *,
     tmux_name: str,
     tmp_path: Path,
+    timeout_sec: float = 90.0,
 ) -> bool:
     """Create the persisted TUI thread before submitting ``/goal``."""
 
@@ -246,7 +315,7 @@ def prewarm_codex_cli_goal_thread(
         prompt_path=prompt_path,
         buffer_suffix="prewarm",
     )
-    deadline = time.monotonic() + 90.0
+    deadline = time.monotonic() + max(1.0, float(timeout_sec or 0.0))
     while time.monotonic() < deadline:
         capture = tmux_capture(tmux_name)
         if CODEX_CLI_GOAL_THREAD_PREWARM_MARKER in capture:

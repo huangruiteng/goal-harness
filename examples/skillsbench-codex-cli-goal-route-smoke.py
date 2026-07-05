@@ -339,6 +339,122 @@ def _assert_cli_goal_tui_ready_wait_tolerates_startup_warnings() -> None:
         goal_tui.tmux_capture = original_capture  # type: ignore[assignment]
 
 
+def _assert_cli_goal_paste_submit_falls_back_to_plain_enter() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    import loopx.codex_cli_goal_tui as goal_tui
+
+    prompt_text = "Start this persisted Codex thread."
+    assert goal_tui.codex_cli_tui_active_input_prompt_contains(
+        f"Header\n› {prompt_text}\n",
+        prompt_text,
+    )
+    assert not goal_tui.codex_cli_tui_active_input_prompt_contains(
+        f"User message: {prompt_text}\nThinking\n",
+        prompt_text,
+    )
+
+    calls: list[object] = []
+
+    def fake_run(args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0)
+
+    def fake_submit(tmux_name: str) -> None:
+        calls.append(("kitty-enter", tmux_name))
+
+    def fake_plain_enter(tmux_name: str) -> None:
+        calls.append(("plain-enter", tmux_name))
+
+    def fake_capture(_tmux_name: str) -> str:
+        return f"Codex\n› {prompt_text}\n"
+
+    original_run = goal_tui.subprocess.run
+    original_sleep = goal_tui.time.sleep
+    original_submit = goal_tui.tmux_submit_enter
+    original_plain_enter = goal_tui.tmux_send_plain_enter
+    original_capture = goal_tui.tmux_capture
+    try:
+        goal_tui.subprocess.run = fake_run  # type: ignore[assignment]
+        goal_tui.time.sleep = lambda _seconds: None  # type: ignore[assignment]
+        goal_tui.tmux_submit_enter = fake_submit  # type: ignore[assignment]
+        goal_tui.tmux_send_plain_enter = fake_plain_enter  # type: ignore[assignment]
+        goal_tui.tmux_capture = fake_capture  # type: ignore[assignment]
+        with tempfile.TemporaryDirectory() as temp:
+            prompt_path = Path(temp) / "prompt.txt"
+            prompt_path.write_text(prompt_text, encoding="utf-8")
+            goal_tui.tmux_paste_file_and_submit(
+                tmux_name="fake-session",
+                prompt_path=prompt_path,
+                buffer_suffix="prewarm",
+            )
+    finally:
+        goal_tui.subprocess.run = original_run  # type: ignore[assignment]
+        goal_tui.time.sleep = original_sleep  # type: ignore[assignment]
+        goal_tui.tmux_submit_enter = original_submit  # type: ignore[assignment]
+        goal_tui.tmux_send_plain_enter = original_plain_enter  # type: ignore[assignment]
+        goal_tui.tmux_capture = original_capture  # type: ignore[assignment]
+
+    assert ("kitty-enter", "fake-session") in calls, calls
+    assert ("plain-enter", "fake-session") in calls, calls
+
+
+def _assert_cli_goal_typed_submit_avoids_paste_buffer() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    import loopx.codex_cli_goal_tui as goal_tui
+
+    goal_text = "/goal Complete the task using ./skillsbench-task-prompt.md"
+    calls: list[object] = []
+
+    def fake_run(args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0)
+
+    def fake_submit(tmux_name: str) -> None:
+        calls.append(("kitty-enter", tmux_name))
+
+    def fake_plain_enter(tmux_name: str) -> None:
+        calls.append(("plain-enter", tmux_name))
+
+    def fake_capture(_tmux_name: str) -> str:
+        return f"Codex\n› {goal_text}\n"
+
+    original_run = goal_tui.subprocess.run
+    original_sleep = goal_tui.time.sleep
+    original_submit = goal_tui.tmux_submit_enter
+    original_plain_enter = goal_tui.tmux_send_plain_enter
+    original_capture = goal_tui.tmux_capture
+    try:
+        goal_tui.subprocess.run = fake_run  # type: ignore[assignment]
+        goal_tui.time.sleep = lambda _seconds: None  # type: ignore[assignment]
+        goal_tui.tmux_submit_enter = fake_submit  # type: ignore[assignment]
+        goal_tui.tmux_send_plain_enter = fake_plain_enter  # type: ignore[assignment]
+        goal_tui.tmux_capture = fake_capture  # type: ignore[assignment]
+        goal_tui.tmux_type_text_and_submit(
+            tmux_name="fake-session",
+            text=goal_text,
+        )
+    finally:
+        goal_tui.subprocess.run = original_run  # type: ignore[assignment]
+        goal_tui.time.sleep = original_sleep  # type: ignore[assignment]
+        goal_tui.tmux_submit_enter = original_submit  # type: ignore[assignment]
+        goal_tui.tmux_send_plain_enter = original_plain_enter  # type: ignore[assignment]
+        goal_tui.tmux_capture = original_capture  # type: ignore[assignment]
+
+    assert any(
+        isinstance(call, list)
+        and call[:5] == ["tmux", "send-keys", "-t", "fake-session", "-l"]
+        and call[-1] == goal_text
+        for call in calls
+    ), calls
+    assert ("kitty-enter", "fake-session") in calls, calls
+    assert ("plain-enter", "fake-session") in calls, calls
+    assert not any(
+        isinstance(call, list)
+        and any(part in {"load-buffer", "paste-buffer"} for part in call)
+        for call in calls
+    ), calls
+
+
 def _assert_cli_goal_rate_limit_is_public_safe_retryable_stage() -> None:
     sys.path.insert(0, str(REPO_ROOT))
     from loopx.benchmark_adapters.skillsbench_acp_relay import (
@@ -430,15 +546,15 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
             "request timed out while waiting for model\n› ",
             stage="post_bridge_tui_model_timeout",
         )
-        == ""
+        == "typed_continue"
     )
     assert (
         _codex_cli_tui_post_bridge_recovery_skip_reason(
             "request timed out while waiting for model\n› ",
             stage="post_bridge_tui_model_timeout",
-            recovery_action="",
+            recovery_action="typed_continue",
         )
-        == "no_retry_affordance"
+        == ""
     )
     assert (
         _codex_cli_tui_post_bridge_recovery_action(
@@ -577,7 +693,9 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
             goal_terminal_observed=False,
             first_action_observed=True,
             bridge_summary_path=bridge_summary,
-            post_bridge_recovery_skip_reason="no_retry_affordance",
+            post_bridge_recovery_attempt_count=1,
+            post_bridge_recovery_action="typed_continue",
+            post_bridge_recovery_skip_reason="retry_limit_reached",
         )
         plan = {
             "route": "codex-cli-goal-baseline",
@@ -589,25 +707,29 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
 
     prerequisites = plan["runner_prerequisites"]
     assert trace["codex_cli_goal_tui_stage"] == "post_bridge_tui_model_timeout"
-    assert trace["codex_cli_goal_tui_post_bridge_recovery_attempt_count"] == 0
-    assert trace["codex_cli_goal_tui_post_bridge_recovery_action"] == ""
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_attempt_count"] == 1
+    assert trace["codex_cli_goal_tui_post_bridge_recovery_action"] == "typed_continue"
     assert (
         trace["codex_cli_goal_tui_post_bridge_recovery_skip_reason"]
-        == "no_retry_affordance"
+        == "retry_limit_reached"
     )
     assert trace["codex_cli_goal_tui_post_bridge_recovery_skip_reasons"] == [
-        "no_retry_affordance"
+        "retry_limit_reached"
     ]
     public_prerequisites = _public_runner_prerequisites(prerequisites)
+    assert (
+        public_prerequisites["codex_cli_goal_tui_post_bridge_recovery_action"]
+        == "typed_continue"
+    )
     assert (
         public_prerequisites[
             "codex_cli_goal_tui_post_bridge_recovery_skip_reason"
         ]
-        == "no_retry_affordance"
+        == "retry_limit_reached"
     )
     assert public_prerequisites[
         "codex_cli_goal_tui_post_bridge_recovery_skip_reasons"
-    ] == ["no_retry_affordance"]
+    ] == ["retry_limit_reached"]
 
 
 def _assert_cli_goal_active_timeout_is_public_countability_stage() -> None:
@@ -677,11 +799,14 @@ def _assert_cli_goal_active_timeout_is_public_countability_stage() -> None:
     assert contract["raw_material_recorded"] is False, contract
 
 
-def _assert_cli_goal_input_is_submitted_as_one_buffer() -> None:
+def _assert_cli_goal_uses_short_file_backed_objective_for_bridge_packet() -> None:
     sys.path.insert(0, str(REPO_ROOT))
     from loopx.codex_cli_goal_tui import (
+        CODEX_CLI_GOAL_OBJECTIVE_MAX_CHARS,
+        CODEX_CLI_GOAL_TASK_PROMPT_FILENAME,
         CODEX_CLI_GOAL_THREAD_PREWARM_MARKER,
         CODEX_CLI_GOAL_THREAD_PREWARM_PROMPT,
+        build_codex_cli_goal_file_objective,
         build_codex_cli_goal_tui_input,
     )
     from loopx.benchmark_adapters.skillsbench_acp_relay import (
@@ -694,10 +819,12 @@ def _assert_cli_goal_input_is_submitted_as_one_buffer() -> None:
     assert CODEX_CLI_GOAL_THREAD_PREWARM_MARKER not in (
         CODEX_CLI_GOAL_THREAD_PREWARM_PROMPT
     )
-    objective = "Solve the task.\nUse the private bridge."
-    assert build_codex_cli_goal_tui_input(objective) == (
-        "/goal Solve the task.\nUse the private bridge."
+    objective = build_codex_cli_goal_file_objective(
+        CODEX_CLI_GOAL_TASK_PROMPT_FILENAME
     )
+    assert CODEX_CLI_GOAL_TASK_PROMPT_FILENAME in objective, objective
+    assert len(objective) < CODEX_CLI_GOAL_OBJECTIVE_MAX_CHARS
+    assert build_codex_cli_goal_tui_input(objective).startswith("/goal "), objective
     packet = SkillsBenchLocalAcpRelay(
         CodexExecConfig(remote_command_file_bridge_command="/tmp/private-bridge")
     )._prompt_with_remote_bridge_packet(
@@ -725,12 +852,45 @@ def _assert_cli_goal_input_is_submitted_as_one_buffer() -> None:
     source = (
         REPO_ROOT / "loopx/benchmark_adapters/skillsbench_acp_relay.py"
     ).read_text(encoding="utf-8")
+    assert "CODEX_CLI_GOAL_TASK_PROMPT_FILENAME" in source
+    assert "prompt_instruction_path.write_text(" in source
+    assert "build_codex_cli_goal_file_objective(" in source
+    assert "tmux_type_text_and_submit(" in source
+    assert "build_codex_cli_goal_tui_input(prompt_for_codex)" not in source
     assert "prewarm_codex_cli_goal_thread(" in source
     assert "thread_prewarm_timeout" in source
+    assert "timeout_sec=max(" in source
+    assert "self._config.first_action_timeout_sec" in source
     tui_source = (REPO_ROOT / "loopx/codex_cli_goal_tui.py").read_text(
         encoding="utf-8"
     )
     assert "goal-thread-prewarm.txt" in tui_source
+    assert CODEX_CLI_GOAL_TASK_PROMPT_FILENAME in tui_source
+    assert "tmux_send_plain_enter" in tui_source
+    assert "tmux_type_text_and_submit" in tui_source
+
+    with tempfile.TemporaryDirectory() as temp:
+        trace_dir = Path(temp) / "trace"
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(worker_public_trace_dir=str(trace_dir))
+        )
+        relay._publish_codex_cli_goal_trace(
+            ok=False,
+            stage="goal_active_timeout",
+            goal_active_observed=False,
+            goal_terminal_observed=False,
+            first_action_observed=False,
+            bridge_summary_path=None,
+            goal_prompt_file_used=True,
+            goal_command_submission_method="typed",
+        )
+        traces = list(trace_dir.glob("*.compact.json"))
+        assert len(traces) == 1, traces
+        payload = json.loads(traces[0].read_text(encoding="utf-8"))
+        trace = payload["codex_cli_goal"]
+        assert trace["goal_prompt_file_used"] is True, trace
+        assert trace["goal_prompt_file_raw_path_recorded"] is False, trace
+        assert trace["goal_command_submission_method"] == "typed", trace
 
 
 def _assert_cli_goal_codex_api_proxy_is_runtime_only() -> None:
@@ -819,10 +979,12 @@ def main() -> int:
     _assert_cli_goal_plan_and_relay_command()
     _assert_cli_goal_trace_merges_into_public_prerequisites()
     _assert_cli_goal_tui_ready_wait_tolerates_startup_warnings()
+    _assert_cli_goal_paste_submit_falls_back_to_plain_enter()
+    _assert_cli_goal_typed_submit_avoids_paste_buffer()
     _assert_cli_goal_rate_limit_is_public_safe_retryable_stage()
     _assert_cli_goal_post_bridge_blocker_is_public_safe_stage()
     _assert_cli_goal_active_timeout_is_public_countability_stage()
-    _assert_cli_goal_input_is_submitted_as_one_buffer()
+    _assert_cli_goal_uses_short_file_backed_objective_for_bridge_packet()
     _assert_cli_goal_codex_api_proxy_is_runtime_only()
     print("skillsbench-codex-cli-goal-route-smoke ok")
     return 0
