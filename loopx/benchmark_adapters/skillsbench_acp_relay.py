@@ -1536,7 +1536,7 @@ class SkillsBenchLocalAcpRelay:
                         and bridge_summary_path is not None
                         and not _bridge_summary_has_inflight_operation(
                             bridge_summary_path
-                        )
+                        ) and (not post_bridge_recovery_attempt_count or now - last_bridge_activity_at >= 30.0)
                     ):
                         post_bridge_blocker_stage = (
                             _codex_cli_tui_post_bridge_blocker_stage(
@@ -1553,7 +1553,7 @@ class SkillsBenchLocalAcpRelay:
                         )
                         if (
                             recovery_action == "press_enter"
-                            and post_bridge_recovery_attempt_count < 1
+                            and post_bridge_recovery_attempt_count < 2
                         ):
                             post_bridge_recovery_attempt_count += 1
                             post_bridge_recovery_action = recovery_action
@@ -1567,7 +1567,7 @@ class SkillsBenchLocalAcpRelay:
                             continue
                         if (
                             recovery_action == "typed_continue"
-                            and post_bridge_recovery_attempt_count < 1
+                            and post_bridge_recovery_attempt_count < 2
                         ):
                             post_bridge_recovery_attempt_count += 1
                             post_bridge_recovery_action = recovery_action
