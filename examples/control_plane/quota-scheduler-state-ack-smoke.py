@@ -7,7 +7,6 @@ from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
@@ -16,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.control_plane.testing.canary_harness import run_json_cli  # noqa: E402
 from loopx.control_plane.scheduler.scheduler_hint import (  # noqa: E402
     build_scheduler_ack_plan,
     build_scheduler_hint,
@@ -446,28 +446,15 @@ def assert_scheduler_state_scope_validation() -> None:
 
 
 def run_cli(root: Path, *args: str, registry_path: Path, runtime: Path, project: Path) -> dict:
-    command = [
-        sys.executable,
-        "-m",
-        "loopx.cli",
-        "--registry",
-        str(registry_path),
-        "--runtime-root",
-        str(runtime),
-        "--format",
-        "json",
+    return run_json_cli(
         *args,
         "--scan-path",
         str(project),
-    ]
-    result = subprocess.run(
-        command,
+        registry_path=registry_path,
+        runtime_root=runtime,
         cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+        include_returncode=False,
     )
-    return json.loads(result.stdout)
 
 
 def assert_cli_scheduler_ack_progression() -> None:

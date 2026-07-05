@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -20,6 +19,13 @@ import loopx.cli_commands.quota as quota_command  # noqa: E402
 from loopx.control_plane.scheduler.monitor_poll_writeback import (  # noqa: E402
     resolve_monitor_todo_item,
     write_monitor_poll_todo_state,
+)
+from loopx.control_plane.testing.canary_harness import (  # noqa: E402
+    read_run_index,
+    run_json_cli,
+    run_json_cli_result,
+    runtime_root_from_registry,
+    write_fixture_registry,
 )
 from loopx.status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, parse_active_state_todos  # noqa: E402
 
@@ -141,79 +147,43 @@ def write_fixture(
         f"{user_gate}",
         encoding="utf-8",
     )
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "updated_at": "2026-01-01T00:00:00+00:00",
-                "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "monitor-poll-writeback",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
-                        "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
-                        "coordination": {
-                            "registered_agents": [AGENT_ID],
-                            "primary_agent": AGENT_ID,
-                        },
-                    }
-                ],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_fixture_registry(
+        project=project,
+        runtime_root=runtime,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        domain="monitor-poll-writeback",
+        adapter_kind="generic_project_goal_v0",
+        registered_agents=[AGENT_ID],
+        primary_agent=AGENT_ID,
+        quota_allowed_slots=None,
     )
     return registry_path, state_file
 
 
 def run_cli(registry_path: Path, *args: str) -> dict:
     scan_args = ["--scan-path", str(Path(__file__).resolve())] if args[:1] == ("quota",) else []
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "loopx.cli",
-            "--registry",
-            str(registry_path),
-            "--format",
-            "json",
-            *args,
-            *scan_args,
-        ],
+    return run_json_cli(
+        *args,
+        *scan_args,
+        registry_path=registry_path,
+        runtime_root=runtime_root_from_registry(registry_path),
         cwd=REPO_ROOT,
-        check=True,
-        text=True,
-        capture_output=True,
+        include_returncode=False,
     )
-    return json.loads(result.stdout)
 
 
-def run_cli_expect_error(registry_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run_cli_expect_error(registry_path: Path, *args: str) -> dict:
     scan_args = ["--scan-path", str(Path(__file__).resolve())] if args[:1] == ("quota",) else []
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "loopx.cli",
-            "--registry",
-            str(registry_path),
-            "--format",
-            "json",
-            *args,
-            *scan_args,
-        ],
+    returncode, payload = run_json_cli_result(
+        *args,
+        *scan_args,
+        registry_path=registry_path,
+        runtime_root=runtime_root_from_registry(registry_path),
         cwd=REPO_ROOT,
-        check=False,
-        text=True,
-        capture_output=True,
     )
-    assert result.returncode != 0, result
-    return result
+    assert returncode != 0, payload
+    return payload
 
 
 def agent_todos(state_file: Path) -> list[dict]:
@@ -229,16 +199,9 @@ def find_todo(state_file: Path, todo_id: str) -> dict:
 
 
 def run_index_records(registry_path: Path) -> list[dict]:
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    runtime = Path(str(registry["common_runtime_root"]))
-    index_path = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
-    if not index_path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in index_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    runtime = runtime_root_from_registry(registry_path)
+    assert runtime is not None, registry_path
+    return read_run_index(runtime, GOAL_ID)
 
 
 def monitor_poll_records(registry_path: Path) -> list[dict]:
@@ -456,7 +419,7 @@ def assert_target_key_cannot_hijack_selected_due_monitor() -> None:
         )
         assert_due_monitor_selected(registry_path, due_count=2)
 
-        result = run_cli_expect_error(
+        payload = run_cli_expect_error(
             registry_path,
             "quota",
             "monitor-poll",
@@ -470,7 +433,6 @@ def assert_target_key_cannot_hijack_selected_due_monitor() -> None:
             "new",
             "--execute",
         )
-        payload = json.loads(result.stdout)
         assert payload["ok"] is False, payload
         assert "monitor-poll requires" in payload["reason"], payload
         selected = find_todo(state_file, TODO_ID)
