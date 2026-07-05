@@ -74,8 +74,7 @@ from .control_plane.work_items.outcome_followthrough import build_outcome_follow
 from .control_plane.scheduler.scheduler_hint import (
     build_codex_app_scheduler_ack_event,
     build_scheduler_hint,
-    normalize_scheduler_rrule,
-    scheduler_backoff_packet,
+    build_scheduler_ack_plan,
 )
 from .control_plane.scheduler.monitor_todo import (
     monitor_cadence_delta as scheduler_monitor_cadence_delta,
@@ -5722,19 +5721,15 @@ def record_quota_scheduler_ack(
     safe_surface = str(surface or CODEX_APP_SURFACE).strip() or CODEX_APP_SURFACE
     safe_state_key = str(state_key or CODEX_APP_STATEFUL_BACKOFF_STATE_KEY).strip()
     before = build_quota_should_run(status_payload, goal_id=safe_goal_id, agent_id=safe_agent_id)
-    _, codex_app, stateful_backoff = scheduler_backoff_packet(before)
-    if not safe_agent_id:
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason="`loopx quota scheduler-ack` requires --agent-id",
-            before=before,
-        )
-    if not stateful_backoff:
+    ack_plan = build_scheduler_ack_plan(
+        before,
+        agent_id=safe_agent_id,
+        state_key=safe_state_key,
+        applied_rrule=applied_rrule,
+        reset_token=reset_token,
+        identity_signature=identity_signature,
+    )
+    if not ack_plan.get("ok"):
         return _scheduler_ack_failure(
             goal_id=safe_goal_id,
             agent_id=safe_agent_id,
@@ -5742,43 +5737,10 @@ def record_quota_scheduler_ack(
             surface=safe_surface,
             state_key=safe_state_key,
             applied_rrule=applied_rrule,
-            reason="current quota decision has no Codex App stateful scheduler packet",
+            reason=str(ack_plan.get("reason") or "scheduler ack validation failed"),
             before=before,
         )
-    if safe_state_key != str(stateful_backoff.get("state_key") or ""):
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason="--state-key does not match scheduler_hint.codex_app.stateful_backoff.state_key",
-            before=before,
-        )
-    if reset_token and str(reset_token).strip() != str(stateful_backoff.get("reset_token") or ""):
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason="--reset-token does not match the current scheduler hint",
-            before=before,
-        )
-    if identity_signature and str(identity_signature).strip() != str(stateful_backoff.get("identity_signature") or ""):
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason="--identity-signature does not match the current scheduler hint",
-            before=before,
-        )
-    if stateful_backoff.get("apply_needed") is not True:
+    if ack_plan.get("already_applied"):
         return {
             "ok": True,
             "mode": "scheduler-ack",
@@ -5787,7 +5749,7 @@ def record_quota_scheduler_ack(
             "agent_id": safe_agent_id,
             "surface": safe_surface,
             "state_key": safe_state_key,
-            "applied_rrule": normalize_scheduler_rrule(applied_rrule),
+            "applied_rrule": ack_plan.get("applied_rrule"),
             "appended": False,
             "registry_mutated": False,
             "already_applied": True,
@@ -5795,17 +5757,6 @@ def record_quota_scheduler_ack(
             "after": before,
             "reason": "scheduler RRULE already applied; no ack write needed",
         }
-    if not normalize_scheduler_rrule(applied_rrule):
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason="`loopx quota scheduler-ack` requires --applied-rrule when apply_needed=true",
-            before=before,
-        )
 
     raw_runtime_root = status_payload.get("runtime_root")
     if not raw_runtime_root:
