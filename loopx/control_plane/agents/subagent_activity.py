@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from ..runtime.public_safety import (
+    public_safe_compact_list as _default_public_safe_compact_list,
+    public_safe_compact_text as _default_public_safe_compact_text,
+)
+
 
 MAX_SUBAGENT_ACTIVITY_ITEMS = 5
 
@@ -12,7 +17,7 @@ PublicSafeList = Callable[..., list[str]]
 def subagent_state(
     run: dict[str, Any],
     *,
-    public_safe_compact_text: PublicSafeText,
+    public_safe_compact_text: PublicSafeText = _default_public_safe_compact_text,
 ) -> str | None:
     for field in ("result_status", "state", "status", "classification"):
         value = public_safe_compact_text(run.get(field), limit=80)
@@ -43,8 +48,8 @@ def compact_subagent_run(
     *,
     parent_goal_id: str | None = None,
     parent_run_id: str | None = None,
-    public_safe_compact_text: PublicSafeText,
-    public_safe_compact_list: PublicSafeList,
+    public_safe_compact_text: PublicSafeText = _default_public_safe_compact_text,
+    public_safe_compact_list: PublicSafeList = _default_public_safe_compact_list,
 ) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -98,8 +103,8 @@ def compact_subagent_run(
 def subagent_activity_for_goal(
     goal: dict[str, Any],
     *,
-    public_safe_compact_text: PublicSafeText,
-    public_safe_compact_list: PublicSafeList,
+    public_safe_compact_text: PublicSafeText = _default_public_safe_compact_text,
+    public_safe_compact_list: PublicSafeList = _default_public_safe_compact_list,
 ) -> dict[str, Any] | None:
     if not isinstance(goal, dict):
         return None
