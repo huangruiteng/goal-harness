@@ -35,6 +35,18 @@ VisibleLauncher = Callable[..., dict[str, object]]
 VisibleWake = Callable[[str, Sequence[str]], dict[str, object]]
 
 AUTO_RESEARCH_DEMO_E2E_SCHEMA_VERSION = "auto_research_demo_e2e_result_v0"
+AUTO_RESEARCH_SEED_ACTION_CHAIN = (
+    "write_research_contract",
+    "propose_hypothesis",
+    "run_dev_eval",
+    "summarize_evidence",
+)
+AUTO_RESEARCH_SEED_ACTION_ORDER = {
+    action: index for index, action in enumerate(AUTO_RESEARCH_SEED_ACTION_CHAIN)
+}
+AUTO_RESEARCH_SEED_PREREQUISITE_ACTION_BY_ACTION = dict(
+    zip(AUTO_RESEARCH_SEED_ACTION_CHAIN[1:], AUTO_RESEARCH_SEED_ACTION_CHAIN)
+)
 
 
 def _prepare_visible_demo_workspace_route(
@@ -170,15 +182,39 @@ def _seed_visible_demo_control_plane(
 
     seeded_todos: list[dict[str, object]] = []
     seeded_todo_ids_by_action: dict[str, str] = {}
+    seed_rows: list[tuple[str, str, str, str]] = []
     for lane in lanes:
         agent_id = str(lane.get("agent_id") or "").strip()
         role_id = str(lane.get("role_id") or "").strip()
         lane_id = str(lane.get("lane_id") or "").strip()
         action_kind = auto_research_seed_action_for_role(role_id)
+        seed_rows.append((action_kind, agent_id, role_id, lane_id))
+    seed_rows.sort(
+        key=lambda row: (
+            AUTO_RESEARCH_SEED_ACTION_ORDER.get(
+                row[0], len(AUTO_RESEARCH_SEED_ACTION_ORDER)
+            ),
+            row[1],
+        )
+    )
+    for action_kind, agent_id, role_id, lane_id in seed_rows:
         title = auto_research_seed_title(
             action_kind=action_kind,
             role_id=role_id,
             lane_id=lane_id,
+        )
+        prerequisite_action = AUTO_RESEARCH_SEED_PREREQUISITE_ACTION_BY_ACTION.get(
+            action_kind
+        )
+        prerequisite_todo_id = (
+            seeded_todo_ids_by_action.get(prerequisite_action)
+            if prerequisite_action
+            else None
+        )
+        resume_when = (
+            f"todo_done:{prerequisite_todo_id}"
+            if prerequisite_todo_id
+            else None
         )
         result = add_goal_todo(
             registry_path=control_registry,
@@ -188,12 +224,7 @@ def _seed_visible_demo_control_plane(
             task_class="advancement_task",
             action_kind=action_kind,
             claimed_by=agent_id or None,
-            resume_when=(
-                f"todo_done:{seeded_todo_ids_by_action['run_dev_eval']}"
-                if action_kind == "summarize_evidence"
-                and seeded_todo_ids_by_action.get("run_dev_eval")
-                else None
-            ),
+            resume_when=resume_when,
             project=control_project,
         )
         todo_id = result.get("todo_id")
