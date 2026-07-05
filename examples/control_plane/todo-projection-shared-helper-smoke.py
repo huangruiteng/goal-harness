@@ -15,7 +15,6 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.quota import (  # noqa: E402
     _claimed_visibility_items as quota_claimed_visibility_items,
     _first_executable_todo_item as quota_first_executable_todo_item,
-    _todo_item_is_deferred as quota_todo_item_is_deferred,
     _todo_summary_monitor_items as quota_todo_summary_monitor_items,
     _todo_projection_sort_key as quota_todo_projection_sort_key,
     _todo_task_class as quota_todo_task_class,
@@ -278,7 +277,6 @@ def assert_deferred_helper_parity() -> None:
     for predicate in (
         shared_todo_item_is_deferred,
         status_todo_item_is_deferred,
-        quota_todo_item_is_deferred,
     ):
         assert predicate(deferred) is True, deferred
         assert predicate(open_item) is False, open_item
