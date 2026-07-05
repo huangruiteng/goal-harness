@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Iterable
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def default_state_file(goal_id: str) -> str:
+    return f".codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md"
+
+
+def project_state_path(project: Path, goal_id: str, *, state_file: str | None = None) -> Path:
+    return project / (state_file or default_state_file(goal_id))
+
+
+def run_json_cli(
+    *args: str,
+    registry_path: Path,
+    runtime_root: Path,
+    cwd: Path | None = None,
+    include_returncode: bool = True,
+) -> dict[str, Any]:
+    command = [
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime_root),
+        "--format",
+        "json",
+        *args,
+    ]
+    result = subprocess.run(
+        command,
+        cwd=cwd or REPO_ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stdout + result.stderr)
+    if not result.stdout.strip():
+        raise AssertionError(f"empty CLI output for {command!r}: {result.stderr}")
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict):
+        raise AssertionError(f"expected JSON object for {command!r}: {payload!r}")
+    if include_returncode:
+        payload["_returncode"] = result.returncode
+    return payload
+
+
+def write_fixture_registry(
+    *,
+    project: Path,
+    runtime_root: Path,
+    registry_path: Path,
+    goal_id: str,
+    domain: str,
+    adapter_kind: str,
+    adapter_status: str = "connected",
+    status: str = "active",
+    state_file: str | None = None,
+    state_event_log: str | None = None,
+    registered_agents: Iterable[str] = (),
+    primary_agent: str | None = None,
+    quota_allowed_slots: int = 10,
+    side_agent_independent_worktree_required: bool | None = None,
+    extra_goal_fields: dict[str, Any] | None = None,
+) -> Path:
+    state_file_value = state_file or default_state_file(goal_id)
+    agents = list(registered_agents)
+    coordination: dict[str, Any] = {"registered_agents": agents}
+    if primary_agent:
+        coordination["primary_agent"] = primary_agent
+    elif agents:
+        coordination["primary_agent"] = agents[0]
+
+    goal: dict[str, Any] = {
+        "id": goal_id,
+        "domain": domain,
+        "status": status,
+        "repo": str(project),
+        "state_file": state_file_value,
+        "adapter": {
+            "kind": adapter_kind,
+            "status": adapter_status,
+        },
+        "quota": {
+            "compute": 1.0,
+            "window_hours": 24,
+            "slot_minutes": 1,
+            "allowed_slots": quota_allowed_slots,
+        },
+        "coordination": coordination,
+        "authority_sources": [],
+    }
+    if state_event_log:
+        goal["state_event_log"] = state_event_log
+    if side_agent_independent_worktree_required is not None:
+        goal["workspace_guard_policy"] = {
+            "side_agent_independent_worktree_required": side_agent_independent_worktree_required,
+        }
+    if extra_goal_fields:
+        goal.update(extra_goal_fields)
+
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "common_runtime_root": str(runtime_root),
+                "goals": [goal],
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return registry_path
+
+
+def read_run_index(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]:
+    index_path = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
+    if not index_path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]

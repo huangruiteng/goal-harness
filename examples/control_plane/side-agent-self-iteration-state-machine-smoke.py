@@ -3,14 +3,21 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from loopx.control_plane.testing.canary_harness import (  # noqa: E402
+    run_json_cli,
+    write_fixture_registry,
+)
+
+
 GOAL_ID = "side-agent-self-iteration-fixture"
 AGENT_ID = "codex-product-capability"
 PRIMARY_AGENT_ID = "codex-main-control"
@@ -32,32 +39,12 @@ def run_cli(
     registry_path: Path,
     runtime: Path,
 ) -> dict:
-    command = [
-        sys.executable,
-        "-m",
-        "loopx.cli",
-        "--registry",
-        str(registry_path),
-        "--runtime-root",
-        str(runtime),
-        "--format",
-        "json",
+    return run_json_cli(
         *args,
-    ]
-    result = subprocess.run(
-        command,
+        registry_path=registry_path,
+        runtime_root=runtime,
         cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
     )
-    if result.returncode != 0:
-        raise AssertionError(result.stdout + result.stderr)
-    if not result.stdout.strip():
-        raise AssertionError(f"empty CLI output for {command!r}: {result.stderr}")
-    payload = json.loads(result.stdout)
-    payload["_returncode"] = result.returncode
-    return payload
 
 
 def write_registry(
@@ -67,45 +54,18 @@ def write_registry(
     registry_path: Path,
     adapter_kind: str,
 ) -> None:
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "0.1",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-                "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "side-agent-self-iteration-fixture",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
-                        "adapter": {
-                            "kind": adapter_kind,
-                            "status": "connected-read-only",
-                        },
-                        "authority_sources": [],
-                        "quota": {
-                            "compute": 1.0,
-                            "window_hours": 24,
-                            "allowed_slots": 5,
-                        },
-                        "coordination": {
-                            "registered_agents": [PRIMARY_AGENT_ID, AGENT_ID],
-                            "primary_agent": PRIMARY_AGENT_ID,
-                        },
-                        "workspace_guard_policy": {
-                            "side_agent_independent_worktree_required": False,
-                        },
-                    }
-                ],
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_fixture_registry(
+        project=project,
+        runtime_root=runtime,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        domain="side-agent-self-iteration-fixture",
+        adapter_kind=adapter_kind,
+        adapter_status="connected-read-only",
+        registered_agents=[PRIMARY_AGENT_ID, AGENT_ID],
+        primary_agent=PRIMARY_AGENT_ID,
+        quota_allowed_slots=5,
+        side_agent_independent_worktree_required=False,
     )
 
 
