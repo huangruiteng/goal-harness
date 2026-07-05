@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Callable
+
+from ..runtime.public_safety import (
+    LOCAL_PATH_SURFACE_PATTERN,
+    SECRET_LIKE_SURFACE_PATTERN,
+    compact_text as _compact_text,
+    public_safe_compact_text as _runtime_public_safe_compact_text,
+)
 
 
 DEFAULT_MONITOR_SIGNAL_WAITING_ON = "monitor_signal"
@@ -18,30 +24,8 @@ PROJECT_ASSET_HANDOFF_STATE_TRACE_CHECK_KEYS = (
     "handoff_has_stop_condition",
     "handoff_sanitized_surface",
 )
-LOCAL_PATH_SURFACE_PATTERN = re.compile(
-    r"(?<!<)/(?:Users|Volumes|var/folders|tmp|private/tmp)/[^\s`'\"<>]+"
-)
-SECRET_LIKE_SURFACE_PATTERN = re.compile(
-    r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]{16,}|"
-    r"(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|"
-    r"\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
-)
-
-
-def _compact_text(text: str, *, limit: int) -> str:
-    compact = " ".join(text.strip().split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 1].rstrip() + "…"
-
-
 def project_asset_public_safe_compact_text(value: Any, *, limit: int = 220) -> str | None:
-    text = _compact_text(str(value or ""), limit=limit)
-    if not text:
-        return None
-    if LOCAL_PATH_SURFACE_PATTERN.search(text) or SECRET_LIKE_SURFACE_PATTERN.search(text):
-        return None
-    return text
+    return _runtime_public_safe_compact_text(value, limit=limit)
 
 
 def project_asset_owner(

@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import AbstractSet, Any, Callable, Optional
 
 from ...session_runtime import SESSION_RUNTIME_READONLY_PROJECTION_SCHEMA_VERSION
+from .public_safety import (
+    public_safe_compact_list as _default_public_safe_compact_list,
+    public_safe_compact_text as _default_public_safe_compact_text,
+)
 
 
 SESSION_RUNTIME_READONLY_PROJECTION_KEYS = (
@@ -188,8 +192,8 @@ def compact_session_runtime_attention_item(
 def compact_session_runtime_readonly_projection(
     value: Any,
     *,
-    public_safe_compact_text: PublicSafeText,
-    public_safe_compact_list: PublicSafeList,
+    public_safe_compact_text: PublicSafeText = _default_public_safe_compact_text,
+    public_safe_compact_list: PublicSafeList = _default_public_safe_compact_list,
 ) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -238,8 +242,8 @@ def compact_session_runtime_readonly_projection(
 def compact_session_runtime_projection_from_run(
     run: dict[str, Any] | None,
     *,
-    public_safe_compact_text: PublicSafeText,
-    public_safe_compact_list: PublicSafeList,
+    public_safe_compact_text: PublicSafeText = _default_public_safe_compact_text,
+    public_safe_compact_list: PublicSafeList = _default_public_safe_compact_list,
 ) -> dict[str, Any] | None:
     if not isinstance(run, dict):
         return None
