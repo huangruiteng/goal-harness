@@ -21,6 +21,106 @@ def _safe_segment(value: str) -> str:
     return safe or "default"
 
 
+def _positive_int_list(value: Any) -> list[int] | None:
+    if not isinstance(value, list):
+        return None
+    result: list[int] = []
+    for item in value:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            return None
+        if number <= 0:
+            return None
+        result.append(number)
+    return result or None
+
+
+def normalize_scheduler_state(
+    state: dict[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str,
+    surface: str = CODEX_APP_SURFACE,
+    state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+) -> dict[str, Any] | None:
+    if not isinstance(state, dict):
+        return None
+    expected = {
+        "schema_version": SCHEDULER_STATE_SCHEMA_VERSION,
+        "goal_id": str(goal_id or "").strip(),
+        "agent_id": str(agent_id or "").strip(),
+        "surface": str(surface or CODEX_APP_SURFACE).strip() or CODEX_APP_SURFACE,
+        "state_key": str(state_key or CODEX_APP_STATEFUL_BACKOFF_STATE_KEY).strip(),
+    }
+    for key, expected_value in expected.items():
+        if str(state.get(key) or "").strip() != expected_value:
+            return None
+    reset_token = str(state.get("reset_token") or "").strip()
+    identity_signature = str(state.get("identity_signature") or "").strip()
+    last_applied_rrule = str(state.get("last_applied_rrule") or "").strip()
+    if not reset_token or not identity_signature or not last_applied_rrule:
+        return None
+    try:
+        progression_index = int(state.get("progression_index"))
+    except (TypeError, ValueError):
+        return None
+    if progression_index < 0:
+        return None
+    progression_minutes = _positive_int_list(state.get("progression_minutes"))
+    if progression_minutes is None:
+        return None
+    normalized = dict(state)
+    normalized.update(expected)
+    normalized["reset_token"] = reset_token
+    normalized["identity_signature"] = identity_signature
+    normalized["progression_index"] = progression_index
+    normalized["progression_minutes"] = progression_minutes
+    normalized["last_applied_rrule"] = last_applied_rrule
+    return normalized
+
+
+def build_scheduler_state(
+    *,
+    goal_id: Any,
+    agent_id: str,
+    surface: str = CODEX_APP_SURFACE,
+    state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+    reset_token: Any,
+    identity_signature: Any,
+    progression_index: int,
+    progression_minutes: list[Any],
+    last_applied_rrule: Any,
+    updated_at: str,
+    source: str | None = None,
+) -> dict[str, Any]:
+    state = {
+        "schema_version": SCHEDULER_STATE_SCHEMA_VERSION,
+        "goal_id": str(goal_id or "").strip(),
+        "agent_id": str(agent_id or "").strip(),
+        "surface": str(surface or CODEX_APP_SURFACE).strip() or CODEX_APP_SURFACE,
+        "state_key": str(state_key or CODEX_APP_STATEFUL_BACKOFF_STATE_KEY).strip(),
+        "reset_token": reset_token,
+        "identity_signature": identity_signature,
+        "progression_index": progression_index,
+        "progression_minutes": progression_minutes,
+        "last_applied_rrule": last_applied_rrule,
+        "updated_at": str(updated_at or ""),
+    }
+    if source:
+        state["source"] = str(source)
+    normalized = normalize_scheduler_state(
+        state,
+        goal_id=state["goal_id"],
+        agent_id=state["agent_id"],
+        surface=state["surface"],
+        state_key=state["state_key"],
+    )
+    if normalized is None:
+        raise ValueError("scheduler state is missing required persisted-state fields")
+    return normalized
+
+
 def scheduler_state_path(
     runtime_root: Path,
     *,
@@ -64,9 +164,13 @@ def load_scheduler_state(
         return None
     if not isinstance(parsed, dict):
         return None
-    if parsed.get("schema_version") != SCHEDULER_STATE_SCHEMA_VERSION:
-        return None
-    return parsed
+    return normalize_scheduler_state(
+        parsed,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        surface=surface,
+        state_key=state_key,
+    )
 
 
 def write_scheduler_state(
@@ -78,6 +182,15 @@ def write_scheduler_state(
     surface: str = CODEX_APP_SURFACE,
     state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
 ) -> Path:
+    normalized = normalize_scheduler_state(
+        state,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        surface=surface,
+        state_key=state_key,
+    )
+    if normalized is None:
+        raise ValueError("scheduler state does not match target scope or schema")
     path = scheduler_state_path(
         runtime_root,
         goal_id=goal_id,
@@ -87,6 +200,6 @@ def write_scheduler_state(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     tmp_path.replace(path)
     return path

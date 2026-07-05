@@ -12,7 +12,7 @@ from ..work_items.delivery_outcome import DeliveryOutcome
 from .state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_SURFACE,
-    SCHEDULER_STATE_SCHEMA_VERSION,
+    build_scheduler_state,
     rrule_for_minutes,
 )
 
@@ -244,20 +244,19 @@ def build_codex_app_scheduler_ack_event(
     )
     progression_index = max(0, _int_number(stateful_backoff.get("progression_index"), default=0))
     safe_generated_at = generated_at or ""
-    scheduler_state = {
-        "schema_version": SCHEDULER_STATE_SCHEMA_VERSION,
-        "goal_id": before.get("goal_id"),
-        "agent_id": safe_agent_id,
-        "surface": surface,
-        "state_key": state_key,
-        "reset_token": stateful_backoff.get("reset_token"),
-        "identity_signature": stateful_backoff.get("identity_signature"),
-        "progression_index": progression_index,
-        "progression_minutes": progression_minutes,
-        "last_applied_rrule": expected_rrule,
-        "updated_at": safe_generated_at,
-        "source": classification,
-    }
+    scheduler_state = build_scheduler_state(
+        goal_id=before.get("goal_id"),
+        agent_id=safe_agent_id,
+        surface=surface,
+        state_key=state_key,
+        reset_token=stateful_backoff.get("reset_token"),
+        identity_signature=stateful_backoff.get("identity_signature"),
+        progression_index=progression_index,
+        progression_minutes=progression_minutes,
+        last_applied_rrule=expected_rrule,
+        updated_at=safe_generated_at,
+        source=classification,
+    )
     reason = str(reason_summary or "").strip() or (
         f"acknowledged Codex App scheduler RRULE {expected_rrule}; no quota spend"
     )
