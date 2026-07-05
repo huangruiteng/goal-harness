@@ -13,7 +13,6 @@ from ..todos.contract import (
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
-    TODO_TASK_CLASS_USER_GATE,
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
     normalize_todo_id,
@@ -29,24 +28,14 @@ from ..todos.projection import (
     todo_projection_sort_key,
 )
 from ..todos.summary_item import compact_todo_summary_item
+from ..todos.user_gate import (
+    open_todo_count as _open_todo_count,
+    open_user_gate_todo_items as _open_user_gate_todo_items,
+)
 
 
 AGENT_SCOPE_FRONTIER_SCHEMA_VERSION = "agent_scope_frontier_v0"
 AGENT_LANE_FRONTIER_HINT_SCHEMA_VERSION = "agent_lane_frontier_hint_v0"
-
-USER_GATE_ACTION_KIND_HINTS = (
-    "approval",
-    "approve",
-    "boundary",
-    "gate",
-    "blocker",
-    "credential",
-    "private",
-    "production",
-    "leaderboard",
-    "submission",
-    "public_claim",
-)
 
 _ACTION_SCOPE_STOPWORDS = {
     "a",
@@ -125,48 +114,6 @@ def _protocol_action_text(value: Any, *, limit: int = 220) -> str | None:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _open_todo_count(summary: dict[str, Any] | None) -> int:
-    if not isinstance(summary, dict):
-        return 0
-    try:
-        return max(0, int(summary.get("open_count") or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _is_user_gate_todo_item(item: dict[str, Any]) -> bool:
-    if _todo_task_class(item) == TODO_TASK_CLASS_USER_GATE:
-        return True
-    action_kind = str(item.get("action_kind") or "").strip().lower()
-    if not action_kind:
-        return False
-    return any(hint in action_kind for hint in USER_GATE_ACTION_KIND_HINTS)
-
-
-def _open_user_gate_todo_items(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not isinstance(summary, dict):
-        return []
-    candidates: list[dict[str, Any]] = []
-    for key in ("gate_open_items", "first_open_items"):
-        values = summary.get(key)
-        if not isinstance(values, list):
-            continue
-        for item in values:
-            if not isinstance(item, dict) or item.get("done") is True:
-                continue
-            if not _is_user_gate_todo_item(item):
-                continue
-            item_key = (item.get("todo_id"), item.get("index"), item.get("text"))
-            if any(
-                (existing.get("todo_id"), existing.get("index"), existing.get("text"))
-                == item_key
-                for existing in candidates
-            ):
-                continue
-            candidates.append(item)
-    return candidates
 
 
 def _action_scope_tokens_from_text(text: str) -> set[str]:
