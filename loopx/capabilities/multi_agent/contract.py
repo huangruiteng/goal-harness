@@ -21,10 +21,10 @@ GENERIC_MULTI_AGENT_DEFAULT_KERNEL_SKILLS = ("loopx-project", "loopx-doc-registr
 
 PANE_LOCAL_A2A_WAKEUP_PROMPT = (
     "LoopX pane-local A2A wakeup: read $LOOPX_CODEX_TUI_PROMPT_ARTIFACT for role/scope if needed. "
-    "Treat this fixed wake as a fresh decentralized round. "
-    "Inspect $LOOPX_PANE_TICK_SUMMARY only as your own prior pane-local tick evidence, then read your own LoopX quota/frontier. "
-    "Run the bounded $LOOPX_PANE_A2A_TICK once to refresh guard/frontier state when your own state shows runnable work or the user asked for another round. "
-    "The tick is not research completion unless a configured worker explicitly writes real public-safe evidence. "
+    "Treat this fixed wake as a fresh decentralized state check, not as a completed research round. "
+    "Inspect $LOOPX_PANE_TICK_SUMMARY only as your own prior pane-local status summary, then read your own LoopX quota/frontier. "
+    "Run $LOOPX_PANE_A2A_TICK once to refresh guard/frontier state when your own state shows runnable work or the user asked for another step. "
+    "The status check is never research completion unless a configured worker explicitly writes real public-safe evidence. "
     "Use only your own LOOPX_GOAL_ID/LOOPX_AGENT_ID quota/frontier; "
     "if no runnable frontier remains, stay quiet with a brief no-action note; "
     "if frontier remains, do the role's visible research work yourself and summarize public evidence and next handoff. "
@@ -37,7 +37,7 @@ GENERIC_MULTI_AGENT_KERNEL_MECHANICS = (
     "real_codex_tui_panes",
     "workspace_and_trust_safe_launch",
     "decentralized_a2a_driver",
-    "pane_local_a2a_tick",
+    "pane_local_a2a_status_check",
     "todo_evidence_status_protocol",
     "compact_human_status",
     "default_role_prompt_scaffolding",
@@ -183,7 +183,7 @@ def build_decentralized_a2a_driver_contract(
     return {
         "schema_version": DECENTRALIZED_A2A_DRIVER_CONTRACT_SCHEMA_VERSION,
         "owner_layer": "generic_multi_agent_kernel",
-        "driver_model": "fixed_prompt_broadcast_plus_pane_local_state_tick",
+        "driver_model": "fixed_prompt_broadcast_plus_pane_local_state_check",
         "coordination_pattern": "decentralized_state_a2a",
         "prompt": {
             "owner_layer": "generic_multi_agent_kernel",
@@ -195,7 +195,7 @@ def build_decentralized_a2a_driver_contract(
             "target_role_artifact_ref": "$LOOPX_CODEX_TUI_PROMPT_ARTIFACT",
             "tick_summary_ref": "$LOOPX_PANE_TICK_SUMMARY",
             "wake_round": "fresh_agent_scoped_quota_frontier_check",
-            "tick_summary_semantics": "prior_pane_tick_evidence_not_a_tick_skip_gate",
+            "tick_summary_semantics": "prior_pane_status_not_research_evidence",
         },
         "broadcaster": {
             "command": wake_command,
@@ -210,19 +210,19 @@ def build_decentralized_a2a_driver_contract(
         "pane": {
             "decision_owner": "codex_tui_agent_via_loopx_state",
             "tick_command": "$LOOPX_PANE_A2A_TICK",
-            "first_action": "codex_tui_first_turn_tick",
-            "cadence_action": "fixed_prompt_wakeup_then_own_quota_frontier_tick_when_runnable",
+            "first_action": "codex_tui_first_turn_status_check",
+            "cadence_action": "fixed_prompt_wakeup_then_own_quota_frontier_check_when_runnable",
             "reads": [
                 "own_LOOPX_GOAL_ID",
                 "own_LOOPX_AGENT_ID",
                 "own_quota_should_run",
                 "own_agent_scoped_frontier",
-                "own_prior_tick_summary_evidence",
+                "own_prior_status_summary",
             ],
             "may_run": ["LOOPX_PANE_WORKER_TURN", "LOOPX_PANE_WORKER_LOOP"],
             "writes": ["public_safe_evidence", "todo_completion_when_worker_turn_configured"],
-            "rounds_env": "LOOPX_PANE_TICK_ROUNDS",
-            "rounds_artifact": "$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-rounds.public.json",
+            "status_artifact": "$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-status.public.json",
+            "counts_as_research_round": False,
         },
         "layer_budget": {
             "user_layer": ["goal_id", "roles", "optional_overrides"],
@@ -230,7 +230,7 @@ def build_decentralized_a2a_driver_contract(
             "kernel_layer": [
                 "tmux_codex_tui_lifecycle",
                 "fixed_prompt_wakeup",
-                "pane_local_tick_runtime",
+                "pane_local_status_check_runtime",
                 "loopx_state_protocol",
             ],
         },
@@ -326,16 +326,16 @@ def build_tui_multi_agent_runner_contract(
         "pane_local_a2a": {
             "tick_command": driver_contract["pane"]["tick_command"],
             "first_action": (
-                "Codex TUI first turn runs $LOOPX_PANE_A2A_TICK; "
-                "later live wakes check own quota/frontier and tick when runnable"
+                "Codex TUI first turn runs $LOOPX_PANE_A2A_TICK as a status check; "
+                "later live wakes check own quota/frontier when runnable"
             ),
             "cadence_wakeup_command": driver_contract["broadcaster"]["command"],
             "cadence_wakeup_model": driver_contract["broadcaster"]["model"],
             "cadence_broadcaster_decides_work": driver_contract["broadcaster"]["decides_work"],
-            "reads": ["own prior tick evidence", "own quota should-run", "own agent-scoped frontier"],
+            "reads": ["own prior status summary", "own quota should-run", "own agent-scoped frontier"],
             "runs": driver_contract["pane"]["may_run"],
-            "bounded_rounds_env": driver_contract["pane"]["rounds_env"],
-            "rounds_artifact": driver_contract["pane"]["rounds_artifact"],
+            "status_artifact": driver_contract["pane"]["status_artifact"],
+            "counts_as_research_round": driver_contract["pane"]["counts_as_research_round"],
             "tick_summary": "$LOOPX_PANE_TICK_SUMMARY",
             "tick_output": "$LOOPX_PANE_TICK_OUTPUT_ARTIFACT",
             "machine_json_policy": "file_or_explicit_machine_channel_only",
@@ -401,7 +401,7 @@ def build_three_layer_minimality_contract(
             "forbidden": [
                 "tmux_or_process_lifecycle",
                 "quota_frontier_protocol_details",
-                "pane_local_tick_commands",
+                "pane_local_status_check_commands",
                 "raw_worker_or_status_plumbing",
             ],
         },
@@ -468,7 +468,7 @@ def build_compact_human_status(payload: dict[str, object]) -> dict[str, object]:
         "stop": commands.get("stop"),
         "first_action": "$LOOPX_PANE_A2A_TICK",
         "driver_model": driver.get("driver_model")
-        or "fixed_prompt_broadcast_plus_pane_local_state_tick",
+        or "fixed_prompt_broadcast_plus_pane_local_state_check",
         "coordination_pattern": driver.get("coordination_pattern")
         or "decentralized_state_a2a",
         "machine_json_policy": "artifact_only_in_visible_panes",

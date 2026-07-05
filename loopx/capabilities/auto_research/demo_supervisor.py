@@ -96,7 +96,7 @@ def build_auto_research_demo_supervisor_plan(
                 "kernel_driver_schema": driver_contract.get("schema_version"),
                 "delegated_kernel_mechanics": [
                     "fixed_prompt_wakeup",
-                    "pane_local_a2a_tick",
+                    "pane_local_a2a_status_check",
                     "todo_evidence_status_protocol",
                 ],
                 "worker_turn_owner": "generic_multi_agent_kernel",

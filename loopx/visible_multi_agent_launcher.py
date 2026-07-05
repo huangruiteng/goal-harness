@@ -22,7 +22,6 @@ from .capabilities.multi_agent.contract import (
     build_generic_role_profile,
     build_tui_multi_agent_runner_contract,
     generic_role_prompt as _generic_role_prompt,
-    positive_int_value as _positive_int_value,
     role_skill_profile as _role_skill_profile,
 )
 from .capabilities.multi_agent.runtime_scripts import (
@@ -532,8 +531,6 @@ def build_visible_lane_command(
     agent_id: str | None = None,
     worker_turn_command: str | None = None,
     worker_loop_command: str | None = None,
-    tick_rounds: int | None = None,
-    tick_sleep_seconds: int | None = None,
     visible_lane_count: int | None = None,
 ) -> str:
     codex_exec_env = (
@@ -565,10 +562,6 @@ def build_visible_lane_command(
         pane_a2a_env += f"export LOOPX_PANE_WORKER_TURN={_q(worker_turn_command)}; "
     if worker_loop_command:
         pane_a2a_env += f"export LOOPX_PANE_WORKER_LOOP={_q(worker_loop_command)}; "
-    if tick_rounds and tick_rounds > 1:
-        pane_a2a_env += f"export LOOPX_PANE_TICK_ROUNDS={_q(tick_rounds)}; "
-        if tick_sleep_seconds and tick_sleep_seconds > 0:
-            pane_a2a_env += f"export LOOPX_PANE_TICK_SLEEP_SECONDS={_q(tick_sleep_seconds)}; "
     if visible_lane_count and visible_lane_count > 0:
         pane_a2a_env += f"export LOOPX_VISIBLE_LANE_COUNT={_q(visible_lane_count)}; "
     return (
@@ -593,7 +586,7 @@ def build_visible_lane_command(
         "printf 'bootstrap_command_failed exit=%s\\n' \"$BOOTSTRAP_STATUS\"; "
         "exec /bin/sh -i; "
         "fi; "
-        'export LOOPX_PANE_TICK_SUMMARY="$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-rounds.public.json"; '
+        'export LOOPX_PANE_TICK_SUMMARY="$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-status.public.json"; '
         'export LOOPX_PANE_TICK_OUTPUT_ARTIFACT="$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-tick.output.txt"; '
         'VISIBLE_PROMPT_ARTIFACT="$LOOPX_PANE_ARTIFACT_DIR/codex-visible-first-prompt.public.txt"; '
         'export LOOPX_CODEX_FULL_BOOTSTRAP_ARTIFACT="$BOOTSTRAP_ARTIFACT"; '
@@ -814,11 +807,6 @@ def build_visible_multi_agent_payload_from_spec(
             )
             or ""
         ).strip()
-        tick_rounds = _positive_int_value(
-            raw_role.get("tick_rounds") or raw_role.get("auto_tick_rounds"),
-            default=1,
-        )
-        tick_sleep_seconds = _positive_int_value(raw_role.get("tick_sleep_seconds"), default=3)
         role_profile = build_generic_role_profile(
             role_id=role_id,
             agent_id=agent_id,
@@ -869,8 +857,8 @@ def build_visible_multi_agent_payload_from_spec(
                 "worker_loop_configured": bool(worker_loop_command),
                 "auto_start": True,
                 "auto_start_owner": "codex_tui_first_turn_prompt",
-                "tick_rounds": tick_rounds,
-                "tick_sleep_seconds": tick_sleep_seconds,
+                "status_check_only": True,
+                "counts_as_research_round": False,
             },
             "bootstrap_message": "role_prompt_public_artifact_for_first_turn_and_fixed_wake",
             "visible_launch_command": build_visible_lane_command(
@@ -885,15 +873,13 @@ def build_visible_multi_agent_payload_from_spec(
                 agent_id=agent_id,
                 worker_turn_command=worker_turn_command,
                 worker_loop_command=worker_loop_command,
-                tick_rounds=tick_rounds,
-                tick_sleep_seconds=tick_sleep_seconds,
                 visible_lane_count=len(roles),
             ),
             "reasoning_effort": reasoning_effort,
             "lane_timeline": [
                 "role_profile",
                 "codex_tui",
-                "tui_first_turn_pane_local_a2a_tick",
+                "tui_first_turn_quota_frontier_status_check",
                 "frontier",
             ],
         }

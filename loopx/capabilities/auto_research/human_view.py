@@ -414,7 +414,7 @@ def _render_demo_e2e(payload: dict[str, object]) -> str:
     route = _dict_value(payload, "route_contract")
     preset_context = _dict_value(payload, "preset_context")
     live = _dict_value(payload, "visible_worker_proof")
-    pane_rounds = _dict_value(payload, "visible_pane_a2a_rounds")
+    pane_status = _dict_value(payload, "visible_pane_a2a_status")
     collective_rounds = _dict_value(payload, "collective_research_rounds")
     readiness = _dict_value(payload, "visible_readiness")
     contract_acceptance = _dict_value(payload, "contract_acceptance")
@@ -460,15 +460,15 @@ def _render_demo_e2e(payload: dict[str, object]) -> str:
         f"- visible_lanes_accepted: `{live.get('visible_lanes_accepted')}`",
         f"- visible_role_participation_verified: `{live.get('visible_role_participation_verified')}`",
         f"- visible_role_participation_basis: `{live.get('visible_role_participation_basis')}`",
-        f"- visible_pane_local_ticks: `{pane_rounds.get('max_rounds_completed')}`",
-        f"- pane_ticks_count_as_research_rounds: `{pane_rounds.get('counts_as_collective_research_round')}`",
+        f"- visible_pane_status_checks: `{pane_status.get('status_check_count')}`",
+        f"- pane_status_counts_as_research_rounds: `{pane_status.get('counts_as_collective_research_round')}`",
         f"- collective_research_claim_source: `{collective_rounds.get('claim_source') or collective_rounds.get('source')}`",
         f"- collective_research_rounds: `{collective_rounds.get('collective_round_count')}`",
         f"- collective_research_rounds_verified: `{collective_rounds.get('multi_round_research_verified')}`",
         f"- collective_research_role_cycle_gap: `{role_cycle_shortfall}`",
         f"- holdout_metric_sequence: `{collective_rounds.get('holdout_metric_sequence')}`",
         f"- holdout_improvement_count: `{collective_rounds.get('holdout_improvement_count')}`",
-        f"- decentralized_a2a_rounds_verified: `{live.get('decentralized_a2a_rounds_verified')}`",
+        f"- collective_a2a_rounds_verified: `{live.get('decentralized_a2a_rounds_verified')}`",
         f"- visible_readiness_ready: `{readiness.get('ready')}`",
         f"- visible_readiness_level: `{readiness.get('readiness_level')}`",
         f"- visible_best_metric: `{improvement.get('best_metric')}`",

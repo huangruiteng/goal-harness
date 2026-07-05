@@ -85,7 +85,7 @@ def main() -> int:
             "visible_lanes_launched": True,
             "visible_lanes_accepted": True,
         },
-        "visible_pane_a2a_rounds": {},
+        "visible_pane_a2a_status": {},
         "visible_readiness": {},
         "visible_launch": {
             "launch_result": {

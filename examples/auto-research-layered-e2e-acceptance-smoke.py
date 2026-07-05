@@ -54,7 +54,7 @@ def assert_three_layer_minimality() -> None:
         "real_codex_tui_panes",
         "workspace_and_trust_safe_launch",
         "decentralized_a2a_driver",
-        "pane_local_a2a_tick",
+        "pane_local_a2a_status_check",
         "todo_evidence_status_protocol",
         "compact_human_status",
     ]:
@@ -80,7 +80,8 @@ def assert_three_layer_minimality() -> None:
     for lane in supervisor["lanes"]:
         assert lane["pane_local_a2a"]["auto_start"] is True, lane
         assert lane["pane_local_a2a"]["worker_turn_configured"] is False, lane
-        assert lane["pane_local_a2a"]["tick_rounds"] == 1, lane
+        assert lane["pane_local_a2a"]["status_check_only"] is True, lane
+        assert lane["pane_local_a2a"]["counts_as_research_round"] is False, lane
         command = lane["visible_launch_command"]
         assert "LOOPX_PANE_A2A_TICK" in command, lane
         assert "auto-research worker-turn" not in command, lane

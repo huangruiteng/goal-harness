@@ -77,8 +77,6 @@ def main() -> int:
                         "Write a LoopX todo for builder when the plan is ready."
                     ],
                     "worker_turn_command": "loopx auto-research worker-turn --dry-run",
-                    "tick_rounds": 2,
-                    "tick_sleep_seconds": 1,
                 },
                 {
                     "lane_id": "builder",
@@ -185,7 +183,8 @@ def main() -> int:
     assert planner["role_profile"]["required_skill"] == "loopx-planner-worker", planner
     assert builder["role_profile"]["required_skill"] == "loopx-builder-worker", builder
     assert planner["pane_local_a2a"]["worker_turn_configured"] is True, planner
-    assert planner["pane_local_a2a"]["tick_rounds"] == 2, planner
+    assert planner["pane_local_a2a"]["status_check_only"] is True, planner
+    assert planner["pane_local_a2a"]["counts_as_research_round"] is False, planner
     assert builder["reasoning_effort"] == "high", builder
     assert planner["reasoning_effort"] == "medium", planner
 
@@ -203,14 +202,14 @@ def main() -> int:
         assert "raw_frontier_json" not in command, lane
         assert "$LOOPX_PANE_LOOPX_JSON quota should-run" in lane["quota_guard"], lane
         assert "> \"$LOOPX_PANE_ARTIFACT_DIR/quota.public.json\"" in lane["quota_guard"], lane
-        assert "tui_first_turn_pane_local_a2a_tick" in lane["lane_timeline"], lane
+        assert "tui_first_turn_quota_frontier_status_check" in lane["lane_timeline"], lane
 
     assert payload["cli_contract"]["machine_json_policy"] == "artifact_only_in_visible_panes", payload
     compact = payload["compact_human_status"]
     assert compact["schema_version"] == GENERIC_MULTI_AGENT_COMPACT_STATUS_SCHEMA_VERSION, compact
     assert compact["role_count"] == 2, compact
     assert compact["first_action"] == "$LOOPX_PANE_A2A_TICK", compact
-    assert compact["driver_model"] == "fixed_prompt_broadcast_plus_pane_local_state_tick", compact
+    assert compact["driver_model"] == "fixed_prompt_broadcast_plus_pane_local_state_check", compact
     assert compact["coordination_pattern"] == "decentralized_state_a2a", compact
     assert compact["machine_json_policy"] == "artifact_only_in_visible_panes", compact
     assert [role["lane_id"] for role in compact["roles"]] == ["planner", "builder"], compact

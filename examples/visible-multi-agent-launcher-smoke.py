@@ -107,7 +107,8 @@ def main() -> int:
     assert "LOOPX_PANE_A2A_TICK" in launcher_source
     assert "loopx-pane-a2a-tick" in launcher_source
     assert "LOOPX_PANE_WORKER_TURN" in launcher_source
-    assert "LOOPX_PANE_TICK_ROUNDS" in launcher_source
+    assert "LOOPX_PANE_TICK_ROUNDS" not in launcher_source
+    assert "LOOPX_PANE_TICK_SLEEP_SECONDS" not in launcher_source
     assert "LOOPX_PANE_TICK_SUMMARY" in launcher_source
     assert "LOOPX_PANE_TICK_OUTPUT_ARTIFACT" in launcher_source
     assert "LOOPX_PANE_BOOTSTRAP_PROMPT" in launcher_source
@@ -204,31 +205,29 @@ def main() -> int:
     driver = runner_contract["decentralized_a2a_driver"]
     assert driver["schema_version"] == "multi_agent_decentralized_a2a_driver_contract_v0", driver
     assert driver["owner_layer"] == "generic_multi_agent_kernel", driver
-    assert driver["driver_model"] == "fixed_prompt_broadcast_plus_pane_local_state_tick", driver
+    assert driver["driver_model"] == "fixed_prompt_broadcast_plus_pane_local_state_check", driver
     assert driver["broadcaster"]["reads_frontier"] is False, driver
     assert driver["broadcaster"]["selects_todo"] is False, driver
     assert driver["broadcaster"]["runs_worker_turn"] is False, driver
     assert driver["pane"]["decision_owner"] == "codex_tui_agent_via_loopx_state", driver
     assert driver["prompt"]["tick_summary_ref"] == "$LOOPX_PANE_TICK_SUMMARY", driver
-    assert "own_prior_tick_summary_evidence" in driver["pane"]["reads"], driver
+    assert "own_prior_status_summary" in driver["pane"]["reads"], driver
     assert driver["pane"]["cadence_action"] == (
-        "fixed_prompt_wakeup_then_own_quota_frontier_tick_when_runnable"
+        "fixed_prompt_wakeup_then_own_quota_frontier_check_when_runnable"
     ), driver
     assert driver["prompt"]["wake_round"] == "fresh_agent_scoped_quota_frontier_check", driver
     assert (
         driver["prompt"]["tick_summary_semantics"]
-        == "prior_pane_tick_evidence_not_a_tick_skip_gate"
+        == "prior_pane_status_not_research_evidence"
     ), driver
     assert driver["acceptance"]["each_pane_decides_from_state"] is True, driver
     assert driver["acceptance"]["tick_summary_does_not_gate_wake_tick"] is True, driver
     assert driver["acceptance"]["tui_first_turn_owns_tick"] is True, driver
     assert runner_contract["pane_local_a2a"]["first_action"] == (
-        "Codex TUI first turn runs $LOOPX_PANE_A2A_TICK; "
-        "later live wakes check own quota/frontier and tick when runnable"
+        "Codex TUI first turn runs $LOOPX_PANE_A2A_TICK as a status check; "
+        "later live wakes check own quota/frontier when runnable"
     )
-    assert runner_contract["pane_local_a2a"]["bounded_rounds_env"] == (
-        "LOOPX_PANE_TICK_ROUNDS"
-    )
+    assert runner_contract["pane_local_a2a"]["counts_as_research_round"] is False
     assert "LOOPX_PANE_WORKER_TURN" in runner_contract["lane_runtime_env"]["pane_tools"]
     assert "LOOPX_PANE_ARTIFACT_DIR" in runner_contract["lane_runtime_env"]["pane_tools"]
     assert "LOOPX_PANE_TICK_SUMMARY" in runner_contract["lane_runtime_env"]["pane_tools"]
@@ -239,8 +238,8 @@ def main() -> int:
     assert runner_contract["pane_local_a2a"]["machine_json_destination"] == (
         "$LOOPX_PANE_ARTIFACT_DIR/*.public.json"
     )
-    assert runner_contract["pane_local_a2a"]["rounds_artifact"] == (
-        "$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-rounds.public.json"
+    assert runner_contract["pane_local_a2a"]["status_artifact"] == (
+        "$LOOPX_PANE_ARTIFACT_DIR/pane-a2a-status.public.json"
     )
     assert runner_contract["pane_local_a2a"]["tick_summary"] == (
         "$LOOPX_PANE_TICK_SUMMARY"
@@ -289,8 +288,6 @@ def main() -> int:
                     "role_id": "planner",
                     "scope": "plan one state-backed handoff",
                     "worker_turn_command": "printf 'turn streamed\\n'",
-                    "tick_rounds": 2,
-                    "tick_sleep_seconds": 1,
                 }
             ],
         }
@@ -306,16 +303,17 @@ def main() -> int:
     assert generic_lane["pane_local_a2a"]["auto_start_owner"] == (
         "codex_tui_first_turn_prompt"
     ), generic_lane
-    assert generic_lane["pane_local_a2a"]["tick_rounds"] == 2, generic_lane
-    assert "tui_first_turn_pane_local_a2a_tick" in generic_lane["lane_timeline"], generic_lane
+    assert generic_lane["pane_local_a2a"]["status_check_only"] is True, generic_lane
+    assert generic_lane["pane_local_a2a"]["counts_as_research_round"] is False, generic_lane
+    assert "tui_first_turn_quota_frontier_status_check" in generic_lane["lane_timeline"], generic_lane
     assert "LOOPX_PANE_A2A_TICK" in generic_lane["visible_launch_command"], generic_lane
     assert "LOOPX_PANE_WORKER_TURN" in generic_lane["visible_launch_command"], generic_lane
     assert "LOOPX_PANE_ARTIFACT_DIR" in generic_lane["visible_launch_command"], generic_lane
     assert "LOOPX_PANE_TICK_SUMMARY" in generic_lane["visible_launch_command"], generic_lane
     assert "LOOPX_PANE_TICK_OUTPUT_ARTIFACT" in generic_lane["visible_launch_command"], generic_lane
     assert "$LOOPX_PANE_ARTIFACT_DIR/quota.public.json" in generic_lane["quota_guard"], generic_lane
-    assert "LOOPX_PANE_TICK_ROUNDS=2" in generic_lane["visible_launch_command"], generic_lane
-    assert "LOOPX_PANE_TICK_SLEEP_SECONDS=1" in generic_lane["visible_launch_command"], generic_lane
+    assert "LOOPX_PANE_TICK_ROUNDS=" not in generic_lane["visible_launch_command"], generic_lane
+    assert "LOOPX_PANE_TICK_SLEEP_SECONDS=" not in generic_lane["visible_launch_command"], generic_lane
     assert "pane-a2a-tick.output.txt" in generic_lane["visible_launch_command"], generic_lane
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -490,8 +488,6 @@ def main() -> int:
                     "LOOPX_AGENT_ID": "codex-side-bypass",
                     "LOOPX_ROLE_ID": "planner",
                     "LOOPX_PANE_WORKER_TURN": "printf 'worker turn streamed\\n'",
-                    "LOOPX_PANE_TICK_ROUNDS": "2",
-                    "LOOPX_PANE_TICK_SLEEP_SECONDS": "1",
                 },
                 check=True,
                 capture_output=True,
@@ -515,27 +511,27 @@ def main() -> int:
             assert "LoopX machine JSON hidden" in tty_output, tty_output
             assert "fake-loopx" not in tty_output, tty_output
             assert "role=planner agent=codex-side-bypass" in tick.stdout, tick.stdout
-            assert "round 1/2" in tick.stdout and "round 2/2" in tick.stdout, tick.stdout
+            assert "round 1/2" not in tick.stdout and "round 2/2" not in tick.stdout, tick.stdout
             assert "quota should-run" in tick.stdout, tick.stdout
             assert "--format markdown" in tick.stdout, tick.stdout
             assert "worker turn streamed" in tick.stdout, tick.stdout
-            rounds_artifact = (
+            status_artifact = (
                 workspace
                 / ".local"
                 / "pane-artifacts"
                 / "reviewer"
-                / "pane-a2a-rounds.public.json"
+                / "pane-a2a-status.public.json"
             )
-            rounds_payload = json.loads(rounds_artifact.read_text(encoding="utf-8"))
-            assert rounds_payload["schema_version"] == "pane_local_a2a_tick_rounds_v0", rounds_payload
-            assert rounds_payload["coordination_model"] == "decentralized_state_a2a", rounds_payload
-            assert rounds_payload["workflow_driver"] is False, rounds_payload
-            assert rounds_payload["rounds_requested"] == 2, rounds_payload
-            assert rounds_payload["rounds_completed"] == 2, rounds_payload
-            assert rounds_payload["worker_configured"] is True, rounds_payload
-            assert [item["round_index"] for item in rounds_payload["rounds"]] == [1, 2], rounds_payload
-            assert rounds_payload["public_boundary"]["raw_logs_recorded"] is False, rounds_payload
-            assert "/" + "tmp/" not in json.dumps(rounds_payload, sort_keys=True), rounds_payload
+            status_payload = json.loads(status_artifact.read_text(encoding="utf-8"))
+            assert status_payload["schema_version"] == "pane_local_a2a_status_check_v0", status_payload
+            assert status_payload["coordination_model"] == "decentralized_state_a2a", status_payload
+            assert status_payload["workflow_driver"] is False, status_payload
+            assert status_payload["status_check_count"] == 1, status_payload
+            assert status_payload["counts_as_research_round"] is False, status_payload
+            assert status_payload["worker_configured"] is True, status_payload
+            assert [item["check_index"] for item in status_payload["checks"]] == [1], status_payload
+            assert status_payload["public_boundary"]["raw_logs_recorded"] is False, status_payload
+            assert "/" + "tmp/" not in json.dumps(status_payload, sort_keys=True), status_payload
 
             try:
                 execute_visible_multi_agent_launcher(
@@ -619,9 +615,10 @@ def main() -> int:
             assert wake["mode"] == "execute", wake
             assert wake["wakeup_model"] == "fixed_prompt_broadcast", wake
             assert "$LOOPX_PANE_TICK_SUMMARY" in wake["prompt"], wake
-            assert "Treat this fixed wake as a fresh decentralized round" in wake["prompt"], wake
-            assert "prior pane-local tick evidence" in wake["prompt"], wake
-            assert "Run the bounded $LOOPX_PANE_A2A_TICK once" in wake["prompt"], wake
+            assert "fresh decentralized state check" in wake["prompt"], wake
+            assert "not as a completed research round" in wake["prompt"], wake
+            assert "prior pane-local status summary" in wake["prompt"], wake
+            assert "Run $LOOPX_PANE_A2A_TICK once" in wake["prompt"], wake
             assert wake["pane_input_ready_verified"] is True, wake
             assert wake["prompt_delivery"] == (
                 "tmux_paste_buffer_after_codex_tui_first_turn_ready"
