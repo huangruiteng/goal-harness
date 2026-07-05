@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.control_plane.testing.canary_harness import (  # noqa: E402
+    run_json_cli,
+    run_json_cli_result,
+    runtime_root_from_registry,
+    write_fixture_registry,
+)
 from loopx.status import parse_active_state_todos  # noqa: E402
 
 
@@ -51,77 +56,39 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         "- [ ] Legacy monitor-only placeholder.\n",
         encoding="utf-8",
     )
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "updated_at": "2026-01-01T00:00:00+00:00",
-                "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "todo-lifecycle-fixture",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": ".codex/goals/todo-lifecycle-goal/ACTIVE_GOAL_STATE.md",
-                        "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
-                        "authority_sources": [],
-                        "coordination": {
-                            "registered_agents": ["codex-main-control", "codex-side-bypass"],
-                            "primary_agent": "codex-main-control",
-                        },
-                    }
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_fixture_registry(
+        project=project,
+        runtime_root=runtime,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        domain="todo-lifecycle-fixture",
+        adapter_kind="generic_project_goal_v0",
+        registered_agents=["codex-main-control", "codex-side-bypass"],
+        primary_agent="codex-main-control",
+        quota_allowed_slots=None,
     )
     return registry_path, state_file
 
 
 def run_cli(registry_path: Path, *args: str) -> dict:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "loopx.cli",
-            "--registry",
-            str(registry_path),
-            "--format",
-            "json",
-            *args,
-        ],
+    return run_json_cli(
+        *args,
+        registry_path=registry_path,
+        runtime_root=runtime_root_from_registry(registry_path),
         cwd=REPO_ROOT,
-        check=True,
-        text=True,
-        capture_output=True,
+        include_returncode=False,
     )
-    return json.loads(result.stdout)
 
 
 def run_cli_error(registry_path: Path, *args: str) -> dict:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "loopx.cli",
-            "--registry",
-            str(registry_path),
-            "--format",
-            "json",
-            *args,
-        ],
+    returncode, payload = run_json_cli_result(
+        *args,
+        registry_path=registry_path,
+        runtime_root=runtime_root_from_registry(registry_path),
         cwd=REPO_ROOT,
-        check=False,
-        text=True,
-        capture_output=True,
     )
-    assert result.returncode == 1, result.stdout + result.stderr
-    return json.loads(result.stdout)
+    assert returncode == 1, payload
+    return payload
 
 
 def parsed_items(state_file: Path) -> list[dict]:
