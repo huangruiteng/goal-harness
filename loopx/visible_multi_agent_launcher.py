@@ -197,6 +197,8 @@ def _prompt_still_waiting_for_submit(capture: str, prompt: str) -> bool:
     current_view = capture[prompt_index:] if prompt_index >= 0 else capture
     if "Working (" in current_view or "Queued follow-up inputs" in current_view:
         return False
+    if "[Pasted Content" in current_view:
+        return True
     words = [part for part in prompt.split() if part]
     head = words[:4]
     tail = words[-4:]
