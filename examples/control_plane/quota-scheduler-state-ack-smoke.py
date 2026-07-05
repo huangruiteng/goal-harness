@@ -20,7 +20,11 @@ from loopx.control_plane.scheduler.scheduler_hint import (  # noqa: E402
     build_scheduler_ack_plan,
     build_scheduler_hint,
 )
-from loopx.control_plane.scheduler.state import SCHEDULER_STATE_SCHEMA_VERSION  # noqa: E402
+from loopx.control_plane.scheduler.state import (  # noqa: E402
+    SCHEDULER_STATE_SCHEMA_VERSION,
+    load_scheduler_state,
+    write_scheduler_state,
+)
 from loopx.quota import AgentScopeFrontierAction  # noqa: E402
 from loopx.status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK  # noqa: E402
 
@@ -378,6 +382,53 @@ def assert_scheduler_ack_plan_validation() -> None:
     }, already_applied
 
 
+def assert_scheduler_state_scope_validation() -> None:
+    base = active_payload()
+    first = build_scheduler_hint(
+        deepcopy(base),
+        agent_scope_frontier_actions=AGENT_SCOPE_ACTIONS,
+    )
+    valid_state = state_from(first)
+    with tempfile.TemporaryDirectory(prefix="loopx-scheduler-state-scope-") as tmp:
+        runtime = Path(tmp)
+        state_path = write_scheduler_state(
+            runtime,
+            valid_state,
+            goal_id="scheduler-state-ack-smoke",
+            agent_id="codex-side-agent",
+        )
+        loaded = load_scheduler_state(
+            runtime,
+            goal_id="scheduler-state-ack-smoke",
+            agent_id="codex-side-agent",
+        )
+        assert loaded == valid_state, loaded
+
+        corrupt_state = dict(valid_state)
+        corrupt_state["agent_id"] = "codex-other-agent"
+        state_path.write_text(json.dumps(corrupt_state, sort_keys=True) + "\n", encoding="utf-8")
+        assert (
+            load_scheduler_state(
+                runtime,
+                goal_id="scheduler-state-ack-smoke",
+                agent_id="codex-side-agent",
+            )
+            is None
+        )
+
+        try:
+            write_scheduler_state(
+                runtime,
+                corrupt_state,
+                goal_id="scheduler-state-ack-smoke",
+                agent_id="codex-side-agent",
+            )
+        except ValueError as exc:
+            assert "target scope or schema" in str(exc), exc
+        else:
+            raise AssertionError("write_scheduler_state accepted cross-agent scheduler state")
+
+
 def run_cli(root: Path, *args: str, registry_path: Path, runtime: Path, project: Path) -> dict:
     command = [
         sys.executable,
@@ -502,6 +553,63 @@ def assert_cli_scheduler_ack_progression() -> None:
         assert "recommended_rrule" not in final_app, current
 
 
+def assert_cli_ignores_corrupt_scheduler_state() -> None:
+    fixture = _load_quota_plan_fixture_module()
+    with tempfile.TemporaryDirectory(prefix="loopx-quota-scheduler-corrupt-") as tmp:
+        root = Path(tmp)
+        registry_path, runtime, project = fixture.write_cli_fixture(root, scoped_agents=True)
+        agent_id = fixture.SCOPED_AGENT_ID
+        first = run_cli(
+            root,
+            "quota",
+            "should-run",
+            "--goal-id",
+            "needs-operator",
+            "--agent-id",
+            agent_id,
+            registry_path=registry_path,
+            runtime=runtime,
+            project=project,
+        )
+        first_rrule = first["scheduler_hint"]["codex_app"]["recommended_rrule"]
+        ack = run_cli(
+            root,
+            "quota",
+            "scheduler-ack",
+            "--goal-id",
+            "needs-operator",
+            "--agent-id",
+            agent_id,
+            "--applied-rrule",
+            first_rrule,
+            "--execute",
+            registry_path=registry_path,
+            runtime=runtime,
+            project=project,
+        )
+        state_path = Path(ack["scheduler_state_path"])
+        persisted_state = json.loads(state_path.read_text(encoding="utf-8"))
+        persisted_state["agent_id"] = "codex-other-agent"
+        state_path.write_text(json.dumps(persisted_state, sort_keys=True) + "\n", encoding="utf-8")
+
+        repaired = run_cli(
+            root,
+            "quota",
+            "should-run",
+            "--goal-id",
+            "needs-operator",
+            "--agent-id",
+            agent_id,
+            registry_path=registry_path,
+            runtime=runtime,
+            project=project,
+        )
+        app = repaired["scheduler_hint"]["codex_app"]
+        assert app["recommended_rrule"] == first_rrule, repaired
+        assert app["stateful_backoff"]["state_status"] == "missing", repaired
+        assert app["stateful_backoff"]["apply_needed"] is True, repaired
+
+
 def assert_cli_scheduler_ack_uses_should_run_lookback() -> None:
     from argparse import Namespace
     from loopx.cli_commands import quota as quota_command
@@ -579,7 +687,9 @@ def main() -> int:
     assert_monitor_wait_progression_reaches_120()
     assert_active_work_keeps_initial_cadence()
     assert_scheduler_ack_plan_validation()
+    assert_scheduler_state_scope_validation()
     assert_cli_scheduler_ack_progression()
+    assert_cli_ignores_corrupt_scheduler_state()
     assert_cli_scheduler_ack_uses_should_run_lookback()
     print("quota-scheduler-state-ack-smoke ok")
     return 0
