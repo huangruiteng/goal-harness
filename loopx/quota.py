@@ -81,6 +81,15 @@ from .control_plane.quota.projection_repair import (
     build_state_projection_gap,
     build_state_projection_gap_repair_hint,
 )
+from .control_plane.quota.decision_summary import (
+    compact_quota_decision,
+    quota_decision_agent_id,
+)
+from .control_plane.quota.scheduler_ack import (
+    QUOTA_SCHEDULER_ACK_CLASSIFICATION,
+    build_quota_scheduler_ack_event,
+    record_quota_scheduler_ack_for_decision,
+)
 from .control_plane.runtime.decision_freshness import (
     DECISION_FRESHNESS_WARNING_ITEM_LIMIT,
     decision_freshness_warning as _decision_freshness_warning,
@@ -99,9 +108,7 @@ from .control_plane.work_items.work_lane import (
     work_lane_contract_is_due_monitor_attempt,
 )
 from .control_plane.scheduler.scheduler_hint import (
-    build_codex_app_scheduler_ack_event,
     build_scheduler_hint,
-    build_scheduler_ack_plan,
 )
 from .control_plane.scheduler.monitor_poll_policy import (
     allows_due_monitor_poll,
@@ -117,8 +124,6 @@ from .control_plane.scheduler.state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_SURFACE,
     load_scheduler_state,
-    scheduler_state_path,
-    write_scheduler_state,
 )
 from .state_projection import (
     actions_are_projection_aligned,
@@ -180,7 +185,6 @@ QUOTA_STATE_ORDER = (
 QUOTA_SLOT_SPENT_CLASSIFICATION = "quota_slot_spent"
 QUOTA_SLOT_VOIDED_CLASSIFICATION = "quota_slot_voided"
 QUOTA_MONITOR_POLL_CLASSIFICATION = "quota_monitor_poll"
-QUOTA_SCHEDULER_ACK_CLASSIFICATION = "quota_scheduler_ack"
 AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS = {
     QUOTA_SLOT_SPENT_CLASSIFICATION,
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
@@ -2437,7 +2441,7 @@ def build_quota_should_run(
             codex_app_scheduler_state=_load_codex_app_scheduler_state(
                 status_payload,
                 goal_id=safe_goal_id,
-                agent_id=_quota_decision_agent_id(payload) or agent_id,
+                agent_id=quota_decision_agent_id(payload) or agent_id,
             ),
         )
         payload["protocol_action_packet"] = build_protocol_action_packet(payload)
@@ -2672,28 +2676,6 @@ def build_quota_slot_preview(
     }
 
 
-def _compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
-    quota = decision.get("quota") if isinstance(decision.get("quota"), dict) else {}
-    return {
-        "should_run": bool(decision.get("should_run")),
-        "normal_delivery_allowed": bool(decision.get("normal_delivery_allowed")),
-        "recovery_delivery_allowed": bool(decision.get("recovery_delivery_allowed")),
-        "effective_action": decision.get("effective_action"),
-        "self_repair_allowed": bool(decision.get("self_repair_allowed")),
-        "capability_repair_allowed": bool(decision.get("capability_repair_allowed")),
-        "workspace_repair_allowed": bool(decision.get("workspace_repair_allowed")),
-        "state": str(decision.get("state") or ""),
-        "safe_bypass_allowed": bool(decision.get("safe_bypass_allowed")),
-        "safe_bypass_kind": decision.get("safe_bypass_kind"),
-        "blocked_action_scope": decision.get("blocked_action_scope"),
-        "compute": quota.get("compute"),
-        "window_hours": quota.get("window_hours"),
-        "slot_minutes": quota.get("slot_minutes"),
-        "spent_slots": quota.get("spent_slots"),
-        "allowed_slots": quota.get("allowed_slots"),
-    }
-
-
 def _first_todo_id_from_items(value: Any) -> str | None:
     if not isinstance(value, list):
         return None
@@ -2740,15 +2722,6 @@ def _required_read_todo_id(decision: dict[str, Any]) -> str | None:
     return None
 
 
-def _quota_decision_agent_id(decision: dict[str, Any]) -> str | None:
-    agent_identity = (
-        decision.get("agent_identity")
-        if isinstance(decision.get("agent_identity"), dict)
-        else {}
-    )
-    return normalize_todo_claimed_by(agent_identity.get("agent_id"))
-
-
 def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
     effective_action = str(decision.get("effective_action") or "")
     replan_required = effective_action in {
@@ -2759,7 +2732,7 @@ def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     read = build_agent_scoped_required_read(
         goal_id=str(decision.get("goal_id") or ""),
-        agent_id=_quota_decision_agent_id(decision),
+        agent_id=quota_decision_agent_id(decision),
         todo_id=_required_read_todo_id(decision),
         reason=(
             "read this agent's thin public-safe evidence ledger before autonomous "
@@ -2767,56 +2740,6 @@ def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
         ),
     )
     return [read] if read else []
-
-
-def _scheduler_ack_failure(
-    *,
-    goal_id: str,
-    agent_id: str | None,
-    execute: bool,
-    surface: str,
-    state_key: str,
-    applied_rrule: str | None,
-    reason: str,
-    before: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "mode": "scheduler-ack",
-        "dry_run": not execute,
-        "goal_id": goal_id,
-        "agent_id": normalize_todo_claimed_by(agent_id),
-        "surface": surface,
-        "state_key": state_key,
-        "applied_rrule": applied_rrule,
-        "appended": False,
-        "registry_mutated": False,
-        "reason": reason,
-        "before": before,
-        "after": None,
-    }
-
-
-def build_quota_scheduler_ack_event(
-    before: dict[str, Any],
-    *,
-    applied_rrule: str,
-    surface: str = CODEX_APP_SURFACE,
-    state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
-    generated_at: str | None = None,
-    reason_summary: str | None = None,
-) -> dict[str, Any]:
-    return build_codex_app_scheduler_ack_event(
-        before,
-        agent_id=_quota_decision_agent_id(before),
-        applied_rrule=applied_rrule,
-        classification=QUOTA_SCHEDULER_ACK_CLASSIFICATION,
-        surface=surface,
-        state_key=state_key,
-        generated_at=generated_at or _now_local(),
-        reason_summary=reason_summary,
-        compact_before=_compact_quota_decision(before),
-    )
 
 
 def record_quota_scheduler_ack(
@@ -2837,122 +2760,23 @@ def record_quota_scheduler_ack(
     safe_surface = str(surface or CODEX_APP_SURFACE).strip() or CODEX_APP_SURFACE
     safe_state_key = str(state_key or CODEX_APP_STATEFUL_BACKOFF_STATE_KEY).strip()
     before = build_quota_should_run(status_payload, goal_id=safe_goal_id, agent_id=safe_agent_id)
-    ack_plan = build_scheduler_ack_plan(
-        before,
-        agent_id=safe_agent_id,
-        state_key=safe_state_key,
-        applied_rrule=applied_rrule,
-        reset_token=reset_token,
-        identity_signature=identity_signature,
-    )
-    if not ack_plan.get("ok"):
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason=str(ack_plan.get("reason") or "scheduler ack validation failed"),
-            before=before,
-        )
-    if ack_plan.get("already_applied"):
-        return {
-            "ok": True,
-            "mode": "scheduler-ack",
-            "dry_run": not execute,
-            "goal_id": safe_goal_id,
-            "agent_id": safe_agent_id,
-            "surface": safe_surface,
-            "state_key": safe_state_key,
-            "applied_rrule": ack_plan.get("applied_rrule"),
-            "appended": False,
-            "registry_mutated": False,
-            "already_applied": True,
-            "before": before,
-            "after": before,
-            "reason": "scheduler RRULE already applied; no ack write needed",
-        }
-
     raw_runtime_root = status_payload.get("runtime_root")
     if not raw_runtime_root:
         raise ValueError("status payload does not include runtime_root")
     runtime_root = Path(str(raw_runtime_root)).expanduser()
-    generated_at = _now_local()
-    try:
-        record = build_quota_scheduler_ack_event(
-            before,
-            applied_rrule=str(applied_rrule),
-            surface=safe_surface,
-            state_key=safe_state_key,
-            generated_at=generated_at,
-            reason_summary=reason_summary,
-        )
-    except ValueError as exc:
-        return _scheduler_ack_failure(
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            execute=execute,
-            surface=safe_surface,
-            state_key=safe_state_key,
-            applied_rrule=applied_rrule,
-            reason=str(exc),
-            before=before,
-        )
-
-    state_path = scheduler_state_path(
-        runtime_root,
+    return record_quota_scheduler_ack_for_decision(
+        before,
+        runtime_root=runtime_root,
         goal_id=safe_goal_id,
         agent_id=safe_agent_id,
+        execute=execute,
         surface=safe_surface,
         state_key=safe_state_key,
+        applied_rrule=applied_rrule,
+        reset_token=reset_token,
+        identity_signature=identity_signature,
+        reason_summary=reason_summary,
     )
-    scheduler_state = (
-        record.get("scheduler_ack_event", {}).get("scheduler_state")
-        if isinstance(record.get("scheduler_ack_event"), dict)
-        else {}
-    )
-    if execute:
-        write_scheduler_state(
-            runtime_root,
-            scheduler_state,
-            goal_id=safe_goal_id,
-            agent_id=safe_agent_id,
-            surface=safe_surface,
-            state_key=safe_state_key,
-        )
-
-    return {
-        "ok": True,
-        "mode": "scheduler-ack",
-        "dry_run": not execute,
-        "goal_id": safe_goal_id,
-        "agent_id": safe_agent_id,
-        "surface": safe_surface,
-        "state_key": safe_state_key,
-        "applied_rrule": record["scheduler_ack_event"]["applied_rrule"],
-        "classification": QUOTA_SCHEDULER_ACK_CLASSIFICATION,
-        "generated_at": generated_at,
-        "appended": False,
-        "registry_mutated": False,
-        "scheduler_state_mutated": execute,
-        "already_applied": False,
-        "scheduler_ack_event": record["scheduler_ack_event"],
-        "health_check": record["health_check"],
-        "delivery_outcome": record["delivery_outcome"],
-        "scheduler_state_path": str(state_path),
-        "before": before,
-        "after": None,
-        "post_ack_contract": {
-            "next_action": "wait_for_next_scheduler_tick_or_material_state_transition",
-            "do_not_apply_successor_rrule_from_ack_response": True,
-            "next_rrule_source": "future_quota_should-run_only",
-        },
-        "reason": (
-            f"{'updated' if execute else 'dry-run preview'} scheduler state ack: "
-            f"{safe_goal_id}/{safe_agent_id} applied {record['scheduler_ack_event']['applied_rrule']}"
-        ),
-    }
 
 
 def build_quota_monitor_poll_event(
@@ -3013,7 +2837,7 @@ def build_quota_monitor_poll_event(
             or before.get("reason")
             or "monitor-only poll had no material transition"
         )
-    safe_agent_id = _quota_decision_agent_id(before)
+    safe_agent_id = quota_decision_agent_id(before)
 
     record = {
         "generated_at": generated_at or _now_local(),
@@ -3049,7 +2873,7 @@ def build_quota_monitor_poll_event(
             "todo_id": normalize_todo_id(todo_id) if todo_id else None,
             "target_key": str(target_key or "").strip() or None,
             "result_hash": str(result_hash or "").strip() or None,
-            "before": _compact_quota_decision(before),
+            "before": compact_quota_decision(before),
         },
     }
     if safe_agent_id:
@@ -3071,10 +2895,10 @@ def build_quota_slot_spend_event(
         raise ValueError(f"quota slot spend source must be one of: {', '.join(sorted(VALID_SLOT_SPEND_SOURCES))}")
     before = preview.get("before") if isinstance(preview.get("before"), dict) else {}
     after = preview.get("after") if isinstance(preview.get("after"), dict) else {}
-    safe_agent_id = normalize_todo_claimed_by(preview.get("agent_id")) or _quota_decision_agent_id(before)
+    safe_agent_id = normalize_todo_claimed_by(preview.get("agent_id")) or quota_decision_agent_id(before)
     slots = max(1, _int_number(preview.get("slots"), default=1))
-    before_compact = _compact_quota_decision(before)
-    after_compact = _compact_quota_decision(after)
+    before_compact = compact_quota_decision(before)
+    after_compact = compact_quota_decision(after)
     if _int_number(after_compact.get("spent_slots"), default=0) != _int_number(
         before_compact.get("spent_slots"), default=0
     ) + slots:
@@ -3521,7 +3345,7 @@ def build_quota_slot_void_event(
     safe_reason = str(reason_summary or "").strip() or "void duplicate or invalid quota slot spend event"
     before = preview.get("before") if isinstance(preview.get("before"), dict) else {}
     after = preview.get("after") if isinstance(preview.get("after"), dict) else {}
-    safe_agent_id = _quota_decision_agent_id(before)
+    safe_agent_id = quota_decision_agent_id(before)
     record = {
         "generated_at": generated_at or _now_local(),
         "goal_id": preview.get("goal_id"),
@@ -3535,8 +3359,8 @@ def build_quota_slot_void_event(
             "reason_summary": safe_reason,
             "voided_run_generated_at": preview.get("voided_run_generated_at"),
             "voided_run_classification": preview.get("voided_run_classification"),
-            "before": _compact_quota_decision(before) if before else {},
-            "after": _compact_quota_decision(after) if after else {},
+            "before": compact_quota_decision(before) if before else {},
+            "after": compact_quota_decision(after) if after else {},
         },
     }
     if safe_agent_id:
