@@ -294,13 +294,29 @@ def assert_scheduler_ack_plan_validation() -> None:
     )
     codex_app = first["codex_app"]
     backoff = codex_app["stateful_backoff"]
+    ack_hint = codex_app["ack_hint"]
+    ack_args = ack_hint["args"]
+    assert ack_hint["schema_version"] == "codex_app_scheduler_ack_hint_v0", ack_hint
+    assert ack_hint["after"] == "automation_update_rrule_success", ack_hint
+    assert ack_hint["command"] == "quota scheduler-ack", ack_hint
+    assert ack_hint["execute"] is True, ack_hint
+    assert ack_hint["no_spend"] is True, ack_hint
+    assert ack_args == {
+        "goal_id": "scheduler-state-ack-smoke",
+        "agent_id": "codex-side-agent",
+        "surface": "codex_app",
+        "state_key": backoff["state_key"],
+        "applied_rrule": codex_app["recommended_rrule"],
+        "reset_token": backoff["reset_token"],
+        "identity_signature": backoff["identity_signature"],
+    }, ack_hint
     plan = build_scheduler_ack_plan(
         {"scheduler_hint": first},
-        agent_id="codex-side-agent",
-        state_key=backoff["state_key"],
-        applied_rrule=codex_app["recommended_rrule"],
-        reset_token=backoff["reset_token"],
-        identity_signature=backoff["identity_signature"],
+        agent_id=ack_args["agent_id"],
+        state_key=ack_args["state_key"],
+        applied_rrule=ack_args["applied_rrule"],
+        reset_token=ack_args["reset_token"],
+        identity_signature=ack_args["identity_signature"],
     )
     assert plan == {
         "ok": True,
@@ -473,18 +489,31 @@ def assert_cli_scheduler_ack_progression() -> None:
             project=project,
         )
         first_rrule = first["scheduler_hint"]["codex_app"]["recommended_rrule"]
-        assert first["scheduler_hint"]["codex_app"]["stateful_backoff"]["apply_needed"] is True, first
+        first_app = first["scheduler_hint"]["codex_app"]
+        first_ack_args = first_app["ack_hint"]["args"]
+        assert first_app["stateful_backoff"]["apply_needed"] is True, first
+        assert first_ack_args["goal_id"] == "needs-operator", first
+        assert first_ack_args["agent_id"] == agent_id, first
+        assert first_ack_args["applied_rrule"] == first_rrule, first
 
         ack = run_cli(
             root,
             "quota",
             "scheduler-ack",
             "--goal-id",
-            "needs-operator",
+            first_ack_args["goal_id"],
             "--agent-id",
-            agent_id,
+            first_ack_args["agent_id"],
+            "--surface",
+            first_ack_args["surface"],
+            "--state-key",
+            first_ack_args["state_key"],
             "--applied-rrule",
-            first_rrule,
+            first_ack_args["applied_rrule"],
+            "--reset-token",
+            first_ack_args["reset_token"],
+            "--identity-signature",
+            first_ack_args["identity_signature"],
             "--execute",
             registry_path=registry_path,
             runtime=runtime,
@@ -517,17 +546,28 @@ def assert_cli_scheduler_ack_progression() -> None:
 
         current = second
         while current["scheduler_hint"]["codex_app"]["stateful_backoff"]["apply_needed"]:
-            current_rrule = current["scheduler_hint"]["codex_app"]["recommended_rrule"]
+            current_app = current["scheduler_hint"]["codex_app"]
+            current_rrule = current_app["recommended_rrule"]
+            current_ack_args = current_app["ack_hint"]["args"]
+            assert current_ack_args["applied_rrule"] == current_rrule, current
             ack = run_cli(
                 root,
                 "quota",
                 "scheduler-ack",
                 "--goal-id",
-                "needs-operator",
+                current_ack_args["goal_id"],
                 "--agent-id",
-                agent_id,
+                current_ack_args["agent_id"],
+                "--surface",
+                current_ack_args["surface"],
+                "--state-key",
+                current_ack_args["state_key"],
                 "--applied-rrule",
-                current_rrule,
+                current_ack_args["applied_rrule"],
+                "--reset-token",
+                current_ack_args["reset_token"],
+                "--identity-signature",
+                current_ack_args["identity_signature"],
                 "--execute",
                 registry_path=registry_path,
                 runtime=runtime,

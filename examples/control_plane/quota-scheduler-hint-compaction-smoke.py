@@ -23,18 +23,19 @@ from loopx.quota import _scheduler_hint  # noqa: E402
 RUNTIME_KEYS = ("local_scheduler", "codex_cli_tui", "claude_code_loop")
 
 
-def _load_quota_plan_fixture_writer():
+def _load_quota_plan_fixture_module():
     module_path = REPO_ROOT / "examples" / "control_plane" / "quota-plan-smoke.py"
     spec = importlib.util.spec_from_file_location("quota_plan_smoke_fixture", module_path)
     assert spec and spec.loader, module_path
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.write_cli_fixture
+    return module
 
 
 def payload(*, should_run: bool, recommended_mode: str = "", user_required: bool = False) -> dict:
     return {
         "goal_id": "quota-scheduler-compaction",
+        "agent_identity": {"agent_id": "codex-compact-agent"},
         "should_run": should_run,
         "effective_action": "operator_gate_notify" if user_required else "normal_run",
         "recommended_action": "Keep scheduler hints compact on the hot path.",
@@ -64,10 +65,18 @@ def json_size(value: dict) -> int:
     return len(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
 
 
-def assert_compact_runtime_policy_complete(name: str, compact: dict) -> None:
+def assert_compact_runtime_policy_complete(
+    name: str,
+    compact: dict,
+    *,
+    expected_goal_id: str,
+    expected_agent_id: str,
+) -> None:
     codex_app = compact["codex_app"]
     unchanged_poll = compact["unchanged_poll"]
     stateful_backoff = codex_app["stateful_backoff"]
+    ack_hint = codex_app["ack_hint"]
+    ack_args = ack_hint["args"]
     assert codex_app["recommended_interval_minutes"], (name, compact)
     assert codex_app["recommended_rrule"], (name, compact)
     assert codex_app["max_interval_minutes"], (name, compact)
@@ -86,6 +95,18 @@ def assert_compact_runtime_policy_complete(name: str, compact: dict) -> None:
     assert stateful_backoff["apply_needed"] is True, (name, compact)
     assert stateful_backoff["current_rrule"] == codex_app["recommended_rrule"], (name, compact)
     assert stateful_backoff["state_status"] == "missing", (name, compact)
+    assert ack_hint["schema_version"] == "codex_app_scheduler_ack_hint_v0", (name, compact)
+    assert ack_hint["after"] == "automation_update_rrule_success", (name, compact)
+    assert ack_hint["command"] == "quota scheduler-ack", (name, compact)
+    assert ack_hint["execute"] is True, (name, compact)
+    assert ack_hint["no_spend"] is True, (name, compact)
+    assert ack_args["goal_id"] == expected_goal_id, (name, compact)
+    assert ack_args["agent_id"] == expected_agent_id, (name, compact)
+    assert ack_args["surface"] == "codex_app", (name, compact)
+    assert ack_args["state_key"] == stateful_backoff["state_key"], (name, compact)
+    assert ack_args["applied_rrule"] == codex_app["recommended_rrule"], (name, compact)
+    assert ack_args["reset_token"] == stateful_backoff["reset_token"], (name, compact)
+    assert ack_args["identity_signature"] == stateful_backoff["identity_signature"], (name, compact)
     for omitted in (
         "progression_minutes",
         "current_interval_minutes",
@@ -139,7 +160,12 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
     assert compact["detail_ref"]["omitted_by_default"] is True, (name, compact)
     assert compact["detail_ref"]["execution_required"] is False, (name, compact)
     assert compact["detail_ref"]["request"] == "loopx quota should-run --include-scheduler-detail", (name, compact)
-    assert_compact_runtime_policy_complete(name, compact)
+    assert_compact_runtime_policy_complete(
+        name,
+        compact,
+        expected_goal_id=source_payload["goal_id"],
+        expected_agent_id=source_payload["agent_identity"]["agent_id"],
+    )
     assert compact["reset_policy"]["reset_token"], (name, compact)
     assert compact["reset_policy"]["codex_app_initial_rrule"] == compact["codex_app"]["recommended_rrule"], (
         name,
@@ -179,10 +205,17 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
     assert "automation_update" in reset_detail["codex_app_apply"], (name, detailed)
     assert len(reset_detail["profile_signature"]) == 12, (name, detailed)
     assert json_size(compact) < json_size(detailed), (name, json_size(compact), json_size(detailed))
-    assert json_size(compact) <= 2_700, (name, json_size(compact))
+    assert json_size(compact) <= 3_100, (name, json_size(compact))
 
 
-def run_should_run_cli(*, include_detail: bool, registry_path: Path, runtime: Path, project: Path) -> dict:
+def run_should_run_cli(
+    *,
+    include_detail: bool,
+    registry_path: Path,
+    runtime: Path,
+    project: Path,
+    agent_id: str,
+) -> dict:
     args = [
         sys.executable,
         "-m",
@@ -197,6 +230,8 @@ def run_should_run_cli(*, include_detail: bool, registry_path: Path, runtime: Pa
         "should-run",
         "--goal-id",
         "needs-operator",
+        "--agent-id",
+        agent_id,
         "--scan-path",
         str(project),
     ]
@@ -213,23 +248,30 @@ def run_should_run_cli(*, include_detail: bool, registry_path: Path, runtime: Pa
 
 
 def assert_cli_compact_and_detail_contract() -> None:
-    write_cli_fixture = _load_quota_plan_fixture_writer()
+    fixture = _load_quota_plan_fixture_module()
     with tempfile.TemporaryDirectory(prefix="loopx-quota-scheduler-detail-cli-") as tmp:
-        registry_path, runtime, project = write_cli_fixture(Path(tmp), scoped_agents=True)
+        registry_path, runtime, project = fixture.write_cli_fixture(Path(tmp), scoped_agents=True)
         compact = run_should_run_cli(
             include_detail=False,
             registry_path=registry_path,
             runtime=runtime,
             project=project,
+            agent_id=fixture.SCOPED_AGENT_ID,
         )["scheduler_hint"]
         detailed = run_should_run_cli(
             include_detail=True,
             registry_path=registry_path,
             runtime=runtime,
             project=project,
+            agent_id=fixture.SCOPED_AGENT_ID,
         )["scheduler_hint"]
 
-    assert_compact_runtime_policy_complete("cli-default", compact)
+    assert_compact_runtime_policy_complete(
+        "cli-default",
+        compact,
+        expected_goal_id="needs-operator",
+        expected_agent_id=fixture.SCOPED_AGENT_ID,
+    )
     for key in RUNTIME_KEYS:
         assert key not in compact, (key, compact)
         assert key not in detailed, (key, detailed)

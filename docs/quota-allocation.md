@@ -725,10 +725,10 @@ target interval. For Codex App heartbeats, `recommended_rrule` is emitted only
 when `codex_app.stateful_backoff.apply_needed=true`; if the desired RRULE is
 already applied, it is omitted so the agent does not call a host tool again.
 After a successful host RRULE update, the agent records that fact with
-`loopx quota scheduler-ack --goal-id ... --agent-id ... --applied-rrule ... --execute`,
-which lets LoopX advance the per goal/agent scheduler state without spending
-quota. Human gates can move to `[30, 60, 120]` after the concrete user todo has
-been surfaced.
+`loopx quota scheduler-ack --execute` using
+`codex_app.ack_hint.args`, which lets LoopX advance the per goal/agent scheduler
+state without spending quota. Human gates can move to `[30, 60, 120]` after the
+concrete user todo has been surfaced.
 Monitor-only quiet waits move through `[15, 30, 60, 120]` while preserving the
 same no-spend monitor-poll contract, unless a monitor cadence or due time caps
 the progression earlier.
@@ -752,8 +752,8 @@ backoff again; it never spends quota.
 For Codex App heartbeats, hosts and agents should use `automation_update` only
 when `codex_app.stateful_backoff.apply_needed=true` and
 `codex_app.recommended_rrule` is present. After `automation_update` succeeds,
-the agent must call `quota scheduler-ack` with that applied RRULE. LoopX then
-persists `reset_token`, `identity_signature`, `progression_index`, and
+the agent must call `quota scheduler-ack` from `codex_app.ack_hint.args`. LoopX
+then persists `reset_token`, `identity_signature`, `progression_index`, and
 `last_applied_rrule` under the runtime root. Repeated unchanged identity
 advances through `progression_minutes`; a changed `reset_policy.reset_token`
 returns to the current profile's initial interval. This gives hosts a compact
