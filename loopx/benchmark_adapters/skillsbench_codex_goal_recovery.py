@@ -18,10 +18,18 @@ CODEX_CLI_GOAL_POST_BRIDGE_CLOSEOUT_PROMPT = (
 )
 POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT = 6
 POST_BRIDGE_CLOSEOUT_ATTEMPT_LIMIT = 8
+TUI_BLOCKER_RECENT_LINE_WINDOW = 40
+
+
+def _recent_capture_region(capture: str) -> str:
+    lines = str(capture or "").splitlines()
+    if len(lines) <= TUI_BLOCKER_RECENT_LINE_WINDOW:
+        return "\n".join(lines)
+    return "\n".join(lines[-TUI_BLOCKER_RECENT_LINE_WINDOW:])
 
 
 def _capture_has_rate_limit(capture: str) -> bool:
-    lowered = str(capture or "").lower()
+    lowered = _recent_capture_region(capture).lower()
     return any(
         marker in lowered
         for marker in (
@@ -35,14 +43,14 @@ def _capture_has_rate_limit(capture: str) -> bool:
 
 
 def _capture_has_model_timeout(capture: str) -> bool:
-    lowered = str(capture or "").lower()
+    lowered = _recent_capture_region(capture).lower()
     return any(marker in lowered for marker in ("timed out", "timeout")) and any(
         marker in lowered for marker in ("model", "request", "error", "failed")
     )
 
 
 def _capture_has_retry_affordance(capture: str) -> bool:
-    lowered = str(capture or "").lower()
+    lowered = _recent_capture_region(capture).lower()
     return any(marker in lowered for marker in ("press enter", "press return"))
 
 
@@ -59,7 +67,7 @@ def codex_cli_tui_pre_bridge_blocker_stage(
         return "pre_bridge_tui_rate_limit"
     if _capture_has_model_timeout(capture):
         return "pre_bridge_tui_model_timeout"
-    lowered = str(capture or "").lower()
+    lowered = _recent_capture_region(capture).lower()
     if _capture_has_retry_affordance(capture) and any(
         marker in lowered
         for marker in ("error", "failed", "timed out", "timeout", "model")
@@ -122,7 +130,7 @@ def codex_cli_tui_post_bridge_blocker_stage(
         return "post_bridge_tui_rate_limit"
     if _capture_has_model_timeout(capture):
         return "post_bridge_tui_model_timeout"
-    lowered = str(capture or "").lower()
+    lowered = _recent_capture_region(capture).lower()
     if _capture_has_retry_affordance(capture) and any(
         marker in lowered
         for marker in ("error", "failed", "timed out", "timeout", "model")

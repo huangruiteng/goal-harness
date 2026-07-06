@@ -529,6 +529,7 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
         POST_BRIDGE_CLOSEOUT_ATTEMPT_LIMIT,
         POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT,
         PRE_BRIDGE_RECOVERY_ATTEMPT_LIMIT,
+        TUI_BLOCKER_RECENT_LINE_WINDOW,
         codex_cli_tui_post_bridge_blocker_stage,
         codex_cli_tui_post_bridge_closeout_recovery_action,
         codex_cli_tui_post_bridge_recovery_action,
@@ -545,6 +546,7 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
     assert POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT == 6
     assert POST_BRIDGE_CLOSEOUT_ATTEMPT_LIMIT == 8
     assert PRE_BRIDGE_RECOVERY_ATTEMPT_LIMIT == 2
+    assert TUI_BLOCKER_RECENT_LINE_WINDOW == 40
     assert "Close out the active SkillsBench goal" in (
         CODEX_CLI_GOAL_POST_BRIDGE_CLOSEOUT_PROMPT
     )
@@ -590,6 +592,38 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
             prompt_visible=True,
         )
         == "post_bridge_tui_model_timeout"
+    )
+    stale_timeout_scrollback = "\n".join(
+        [
+            "request timed out while waiting for model",
+            *[f"historical tui line {index}" for index in range(50)],
+            "Goal active",
+            "Pursuing goal",
+            "› ",
+        ]
+    )
+    assert (
+        codex_cli_tui_post_bridge_blocker_stage(
+            stale_timeout_scrollback,
+            prompt_visible=True,
+        )
+        == ""
+    )
+    stale_rate_limit_scrollback = "\n".join(
+        [
+            "rate limit reached; press enter to retry",
+            *[f"historical tui line {index}" for index in range(50)],
+            "Goal active",
+            "Pursuing goal",
+            "› ",
+        ]
+    )
+    assert (
+        codex_cli_tui_post_bridge_blocker_stage(
+            stale_rate_limit_scrollback,
+            prompt_visible=True,
+        )
+        == ""
     )
     assert (
         codex_cli_tui_post_bridge_recovery_action(
