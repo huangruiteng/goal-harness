@@ -109,6 +109,7 @@ from .control_plane.quota.states import QUOTA_STATE_ORDER
 from .control_plane.runtime.decision_freshness import (
     decision_freshness_warning as _decision_freshness_warning,
 )
+from .control_plane.runtime.time import parse_timestamp as _parse_timestamp
 from .control_plane.runtime.agent_scoped_evidence_log import (
     build_agent_scoped_required_read,
 )
@@ -219,18 +220,6 @@ STALL_HEALTH_ITEM_COMPACT_FIELDS = (
     "recommended_action",
 )
 MONITOR_DUE_ITEM_LIMIT = 1
-
-def _parse_timestamp(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
 
 def _validate_goal_id_path_segment(goal_id: str) -> str:
     value = goal_id.strip()
