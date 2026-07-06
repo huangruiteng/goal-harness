@@ -216,6 +216,7 @@ from .control_plane.goals.global_registry_health import (
     collect_global_registry_health as _collect_global_registry_health_read_model,
     global_registry_finding,
 )
+from .control_plane.goals.path_resolution import resolve_goal_local_path, same_path
 from .control_plane.goals.goal_channel import (
     attach_goal_channel_projection as _attach_goal_channel_projection_read_model,
 )
@@ -6454,22 +6455,6 @@ def merge_global_registry_attention_findings(
         attention_item=attention_item,
         attach_global_registry_shadow_finding=attach_global_registry_shadow_finding,
     )
-
-
-def same_path(left: Path, right: Path) -> bool:
-    return left.expanduser().resolve() == right.expanduser().resolve()
-
-
-def resolve_goal_local_path(raw: Any, goal: dict[str, Any], *, fallback_base: Path) -> Path | None:
-    if not raw:
-        return None
-    path = Path(str(raw)).expanduser()
-    if path.is_absolute():
-        return path
-    repo = goal.get("repo")
-    if repo:
-        return Path(str(repo)).expanduser() / path
-    return fallback_base / path
 
 
 def collect_global_registry_health(

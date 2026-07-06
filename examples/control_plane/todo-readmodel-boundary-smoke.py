@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -18,6 +19,7 @@ from loopx.control_plane.work_items import attention_item as attention_item_read
 from loopx.control_plane.work_items import autonomous_candidates as autonomous_read_model  # noqa: E402
 from loopx.control_plane.work_items import autonomous_replan_ack as replan_ack_read_model  # noqa: E402
 from loopx.control_plane.goals import global_registry_shadow as global_registry_shadow_read_model  # noqa: E402
+from loopx.control_plane.goals import path_resolution as path_resolution_read_model  # noqa: E402
 from loopx.control_plane.runtime import event_ledger as event_ledger_read_model  # noqa: E402
 from loopx.control_plane.runtime import run_compaction as run_compaction_read_model  # noqa: E402
 from loopx.control_plane.runtime import session_runtime as session_runtime_read_model  # noqa: E402
@@ -82,6 +84,8 @@ def fixture_todos() -> dict:
 def assert_direct_status_aliases() -> None:
     assert status_module.parse_state_frontmatter is active_state_metadata_read_model.parse_state_frontmatter
     assert status_module.todo_role_for_heading is active_state_metadata_read_model.todo_role_for_heading
+    assert status_module.same_path is path_resolution_read_model.same_path
+    assert status_module.resolve_goal_local_path is path_resolution_read_model.resolve_goal_local_path
     assert status_module.parse_active_state_todos is active_state_todo_parser_read_model.parse_active_state_todos
     assert status_module.attach_monitor_writeback_contract is active_state_todos_read_model.attach_monitor_writeback_contract
     assert status_module.redacted_status_todo_fields is active_state_todos_read_model.redacted_status_todo_fields
@@ -308,8 +312,28 @@ def assert_active_state_todo_fields_redacts_review_material_paths() -> None:
         assert "resolved_path" not in material_projection, material_projection
 
 
+def assert_control_plane_has_no_status_reverse_imports() -> None:
+    control_plane_root = ROOT / "loopx" / "control_plane"
+    offenders: list[str] = []
+    for path in sorted(control_plane_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "loopx.status":
+                        offenders.append(f"{path.relative_to(ROOT)}:{node.lineno} import {alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module == "loopx.status" or (module == "status" and node.level > 0):
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno} from {'.' * node.level}{module} import",
+                    )
+    assert offenders == [], offenders
+
+
 def main() -> None:
     assert_direct_status_aliases()
+    assert_control_plane_has_no_status_reverse_imports()
     assert_wrapper_parity()
     assert_dependency_blocker_parity()
     assert_autonomous_candidate_parity()
