@@ -62,7 +62,6 @@ DEPENDENCY_AGENT_TODO = "Continue the gate-independent P1/P2 product-hardening s
 DEPENDENCY_MONITOR_TODO = "Side-bypass dependency monitor: observe public-safe replay transitions only."
 DEPENDENCY_USER_TODO = "Confirm the sibling project evidence gate before its controller resumes delivery."
 
-
 def assert_handoff_budget_contract(readiness: dict, label: str) -> None:
     budget = readiness.get("handoff_interface_budget")
     assert isinstance(budget, dict), (label, readiness)
@@ -87,6 +86,7 @@ def write_planned_registry(root: Path) -> Path:
         "# Planned Main Control\n\n"
         "## User Todo / Owner Review Reading Queue\n\n"
         f"- [ ] {USER_TODO_TEXT}\n"
+        "  <!-- loopx:todo todo_id=todo_planned_user_gate task_class=user_gate global_gate=true -->\n"
         "- [x] Open owner worksheet.\n\n"
         "## Agent Todo\n\n"
         f"- [ ] {AGENT_TODO_TEXT}\n",
@@ -129,7 +129,6 @@ def mark_planned_todos_done(root: Path) -> None:
     state_text = state_text.replace(f"- [ ] {USER_TODO_TEXT}", f"- [x] {USER_TODO_TEXT}")
     state_text = state_text.replace(f"- [ ] {AGENT_TODO_TEXT}", f"- [x] {AGENT_TODO_TEXT}")
     state_path.write_text(state_text, encoding="utf-8")
-
 
 def write_connected_delivery_registry(root: Path) -> Path:
     project = root / "project"
@@ -334,7 +333,8 @@ def write_dependency_blocker_registry(root: Path) -> Path:
         "---\n\n"
         "# Dependency Owner Gate\n\n"
         "## User Todo / Owner Review Reading Queue\n\n"
-        f"- [ ] {DEPENDENCY_USER_TODO}\n",
+        f"- [ ] {DEPENDENCY_USER_TODO}\n"
+        "  <!-- loopx:todo todo_id=todo_dependency_user_gate task_class=user_gate global_gate=true -->\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1823,7 +1823,7 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
     assert item["waiting_on"] == "controller", item
     assert item["recommended_action"] == USER_TODO_TEXT, item
     assert item["project_asset"]["owner"] == "controller", item
-    assert item["project_asset"]["gate"] == "active_state_user_todo", item
+    assert item["project_asset"]["gate"] == "active_state_user_gate", item
     assert item["project_asset"]["next_action"] == USER_TODO_TEXT, item
     assert "stop until the controller or owner resolves this gate" in item["project_asset"]["stop_condition"], item
     assert item["project_asset"]["user_todos"]["open"] == 1, item
@@ -1835,7 +1835,7 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
     assert OLD_PLANNED_ACTION not in json.dumps(payload, ensure_ascii=False), payload
     assert OLD_PLANNED_ACTION not in markdown, markdown
     assert USER_TODO_TEXT in markdown, markdown
-    assert "project_asset: owner=controller gate=active_state_user_todo" in markdown, markdown
+    assert "project_asset: owner=controller gate=active_state_user_gate" in markdown, markdown
     assert f"asset_next_action: {USER_TODO_TEXT}" in markdown, markdown
     assert "asset_todos: user_open=1 agent_open=1" in markdown, markdown
     assert f"asset_user_todo: {USER_TODO_TEXT}" in markdown, markdown
@@ -1851,7 +1851,7 @@ def assert_planned_preview_is_not_runnable(payload: dict, markdown: str) -> None
         waiting_on="controller",
         expect_operator_question=False,
     )
-    assert quota_payload["status"] == "active_state_user_todo", quota_payload
+    assert quota_payload["status"] == "active_state_user_gate", quota_payload
 
 
 def assert_project_local_status_excludes_runtime_orphans(registry_path: Path) -> None:
