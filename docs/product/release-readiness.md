@@ -115,6 +115,13 @@ path, and canary route rather than as a user-facing release baseline.
   research panes, wires agent-scoped evidence read hints into replan, and
   hardens successor/frontier recovery when completed advancement has no next
   executable todo.
+- `v0.1.10` on 2026-07-06 11:50 +08:00: scoped user-gate and agent-management
+  release at the matching `v0.1.10` tag. This release makes blocking owner
+  todos explicitly typed as `user_gate` or non-blocking `user_action`, scopes
+  per-agent gates with `blocks_agent`, adds read-only live agent-management
+  status projections, and continues moving quota, todo, scheduler, review
+  packet, and handoff rules into bounded control-plane contexts with focused
+  canary coverage.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
