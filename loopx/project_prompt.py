@@ -775,7 +775,8 @@ def render_prompt_text(
    的 user todo 权威区：
 
 ```bash
-{cli_bin} todo add --goal-id {goal_id} --role user --text "<public-safe user/owner action>"
+{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate --blocks-agent <agent-id> --text "<public-safe blocking user/owner decision>"
+{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_action --text "<public-safe non-blocking user/owner todo>"
 ```
 
    agent 自己的后续动作写成 `--role agent`。写入后如果 dashboard 需要看到最新状态，运行

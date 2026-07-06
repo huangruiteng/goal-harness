@@ -31,6 +31,9 @@ def open_todo_count(summary: dict[str, Any] | None) -> int:
 
 
 def is_user_gate_todo_item(item: dict[str, Any]) -> bool:
+    explicit_task_class = str(item.get("task_class") or "").strip()
+    if explicit_task_class:
+        return todo_item_task_class(item) == TODO_TASK_CLASS_USER_GATE
     if todo_item_task_class(item) == TODO_TASK_CLASS_USER_GATE:
         return True
     action_kind = str(item.get("action_kind") or "").strip().lower()
@@ -43,7 +46,7 @@ def open_user_gate_todo_items(summary: dict[str, Any] | None) -> list[dict[str, 
     if not isinstance(summary, dict):
         return []
     candidates: list[dict[str, Any]] = []
-    for key in ("gate_open_items", "first_open_items"):
+    for key in ("gate_open_items", "first_open_items", "items", "backlog_items"):
         values = summary.get(key)
         if not isinstance(values, list):
             continue

@@ -163,7 +163,8 @@ loopx new-project-prompt \
    立刻把它写进 active state 的 user todo 权威区：
 
    ```bash
-   loopx todo add --goal-id <STABLE_GOAL_ID> --role user --text "<public-safe user/owner action>"
+   loopx todo add --goal-id <STABLE_GOAL_ID> --role user --task-class user_gate --blocks-agent <agent-id> --text "<public-safe blocking user/owner decision>"
+   loopx todo add --goal-id <STABLE_GOAL_ID> --role user --task-class user_action --text "<public-safe non-blocking user/owner todo>"
    ```
 
    agent 自己的后续动作写成 `--role agent`。写入后如果 dashboard 需要看到最新状态，

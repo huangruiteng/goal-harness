@@ -32,6 +32,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "required_decision_scopes",
     "claimed_by",
     "blocks_agent",
+    "global_gate",
     "unblocks_todo_id",
     "resume_when",
     "resume_condition",

@@ -15,6 +15,7 @@ from ..todos.contract import (
     TODO_TASK_CLASS_MONITOR,
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
+    normalize_todo_global_gate,
     normalize_todo_id,
     normalize_todo_status,
     normalize_todo_task_class,
@@ -145,6 +146,8 @@ def _todo_gate_relation(gate: dict[str, Any], agent_item: dict[str, Any]) -> dic
 
 
 def _user_gate_blocks_agent_item(gate: dict[str, Any], agent_item: dict[str, Any]) -> bool:
+    if normalize_todo_global_gate(gate.get("global_gate")):
+        return True
     relation = _todo_gate_relation(gate, agent_item)
     if relation:
         return todo_gate_relation_blocks_agent(relation)
@@ -199,6 +202,9 @@ def _agent_scope_filter_user_gate_items(
     current_agent_items: list[dict[str, Any]] = []
     other_agent_scoped_items: list[dict[str, Any]] = []
     for item in open_items:
+        if normalize_todo_global_gate(item.get("global_gate")):
+            current_agent_items.append(item)
+            continue
         blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
         if blocks_agent:
             if blocks_agent != agent_id:

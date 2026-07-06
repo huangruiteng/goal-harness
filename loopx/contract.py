@@ -14,6 +14,7 @@ from .registry import inspect_registry, inspect_registry_boundary, registry_goal
 from .control_plane.todos.contract import (
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,
+    TODO_TASK_CLASS_USER_ACTION,
     TODO_TASK_CLASS_USER_GATE,
     TODO_TASK_PATTERN,
     parse_todo_metadata_line,
@@ -283,8 +284,6 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
     for goal in registry_goals(registry):
         goal_id = str(goal.get("id") or "")
         registered_agents = registered_agent_ids_for_goal(goal)
-        if len(registered_agents) <= 1:
-            continue
         repo_text = str(goal.get("repo") or "").strip()
         if not repo_text:
             continue
@@ -327,27 +326,47 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
                 next_index += 1
             status = str(metadata.get("status") or todo_status_from_marker(marker) or "").lower()
             task_class = str(metadata.get("task_class") or "")
-            if role == "user" and task_class == TODO_TASK_CLASS_USER_GATE and status not in TERMINAL_TODO_STATUSES:
+            if role == "user" and status not in TERMINAL_TODO_STATUSES:
                 checked += 1
                 blocks_agent = metadata.get("blocks_agent")
                 global_gate = metadata.get("global_gate") is True
-                if blocks_agent and global_gate:
-                    todo_id = metadata.get("todo_id") or f"line:{index + 1}"
+                todo_id = metadata.get("todo_id") or f"line:{index + 1}"
+                if task_class not in {TODO_TASK_CLASS_USER_ACTION, TODO_TASK_CLASS_USER_GATE}:
+                    errors.append(
+                        f"{goal_id}: open user todo {todo_id} requires task_class=user_gate "
+                        "or task_class=user_action "
+                        f"(state_file={state_file}, line={index + 1}, text={text})"
+                    )
+                elif task_class == TODO_TASK_CLASS_USER_ACTION and (blocks_agent or global_gate):
+                    errors.append(
+                        f"{goal_id}: open user_action todo {todo_id} is non-blocking and "
+                        "cannot set blocks_agent or global_gate=true "
+                        f"(state_file={state_file}, line={index + 1}, text={text})"
+                    )
+                elif task_class == TODO_TASK_CLASS_USER_GATE and blocks_agent and global_gate:
                     errors.append(
                         f"{goal_id}: open user_gate todo {todo_id} in multi-agent goal "
                         "cannot set both blocks_agent and global_gate=true "
                         f"(state_file={state_file}, line={index + 1}, text={text})"
                     )
-                elif blocks_agent and blocks_agent not in registered_agents:
-                    todo_id = metadata.get("todo_id") or f"line:{index + 1}"
+                elif (
+                    task_class == TODO_TASK_CLASS_USER_GATE
+                    and blocks_agent
+                    and registered_agents
+                    and blocks_agent not in registered_agents
+                ):
                     errors.append(
                         f"{goal_id}: open user_gate todo {todo_id} has blocks_agent="
                         f"{blocks_agent!r}, which is not registered for this goal "
                         f"(registered_agents={', '.join(registered_agents)}, "
                         f"state_file={state_file}, line={index + 1}, text={text})"
                     )
-                elif not blocks_agent and not global_gate:
-                    todo_id = metadata.get("todo_id") or f"line:{index + 1}"
+                elif (
+                    task_class == TODO_TASK_CLASS_USER_GATE
+                    and len(registered_agents) > 1
+                    and not blocks_agent
+                    and not global_gate
+                ):
                     errors.append(
                         f"{goal_id}: open user_gate todo {todo_id} in multi-agent goal "
                         "requires blocks_agent=<registered-agent> or global_gate=true "

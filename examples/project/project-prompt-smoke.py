@@ -58,7 +58,8 @@ MUST_HAVE = (
     "用户/owner 待办",
     "不要只写在 `Next Action`、外部 review 文档或聊天里。",
     "loopx todo add --goal-id",
-    "--role user --text \"<public-safe user/owner action>\"",
+    "--role user --task-class user_gate",
+    "--role user --task-class user_action",
     "agent 自己的后续动作写成 `--role agent`",
     "docs/project-agent-todo-contract.md",
 )

@@ -741,14 +741,9 @@ If the result says `should_run=true`:
    review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
-   state. If the step discovers a concrete user/owner action, do not hide it in
-   `Next Action`, a review doc, or chat. Add it to the active-state user todo
-   queue with:
-
-   ```bash
-   {cli_bin} todo add --goal-id {goal_id} --role user --text "<public-safe user/owner action>"
-   ```
-
+   state. If a user/owner todo appears, do not hide it in prose: use
+   `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate --blocks-agent <agent-id>`
+   or `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_action`.
    Use `--role agent` for project-agent follow-up work.
    For non-trivial feature slices, complete the current todo only after adding
    a successor todo, or include a compact no-follow-up rationale.
@@ -937,8 +932,8 @@ If `should_run=true`:
    Public-safe commit/push/PR may proceed after validation/clean scan. Stop for
    private/company material, credentials, destructive git, production, or review rules.
 8. Validate; write files/validation/critic/next action to active state;
-   use `{cli_bin} todo add --goal-id {goal_id} --role user|agent` for
-   blockers/plans, not prose. Nontrivial done ->
+   use `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate|user_action`
+   for owner todos and `--role agent` for agent todos, not prose. Nontrivial done ->
    successor todo or no-follow-up rationale.
 9. After delivery/safe-bypass, spend once before refresh:
 

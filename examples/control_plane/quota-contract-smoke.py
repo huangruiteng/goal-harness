@@ -125,7 +125,7 @@ def main() -> int:
     )
     assert_contains(
         quota_doc,
-        "`loopx todo add --role user` instead of hiding it in `Next Action`",
+        "`loopx todo add --role user --task-class user_gate|user_action` instead of",
         label="quota doc",
     )
     assert_contains(

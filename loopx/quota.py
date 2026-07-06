@@ -686,9 +686,14 @@ def _todo_write_hint(goal_id: str) -> dict[str, str]:
         "rule": (
             "Write concrete user/owner actions to User Todo, not Next Action, docs, or chat."
         ),
-        "user_todo_command_template": (
+        "user_gate_command_template": (
             f"loopx todo add --goal-id {goal_id} --role user "
-            "--text '<public-safe user/owner action>'"
+            "--task-class user_gate --blocks-agent <agent-id> "
+            "--text '<public-safe blocking user/owner decision>'"
+        ),
+        "user_action_command_template": (
+            f"loopx todo add --goal-id {goal_id} --role user "
+            "--task-class user_action --text '<public-safe non-blocking user todo>'"
         ),
         "agent_todo_command_template": (
             f"loopx todo add --goal-id {goal_id} --role agent "
@@ -3409,7 +3414,13 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"count={succession_warning.get('count')} "
                 f"todo_ids={todo_ids_text}"
             )
-        first_open = summary.get("first_open_items") if isinstance(summary.get("first_open_items"), list) else []
+        first_open = list(summary.get("first_open_items") if isinstance(summary.get("first_open_items"), list) else [])
+        if label == "user_todo" and isinstance(summary.get("user_action_items"), list):
+            first_open.extend(
+                item
+                for item in summary.get("user_action_items", [])
+                if isinstance(item, dict)
+            )
         for todo in first_open[:3]:
             if not isinstance(todo, dict):
                 continue
@@ -3888,7 +3899,8 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
     todo_write_hint = payload.get("todo_write_hint") if isinstance(payload.get("todo_write_hint"), dict) else {}
     if todo_write_hint:
         lines.append(f"- todo_write_hint: {todo_write_hint.get('rule')}")
-        lines.append(f"- user_todo_command_template: `{todo_write_hint.get('user_todo_command_template')}`")
+        lines.append(f"- user_gate_command_template: `{todo_write_hint.get('user_gate_command_template')}`")
+        lines.append(f"- user_action_command_template: `{todo_write_hint.get('user_action_command_template')}`")
         lines.append(f"- agent_todo_command_template: `{todo_write_hint.get('agent_todo_command_template')}`")
     if payload.get("recommended_action"):
         lines.append(f"- recommended_action: {payload.get('recommended_action')}")

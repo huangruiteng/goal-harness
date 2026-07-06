@@ -15,6 +15,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.contract import check_contract  # noqa: E402
+from loopx.control_plane.todos.todo_summary import active_state_todo_attention_item  # noqa: E402
+from loopx.quota import build_quota_should_run  # noqa: E402
+from loopx.status import collect_status  # noqa: E402
 from loopx.todos import add_goal_todo, complete_goal_todo, update_goal_todo  # noqa: E402
 
 
@@ -83,10 +86,148 @@ def insert_before_agent_section(state: Path, block: str) -> None:
     state.write_text(text.replace(marker, f"\n{block.rstrip()}\n{marker}", 1), encoding="utf-8")
 
 
+def assert_user_action_does_not_drive_active_state_attention() -> None:
+    item = active_state_todo_attention_item(
+        {"id": GOAL_ID},
+        {
+            "user_todos": {
+                "open_count": 1,
+                "first_open_items": [
+                    {
+                        "text": "Track a non-blocking owner note.",
+                        "task_class": "user_action",
+                    }
+                ],
+            },
+            "agent_todos": {
+                "open_count": 1,
+                "first_open_items": [
+                    {
+                        "text": "Deliver a product-capability slice.",
+                        "task_class": "advancement_task",
+                    }
+                ],
+            },
+        },
+        None,
+        public_safe_compact_text=lambda value, limit=320: str(value or "").strip()[:limit] or None,
+        first_open_todo_text=lambda summary: (
+            str((summary.get("first_open_items") or [{}])[0].get("text") or "")
+            if isinstance(summary, dict) and summary.get("first_open_items")
+            else None
+        ),
+        todo_summary_open_count=lambda summary: int(summary.get("open_count") or 0) if isinstance(summary, dict) else 0,
+        goal_lifecycle_fields=lambda _goal, _run: {},
+        attention_item=lambda **kwargs: kwargs,
+    )
+    assert item is not None, item
+    assert item["status"] == "active_state_agent_todo", item
+    assert item["waiting_on"] == "codex", item
+
+    gate_item = active_state_todo_attention_item(
+        {"id": GOAL_ID},
+        {
+            "user_todos": {
+                "open_count": 1,
+                "first_open_items": [
+                    {
+                        "text": "Approve the side-agent delivery.",
+                        "task_class": "user_gate",
+                        "blocks_agent": SIDE_AGENT,
+                    }
+                ],
+            },
+            "agent_todos": {
+                "open_count": 1,
+                "first_open_items": [
+                    {
+                        "text": "Deliver a product-capability slice.",
+                        "task_class": "advancement_task",
+                    }
+                ],
+            },
+        },
+        None,
+        public_safe_compact_text=lambda value, limit=320: str(value or "").strip()[:limit] or None,
+        first_open_todo_text=lambda summary: (
+            str((summary.get("first_open_items") or [{}])[0].get("text") or "")
+            if isinstance(summary, dict) and summary.get("first_open_items")
+            else None
+        ),
+        todo_summary_open_count=lambda summary: int(summary.get("open_count") or 0) if isinstance(summary, dict) else 0,
+        goal_lifecycle_fields=lambda _goal, _run: {},
+        attention_item=lambda **kwargs: kwargs,
+    )
+    assert gate_item is not None, gate_item
+    assert gate_item["status"] == "active_state_user_gate", gate_item
+    assert gate_item["waiting_on"] == "controller", gate_item
+
+
 def main() -> int:
+    assert_user_action_does_not_drive_active_state_attention()
+
     with tempfile.TemporaryDirectory(prefix="loopx-user-gate-scope-") as tmp:
         root = Path(tmp)
         repo, state, registry = write_fixture(root)
+
+        assert_raises_message(
+            lambda: add_goal_todo(
+                registry_path=registry,
+                goal_id=GOAL_ID,
+                role="user",
+                text="Track a non-blocking owner note.",
+                dry_run=True,
+            ),
+            "user todo requires explicit --task-class",
+        )
+
+        user_action = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="user",
+            text="Track a non-blocking owner note.",
+            task_class="user_action",
+        )
+        assert user_action["task_class"] == "user_action", user_action
+
+        assert_raises_message(
+            lambda: add_goal_todo(
+                registry_path=registry,
+                goal_id=GOAL_ID,
+                role="user",
+                text="Try to make a non-blocking action scoped.",
+                task_class="user_action",
+                blocks_agent=SIDE_AGENT,
+                dry_run=True,
+            ),
+            "user_action is non-blocking",
+        )
+
+        side_agent_todo = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="Deliver a product-capability slice.",
+            task_class="advancement_task",
+            claimed_by=SIDE_AGENT,
+        )
+        assert side_agent_todo["claimed_by"] == SIDE_AGENT, side_agent_todo
+        status_payload = collect_status(
+            registry_path=registry,
+            runtime_root_override=str(root / "runtime"),
+            scan_roots=[repo],
+            limit=1,
+            goal_id=GOAL_ID,
+        )
+        quota_payload = build_quota_should_run(
+            status_payload,
+            goal_id=GOAL_ID,
+            agent_id=SIDE_AGENT,
+        )
+        user_summary = quota_payload.get("user_todo_summary")
+        assert isinstance(user_summary, dict), quota_payload
+        assert user_summary["user_action_open_count"] == 1, user_summary
+        assert user_summary["gate_open_items"] == [], user_summary
 
         assert_raises_message(
             lambda: add_goal_todo(
@@ -192,6 +333,29 @@ def main() -> int:
             limit=1,
         )
         assert repaired_check["ok"] is True, repaired_check
+
+        insert_before_agent_section(
+            state,
+            "- [ ] Track an intentionally untyped user todo.\n"
+            "  <!-- loopx:todo todo_id=todo_untyped_user status=open -->",
+        )
+        untyped_check = check_contract(
+            registry_path=registry,
+            runtime_root_override=str(root / "runtime"),
+            scan_roots=[repo],
+            limit=1,
+        )
+        assert untyped_check["ok"] is False, untyped_check
+        assert any("todo_untyped_user" in item and "requires task_class" in item for item in untyped_check["errors"]), untyped_check
+
+        closed_untyped = update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id="todo_untyped_user",
+            role="user",
+            status="done",
+        )
+        assert closed_untyped["changed"] is True, closed_untyped
 
         insert_before_agent_section(
             state,

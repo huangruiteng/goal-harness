@@ -53,15 +53,22 @@ def summarize_user_todos_for_quota(
         key=todo_projection_sort_key,
     )
     blocking_open_items = all_open_items
+    user_action_open_items: list[dict[str, Any]] = []
     other_agent_scoped_items: list[dict[str, Any]] = []
     agent_scope_filter: dict[str, Any] | None = None
     if filter_user_gate_blocks_agent:
+        gate_candidate_items = [
+            item for item in all_open_items if is_user_gate_todo_item(item)
+        ]
+        user_action_open_items = [
+            item for item in all_open_items if not is_user_gate_todo_item(item)
+        ]
         (
             blocking_open_items,
             other_agent_scoped_items,
             agent_scope_filter,
         ) = _agent_scope_filter_user_gate_items(
-            all_open_items,
+            gate_candidate_items,
             agent_identity=agent_identity,
         )
     open_items, claim_scope = build_agent_claim_scoped_open_items(
@@ -104,6 +111,7 @@ def summarize_user_todos_for_quota(
         for item in open_items
         if is_user_gate_todo_item(item)
     ]
+    display_open_items = open_items + user_action_open_items if filter_user_gate_blocks_agent else open_items
     active_next_action_items = (
         [
             compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
@@ -135,7 +143,7 @@ def summarize_user_todos_for_quota(
         "total_count": value.get("total_count"),
         "open_count": open_count,
         "done_count": value.get("done_count"),
-        "first_open_items": open_items[:3],
+        "first_open_items": display_open_items[:3],
         "first_executable_items": executable_items[:3],
         "gate_open_items": gate_items[:3],
         "monitor_open_items": monitor_items,
@@ -145,7 +153,7 @@ def summarize_user_todos_for_quota(
         "monitor_schedule_gap_items": monitor_schedule_gap_items[:MONITOR_DUE_ITEM_LIMIT],
         "active_next_action_items": active_next_action_items,
         "active_next_action_executable_items": active_next_action_executable_items,
-        "backlog_items": open_items[:TODO_BACKLOG_ITEM_LIMIT],
+        "backlog_items": display_open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": executable_items[:TODO_BACKLOG_ITEM_LIMIT],
     }
     monitor_writeback = todo_summary_monitor_writeback_contract(value)
@@ -193,11 +201,16 @@ def summarize_user_todos_for_quota(
             item_limit=TODO_BACKLOG_ITEM_LIMIT,
         )
     )
-    if claimed_open_items or value.get("claimed_open_count"):
-        summary["claimed_open_count"] = value.get("claimed_open_count", len(claimed_open_items))
-        summary["unclaimed_open_count"] = value.get(
-            "unclaimed_open_count",
-            max(0, int(open_count or 0) - len(claimed_open_items)),
+    source_claimed_open_count = None if filter_user_gate_blocks_agent else value.get("claimed_open_count")
+    if claimed_open_items or source_claimed_open_count:
+        summary["claimed_open_count"] = source_claimed_open_count or len(claimed_open_items)
+        summary["unclaimed_open_count"] = (
+            max(0, int(open_count or 0) - len(claimed_open_items))
+            if filter_user_gate_blocks_agent
+            else value.get(
+                "unclaimed_open_count",
+                max(0, int(open_count or 0) - len(claimed_open_items)),
+            )
         )
     if claim_scope:
         summary["claim_scope"] = claim_scope
@@ -208,6 +221,12 @@ def summarize_user_todos_for_quota(
         summary["other_agent_scoped_items"] = [
             compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
             for item in other_agent_scoped_items[:TODO_VISIBILITY_LANE_LIMIT]
+        ]
+    if filter_user_gate_blocks_agent and user_action_open_items:
+        summary["user_action_open_count"] = len(user_action_open_items)
+        summary["user_action_items"] = [
+            compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
+            for item in user_action_open_items[:TODO_VISIBILITY_LANE_LIMIT]
         ]
     return summary
 
@@ -244,15 +263,22 @@ def summarize_project_asset_todos_for_quota(
         if all_open_items and next_claimed_by:
             all_open_items[0]["claimed_by"] = next_claimed_by
     blocking_open_items = all_open_items
+    user_action_open_items: list[dict[str, Any]] = []
     other_agent_scoped_items: list[dict[str, Any]] = []
     agent_scope_filter: dict[str, Any] | None = None
     if filter_user_gate_blocks_agent:
+        gate_candidate_items = [
+            item for item in all_open_items if is_user_gate_todo_item(item)
+        ]
+        user_action_open_items = [
+            item for item in all_open_items if not is_user_gate_todo_item(item)
+        ]
         (
             blocking_open_items,
             other_agent_scoped_items,
             agent_scope_filter,
         ) = _agent_scope_filter_user_gate_items(
-            all_open_items,
+            gate_candidate_items,
             agent_identity=agent_identity,
         )
     open_items, claim_scope = build_agent_claim_scoped_open_items(
@@ -304,6 +330,7 @@ def summarize_project_asset_todos_for_quota(
         else []
     )
     claimed_open_items = [item for item in blocking_open_items if item.get("claimed_by")]
+    display_open_items = open_items + user_action_open_items if filter_user_gate_blocks_agent else open_items
     open_count = value.get("open", value.get("open_count", len(all_open_items)))
     if claim_scope is not None:
         open_count = len(open_items)
@@ -315,14 +342,14 @@ def summarize_project_asset_todos_for_quota(
         "total_count": value.get("total", value.get("total_count")),
         "open_count": open_count,
         "done_count": value.get("done", value.get("done_count")),
-        "first_open_items": open_items[:3],
+        "first_open_items": display_open_items[:3],
         "first_executable_items": executable_items[:3],
         "monitor_open_items": monitor_items,
         "monitor_due_count": len(monitor_due_items),
         "monitor_due_items": monitor_due_items[:MONITOR_DUE_ITEM_LIMIT],
         "active_next_action_items": active_next_action_items,
         "active_next_action_executable_items": active_next_action_executable_items,
-        "backlog_items": open_items[:TODO_BACKLOG_ITEM_LIMIT],
+        "backlog_items": display_open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": executable_items[:TODO_BACKLOG_ITEM_LIMIT],
     }
     monitor_writeback = todo_summary_monitor_writeback_contract(value)
@@ -357,11 +384,16 @@ def summarize_project_asset_todos_for_quota(
             item_limit=TODO_BACKLOG_ITEM_LIMIT,
         )
     )
-    if claimed_open_items or value.get("claimed_open_count"):
-        summary["claimed_open_count"] = value.get("claimed_open_count", len(claimed_open_items))
-        summary["unclaimed_open_count"] = value.get(
-            "unclaimed_open_count",
-            max(0, int(open_count or 0) - len(claimed_open_items)),
+    source_claimed_open_count = None if filter_user_gate_blocks_agent else value.get("claimed_open_count")
+    if claimed_open_items or source_claimed_open_count:
+        summary["claimed_open_count"] = source_claimed_open_count or len(claimed_open_items)
+        summary["unclaimed_open_count"] = (
+            max(0, int(open_count or 0) - len(claimed_open_items))
+            if filter_user_gate_blocks_agent
+            else value.get(
+                "unclaimed_open_count",
+                max(0, int(open_count or 0) - len(claimed_open_items)),
+            )
         )
     if claim_scope:
         summary["claim_scope"] = claim_scope
@@ -372,6 +404,12 @@ def summarize_project_asset_todos_for_quota(
         summary["other_agent_scoped_items"] = [
             compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
             for item in other_agent_scoped_items[:TODO_VISIBILITY_LANE_LIMIT]
+        ]
+    if filter_user_gate_blocks_agent and user_action_open_items:
+        summary["user_action_open_count"] = len(user_action_open_items)
+        summary["user_action_items"] = [
+            compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
+            for item in user_action_open_items[:TODO_VISIBILITY_LANE_LIMIT]
         ]
     return summary
 

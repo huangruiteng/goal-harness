@@ -4,7 +4,7 @@
 This fixture proves the executor-facing loop, not just isolated helpers:
 
 1. `quota should-run` exposes a concrete todo write hint.
-2. A project agent can use `loopx todo add --role user`.
+2. A project agent can use typed `loopx todo add --role user`.
 3. `status` projects that user todo into the attention queue.
 4. After an approved operator gate, `review-packet` gives only the short,
    goal-guarded approved handoff to the target agent.
@@ -125,8 +125,13 @@ def main() -> int:
         assert first_quota["state"] == "operator_gate", first_quota
         assert first_quota["should_run"] is False, first_quota
         assert first_quota["todo_write_hint"]["section"] == "User Todo / Owner Review Reading Queue", first_quota
-        assert first_quota["todo_write_hint"]["user_todo_command_template"] == (
-            f"loopx todo add --goal-id {GOAL_ID} --role user --text '<public-safe user/owner action>'"
+        assert first_quota["todo_write_hint"]["user_gate_command_template"] == (
+            f"loopx todo add --goal-id {GOAL_ID} --role user --task-class user_gate "
+            "--blocks-agent <agent-id> --text '<public-safe blocking user/owner decision>'"
+        ), first_quota
+        assert first_quota["todo_write_hint"]["user_action_command_template"] == (
+            f"loopx todo add --goal-id {GOAL_ID} --role user --task-class user_action "
+            "--text '<public-safe non-blocking user todo>'"
         ), first_quota
         assert first_quota["agent_todo_summary"]["open_count"] == 1, first_quota
         assert first_quota["agent_todo_summary"]["first_open_items"][0]["text"] == AGENT_TODO, first_quota
@@ -140,6 +145,9 @@ def main() -> int:
             GOAL_ID,
             "--role",
             "user",
+            "--task-class",
+            "user_gate",
+            "--global-gate",
             "--text",
             USER_TODO,
         )

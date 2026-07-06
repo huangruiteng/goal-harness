@@ -26,6 +26,7 @@ from .control_plane.todos.contract import (
     TODO_MONITOR_METADATA_FIELDS,
     TODO_STATUS_DONE,
     TODO_STATUS_OPEN,
+    TODO_TASK_CLASS_USER_ACTION,
     TODO_TASK_CLASS_USER_GATE,
     TODO_TASK_PATTERN,
     build_todo_id,
@@ -98,6 +99,37 @@ TODO_METADATA_FIELDS = (
     "updated_at",
     "superseded_by",
 )
+
+
+USER_TODO_TASK_CLASSES = {
+    TODO_TASK_CLASS_USER_ACTION,
+    TODO_TASK_CLASS_USER_GATE,
+}
+
+
+def require_user_todo_task_class(
+    *,
+    role: str,
+    task_class: str | None,
+    blocks_agent: str | None = None,
+    global_gate: bool | None = None,
+) -> None:
+    if role != "user":
+        if task_class in USER_TODO_TASK_CLASSES:
+            raise ValueError("user_action and user_gate task_class are only valid for --role user")
+        return
+    normalized = str(task_class or "").strip()
+    if normalized not in USER_TODO_TASK_CLASSES:
+        raise ValueError(
+            "user todo requires explicit --task-class user_gate or user_action; "
+            "use user_gate for blocking owner/controller decisions and user_action "
+            "for non-blocking user-visible todos"
+        )
+    if normalized == TODO_TASK_CLASS_USER_ACTION and (blocks_agent or global_gate):
+        raise ValueError(
+            "user_action is non-blocking and cannot set blocks_agent or global_gate; "
+            "use --task-class user_gate for blocking decisions"
+        )
 
 
 def _is_primary_review_action_kind(value: Any) -> bool:
@@ -854,6 +886,12 @@ def add_todo_to_lines(
     monitor_metadata: dict[str, Any] | None = None,
     evidence: str | None = None,
 ) -> dict[str, Any]:
+    require_user_todo_task_class(
+        role=role,
+        task_class=task_class,
+        blocks_agent=blocks_agent,
+        global_gate=global_gate,
+    )
     todo_text = normalize_new_todo(text)
     normalized_monitor_metadata = require_monitor_metadata_scope(
         monitor_metadata=monitor_metadata,
@@ -1039,6 +1077,12 @@ def add_goal_todo(
 ) -> dict[str, Any]:
     if role not in TODO_SECTION_HEADINGS:
         raise ValueError("todo role must be one of: user, agent")
+    require_user_todo_task_class(
+        role=role,
+        task_class=task_class,
+        blocks_agent=blocks_agent,
+        global_gate=True if global_gate else None,
+    )
     if global_gate and not (role == "user" and task_class == TODO_TASK_CLASS_USER_GATE):
         raise ValueError("global_gate is only valid for `--role user --task-class user_gate`")
     todo_text = normalize_new_todo(text)
@@ -1450,6 +1494,12 @@ def update_goal_todo(
             effective_blocks_agent = effective_agent_id
         target_global_gate = True if global_gate else existing_global_gate
         if not todo_done_for_status(target_status):
+            require_user_todo_task_class(
+                role=target_role,
+                task_class=target_task_class,
+                blocks_agent=target_blocks_agent,
+                global_gate=target_global_gate,
+            )
             require_user_gate_scope(
                 registry_path=registry_path,
                 goal_id=goal_id,
