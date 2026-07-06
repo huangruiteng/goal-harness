@@ -127,12 +127,53 @@ def main() -> int:
         legacy_registry_path, _ = write_fixture(root / "legacy", register_agents=False)
         original = state_file.read_text(encoding="utf-8")
 
-        dry_run = run_cli(registry_path, "todo", "add", "--goal-id", GOAL_ID, "--role", "user", "--text", USER_TODO, "--dry-run")
+        bare_user_error = run_cli_error(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "user",
+            "--text",
+            USER_TODO,
+            "--dry-run",
+        )
+        assert "user todo requires explicit --task-class" in bare_user_error["error"], bare_user_error
+
+        dry_run = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "user",
+            "--task-class",
+            "user_gate",
+            "--global-gate",
+            "--text",
+            USER_TODO,
+            "--dry-run",
+        )
         assert dry_run["ok"] is True, dry_run
         assert dry_run["added"] is True, dry_run
         assert state_file.read_text(encoding="utf-8") == original
 
-        user_payload = run_cli(registry_path, "todo", "add", "--goal-id", GOAL_ID, "--role", "user", "--text", USER_TODO)
+        user_payload = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "user",
+            "--task-class",
+            "user_gate",
+            "--global-gate",
+            "--text",
+            USER_TODO,
+        )
         assert user_payload["added"] is True, user_payload
         after_user = state_file.read_text(encoding="utf-8")
         assert "## User Todo / Owner Review Reading Queue" in after_user, after_user
@@ -140,7 +181,20 @@ def main() -> int:
         assert after_user.index("## User Todo / Owner Review Reading Queue") < after_user.index("## Next Action")
         assert "updated_at: 2026-01-01T00:00:00+00:00" not in after_user
 
-        duplicate = run_cli(registry_path, "todo", "add", "--goal-id", GOAL_ID, "--role", "user", "--text", USER_TODO)
+        duplicate = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "user",
+            "--task-class",
+            "user_gate",
+            "--global-gate",
+            "--text",
+            USER_TODO,
+        )
         assert duplicate["added"] is False, duplicate
         assert duplicate["already_exists"] is True, duplicate
         assert state_file.read_text(encoding="utf-8").count(USER_TODO) == 1

@@ -396,11 +396,9 @@ If the result says should_run=true:
    production actions, or repository rules that explicitly require review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
-   state. If the step discovers a concrete user/owner action, do not hide it in
-   `Next Action`, a review doc, or chat. Add it to the active-state user todo
-   queue with:
-
-   loopx todo add --goal-id <GOAL_ID> --role user --text "<public-safe user/owner action>"
+   state. If a user/owner todo appears, do not hide it in prose:
+   `loopx todo add --goal-id <GOAL_ID> --role user --task-class user_gate --blocks-agent <agent-id>`
+   or `loopx todo add --goal-id <GOAL_ID> --role user --task-class user_action`.
 
    Use `--role agent` for project-agent follow-up work.
    For non-trivial feature slices, complete the current todo only after adding

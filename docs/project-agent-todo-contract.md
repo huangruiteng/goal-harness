@@ -30,13 +30,27 @@ sync catch up.
 ## Write Contract
 
 When read-only analysis, a review packet, a gate checklist, or P0/P1 steering
-finds a concrete user or owner action, write it immediately with the todo CLI:
+finds a concrete user or owner action, write it immediately with the todo CLI.
+Use `user_gate` only when the item blocks an agent or the whole goal:
 
 ```bash
 loopx todo add \
   --goal-id <goal-id> \
   --role user \
-  --text "<public-safe user or owner action>"
+  --task-class user_gate \
+  --blocks-agent <agent-id> \
+  --text "<public-safe blocking user or owner decision>"
+```
+
+Use `user_action` for owner-visible follow-up that should not stop unrelated
+agents:
+
+```bash
+loopx todo add \
+  --goal-id <goal-id> \
+  --role user \
+  --task-class user_action \
+  --text "<public-safe non-blocking user or owner todo>"
 ```
 
 Use `--role agent` for project-agent follow-up work:
@@ -78,9 +92,10 @@ loopx todo add \
 CLI project the lane consistently, but explicit `--task-class` is the authority
 when both are present. If an exact todo already exists, `todo add` updates or
 inserts the metadata comment instead of creating a duplicate checkbox.
-`--task-class user_gate` and `--task-class blocker` are non-executable control
-lanes for owner input and concrete blockers; quota/executor code must not treat
-them as advancement work.
+`--task-class user_gate`, `--task-class user_action`, and `--task-class blocker`
+are non-executable control lanes; quota/executor code must not treat them as
+advancement work. Open user todos must declare either `user_gate` or
+`user_action`; a bare `--role user` todo is an authoring error.
 
 For scheduled monitors, keep the contract minimal: `--next-due-at` is the first
 eligible time, `--cadence` is the retry interval, `--monitor-target-key` is the

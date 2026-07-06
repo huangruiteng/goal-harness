@@ -80,6 +80,9 @@ def run_demo(
         goal_id=goal_id,
         role="user",
         text=user_todo,
+        task_class="user_gate",
+        action_kind="demo_goal_decision",
+        global_gate=True,
     )
     agent_todo_payload = add_goal_todo(
         registry_path=registry_path,

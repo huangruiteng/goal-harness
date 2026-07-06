@@ -629,8 +629,8 @@ notification, make the turn a user-action gate, or leave the top-level
 `should_run` set for an otherwise quiet no-op.
 For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
-`loopx todo add --role user` instead of hiding it in `Next Action`,
-review docs, or chat.
+`loopx todo add --role user --task-class user_gate|user_action` instead of
+hiding it in `Next Action`, review docs, or chat.
 When available, `quota should-run` also keeps next-action signals separate:
 `active_state_next_action` is the durable `## Next Action`,
 `latest_run_recommended_action` is the latest non-agent-lane run's

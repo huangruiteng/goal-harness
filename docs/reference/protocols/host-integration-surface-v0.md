@@ -80,7 +80,7 @@ the host lacks authority. A host adapter may expose these write classes:
 | Write Class | CLI Baseline | Required Guards |
 | --- | --- | --- |
 | Todo claim and lifecycle | `loopx todo claim/update/complete` | registered agent id, active-state file lock, task class, optional successor handoff with `blocks_agent` / `unblocks_todo_id` |
-| User/agent todo creation | `loopx todo add --role user|agent` | public-safe text, concrete actor, duplicate detection |
+| User/agent todo creation | `loopx todo add --role user --task-class user_gate\|user_action` / `--role agent` | public-safe text, concrete actor, duplicate detection |
 | Gate decision | `loopx operator-gate --decision approve|reject|defer` | explicit controller/user decision, dry-run preview before write |
 | Human reward | `loopx reward ... --dry-run` then explicit write | run-bound judgment, public-safe reason, no score impersonation |
 | Lease or claim projection | `claimed_by` today; future `task_lease_v0` | `(goal_id, todo_id)` contention key; `task_lease_v0` stays optional and future until CLI/server lease commands ship |

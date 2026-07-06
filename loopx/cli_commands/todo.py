@@ -73,11 +73,12 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
     todo_parser.add_argument("--reason", help="Public-safe reason for blocked/deferred/supersede transitions.")
     todo_parser.add_argument(
         "--task-class",
-        choices=["advancement_task", "continuous_monitor", "user_gate", "blocker"],
+        choices=["advancement_task", "continuous_monitor", "user_gate", "user_action", "blocker"],
         help=(
             "For todo add/update, explicitly register the routing lane. Use "
-            "advancement_task for executable delivery work; continuous_monitor, "
-            "user_gate, and blocker are non-executable lanes."
+            "advancement_task for executable delivery work; user_gate for blocking "
+            "owner/controller decisions; user_action for non-blocking user-visible "
+            "todos; continuous_monitor and blocker are non-executable lanes."
         ),
     )
     todo_parser.add_argument(
@@ -246,7 +247,7 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
     )
     todo_parser.add_argument(
         "--next-task-class",
-        choices=["advancement_task", "continuous_monitor", "user_gate", "blocker"],
+        choices=["advancement_task", "continuous_monitor", "blocker"],
         help="Task class for --next-agent-todo. Defaults to advancement_task.",
     )
     todo_parser.add_argument("--next-action-kind", help="Action kind for --next-agent-todo.")
@@ -326,7 +327,7 @@ def handle_todo_command(
                 "todo --agent-id is supported by `todo list`, `todo suggest`, and "
                 "by `todo add/update --role user --task-class user_gate` for "
                 "agent-scoped user gates; --global-gate is supported by "
-                "`todo add/update` for user gates; --from, --limit, and "
+                "`todo add/update --role user --task-class user_gate`; --from, --limit, and "
                 "--trigger are only supported by `todo suggest`"
             )
         if args.todo_command == "list":

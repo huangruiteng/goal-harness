@@ -42,6 +42,7 @@ from .projection import (
     todo_projection_sort_key as projection_todo_projection_sort_key,
 )
 from ..work_items.project_asset import build_project_asset_todo_summary
+from .user_gate import open_user_gate_todo_items
 
 
 MAX_STATUS_TODOS_PER_ROLE = 12
@@ -103,21 +104,25 @@ def active_state_todo_attention_item(
         fields.get("active_state_next_action"),
         limit=320,
     )
-    user_action = public_safe_compact_text(first_open_todo_text(user_todos), limit=320)
+    user_gate_items = open_user_gate_todo_items(user_todos)
+    user_gate_action = public_safe_compact_text(
+        user_gate_items[0].get("text") if user_gate_items else None,
+        limit=320,
+    )
     agent_action = public_safe_compact_text(first_open_todo_text(agent_todos), limit=320)
     lifecycle_fields = goal_lifecycle_fields(goal, current_run)
     goal_id = str(goal.get("id") or "unknown-goal")
 
-    if user_action or todo_summary_open_count(user_todos) > 0:
+    if user_gate_action or user_gate_items:
         return attention_item(
             goal_id=goal_id,
-            status="active_state_user_todo",
+            status="active_state_user_gate",
             waiting_on="controller",
             severity="action",
             recommended_action=(
-                user_action
+                user_gate_action
                 or active_next_action
-                or "resolve the open user todo from the active goal state"
+                or "resolve the open user_gate todo from the active goal state"
             ),
             source="active_state",
             **lifecycle_fields,

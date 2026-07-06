@@ -163,6 +163,8 @@ def attention(
                             "index": 1,
                             "done": False,
                             "text": "Confirm the operator gate.",
+                            "task_class": "user_gate",
+                            "global_gate": True,
                         }
                     ],
                 },
@@ -865,8 +867,11 @@ def assert_operator_gate_should_run(status_payload: dict) -> None:
     assert payload["user_todo_summary"]["open_count"] == 1, payload
     assert payload["agent_todo_summary"]["open_count"] == 1, payload
     assert payload["todo_write_hint"]["section"] == "User Todo / Owner Review Reading Queue", payload
-    assert "loopx todo add --goal-id needs-operator --role user" in payload["todo_write_hint"][
-        "user_todo_command_template"
+    assert "loopx todo add --goal-id needs-operator --role user --task-class user_gate" in payload["todo_write_hint"][
+        "user_gate_command_template"
+    ], payload
+    assert "loopx todo add --goal-id needs-operator --role user --task-class user_action" in payload["todo_write_hint"][
+        "user_action_command_template"
     ], payload
     assert "loopx todo add --goal-id needs-operator --role agent" in payload["todo_write_hint"][
         "agent_todo_command_template"
@@ -906,6 +911,7 @@ def assert_focus_wait_should_run() -> None:
                 "index": 1,
                 "done": False,
                 "text": "Provide new owner evidence, a clean baseline, or external eval before delivery resumes.",
+                "task_class": "user_action",
             }
         ],
     }
