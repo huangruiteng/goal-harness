@@ -13,6 +13,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx import status as status_module  # noqa: E402
+from loopx import boundary_authority as boundary_authority_module  # noqa: E402
+from loopx import interface_budget as interface_budget_module  # noqa: E402
+from loopx import quota as quota_module  # noqa: E402
 from loopx.control_plane.goals import active_state_metadata as active_state_metadata_read_model  # noqa: E402
 from loopx.control_plane.goals import global_registry_health as global_registry_health_read_model  # noqa: E402
 from loopx.control_plane.work_items import attention_item as attention_item_read_model  # noqa: E402
@@ -115,6 +118,9 @@ def assert_direct_status_aliases() -> None:
     assert evidence_log_read_model.parse_timestamp is runtime_time_read_model.parse_timestamp
     assert management_projection_read_model.parse_timestamp is runtime_time_read_model.parse_timestamp
     assert task_lease_read_model.parse_timestamp is runtime_time_read_model.parse_timestamp
+    assert quota_module._parse_timestamp is runtime_time_read_model.parse_timestamp
+    assert boundary_authority_module._parse_timestamp is runtime_time_read_model.parse_timestamp
+    assert interface_budget_module.parse_timestamp is runtime_time_read_model.parse_timestamp
     assert status_module.quota_spend_slots is usage_summary_read_model.quota_spend_slots
     assert status_module.is_automation_run is usage_summary_read_model.is_automation_run
     assert status_module.is_progress_signal_run is usage_summary_read_model.is_progress_signal_run
