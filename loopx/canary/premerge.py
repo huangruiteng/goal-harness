@@ -776,7 +776,11 @@ def build_premerge_validation_gate(
 
     risk_profiles = list(classification["risk_profiles"])
     risk_profile_run: dict[str, Any] | None = None
-    if risk_profiles:
+    profile_limit = int(limits["profile_limit"])
+    run_risk_profiles = bool(risk_profiles) and not (
+        tier == "quick" and profile_limit == 0
+    )
+    if run_risk_profiles:
         risk_progress = _section_progress_callback(
             progress_callback,
             section="risk_profile_smokes",
@@ -785,13 +789,13 @@ def build_premerge_validation_gate(
             risk_progress,
             event="section_started",
             profiles=risk_profiles,
-            selected_hint=int(limits["profile_limit"]),
+            selected_hint=profile_limit,
         )
         risk_profile_run = build_canary_smoke_suite_run(
             suite="default-public",
             profiles=risk_profiles,
             include_deep_checks=include_deep,
-            limit=int(limits["profile_limit"]),
+            limit=profile_limit,
             execute=execute,
             timeout_seconds=timeout_seconds,
             fail_fast=fail_fast,

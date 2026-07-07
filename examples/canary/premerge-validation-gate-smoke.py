@@ -78,6 +78,19 @@ def assert_public_docs_change_adds_boundary_scan() -> None:
     assert "AGENTS.md" in boundary_commands[0], payload
 
 
+def assert_quick_public_docs_change_skips_risk_profile_smokes() -> None:
+    payload = build_premerge_validation_gate(
+        changed_files=["README.md"],
+        tier="quick",
+        execute=False,
+    )
+    assert payload["classification"]["risk_profiles"] == ["docs-project-content-ops"], payload
+    assert payload["risk_profile_run"] is None, payload
+    assert payload["boundary_run"]["selected_check_count"] == 1, payload
+    assert payload["catalog_run"]["selected_check_count"] <= 3, payload
+    assert payload["validation_summary"]["selected_check_count"] <= 4, payload
+
+
 def assert_public_boundary_scan_executes_in_process() -> None:
     run = _public_boundary_changed_files_run(
         changed_files=["AGENTS.md"],
@@ -322,6 +335,7 @@ def assert_inherited_line_budget_red_is_advisory_only() -> None:
 def main() -> None:
     assert_control_plane_change_selects_state_machine_validation()
     assert_public_docs_change_adds_boundary_scan()
+    assert_quick_public_docs_change_skips_risk_profile_smokes()
     assert_public_boundary_scan_executes_in_process()
     assert_changed_python_gets_compile_check()
     assert_benchmark_sensitive_change_blocks_self_merge()
