@@ -715,6 +715,20 @@ def _assert_cli_goal_post_bridge_blocker_is_public_safe_stage() -> None:
         == "pre_bridge_tui_error_prompt"
     )
     assert (
+        codex_cli_tui_pre_bridge_blocker_stage(
+            "Goal active\nGoal failed\n› ",
+            prompt_visible=True,
+        )
+        == "pre_bridge_tui_error_prompt"
+    )
+    assert (
+        codex_cli_tui_pre_bridge_recovery_action(
+            "Goal active\nGoal failed\n› ",
+            stage="pre_bridge_tui_error_prompt",
+        )
+        == "typed_goal_resubmit"
+    )
+    assert (
         codex_cli_tui_pre_bridge_terminal_stage(
             first_turn_terminal_timeout_capture,
             prompt_visible=True,
@@ -1289,6 +1303,41 @@ def _assert_cli_goal_uses_short_file_backed_objective_for_bridge_packet() -> Non
         assert trace["goal_prompt_file_used"] is True, trace
         assert trace["goal_prompt_file_raw_path_recorded"] is False, trace
         assert trace["goal_command_submission_method"] == "typed", trace
+        assert trace["private_tui_tail_recorded"] is False, trace
+
+    with tempfile.TemporaryDirectory() as temp:
+        trace_dir = Path(temp) / "trace"
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(worker_public_trace_dir=str(trace_dir))
+        )
+        final_capture = "\n".join(
+            [f"old line {index}" for index in range(20)]
+            + ["Goal active", "Goal failed", "› "]
+        )
+        relay._last_codex_cli_goal_tui_capture = final_capture
+        relay._publish_codex_cli_goal_trace(
+            ok=False,
+            stage="pre_bridge_tui_error_prompt",
+            goal_active_observed=True,
+            goal_terminal_observed=True,
+            first_action_observed=False,
+            bridge_summary_path=None,
+            goal_prompt_file_used=True,
+            goal_command_submission_method="typed",
+        )
+        traces = list(trace_dir.glob("*.compact.json"))
+        assert len(traces) == 1, traces
+        payload = json.loads(traces[0].read_text(encoding="utf-8"))
+        trace = payload["codex_cli_goal"]
+        assert trace["private_tui_tail_recorded"] is True, trace
+        assert trace["private_tui_tail_ref"].startswith("private/"), trace
+        assert trace["private_tui_tail_line_count"] == 23, trace
+        assert trace["raw_tui_capture_recorded"] is False, trace
+        private_tail = trace_dir / trace["private_tui_tail_ref"]
+        assert private_tail.exists(), private_tail
+        private_tail_text = private_tail.read_text(encoding="utf-8")
+        assert "Goal failed" in private_tail_text
+        assert "old line 0" in private_tail_text
 
     with tempfile.TemporaryDirectory() as temp:
         trace_dir = Path(temp) / "trace"

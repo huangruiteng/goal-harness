@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+import uuid
+
 from loopx.codex_cli_goal_tui import codex_cli_tui_input_prompt_visible
 
 
 PRE_BRIDGE_RECOVERY_ATTEMPT_LIMIT = 2
+CODEX_CLI_GOAL_PRIVATE_TUI_TAIL_MAX_LINES = 160
+CODEX_CLI_GOAL_PRIVATE_TUI_TAIL_MAX_CHARS = 60000
 CODEX_CLI_GOAL_POST_BRIDGE_CONTINUE_PROMPT = (
     "Continue the active SkillsBench goal after the transient model timeout. "
     "If ./skillsbench-task-prompt.md exists, read it before acting. Use the "
@@ -19,6 +24,43 @@ CODEX_CLI_GOAL_POST_BRIDGE_CLOSEOUT_PROMPT = (
 POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT = 6
 POST_BRIDGE_CLOSEOUT_ATTEMPT_LIMIT = 8
 TUI_BLOCKER_RECENT_LINE_WINDOW = 40
+
+
+def write_private_codex_cli_goal_tui_tail(
+    trace_dir_value: object,
+    safe_stage: str,
+    capture: object,
+) -> dict[str, object]:
+    """Persist a bounded private TUI tail and return public-safe metadata."""
+
+    metadata: dict[str, object] = {
+        "private_tui_tail_recorded": False,
+        "private_tui_tail_ref": "",
+        "private_tui_tail_line_count": 0,
+    }
+    if not trace_dir_value or not capture:
+        return metadata
+    tail_lines = str(capture).splitlines()[-CODEX_CLI_GOAL_PRIVATE_TUI_TAIL_MAX_LINES:]
+    tail_text = "\n".join(tail_lines)
+    if len(tail_text) > CODEX_CLI_GOAL_PRIVATE_TUI_TAIL_MAX_CHARS:
+        tail_text = tail_text[-CODEX_CLI_GOAL_PRIVATE_TUI_TAIL_MAX_CHARS:]
+    tail_text = tail_text.rstrip()
+    if not tail_text:
+        return metadata
+    stage = "".join(
+        ch if ch.isalnum() or ch == "_" else "_" for ch in str(safe_stage or "")
+    ) or "unknown"
+    tail_name = f"codex-cli-goal-tui-tail-{stage}-{uuid.uuid4().hex[:12]}.txt"
+    try:
+        private_dir = Path(str(trace_dir_value)).expanduser() / "private"
+        private_dir.mkdir(parents=True, exist_ok=True)
+        (private_dir / tail_name).write_text(tail_text + "\n", encoding="utf-8")
+    except OSError:
+        return metadata
+    metadata["private_tui_tail_recorded"] = True
+    metadata["private_tui_tail_ref"] = f"private/{tail_name}"
+    metadata["private_tui_tail_line_count"] = len(tail_text.splitlines())
+    return metadata
 
 
 def _recent_capture_region(capture: str) -> str:
@@ -68,7 +110,7 @@ def codex_cli_tui_pre_bridge_blocker_stage(
     if _capture_has_model_timeout(capture):
         return "pre_bridge_tui_model_timeout"
     lowered = _recent_capture_region(capture).lower()
-    if _capture_has_retry_affordance(capture) and any(
+    if any(
         marker in lowered
         for marker in ("error", "failed", "timed out", "timeout", "model")
     ):
@@ -86,9 +128,7 @@ def codex_cli_tui_pre_bridge_recovery_action(capture: str, *, stage: str) -> str
         return ""
     if _capture_has_retry_affordance(capture):
         return "press_enter"
-    if stage == "pre_bridge_tui_model_timeout" and codex_cli_tui_input_prompt_visible(
-        capture
-    ):
+    if codex_cli_tui_input_prompt_visible(capture):
         return "typed_goal_resubmit"
     return ""
 
