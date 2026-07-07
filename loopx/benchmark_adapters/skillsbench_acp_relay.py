@@ -45,6 +45,7 @@ from loopx.benchmark_adapters.skillsbench_codex_goal_recovery import (
     codex_cli_tui_pre_bridge_recovery_skip_reason,
     codex_cli_tui_pre_bridge_terminal_stage,
     codex_cli_tui_pre_bridge_terminal_skip_reason,
+    write_private_codex_cli_goal_tui_tail,
 )
 from loopx.codex_cli_goal_tui import (
     CODEX_CLI_GOAL_TASK_PROMPT_FILENAME,
@@ -1328,7 +1329,7 @@ class SkillsBenchLocalAcpRelay:
                 )
                 while time.monotonic() < deadline:
                     now = time.monotonic()
-                    capture = tmux_capture(tmux_name)
+                    capture = self._last_codex_cli_goal_tui_capture = tmux_capture(tmux_name)
                     if "Goal active" in capture or "Pursuing goal" in capture:
                         goal_active_observed = True
                     goal_failed_now = "Goal failed" in capture or "Goal blocked" in capture
@@ -1810,6 +1811,7 @@ class SkillsBenchLocalAcpRelay:
             ch if ch.isalnum() or ch == "_" else "_"
             for ch in str(stage or "").strip().lower()
         ) or "unknown"
+        private_tui_tail = write_private_codex_cli_goal_tui_tail(self._config.worker_public_trace_dir, safe_stage, getattr(self, "_last_codex_cli_goal_tui_capture", ""))
         bridge_request_count = 0
         task_facing_success_count = 0
         if bridge_summary_path is not None and bridge_summary_path.exists():
@@ -1872,6 +1874,7 @@ class SkillsBenchLocalAcpRelay:
                     codex_cli_tui_environment(self._config.codex_api_proxy)
                 ),
                 "codex_api_proxy_raw_url_recorded": False,
+                **private_tui_tail,
                 "raw_tui_capture_recorded": False,
                 "raw_task_text_recorded": False,
                 "raw_stdout_recorded": False,
