@@ -55,7 +55,8 @@ def assert_control_plane_change_selects_state_machine_validation() -> None:
         summary["selected_commands"]
     ), payload
     assert any("interaction-contract-state-machine-smoke.py" in item for item in catalog_commands), payload
-    assert any("control-plane-integrated-canary-smoke.py" in item for item in catalog_commands), payload
+    assert not any("control-plane-integrated-canary-smoke.py" in item for item in catalog_commands), payload
+    assert any("heartbeat-quota-flow-smoke.py" in item for item in catalog_commands), payload
     assert any("bounded-context-namespace-smoke.py" in item for item in catalog_commands), payload
     assert risk_commands, payload
     assert payload["gate"]["status"] == "preview_only", payload
