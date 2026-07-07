@@ -27,6 +27,14 @@ CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION = "codex_app_scheduler_ack_hint_v0"
 MONITOR_CADENCE_PATTERN = re.compile(r"^\s*(\d+)\s*([mhd])\s*$", re.IGNORECASE)
 MONITOR_WAIT_PROGRESSION_MINUTES = [15, 30, 60, 120]
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
+MONITOR_WAIT_HOST_FLOOR_MINUTES = 15
+MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES = 60
+MONITOR_WAIT_PHASE_RANK = {
+    "active_window": 0,
+    "near_window": 1,
+    "cadence_only": 2,
+    "far_window": 3,
+}
 
 
 def normalize_scheduler_rrule(value: Any) -> str:
@@ -248,29 +256,144 @@ def _monitor_wait_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def _monitor_wait_cadence_progression(payload: dict[str, Any]) -> list[int] | None:
-    """Cap monitor quiet backoff so the host does not sleep past monitor due."""
+def _monitor_item_identity(item: dict[str, Any]) -> str:
+    for key in ("todo_id", "target_key", "action_kind", "title"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            return value
+    return str(item.get("index") or "monitor")
+
+
+def _minutes_until(value: datetime, current_time: datetime) -> int:
+    return max(1, int(math.ceil((value - current_time).total_seconds() / 60)))
+
+
+def _cap_monitor_progression(*, cap_minutes: int, host_floor_minutes: int) -> list[int]:
+    safe_cap = max(1, int(cap_minutes))
+    safe_floor = max(1, int(host_floor_minutes))
+    return [
+        max(safe_floor, min(interval, safe_cap))
+        for interval in MONITOR_WAIT_PROGRESSION_MINUTES
+    ]
+
+
+def _monitor_wait_item_plan(
+    item: dict[str, Any],
+    *,
+    current_time: datetime,
+) -> dict[str, Any] | None:
+    expires_at = _parse_monitor_timestamp(item.get("expires_at"))
+    if expires_at is not None and expires_at <= current_time:
+        return {
+            "phase": "expired",
+            "selected_monitor_identity": _monitor_item_identity(item),
+        }
+
+    next_due_at = _parse_monitor_timestamp(item.get("next_due_at"))
+    last_checked_at = _parse_monitor_timestamp(item.get("last_checked_at"))
+    cadence_minutes = _monitor_cadence_minutes(item.get("cadence"))
+    host_floor = MONITOR_WAIT_HOST_FLOOR_MINUTES
+    phase: str | None = None
+    cap_candidates: list[int] = []
+    include_next_due_in_reset = False
+
+    if expires_at is not None and last_checked_at is not None and last_checked_at <= current_time:
+        phase = "active_window"
+        if cadence_minutes is not None:
+            cap_candidates.append(max(host_floor, cadence_minutes))
+        if next_due_at is not None and next_due_at > current_time:
+            cap_candidates.append(max(host_floor, _minutes_until(next_due_at, current_time)))
+    elif next_due_at is not None and next_due_at > current_time:
+        minutes_until_due = _minutes_until(next_due_at, current_time)
+        phase = (
+            "near_window"
+            if minutes_until_due <= MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES
+            else "far_window"
+        )
+        cap_candidates.append(max(host_floor, minutes_until_due))
+        include_next_due_in_reset = True
+    elif cadence_minutes is not None:
+        phase = "cadence_only"
+        cap_candidates.append(max(host_floor, cadence_minutes))
+
+    if phase is None or not cap_candidates:
+        return None
+
+    cap_minutes = max(host_floor, min(cap_candidates))
+    selected_identity = _monitor_item_identity(item)
+    reset_profile = {
+        "monitor_wait_phase": phase,
+        "monitor_wait_host_floor_minutes": host_floor,
+        "monitor_wait_selected_identity": selected_identity,
+        "monitor_wait_cadence_minutes": cadence_minutes,
+        "monitor_wait_window_start_at": (
+            next_due_at.isoformat()
+            if include_next_due_in_reset and next_due_at is not None
+            else None
+        ),
+        "monitor_wait_window_end_at": expires_at.isoformat() if expires_at is not None else None,
+    }
+    progression = _cap_monitor_progression(
+        cap_minutes=cap_minutes,
+        host_floor_minutes=host_floor,
+    )
+    return {
+        "phase": phase,
+        "selected_monitor_identity": selected_identity,
+        "selected_todo_id": item.get("todo_id"),
+        "selected_target_key": item.get("target_key"),
+        "host_floor_minutes": host_floor,
+        "cap_minutes": cap_minutes,
+        "cadence_minutes": cadence_minutes,
+        "next_due_at": next_due_at.isoformat() if next_due_at is not None else None,
+        "expires_at": expires_at.isoformat() if expires_at is not None else None,
+        "last_checked_at": last_checked_at.isoformat() if last_checked_at is not None else None,
+        "progression_minutes": progression,
+        "reset_profile": reset_profile,
+    }
+
+
+def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Build phase-aware monitor backoff without turning due horizon into identity."""
 
     current_time = now_utc()
-    caps: list[int] = []
+    plans: list[dict[str, Any]] = []
+    expired_count = 0
     for item in _monitor_wait_items(payload):
-        expires_at = _parse_monitor_timestamp(item.get("expires_at"))
-        if expires_at is not None and expires_at <= current_time:
+        plan = _monitor_wait_item_plan(item, current_time=current_time)
+        if not plan:
             continue
-        item_caps: list[int] = []
-        cadence_minutes = _monitor_cadence_minutes(item.get("cadence"))
-        if cadence_minutes is not None:
-            item_caps.append(cadence_minutes)
-        next_due_at = _parse_monitor_timestamp(item.get("next_due_at"))
-        if next_due_at is not None and next_due_at > current_time:
-            seconds_until_due = (next_due_at - current_time).total_seconds()
-            item_caps.append(max(1, int(math.ceil(seconds_until_due / 60))))
-        if item_caps:
-            caps.append(min(item_caps))
-    if not caps:
+        if plan.get("phase") == "expired":
+            expired_count += 1
+            continue
+        plans.append(plan)
+
+    if not plans:
+        if expired_count:
+            return {
+                "phase": "expired",
+                "expired_monitor_count": expired_count,
+                "host_floor_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
+                "base_progression_minutes": MONITOR_WAIT_PROGRESSION_MINUTES,
+                "progression_minutes": None,
+                "reset_profile": None,
+            }
         return None
-    cap = max(1, min(caps))
-    return [min(interval, cap) for interval in MONITOR_WAIT_PROGRESSION_MINUTES]
+
+    selected = min(
+        plans,
+        key=lambda plan: (
+            int(plan.get("cap_minutes") or 10**9),
+            MONITOR_WAIT_PHASE_RANK.get(str(plan.get("phase") or ""), 99),
+            str(plan.get("selected_monitor_identity") or ""),
+        ),
+    )
+    return {
+        **selected,
+        "base_progression_minutes": MONITOR_WAIT_PROGRESSION_MINUTES,
+        "candidate_count": len(plans),
+        "expired_monitor_count": expired_count,
+    }
 
 
 def build_codex_app_scheduler_ack_event(
@@ -441,6 +564,8 @@ def build_scheduler_hint(
         claude_limit: int | None,
         multiplier: int = 2,
         cadence_progression_override: list[int] | None = None,
+        reset_profile_snapshot_override: dict[str, Any] | None = None,
+        cadence_context_detail: dict[str, Any] | None = None,
         advance_same_identity: bool = True,
     ) -> dict[str, Any]:
         cadence_progression = cadence_progression_override or [
@@ -469,10 +594,11 @@ def build_scheduler_hint(
             "local_scheduler_unchanged_poll_limit": cli_limit,
             "claude_code_loop_unchanged_poll_limit": claude_limit,
         }
+        reset_profile_snapshot = reset_profile_snapshot_override or profile_snapshot
         reset_token_payload = {
             "action": action,
             "identity_snapshot": identity_snapshot,
-            "profile_snapshot": profile_snapshot,
+            "profile_snapshot": reset_profile_snapshot,
         }
         reset_token = hashlib.sha256(
             json.dumps(
@@ -498,6 +624,14 @@ def build_scheduler_hint(
                 default=str,
             ).encode("utf-8")
         ).hexdigest()[:12]
+        reset_profile_signature = hashlib.sha256(
+            json.dumps(
+                reset_profile_snapshot,
+                ensure_ascii=True,
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()[:12]
         reset_policy_detail = {
             "schema_version": SCHEDULER_RESET_POLICY_SCHEMA_VERSION,
             "source": "quota.should-run",
@@ -512,6 +646,7 @@ def build_scheduler_hint(
             "identity_key_count": len(identity_keys),
             "identity_signature": identity_signature,
             "profile_signature": profile_signature,
+            "reset_profile_signature": reset_profile_signature,
             "reset_condition_summary": "token_changed|user_feedback|new_or_reassigned_todo|gate_or_material_transition|active_work_projected",
             "after_reset": "apply_initial_interval_before_backoff",
             "codex_app_tool": "automation_update",
@@ -693,6 +828,8 @@ def build_scheduler_hint(
                 "reset_policy_detail": reset_policy_detail,
                 "stateful_backoff_detail": stateful_backoff_detail,
             }
+            if cadence_context_detail:
+                scheduler_hint["cold_path_detail"]["cadence_context"] = cadence_context_detail
         return scheduler_hint
 
     if (
@@ -772,7 +909,27 @@ def build_scheduler_hint(
         effective_action == "monitor_quiet_skip"
         or recommended_mode == "monitor_quiet_until_material_transition"
     ):
-        monitor_progression = _monitor_wait_cadence_progression(payload)
+        monitor_plan = _monitor_wait_cadence_plan(payload)
+        monitor_progression = (
+            monitor_plan.get("progression_minutes")
+            if isinstance(monitor_plan, dict)
+            else None
+        )
+        monitor_reset_profile = (
+            {
+                "cadence_class": "monitor_wait",
+                "codex_app_initial_interval_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
+                "codex_app_initial_rrule": rrule_for_minutes(MONITOR_WAIT_HOST_FLOOR_MINUTES),
+                "codex_app_max_interval_minutes": 120,
+                "unchanged_poll_backoff_multiplier": 2,
+                "local_scheduler_unchanged_poll_limit": 3,
+                "claude_code_loop_unchanged_poll_limit": 3,
+                **monitor_plan["reset_profile"],
+            }
+            if isinstance(monitor_plan, dict)
+            and isinstance(monitor_plan.get("reset_profile"), dict)
+            else None
+        )
         return hint(
             action="backoff_until_material_transition",
             cadence_class="monitor_wait",
@@ -787,6 +944,8 @@ def build_scheduler_hint(
             cadence_progression_override=(
                 monitor_progression or MONITOR_WAIT_PROGRESSION_MINUTES
             ),
+            reset_profile_snapshot_override=monitor_reset_profile,
+            cadence_context_detail=monitor_plan,
         )
 
     if payload.get("should_run") is False:
