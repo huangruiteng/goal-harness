@@ -49,7 +49,6 @@ LEGACY_OVERSIZED_RETIREMENT_PLANS = {
 
 LEGACY_OVERSIZED_LIMITS = {
     "examples/benchmark-run-ledger-smoke.py": 2106,
-    "examples/control_plane/quota-plan-smoke.py": 2079,
     "examples/skillsbench-app-server-goal-worker-smoke.py": 3119,
     "examples/skillsbench-benchmark-run-smoke.py": 14821,
     "examples/skillsbench-host-local-launch-plan-smoke.py": 2373,
