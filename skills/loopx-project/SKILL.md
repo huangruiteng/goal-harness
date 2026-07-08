@@ -61,6 +61,21 @@ silently downgrade `/loopx <goal text>` into a bare `/loopx` read-only command.
 Use `loopx bootstrap-command-pack --project . --goal-text "<GOAL_TEXT>"` only
 when implementing or debugging the lower-level host handoff packet.
 
+If the connected goal later needs a wider or corrected write boundary, do not
+rerun `loopx bootstrap --force` just to change scope. Use the incremental
+configuration path instead:
+
+```bash
+loopx configure-goal \
+  --goal-id <STABLE_GOAL_ID> \
+  --write-scope "<SAFE_WRITE_SCOPE>" \
+  --execute
+```
+
+If a destructive reconnect is explicitly required, pass `--preserve-todos` with
+`--force` unless the user intends to rebuild the active state file and discard
+existing todo projection.
+
 `/loopx <goal text>` is an explicit goal-start intent: first produce a concise
 ordered plan, then write todos in priority order, using planner order plus
 `todo add` write order as the same-priority tie-breaker. For broad or fuzzy
