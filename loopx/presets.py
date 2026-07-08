@@ -12,6 +12,7 @@ PRESET_PICKER_SCHEMA_VERSION = "loopx_beginner_preset_picker_v0"
 class BeginnerPreset:
     preset_id: str
     title: str
+    tier: str
     maturity: str
     cadence: str
     default_mode: str
@@ -26,6 +27,7 @@ BEGINNER_PRESETS: tuple[BeginnerPreset, ...] = (
     BeginnerPreset(
         preset_id="daily-triage",
         title="Daily Triage L1",
+        tier="beginner_default",
         maturity="L1 report-only",
         cadence="daily or weekday morning",
         default_mode="report_only",
@@ -57,6 +59,7 @@ BEGINNER_PRESETS: tuple[BeginnerPreset, ...] = (
     BeginnerPreset(
         preset_id="changelog-draft",
         title="Changelog Draft L1",
+        tier="beginner_default",
         maturity="L1 draft-only",
         cadence="per release, or daily during release week",
         default_mode="draft_only",
@@ -88,6 +91,7 @@ BEGINNER_PRESETS: tuple[BeginnerPreset, ...] = (
     BeginnerPreset(
         preset_id="pr-watch",
         title="PR Watch L1",
+        tier="beginner_default",
         maturity="L1 watch-only",
         cadence="every 10-30 minutes while the PR is active",
         default_mode="watch_only",
@@ -116,9 +120,89 @@ BEGINNER_PRESETS: tuple[BeginnerPreset, ...] = (
             "You need an automation-friendly monitor that still produces concrete blockers.",
         ),
     ),
+    BeginnerPreset(
+        preset_id="ci-sweeper",
+        title="CI Sweeper L2",
+        tier="advanced_opt_in",
+        maturity="L2 opt-in patch lane",
+        cadence="on failing checks, or every 30-60 minutes while a PR is active",
+        default_mode="dry_run_report_first",
+        summary=(
+            "Classify failing checks, propose the smallest bounded fix, and only draft "
+            "a worktree patch after explicit owner opt-in."
+        ),
+        goal_text=(
+            "Run CI Sweeper L2 for this repository: inspect failing checks and recent "
+            "CI context, classify the likely fix, then produce a dry-run report first. "
+            "Only after explicit owner opt-in, draft a bounded patch in an isolated "
+            "codex/ worktree, run focused verification, and stop for human review before "
+            "push, merge, rerun-cost expansion, or external writes."
+        ),
+        capability_path=(
+            "failing-check intake",
+            "bounded codex/ worktree patch",
+            "focused verifier or smoke",
+            "human review gate",
+        ),
+        safety_defaults=(
+            "Dry-run report first; no patch until owner opt-in.",
+            "Patch only in an isolated codex/ worktree with a narrow allowed scope.",
+            "Verifier or focused smoke must pass before marking a patch ready.",
+            "Human review before push, merge, rerun-cost expansion, or external writes.",
+            "Escalate after repeated failures or unchanged error signatures.",
+        ),
+        useful_when=(
+            "A PR or main branch has boring, well-scoped check failures.",
+            "You want LoopX to reduce maintainer toil without granting merge authority.",
+        ),
+    ),
+    BeginnerPreset(
+        preset_id="dependency-sweeper",
+        title="Dependency Sweeper L2",
+        tier="advanced_opt_in",
+        maturity="L2 opt-in dependency lane",
+        cadence="weekly, per security notice, or during release hardening",
+        default_mode="policy_report_first",
+        summary=(
+            "Review dependency update candidates against a patch/minor policy, denylist, "
+            "and verifier plan before drafting any update patch."
+        ),
+        goal_text=(
+            "Run Dependency Sweeper L2 for this repository: inspect dependency update "
+            "candidates, apply a patch/minor policy and denylist, then produce a policy "
+            "report first. Only after explicit owner opt-in, draft a bounded dependency "
+            "patch in an isolated codex/ worktree, run focused verification, and stop "
+            "for human review before push, merge, publish, or rollout."
+        ),
+        capability_path=(
+            "dependency candidate intake",
+            "patch/minor policy and denylist",
+            "bounded codex/ worktree patch",
+            "focused verifier or smoke",
+            "human review gate",
+        ),
+        safety_defaults=(
+            "Policy report first; no dependency edit until owner opt-in.",
+            "Default to patch and minor updates; deny major, runtime, lockfile-wide, "
+            "and toolchain jumps unless explicitly allowed.",
+            "Verifier or focused smoke must pass before marking an update ready.",
+            "Human review before push, merge, publish, rollout, or dependency source changes.",
+            "Escalate when updates fail twice, widen scope, or hit a denied package.",
+        ),
+        useful_when=(
+            "A repo has recurring safe dependency bumps or security patch noise.",
+            "You want update toil reduced while keeping rollout and publish authority human.",
+        ),
+    ),
 )
 
 PRESET_IDS = tuple(preset.preset_id for preset in BEGINNER_PRESETS)
+DEFAULT_PRESET_IDS = tuple(
+    preset.preset_id for preset in BEGINNER_PRESETS if preset.tier == "beginner_default"
+)
+ADVANCED_PRESET_IDS = tuple(
+    preset.preset_id for preset in BEGINNER_PRESETS if preset.tier == "advanced_opt_in"
+)
 
 
 def _shell(value: str) -> str:
@@ -163,6 +247,7 @@ def _preset_to_dict(
     return {
         "id": preset.preset_id,
         "title": preset.title,
+        "tier": preset.tier,
         "maturity": preset.maturity,
         "cadence": preset.cadence,
         "default_mode": preset.default_mode,
@@ -205,6 +290,8 @@ def build_beginner_preset_packet(
         ),
         "mutation_policy": "read_only; renders commands only; does not write registry, state, automation, PRs, or docs",
         "recommended_order": list(PRESET_IDS),
+        "default_preset_ids": list(DEFAULT_PRESET_IDS),
+        "advanced_preset_ids": list(ADVANCED_PRESET_IDS),
         "placeholders": {
             "goal_id": goal_id,
             "agent_id": agent_id,
@@ -252,6 +339,7 @@ def render_beginner_preset_markdown(payload: dict[str, Any]) -> str:
                 f"## {preset.get('title')}",
                 "",
                 f"- id: `{preset.get('id')}`",
+                f"- tier: `{preset.get('tier')}`",
                 f"- maturity: {preset.get('maturity')}",
                 f"- cadence: {preset.get('cadence')}",
                 f"- default mode: `{preset.get('default_mode')}`",
