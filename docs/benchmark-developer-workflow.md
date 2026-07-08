@@ -1381,12 +1381,24 @@ before launching `scripts/skillsbench_automation_loop.py`; the runner forwards
 standard proxy variables only to the private BenchFlow subprocess and agent
 environment, runs a bounded HTTP CONNECT preflight, and records only
 source/scheme/endpoint-kind/port plus `proxy_url_recorded=false` in public
-artifacts. Use `--benchmark-egress-proxy-mode require` when the run must fail
-fast without that private proxy. The default `auto` mode validates a configured
-proxy first, but if that proxy is unavailable and direct egress to the public
-test host is reachable, the runner records a direct fallback and does not inject
-the stale proxy into the benchmark runtime. Use `--benchmark-egress-proxy-mode
-off` only for explicit no-proxy debugging.
+artifacts. Formal host-local Goal benchmark routes resolve the default `auto`
+policy to `require`, so a missing benchmark egress proxy blocks before setup or
+verifier dependency installs begin. Outside those formal routes, `auto` still
+validates a configured proxy first, but if that proxy is unavailable and direct
+egress to the public test host is reachable, the runner records a direct
+fallback and does not inject the stale proxy into the benchmark runtime. Use
+`--benchmark-egress-proxy-mode off` only for explicit no-proxy debugging.
+
+For Docker-backed SkillsBench runs, the proxy endpoint must be reachable from
+both the remote host shell and Docker build/runtime containers. A loopback-only
+SSH reverse tunnel such as `127.0.0.1:<port>` is enough for host-side Codex API
+preflight, but Docker build steps interpret `127.0.0.1` as the build container
+itself, so apt/pip/bootstrap commands fail with connection refused. The public
+launcher starts a short-lived bridge listener on the remote Docker bridge
+address and passes that bridge URL as `LOOPX_SKILLSBENCH_EGRESS_PROXY`, while
+keeping the concrete proxy value out of public artifacts. Equivalent
+host-network or bridge-forwarder wiring is valid; do not treat a host-only
+loopback proxy as benchmark/verifier-ready.
 
 Keep upstream benchmark sources clean:
 

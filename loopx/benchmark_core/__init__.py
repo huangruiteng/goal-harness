@@ -34,6 +34,7 @@ from .lifecycle import (
     CANONICAL_LIFECYCLE_PHASES,
     BenchmarkLifecyclePhase,
     canonical_lifecycle,
+    compact_benchmark_canonical_lifecycle,
 )
 from .loop_protocol import (
     BENCHMARK_LOOP_CONTROLLER_TRACE_SCHEMA_VERSION,
@@ -186,6 +187,7 @@ __all__ = [
     "RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION",
     "RunPermissionAction",
     "canonical_lifecycle",
+    "compact_benchmark_canonical_lifecycle",
     "compact_run_permission_policy_for_quota",
     "compact_round_rewards",
     "compact_round_artifact_snapshots",

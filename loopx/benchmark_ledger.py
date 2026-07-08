@@ -337,7 +337,6 @@ def _compact_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
         "official_score_missing",
         "official_result_json_materialized",
         "case_attempt_budget_should_count",
-        "setup_stall_timeout_capped",
         "runner_launch_preflight_passed",
         "apt_setup_risk_detected",
         "apt_retry_patch_required",
