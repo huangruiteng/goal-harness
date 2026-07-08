@@ -29,6 +29,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "purpose": "Refresh host slash-command prompt and skill files.",
             },
             {
+                "command": "loopx preset list",
+                "purpose": "Show beginner-safe Daily Triage, Changelog Draft, and PR Watch start packets.",
+            },
+            {
                 "command": 'loopx start-goal --guided --project . --goal-text "<goal>"',
                 "purpose": "Preview the shell fallback for the same agent-safe `/loopx <goal>` path.",
             },
@@ -176,6 +180,7 @@ def render_concise_help(program: str = "loopx") -> str:
             "  /loopx <goal text>             Start or continue a concrete long-running goal.",
             "  loopx doctor                   Check install, PATH, release snapshot, and skills.",
             "  loopx slash-commands --install Refresh host slash-command skill files.",
+            "  loopx preset list              Show beginner-safe loop start packets.",
             "  loopx start-goal --guided --project . --goal-text \"<goal>\"",
             "                                  Preview the shell fallback for /loopx <goal>.",
             "",
