@@ -28,6 +28,8 @@ For one preset card:
 loopx preset show daily-triage
 loopx preset show changelog-draft
 loopx preset show pr-watch
+loopx preset show ci-sweeper
+loopx preset show dependency-sweeper
 ```
 
 These commands are read-only. They render `/loopx ...`, `start-goal`,
@@ -90,6 +92,10 @@ guardrails are explicit." The required guardrails are:
 - token/cadence cap;
 - human review before push, merge, publish, or dependency rollout;
 - escalation after repeated failure or unchanged error signatures.
+
+The picker exposes both as `advanced_opt_in` cards. Their default output is a
+dry-run or policy report first; a patch lane starts only after explicit owner
+opt-in and stays inside an isolated `codex/` worktree.
 
 ### Tier 3: Later expansion
 
