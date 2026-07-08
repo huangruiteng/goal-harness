@@ -464,6 +464,8 @@ def test_benchmark_egress_proxy_env_is_public_safe_and_forwarded() -> None:
             )
             plan = build_plan(args)
             egress = plan["benchmark_egress_proxy"]
+            assert egress["requested_mode"] == "require", egress
+            assert egress["proxy_required"] is True, egress
             assert egress["proxy_configured"] is True, egress
             assert egress["proxy_source"] == "env", egress
             assert egress["proxy_env_key"] == "LOOPX_SKILLSBENCH_EGRESS_PROXY", egress
@@ -511,6 +513,8 @@ def test_benchmark_egress_proxy_env_is_public_safe_and_forwarded() -> None:
             assert not docker_config_dir.exists(), docker_config_dir
 
             config = plan["runner_config"]
+            assert config["benchmark_egress_proxy_required"] is True, config
+            assert config["benchmark_egress_proxy_mode_requested"] == "require", config
             assert config["benchmark_egress_proxy_configured"] is True, config
             assert config["benchmark_egress_proxy_endpoint_kind"] == "public_or_unknown", config
             assert config["benchmark_egress_proxy_endpoint_port"] == 18080, config
@@ -12697,7 +12701,6 @@ def test_skillsbench_runner_failure_backfills_generic_timeout_stall_cleanup() ->
                 "benchflow_setup_stall_timeout_enabled": True,
                 "benchflow_setup_stall_timeout_requested_sec": 180,
                 "benchflow_setup_stall_timeout_sec": 180,
-                "benchflow_setup_stall_timeout_capped": False,
                 "benchflow_setup_stall_timeout_triggered": True,
                 "benchflow_setup_stall_before_agent_lifecycle": True,
                 "benchflow_setup_stall_raw_logs_read": False,

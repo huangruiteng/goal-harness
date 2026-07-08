@@ -70,3 +70,29 @@ def canonical_lifecycle(**flags: Any) -> dict[str, Any]:
         "next_required_phase": next_required_phase,
         "phase_ready": ready,
     }
+
+
+def compact_benchmark_canonical_lifecycle(value: Any) -> dict[str, Any]:
+    """Return the public-safe subset of a canonical lifecycle projection."""
+
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    if value.get("schema_version") == BENCHMARK_CANONICAL_LIFECYCLE_SCHEMA_VERSION:
+        compact["schema_version"] = BENCHMARK_CANONICAL_LIFECYCLE_SCHEMA_VERSION
+    for field in ("current_phase", "next_required_phase"):
+        raw = value.get(field)
+        if isinstance(raw, str) and raw in CANONICAL_LIFECYCLE_PHASES:
+            compact[field] = raw
+    for field in ("entered_benchmark_case", "case_attempt_countable"):
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+    phase_ready = value.get("phase_ready")
+    if isinstance(phase_ready, dict):
+        compact_phase_ready: dict[str, bool] = {}
+        for key, ready in phase_ready.items():
+            if key in CANONICAL_LIFECYCLE_PHASES and isinstance(ready, bool):
+                compact_phase_ready[key] = ready
+        if compact_phase_ready:
+            compact["phase_ready"] = compact_phase_ready
+    return compact

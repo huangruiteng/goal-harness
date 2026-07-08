@@ -46,9 +46,9 @@ def test_skillsbench_runner_failure_marks_build_stall_timeout() -> None:
         assert default_plan["runner_prerequisites"][
             "benchflow_setup_stall_timeout_enabled"
         ] is False
-        assert default_plan["runner_prerequisites"][
-            "benchflow_setup_stall_timeout_capped"
-        ] is False
+        assert "benchflow_setup_stall_timeout_capped" not in default_plan[
+            "runner_prerequisites"
+        ]
 
         args = parse_args(
             [
@@ -90,7 +90,6 @@ def test_skillsbench_runner_failure_marks_build_stall_timeout() -> None:
                 "benchflow_setup_stall_timeout_enabled": True,
                 "benchflow_setup_stall_timeout_requested_sec": 60,
                 "benchflow_setup_stall_timeout_sec": 60,
-                "benchflow_setup_stall_timeout_capped": False,
                 "benchflow_setup_stall_timeout_triggered": True,
                 "benchflow_setup_stall_before_agent_lifecycle": True,
                 "benchflow_setup_stall_raw_logs_read": False,
@@ -106,9 +105,9 @@ def test_skillsbench_runner_failure_marks_build_stall_timeout() -> None:
             "setup_stall_timeout_requested_sec"
         ] == 60, compact
         assert compact["compose_setup_diagnostic"]["setup_stall_timeout_sec"] == 60
-        assert compact["compose_setup_diagnostic"][
-            "setup_stall_timeout_capped"
-        ] is False, compact
+        assert "setup_stall_timeout_capped" not in compact[
+            "compose_setup_diagnostic"
+        ]
         compact_text = json.dumps(compact, sort_keys=True)
         assert "skillsbench docker compose build/setup stall timeout" not in compact_text
         assert "/private/" not in compact_text
@@ -133,9 +132,9 @@ def test_skillsbench_runner_failure_honors_long_build_stall_timeout() -> None:
         plan = build_plan(args)
         assert plan["build_stall_timeout_requested_sec"] == 7200
         assert plan["build_stall_timeout_sec"] == 7200
-        assert plan["runner_prerequisites"][
-            "benchflow_setup_stall_timeout_capped"
-        ] is False
+        assert "benchflow_setup_stall_timeout_capped" not in plan[
+            "runner_prerequisites"
+        ]
 
         compact = build_runner_failure_compact(
             args,
@@ -154,7 +153,6 @@ def test_skillsbench_runner_failure_honors_long_build_stall_timeout() -> None:
                 "benchflow_setup_stall_timeout_enabled": True,
                 "benchflow_setup_stall_timeout_requested_sec": 7200,
                 "benchflow_setup_stall_timeout_sec": 7200,
-                "benchflow_setup_stall_timeout_capped": False,
                 "benchflow_setup_stall_timeout_triggered": True,
                 "benchflow_setup_stall_before_agent_lifecycle": True,
             },
@@ -163,9 +161,9 @@ def test_skillsbench_runner_failure_honors_long_build_stall_timeout() -> None:
             "setup_stall_timeout_requested_sec"
         ] == 7200, compact
         assert compact["compose_setup_diagnostic"]["setup_stall_timeout_sec"] == 7200
-        assert compact["compose_setup_diagnostic"][
-            "setup_stall_timeout_capped"
-        ] is False, compact
+        assert "setup_stall_timeout_capped" not in compact[
+            "compose_setup_diagnostic"
+        ]
         compact_text = json.dumps(compact, sort_keys=True)
         assert "skillsbench docker compose build/setup stall timeout" not in compact_text
         assert "/private/" not in compact_text

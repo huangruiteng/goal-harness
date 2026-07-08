@@ -36,6 +36,7 @@ from loopx.benchmark_core import (  # noqa: E402
     RunHandle,
     build_round_artifact_restore_plan,
     compact_round_artifact_snapshots,
+    compact_benchmark_canonical_lifecycle,
     canonical_lifecycle,
     load_json_object,
     optional_float,
@@ -108,6 +109,15 @@ def test_process_started_is_not_case_entry() -> None:
     assert lifecycle["entered_benchmark_case"] is False, lifecycle
     assert lifecycle["case_attempt_countable"] is False, lifecycle
     assert lifecycle["next_required_phase"] == "runner_accepted_args", lifecycle
+    compact = compact_benchmark_canonical_lifecycle(lifecycle)
+    assert compact["current_phase"] == "process_started", compact
+    assert compact["phase_ready"]["process_started"] is True, compact
+    assert compact["phase_ready"]["runner_accepted_args"] is False, compact
+    noisy = dict(lifecycle)
+    noisy["phase_ready"] = {**lifecycle["phase_ready"], "fixture_private_phase": True}
+    assert "fixture_private_phase" not in compact_benchmark_canonical_lifecycle(
+        noisy
+    )["phase_ready"]
 
 
 def test_existing_lifecycle_builder_projects_canonical_state() -> None:

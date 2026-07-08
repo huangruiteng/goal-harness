@@ -11,6 +11,7 @@ from .benchmark_adapters.skillsbench_signals import (
 from .benchmark_adapters.skillsbench_verifier_bootstrap import (
     apply_skillsbench_verifier_bootstrap_missing_score_attribution,
 )
+from .benchmark_core import compact_benchmark_canonical_lifecycle
 from .control_plane import compact_control_plane_policy
 from .control_plane.status_collection import (
     StatusCollectionContext,
@@ -2314,7 +2315,6 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
         "loopx_source_mount_source_recorded",
         "benchflow_setup_stall_timeout_enabled",
         "benchflow_setup_stall_timeout_triggered",
-        "benchflow_setup_stall_timeout_capped",
         "benchflow_setup_stall_raw_logs_read",
         "benchflow_setup_stall_before_agent_lifecycle",
         "benchflow_agent_install_started",
@@ -2334,6 +2334,11 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
+    lifecycle = compact_benchmark_canonical_lifecycle(
+        value.get("benchmark_canonical_lifecycle")
+    )
+    if lifecycle:
+        compact["benchmark_canonical_lifecycle"] = lifecycle
     for field in (
         "codex_acp_runtime_launch_preflight_rc",
         "benchflow_user_loop_recovery_round",
@@ -2420,7 +2425,6 @@ def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
             "remote_command_file_bridge_agent_successful_loopx_command_records"
         ] = command_records
     return compact
-
 
 def _compact_benchmark_task_staging(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
@@ -2612,7 +2616,6 @@ def _compact_benchmark_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
         "official_score_missing",
         "official_result_json_materialized",
         "case_attempt_budget_should_count",
-        "setup_stall_timeout_capped",
         "runner_launch_preflight_passed",
         "apt_setup_risk_detected",
         "apt_retry_patch_required",

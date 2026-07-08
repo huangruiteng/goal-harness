@@ -136,6 +136,8 @@ from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
 )
 from loopx.benchmark_core import (  # noqa: E402
     build_benchmark_launch_observable_handle,
+    canonical_lifecycle,
+    compact_benchmark_canonical_lifecycle,
     write_benchmark_run_observable_status,
 )
 from loopx.benchmark_core.loop_protocol import (  # noqa: E402
@@ -1386,8 +1388,27 @@ def _benchmark_egress_proxy_requested_mode(
     if args is not None:
         requested = str(getattr(args, "benchmark_egress_proxy_mode", "") or "")
     if requested in BENCHMARK_EGRESS_PROXY_MODE_CHOICES:
+        if requested == "auto" and _formal_goal_benchmark_egress_proxy_required(args):
+            return "require"
         return requested
     return "auto"
+
+
+def _formal_goal_benchmark_egress_proxy_required(
+    args: argparse.Namespace | None,
+) -> bool:
+    if args is None:
+        return False
+    if bool(getattr(args, "reduce_only", False)):
+        return False
+    if not bool(getattr(args, "host_local_acp_launch", False)):
+        return False
+    if getattr(args, "route", "") not in {
+        "codex-app-server-goal-baseline",
+        CODEX_CLI_GOAL_BASELINE_ROUTE,
+    }:
+        return False
+    return _codex_api_egress_resolved_mode(args) == "reverse-tunnel"
 
 
 def _proxy_host_kind(host: str) -> str:
@@ -2849,7 +2870,6 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_final_verifier_timeout_raw_output_recorded",
         "benchflow_setup_stall_timeout_enabled",
         "benchflow_setup_stall_timeout_triggered",
-        "benchflow_setup_stall_timeout_capped",
         "benchflow_setup_stall_raw_logs_read",
         "benchflow_setup_stall_before_agent_lifecycle",
         "benchflow_agent_install_started",
@@ -2865,6 +2885,11 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
+    lifecycle = compact_benchmark_canonical_lifecycle(
+        value.get("benchmark_canonical_lifecycle")
+    )
+    if lifecycle:
+        compact["benchmark_canonical_lifecycle"] = lifecycle
     for field in (
         "codex_acp_runtime_launch_preflight_rc",
         "benchflow_agent_timeout_requested_sec",
@@ -4619,10 +4644,6 @@ def _ensure_setup_stall_timeout_prerequisites(
     )
     raw_prerequisites.setdefault(
         "benchflow_setup_stall_timeout_sec", build_stall_timeout_sec
-    )
-    raw_prerequisites.setdefault(
-        "benchflow_setup_stall_timeout_capped",
-        requested_build_stall_timeout_sec > build_stall_timeout_sec,
     )
     raw_prerequisites.setdefault("benchflow_setup_stall_timeout_triggered", True)
     raw_prerequisites.setdefault(
@@ -6580,10 +6601,6 @@ def build_compose_setup_diagnostic(
         "setup_stall_timeout_sec": _public_int(
             runner_prerequisites.get("benchflow_setup_stall_timeout_sec")
         ),
-        "setup_stall_timeout_capped": runner_prerequisites.get(
-            "benchflow_setup_stall_timeout_capped"
-        )
-        is True,
         "runner_prerequisite_status": str(
             runner_prerequisites.get(
                 "codex_acp_runtime_launch_preflight_status", ""
@@ -7899,13 +7916,16 @@ def patch_verifier_benchmark_egress_proxy_env(
     """Forward the private benchmark egress proxy into staged verifier scripts."""
 
     exports = _verifier_benchmark_egress_proxy_exports(proxy_env)
+    patch_required = bool(exports and verifier.exists())
     metadata: dict[str, Any] = {
-        "benchmark_egress_proxy_verifier_env_patch_required": bool(exports),
+        "benchmark_egress_proxy_verifier_env_patch_required": patch_required,
         "benchmark_egress_proxy_verifier_env_patch_applied": False,
-        "benchmark_egress_proxy_verifier_env_key_count": len(exports),
+        "benchmark_egress_proxy_verifier_env_key_count": (
+            len(exports) if patch_required else 0
+        ),
         "benchmark_egress_proxy_verifier_env_raw_proxy_recorded": False,
     }
-    if not verifier.exists() or not exports:
+    if not patch_required:
         return metadata
     try:
         original = verifier.read_text(encoding="utf-8", errors="replace")
@@ -8834,11 +8854,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         if is_app_server_goal_route
         else {}
     )
+    benchmark_canonical_lifecycle = canonical_lifecycle(
+        process_started=True,
+        runner_accepted_args=True,
+    )
     launch_plan = {
         "schema_version": "skillsbench_runner_launch_plan_v0",
         "benchmark_id": args.dataset,
         "task_id": task_id,
         "route": route,
+        "benchmark_canonical_lifecycle": benchmark_canonical_lifecycle,
         "agent": (
             "codex-app-server-goal"
             if is_app_server_goal_route
@@ -9002,6 +9027,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "runner_prerequisites": {
             "schema_version": "skillsbench_runner_prerequisites_v0",
+            "benchmark_canonical_lifecycle": benchmark_canonical_lifecycle,
             "benchflow_setup_stall_timeout_enabled": (
                 _effective_build_stall_timeout_sec(args) > 0
             ),
@@ -9010,10 +9036,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "benchflow_setup_stall_timeout_sec": int(
                 _effective_build_stall_timeout_sec(args)
-            ),
-            "benchflow_setup_stall_timeout_capped": (
-                _requested_build_stall_timeout_sec(args)
-                > _effective_build_stall_timeout_sec(args)
             ),
             "benchflow_setup_stall_raw_logs_read": False,
             "codex_acp_runtime_container_bootstrap": (
@@ -14394,9 +14416,6 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         requested_build_stall_timeout_sec
     )
     prerequisites["benchflow_setup_stall_timeout_sec"] = build_stall_timeout_sec
-    prerequisites["benchflow_setup_stall_timeout_capped"] = (
-        requested_build_stall_timeout_sec > build_stall_timeout_sec
-    )
     prerequisites["benchflow_setup_stall_raw_logs_read"] = False
     prerequisites["benchflow_run_stage"] = "before_benchflow_run"
 
