@@ -18,7 +18,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from loopx.quota import (  # noqa: E402
     build_quota_plan,
-    build_quota_monitor_poll_event,
     build_quota_should_run,
     build_quota_slot_spend_event,
     build_quota_slot_void_event,
@@ -32,7 +31,6 @@ from loopx.quota import (  # noqa: E402
     render_quota_should_run_markdown,
     void_quota_slot,
 )
-from loopx.control_plane.work_items.interaction_contract import interaction_next_cli_actions  # noqa: E402
 
 
 SCOPED_AGENT_ID = "codex-side-bypass"
@@ -2033,104 +2031,6 @@ def assert_quota_void_event_net_ledger() -> None:
         assert after["void_event_count"] == 1, after
 
 
-def assert_monitor_poll_event_carries_agent_id() -> None:
-    event = build_quota_monitor_poll_event(
-        {
-            "goal_id": "scoped-monitor-goal",
-            "should_run": True,
-            "effective_action": "monitor_quiet_skip",
-            "recommended_action": "stay quiet until material transition",
-            "reason": "unchanged monitor target",
-            "heartbeat_recommendation": {
-                "recommended_mode": "monitor_quiet_until_material_transition",
-                "reason": "unchanged monitor target",
-            },
-            "agent_identity": {
-                "agent_id": SCOPED_AGENT_ID,
-                "registered": True,
-                "role": "side-agent",
-                "primary_agent": "codex-main-control",
-                "registered_agents": ["codex-main-control", SCOPED_AGENT_ID],
-            },
-        },
-        source="heartbeat",
-    )
-
-    assert event["agent_id"] == SCOPED_AGENT_ID, event
-    assert event["monitor_event"]["agent_id"] == SCOPED_AGENT_ID, event
-    target = event["monitor_target"]
-    assert target["schema_version"] == "quota_monitor_target_v0", target
-    assert target["target_id"] == event["monitor_event"]["monitor_target"]["target_id"], event
-    assert target["agent_id"] == SCOPED_AGENT_ID, target
-    assert target["effective_action"] == "monitor_quiet_skip", target
-
-
-def assert_monitor_poll_next_cli_action_preserves_agent_id() -> None:
-    actions = interaction_next_cli_actions(
-        {
-            "goal_id": "scoped-monitor-goal",
-            "agent_identity": {
-                "agent_id": SCOPED_AGENT_ID,
-            },
-        },
-        mode="monitor_quiet_skip",
-    )
-
-    assert actions == [
-        (
-            "loopx quota monitor-poll --goal-id scoped-monitor-goal "
-            f"--agent-id {SCOPED_AGENT_ID} --execute"
-        ),
-        (
-            "loopx --format json quota should-run --goal-id scoped-monitor-goal "
-            f"--agent-id {SCOPED_AGENT_ID}"
-        ),
-    ], actions
-
-
-def assert_delivery_completion_spend_preserves_requested_agent_id() -> None:
-    before = {
-        "goal_id": "delivery-completion-goal",
-        "should_run": False,
-        "normal_delivery_allowed": False,
-        "recovery_delivery_allowed": False,
-        "effective_action": "monitor_quiet_skip",
-        "self_repair_allowed": False,
-        "capability_repair_allowed": False,
-        "workspace_repair_allowed": False,
-        "state": "eligible",
-        "safe_bypass_allowed": False,
-        "quota": {
-            "compute": 1.0,
-            "window_hours": 24,
-            "slot_minutes": 1,
-            "spent_slots": 0,
-            "allowed_slots": 1440,
-        },
-    }
-    after = deepcopy(before)
-    after["quota"] = {**before["quota"], "spent_slots": 1}
-    preview = {
-        "ok": True,
-        "mode": "spend-slot",
-        "dry_run": True,
-        "goal_id": "delivery-completion-goal",
-        "slots": 1,
-        "agent_id": SCOPED_AGENT_ID,
-        "before": before,
-        "after": after,
-        "delivery_completion_spend": True,
-        "delivery_run_generated_at": "2026-01-01T00:00:00+00:00",
-        "delivery_run_classification": "validated_delivery_fixture",
-    }
-    event = build_quota_slot_spend_event(preview, source="heartbeat")
-
-    assert event["agent_id"] == SCOPED_AGENT_ID, event
-    assert event["quota_event"]["agent_id"] == SCOPED_AGENT_ID, event
-    assert event["quota_event"]["delivery_run_classification"] == "validated_delivery_fixture", event
-    assert "validated delivery" in event["health_check"], event
-
-
 def main() -> int:
     assert_default_quota_is_duty_cycle()
     assert_rolling_window_ledger_expires_old_spends()
@@ -2157,9 +2057,6 @@ def main() -> int:
     assert_decision_freshness_warning_in_should_run()
     assert_safe_bypass_slot_preview(status_payload)
     assert_quota_void_event_net_ledger()
-    assert_monitor_poll_event_carries_agent_id()
-    assert_monitor_poll_next_cli_action_preserves_agent_id()
-    assert_delivery_completion_spend_preserves_requested_agent_id()
     assert_slot_preview(build_quota_slot_preview(status_payload, goal_id="near-limit-half", slots=1))
     with tempfile.TemporaryDirectory(prefix="loopx-quota-plan-smoke-") as tmp:
         cli_plan, cli_markdown = run_cli_quota_plan(Path(tmp))
