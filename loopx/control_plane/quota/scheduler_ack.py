@@ -59,6 +59,8 @@ def build_quota_scheduler_ack_event(
     applied_rrule: str,
     surface: str = CODEX_APP_SURFACE,
     state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+    reset_token: str | None = None,
+    identity_signature: str | None = None,
     generated_at: str | None = None,
     reason_summary: str | None = None,
 ) -> dict[str, Any]:
@@ -69,6 +71,8 @@ def build_quota_scheduler_ack_event(
         classification=QUOTA_SCHEDULER_ACK_CLASSIFICATION,
         surface=surface,
         state_key=state_key,
+        reset_token=reset_token,
+        identity_signature=identity_signature,
         generated_at=generated_at or _now_local(),
         reason_summary=reason_summary,
         compact_before=compact_quota_decision(before),
@@ -135,6 +139,8 @@ def record_quota_scheduler_ack_for_decision(
             applied_rrule=str(applied_rrule),
             surface=surface,
             state_key=state_key,
+            reset_token=reset_token,
+            identity_signature=identity_signature,
             generated_at=safe_generated_at,
             reason_summary=reason_summary,
         )
