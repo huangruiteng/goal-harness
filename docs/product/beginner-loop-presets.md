@@ -16,6 +16,24 @@ of creating a second `STATE.md` runtime or a separate loop ledger. The first
 run should be safe and easy to explain. Advanced presets can be powerful, but
 they must be opt-in and visibly gated.
 
+The current thin entry point is:
+
+```bash
+loopx preset list
+```
+
+For one preset card:
+
+```bash
+loopx preset show daily-triage
+loopx preset show changelog-draft
+loopx preset show pr-watch
+```
+
+These commands are read-only. They render `/loopx ...`, `start-goal`,
+`quota should-run`, and `heartbeat-prompt` command packets; they do not write
+registry state, install automations, edit docs, or create PRs.
+
 ## Recommendation Matrix
 
 | Pattern | User value | LoopX default | Recommendation |

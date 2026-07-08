@@ -37,6 +37,7 @@ from .cli_commands import (
     handle_lark_kanban_command,
     handle_ml_experiment_command,
     handle_multi_agent_command,
+    handle_preset_command,
     handle_project_lifecycle_command,
     handle_pr_review_command,
     handle_quota_command,
@@ -62,6 +63,7 @@ from .cli_commands import (
     register_lark_kanban_commands,
     register_ml_experiment_commands,
     register_multi_agent_commands,
+    register_preset_commands,
     register_project_lifecycle_commands,
     register_pr_review_command,
     register_quota_command,
@@ -166,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     register_auto_research_commands(sub, add_subcommand_format)
 
     register_multi_agent_commands(sub, add_subcommand_format)
+    register_preset_commands(sub, add_subcommand_format)
 
     register_registry_admin_commands(sub)
 
@@ -311,6 +314,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     if multi_agent_result is not None:
         return multi_agent_result
+
+    preset_result = handle_preset_command(
+        args,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if preset_result is not None:
+        return preset_result
 
     if args.command == "content-ops":
         return handle_content_ops_command(args, output_format=output_format, print_payload=print_payload)
