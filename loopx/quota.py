@@ -85,6 +85,15 @@ from .control_plane.quota.scheduler_ack import (
     build_quota_scheduler_ack_event,
     record_quota_scheduler_ack_for_decision,
 )
+from .control_plane.quota.subagent_orchestration import (
+    apply_subagent_orchestration_contract,
+    attach_subagent_payload_contract,
+    build_quota_work_lane_contract,
+    payload_work_lane_contract as _payload_work_lane_contract,
+    subagent_goal_route_hint,
+    subagent_orchestration_effective_action,
+    subagent_selected_recommended_action,
+)
 from .control_plane.quota.slot_accounting import (
     QUOTA_SLOT_SPENT_CLASSIFICATION,
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
@@ -112,11 +121,7 @@ from .control_plane.runtime.promotion_readiness import (
     promotion_readiness_warning as _promotion_readiness_warning,
 )
 from .control_plane.work_items.goal_route_hint import build_goal_route_hint
-from .control_plane.work_items.work_lane_context import (
-    build_work_lane_context_contract,
-)
 from .control_plane.work_items.work_lane import (
-    WORK_LANE_CONTRACT_SCHEMA_VERSION,
     work_lane_contract_is_due_monitor_attempt,
 )
 from .control_plane.scheduler.scheduler_hint import (
@@ -279,98 +284,6 @@ def _has_focus_wait_marker(*values: Any) -> bool:
             if marker in FOCUS_WAIT_LIFECYCLE_MARKERS:
                 return True
     return False
-
-
-def _work_lane_contract(
-    item: dict[str, Any],
-    *,
-    agent_todo_summary: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    return build_work_lane_context_contract(
-        item,
-        agent_todo_summary=agent_todo_summary,
-        monitor_due_item_limit=MONITOR_DUE_ITEM_LIMIT,
-    )
-
-
-AGENT_SCOPE_NON_EXECUTION_ACTIONS = {
-    AgentScopeFrontierAction.AGENT_SCOPE_EXHAUSTED.value,
-    AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
-    AgentScopeFrontierAction.REASSIGNMENT_REQUIRED.value,
-}
-
-
-def _agent_scope_payload_work_lane_contract(
-    work_lane_contract: dict[str, Any],
-    *,
-    effective_action: str,
-    agent_scope_frontier: dict[str, Any],
-) -> dict[str, Any]:
-    reason_codes = [
-        str(value)
-        for value in (
-            work_lane_contract.get("reason_codes")
-            if isinstance(work_lane_contract.get("reason_codes"), list)
-            else []
-        )
-        if str(value).strip()
-    ]
-    for code in ("agent_scope_no_current_runnable_candidate", effective_action):
-        if code not in reason_codes:
-            reason_codes.append(code)
-
-    deferred_work_lane = {
-        key: work_lane_contract.get(key)
-        for key in ("lane", "next_lane", "obligation", "monitor_policy")
-        if work_lane_contract.get(key) is not None
-    }
-    if work_lane_contract.get("reason_codes") is not None:
-        deferred_work_lane["reason_codes"] = work_lane_contract.get("reason_codes")
-
-    return {
-        "schema_version": str(
-            work_lane_contract.get("schema_version")
-            or WORK_LANE_CONTRACT_SCHEMA_VERSION
-        ),
-        "lane": effective_action,
-        "next_lane": str(work_lane_contract.get("lane") or "advancement_task"),
-        "obligation": "wait_for_current_agent_or_unclaimed_advancement",
-        "must_attempt_work": False,
-        "reason_codes": reason_codes,
-        "monitor_policy": "no_delivery_until_current_agent_frontier_exists",
-        "blocked_by_agent_scope": True,
-        "agent_scope_action": effective_action,
-        "deferred_work_lane": deferred_work_lane,
-        "action": (
-            agent_scope_frontier.get("recommended_action")
-            or agent_scope_frontier.get("reason")
-            or "wait for a current-agent or unclaimed advancement todo before delivery"
-        ),
-    }
-
-
-def _payload_work_lane_contract(
-    work_lane_contract: dict[str, Any] | None,
-    *,
-    effective_action: str,
-    recovery_allowed: bool,
-    agent_scope_frontier: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if recovery_allowed and effective_action == "outcome_floor_recovery":
-        return None
-    if not isinstance(work_lane_contract, dict):
-        return work_lane_contract
-    if (
-        effective_action in AGENT_SCOPE_NON_EXECUTION_ACTIONS
-        and work_lane_contract.get("must_attempt_work") is True
-        and isinstance(agent_scope_frontier, dict)
-    ):
-        return _agent_scope_payload_work_lane_contract(
-            work_lane_contract,
-            effective_action=effective_action,
-            agent_scope_frontier=agent_scope_frontier,
-        )
-    return work_lane_contract
 
 
 def _focus_wait_quota(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1470,7 +1383,17 @@ def build_quota_should_run(
             agent_todo_summary=agent_todo_summary,
         )
         self_repair_allowed = bool(stall_self_repair and stall_self_repair.get("allowed"))
-        work_lane_contract = _work_lane_contract(item, agent_todo_summary=agent_todo_summary)
+        work_lane_contract = build_quota_work_lane_contract(
+            item,
+            agent_todo_summary=agent_todo_summary,
+            monitor_due_item_limit=MONITOR_DUE_ITEM_LIMIT,
+        )
+        subagent_orchestration_contract, work_lane_contract = apply_subagent_orchestration_contract(
+            fallback_work_lane_contract=work_lane_contract,
+            goal_boundary=goal_boundary,
+            agent_identity=agent_identity,
+            agent_todo_summary=agent_todo_summary,
+        )
         agent_frontier_id = (
             normalize_todo_claimed_by(agent_identity.get("agent_id"))
             if isinstance(agent_identity, dict)
@@ -1604,6 +1527,13 @@ def build_quota_should_run(
         if automation_prompt_upgrade_required:
             should_run = False
             effective_action = "automation_prompt_upgrade_required"
+        effective_action, reason = subagent_orchestration_effective_action(
+            subagent_orchestration_contract,
+            should_run=should_run,
+            normal_delivery_allowed=normal_delivery_allowed,
+            effective_action=effective_action,
+            reason=reason,
+        )
         recommendation_item = {**item, "quota": quota}
         heartbeat_recommendation = build_heartbeat_recommendation(
             recommendation_item,
@@ -1737,6 +1667,10 @@ def build_quota_should_run(
             agent_todo_summary=agent_todo_summary,
             work_lane_contract=work_lane_contract,
         )
+        selected_recommended_action = subagent_selected_recommended_action(
+            subagent_orchestration_contract,
+            selected_recommended_action,
+        )
         due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(work_lane_contract)
         if capability_gate and not due_monitor_attempt:
             if capability_gate.get("action") in {"repair_bridge", "ask_owner", "skip"}:
@@ -1775,7 +1709,7 @@ def build_quota_should_run(
             allow_unrelated_gate=bool(quota.get("safe_bypass_allowed")),
         )
         agent_lane_next_action = None
-        if not due_monitor_attempt:
+        if not due_monitor_attempt and not subagent_orchestration_contract:
             agent_lane_next_action = build_agent_lane_next_action(
                 agent_identity=agent_identity,
                 agent_todo_summary=agent_todo_summary,
@@ -1872,6 +1806,7 @@ def build_quota_should_run(
             latest_run_recommended_action=latest_run_recommended_action_text,
             selected_recommended_action=selected_recommended_action,
         )
+        goal_route_hint = subagent_goal_route_hint(goal_route_hint, subagent_orchestration_contract)
         agent_scope_action = _agent_scope_frontier_action(effective_action)
         payload_work_lane_contract = _payload_work_lane_contract(
             work_lane_contract,
@@ -1971,6 +1906,7 @@ def build_quota_should_run(
             "plan_summary": plan.get("summary"),
             "todo_write_hint": build_todo_write_hint(safe_goal_id),
         }
+        payload = attach_subagent_payload_contract(payload, subagent_orchestration_contract)
         autonomous_replan_decision = goal_frontier_projection.get("autonomous_replan_decision")
         if isinstance(autonomous_replan_decision, dict):
             payload["autonomous_replan_decision"] = autonomous_replan_decision

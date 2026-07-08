@@ -423,6 +423,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return "external_evidence_observation"
     if kind == AUTONOMOUS_REPLAN_REQUIRED_MODE:
         return "autonomous_replan"
+    if effective_action == "orchestrate_child_lanes":
+        return "subagent_orchestration"
     agent_scope_action = _agent_scope_frontier_action(effective_action)
     if agent_scope_action is not None:
         return agent_scope_action.value
@@ -494,6 +496,21 @@ def _interaction_primary_agent_action(payload: dict[str, Any], *, mode: str) -> 
         )
     if mode == "bounded_delivery_with_user_notice":
         return _protocol_first_candidate_action(payload) or "advance one bounded validated segment"
+    if mode == "subagent_orchestration":
+        contract = (
+            payload.get("subagent_orchestration_contract")
+            if isinstance(payload.get("subagent_orchestration_contract"), dict)
+            else {}
+        )
+        lanes = (
+            contract.get("eligible_child_lanes")
+            if isinstance(contract.get("eligible_child_lanes"), list)
+            else []
+        )
+        return (
+            f"spawn/resume child lanes ({len(lanes)} eligible); "
+            "controller reviews returned evidence and writes back accepted state"
+        )
     if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
         return "wait for user/owner action after surfacing the blocker or gate"
     if mode == "outcome_floor_recovery":
@@ -770,6 +787,7 @@ def build_interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         "control_plane_self_repair",
         "boundary_projection_repair",
         "external_evidence_observation",
+        "subagent_orchestration",
         AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
         "scoped_user_gate_fallback",
         "bounded_delivery_with_user_notice",

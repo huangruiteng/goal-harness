@@ -1394,7 +1394,6 @@ def assert_quota_void_event_net_ledger() -> None:
         assert after["spend_event_count"] == 1, after
         assert after["void_event_count"] == 1, after
 
-
 def main() -> int:
     assert_default_quota_is_duty_cycle()
     assert_rolling_window_ledger_expires_old_spends()
@@ -1437,7 +1436,6 @@ def main() -> int:
         assert_slot_void_execute(*run_cli_slot_void_execute(Path(tmp)))
     print("quota-plan-smoke ok")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -919,6 +919,8 @@ If `should_run=true`:
    validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
+   `subagent_orchestration_contract`: spawn/resume eligible child lanes;
+   review/write.
    Check `delivery_batch_scale`, `delivery_outcome`,
    `post_handoff_outcome_gap_streak`, `handoff_delivery_contract`; obey
    repeated-small/surface-loop contracts.

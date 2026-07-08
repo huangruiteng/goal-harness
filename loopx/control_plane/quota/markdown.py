@@ -276,6 +276,16 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                     f"done={vision_gap_judge.get('done')} "
                     f"decision={vision_gap_judge.get('decision')}"
                 )
+    subagent_orchestration = as_dict(payload.get("subagent_orchestration_contract"))
+    if subagent_orchestration:
+        child_lanes = as_list(subagent_orchestration.get("eligible_child_lanes"))
+        lines.append(
+            "- subagent_orchestration: "
+            f"mode={subagent_orchestration.get('mode')} "
+            f"spawn_required={subagent_orchestration.get('spawn_required')} "
+            f"child_lanes={len(child_lanes)} "
+            f"writeback_owner={subagent_orchestration.get('writeback_owner')}"
+        )
     replan_decision = (
         payload.get("autonomous_replan_decision")
         if isinstance(payload.get("autonomous_replan_decision"), dict)

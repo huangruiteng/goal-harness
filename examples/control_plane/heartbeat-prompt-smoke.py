@@ -215,6 +215,8 @@ def main() -> int:
         "ranker/cross-domain evidence artifact",
         "status/log/metric/marker poll",
         "heartbeat_recommendation",
+        "subagent_orchestration_contract",
+        "spawn/resume eligible child lanes",
         "goal_boundary",
         "delivery_batch_scale",
         "delivery_outcome",
