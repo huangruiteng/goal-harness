@@ -139,6 +139,37 @@ def main() -> int:
     assert requested["transition"]["decision"] == "runnable_successor", requested
     assert requested["transition"]["action_kind"] == "issue_fix_review_changes_replan"
 
+    blocked_pending = build_issue_fix_pr_lifecycle_monitor_packet(
+        url="https://github.com/huangruiteng/loopx/pull/1715",
+        provider_payload={
+            "state": "OPEN",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "mergeStateStatus": "BLOCKED",
+            "statusCheckRollup": [{"name": "lint", "status": "IN_PROGRESS"}],
+        },
+    )
+    assert_packet_shape(blocked_pending)
+    assert blocked_pending["transition"]["decision"] == "monitor_continuation"
+    assert blocked_pending["transition"]["action_kind"] == (
+        "issue_fix_pr_checks_pending_monitor"
+    )
+    assert blocked_pending["transition"]["material_change"] is False
+
+    stale = build_issue_fix_pr_lifecycle_monitor_packet(
+        url="https://github.com/huangruiteng/loopx/pull/1715",
+        provider_payload={
+            "state": "OPEN",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "mergeStateStatus": "BEHIND",
+            "statusCheckRollup": [{"name": "lint", "conclusion": "SUCCESS"}],
+        },
+    )
+    assert_packet_shape(stale)
+    assert stale["transition"]["decision"] == "runnable_successor"
+    assert stale["transition"]["action_kind"] == (
+        "issue_fix_branch_or_merge_blocker_replan"
+    )
+
     quiet = build_issue_fix_pr_lifecycle_monitor_packet(
         url="https://github.com/huangruiteng/loopx/pull/1715",
         provider_payload={
@@ -176,8 +207,15 @@ def main() -> int:
         assert key == {"repo": "huangruiteng/loopx", "pr_ref": "pull_1715"}
         result = upsert_issue_fix_pr_lifecycle_ledger_jsonl(ledger, quiet)
         assert result["status"] == "inserted", result
+        first_inode = ledger.stat().st_ino
         result = upsert_issue_fix_pr_lifecycle_ledger_jsonl(ledger, quiet)
-        assert result["status"] == "updated", result
+        assert result["status"] == "unchanged", result
+        assert result["write_performed"] is False, result
+        assert ledger.stat().st_ino == first_inode
+        assert quiet["domain_state_projection"]["write_performed"] is False, quiet
+        assert quiet["domain_state_projection"]["write_skipped_reason"] == (
+            "observation_fingerprint_unchanged"
+        ), quiet
         rows = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
         assert len(rows) == 1, rows
         assert rows[0]["domain_state_key"] == key, rows
@@ -211,8 +249,11 @@ def main() -> int:
         )
         cli_packet = json.loads(cli_result.stdout)
         assert_packet_shape(cli_packet)
-        assert cli_packet["domain_state_projection"]["write_performed"] is True
+        assert cli_packet["domain_state_projection"]["write_performed"] is False
         write_result = cli_packet["domain_state_projection"]["write_result"]
+        assert write_result["status"] == "unchanged", write_result
+        assert write_result["write_performed"] is False, write_result
+        assert ledger.stat().st_ino == first_inode
         assert write_result["path_recorded"] is False, write_result
         persisted_rows = [
             json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()
@@ -222,6 +263,12 @@ def main() -> int:
         assert persisted_projection["write_performed"] is True, persisted_rows[0]
         assert "write_result" not in persisted_projection, persisted_rows[0]
         assert_public_safe(cli_packet)
+
+        material_result = upsert_issue_fix_pr_lifecycle_ledger_jsonl(ledger, failing)
+        assert material_result["status"] == "updated", material_result
+        assert material_result["write_performed"] is True, material_result
+        assert failing["domain_state_projection"]["write_performed"] is True, failing
+        assert ledger.stat().st_ino != first_inode
 
     print("issue-fix-pr-lifecycle-smoke: ok")
     return 0
