@@ -23,25 +23,6 @@ INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 
 
-def _protocol_todo_actions(summary: Any, *, limit: int = 3) -> list[str]:
-    if not isinstance(summary, dict):
-        return []
-    first_open_items = summary.get("first_open_items")
-    if not isinstance(first_open_items, list):
-        return []
-    actions: list[str] = []
-    for item in first_open_items:
-        if not isinstance(item, dict):
-            continue
-        text = _protocol_action_label(item.get("text"))
-        if not text:
-            continue
-        actions.append(text)
-        if len(actions) >= limit:
-            break
-    return actions
-
-
 def _user_todo_item_is_explicitly_non_gating(item: dict[str, Any]) -> bool:
     if item.get("gating") is False or item.get("non_gating") is True:
         return True
@@ -83,6 +64,33 @@ def user_channel_action_required(payload: dict[str, Any]) -> bool:
     return bool(payload.get("requires_user_action")) or bool(
         user_channel_action_todo_actions(payload.get("user_todo_summary"))
     )
+
+
+def projected_user_channel_actions(
+    payload: dict[str, Any],
+    *,
+    limit: int = 3,
+) -> list[str]:
+    actions = user_channel_action_todo_actions(
+        payload.get("user_todo_summary"),
+        limit=limit,
+    )
+    if actions or not user_channel_action_required(payload):
+        return actions
+    capability_gate = (
+        payload.get("capability_gate")
+        if isinstance(payload.get("capability_gate"), dict)
+        else {}
+    )
+    if capability_gate.get("action") == "ask_owner":
+        owner_action = protocol_action_text(capability_gate.get("owner_action"))
+        if owner_action:
+            return [owner_action]
+    for key in ("gate_prompt", "operator_question", "open_todo_notify_reason"):
+        text = protocol_action_text(payload.get(key))
+        if text:
+            return [text]
+    return []
 
 
 def attach_user_action_compat_fields(payload: dict[str, Any]) -> None:
@@ -134,24 +142,7 @@ def build_protocol_action_packet(payload: dict[str, Any]) -> dict[str, Any]:
         and not scoped_user_gate_fallback
     )
 
-    user_actions = _protocol_todo_actions(payload.get("user_todo_summary"))
-    if requires_user_action and not user_actions:
-        capability_gate = (
-            payload.get("capability_gate")
-            if isinstance(payload.get("capability_gate"), dict)
-            else {}
-        )
-        if capability_gate.get("action") == "ask_owner":
-            owner_action = protocol_action_text(capability_gate.get("owner_action"))
-            if owner_action:
-                user_actions = [owner_action]
-        for key in ("gate_prompt", "operator_question", "open_todo_notify_reason"):
-            if user_actions:
-                break
-            text = protocol_action_text(payload.get(key))
-            if text:
-                user_actions = [text]
-                break
+    user_actions = projected_user_channel_actions(payload)
 
     if requires_user_action and scoped_user_gate_fallback:
         primary_actor = "agent_with_user_gate"
@@ -651,6 +642,9 @@ def _build_interaction_user_channel(
     }
     if user_required:
         channel["max_items"] = 3
+        actions = projected_user_channel_actions(payload, limit=3)
+        if actions:
+            channel["actions"] = actions
     reason = _interaction_user_reason(payload)
     if reason:
         channel["reason"] = reason
