@@ -172,6 +172,7 @@ def main() -> int:
 
     quiet = build_issue_fix_pr_lifecycle_monitor_packet(
         url="https://github.com/huangruiteng/loopx/pull/1715",
+        issue_ref="issues_1700",
         provider_payload={
             "state": "OPEN",
             "reviewDecision": "REVIEW_REQUIRED",
@@ -181,6 +182,7 @@ def main() -> int:
     )
     assert_packet_shape(quiet)
     assert quiet["transition"]["decision"] == "monitor_continuation", quiet
+    assert quiet["observation"]["issue_ref"] == "issues_1700", quiet
     assert quiet["transition"]["material_change"] is False
     assert quiet["writeback_contract"]["monitor_quiet_skip_allowed"] is True
     repo_ref = build_issue_fix_pr_lifecycle_monitor_packet(
@@ -241,6 +243,8 @@ def main() -> int:
                 "https://github.com/huangruiteng/loopx/pull/1715",
                 "--metadata-json",
                 str(metadata_path),
+                "--issue-ref",
+                "issues_1700",
                 "--goal-id",
                 "example-goal",
                 "--project",

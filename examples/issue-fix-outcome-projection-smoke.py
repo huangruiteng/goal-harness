@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -11,12 +12,26 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx.capabilities.issue_fix.outcome_projection import (  # noqa: E402
+    build_issue_fix_outcome_collection_from_domain_state,
     build_issue_fix_outcome_projection,
+)
+from loopx.capabilities.issue_fix.feasibility import (  # noqa: E402
+    build_issue_fix_feasibility_packet,
+)
+from loopx.capabilities.issue_fix.pr_lifecycle import (  # noqa: E402
+    build_issue_fix_pr_lifecycle_monitor_packet,
+)
+from loopx.domain_packs.issue_fix import (  # noqa: E402
+    default_issue_fix_domain_state_ledger_path,
+    default_issue_fix_feasibility_ledger_path,
+    upsert_issue_fix_feasibility_ledger_jsonl,
+    upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
 from loopx.presentation.sinks.lark.kanban import (  # noqa: E402
     LarkKanbanConfig,
     STATUS_DONE,
     sync_loopx_projection_to_lark_kanban,
+    sync_loopx_todos_to_lark_kanban,
 )
 
 
@@ -116,6 +131,137 @@ def delivery_evidence() -> dict[str, object]:
         ],
         "risks": ["full integration suite remains outside focused validation"],
     }
+
+
+def assert_default_goal_sync_composes_outcomes() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-issue-fix-closeout-") as tmp:
+        project = Path(tmp)
+        goal_id = "public-issue-fix-closeout"
+        registry = project / "registry.json"
+        state = project / "active-state.md"
+        state.write_text(
+            "\n".join(
+                [
+                    "## User Todo / Owner Review Reading Queue",
+                    "",
+                    "## Agent Todo",
+                    "",
+                    "- [ ] [P2] Continue public fixture monitor",
+                    "  <!-- loopx: todo_id=todo_monitor status=open task_class=continuous_monitor action_kind=monitor claimed_by=codex-public-fixture -->",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        registry.write_text(
+            json.dumps(
+                {
+                    "goals": [
+                        {
+                            "id": goal_id,
+                            "repo": str(project),
+                            "state_file": state.name,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        feasibility_ledger = default_issue_fix_feasibility_ledger_path(
+            project=project,
+            goal_id=goal_id,
+        )
+        for number in (42, 43):
+            packet = build_issue_fix_feasibility_packet(
+                url=f"https://github.com/public-fixture/widgets/issues/{number}",
+                reproduction_status="confirmed",
+                scope_class="bounded",
+                reproduction_label=f"focused fixture repro {number}",
+                validation_label=f"focused fixture validation {number}",
+            )
+            upsert_issue_fix_feasibility_ledger_jsonl(feasibility_ledger, packet)
+
+        lifecycle_ledger = default_issue_fix_domain_state_ledger_path(
+            project=project,
+            goal_id=goal_id,
+        )
+        linked = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/public-fixture/widgets/pull/77",
+            issue_ref="issues_42",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [
+                    {"name": "focused", "conclusion": "SUCCESS"}
+                ],
+            },
+        )
+        assert linked["observation"]["issue_ref"] == "issues_42", linked
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(lifecycle_ledger, linked)
+        unlinked = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/public-fixture/widgets/pull/78",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(lifecycle_ledger, unlinked)
+
+        collection = build_issue_fix_outcome_collection_from_domain_state(
+            goal_id=goal_id,
+            project=project,
+            agent_id="codex-public-fixture",
+        )
+        assert collection["ok"] is True, collection
+        assert collection["validation"]["ok"] is True, collection
+        assert collection["source_counts"] == {
+            "feasibility": 2,
+            "pr_lifecycle": 2,
+            "outcomes": 2,
+            "unlinked_pr_lifecycle": 1,
+        }, collection
+        collection_by_issue = {
+            item["issue_ref"]: item for item in collection["issue_fix_outcomes"]
+        }
+        assert collection_by_issue["issues_42"]["pull_request"]["number"] == 77
+        assert collection_by_issue["issues_43"]["pull_request"] is None
+        assert collection["source_contract"]["creates_parallel_state_machine"] is False
+
+        sync = sync_loopx_todos_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            registry_path=registry,
+            goal_id=goal_id,
+            agent_id="codex-public-fixture",
+            execute=False,
+        )
+        assert sync["ok"] is True, sync
+        assert sync["todo_count"] == 1, sync
+        assert sync["issue_fix_outcome_count"] == 2, sync
+        outcome_records = [
+            item
+            for item in sync["records"]
+            if item["values"].get("Work Item Type") == "Issue Fix"
+        ]
+        assert len(outcome_records) == 2, sync
+        linked_record = next(
+            item
+            for item in outcome_records
+            if item["values"]["Issue"].endswith("/issues/42")
+        )
+        assert linked_record["values"]["Pull Request"].endswith("/pull/77")
+        unlinked_record = next(
+            item
+            for item in outcome_records
+            if item["values"]["Issue"].endswith("/issues/43")
+        )
+        assert unlinked_record["values"]["Pull Request"] == ""
+        assert str(project) not in json.dumps(sync["records"], ensure_ascii=False)
 
 
 def main() -> None:
@@ -252,6 +398,8 @@ def main() -> None:
         assert "repo-relative" in str(exc) or "public-safe" in str(exc), exc
     else:
         raise AssertionError("absolute changed file should be rejected")
+
+    assert_default_goal_sync_composes_outcomes()
 
     print("issue-fix-outcome-projection-smoke: ok")
 
