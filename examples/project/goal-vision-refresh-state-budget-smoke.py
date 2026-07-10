@@ -168,6 +168,7 @@ def main() -> int:
                     "vision_summary": "Map the next evidence frontier and hand off one runnable claim.",
                     "role_scope": "Owns framing; does not run evaluation.",
                     "acceptance_summary": "One successor todo plus evidence references.",
+                    "advancement_policy": "repeat_until_closed",
                     "replan_trigger_summary": "Frontier exhausted while acceptance remains open.",
                 },
                 "todo_delta": ["create_successor"],
@@ -215,6 +216,9 @@ def main() -> int:
         assert indexed_vision["vision_patch"]["replan_trigger_summary"] == (
             "Frontier exhausted while acceptance remains open."
         ), indexed_vision
+        assert indexed_vision["vision_patch"]["advancement_policy"] == (
+            "repeat_until_closed"
+        ), indexed_vision
         assert indexed_vision["todo_delta"] == ["create_successor"], indexed_vision
         assert indexed_checkpoint["agent_id"] == AGENT_ID, indexed_checkpoint
         assert indexed_checkpoint["decision"] == "patched", indexed_checkpoint
@@ -235,6 +239,7 @@ def main() -> int:
             "vision_summary": 63,
             "role_scope": 38,
             "acceptance_summary": 44,
+            "advancement_policy": 19,
             "replan_trigger_summary": 49,
         }, latest_status_vision
         assert latest_status_checkpoint["agent_id"] == AGENT_ID, latest_status_checkpoint
@@ -256,6 +261,8 @@ def main() -> int:
                     "Owns research framing and successor routing.",
                     "--vision-acceptance",
                     "At least two visible research passes produce evidence-backed next steps.",
+                    "--vision-advancement-policy",
+                    "repeat_until_closed",
                     "--vision-replan-trigger",
                     "The current frontier explains mechanism work but not multi-round research uplift.",
                     "--vision-todo-delta",
@@ -268,6 +275,9 @@ def main() -> int:
         assert inline["agent_vision"]["state"] == "vision_drift_detected", inline
         assert inline["agent_vision"]["vision_patch"]["replan_trigger_summary"] == (
             "The current frontier explains mechanism work but not multi-round research uplift."
+        ), inline
+        assert inline["agent_vision"]["vision_patch"]["advancement_policy"] == (
+            "repeat_until_closed"
         ), inline
         assert inline["agent_vision"]["todo_delta"] == ["create_successor"], inline
         assert inline["vision_checkpoint"]["agent_id"] == AGENT_ID, inline
@@ -467,6 +477,29 @@ def main() -> int:
         assert "active_state_next_action" in secret_next_action["error"], secret_next_action
         assert "secret-looking value" in secret_next_action["error"], secret_next_action
         assert "AK/SK" in secret_next_action["error"], secret_next_action
+
+        write_json(
+            invalid_path,
+            {
+                "goal_id": GOAL_ID,
+                "agent_id": AGENT_ID,
+                "vision_patch": {
+                    "vision_summary": "Invalid advancement policy should fail.",
+                    "advancement_policy": "always_loop",
+                },
+            },
+        )
+        invalid_policy_result = run_cli(
+            registry_path,
+            runtime,
+            vision_path=invalid_path,
+            check=False,
+        )
+        assert invalid_policy_result.returncode == 1, invalid_policy_result
+        invalid_policy = payload(invalid_policy_result)
+        assert "advancement_policy must be one of" in invalid_policy["error"], (
+            invalid_policy
+        )
 
         write_json(
             invalid_path,
