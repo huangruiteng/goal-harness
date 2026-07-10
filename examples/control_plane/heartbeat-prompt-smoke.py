@@ -238,6 +238,11 @@ def main() -> int:
         command = str(capability_scoped_payload[command_key])
         assert "--available-capability network" in command, command
         assert "--available-capability external_evidence_poll" in command, command
+    capability_task_body = str(capability_scoped_payload["task_body"])
+    assert "--available-capability network" in capability_task_body, capability_task_body
+    assert "--available-capability external_evidence_poll" in capability_task_body, (
+        capability_task_body
+    )
     assert "productization showcase docs lane" in normalized(str(profile_scoped_payload["task_body"])), (
         profile_scoped_payload
     )
