@@ -56,6 +56,10 @@ def upsert_domain_state_jsonl(
     key: dict[str, Any],
     existing_key_fn: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     unchanged_fn: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None,
+    merge_existing_fn: Callable[
+        [dict[str, Any], dict[str, Any]], dict[str, Any]
+    ]
+    | None = None,
 ) -> dict[str, Any]:
     """Upsert a payload into a JSONL domain-state file by stable key."""
 
@@ -85,11 +89,19 @@ def upsert_domain_state_jsonl(
                         row_key = existing_key_fn(row)
                     if isinstance(row, dict) and row_key == key:
                         if not updated:
-                            if unchanged_fn is not None and unchanged_fn(row, candidate):
+                            merged_candidate = (
+                                merge_existing_fn(row, candidate)
+                                if merge_existing_fn is not None
+                                else candidate
+                            )
+                            if (
+                                unchanged_fn is not None
+                                and unchanged_fn(row, merged_candidate)
+                            ):
                                 rows.append(row)
                                 unchanged = True
                             else:
-                                rows.append(candidate)
+                                rows.append(merged_candidate)
                             updated = True
                         continue
                     rows.append(row)

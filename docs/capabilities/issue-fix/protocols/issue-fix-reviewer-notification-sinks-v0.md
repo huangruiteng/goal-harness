@@ -39,7 +39,10 @@ local capability packet rather than public issue-fix state:
       "sink_kind": "lark_chat",
       "sink_instance_key": "project-review-lane",
       "identity_scope": "project_dedicated",
-      "bot_profile": "project-review-bot-profile",
+      "reader_profile": "project-user-profile",
+      "reader_identity": "user",
+      "sender_profile": "project-review-bot-profile",
+      "sender_identity": "bot",
       "bot_display_name": "Project Review Bot",
       "destination_id": "<private-chat-id>",
       "reviewer_identities": {
@@ -53,9 +56,17 @@ local capability packet rather than public issue-fix state:
 }
 ```
 
-`bot_profile`, `destination_id`, and `member_id` are execution inputs. They are
+The explicit reader/user binding verifies access to the approved destination.
+The sender/bot binding independently verifies the dedicated bot identity and,
+in that app's `open_id` namespace, verifies mapped reviewer membership before
+performing send plus readback. Neither
+binding depends on the machine's active/default Lark profile. The legacy
+`bot_profile` field remains accepted for explicit manual configs, but a
+goal-default config requires both bindings.
+
+Profile names, `destination_id`, and `member_id` are execution inputs. They are
 never copied into the result, domain state, todo, Kanban, PR, or public log.
-The first contract requires a named, project-dedicated bot profile and expected
+The first contract requires a named, project-dedicated sender profile and expected
 `bot_display_name`, verifies the live bot identity before every send, and
 rejects shared/default or mismatched identities. This prevents a long-running
 project employee from silently speaking as an unrelated application.
@@ -78,6 +89,24 @@ is returned as a receipt. Callers store only that compact receipt in existing is
 and pass it back on retry; a matching receipt returns `already_notified`
 without a provider call.
 
+For connected goals, register only the repo-relative local-private pointer:
+
+```bash
+loopx configure-goal \
+  --goal-id example-goal \
+  --issue-fix-reviewer-notification-config \
+  .loopx/config/issue-fix/reviewer-notification-sinks.json \
+  --execute
+```
+
+Then `reviewer-request --goal-id example-goal --project ...` discovers the
+config automatically. Execute mode requires the PR's existing lifecycle row,
+merges its verified hashed receipts into the private input, and writes only new
+receipts back to that same row. A restart or retry therefore remains
+idempotent without a second ledger. Goal boundary/status projections expose
+only that the capability and pointer are configured; they never expose the
+pointer value or profiles (`config_pointer_registered=true`).
+
 A zero exit status is insufficient. The adapter requires a message id from the
 send response, fetches that message with the same dedicated bot profile, and
 verifies both the id and marker. Results distinguish `preview_ready`,
@@ -90,8 +119,8 @@ Permission or group-membership errors become the concrete
 For a Lark sink, provision one app/bot identity for the project lane, grant only
 the scopes required for sending and group/member resolution, publish the app,
 and have the target group's owner or administrator install it. A local named
-CLI profile selects those credentials explicitly. The contract never falls
-back to the machine's default bot profile.
+CLI profiles select reader and sender credentials explicitly. The contract
+never falls back to the machine's default user or bot profile.
 
 The setup gate should tell the owner exactly which missing invariant to repair:
 

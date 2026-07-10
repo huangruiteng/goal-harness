@@ -25,6 +25,8 @@ PRIVATE_PATTERNS = (
     re.compile(r"oc_[A-Za-z0-9_-]+"),
     re.compile(r"ou_[A-Za-z0-9_-]+"),
     re.compile(r"cli-private-profile"),
+    re.compile(r"fixture-reader-profile"),
+    re.compile(r"fixture-sender-profile"),
 )
 
 
@@ -36,17 +38,39 @@ class FakeSinkRunner:
         verify_returncode: int = 0,
         include_marker: bool = True,
         bot_name: str = "Project Review Bot",
+        reader_verified: bool = True,
+        include_member: bool = True,
+        member_id: str = "ou_private_member",
     ) -> None:
         self.send_returncode = send_returncode
         self.verify_returncode = verify_returncode
         self.include_marker = include_marker
         self.bot_name = bot_name
+        self.reader_verified = reader_verified
+        self.include_member = include_member
+        self.member_id = member_id
         self.calls: list[list[str]] = []
 
     def __call__(self, args: list[str]) -> dict[str, Any]:
         command = list(args)
         self.calls.append(command)
         if command[-4:] == ["auth", "status", "--verify", "--json"]:
+            profile = command[2]
+            if profile == "fixture-reader-profile":
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        {
+                            "identities": {
+                                "user": {
+                                    "available": self.reader_verified,
+                                    "verified": self.reader_verified,
+                                }
+                            }
+                        }
+                    ),
+                    "stderr": "",
+                }
             return {
                 "returncode": 0,
                 "stdout": json.dumps(
@@ -58,6 +82,20 @@ class FakeSinkRunner:
                                 "appName": self.bot_name,
                             }
                         }
+                    }
+                ),
+                "stderr": "",
+            }
+        if "chat.members" in command and "get" in command:
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    {
+                        "items": [
+                            {"member_id": self.member_id}
+                            if self.include_member
+                            else {"member_id": "ou_someone_else"}
+                        ]
                     }
                 ),
                 "stderr": "",
@@ -98,26 +136,39 @@ class FakeSinkRunner:
         raise AssertionError(command)
 
 
-def fixture(*, reviewer: str = "@service-owner") -> dict[str, Any]:
+def fixture(
+    *,
+    reviewer: str = "@service-owner",
+    explicit_profiles: bool = False,
+) -> dict[str, Any]:
+    sink: dict[str, Any] = {
+        "sink_kind": "lark_chat",
+        "sink_instance_key": "fixture-review-lane",
+        "identity_scope": "project_dedicated",
+        "bot_profile": "cli-private-profile",
+        "bot_display_name": "Project Review Bot",
+        "destination_id": "oc_private_destination",
+        "reviewer_identities": {
+            reviewer: {
+                "member_id": "ou_private_member",
+                "display_name": "Service Owner",
+            }
+        },
+    }
+    if explicit_profiles:
+        sink.pop("bot_profile")
+        sink.update(
+            {
+                "reader_profile": "fixture-reader-profile",
+                "reader_identity": "user",
+                "sender_profile": "fixture-sender-profile",
+                "sender_identity": "bot",
+            }
+        )
     return {
         "schema_version": ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_INPUT_SCHEMA_VERSION,
         "receipts": [],
-        "sinks": [
-            {
-                "sink_kind": "lark_chat",
-                "sink_instance_key": "fixture-review-lane",
-                "identity_scope": "project_dedicated",
-                "bot_profile": "cli-private-profile",
-                "bot_display_name": "Project Review Bot",
-                "destination_id": "oc_private_destination",
-                "reviewer_identities": {
-                    reviewer: {
-                        "member_id": "ou_private_member",
-                        "display_name": "Service Owner",
-                    }
-                },
-            }
-        ],
+        "sinks": [sink],
     }
 
 
@@ -227,6 +278,81 @@ def main() -> int:
     assert re.fullmatch(r"sha256:[a-f0-9]{64}", receipt)
     assert provider_key != receipt
     assert_public_safe(sent)
+
+    explicit_runner = FakeSinkRunner()
+    explicit = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=fixture(explicit_profiles=True),
+        execute=True,
+        runner=explicit_runner,
+    )
+    assert explicit["ok"] is True, explicit
+    assert explicit["results"][0]["reader_identity_verified"] is True
+    assert len(explicit_runner.calls) == 6, explicit_runner.calls
+    explicit_send = next(
+        call for call in explicit_runner.calls if "+messages-send" in call
+    )
+    assert explicit_send[:3] == [
+        "lark-cli",
+        "--profile",
+        "fixture-sender-profile",
+    ]
+    member_read = next(
+        call for call in explicit_runner.calls if "chat.members" in call
+    )
+    assert member_read[:3] == [
+        "lark-cli",
+        "--profile",
+        "fixture-reader-profile",
+    ]
+    assert member_read[member_read.index("--as") + 1] == "user"
+    sender_member_read = next(
+        call
+        for call in explicit_runner.calls
+        if "chat.members" in call and call[call.index("--as") + 1] == "bot"
+    )
+    assert sender_member_read[:3] == [
+        "lark-cli",
+        "--profile",
+        "fixture-sender-profile",
+    ]
+    assert_public_safe(explicit)
+
+    missing_member = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=fixture(explicit_profiles=True),
+        execute=True,
+        runner=FakeSinkRunner(include_member=False),
+    )
+    assert missing_member["ok"] is False, missing_member
+    assert missing_member["blocker"] == "reviewer_notification_identity_unresolved"
+    assert missing_member["external_writes_performed"] is False
+    assert_public_safe(missing_member)
+
+    substring_member = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=fixture(explicit_profiles=True),
+        execute=True,
+        runner=FakeSinkRunner(member_id="ou_private_member_suffix"),
+    )
+    assert substring_member["ok"] is False, substring_member
+    assert substring_member["blocker"] == (
+        "reviewer_notification_identity_unresolved"
+    )
+    assert substring_member["external_writes_performed"] is False
+    assert_public_safe(substring_member)
 
     retry_input = fixture()
     retry_input["receipts"] = [receipt]

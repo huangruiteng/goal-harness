@@ -23,7 +23,8 @@ The default strategy is `request_top_requestable_when_authorized`:
    comment's reviewer marker and public URL to be visible;
 7. continue PR lifecycle monitoring only after that verification.
 
-An optional `--notification-sinks-json` may then deliver the same verified
+An optional `--notification-sinks-json`, or a goal-default local-private config
+registered through `configure-goal`, may then deliver the same verified
 reviewer through project-dedicated secondary channels. Secondary delivery is
 separate evidence: it never replaces GitHub review state, never reranks the
 reviewer, and cannot erase a successful canonical request when its own setup is
@@ -69,6 +70,32 @@ loopx issue-fix reviewer-request \
   --format json
 ```
 
+For a connected long-running goal, register the local-private pointer once and
+let the normal post-PR call discover it:
+
+```bash
+loopx configure-goal \
+  --goal-id example-goal \
+  --issue-fix-reviewer-notification-config \
+  .loopx/config/issue-fix/reviewer-notification-sinks.json \
+  --execute
+
+loopx issue-fix reviewer-request \
+  --goal-id example-goal \
+  --project /path/to/approved/repo \
+  --url https://github.com/owner/repo/pull/123 \
+  --repo-path /path/to/approved/repo \
+  --base-ref origin/main \
+  --execute \
+  --format json
+```
+
+Goal-default execute mode requires the existing PR lifecycle row and persists
+only verified `sha256:` secondary receipts into that row. The local config,
+profiles, destination, and member mapping are not copied. Repeating the call
+after restart returns `already_notified` without another secondary provider
+write.
+
 Preview without an external write by supplying compact, caller-approved PR
 metadata containing `author`, `comments`, `reviewRequests`, `reviews`, and
 `state`:
@@ -109,6 +136,8 @@ The packet records:
 - one structured transition.
 - optional secondary-sink status, verification, and hashed receipts without
   private destination, member, or bot-profile fields.
+- whether the sink came from an explicit input or the goal default, and whether
+  verified hashed receipts were persisted in existing PR lifecycle state.
 
 Successful verified requests emit `issue_fix_reviewer_request_verified` with
 `monitor_continuation`. Confirmed permission denial followed by a verified

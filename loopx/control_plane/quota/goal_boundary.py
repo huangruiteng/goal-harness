@@ -105,6 +105,30 @@ def goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> d
     guards = goal.get("guards") if isinstance(goal.get("guards"), list) else []
     if guards:
         boundary["guards"] = [str(value) for value in guards if str(value).strip()]
+    control_plane = (
+        goal.get("control_plane")
+        if isinstance(goal.get("control_plane"), dict)
+        else {}
+    )
+    issue_fix = (
+        control_plane.get("issue_fix")
+        if isinstance(control_plane.get("issue_fix"), dict)
+        else {}
+    )
+    reviewer_notification = (
+        issue_fix.get("reviewer_notification")
+        if isinstance(issue_fix.get("reviewer_notification"), dict)
+        else {}
+    )
+    if reviewer_notification.get("enabled") is True:
+        boundary.setdefault("capabilities", {})[
+            "issue_fix_reviewer_notification"
+        ] = {
+            "enabled": True,
+            "config_pointer_registered": bool(
+                reviewer_notification.get("config_path")
+            ),
+        }
     if goal.get("next_probe"):
         boundary["next_probe"] = str(goal.get("next_probe"))
     spawn_policy = goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else None

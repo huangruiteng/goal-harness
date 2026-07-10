@@ -166,7 +166,10 @@ def main() -> int:
     assert_markers(
         reviewer_notification_sink_protocol,
         (
-            "project-dedicated bot profile",
+            "reader/user binding",
+            "sender/bot binding",
+            "config_pointer_registered",
+            "existing lifecycle row",
             "local capability packet",
             "lark_bot_group_access_required",
             "private_destination_captured",

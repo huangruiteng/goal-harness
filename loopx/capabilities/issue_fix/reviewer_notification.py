@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
@@ -32,6 +33,120 @@ LARK_MESSAGE_PATTERN = re.compile(r"om_[A-Za-z0-9_-]+")
 
 CommandRunner = Callable[[Sequence[str]], Mapping[str, Any]]
 NotificationSinkAdapter = Callable[..., dict[str, Any]]
+
+
+def goal_reviewer_notification_config_path(
+    *,
+    goal: Mapping[str, Any],
+    project: str | Path,
+) -> Path | None:
+    """Resolve a registered local-private sink config without exposing its path."""
+
+    control_plane = (
+        goal.get("control_plane")
+        if isinstance(goal.get("control_plane"), Mapping)
+        else {}
+    )
+    issue_fix = (
+        control_plane.get("issue_fix")
+        if isinstance(control_plane.get("issue_fix"), Mapping)
+        else {}
+    )
+    policy = (
+        issue_fix.get("reviewer_notification")
+        if isinstance(issue_fix.get("reviewer_notification"), Mapping)
+        else {}
+    )
+    if policy.get("enabled") is not True:
+        return None
+    raw_path = str(policy.get("config_path") or "").strip().replace("\\", "/")
+    relative = PurePosixPath(raw_path)
+    if (
+        not raw_path
+        or relative.is_absolute()
+        or ".." in relative.parts
+        or len(relative.parts) < 3
+        or relative.parts[:2] != (".loopx", "config")
+        or relative.suffix != ".json"
+    ):
+        raise ValueError("goal reviewer notification config pointer is invalid")
+    root = Path(project).expanduser().resolve()
+    resolved = (root / Path(*relative.parts)).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            "goal reviewer notification config must stay inside the project"
+        ) from exc
+    return resolved
+
+
+def load_goal_reviewer_notification_sinks_input(
+    *,
+    goal: Mapping[str, Any],
+    project: str | Path,
+) -> dict[str, Any] | None:
+    """Load the goal-default sink config and require explicit profile bindings."""
+
+    path = goal_reviewer_notification_config_path(goal=goal, project=project)
+    if path is None:
+        return None
+    if not path.is_file():
+        raise ValueError("goal reviewer notification config is registered but missing")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("goal reviewer notification config is not valid JSON") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != (
+        ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_INPUT_SCHEMA_VERSION
+    ):
+        raise ValueError("goal reviewer notification config schema is invalid")
+    sinks = payload.get("sinks")
+    if not isinstance(sinks, list) or not sinks:
+        raise ValueError("goal reviewer notification config must define sinks")
+    for sink in sinks:
+        if not isinstance(sink, Mapping):
+            raise ValueError("goal reviewer notification sinks must be objects")
+        if sink.get("sink_kind") == "lark_chat" and not (
+            SAFE_LOCAL_KEY_PATTERN.fullmatch(str(sink.get("reader_profile") or ""))
+            and sink.get("reader_identity") == "user"
+            and SAFE_LOCAL_KEY_PATTERN.fullmatch(
+                str(sink.get("sender_profile") or "")
+            )
+            and sink.get("sender_identity") == "bot"
+        ):
+            raise ValueError(
+                "goal lark reviewer notification requires explicit reader/user "
+                "and sender/bot profile bindings"
+            )
+    return payload
+
+
+def reviewer_notification_receipts_from_state(
+    packet: Mapping[str, Any] | None,
+) -> list[str]:
+    values = packet.get("reviewer_notification_receipts") if packet else []
+    return list(
+        dict.fromkeys(
+            str(value)
+            for value in (values if isinstance(values, list) else [])
+            if re.fullmatch(r"sha256:[a-f0-9]{64}", str(value))
+        )
+    )
+
+
+def with_reviewer_notification_receipts(
+    sinks_input: Mapping[str, Any],
+    receipts: Sequence[str],
+) -> dict[str, Any]:
+    merged = reviewer_notification_receipts_from_state(
+        {"reviewer_notification_receipts": list(receipts)}
+    )
+    for value in sinks_input.get("receipts") or []:
+        text = str(value)
+        if re.fullmatch(r"sha256:[a-f0-9]{64}", text) and text not in merged:
+            merged.append(text)
+    return {**dict(sinks_input), "receipts": merged}
 
 
 def _default_runner(args: Sequence[str]) -> Mapping[str, Any]:
@@ -102,6 +217,28 @@ def _parse_json_object(value: Any) -> Mapping[str, Any] | None:
     return payload if isinstance(payload, Mapping) else None
 
 
+def _lark_member_ids(value: Any) -> set[str]:
+    """Collect exact member ids from a provider response without retaining it."""
+
+    member_ids: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key, child in node.items():
+                if key in {"member_id", "open_id"} and isinstance(child, str):
+                    member_id = child.strip()
+                    if LARK_MEMBER_PATTERN.fullmatch(member_id):
+                        member_ids.add(member_id)
+                else:
+                    visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return member_ids
+
+
 def _public_result(
     *,
     sink_kind: str,
@@ -114,6 +251,7 @@ def _public_result(
     verification_performed: bool = False,
     notification_verified: bool = False,
     bot_identity_verified: bool = False,
+    reader_identity_verified: bool = False,
     blocker: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
@@ -130,6 +268,7 @@ def _public_result(
         "verification_performed": verification_performed,
         "notification_verified": notification_verified,
         "bot_identity_verified": bot_identity_verified,
+        "reader_identity_verified": reader_identity_verified,
         "private_destination_captured": False,
         "private_member_ids_captured": False,
         "private_bot_profile_captured": False,
@@ -163,7 +302,21 @@ def _lark_result(
             blocker="dedicated_bot_identity_required",
         )
 
-    profile = str(sink.get("bot_profile") or "").strip()
+    explicit_profile_bindings = any(
+        sink.get(field) is not None
+        for field in (
+            "reader_profile",
+            "reader_identity",
+            "sender_profile",
+            "sender_identity",
+        )
+    )
+    reader_profile = str(sink.get("reader_profile") or "").strip()
+    reader_identity = str(sink.get("reader_identity") or "").strip()
+    profile = str(
+        sink.get("sender_profile") or sink.get("bot_profile") or ""
+    ).strip()
+    sender_identity = str(sink.get("sender_identity") or "bot").strip()
     expected_bot_name = public_safe_compact_text(
         sink.get("bot_display_name"),
         limit=100,
@@ -175,6 +328,15 @@ def _lark_result(
         or profile.lower() == "default"
         or not SAFE_LOCAL_KEY_PATTERN.fullmatch(instance_key)
         or not expected_bot_name
+        or sender_identity != "bot"
+        or (
+            explicit_profile_bindings
+            and (
+                not SAFE_LOCAL_KEY_PATTERN.fullmatch(reader_profile)
+                or reader_identity != "user"
+                or not sink.get("sender_profile")
+            )
+        )
     ):
         return _public_result(
             sink_kind=sink_kind,
@@ -252,6 +414,86 @@ def _lark_result(
             external_write_authority_asserted=False,
         )
 
+    reader_verified = False
+    if explicit_profile_bindings:
+        try:
+            reader_status = runner(
+                [
+                    "lark-cli",
+                    "--profile",
+                    reader_profile,
+                    "auth",
+                    "status",
+                    "--verify",
+                    "--json",
+                ]
+            )
+        except (OSError, subprocess.SubprocessError):
+            reader_status = {"returncode": 1}
+        reader_payload = _parse_json_object(reader_status.get("stdout"))
+        reader = (
+            (reader_payload.get("identities") or {}).get("user")
+            if isinstance(reader_payload, Mapping)
+            and isinstance(reader_payload.get("identities"), Mapping)
+            else {}
+        )
+        reader = reader if isinstance(reader, Mapping) else {}
+        reader_verified = bool(
+            reader_status.get("returncode") == 0
+            and reader.get("available") is True
+            and reader.get("verified") is True
+        )
+        if not reader_verified:
+            return _public_result(
+                sink_kind=sink_kind,
+                reviewer_handles=reviewer_handles,
+                idempotency_key=key,
+                status="gate_required",
+                ok=False,
+                external_write_authority_asserted=True,
+                blocker="reviewer_notification_reader_identity_mismatch",
+            )
+        try:
+            members = runner(
+                [
+                    "lark-cli",
+                    "--profile",
+                    reader_profile,
+                    "im",
+                    "chat.members",
+                    "get",
+                    "--chat-id",
+                    destination_id,
+                    "--member-id-type",
+                    "open_id",
+                    "--page-all",
+                    "--as",
+                    "user",
+                    "--format",
+                    "json",
+                ]
+            )
+        except (OSError, subprocess.SubprocessError):
+            members = {"returncode": 1}
+        if members.get("returncode") != 0:
+            provider_error = " ".join(
+                str(members.get(field) or "") for field in ("stderr", "stdout")
+            )
+            return _public_result(
+                sink_kind=sink_kind,
+                reviewer_handles=reviewer_handles,
+                idempotency_key=key,
+                status="gate_required",
+                ok=False,
+                external_write_authority_asserted=True,
+                reader_identity_verified=True,
+                blocker=(
+                    "lark_bot_group_access_required"
+                    if LARK_PERMISSION_PATTERN.search(provider_error)
+                    else "reviewer_notification_provider_failed"
+                ),
+            )
+
     try:
         identity_status = runner(
             [
@@ -288,7 +530,67 @@ def _lark_result(
             ok=False,
             external_write_authority_asserted=True,
             blocker="dedicated_bot_identity_mismatch",
+            reader_identity_verified=reader_verified,
         )
+
+    if explicit_profile_bindings:
+        try:
+            sender_members = runner(
+                [
+                    "lark-cli",
+                    "--profile",
+                    profile,
+                    "im",
+                    "chat.members",
+                    "get",
+                    "--chat-id",
+                    destination_id,
+                    "--member-id-type",
+                    "open_id",
+                    "--page-all",
+                    "--as",
+                    "bot",
+                    "--format",
+                    "json",
+                ]
+            )
+        except (OSError, subprocess.SubprocessError):
+            sender_members = {"returncode": 1}
+        if sender_members.get("returncode") != 0:
+            provider_error = " ".join(
+                str(sender_members.get(field) or "")
+                for field in ("stderr", "stdout")
+            )
+            return _public_result(
+                sink_kind=sink_kind,
+                reviewer_handles=reviewer_handles,
+                idempotency_key=key,
+                status="gate_required",
+                ok=False,
+                external_write_authority_asserted=True,
+                bot_identity_verified=True,
+                reader_identity_verified=reader_verified,
+                blocker=(
+                    "lark_bot_group_access_required"
+                    if LARK_PERMISSION_PATTERN.search(provider_error)
+                    else "reviewer_notification_provider_failed"
+                ),
+            )
+        sender_member_ids = _lark_member_ids(
+            _parse_json_object(sender_members.get("stdout"))
+        )
+        if any(member_id not in sender_member_ids for _, member_id, _ in resolved):
+            return _public_result(
+                sink_kind=sink_kind,
+                reviewer_handles=reviewer_handles,
+                idempotency_key=key,
+                status="gate_required",
+                ok=False,
+                external_write_authority_asserted=True,
+                bot_identity_verified=True,
+                reader_identity_verified=reader_verified,
+                blocker="reviewer_notification_identity_unresolved",
+            )
 
     marker = f"loopx-reviewer-notification:{key.partition(':')[2][:16]}"
     provider_idempotency_key = f"loopx-{key.partition(':')[2][:32]}"
@@ -338,6 +640,7 @@ def _lark_result(
             external_write_authority_asserted=True,
             blocker="reviewer_notification_provider_unavailable",
             bot_identity_verified=True,
+            reader_identity_verified=reader_verified,
         )
     if send.get("returncode") != 0:
         provider_error = " ".join(
@@ -356,6 +659,7 @@ def _lark_result(
                 else "reviewer_notification_provider_failed"
             ),
             bot_identity_verified=True,
+            reader_identity_verified=reader_verified,
         )
 
     send_payload = _parse_json_object(send.get("stdout"))
@@ -371,6 +675,7 @@ def _lark_result(
             external_write_performed=True,
             blocker="lark_notification_not_verified",
             bot_identity_verified=True,
+            reader_identity_verified=reader_verified,
         )
     try:
         readback = runner(
@@ -413,6 +718,7 @@ def _lark_result(
         verification_performed=True,
         notification_verified=verified,
         bot_identity_verified=True,
+        reader_identity_verified=reader_verified,
         blocker=None if verified else "lark_notification_not_verified",
     )
 
