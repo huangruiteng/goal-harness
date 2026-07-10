@@ -24,6 +24,8 @@ from .control_plane.todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_excluded_agents,
     parse_todo_metadata_line,
+    parse_todo_metadata_tokens,
+    require_todo_excluded_agents,
     todo_status_from_marker,
 )
 
@@ -301,6 +303,7 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
             marker, text = match.groups()
             metadata: dict[str, Any] = {}
             removed_continuation_policy: str | None = None
+            malformed_excluded_agents = False
             next_index = index + 1
             while next_index < len(lines):
                 if lines[next_index].startswith("## ") or TODO_TASK_PATTERN.match(lines[next_index]):
@@ -315,6 +318,14 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
                 )
                 if removed_match:
                     removed_continuation_policy = removed_match.group(1)
+                raw_metadata = parse_todo_metadata_tokens(lines[next_index])
+                for key, value in raw_metadata or []:
+                    if key not in {"excluded_agent", "excluded_agents"}:
+                        continue
+                    try:
+                        require_todo_excluded_agents(value)
+                    except ValueError:
+                        malformed_excluded_agents = True
                 parsed = parse_todo_metadata_line(lines[next_index])
                 if parsed:
                     metadata.update(parsed)
@@ -322,6 +333,12 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
             status = str(metadata.get("status") or todo_status_from_marker(marker) or "").lower()
             task_class = str(metadata.get("task_class") or "")
             todo_id = metadata.get("todo_id") or f"line:{index + 1}"
+            if malformed_excluded_agents:
+                errors.append(
+                    f"{goal_id}: todo {todo_id} has malformed excluded_agents metadata; "
+                    "replace it with --excluded-agent <registered-agent> or remove it "
+                    "with --clear-excluded-agents"
+                )
             if role == "agent" and removed_continuation_policy:
                 errors.append(
                     f"{goal_id}: agent todo {todo_id} uses removed continuation_policy="

@@ -570,14 +570,25 @@ def decode_metadata_value(value: Any) -> str:
     return compact_todo_text(unquote(str(value or "")))
 
 
-def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
+def parse_todo_metadata_tokens(line: str) -> list[tuple[str, str]] | None:
     match = TODO_METADATA_PATTERN.match(line)
     if not match:
         return None
+    return [
+        (
+            token.group("key").replace("-", "_"),
+            decode_metadata_value(token.group("value")),
+        )
+        for token in TODO_METADATA_TOKEN_PATTERN.finditer(match.group("body"))
+    ]
+
+
+def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
+    tokens = parse_todo_metadata_tokens(line)
+    if tokens is None:
+        return None
     metadata: dict[str, Any] = {}
-    for token in TODO_METADATA_TOKEN_PATTERN.finditer(match.group("body")):
-        key = token.group("key").replace("-", "_")
-        value = decode_metadata_value(token.group("value"))
+    for key, value in tokens:
         if key == "todo_id":
             todo_id = normalize_todo_id(value)
             if todo_id:
