@@ -171,6 +171,11 @@ def test_public_launcher_uses_container_reachable_benchmark_proxy() -> None:
     assert "--local-codex-sandbox danger-full-access" in output, output
     assert "local_codex_sandbox=danger-full-access" in output, output
     assert "remote_codex_bin_mode=explicit" in output, output
+    assert (
+        "--local-ledger-catchup-run-group-contains "
+        "skillsbench-codex-cli-goal-xhigh-citation-check-egress-smoke-"
+        "20260709T000000CST" in output
+    ), output
     assert "--append-history" not in output, output
 
 
