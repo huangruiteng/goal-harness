@@ -133,7 +133,7 @@ def main() -> int:
         assert proc.returncode == 0, proc.stderr or proc.stdout
         request = json.loads(observed_request.read_text(encoding="utf-8"))
         assert request == {"operation": "exec", "cwd": "/app", "command": "pwd && ls -la", "timeout_sec": 10}, request
-        assert '/root/answer.json' in packet and '/root/task-input-or-data' in packet, packet
+        assert '/root/task-input-or-data' in packet and '/root/answer.json' not in packet and 'Do not force relative paths into `/root` or `/app`' in packet, packet
         assert "`/app`, `/tmp`, and `/root`" in packet, packet
         trace_dir = tmp_path / "traces"
         relay = SkillsBenchLocalAcpRelay(
