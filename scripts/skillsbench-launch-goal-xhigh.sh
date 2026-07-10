@@ -27,6 +27,8 @@ Optional env:
   SKILLSBENCH_REASONING_EFFORT         Reasoning effort, default xhigh
   SKILLSBENCH_REMOTE_CODEX_BIN          Codex CLI executable on remote runner;
                                        default codex from remote PATH
+  SKILLSBENCH_LOCAL_CODEX_SANDBOX      Host Codex sandbox mode; default
+                                       workspace-write
   SKILLSBENCH_BUILD_STALL_TIMEOUT_SEC  Setup stall timeout, default 3600;
                                        0 disables cap
   SKILLSBENCH_RUN_TIMEOUT_SEC          Supervisor timeout, default 28800
@@ -42,6 +44,10 @@ Optional env:
   SKILLSBENCH_LOCAL_RUN_LEDGER_SEED    Optional accepted-lane ledger copied
                                        when the live ledger does not exist yet;
                                        keep unrelated benchmark lanes out
+  SKILLSBENCH_LEDGER_CATCHUP_GROUP     Optional run-group substring used for
+                                       local ledger catch-up. Canonical runs
+                                       default to the Goal campaign prefix;
+                                       isolated ledgers default to this run.
   SKILLSBENCH_CANONICAL_CASE_IDS_FILE  Optional canonical case-id file; enables
                                        standard aggregate refresh after closeout
   SKILLSBENCH_STANDARD_AGGREGATE_PATH  Aggregate output path; default beside
@@ -109,6 +115,7 @@ if [[ -n "${SKILLSBENCH_SSH_OPTIONS:-}" ]]; then
 fi
 
 remote_codex_bin="${SKILLSBENCH_REMOTE_CODEX_BIN:-codex}"
+local_codex_sandbox="${SKILLSBENCH_LOCAL_CODEX_SANDBOX:-workspace-write}"
 remote_codex_bin_mode="path_lookup"
 if [[ -n "${SKILLSBENCH_REMOTE_CODEX_BIN:-}" ]]; then
   remote_codex_bin_mode="explicit"
@@ -256,6 +263,13 @@ fi
 
 run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
 job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
+if [[ -n "${SKILLSBENCH_LEDGER_CATCHUP_GROUP:-}" ]]; then
+  ledger_catchup_group="$SKILLSBENCH_LEDGER_CATCHUP_GROUP"
+elif [[ -n "${SKILLSBENCH_CANONICAL_CASE_IDS_FILE:-}" ]]; then
+  ledger_catchup_group="skillsbench-codex-cli-goal-xhigh-"
+else
+  ledger_catchup_group="$run_group"
+fi
 
 public_root=".local/goals/${goal_id}/skillsbench-runs"
 public_dir="${public_root}/${run_group}"
@@ -288,6 +302,7 @@ remote_command=$(
     --benchmark-egress-proxy-mode require \
     --host-local-acp-launch \
     --local-codex-bin "$remote_codex_bin" \
+    --local-codex-sandbox "$local_codex_sandbox" \
     --remote-command-file-bridge-probe \
     --run-group-id "$run_group" \
     --job-name "$job_name"
@@ -317,7 +332,7 @@ supervisor_cmd=(
   --local-run-ledger-path "$local_run_ledger"
   --local-run-group-id "$run_group"
   --local-ledger-catchup-root "$public_root"
-  --local-ledger-catchup-run-group-contains "skillsbench-codex-cli-goal-xhigh-"
+  --local-ledger-catchup-run-group-contains "$ledger_catchup_group"
   --private-log-path "${private_dir}/remote-command.log"
   --public-output-path "${public_dir}/supervisor.public.json"
 )
@@ -348,6 +363,7 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
   printf 'docker_api_version=%s\n' "$docker_api_version"
   printf 'remote_codex_bin_mode=%s\n' "$remote_codex_bin_mode"
+  printf 'local_codex_sandbox=%s\n' "$local_codex_sandbox"
   printf 'local_run_ledger=%s\n' "$local_run_ledger"
   if [[ -n "${standard_aggregate:-}" ]]; then
     printf 'standard_aggregate=%s\n' "$standard_aggregate"
@@ -394,4 +410,5 @@ docker_proxy_host=${docker_proxy_host}
 docker_proxy_endpoint_mode=${docker_proxy_endpoint_mode}
 docker_api_version=${docker_api_version}
 remote_codex_bin_mode=${remote_codex_bin_mode}
+local_codex_sandbox=${local_codex_sandbox}
 EOF

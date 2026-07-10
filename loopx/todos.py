@@ -18,7 +18,6 @@ from .status import (
 )
 from .control_plane.todos.contract import (
     TODO_MONITOR_METADATA_FIELDS,
-    TODO_METADATA_FIELDS,
     TODO_CONTINUATION_POLICY_VALUES,
     TodoContinuationPolicy,
     TODO_STATUS_DEFERRED,
@@ -27,9 +26,11 @@ from .control_plane.todos.contract import (
     TODO_TASK_CLASS_USER_GATE,
     build_todo_id,
     format_todo_metadata_line,
+    metadata_line_for_todo_block,
     merge_todo_id_lists,
     normalize_required_capabilities,
     normalize_required_write_scopes,
+    normalize_explore_result_node_refs,
     normalize_target_capabilities,
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
@@ -480,143 +481,6 @@ def matching_todo_block(
     return None
 
 
-def block_metadata(block: dict[str, Any]) -> dict[str, Any]:
-    metadata: dict[str, Any] = {}
-    for key in TODO_METADATA_FIELDS:
-        value = block.get(key)
-        if value is None:
-            continue
-        if key == "required_write_scopes":
-            scopes = normalize_required_write_scopes(value)
-            if scopes:
-                metadata[key] = scopes
-            continue
-        if key == "required_capabilities":
-            capabilities = normalize_required_capabilities(value)
-            if capabilities:
-                metadata[key] = capabilities
-            continue
-        if key == "target_capabilities":
-            capabilities = normalize_target_capabilities(value)
-            if capabilities:
-                metadata[key] = capabilities
-            continue
-        if key == "excluded_agents":
-            excluded_agents = normalize_todo_excluded_agents(value)
-            if excluded_agents:
-                metadata[key] = excluded_agents
-            continue
-        if key == "continuation_policy":
-            continuation_policy = normalize_todo_continuation_policy(value)
-            if continuation_policy:
-                metadata[key] = continuation_policy
-            continue
-        if key == "decision_scope":
-            decision_scope = normalize_todo_decision_scope(value)
-            if decision_scope:
-                metadata[key] = decision_scope
-            continue
-        if key == "required_decision_scopes":
-            scopes = normalize_todo_required_decision_scopes(value)
-            if scopes:
-                metadata[key] = scopes
-            continue
-        if key == "no_followup":
-            no_followup = normalize_todo_no_followup(value)
-            if no_followup is not None:
-                metadata[key] = no_followup
-            continue
-        if key == "global_gate":
-            global_gate = normalize_todo_global_gate(value)
-            if global_gate is not None:
-                metadata[key] = global_gate
-            continue
-        if str(value or "").strip():
-            metadata[key] = str(value).strip()
-    return metadata
-
-
-def metadata_line_for_block(block: dict[str, Any], updates: dict[str, Any]) -> str | None:
-    metadata = block_metadata(block)
-    for key, value in updates.items():
-        if key not in TODO_METADATA_FIELDS:
-            continue
-        if value is None:
-            metadata.pop(key, None)
-        elif key == "required_write_scopes":
-            scopes = normalize_required_write_scopes(value)
-            if scopes:
-                metadata[key] = scopes
-            else:
-                metadata.pop(key, None)
-        elif key == "required_capabilities":
-            capabilities = normalize_required_capabilities(value)
-            if capabilities:
-                metadata[key] = capabilities
-            else:
-                metadata.pop(key, None)
-        elif key == "target_capabilities":
-            capabilities = normalize_target_capabilities(value)
-            if capabilities:
-                metadata[key] = capabilities
-            else:
-                metadata.pop(key, None)
-        elif key == "excluded_agents":
-            excluded_agents = normalize_todo_excluded_agents(value)
-            if excluded_agents:
-                metadata[key] = excluded_agents
-            else:
-                metadata.pop(key, None)
-        elif key == "continuation_policy":
-            continuation_policy = normalize_todo_continuation_policy(value)
-            if continuation_policy:
-                metadata[key] = continuation_policy
-            elif value:
-                raise ValueError(
-                    "todo continuation_policy must be one of: "
-                    + ", ".join(sorted(TODO_CONTINUATION_POLICY_VALUES))
-                )
-            else:
-                metadata.pop(key, None)
-        elif key == "decision_scope":
-            decision_scope = normalize_todo_decision_scope(value)
-            if decision_scope:
-                metadata[key] = decision_scope
-            else:
-                metadata.pop(key, None)
-        elif key == "required_decision_scopes":
-            scopes = normalize_todo_required_decision_scopes(value)
-            if scopes:
-                metadata[key] = scopes
-            else:
-                metadata.pop(key, None)
-        elif key == "no_followup":
-            no_followup = normalize_todo_no_followup(value)
-            if no_followup is not None:
-                metadata[key] = no_followup
-            else:
-                metadata.pop(key, None)
-        elif key == "successor_todo_ids":
-            todo_ids = normalize_todo_id_list(value)
-            if todo_ids:
-                metadata[key] = todo_ids
-            else:
-                metadata.pop(key, None)
-        elif key == "global_gate":
-            global_gate = normalize_todo_global_gate(value)
-            if global_gate is not None:
-                metadata[key] = global_gate
-            else:
-                metadata.pop(key, None)
-        elif str(value).strip():
-            metadata[key] = str(value).strip()
-    if "todo_id" not in metadata and block.get("todo_id"):
-        metadata["todo_id"] = str(block["todo_id"])
-    if "status" not in metadata:
-        metadata["status"] = TODO_STATUS_DONE if block.get("done") else TODO_STATUS_OPEN
-    return format_todo_metadata_line(**metadata)
-
-
 def upsert_todo_metadata(lines: list[str], block: dict[str, Any], metadata_line: str | None) -> bool:
     if not metadata_line:
         return False
@@ -659,7 +523,7 @@ def link_generated_successor_todo_ids(
     metadata_updated = upsert_todo_metadata(
         lines,
         block,
-        metadata_line_for_block(block, {"successor_todo_ids": merged_successor_ids}),
+        metadata_line_for_todo_block(block, {"successor_todo_ids": merged_successor_ids}),
     )
     update_result["successor_todo_ids"] = merged_successor_ids
     update_result["metadata_updated"] = bool(update_result.get("metadata_updated") or metadata_updated)
@@ -747,6 +611,7 @@ def add_todo_to_lines(
     required_write_scopes: list[str] | None = None,
     required_capabilities: list[str] | None = None,
     target_capabilities: list[str] | None = None,
+    explore_result_node_refs: list[str] | None = None,
     decision_scope: Any = None,
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
@@ -817,6 +682,7 @@ def add_todo_to_lines(
             required_write_scopes=required_write_scopes,
             required_capabilities=required_capabilities,
             target_capabilities=target_capabilities,
+            explore_result_node_refs=explore_result_node_refs,
             decision_scope=decision_scope,
             required_decision_scopes=required_decision_scopes,
             claimed_by=claimed_by,
@@ -855,6 +721,8 @@ def add_todo_to_lines(
             updates["required_capabilities"] = required_capabilities
         if target_capabilities is not None:
             updates["target_capabilities"] = target_capabilities
+        if explore_result_node_refs is not None:
+            updates["explore_result_node_refs"] = explore_result_node_refs
         if decision_scope is not None:
             updates["decision_scope"] = decision_scope
         if required_decision_scopes is not None:
@@ -876,7 +744,7 @@ def add_todo_to_lines(
             updates["evidence"] = evidence
         if updated_at and not block.get("updated_at"):
             updates["updated_at"] = updated_at
-        metadata_line = metadata_line_for_block(block, updates)
+        metadata_line = metadata_line_for_todo_block(block, updates)
         metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
         todo_id = str(block.get("todo_id") or "")
         effective_metadata = parse_todo_metadata_line(metadata_line or "") or {}
@@ -905,6 +773,9 @@ def add_todo_to_lines(
         ),
         "target_capabilities": normalize_target_capabilities(
             effective_metadata.get("target_capabilities") or target_capabilities
+        ),
+        "explore_result_node_refs": normalize_explore_result_node_refs(
+            effective_metadata.get("explore_result_node_refs") or explore_result_node_refs
         ),
         "decision_scope": normalize_todo_decision_scope(
             effective_metadata.get("decision_scope") or decision_scope
@@ -942,6 +813,7 @@ def add_goal_todo(
     required_write_scopes: list[str] | None = None,
     required_capabilities: list[str] | None = None,
     target_capabilities: list[str] | None = None,
+    explore_result_node_refs: list[str] | None = None,
     decision_scope: Any = None,
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
@@ -1062,6 +934,7 @@ def add_goal_todo(
             required_write_scopes=required_write_scopes,
             required_capabilities=required_capabilities,
             target_capabilities=target_capabilities,
+            explore_result_node_refs=explore_result_node_refs,
             decision_scope=decision_scope,
             required_decision_scopes=required_decision_scopes,
             claimed_by=effective_claimed_by,
@@ -1102,6 +975,7 @@ def add_goal_todo(
         "required_write_scopes": add_result.get("required_write_scopes"),
         "required_capabilities": add_result.get("required_capabilities"),
         "target_capabilities": add_result.get("target_capabilities"),
+        "explore_result_node_refs": add_result.get("explore_result_node_refs"),
         "decision_scope": add_result.get("decision_scope"),
         "required_decision_scopes": add_result.get("required_decision_scopes"),
         "claimed_by": add_result.get("claimed_by"),
@@ -1160,6 +1034,7 @@ def apply_todo_update_to_lines(
     required_write_scopes: list[str] | None = None,
     required_capabilities: list[str] | None = None,
     target_capabilities: list[str] | None = None,
+    explore_result_node_refs: list[str] | None = None,
     decision_scope: Any = None,
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
@@ -1223,6 +1098,8 @@ def apply_todo_update_to_lines(
         updates["required_capabilities"] = required_capabilities
     if target_capabilities is not None:
         updates["target_capabilities"] = target_capabilities
+    if explore_result_node_refs is not None:
+        updates["explore_result_node_refs"] = explore_result_node_refs
     if decision_scope is not None:
         updates["decision_scope"] = decision_scope
     if required_decision_scopes is not None:
@@ -1256,11 +1133,11 @@ def apply_todo_update_to_lines(
     for key, value in (monitor_metadata or {}).items():
         if key in TODO_MONITOR_METADATA_FIELDS:
             updates[key] = value
-    metadata_line = metadata_line_for_block(block, updates)
+    metadata_line = metadata_line_for_todo_block(block, updates)
     semantic_metadata_changed = todo_metadata_would_change(lines, block, metadata_line)
     if status_changed or text_changed or semantic_metadata_changed:
         updates["updated_at"] = updated_at
-        metadata_line = metadata_line_for_block(block, updates)
+        metadata_line = metadata_line_for_todo_block(block, updates)
     metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
     effective_metadata = parse_todo_metadata_line(metadata_line or "") or {}
     return {
@@ -1284,6 +1161,9 @@ def apply_todo_update_to_lines(
         ),
         "target_capabilities": normalize_target_capabilities(
             effective_metadata.get("target_capabilities")
+        ),
+        "explore_result_node_refs": normalize_explore_result_node_refs(
+            effective_metadata.get("explore_result_node_refs")
         ),
         "decision_scope": normalize_todo_decision_scope(effective_metadata.get("decision_scope")),
         "required_decision_scopes": normalize_todo_required_decision_scopes(
@@ -1322,6 +1202,7 @@ def update_goal_todo(
     required_write_scopes: list[str] | None = None,
     required_capabilities: list[str] | None = None,
     target_capabilities: list[str] | None = None,
+    explore_result_node_refs: list[str] | None = None,
     decision_scope: Any = None,
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
@@ -1508,6 +1389,7 @@ def update_goal_todo(
             required_write_scopes=required_write_scopes,
             required_capabilities=required_capabilities,
             target_capabilities=target_capabilities,
+            explore_result_node_refs=explore_result_node_refs,
             decision_scope=decision_scope,
             required_decision_scopes=required_decision_scopes,
             claimed_by=effective_claimed_by,
@@ -1909,7 +1791,7 @@ def supersede_goal_todo(
                 update_result["metadata_updated"] = upsert_todo_metadata(
                     lines,
                     block,
-                    metadata_line_for_block(
+                    metadata_line_for_todo_block(
                         block,
                         {
                             "superseded_by": superseded_by,

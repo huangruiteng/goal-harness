@@ -37,6 +37,22 @@ def test_pip_bootstrap_failure_attribution() -> None:
     assert "pip_bootstrap_failure" in fingerprint["matched_patterns"], fingerprint
 
 
+def test_task_skills_context_does_not_shadow_pip_failure() -> None:
+    error_text = (
+        "Docker compose command failed while task skills metadata references "
+        "/app/skills. Dockerfile RUN pip install numpy did not complete "
+        "successfully: externally-managed-environment."
+    )
+
+    exception_type, attribution, labels = skillsbench_runner_error_attribution(
+        error_text
+    )
+    expected = "skillsbench_docker_compose_pip_bootstrap_failure"
+    assert exception_type == expected
+    assert attribution == expected
+    assert "skillsbench_python_package_bootstrap_failure" in labels, labels
+
+
 def test_docker_api_version_mismatch_attribution() -> None:
     error_text = (
         "Docker compose command failed. Error response from daemon: "
@@ -161,6 +177,7 @@ def test_failure_dependency_classes_ignore_unrelated_dockerfile_lines() -> None:
 
 if __name__ == "__main__":
     test_pip_bootstrap_failure_attribution()
+    test_task_skills_context_does_not_shadow_pip_failure()
     test_docker_api_version_mismatch_attribution()
     test_docker_compose_plugin_unavailable_attribution()
     test_injected_pip_lines_do_not_mask_later_build_failure()

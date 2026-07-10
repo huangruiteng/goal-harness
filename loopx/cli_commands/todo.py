@@ -129,6 +129,20 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     todo_parser.add_argument(
+        "--explore-result-node-ref",
+        dest="explore_result_node_refs",
+        action="append",
+        help=(
+            "For todo add/update, link an explicit public-safe Explore result node id. "
+            "Repeat for multiple nodes; analysis resolves only these links."
+        ),
+    )
+    todo_parser.add_argument(
+        "--clear-explore-result-node-refs",
+        action="store_true",
+        help="For todo update, remove all explicit Explore result node links.",
+    )
+    todo_parser.add_argument(
         "--decision-scope",
         help=(
             "For user_gate add/update, declare the concrete decision as "
@@ -406,6 +420,10 @@ def handle_todo_command(
                 raise ValueError("todo add requires --text")
             if args.clear_claim:
                 raise ValueError("todo add accepts --claimed-by but not --clear-claim")
+            if args.clear_explore_result_node_refs:
+                raise ValueError(
+                    "todo add accepts --explore-result-node-ref but not --clear-explore-result-node-refs"
+                )
             if args.next_claimed_by:
                 raise ValueError("todo add does not support --next-claimed-by")
             if args.next_continuation_policy:
@@ -434,6 +452,7 @@ def handle_todo_command(
                 required_write_scopes=args.required_write_scopes,
                 required_capabilities=args.required_capabilities,
                 target_capabilities=args.target_capabilities,
+                explore_result_node_refs=args.explore_result_node_refs,
                 decision_scope=args.decision_scope,
                 required_decision_scopes=args.required_decision_scopes,
                 claimed_by=args.claimed_by,
@@ -474,6 +493,8 @@ def handle_todo_command(
                     ("--required-write-scope", args.required_write_scopes),
                     ("--required-capability", args.required_capabilities),
                     ("--target-capability", args.target_capabilities),
+                    ("--explore-result-node-ref", args.explore_result_node_refs),
+                    ("--clear-explore-result-node-refs", args.clear_explore_result_node_refs),
                     ("--decision-scope", args.decision_scope),
                     ("--required-decision-scope", args.required_decision_scopes),
                     ("--blocks-agent", args.blocks_agent),
@@ -523,6 +544,11 @@ def handle_todo_command(
                 raise ValueError("todo update requires --todo-id")
             if args.claimed_by and args.clear_claim:
                 raise ValueError("todo update accepts either --claimed-by or --clear-claim, not both")
+            if args.explore_result_node_refs and args.clear_explore_result_node_refs:
+                raise ValueError(
+                    "todo update accepts either --explore-result-node-ref or "
+                    "--clear-explore-result-node-refs, not both"
+                )
             if not any([
                 args.text,
                 args.followups,
@@ -536,6 +562,8 @@ def handle_todo_command(
                 args.required_write_scopes,
                 args.required_capabilities,
                 args.target_capabilities,
+                args.explore_result_node_refs,
+                args.clear_explore_result_node_refs,
                 args.decision_scope,
                 args.required_decision_scopes,
                 args.claimed_by,
@@ -583,6 +611,11 @@ def handle_todo_command(
                 required_write_scopes=args.required_write_scopes,
                 required_capabilities=args.required_capabilities,
                 target_capabilities=args.target_capabilities,
+                explore_result_node_refs=(
+                    []
+                    if args.clear_explore_result_node_refs
+                    else args.explore_result_node_refs
+                ),
                 decision_scope=args.decision_scope,
                 required_decision_scopes=args.required_decision_scopes,
                 claimed_by=args.claimed_by,
@@ -610,6 +643,10 @@ def handle_todo_command(
         elif args.todo_command == "complete":
             if not args.todo_id:
                 raise ValueError("todo complete requires --todo-id")
+            if args.explore_result_node_refs or args.clear_explore_result_node_refs:
+                raise ValueError(
+                    "todo complete does not update --explore-result-node-ref; use todo update first"
+                )
             if args.claimed_by and args.clear_claim:
                 raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
             if args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.unblocks_todo_id or args.resume_when:
@@ -662,6 +699,10 @@ def handle_todo_command(
         elif args.todo_command == "supersede":
             if not args.todo_id:
                 raise ValueError("todo supersede requires --todo-id")
+            if args.explore_result_node_refs or args.clear_explore_result_node_refs:
+                raise ValueError(
+                    "todo supersede does not update --explore-result-node-ref; use todo update first"
+                )
             if args.claimed_by:
                 raise ValueError(
                     "todo supersede does not support --claimed-by; use --next-claimed-by "
