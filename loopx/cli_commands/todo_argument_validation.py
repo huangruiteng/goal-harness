@@ -23,6 +23,7 @@ TODO_OPTION_FIELDS = (
     ("--required-decision-scope", "required_decision_scopes"),
     ("--claimed-by", "claimed_by"),
     ("--blocks-agent", "blocks_agent"),
+    ("--clear-blocks-agent", "clear_blocks_agent"),
     ("--excluded-agent", "excluded_agents"),
     ("--clear-excluded-agents", "clear_excluded_agents"),
     ("--global-gate", "global_gate"),

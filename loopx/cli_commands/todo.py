@@ -158,6 +158,11 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     todo_parser.add_argument(
+        "--clear-blocks-agent",
+        action="store_true",
+        help="For todo update, remove the existing blocks_agent field.",
+    )
+    todo_parser.add_argument(
         "--excluded-agent",
         dest="excluded_agents",
         action="append",
@@ -409,6 +414,8 @@ def handle_todo_command(
                 raise ValueError("todo add does not support --next-excluded-agent")
             if args.clear_excluded_agents:
                 raise ValueError("todo add does not support --clear-excluded-agents")
+            if args.clear_blocks_agent:
+                raise ValueError("todo add does not support --clear-blocks-agent")
             if args.self_merged:
                 raise ValueError("todo add does not support --self-merged")
             if args.no_follow_up:
@@ -470,6 +477,7 @@ def handle_todo_command(
                     ("--decision-scope", args.decision_scope),
                     ("--required-decision-scope", args.required_decision_scopes),
                     ("--blocks-agent", args.blocks_agent),
+                    ("--clear-blocks-agent", args.clear_blocks_agent),
                     ("--excluded-agent", args.excluded_agents),
                     ("--clear-excluded-agents", args.clear_excluded_agents),
                     ("--global-gate", args.global_gate),
@@ -532,6 +540,7 @@ def handle_todo_command(
                 args.required_decision_scopes,
                 args.claimed_by,
                 args.blocks_agent,
+                args.clear_blocks_agent,
                 args.excluded_agents,
                 args.clear_excluded_agents,
                 args.global_gate,
@@ -578,6 +587,7 @@ def handle_todo_command(
                 required_decision_scopes=args.required_decision_scopes,
                 claimed_by=args.claimed_by,
                 blocks_agent=args.blocks_agent,
+                clear_blocks_agent=bool(args.clear_blocks_agent),
                 excluded_agents=args.excluded_agents,
                 clear_excluded_agents=bool(args.clear_excluded_agents),
                 global_gate=bool(args.global_gate),
@@ -602,7 +612,7 @@ def handle_todo_command(
                 raise ValueError("todo complete requires --todo-id")
             if args.claimed_by and args.clear_claim:
                 raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
-            if args.blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.unblocks_todo_id or args.resume_when:
+            if args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.unblocks_todo_id or args.resume_when:
                 raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
             if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
                 raise ValueError("todo complete does not support monitor schedule metadata; use todo update before completion")
@@ -676,7 +686,7 @@ def handle_todo_command(
                 )
             if args.next_excluded_agents and not args.next_agent_todo:
                 raise ValueError("--next-excluded-agent requires --next-agent-todo")
-            if args.blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.unblocks_todo_id or args.resume_when:
+            if args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.unblocks_todo_id or args.resume_when:
                 raise ValueError("todo supersede does not update current todo routing metadata; use todo update first")
             if args.successor_todo_ids:
                 raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
@@ -702,7 +712,7 @@ def handle_todo_command(
         elif args.todo_command == "archive-completed":
             if args.claimed_by or args.clear_claim:
                 raise ValueError("todo archive-completed does not support --claimed-by or --clear-claim")
-            if args.excluded_agents or args.clear_excluded_agents or args.next_excluded_agents:
+            if args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.next_excluded_agents:
                 raise ValueError("todo archive-completed does not support executor exclusions")
             if args.next_claimed_by:
                 raise ValueError("todo archive-completed does not support --next-claimed-by")

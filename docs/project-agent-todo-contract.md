@@ -474,6 +474,11 @@ or `same_agent_non_delivery`. Agent todos may also carry `excluded_agents`,
 `unblocks_todo_id`, and `no_followup=true` to express executor separation,
 dependency lineage, and intentional closeout. `blocks_agent` is reserved for
 scoping user gates.
+
+After a hard-cut upgrade, `loopx check` reports agent todos that still carry
+the removed gate-routing field. Repair those records explicitly with `loopx
+todo update --todo-id <todo_id> --role agent --clear-blocks-agent`; LoopX does
+not rewrite them automatically.
 Deferred successors may carry `resume_when`, `resume_condition`, and
 `resume_ready`; `resume_ready=true` means the deferred item should be considered
 for a successor replan before any agent-scoped no-candidate wait, not that

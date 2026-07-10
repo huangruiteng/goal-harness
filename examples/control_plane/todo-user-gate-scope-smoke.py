@@ -404,6 +404,25 @@ def main() -> int:
             for item in hard_cut_check["errors"]
         ), hard_cut_check
 
+        repaired_agent_gate = update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id="todo_removed_agent_gate",
+            role="agent",
+            clear_blocks_agent=True,
+        )
+        assert repaired_agent_gate["blocks_agent"] is None, repaired_agent_gate
+        repaired_hard_cut_check = check_contract(
+            registry_path=registry,
+            runtime_root_override=str(root / "runtime"),
+            scan_roots=[repo],
+            limit=1,
+        )
+        assert not any(
+            "todo_removed_agent_gate" in item
+            for item in repaired_hard_cut_check["errors"]
+        ), repaired_hard_cut_check
+
     print("todo-user-gate-scope-smoke ok")
     return 0
 
