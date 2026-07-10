@@ -29,8 +29,10 @@ from ..todos.contract import (
 from ..todos.handoff_gate import HandoffGateState
 from ..todos.projection import (
     todo_item_claimed_by_agent_or_unclaimed,
+    todo_item_is_review_handoff,
     todo_item_is_actionable_open,
     todo_item_is_deferred,
+    todo_item_review_handoff_blocks_agent,
     todo_item_task_class,
     todo_projection_sort_key,
 )
@@ -242,6 +244,10 @@ def _agent_scope_selectable_todo_item(
     agent_id = normalize_todo_claimed_by(agent_identity.get("agent_id"))
     if not agent_id:
         return True
+    if todo_item_is_review_handoff(item):
+        if todo_item_review_handoff_blocks_agent(item, agent_id=agent_id):
+            return False
+        return _todo_item_claimed_by_agent_or_unclaimed(item, agent_id=agent_id)
     blocks_agent = agent_scope_item_blocks_agent(item)
     if blocks_agent and blocks_agent != agent_id:
         return False
