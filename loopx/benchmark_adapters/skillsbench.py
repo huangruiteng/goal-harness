@@ -1565,10 +1565,11 @@ def skillsbench_runner_error_attribution(error_text: str) -> tuple[str, str, lis
         or (
             "/app/skills" in text
             and (
-                "bind source path" in text
-                or "mount" in text
-                or "volume" in text
-                or "task skills" in text
+                "copying task skills" in text
+                or "copy task skills" in text
+                or "bind source path" in text
+                or "invalid mount config" in text
+                or "mount denied" in text
                 or "permission denied" in text
             )
         )
