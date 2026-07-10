@@ -45,7 +45,8 @@ Optional env:
   SKILLSBENCH_CANONICAL_CASE_IDS_FILE  Optional canonical case-id file; enables
                                        standard aggregate refresh after closeout
   SKILLSBENCH_STANDARD_AGGREGATE_PATH  Aggregate output path; default beside
-                                       the local live ledger
+                                       the local live ledger; requires an
+                                       explicit local ledger when set
 EOF
 }
 
@@ -87,6 +88,11 @@ for key in "${required_env[@]}"; do
     exit 2
   fi
 done
+if [[ -n "${SKILLSBENCH_STANDARD_AGGREGATE_PATH:-}" ]] &&
+  [[ -z "${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-}" ]]; then
+  echo "SKILLSBENCH_STANDARD_AGGREGATE_PATH requires SKILLSBENCH_LOCAL_RUN_LEDGER_PATH" >&2
+  exit 2
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -133,6 +139,7 @@ if ((task_count > 1)); then
 fi
 
 goal_id="${SKILLSBENCH_GOAL_ID:-loopx-meta}"
+local_run_ledger="${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-.local/goals/${goal_id}/skillsbench-ledgers/live-standard-run-ledger.json}"
 route="${SKILLSBENCH_ROUTE:-codex-cli-goal-baseline}"
 model="${SKILLSBENCH_MODEL:-gpt-5.5}"
 reasoning_effort="${SKILLSBENCH_REASONING_EFFORT:-xhigh}"
@@ -307,7 +314,7 @@ supervisor_cmd=(
   --remote-public-artifact-glob "${job_name}*/*/benchmark_run.compact.json"
   --remote-public-artifact-glob "${job_name}*/host_local_acp_relay_traces/*.compact.json"
   --local-public-artifact-dir "$public_dir"
-  --local-run-ledger-path "${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-.local/goals/${goal_id}/skillsbench-ledgers/live-standard-run-ledger.json}"
+  --local-run-ledger-path "$local_run_ledger"
   --local-run-group-id "$run_group"
   --local-ledger-catchup-root "$public_root"
   --local-ledger-catchup-run-group-contains "skillsbench-codex-cli-goal-xhigh-"
@@ -315,7 +322,6 @@ supervisor_cmd=(
   --public-output-path "${public_dir}/supervisor.public.json"
 )
 
-local_run_ledger="${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-.local/goals/${goal_id}/skillsbench-ledgers/live-standard-run-ledger.json}"
 if [[ "$dry_run" == "false" && ! -f "$local_run_ledger" && -n "${SKILLSBENCH_LOCAL_RUN_LEDGER_SEED:-}" ]]; then
   mkdir -p "$(dirname "$local_run_ledger")"
   cp "$SKILLSBENCH_LOCAL_RUN_LEDGER_SEED" "$local_run_ledger"
@@ -342,6 +348,10 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
   printf 'docker_api_version=%s\n' "$docker_api_version"
   printf 'remote_codex_bin_mode=%s\n' "$remote_codex_bin_mode"
+  printf 'local_run_ledger=%s\n' "$local_run_ledger"
+  if [[ -n "${standard_aggregate:-}" ]]; then
+    printf 'standard_aggregate=%s\n' "$standard_aggregate"
+  fi
   printf 'remote_command=%s\n' "$remote_command"
   printf 'supervisor_command='
   printf '%q ' "${supervisor_cmd[@]}"

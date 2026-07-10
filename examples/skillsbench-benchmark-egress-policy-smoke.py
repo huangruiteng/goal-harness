@@ -220,6 +220,46 @@ def test_public_launcher_batches_three_cases_with_closeout_sync() -> None:
     assert "--local-target-lane-id codex-cli-goal-xhigh" in output, output
     assert "--local-target-run-group-contains" not in output, output
     assert "--local-target-backfill-run-group-contains" not in output, output
+    assert (
+        "local_run_ledger=.local/goals/loopx-meta/skillsbench-ledgers/"
+        "live-standard-run-ledger.json" in output
+    ), output
+    assert (
+        "standard_aggregate=.local/goals/loopx-meta/skillsbench-ledgers/"
+        "standard-current-aggregate.json" in output
+    ), output
+
+
+def test_public_launcher_rejects_aggregate_without_explicit_ledger() -> None:
+    env = os.environ.copy()
+    env.update(
+        {
+            "SKILLSBENCH_SSH_DESTINATION": "example.invalid",
+            "SKILLSBENCH_REMOTE_ROOT": "/remote/loopx",
+            "SKILLSBENCH_ROOT": "/remote/skillsbench",
+            "SKILLSBENCH_EXPECTED_LOOPX_GIT_HEAD": "abc1234",
+            "SKILLSBENCH_STANDARD_AGGREGATE_PATH": "/other/standard.json",
+        }
+    )
+    env.pop("SKILLSBENCH_LOCAL_RUN_LEDGER_PATH", None)
+    proc = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts" / "skillsbench-launch-goal-xhigh.sh"),
+            "--dry-run",
+            "citation-check",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 2, proc
+    assert (
+        "SKILLSBENCH_STANDARD_AGGREGATE_PATH requires "
+        "SKILLSBENCH_LOCAL_RUN_LEDGER_PATH" in proc.stderr
+    ), proc.stderr
 
 
 def test_public_launcher_applies_ssh_options_to_remote_discovery() -> None:
@@ -446,6 +486,7 @@ if __name__ == "__main__":
     test_formal_cli_goal_proxy_env_is_forwarded_without_public_url()
     test_public_launcher_uses_container_reachable_benchmark_proxy()
     test_public_launcher_batches_three_cases_with_closeout_sync()
+    test_public_launcher_rejects_aggregate_without_explicit_ledger()
     test_public_launcher_applies_ssh_options_to_remote_discovery()
     test_proxy_runtime_preserves_docker_cli_plugins()
     test_verifier_proxy_patch_is_required_only_for_existing_verifier()
