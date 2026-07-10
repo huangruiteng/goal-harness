@@ -16,6 +16,8 @@ from loopx.control_plane.todos.claim_visibility import (  # noqa: E402
     build_agent_claim_scoped_open_items,
     build_todo_claim_visibility_lanes,
 )
+from loopx.quota import build_quota_should_run  # noqa: E402
+from work_lane_contract_fixtures import GOAL_ID, status_payload  # noqa: E402
 
 
 CURRENT_AGENT = "codex-product-capability"
@@ -29,6 +31,8 @@ def todo(
     text: str,
     task_class: str,
     claimed_by: str | None = None,
+    continuation_policy: str | None = None,
+    blocks_agent: str | None = None,
 ) -> dict:
     item = {
         "index": index,
@@ -37,6 +41,8 @@ def todo(
         "status": "open",
         "task_class": task_class,
         "claimed_by": claimed_by,
+        "continuation_policy": continuation_policy,
+        "blocks_agent": blocks_agent,
         "required_write_scopes": [" loopx/** ", "loopx/**"],
         "decision_scope": "direction:action:claim",
     }
@@ -101,6 +107,112 @@ def assert_agent_claim_scope_prefers_current_then_unclaimed() -> None:
     assert claim_scope["blocked_claimed_items"][0]["todo_id"] == "todo_other_p0"
 
 
+def assert_review_handoff_excludes_only_the_blocked_peer() -> None:
+    review = todo(
+        "todo_review",
+        index=1,
+        text="[P0] Review the peer implementation.",
+        task_class="advancement_task",
+        continuation_policy="review_handoff",
+        blocks_agent=CURRENT_AGENT,
+    )
+    fallback = todo(
+        "todo_fallback",
+        index=2,
+        text="[P1] Continue the current peer lane.",
+        task_class="advancement_task",
+    )
+
+    blocked_selectable, blocked_scope = build_agent_claim_scoped_open_items(
+        [review, fallback],
+        agent_identity={"agent_id": CURRENT_AGENT, "agent_model": "peer_v1"},
+        diagnostic_item_limit=3,
+    )
+    assert [item["todo_id"] for item in blocked_selectable] == ["todo_fallback"]
+    assert blocked_scope is not None
+    assert blocked_scope["review_handoff_blocked_self_count"] == 1
+    assert blocked_scope["review_handoff_blocked_self_items"][0]["todo_id"] == (
+        "todo_review"
+    )
+    assert blocked_scope["review_handoff_eligibility_policy"] == (
+        "blocks_agent_cannot_review"
+    )
+
+    reviewer_selectable, reviewer_scope = build_agent_claim_scoped_open_items(
+        [review, fallback],
+        agent_identity={"agent_id": OTHER_AGENT, "agent_model": "peer_v1"},
+        diagnostic_item_limit=3,
+    )
+    assert [item["todo_id"] for item in reviewer_selectable] == [
+        "todo_review",
+        "todo_fallback",
+    ]
+    assert reviewer_scope is not None
+    assert reviewer_scope["review_handoff_blocked_self_count"] == 0
+
+    invalid_claim = dict(review, claimed_by=CURRENT_AGENT)
+    invalid_selectable, invalid_scope = build_agent_claim_scoped_open_items(
+        [invalid_claim],
+        agent_identity={"agent_id": CURRENT_AGENT, "agent_model": "peer_v1"},
+        diagnostic_item_limit=3,
+    )
+    assert invalid_selectable == []
+    assert invalid_scope is not None
+    assert invalid_scope["review_handoff_blocked_self_count"] == 1
+
+
+def assert_quota_routes_unclaimed_review_to_an_eligible_peer() -> None:
+    review = todo(
+        "todo_unclaimed_review",
+        index=1,
+        text="[P0] Review the peer implementation before delivery.",
+        task_class="advancement_task",
+        continuation_policy="review_handoff",
+        blocks_agent=CURRENT_AGENT,
+    )
+    fallback = todo(
+        "todo_side_fallback",
+        index=2,
+        text="[P1] Continue the blocked peer's independent fallback.",
+        task_class="advancement_task",
+        claimed_by=CURRENT_AGENT,
+    )
+    for item in (review, fallback):
+        item["role"] = "agent"
+        item["required_capabilities"] = ["shell"]
+    coordination = {
+        "agent_model": "peer_v1",
+        "registered_agents": [OTHER_AGENT, CURRENT_AGENT],
+    }
+
+    def guard(agent_id: str) -> dict:
+        return build_quota_should_run(
+            status_payload(
+                status="review_handoff_eligibility_frontier",
+                next_action=review["text"],
+                coordination=coordination,
+                agent_todo_items=[review, fallback],
+            ),
+            goal_id=GOAL_ID,
+            agent_id=agent_id,
+        )
+
+    blocked_guard = guard(CURRENT_AGENT)
+    assert blocked_guard["agent_lane_next_action"]["todo_id"] == (
+        "todo_side_fallback"
+    ), blocked_guard
+    assert [
+        item["todo_id"]
+        for item in blocked_guard["capability_gate"]["runnable_candidates"]
+    ] == ["todo_side_fallback"], blocked_guard
+
+    reviewer_guard = guard(OTHER_AGENT)
+    assert reviewer_guard["agent_lane_next_action"]["todo_id"] == (
+        "todo_unclaimed_review"
+    ), reviewer_guard
+    assert reviewer_guard["recommended_action"] == review["text"], reviewer_guard
+
+
 def assert_claim_visibility_lanes_split_current_other_and_task_class() -> None:
     open_items = [
         todo(
@@ -158,6 +270,8 @@ def assert_claim_visibility_lanes_split_current_other_and_task_class() -> None:
 
 def main() -> int:
     assert_agent_claim_scope_prefers_current_then_unclaimed()
+    assert_review_handoff_excludes_only_the_blocked_peer()
+    assert_quota_routes_unclaimed_review_to_an_eligible_peer()
     assert_claim_visibility_lanes_split_current_other_and_task_class()
     print("todo-claim-visibility-lanes-smoke ok")
     return 0
