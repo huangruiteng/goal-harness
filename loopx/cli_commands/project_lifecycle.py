@@ -5,6 +5,9 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from ..control_plane.goals.goal_vision_policy import (
+    GOAL_VISION_ADVANCEMENT_POLICY_CHOICES,
+)
 from ..control_plane.work_items.delivery_batch_scale import (
     DELIVERY_BATCH_SCALE_INPUT_CHOICES,
 )
@@ -49,6 +52,7 @@ INLINE_VISION_FIELDS = {
     "vision_summary": "vision_summary",
     "vision_role_scope": "role_scope",
     "vision_acceptance": "acceptance_summary",
+    "vision_advancement_policy": "advancement_policy",
     "vision_replan_trigger": "replan_trigger_summary",
     "vision_dreaming_policy": "dreaming_policy",
     "vision_last_patch": "last_patch_summary",
@@ -181,6 +185,14 @@ def register_project_lifecycle_commands(
     refresh_state_parser.add_argument(
         "--vision-acceptance",
         help="Inline bounded acceptance_summary for the current agent's vision patch.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-advancement-policy",
+        choices=GOAL_VISION_ADVANCEMENT_POLICY_CHOICES,
+        help=(
+            "Whether open acceptance needs advancement only as needed or must "
+            "keep a runnable advancement frontier until the vision closes."
+        ),
     )
     refresh_state_parser.add_argument(
         "--vision-replan-trigger",

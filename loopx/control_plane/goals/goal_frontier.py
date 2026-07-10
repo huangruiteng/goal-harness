@@ -17,6 +17,7 @@ from ..work_items.autonomous_replan_obligation import (
     build_autonomous_replan_obligation_payload,
 )
 from ..work_items.repair_delta import repair_delta_kinds_have_frontier_delta
+from .goal_vision_policy import goal_vision_repeats_advancement_until_closed
 from .goal_vision_state import goal_vision_state_is_closed
 
 
@@ -427,6 +428,12 @@ def acceptance_gaps_from_agent_vision(
     }
     if acceptance:
         gap["acceptance_summary"] = acceptance
+    advancement_policy = _compact_projection_text(
+        patch.get("advancement_policy"),
+        limit=32,
+    )
+    if advancement_policy:
+        gap["advancement_policy"] = advancement_policy
     generated_at = _compact_projection_text(agent_vision.get("generated_at"), limit=80)
     if generated_at:
         gap["generated_at"] = generated_at
@@ -980,9 +987,15 @@ def derive_goal_frontier_replan_obligation_from_summaries(
         for gap in compact_acceptance_gaps
         if gap.get("replan_trigger_source") != "implicit_open_acceptance"
     ]
-    implicit_acceptance_has_watch_lane_continuation = bool(
+    implicit_acceptance_allows_watch_lane_continuation = bool(
         compact_acceptance_gaps
         and not explicit_acceptance_gaps
+        and not any(
+            goal_vision_repeats_advancement_until_closed(
+                gap.get("advancement_policy")
+            )
+            for gap in compact_acceptance_gaps
+        )
         and _is_continuous_monitor_lane(work_lane_contract)
         and agent_counts.get("monitor", 0) > 0
         and _autonomous_replan_ack_has_delta_kind(
@@ -1051,7 +1064,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
         compact_acceptance_gaps
         and agent_counts.get("advancement", 0) == 0
         and total_frontier_advancement == 0
-        and not implicit_acceptance_has_watch_lane_continuation
+        and not implicit_acceptance_allows_watch_lane_continuation
     ):
         return build_autonomous_replan_obligation_payload(
             schema_version=AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION,
@@ -1067,6 +1080,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                     or "bounded agent vision reports an open acceptance gap",
                     "agent_id": agent_id,
                     "acceptance_summary": gap.get("acceptance_summary"),
+                    "advancement_policy": gap.get("advancement_policy"),
                 }
                 for gap in compact_acceptance_gaps[:3]
             ],

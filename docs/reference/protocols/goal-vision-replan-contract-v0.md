@@ -38,6 +38,7 @@ agent pane. Long reasoning belongs in evidence artifacts or design docs.
 | `vision_summary` | 420 | Current role-specific direction and success shape. |
 | `role_scope` | 280 | What this agent owns and must not own. |
 | `acceptance_summary` | 420 | Compact completion contract for this agent. |
+| `advancement_policy` | 32 | `as_needed` or `repeat_until_closed`. |
 | `replan_trigger_summary` | 240 | Why the latest replan is required. |
 | `dreaming_policy` | 240 | Whether advisory dreaming can propose a patch. |
 | `last_patch_summary` | 240 | What changed in the latest bounded vision patch. |
@@ -62,8 +63,20 @@ loopx refresh-state \
   --agent-id <agent-id> \
   --vision-summary "<bounded direction>" \
   --vision-acceptance "<bounded acceptance>" \
+  --vision-advancement-policy repeat_until_closed \
   --vision-replan-trigger "<why the frontier is insufficient>"
 ```
+
+`advancement_policy` is a small machine-readable frontier rule, not a domain
+label. It defaults to `as_needed`, which preserves bounded external waits: an
+implicit open-acceptance gap may remain quiet when a monitor lane has recorded
+an exact `watch_lane_continuation` ACK. Use `repeat_until_closed` for campaigns,
+iterative research, sweepers, and other visions whose open acceptance requires
+another advancement iteration whenever the runnable advancement frontier is
+empty. In that mode, monitor successors and a watch ACK remain useful evidence,
+but cannot satisfy advancement continuation by themselves. A runnable
+advancement successor, blocker or scoped gate, or a closed/superseding vision
+still prevents duplicate replan churn.
 
 For machine-generated or multi-field patches, the same command also accepts
 `--agent-vision-json <packet.json>`. The two forms are mutually exclusive and

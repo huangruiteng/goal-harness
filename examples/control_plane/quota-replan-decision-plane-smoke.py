@@ -297,7 +297,15 @@ def closed_agent_vision_run(*, state: str = "vision_closed") -> dict:
     return run
 
 
-def agent_vision_acceptance_only_run() -> dict:
+def agent_vision_acceptance_only_run(
+    *,
+    advancement_policy: str | None = None,
+) -> dict:
+    vision_patch = {
+        "acceptance_summary": "A visible successor frontier must exist before the lane is monitor-only.",
+    }
+    if advancement_policy:
+        vision_patch["advancement_policy"] = advancement_policy
     return {
         "classification": "state_refreshed",
         "generated_at": "2026-07-04T00:00:00+00:00",
@@ -307,9 +315,7 @@ def agent_vision_acceptance_only_run() -> dict:
             "schema_version": "goal_vision_replan_contract_v0",
             "agent_id": SIDE_AGENT,
             "state": "vision_patch_proposed",
-            "vision_patch": {
-                "acceptance_summary": "A visible successor frontier must exist before the lane is monitor-only.",
-            },
+            "vision_patch": vision_patch,
             "todo_delta": [],
             "vision_budget": {
                 "schema_version": "goal_vision_budget_v0",
@@ -904,6 +910,52 @@ def assert_due_monitor_runs_under_watched_open_agent_vision() -> None:
     assert guard["vision_continuation_audit"]["required"] is True, guard
 
 
+def assert_repeat_advancement_vision_beats_watch_lane_continuation_ack() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            [monitor_item()],
+            replan_obligation=None,
+            latest_runs=[
+                watch_lane_continuation_ack_run(),
+                agent_vision_acceptance_only_run(
+                    advancement_policy="repeat_until_closed"
+                ),
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["effective_action"] == "autonomous_replan_required", guard
+    gap = guard["goal_frontier_projection"]["acceptance_gaps"][0]
+    assert gap["advancement_policy"] == "repeat_until_closed", guard
+    obligation = guard["autonomous_replan_obligation"]
+    assert obligation["triggers"][0]["advancement_policy"] == (
+        "repeat_until_closed"
+    ), guard
+
+
+def assert_repeat_advancement_vision_accepts_runnable_successor() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            [monitor_item(), side_agent_claimed_advancement()],
+            replan_obligation=None,
+            latest_runs=[
+                watch_lane_continuation_ack_run(),
+                agent_vision_acceptance_only_run(
+                    advancement_policy="repeat_until_closed"
+                ),
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "run", guard
+    assert guard["effective_action"] == "normal_run", guard
+    assert guard["goal_frontier_projection"]["replan_required"] is False, guard
+    assert guard.get("autonomous_replan_obligation") is None, guard
+
+
 def assert_non_watch_replan_ack_does_not_suppress_open_agent_vision() -> None:
     guard = build_quota_should_run(
         status_payload(
@@ -1353,6 +1405,8 @@ def main() -> None:
     assert_goal_frontier_context_helper_matches_quota_payload()
     assert_open_agent_vision_uses_watch_lane_continuation_ack()
     assert_due_monitor_runs_under_watched_open_agent_vision()
+    assert_repeat_advancement_vision_beats_watch_lane_continuation_ack()
+    assert_repeat_advancement_vision_accepts_runnable_successor()
     assert_non_watch_replan_ack_does_not_suppress_open_agent_vision()
     assert_open_agent_vision_with_runnable_frontier_uses_neutral_gap_trigger()
     assert_retired_agent_vision_allows_bounded_monitor_wait()

@@ -7,15 +7,18 @@ from .goal_vision_state import (
     GOAL_VISION_DEFAULT_STATE,
     normalize_goal_vision_state,
 )
+from .goal_vision_policy import normalize_goal_vision_advancement_policy
 
 
 GOAL_VISION_REPLAN_SCHEMA_VERSION = "goal_vision_replan_contract_v0"
 GOAL_VISION_BUDGET_ERROR = "vision_budget_exceeded"
 
+
 GOAL_VISION_FIELD_LIMITS: dict[str, int] = {
     "vision_summary": 420,
     "role_scope": 280,
     "acceptance_summary": 420,
+    "advancement_policy": 32,
     "replan_trigger_summary": 240,
     "dreaming_policy": 240,
     "last_patch_summary": 240,
@@ -175,6 +178,8 @@ def normalize_goal_vision_packet(
         text = _packet_text(source, field, limit=limit)
         if text is None:
             continue
+        if field == "advancement_policy":
+            text = normalize_goal_vision_advancement_policy(text)
         vision_patch[field] = text
         field_usage[field] = len(text)
 
