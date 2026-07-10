@@ -116,6 +116,14 @@ SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_PROMPT = (
     f"{SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER} and end the turn."
 )
 CODEX_CLI_GOAL_THREAD_PREWARM_TIMEOUT_SEC = 120
+SKILLSBENCH_OUTPUT_PATH_CONTRACT = (
+    "- Honor every task input and output path exactly as explicit task "
+    "instructions or visible task metadata declare it. Keep absolute paths "
+    "unchanged. Resolve a relative path from the directory containing the "
+    "metadata file that declares it, or otherwise from the sandbox task "
+    "working directory. Do not force relative paths into `/root` or `/app` "
+    "merely because those roots are available."
+)
 
 
 @contextlib.contextmanager
@@ -355,17 +363,15 @@ def _prompt_with_app_server_closeout_instruction(prompt_text: str) -> str:
         + "Native Codex Goal worker closeout contract:\n"
         + "- Solve the task using only the available benchmark workspace or the "
         + "private bridge packet above.\n"
-        + "- SkillsBench scores relative task output file names from `/root`. "
-        + "If the task asks for `report.json`, `answer.json`, or another "
-        + "relative output file, write and self-check `/root/<name>`; an "
-        + "`/app/<name>` working copy alone is not a scored output.\n"
+        + SKILLSBENCH_OUTPUT_PATH_CONTRACT
+        + "\n"
         + "- Before writing the final scored output for optimization, "
         + "scheduling, allocation, routing, planning, or data-processing "
         + "tasks, run a task-derived quality self-check using only visible "
         + "task instructions and workspace data: validate hard constraints, "
         + "compute or estimate the visible objective when the task defines "
         + "one, compare at least one simple alternative or repair pass when "
-        + "feasible, and only then write the final `/root` output. Do not "
+        + "feasible, and only then write the final task-specified output. Do not "
         + "use official verifier/reward/pass-fail output, hidden tests, "
         + "gold answers, or external benchmark feedback for this self-check.\n"
         + "- After the task-required scored output file is written, immediately "
@@ -2250,15 +2256,12 @@ LoopX SkillsBench remote workspace bridge:
 - Request examples:
   - {{"operation":"exec","cwd":"/app","command":"pwd","timeout_sec":10}}
   - {{"operation":"read_file","path":"/app/path/to/file","max_bytes":20000}}
-  - {{"operation":"write_file","path":"/app/path/to/file","content":"..."}}
+  - {{"operation":"write_file","path":"/app/path/to/task-specified-output","content":"..."}}
   - {{"operation":"read_file","path":"/root/task-input-or-data","max_bytes":20000}}
-  - {{"operation":"write_file","path":"/root/answer.json","content":"..."}}
-  - {{"operation":"cleanup","path":"/app/path/to/temp"}}
-- Allowed sandbox path roots are `/app`, `/tmp`, and `/root`; use `/root`
-  when the task instruction names a scored input or output path there.
-- SkillsBench evaluates relative output filenames from `/root`. If the task
-  asks for `report.json`, `answer.json`, or another relative output file, write
-  and self-check `/root/<name>`; an `/app/<name>` copy alone is not scored.
+  - {{"operation":"cleanup","path":"/tmp/path/to/temp"}}
+- Allowed sandbox path roots are `/app`, `/tmp`, and `/root`; use an absolute
+  root only when the task instruction or visible task metadata names it.
+{SKILLSBENCH_OUTPUT_PATH_CONTRACT}
 - Do not upload, submit, expose credentials, quote the bridge command in final output, or record raw stdout/stderr/task text in public artifacts.
 - The bridge readiness probe completed with ready=true and operation_count={operation_count}.
 - If a LoopX product-mode lifecycle contract is present later in this prompt,

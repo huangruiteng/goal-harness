@@ -1398,13 +1398,16 @@ def _assert_cli_goal_uses_short_file_backed_objective_for_bridge_packet() -> Non
     packet = SkillsBenchLocalAcpRelay(
         CodexExecConfig(remote_command_file_bridge_command="/tmp/private-bridge")
     )._prompt_with_remote_bridge_packet(
-        "Task",
+        "Read /app/problem.json. It declares plan_output=task01.txt.",
         bridge_probe={"operation_count": 1},
         bridge_command_for_agent="/tmp/private-bridge",
     )
     assert "FIRST ACTION REQUIRED" in packet, packet
-    assert "relative output filenames from `/root`" in packet, packet
-    assert "an `/app/<name>` copy alone is not scored" in packet, packet
+    assert "Honor every task input and output path exactly" in packet, packet
+    assert "directory containing the metadata file that declares it" in packet, packet
+    assert "Do not force relative paths into `/root` or `/app`" in packet, packet
+    assert "relative output filenames from `/root`" not in packet, packet
+    assert "`/root/<name>`" not in packet, packet
     assert _prompt_requires_bridge_first_action(packet) is True
     assert (
         _prompt_requires_meaningful_bridge_progress(

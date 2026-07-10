@@ -331,18 +331,23 @@ def _assert_app_server_goal_baseline_bridge_contract() -> None:
     assert command[bridge_index + 1] == "python bridge.py", command
     assert "--worker-public-trace-dir" in command, command
 
-    prompt = _prompt_with_app_server_closeout_instruction("Write /root/answer.json.")
+    prompt = _prompt_with_app_server_closeout_instruction(
+        "Read /app/problem.json. It declares plan_output=task01.txt."
+    )
     assert "Native Codex Goal worker closeout contract" in prompt, prompt
     assert "immediately end the turn" in prompt, prompt
     assert "scored output file" in prompt, prompt
-    assert "relative task output file names from `/root`" in prompt, prompt
-    assert "`/root/<name>`" in prompt, prompt
-    assert "`/app/<name>` working copy alone is not a scored output" in prompt, prompt
+    assert "Honor every task input and output path exactly" in prompt, prompt
+    assert "directory containing the metadata file that declares it" in prompt, prompt
+    assert "Do not force relative paths into `/root` or `/app`" in prompt, prompt
+    assert "relative task output file names from `/root`" not in prompt, prompt
+    assert "`/root/<name>`" not in prompt, prompt
     assert "Before writing the final scored output" in prompt, prompt
     assert "task-derived quality self-check" in prompt, prompt
     assert "visible task instructions and workspace data" in prompt, prompt
     assert "official verifier/reward/pass-fail output" in prompt, prompt
     assert "hidden tests" in prompt, prompt
+    assert "final task-specified output" in prompt, prompt
     assert prompt.index("Before writing the final scored output") < prompt.index(
         "After the task-required scored output file"
     ), prompt
