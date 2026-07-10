@@ -899,6 +899,11 @@ def render_thin_heartbeat_task_body(
         else material_queue_rule
     )
     scope_sentence = f"\n\n{agent_scope_instruction}" if agent_scope_instruction else ""
+    quota_guard_instruction = (
+        f"`{quota_guard_command}`"
+        if "--available-capability" in quota_guard_command
+        else "`quota should-run`"
+    )
     return f"""Advance `{goal_id}` from {active_state}.
 
 Use skills: `loopx-project`; if surprising/tiny/contradictory,
@@ -906,7 +911,7 @@ Use skills: `loopx-project`; if surprising/tiny/contradictory,
 {scope_sentence}
 
 Inspect registry/global quota, active state, status/history, repo; run
-`quota should-run`; follow `interaction_contract`. If action_required/open_count:
+{quota_guard_instruction}; follow `interaction_contract`. If action_required/open_count:
 Chinese concrete todos/questions; never only "owner gate"; missing ->
 "具体 user todo 未投影，需修复 LoopX 状态投影". If false/0: quiet/no-user-todo.
 {SCHEDULER_HINT_THIN_RULE}

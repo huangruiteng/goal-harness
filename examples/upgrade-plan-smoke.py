@@ -370,9 +370,8 @@ def assert_registered_agent_activation_is_checked(root: Path) -> None:
         cli_bin="loopx",
         agent_id=REGISTERED_AGENT_ID,
         registered_agents=[REGISTERED_AGENT_ID],
+        available_capabilities=["network", "external_evidence_poll"],
     )["task_body"]
-    expected_sha = goal["generated_prompts"]["thin:codex-current"]["sha256"]
-    assert prompt_digest(rendered) == expected_sha, payload
     write_registered_codex_app_automation(root / "registered-codex-home", prompt=rendered)
     old_codex_home = os.environ.get("CODEX_HOME")
     os.environ["CODEX_HOME"] = str(root / "registered-codex-home")
@@ -381,6 +380,16 @@ def assert_registered_agent_activation_is_checked(root: Path) -> None:
         pending_migration = pending_payload["managed_heartbeats"][0][
             "peer_runtime_automation_migration"
         ]
+        pending_goal = pending_payload["managed_heartbeats"][0]
+        pending_prompt = pending_goal["generated_prompts"]["thin:codex-current"]
+        assert "--available-capability network" in pending_prompt["command"], pending_prompt
+        assert "--available-capability external_evidence_poll" in pending_prompt["command"], (
+            pending_prompt
+        )
+        assert pending_goal["installed_prompts"]["thin:codex-current"][
+            "available_capabilities"
+        ] == ["network", "external_evidence_poll"], pending_goal
+        assert pending_migration["host_update_required_once"] is False, pending_migration
         pending_markdown = render_upgrade_plan_markdown(pending_payload)
         assert pending_migration["migration_id"] in pending_markdown, pending_markdown
         configure_goal(

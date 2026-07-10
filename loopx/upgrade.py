@@ -21,6 +21,7 @@ from .control_plane.agents.runtime_model import (
     peer_agent_runtime_migration_completed,
     peer_agent_runtime_migration_id,
 )
+from .control_plane.todos.contract import normalize_required_capabilities
 
 
 DEFAULT_UPGRADE_MODES = ("thin",)
@@ -43,6 +44,9 @@ PROJECT_POLICY_MARKERS = (
     "Current controller policy:",
     "Primary stability objective:",
     "Current controller policy",
+)
+AVAILABLE_CAPABILITY_PATTERN = re.compile(
+    r"--available-capability(?:=|\s+)([A-Za-z][A-Za-z0-9_:-]{0,63})"
 )
 STAGE_DEFERRED_ATTENTION_STATUSES = {
     "stage_deferred_not_installed",
@@ -231,6 +235,12 @@ def infer_prompt_mode(prompt: str) -> str:
     return DEFAULT_UPGRADE_MODES[0]
 
 
+def infer_available_capabilities_from_prompt(prompt: str) -> list[str]:
+    return normalize_required_capabilities(
+        AVAILABLE_CAPABILITY_PATTERN.findall(prompt)
+    )
+
+
 def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, Any]:
     home = root or codex_home()
     automations_root = home / "automations"
@@ -269,6 +279,9 @@ def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, An
                 "char_count": len(prompt),
                 "line_count": len(prompt.splitlines()),
                 "prompt_policy_audit": prompt_policy_audit(prompt),
+                "available_capabilities": infer_available_capabilities_from_prompt(
+                    prompt
+                ),
                 "status": status,
                 "installed": status.upper() != "DELETED",
                 "source": "codex_app_automation_toml",
@@ -294,6 +307,20 @@ def installed_entry_digest(entry: dict[str, Any]) -> str | None:
     if isinstance(task_body, str):
         return prompt_digest(task_body)
     return None
+
+
+def installed_entry_available_capabilities(
+    entry: dict[str, Any] | None,
+) -> list[str]:
+    if not entry:
+        return []
+    explicit = normalize_required_capabilities(entry.get("available_capabilities"))
+    if explicit:
+        return explicit
+    task_body = entry.get("task_body")
+    if isinstance(task_body, str):
+        return infer_available_capabilities_from_prompt(task_body)
+    return []
 
 
 def entry_declares_not_installed(entry: dict[str, Any] | None) -> bool:
@@ -619,6 +646,12 @@ def build_upgrade_plan(
         ]
         for mode, agent_id in prompt_targets:
             key = prompt_target_key(mode, agent_id)
+            entry = installed_by_key.get((goal_id, mode, agent_id or ""))
+            legacy_unscoped = False
+            if entry is None and agent_id:
+                entry = installed_by_key.get((goal_id, mode, ""))
+                legacy_unscoped = entry is not None
+            available_capabilities = installed_entry_available_capabilities(entry)
             agent_profile = agent_profile_for_goal(goal, agent_id)
             prompt = build_heartbeat_prompt(
                 goal_id=goal_id,
@@ -632,16 +665,12 @@ def build_upgrade_plan(
                 agent_id=agent_id,
                 agent_profile=agent_profile,
                 registered_agents=registered_agents or None,
+                available_capabilities=available_capabilities,
             )
             summary = prompt_summary(prompt, mode)
             summary["agent_id"] = agent_id
             summary["prompt_target"] = key
             prompt_summaries[key] = summary
-            entry = installed_by_key.get((goal_id, mode, agent_id or ""))
-            legacy_unscoped = False
-            if entry is None and agent_id:
-                entry = installed_by_key.get((goal_id, mode, ""))
-                legacy_unscoped = entry is not None
             expected_digest = str(summary.get("sha256") or "")
             not_installed = entry_declares_not_installed(entry)
             actual_digest = None if not_installed else installed_entry_digest(entry) if entry else None
@@ -695,6 +724,7 @@ def build_upgrade_plan(
                 "legacy_unscoped_match": legacy_unscoped,
                 "prompt_sha256": actual_digest,
                 "expected_sha256": expected_digest,
+                "available_capabilities": available_capabilities,
                 "prompt_policy_audit": policy_audit,
             }
         loop_activation = build_loop_activation_summary(installed=installed)

@@ -279,6 +279,9 @@ def main() -> int:
     assert owner_gate["requires_user_action"] is True, owner_gate
     assert owner_gate["capability_gate"]["action"] == "ask_owner", owner_gate
     assert owner_gate["interaction_contract"]["user_channel"]["action_required"] is True, owner_gate
+    assert owner_gate["interaction_contract"]["user_channel"]["actions"] == [
+        "provide or authorize the missing owner-held capability: network"
+    ], owner_gate
     assert owner_gate["heartbeat_recommendation"]["notify"] == "NOTIFY", owner_gate
 
     mixed_capability_todo = todo(
