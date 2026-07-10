@@ -27,6 +27,8 @@ Optional env:
   SKILLSBENCH_REASONING_EFFORT         Reasoning effort, default xhigh
   SKILLSBENCH_REMOTE_CODEX_BIN          Codex CLI executable on remote runner;
                                        default codex from remote PATH
+  SKILLSBENCH_LOCAL_CODEX_SANDBOX      Host Codex sandbox mode; default
+                                       workspace-write
   SKILLSBENCH_BUILD_STALL_TIMEOUT_SEC  Setup stall timeout, default 3600;
                                        0 disables cap
   SKILLSBENCH_RUN_TIMEOUT_SEC          Supervisor timeout, default 28800
@@ -109,6 +111,7 @@ if [[ -n "${SKILLSBENCH_SSH_OPTIONS:-}" ]]; then
 fi
 
 remote_codex_bin="${SKILLSBENCH_REMOTE_CODEX_BIN:-codex}"
+local_codex_sandbox="${SKILLSBENCH_LOCAL_CODEX_SANDBOX:-workspace-write}"
 remote_codex_bin_mode="path_lookup"
 if [[ -n "${SKILLSBENCH_REMOTE_CODEX_BIN:-}" ]]; then
   remote_codex_bin_mode="explicit"
@@ -288,6 +291,7 @@ remote_command=$(
     --benchmark-egress-proxy-mode require \
     --host-local-acp-launch \
     --local-codex-bin "$remote_codex_bin" \
+    --local-codex-sandbox "$local_codex_sandbox" \
     --remote-command-file-bridge-probe \
     --run-group-id "$run_group" \
     --job-name "$job_name"
@@ -348,6 +352,7 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
   printf 'docker_api_version=%s\n' "$docker_api_version"
   printf 'remote_codex_bin_mode=%s\n' "$remote_codex_bin_mode"
+  printf 'local_codex_sandbox=%s\n' "$local_codex_sandbox"
   printf 'local_run_ledger=%s\n' "$local_run_ledger"
   if [[ -n "${standard_aggregate:-}" ]]; then
     printf 'standard_aggregate=%s\n' "$standard_aggregate"
@@ -394,4 +399,5 @@ docker_proxy_host=${docker_proxy_host}
 docker_proxy_endpoint_mode=${docker_proxy_endpoint_mode}
 docker_api_version=${docker_api_version}
 remote_codex_bin_mode=${remote_codex_bin_mode}
+local_codex_sandbox=${local_codex_sandbox}
 EOF

@@ -138,6 +138,7 @@ def test_public_launcher_uses_container_reachable_benchmark_proxy() -> None:
             "SKILLSBENCH_DOCKER_PROXY_HOST": "host.docker.internal",
             "SKILLSBENCH_DOCKER_API_VERSION": "1.43",
             "SKILLSBENCH_REMOTE_CODEX_BIN": "/remote/bin/codex",
+            "SKILLSBENCH_LOCAL_CODEX_SANDBOX": "danger-full-access",
             "SKILLSBENCH_RUN_STAMP": "20260709T000000CST",
         }
     )
@@ -167,6 +168,8 @@ def test_public_launcher_uses_container_reachable_benchmark_proxy() -> None:
     assert "--codex-api-reverse-tunnel-proxy http://127.0.0.1:18186" in output, output
     assert "--benchmark-egress-proxy-mode require" in output, output
     assert "--local-codex-bin /remote/bin/codex" in output, output
+    assert "--local-codex-sandbox danger-full-access" in output, output
+    assert "local_codex_sandbox=danger-full-access" in output, output
     assert "remote_codex_bin_mode=explicit" in output, output
     assert "--append-history" not in output, output
 
