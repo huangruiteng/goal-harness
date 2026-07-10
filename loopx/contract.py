@@ -21,6 +21,8 @@ from .control_plane.todos.contract import (
     TODO_TASK_CLASS_USER_ACTION,
     TODO_TASK_CLASS_USER_GATE,
     TODO_TASK_PATTERN,
+    normalize_todo_claimed_by,
+    normalize_todo_excluded_agents,
     parse_todo_metadata_line,
     todo_status_from_marker,
 )
@@ -298,21 +300,69 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
                 continue
             marker, text = match.groups()
             metadata: dict[str, Any] = {}
+            removed_continuation_policy: str | None = None
             next_index = index + 1
             while next_index < len(lines):
                 if lines[next_index].startswith("## ") or TODO_TASK_PATTERN.match(lines[next_index]):
                     break
+                removed_policies = (
+                    "review_" "handoff",
+                    "primary_" "review",
+                )
+                removed_match = re.search(
+                    r"\bcontinuation_policy=(" + "|".join(removed_policies) + r")\b",
+                    lines[next_index],
+                )
+                if removed_match:
+                    removed_continuation_policy = removed_match.group(1)
                 parsed = parse_todo_metadata_line(lines[next_index])
                 if parsed:
                     metadata.update(parsed)
                 next_index += 1
             status = str(metadata.get("status") or todo_status_from_marker(marker) or "").lower()
             task_class = str(metadata.get("task_class") or "")
+            todo_id = metadata.get("todo_id") or f"line:{index + 1}"
+            if role == "agent" and removed_continuation_policy:
+                errors.append(
+                    f"{goal_id}: agent todo {todo_id} uses removed continuation_policy="
+                    f"{removed_continuation_policy}; use continuation_policy=independent_handoff "
+                    "with an explicit review action_kind and excluded_agents=<author> only when "
+                    "executor separation is required"
+                )
+            blocks_agent = metadata.get("blocks_agent")
+            if role == "agent" and blocks_agent:
+                errors.append(
+                    f"{goal_id}: agent todo {todo_id} uses removed blocks_agent routing; "
+                    "blocks_agent is reserved for user gates, while agent executor "
+                    "constraints use excluded_agents"
+                )
+            excluded_agents = normalize_todo_excluded_agents(
+                metadata.get("excluded_agents")
+            )
+            claimed_by = normalize_todo_claimed_by(metadata.get("claimed_by"))
+            if claimed_by and claimed_by in excluded_agents:
+                errors.append(
+                    f"{goal_id}: agent todo {todo_id} has claimed_by={claimed_by!r} "
+                    "also listed in excluded_agents"
+                )
+            if role != "agent" and excluded_agents:
+                errors.append(
+                    f"{goal_id}: {role or 'unscoped'} todo {todo_id} uses excluded_agents; "
+                    "executor exclusions are only valid for agent todos"
+                )
+            unknown_excluded_agents = [
+                agent_id
+                for agent_id in excluded_agents
+                if registered_agents and agent_id not in registered_agents
+            ]
+            if role == "agent" and unknown_excluded_agents:
+                errors.append(
+                    f"{goal_id}: agent todo {todo_id} excludes unregistered agents: "
+                    + ", ".join(unknown_excluded_agents)
+                )
             if role == "user" and status not in TERMINAL_TODO_STATUSES:
                 checked += 1
-                blocks_agent = metadata.get("blocks_agent")
                 global_gate = metadata.get("global_gate") is True
-                todo_id = metadata.get("todo_id") or f"line:{index + 1}"
                 if task_class not in {TODO_TASK_CLASS_USER_ACTION, TODO_TASK_CLASS_USER_GATE}:
                     errors.append(
                         f"{goal_id}: open user todo {todo_id} requires task_class=user_gate "

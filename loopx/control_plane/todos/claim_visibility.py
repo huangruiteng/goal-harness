@@ -9,8 +9,8 @@ from .contract import (
 )
 from .projection import (
     todo_claimed_visibility_items,
+    todo_item_excludes_agent,
     todo_item_is_actionable_open,
-    todo_item_review_handoff_blocks_agent,
     todo_item_task_class,
     todo_projection_sort_key,
 )
@@ -51,15 +51,15 @@ def build_agent_claim_scoped_open_items(
             return 1
         return 2
 
-    blocked_review_handoff_items = [
+    excluded_self_items = [
         item
         for item in open_items
-        if todo_item_review_handoff_blocks_agent(item, agent_id=agent_id)
+        if todo_item_excludes_agent(item, agent_id=agent_id)
     ]
     selectable_source_items = [
         item
         for item in open_items
-        if not todo_item_review_handoff_blocks_agent(item, agent_id=agent_id)
+        if not todo_item_excludes_agent(item, agent_id=agent_id)
     ]
     current_agent_items = [
         item for item in selectable_source_items if claim_bucket(item) == 0
@@ -95,12 +95,12 @@ def build_agent_claim_scoped_open_items(
             other_agent_visibility,
             limit=diagnostic_item_limit,
         ),
-        "review_handoff_blocked_self_count": len(blocked_review_handoff_items),
-        "review_handoff_blocked_self_items": _compact_items(
-            blocked_review_handoff_items,
+        "executor_excluded_self_count": len(excluded_self_items),
+        "executor_excluded_self_items": _compact_items(
+            excluded_self_items,
             limit=diagnostic_item_limit,
         ),
-        "review_handoff_eligibility_policy": "blocks_agent_cannot_review",
+        "executor_exclusion_policy": "excluded_agents_cannot_claim_or_execute",
     }
     return selectable_items, claim_scope
 

@@ -18,6 +18,7 @@ from .status import (
 )
 from .control_plane.todos.contract import (
     TODO_MONITOR_METADATA_FIELDS,
+    TODO_METADATA_FIELDS,
     TODO_CONTINUATION_POLICY_VALUES,
     TodoContinuationPolicy,
     TODO_STATUS_DEFERRED,
@@ -34,6 +35,7 @@ from .control_plane.todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
     normalize_todo_decision_scope,
+    normalize_todo_excluded_agents,
     normalize_todo_global_gate,
     normalize_todo_id,
     normalize_todo_id_list,
@@ -43,8 +45,8 @@ from .control_plane.todos.contract import (
     normalize_supported_todo_resume_when,
     normalize_todo_status,
     parse_todo_metadata_line,
+    require_todo_excluded_agents,
     resolve_todo_continuation_policy,
-    todo_continuation_requires_review,
     require_supported_todo_resume_when,
     todo_done_for_status,
     todo_marker_for_status,
@@ -75,42 +77,25 @@ from .control_plane.todos.text import (
 from .control_plane.todos.write_policy import require_user_gate_scope, require_user_todo_task_class
 
 
-TODO_METADATA_FIELDS = (
-    "todo_id",
-    "status",
-    "task_class",
-    "action_kind",
-    "continuation_policy",
-    "required_write_scopes",
-    "required_capabilities",
-    "target_capabilities",
-    "decision_scope",
-    "required_decision_scopes",
-    "claimed_by",
-    "blocks_agent",
-    "global_gate",
-    "unblocks_todo_id",
-    "successor_todo_ids",
-    "resume_when",
-    "no_followup",
-    "target_key",
-    "cadence",
-    "next_due_at",
-    "expires_at",
-    "last_checked_at",
-    "result_hash",
-    "consecutive_no_change",
-    "material_change",
-    "max_no_change_before_replan",
-    "note",
-    "evidence",
-    "reason",
-    "completed_at",
-    "updated_at",
-    "superseded_by",
-)
-
 ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE = max(0, MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE - 2)
+
+
+def require_registered_todo_excluded_agents(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    excluded_agents: Any,
+    field: str = "excluded_agents",
+) -> list[str]:
+    return sorted(
+        require_registered_agent_id(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            field=field,
+        )
+        for agent_id in require_todo_excluded_agents(excluded_agents, field=field)
+    )
 
 
 def _attach_todo_write_correctness_dry_run_packet(
@@ -209,8 +194,13 @@ def filtered_todo_summary(
             items = [
                 item
                 for item in items
-                if not normalize_todo_claimed_by(item.get("claimed_by"))
-                or normalize_todo_claimed_by(item.get("claimed_by")) == normalized_agent_id
+                if normalized_agent_id
+                not in normalize_todo_excluded_agents(item.get("excluded_agents"))
+                and (
+                    not normalize_todo_claimed_by(item.get("claimed_by"))
+                    or normalize_todo_claimed_by(item.get("claimed_by"))
+                    == normalized_agent_id
+                )
             ]
         elif role == "user":
             items = [
@@ -238,6 +228,7 @@ def todo_item_relations(item: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "claimed_by",
         "blocks_agent",
+        "excluded_agents",
         "global_gate",
         "unblocks_todo_id",
         "successor_todo_ids",
@@ -510,6 +501,11 @@ def block_metadata(block: dict[str, Any]) -> dict[str, Any]:
             if capabilities:
                 metadata[key] = capabilities
             continue
+        if key == "excluded_agents":
+            excluded_agents = normalize_todo_excluded_agents(value)
+            if excluded_agents:
+                metadata[key] = excluded_agents
+            continue
         if key == "continuation_policy":
             continuation_policy = normalize_todo_continuation_policy(value)
             if continuation_policy:
@@ -563,6 +559,12 @@ def metadata_line_for_block(block: dict[str, Any], updates: dict[str, Any]) -> s
             capabilities = normalize_target_capabilities(value)
             if capabilities:
                 metadata[key] = capabilities
+            else:
+                metadata.pop(key, None)
+        elif key == "excluded_agents":
+            excluded_agents = normalize_todo_excluded_agents(value)
+            if excluded_agents:
+                metadata[key] = excluded_agents
             else:
                 metadata.pop(key, None)
         elif key == "continuation_policy":
@@ -749,6 +751,7 @@ def add_todo_to_lines(
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
+    excluded_agents: list[str] | None = None,
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
     resume_when: str | None = None,
@@ -756,6 +759,13 @@ def add_todo_to_lines(
     evidence: str | None = None,
     updated_at: str | None = None,
 ) -> dict[str, Any]:
+    if role == "agent" and blocks_agent:
+        raise ValueError(
+            "blocks_agent is only valid for user gates; use excluded_agents for "
+            "agent executor constraints"
+        )
+    if role != "agent" and excluded_agents:
+        raise ValueError("excluded_agents is only valid for agent todos")
     require_user_todo_task_class(
         role=role,
         task_class=task_class,
@@ -811,6 +821,7 @@ def add_todo_to_lines(
             required_decision_scopes=required_decision_scopes,
             claimed_by=claimed_by,
             blocks_agent=blocks_agent,
+            excluded_agents=excluded_agents,
             global_gate=global_gate,
             unblocks_todo_id=unblocks_todo_id,
             resume_when=normalized_resume_when,
@@ -852,6 +863,8 @@ def add_todo_to_lines(
             updates["claimed_by"] = claimed_by
         if blocks_agent:
             updates["blocks_agent"] = blocks_agent
+        if excluded_agents is not None:
+            updates["excluded_agents"] = excluded_agents
         if global_gate is not None:
             updates["global_gate"] = global_gate
         if unblocks_todo_id:
@@ -901,6 +914,9 @@ def add_todo_to_lines(
         ),
         "claimed_by": normalize_todo_claimed_by(effective_metadata.get("claimed_by")),
         "blocks_agent": normalize_todo_blocks_agent(effective_metadata.get("blocks_agent")),
+        "excluded_agents": normalize_todo_excluded_agents(
+            effective_metadata.get("excluded_agents")
+        ),
         "global_gate": normalize_todo_global_gate(effective_metadata.get("global_gate")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
         "resume_when": normalize_todo_resume_when(effective_metadata.get("resume_when")),
@@ -930,6 +946,7 @@ def add_goal_todo(
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
+    excluded_agents: list[str] | None = None,
     global_gate: bool = False,
     agent_id: str | None = None,
     unblocks_todo_id: str | None = None,
@@ -949,6 +966,11 @@ def add_goal_todo(
     )
     if global_gate and not (role == "user" and task_class == TODO_TASK_CLASS_USER_GATE):
         raise ValueError("global_gate is only valid for `--role user --task-class user_gate`")
+    if role == "agent" and blocks_agent:
+        raise ValueError(
+            "blocks_agent is only valid for user gates; use --excluded-agent for "
+            "agent executor constraints"
+        )
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")
@@ -1003,6 +1025,13 @@ def add_goal_todo(
             if inferred_blocks_agent
             else None
         )
+        effective_excluded_agents = require_registered_todo_excluded_agents(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            excluded_agents=excluded_agents,
+        )
+        if role != "agent" and effective_excluded_agents:
+            raise ValueError("excluded_agents is only valid for agent todos")
         require_user_gate_scope(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -1037,6 +1066,7 @@ def add_goal_todo(
             required_decision_scopes=required_decision_scopes,
             claimed_by=effective_claimed_by,
             blocks_agent=effective_blocks_agent,
+            excluded_agents=effective_excluded_agents,
             global_gate=True if global_gate else None,
             unblocks_todo_id=normalized_unblocks_todo_id,
             resume_when=normalized_resume_when,
@@ -1077,6 +1107,7 @@ def add_goal_todo(
         "claimed_by": add_result.get("claimed_by"),
         "agent_id": effective_agent_id,
         "blocks_agent": add_result.get("blocks_agent"),
+        "excluded_agents": add_result.get("excluded_agents"),
         "global_gate": add_result.get("global_gate"),
         "unblocks_todo_id": add_result.get("unblocks_todo_id"),
         "resume_when": add_result.get("resume_when"),
@@ -1133,6 +1164,7 @@ def apply_todo_update_to_lines(
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
+    excluded_agents: list[str] | None = None,
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
     successor_todo_ids: list[str] | None = None,
@@ -1206,6 +1238,8 @@ def apply_todo_update_to_lines(
         updates["claimed_by"] = claimed_by
     if blocks_agent:
         updates["blocks_agent"] = blocks_agent
+    if excluded_agents is not None:
+        updates["excluded_agents"] = excluded_agents
     if global_gate is not None:
         updates["global_gate"] = global_gate
     if unblocks_todo_id:
@@ -1253,6 +1287,9 @@ def apply_todo_update_to_lines(
             effective_metadata.get("required_decision_scopes")
         ),
         "blocks_agent": normalize_todo_blocks_agent(effective_metadata.get("blocks_agent")),
+        "excluded_agents": normalize_todo_excluded_agents(
+            effective_metadata.get("excluded_agents")
+        ),
         "global_gate": normalize_todo_global_gate(effective_metadata.get("global_gate")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
         "successor_todo_ids": normalize_todo_id_list(effective_metadata.get("successor_todo_ids")),
@@ -1286,6 +1323,8 @@ def update_goal_todo(
     required_decision_scopes: Any = None,
     claimed_by: str | None = None,
     blocks_agent: str | None = None,
+    excluded_agents: list[str] | None = None,
+    clear_excluded_agents: bool = False,
     global_gate: bool = False,
     agent_id: str | None = None,
     unblocks_todo_id: str | None = None,
@@ -1304,6 +1343,10 @@ def update_goal_todo(
         or (task_class is not None and task_class != TODO_TASK_CLASS_USER_GATE)
     ):
         raise ValueError("global_gate is only valid for user_gate todos")
+    if excluded_agents and clear_excluded_agents:
+        raise ValueError(
+            "todo update accepts either excluded_agents or clear_excluded_agents, not both"
+        )
     resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -1358,6 +1401,35 @@ def update_goal_todo(
         existing_role, _section, _start, _end, existing_block = existing_block_match
         target_role = role or existing_role
         target_task_class = task_class or str(existing_block.get("task_class") or "")
+        if target_role == "agent" and blocks_agent:
+            raise ValueError(
+                "blocks_agent is only valid for user gates; use excluded_agents for "
+                "agent executor constraints"
+            )
+        effective_excluded_agents = (
+            []
+            if clear_excluded_agents
+            else require_registered_todo_excluded_agents(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                excluded_agents=excluded_agents,
+            )
+            if excluded_agents is not None
+            else None
+        )
+        existing_excluded_agents = normalize_todo_excluded_agents(
+            existing_block.get("excluded_agents")
+        )
+        target_excluded_agents = (
+            effective_excluded_agents
+            if effective_excluded_agents is not None
+            else existing_excluded_agents
+        )
+        if target_role != "agent" and target_excluded_agents:
+            raise ValueError(
+                "excluded_agents is only valid for agent todos; clear exclusions before "
+                "moving this todo to a user role"
+            )
         target_status = (
             normalize_todo_status(status)
             if status
@@ -1434,6 +1506,7 @@ def update_goal_todo(
             required_decision_scopes=required_decision_scopes,
             claimed_by=effective_claimed_by,
             blocks_agent=effective_blocks_agent,
+            excluded_agents=effective_excluded_agents,
             global_gate=True if global_gate else None,
             unblocks_todo_id=normalized_unblocks_todo_id,
             successor_todo_ids=normalized_successor_todo_ids if successor_todo_ids is not None else None,
@@ -1488,6 +1561,7 @@ def complete_goal_todo(
     next_task_class: str | None = None,
     next_action_kind: str | None = None,
     next_continuation_policy: str | None = None,
+    next_excluded_agents: list[str] | None = None,
     self_merged: bool = False,
     project: Path | None = None,
     state_file: Path | None = None,
@@ -1563,6 +1637,7 @@ def complete_goal_todo(
             next_agent_todo=next_agent_todo,
             next_action_kind=next_action_kind,
             next_continuation_policy=next_continuation_policy,
+            next_excluded_agents=next_excluded_agents or [],
             self_merged=self_merged,
             evidence=evidence,
             no_followup=no_followup,
@@ -1572,17 +1647,10 @@ def complete_goal_todo(
         effective_claimed_by = completion_policy.effective_claimed_by
         registered_agents = completion_policy.registered_agents
         effective_next_claimed_by = completion_policy.effective_next_claimed_by
+        effective_next_excluded_agents = (
+            completion_policy.effective_next_excluded_agents
+        )
         effective_self_merged = completion_policy.self_merged
-        review_successor = bool(
-            next_agent_todo
-            and todo_continuation_requires_review(
-                next_continuation_policy,
-                action_kind=next_action_kind,
-            )
-        )
-        policy_next_blocks_agent = (
-            effective_claimed_by if review_successor else None
-        )
         if not completion_match:
             if event_context:
                 event_result = complete_event_projected_goal_todo(
@@ -1601,7 +1669,7 @@ def complete_goal_todo(
                     next_action_kind=next_action_kind,
                     next_continuation_policy=next_continuation_policy,
                     self_merged=effective_self_merged,
-                    next_blocks_agent=policy_next_blocks_agent,
+                    next_excluded_agents=effective_next_excluded_agents,
                     registered_agents=registered_agents,
                     updated_at=updated_at,
                     dry_run=dry_run,
@@ -1626,7 +1694,6 @@ def complete_goal_todo(
             if next_agent_todo
             else None
         )
-        next_blocks_agent = policy_next_blocks_agent
         next_user_blocks_agent = None
         if next_user_todo and len(registered_agents) > 1:
             next_user_blocks_agent = effective_claimed_by
@@ -1649,7 +1716,7 @@ def complete_goal_todo(
                     action_kind=next_action_kind,
                     continuation_policy=next_continuation_policy,
                     claimed_by=effective_next_claimed_by,
-                    blocks_agent=next_blocks_agent,
+                    excluded_agents=effective_next_excluded_agents,
                     unblocks_todo_id=next_unblocks_todo_id,
                     updated_at=updated_at,
                 )
@@ -1714,6 +1781,7 @@ def supersede_goal_todo(
     next_task_class: str | None = None,
     next_action_kind: str | None = None,
     next_continuation_policy: str | None = None,
+    next_excluded_agents: list[str] | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -1738,8 +1806,16 @@ def supersede_goal_todo(
             if next_claimed_by
             else None
         )
+        effective_next_excluded_agents = require_registered_todo_excluded_agents(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            excluded_agents=next_excluded_agents,
+            field="next_excluded_agents",
+        )
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")
+        if effective_next_excluded_agents and not next_agent_todo:
+            raise ValueError("--next-excluded-agent requires --next-agent-todo")
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
@@ -1756,27 +1832,20 @@ def supersede_goal_todo(
         )
         if (
             next_agent_todo
-            and todo_continuation_requires_review(
-                next_continuation_policy,
-                action_kind=next_action_kind,
-            )
-            and effective_next_claimed_by
-            and effective_next_claimed_by == current_claimed_by
-        ):
-            raise ValueError(
-                "review_handoff successor must be unclaimed or claimed by a different "
-                "registered peer"
-            )
-        if (
-            next_agent_todo
             and not effective_next_claimed_by
             and next_policy == TodoContinuationPolicy.SAME_AGENT_NON_DELIVERY
         ):
             effective_next_claimed_by = current_claimed_by
-        next_blocks_agent = normalize_todo_blocks_agent(update_result.get("blocks_agent"))
+        if effective_next_claimed_by in effective_next_excluded_agents:
+            raise ValueError(
+                f"next_claimed_by={effective_next_claimed_by!r} cannot also appear in "
+                "next_excluded_agents"
+            )
         next_unblocks_todo_id = normalize_todo_id(update_result.get("unblocks_todo_id"))
         registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
-        next_user_blocks_agent = next_blocks_agent
+        next_user_blocks_agent = normalize_todo_blocks_agent(
+            update_result.get("blocks_agent")
+        )
         if next_user_todo and len(registered_agents) > 1 and not next_user_blocks_agent:
             next_user_blocks_agent = (
                 normalize_todo_claimed_by(update_result.get("claimed_by"))
@@ -1802,7 +1871,7 @@ def supersede_goal_todo(
                     action_kind=next_action_kind,
                     continuation_policy=next_continuation_policy,
                     claimed_by=effective_next_claimed_by,
-                    blocks_agent=next_blocks_agent,
+                    excluded_agents=effective_next_excluded_agents,
                     unblocks_todo_id=next_unblocks_todo_id,
                     updated_at=updated_at,
                 )

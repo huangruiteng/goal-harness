@@ -20,6 +20,7 @@ from .contract import (
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
     normalize_todo_decision_scope,
+    normalize_todo_excluded_agents,
     normalize_todo_global_gate,
     normalize_todo_id,
     normalize_todo_id_list,
@@ -325,6 +326,9 @@ def structured_todo_item(
     blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
     if blocks_agent:
         normalized["blocks_agent"] = blocks_agent
+    excluded_agents = normalize_todo_excluded_agents(item.get("excluded_agents"))
+    if excluded_agents:
+        normalized["excluded_agents"] = excluded_agents
     global_gate = normalize_todo_global_gate(item.get("global_gate"))
     if global_gate is not None:
         normalized["global_gate"] = global_gate
@@ -368,6 +372,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "required_decision_scopes",
         "claimed_by",
         "blocks_agent",
+        "excluded_agents",
         "global_gate",
         "unblocks_todo_id",
         "resume_when",
@@ -826,6 +831,7 @@ def todo_item_is_succession_tracked_completion(item: dict[str, Any]) -> bool:
             "unblocks_todo_id",
             "resume_when",
             "blocks_agent",
+            "excluded_agents",
             "global_gate",
         )
     )

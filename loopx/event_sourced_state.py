@@ -24,6 +24,7 @@ from .control_plane.todos.contract import (
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
+    normalize_todo_excluded_agents,
     normalize_todo_id,
     normalize_todo_id_list,
     normalize_todo_status,
@@ -268,6 +269,7 @@ def backfill_todo_events_from_markdown(
             record.get("required_write_scopes")
         )
         blocks_agent = normalize_todo_blocks_agent(record.get("blocks_agent"))
+        excluded_agents = normalize_todo_excluded_agents(record.get("excluded_agents"))
         if task_class:
             payload["task_class"] = task_class
         if action_kind:
@@ -278,6 +280,8 @@ def backfill_todo_events_from_markdown(
             payload["required_write_scopes"] = required_write_scopes
         if blocks_agent:
             payload["blocks_agent"] = blocks_agent
+        if excluded_agents:
+            payload["excluded_agents"] = excluded_agents
         events.append(
             make_state_event(
                 event_id=_backfill_event_id(goal_id=normalized_goal_id, todo_id=todo_id, suffix="add"),
@@ -561,6 +565,7 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         payload.get("required_write_scopes")
     )
     blocks_agent = normalize_todo_blocks_agent(payload.get("blocks_agent"))
+    excluded_agents = normalize_todo_excluded_agents(payload.get("excluded_agents"))
     claimed_by = normalize_todo_claimed_by(payload.get("claimed_by"))
     todo: dict[str, Any] = {
         "schema_version": "todo_item_v0",
@@ -586,6 +591,8 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         todo["required_write_scopes"] = required_write_scopes
     if blocks_agent:
         todo["blocks_agent"] = blocks_agent
+    if excluded_agents:
+        todo["excluded_agents"] = excluded_agents
     unblocks_todo_id = normalize_todo_id(payload.get("unblocks_todo_id"))
     if unblocks_todo_id:
         todo["unblocks_todo_id"] = unblocks_todo_id
@@ -621,6 +628,9 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
         blocks_agent = normalize_todo_blocks_agent(payload.get("blocks_agent"))
         if blocks_agent:
             todo["blocks_agent"] = blocks_agent
+        excluded_agents = normalize_todo_excluded_agents(payload.get("excluded_agents"))
+        if excluded_agents:
+            todo["excluded_agents"] = excluded_agents
         for key in TODO_MONITOR_METADATA_FIELDS:
             if payload.get(key):
                 todo[key] = compact_text(payload[key])
@@ -759,6 +769,7 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         required_write_scopes=item.get("required_write_scopes"),
         claimed_by=item.get("claimed_by"),
         blocks_agent=item.get("blocks_agent"),
+        excluded_agents=item.get("excluded_agents"),
         unblocks_todo_id=item.get("unblocks_todo_id"),
         successor_todo_ids=item.get("successor_todo_ids"),
         no_followup=True if item.get("no_followup") == "true" else None,
