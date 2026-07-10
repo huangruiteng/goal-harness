@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import skillsbench_automation_loop as skillsbench_loop
+from loopx.benchmark_adapters import skillsbench_dockerfile_runtime as dockerfile_runtime
 from loopx.benchmark_adapters import skillsbench_proxy_runtime as proxy_runtime
 
 
@@ -324,6 +325,57 @@ def test_public_launcher_applies_ssh_options_to_remote_discovery() -> None:
         assert "DOCKER_API_VERSION=1.43" in proc.stdout, proc.stdout
 
 
+def test_docker_staging_keeps_pip_installs_inside_explicit_venv() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-venv-pip-") as tmp:
+        root = Path(tmp)
+        task = root / "tasks" / "venv-pip"
+        dockerfile = task / "environment" / "Dockerfile"
+        dockerfile.parent.mkdir(parents=True)
+        original = (
+            "FROM ubuntu:24.04\n"
+            "RUN python3 -m venv /opt/venv\n"
+            'ENV PATH="/opt/venv/bin:$PATH"\n'
+            "RUN pip install -U pip setuptools wheel\n"
+            "RUN pip3 install numpy && \\\n"
+            "    python3 -m pip install cython\n"
+            "RUN uv pip install pandas\n"
+            "RUN echo 'pip install is documentation'\n"
+            "RUN python3 - <<'PY'\n"
+            "print('pip install remains text')\n"
+            "PY\n"
+            "FROM ubuntu:24.04 AS system-stage\n"
+            "RUN pip install system-package\n"
+        )
+        dockerfile.write_text(original, encoding="utf-8")
+        (task / "task.toml").write_text('version = "1.1"\n', encoding="utf-8")
+
+        staged, metadata = skillsbench_loop.stage_task_for_sandbox(
+            task_path=task,
+            jobs_dir=root / "jobs",
+            job_name="venv-pip-goal",
+            sandbox="docker",
+            include_task_skills=False,
+        )
+
+        assert metadata["dockerfile_venv_pip_invocation_patch_required"] is True
+        assert metadata["dockerfile_venv_pip_invocation_patch_applied"] is True
+        assert dockerfile.read_text(encoding="utf-8") == original
+        staged_text = (staged / "environment" / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        assert dockerfile_runtime.VENV_PIP_INVOCATION_MARKER in staged_text
+        assert "RUN python3 -m pip install -U pip setuptools wheel" in staged_text
+        assert "RUN python3 -m pip install numpy" in staged_text
+        assert "python3 -m pip install cython" in staged_text
+        assert "RUN uv pip install pandas" in staged_text
+        assert "RUN echo 'pip install is documentation'" in staged_text
+        assert "print('pip install remains text')" in staged_text
+        assert "RUN pip install system-package" in staged_text
+        public = skillsbench_loop._public_task_staging(metadata)
+        assert public["dockerfile_venv_pip_invocation_patch_required"] is True
+        assert public["dockerfile_venv_pip_invocation_patch_applied"] is True
+
+
 def test_proxy_runtime_preserves_docker_cli_plugins() -> None:
     with tempfile.TemporaryDirectory(prefix="skillsbench-docker-config-") as tmp:
         root = Path(tmp)
@@ -488,6 +540,7 @@ if __name__ == "__main__":
     test_public_launcher_batches_three_cases_with_closeout_sync()
     test_public_launcher_rejects_aggregate_without_explicit_ledger()
     test_public_launcher_applies_ssh_options_to_remote_discovery()
+    test_docker_staging_keeps_pip_installs_inside_explicit_venv()
     test_proxy_runtime_preserves_docker_cli_plugins()
     test_verifier_proxy_patch_is_required_only_for_existing_verifier()
     test_verifier_proxy_patch_failure_blocks_task_staging()

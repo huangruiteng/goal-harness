@@ -115,6 +115,7 @@ from loopx.benchmark_adapters.skillsbench_task_source import (  # noqa: E402
 )
 from loopx.benchmark_adapters import (  # noqa: E402
     skillsbench_codex_runtime as codex_runtime,
+    skillsbench_dockerfile_runtime as dockerfile_runtime,
     skillsbench_proxy_runtime as proxy_runtime,
     skillsbench_runner_source as runner_source,
     skillsbench_uv_cache as uv_cache,
@@ -6086,6 +6087,8 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
         "dockerfile_pip_install_risk_detected",
         "dockerfile_pip_bootstrap_patch_required",
         "dockerfile_pip_bootstrap_patch_applied",
+        "dockerfile_venv_pip_invocation_patch_required",
+        "dockerfile_venv_pip_invocation_patch_applied",
         "dockerfile_gcr_mirror_configured",
         "dockerfile_gcr_mirror_patch_required",
         "dockerfile_gcr_mirror_patch_applied",
@@ -6229,6 +6232,12 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
         "apt_retry_patch_applied": DOCKER_APT_RETRY_BEGIN in dockerfile_text,
         "dockerfile_pip_bootstrap_patch_applied": (
             DOCKER_PIP_BOOTSTRAP_BEGIN in dockerfile_text
+        ),
+        "dockerfile_venv_pip_invocation_patch_applied": (
+            dockerfile_runtime.VENV_PIP_INVOCATION_MARKER in dockerfile_text
+        ),
+        "dockerfile_venv_pip_invocation_patch_required": (
+            dockerfile_runtime.VENV_PIP_INVOCATION_MARKER in dockerfile_text
         ),
         "dockerfile_gcr_mirror_patch_applied": (
             DOCKER_GCR_MIRROR_BEGIN in dockerfile_text
@@ -7836,7 +7845,7 @@ def patch_dockerfile_benchmark_egress_proxy_env(
             if line.strip() == heredoc_delimiter:
                 heredoc_delimiter = None
             continue
-        heredoc_delimiter = _dockerfile_heredoc_delimiter(line)
+        heredoc_delimiter = dockerfile_runtime.dockerfile_heredoc_delimiter(line)
         stripped = line.strip()
         if (
             _is_dockerfile_from_instruction(stripped)
@@ -7928,7 +7937,7 @@ def patch_dockerfile_pip_bootstrap(dockerfile: Path) -> bool:
             if line.strip() == heredoc_delimiter:
                 heredoc_delimiter = None
             continue
-        heredoc_delimiter = _dockerfile_heredoc_delimiter(line)
+        heredoc_delimiter = dockerfile_runtime.dockerfile_heredoc_delimiter(line)
         stripped = line.strip()
         if (
             _is_dockerfile_from_instruction(stripped)
@@ -7943,15 +7952,6 @@ def patch_dockerfile_pip_bootstrap(dockerfile: Path) -> bool:
         return False
     _write_text_atomic(dockerfile, patched)
     return True
-
-
-def _dockerfile_heredoc_delimiter(line: str) -> str | None:
-    """Return a Dockerfile shell heredoc delimiter opened on this line."""
-
-    match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
-    if not match:
-        return None
-    return match.group(1)
 
 
 def _is_dockerfile_from_instruction(stripped_line: str) -> bool:
@@ -8101,6 +8101,8 @@ def stage_task_for_sandbox(
         "dockerfile_pip_install_risk_detected": False,
         "dockerfile_pip_bootstrap_patch_required": False,
         "dockerfile_pip_bootstrap_patch_applied": False,
+        "dockerfile_venv_pip_invocation_patch_required": False,
+        "dockerfile_venv_pip_invocation_patch_applied": False,
         "dockerfile_gcr_mirror_configured": bool(
             _normalized_docker_gcr_mirror_prefix(docker_gcr_mirror_prefix)
         ),
@@ -8173,6 +8175,11 @@ def stage_task_for_sandbox(
     needs_pip_bootstrap_patch = dockerfile_needs_pip_bootstrap_patch(
         task_path / "environment" / "Dockerfile"
     )
+    needs_venv_pip_invocation_patch = (
+        dockerfile_runtime.needs_venv_pip_invocation_patch(
+            task_path / "environment" / "Dockerfile"
+        )
+    )
     needs_gcr_mirror_patch = dockerfile_needs_gcr_mirror_rewrite(
         task_path / "environment" / "Dockerfile",
         mirror_prefix=docker_gcr_mirror_prefix,
@@ -8224,6 +8231,9 @@ def stage_task_for_sandbox(
     metadata["apt_risk_preflight_blocked"] = False
     metadata["dockerfile_pip_install_risk_detected"] = needs_pip_bootstrap_patch
     metadata["dockerfile_pip_bootstrap_patch_required"] = needs_pip_bootstrap_patch
+    metadata["dockerfile_venv_pip_invocation_patch_required"] = (
+        needs_venv_pip_invocation_patch
+    )
     if needs_pip_bootstrap_patch:
         metadata["dockerfile_pip_index_host"] = DEFAULT_DOCKER_PIP_INDEX_HOST
     metadata["dockerfile_gcr_mirror_patch_required"] = needs_gcr_mirror_patch
@@ -8308,6 +8318,7 @@ def stage_task_for_sandbox(
         and not needs_resource_cap
         and not needs_apt_retry_patch
         and not needs_pip_bootstrap_patch
+        and not needs_venv_pip_invocation_patch
         and not needs_gcr_mirror_patch
         and not needs_elan_toolchain_retry_patch
         and not needs_wget_gpg_key_retry_patch
@@ -8365,6 +8376,9 @@ def stage_task_for_sandbox(
     pip_bootstrap_patched = patch_dockerfile_pip_bootstrap(
         staged_path / "environment" / "Dockerfile"
     )
+    venv_pip_invocation_patched = dockerfile_runtime.patch_venv_pip_invocations(
+        staged_path / "environment" / "Dockerfile"
+    )
     gcr_mirror_patched = patch_dockerfile_gcr_mirror(
         staged_path / "environment" / "Dockerfile",
         mirror_prefix=docker_gcr_mirror_prefix,
@@ -8416,6 +8430,9 @@ def stage_task_for_sandbox(
             "app_skills_mount_patch_applied": patched,
             "apt_retry_patch_applied": apt_retry_patched,
             "dockerfile_pip_bootstrap_patch_applied": pip_bootstrap_patched,
+            "dockerfile_venv_pip_invocation_patch_applied": (
+                venv_pip_invocation_patched
+            ),
             "dockerfile_pip_index_host": (
                 DEFAULT_DOCKER_PIP_INDEX_HOST if pip_bootstrap_patched else ""
             ),
@@ -8859,6 +8876,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 setup_preflight.get("dockerfile_pip_bootstrap_patch_required")
             ),
             "dockerfile_pip_bootstrap_patch_applied": False,
+            "dockerfile_venv_pip_invocation_patch_required": False,
+            "dockerfile_venv_pip_invocation_patch_applied": False,
             "dockerfile_pip_index_host": (
                 DEFAULT_DOCKER_PIP_INDEX_HOST
                 if setup_preflight.get("dockerfile_pip_bootstrap_patch_required")
