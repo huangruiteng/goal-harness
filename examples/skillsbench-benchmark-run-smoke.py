@@ -773,6 +773,9 @@ def test_codex_app_server_goal_blocks_without_codex_api_egress() -> None:
         task_dir = skillsbench_root / "tasks" / "citation-check"
         task_dir.mkdir(parents=True)
         (task_dir / "task.toml").write_text("version = \"1.1\"\n", encoding="utf-8")
+        codex_bin = root / "codex"
+        codex_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        codex_bin.chmod(0o755)
 
         original_create_connection = skillsbench_loop.socket.create_connection
 
@@ -792,6 +795,8 @@ def test_codex_app_server_goal_blocks_without_codex_api_egress() -> None:
                         "codex-app-server-goal-baseline",
                         "--allow-deprecated-app-server-goal-route",
                         "--host-local-acp-launch",
+                        "--local-codex-bin",
+                        str(codex_bin),
                         "--remote-command-file-bridge-ready",
                         "--skillsbench-root",
                         str(skillsbench_root),
