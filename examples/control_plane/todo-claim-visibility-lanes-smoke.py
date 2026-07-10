@@ -16,7 +16,9 @@ from loopx.control_plane.todos.claim_visibility import (  # noqa: E402
     build_agent_claim_scoped_open_items,
     build_todo_claim_visibility_lanes,
 )
+from loopx.control_plane.todos.contract import parse_todo_metadata_line  # noqa: E402
 from loopx.quota import build_quota_should_run  # noqa: E402
+from loopx.todos import apply_todo_update_to_lines  # noqa: E402
 from work_lane_contract_fixtures import GOAL_ID, status_payload  # noqa: E402
 
 
@@ -32,6 +34,7 @@ def todo(
     task_class: str,
     claimed_by: str | None = None,
     continuation_policy: str | None = None,
+    removed_continuation_policy: str | None = None,
     blocks_agent: str | None = None,
     excluded_agents: list[str] | None = None,
 ) -> dict:
@@ -43,6 +46,7 @@ def todo(
         "task_class": task_class,
         "claimed_by": claimed_by,
         "continuation_policy": continuation_policy,
+        "removed_continuation_policy": removed_continuation_policy,
         "blocks_agent": blocks_agent,
         "excluded_agents": excluded_agents,
         "required_write_scopes": [" loopx/** ", "loopx/**"],
@@ -215,6 +219,120 @@ def assert_quota_routes_unclaimed_handoff_to_an_eligible_peer() -> None:
     assert reviewer_guard["recommended_action"] == review["text"], reviewer_guard
 
 
+def assert_legacy_review_handoff_fails_closed_until_repaired() -> None:
+    parsed = parse_todo_metadata_line(
+        "  <!-- loopx:todo todo_id=todo_legacy_review status=open "
+        "task_class=advancement_task action_kind=review "
+        "continuation_policy=review_handoff required_capabilities=shell -->"
+    )
+    assert parsed is not None
+    assert parsed.get("continuation_policy") is None, parsed
+    assert parsed["removed_continuation_policy"] == "review_handoff", parsed
+
+    legacy_review = todo(
+        "todo_legacy_review",
+        index=1,
+        text="[P0] Independently review the peer implementation.",
+        task_class="advancement_task",
+        removed_continuation_policy=parsed["removed_continuation_policy"],
+    )
+    fallback = todo(
+        "todo_legacy_fallback",
+        index=2,
+        text="[P1] Repair the legacy review handoff metadata.",
+        task_class="advancement_task",
+        claimed_by=CURRENT_AGENT,
+    )
+    for item in (legacy_review, fallback):
+        item["role"] = "agent"
+        item["required_capabilities"] = ["shell"]
+
+    selectable, claim_scope = build_agent_claim_scoped_open_items(
+        [legacy_review, fallback],
+        agent_identity={"agent_id": CURRENT_AGENT, "agent_model": "peer_v1"},
+        diagnostic_item_limit=3,
+    )
+    assert [item["todo_id"] for item in selectable] == ["todo_legacy_fallback"]
+    assert claim_scope is not None
+    assert claim_scope["removed_continuation_blocked_count"] == 1, claim_scope
+    assert claim_scope["removed_continuation_blocked_items"][0]["todo_id"] == (
+        "todo_legacy_review"
+    )
+
+    guard = build_quota_should_run(
+        status_payload(
+            status="legacy_review_handoff_migration",
+            next_action=legacy_review["text"],
+            coordination={
+                "agent_model": "peer_v1",
+                "registered_agents": [OTHER_AGENT, CURRENT_AGENT],
+            },
+            agent_todo_items=[legacy_review, fallback],
+        ),
+        goal_id=GOAL_ID,
+        agent_id=CURRENT_AGENT,
+    )
+    assert guard["agent_lane_next_action"]["todo_id"] == "todo_legacy_fallback", guard
+    assert [
+        item["todo_id"] for item in guard["capability_gate"]["runnable_candidates"]
+    ] == ["todo_legacy_fallback"], guard
+
+    peer_selectable, peer_scope = build_agent_claim_scoped_open_items(
+        [legacy_review],
+        agent_identity={"agent_id": OTHER_AGENT, "agent_model": "peer_v1"},
+        diagnostic_item_limit=3,
+    )
+    assert peer_selectable == []
+    assert peer_scope is not None
+    assert peer_scope["removed_continuation_blocked_count"] == 1
+
+
+def assert_legacy_review_handoff_write_requires_explicit_repair() -> None:
+    original_lines = [
+        "## Agent Todo",
+        "",
+        "- [ ] [P0] Independently review the peer implementation.",
+        "  <!-- loopx:todo todo_id=todo_legacy_write status=open "
+        "task_class=advancement_task action_kind=review "
+        "continuation_policy=review_handoff -->",
+    ]
+
+    for updates in (
+        {"claimed_by": CURRENT_AGENT, "claim_only": True},
+        {"note": "Keep this legacy review blocked."},
+    ):
+        lines = list(original_lines)
+        try:
+            apply_todo_update_to_lines(
+                lines,
+                todo_id="todo_legacy_write",
+                role="agent",
+                updated_at="2026-07-11T06:00:00+08:00",
+                **updates,
+            )
+        except ValueError as exc:
+            assert "repair it" in str(exc), exc
+        else:
+            raise AssertionError("legacy review writes must fail closed")
+        assert lines == original_lines
+
+    repaired_lines = list(original_lines)
+    repaired = apply_todo_update_to_lines(
+        repaired_lines,
+        todo_id="todo_legacy_write",
+        role="agent",
+        continuation_policy="independent_handoff",
+        excluded_agents=[CURRENT_AGENT],
+        updated_at="2026-07-11T06:00:00+08:00",
+    )
+    assert repaired["continuation_policy"] == "independent_handoff", repaired
+    assert repaired["excluded_agents"] == [CURRENT_AGENT], repaired
+    repaired_text = "\n".join(repaired_lines)
+    assert "continuation_policy=review_handoff" not in repaired_text
+    assert "continuation_policy=independent_handoff" in repaired_text
+    assert f"excluded_agents={CURRENT_AGENT}" in repaired_text
+
+
 def assert_claim_visibility_lanes_split_current_other_and_task_class() -> None:
     open_items = [
         todo(
@@ -274,6 +392,8 @@ def main() -> int:
     assert_agent_claim_scope_prefers_current_then_unclaimed()
     assert_executor_exclusion_filters_only_the_named_peer()
     assert_quota_routes_unclaimed_handoff_to_an_eligible_peer()
+    assert_legacy_review_handoff_fails_closed_until_repaired()
+    assert_legacy_review_handoff_write_requires_explicit_repair()
     assert_claim_visibility_lanes_split_current_other_and_task_class()
     print("todo-claim-visibility-lanes-smoke ok")
     return 0

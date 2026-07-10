@@ -476,9 +476,25 @@ dependency lineage, and intentional closeout. `blocks_agent` is reserved for
 scoping user gates.
 
 After a hard-cut upgrade, `loopx check` reports agent todos that still carry
-the removed gate-routing field. Repair those records explicitly with `loopx
-todo update --todo-id <todo_id> --role agent --clear-blocks-agent`; LoopX does
-not rewrite them automatically.
+removed gate-routing fields. New readers also preserve a read-only
+`removed_continuation_policy` diagnostic for legacy `review_handoff` and
+`primary_review` records and exclude those records from claim/quota execution.
+This fail-closed compatibility marker is not a supported continuation type and
+is never written back. Repair legacy review records explicitly:
+
+```bash
+loopx todo update \
+  --goal-id <goal-id> \
+  --todo-id <todo-id> \
+  --role agent \
+  --continuation-policy independent_handoff \
+  --excluded-agent <author>
+```
+
+For removed `blocks_agent` routing, use `loopx todo update --todo-id <todo_id>
+--role agent --clear-blocks-agent`. LoopX does not infer the excluded author or
+rewrite either form automatically.
+
 Deferred successors may carry `resume_when`, `resume_condition`, and
 `resume_ready`; `resume_ready=true` means the deferred item should be considered
 for a successor replan before any agent-scoped no-candidate wait, not that

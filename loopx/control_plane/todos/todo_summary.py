@@ -26,6 +26,7 @@ from .contract import (
     normalize_todo_id,
     normalize_todo_id_list,
     normalize_todo_no_followup,
+    normalize_removed_todo_continuation_policy,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
     normalize_todo_status,
@@ -304,6 +305,11 @@ def structured_todo_item(
     )
     if continuation_policy:
         normalized["continuation_policy"] = continuation_policy
+    removed_continuation_policy = normalize_removed_todo_continuation_policy(
+        item.get("removed_continuation_policy")
+    )
+    if removed_continuation_policy:
+        normalized["removed_continuation_policy"] = removed_continuation_policy
     required_write_scopes = normalize_required_write_scopes(item.get("required_write_scopes"))
     if required_write_scopes:
         normalized["required_write_scopes"] = required_write_scopes
@@ -371,6 +377,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "task_class",
         "action_kind",
         "continuation_policy",
+        "removed_continuation_policy",
         "required_write_scopes",
         "required_capabilities",
         "target_capabilities",

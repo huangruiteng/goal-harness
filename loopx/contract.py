@@ -23,6 +23,7 @@ from .control_plane.todos.contract import (
     TODO_TASK_PATTERN,
     normalize_todo_claimed_by,
     normalize_todo_excluded_agents,
+    normalize_removed_todo_continuation_policy,
     parse_todo_metadata_line,
     parse_todo_metadata_tokens,
     require_todo_excluded_agents,
@@ -302,22 +303,11 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
                 continue
             marker, text = match.groups()
             metadata: dict[str, Any] = {}
-            removed_continuation_policy: str | None = None
             malformed_excluded_agents = False
             next_index = index + 1
             while next_index < len(lines):
                 if lines[next_index].startswith("## ") or TODO_TASK_PATTERN.match(lines[next_index]):
                     break
-                removed_policies = (
-                    "review_" "handoff",
-                    "primary_" "review",
-                )
-                removed_match = re.search(
-                    r"\bcontinuation_policy=(" + "|".join(removed_policies) + r")\b",
-                    lines[next_index],
-                )
-                if removed_match:
-                    removed_continuation_policy = removed_match.group(1)
                 raw_metadata = parse_todo_metadata_tokens(lines[next_index])
                 for key, value in raw_metadata or []:
                     if key not in {"excluded_agent", "excluded_agents"}:
@@ -330,6 +320,9 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
                 if parsed:
                     metadata.update(parsed)
                 next_index += 1
+            removed_continuation_policy = normalize_removed_todo_continuation_policy(
+                metadata.get("removed_continuation_policy")
+            )
             status = str(metadata.get("status") or todo_status_from_marker(marker) or "").lower()
             task_class = str(metadata.get("task_class") or "")
             todo_id = metadata.get("todo_id") or f"line:{index + 1}"

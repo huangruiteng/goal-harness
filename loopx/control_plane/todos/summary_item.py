@@ -7,6 +7,7 @@ from .contract import (
     normalize_todo_decision_scope,
     normalize_todo_excluded_agents,
     normalize_todo_id,
+    normalize_removed_todo_continuation_policy,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
 )
@@ -27,6 +28,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "task_class",
     "action_kind",
     "continuation_policy",
+    "removed_continuation_policy",
     "required_write_scopes",
     "required_capabilities",
     "target_capabilities",
@@ -118,6 +120,13 @@ def compact_todo_summary_item(
         compact["excluded_agents"] = excluded_agents
     else:
         compact.pop("excluded_agents", None)
+    removed_continuation_policy = normalize_removed_todo_continuation_policy(
+        compact.get("removed_continuation_policy")
+    )
+    if removed_continuation_policy:
+        compact["removed_continuation_policy"] = removed_continuation_policy
+    else:
+        compact.pop("removed_continuation_policy", None)
     compact["task_class"] = todo_item_task_class(compact)
     attach_todo_handoff_note(compact)
     return compact

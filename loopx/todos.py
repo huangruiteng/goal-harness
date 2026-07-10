@@ -41,6 +41,7 @@ from .control_plane.todos.contract import (
     normalize_todo_id,
     normalize_todo_id_list,
     normalize_todo_no_followup,
+    normalize_removed_todo_continuation_policy,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
     normalize_supported_todo_resume_when,
@@ -1061,6 +1062,26 @@ def apply_todo_update_to_lines(
     if not block_match:
         raise ValueError(f"todo_id {normalized_todo_id!r} was not found in active user or agent todos")
     resolved_role, section, _start, _end, block = block_match
+    removed_continuation_policy = normalize_removed_todo_continuation_policy(
+        block.get("removed_continuation_policy")
+    )
+    if removed_continuation_policy:
+        if claim_only:
+            raise ValueError(
+                f"todo_id {normalized_todo_id!r} uses removed continuation_policy="
+                f"{removed_continuation_policy}; repair it before claiming"
+            )
+        repair_policy = normalize_todo_continuation_policy(continuation_policy)
+        repair_exclusions = normalize_todo_excluded_agents(excluded_agents)
+        if (
+            repair_policy != TodoContinuationPolicy.INDEPENDENT_HANDOFF.value
+            or not repair_exclusions
+        ):
+            raise ValueError(
+                f"todo_id {normalized_todo_id!r} uses removed continuation_policy="
+                f"{removed_continuation_policy}; repair it explicitly with "
+                "continuation_policy=independent_handoff and excluded_agents=<author>"
+            )
     normalized_status = normalize_todo_status(status) if status else None
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")

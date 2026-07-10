@@ -130,6 +130,10 @@ class TodoContinuationPolicy(str, Enum):
 TODO_CONTINUATION_POLICY_VALUES = {
     policy.value for policy in TodoContinuationPolicy
 }
+TODO_REMOVED_REVIEW_CONTINUATION_POLICY_VALUES = {
+    "primary_review",
+    "review_handoff",
+}
 
 TODO_HARD_MONITOR_PATTERNS = (
     re.compile(r"(?i)\bdo not\b.*\b(?:launch|run|execute|start)\b.*\buntil\b"),
@@ -213,6 +217,13 @@ def normalize_todo_action_kind(value: Any) -> str | None:
 def normalize_todo_continuation_policy(value: Any) -> str | None:
     candidate = str(value or "").strip().lower()
     if candidate in TODO_CONTINUATION_POLICY_VALUES:
+        return candidate
+    return None
+
+
+def normalize_removed_todo_continuation_policy(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if candidate in TODO_REMOVED_REVIEW_CONTINUATION_POLICY_VALUES:
         return candidate
     return None
 
@@ -633,6 +644,10 @@ def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
             continuation_policy = normalize_todo_continuation_policy(value)
             if continuation_policy:
                 metadata["continuation_policy"] = continuation_policy
+            else:
+                removed_policy = normalize_removed_todo_continuation_policy(value)
+                if removed_policy:
+                    metadata["removed_continuation_policy"] = removed_policy
         elif key in {"required_write_scope", "required_write_scopes"}:
             scopes = normalize_required_write_scopes(value)
             if scopes:

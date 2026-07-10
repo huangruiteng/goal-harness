@@ -20,6 +20,7 @@ from .contract import (
     TODO_TASK_CLASS_MONITOR,
     normalize_todo_claimed_by,
     normalize_todo_excluded_agents,
+    normalize_removed_todo_continuation_policy,
     normalize_todo_id,
     normalize_todo_status,
 )
@@ -222,6 +223,8 @@ def todo_item_claimed_by_agent_or_unclaimed(
     *,
     agent_id: str | None,
 ) -> bool:
+    if todo_item_has_removed_continuation_policy(item):
+        return False
     normalized_agent_id = normalize_todo_claimed_by(agent_id)
     if not normalized_agent_id:
         return True
@@ -231,6 +234,14 @@ def todo_item_claimed_by_agent_or_unclaimed(
         return False
     claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
     return not claimed_by or claimed_by == normalized_agent_id
+
+
+def todo_item_has_removed_continuation_policy(item: dict[str, Any]) -> bool:
+    return bool(
+        normalize_removed_todo_continuation_policy(
+            item.get("removed_continuation_policy")
+        )
+    )
 
 
 def todo_item_excludes_agent(
