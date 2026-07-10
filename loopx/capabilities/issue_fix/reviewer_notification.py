@@ -217,6 +217,28 @@ def _parse_json_object(value: Any) -> Mapping[str, Any] | None:
     return payload if isinstance(payload, Mapping) else None
 
 
+def _lark_member_ids(value: Any) -> set[str]:
+    """Collect exact member ids from a provider response without retaining it."""
+
+    member_ids: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key, child in node.items():
+                if key in {"member_id", "open_id"} and isinstance(child, str):
+                    member_id = child.strip()
+                    if LARK_MEMBER_PATTERN.fullmatch(member_id):
+                        member_ids.add(member_id)
+                else:
+                    visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return member_ids
+
+
 def _public_result(
     *,
     sink_kind: str,
@@ -534,7 +556,6 @@ def _lark_result(
             )
         except (OSError, subprocess.SubprocessError):
             sender_members = {"returncode": 1}
-        sender_member_text = str(sender_members.get("stdout") or "")
         if sender_members.get("returncode") != 0:
             provider_error = " ".join(
                 str(sender_members.get(field) or "")
@@ -555,9 +576,10 @@ def _lark_result(
                     else "reviewer_notification_provider_failed"
                 ),
             )
-        if any(
-            member_id not in sender_member_text for _, member_id, _ in resolved
-        ):
+        sender_member_ids = _lark_member_ids(
+            _parse_json_object(sender_members.get("stdout"))
+        )
+        if any(member_id not in sender_member_ids for _, member_id, _ in resolved):
             return _public_result(
                 sink_kind=sink_kind,
                 reviewer_handles=reviewer_handles,

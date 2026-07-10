@@ -40,6 +40,7 @@ class FakeSinkRunner:
         bot_name: str = "Project Review Bot",
         reader_verified: bool = True,
         include_member: bool = True,
+        member_id: str = "ou_private_member",
     ) -> None:
         self.send_returncode = send_returncode
         self.verify_returncode = verify_returncode
@@ -47,6 +48,7 @@ class FakeSinkRunner:
         self.bot_name = bot_name
         self.reader_verified = reader_verified
         self.include_member = include_member
+        self.member_id = member_id
         self.calls: list[list[str]] = []
 
     def __call__(self, args: list[str]) -> dict[str, Any]:
@@ -90,7 +92,7 @@ class FakeSinkRunner:
                 "stdout": json.dumps(
                     {
                         "items": [
-                            {"member_id": "ou_private_member"}
+                            {"member_id": self.member_id}
                             if self.include_member
                             else {"member_id": "ou_someone_else"}
                         ]
@@ -334,6 +336,23 @@ def main() -> int:
     assert missing_member["blocker"] == "reviewer_notification_identity_unresolved"
     assert missing_member["external_writes_performed"] is False
     assert_public_safe(missing_member)
+
+    substring_member = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=fixture(explicit_profiles=True),
+        execute=True,
+        runner=FakeSinkRunner(member_id="ou_private_member_suffix"),
+    )
+    assert substring_member["ok"] is False, substring_member
+    assert substring_member["blocker"] == (
+        "reviewer_notification_identity_unresolved"
+    )
+    assert substring_member["external_writes_performed"] is False
+    assert_public_safe(substring_member)
 
     retry_input = fixture()
     retry_input["receipts"] = [receipt]
