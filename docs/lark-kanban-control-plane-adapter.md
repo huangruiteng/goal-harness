@@ -135,9 +135,11 @@ When a worker discovers follow-up work, it should classify the need first:
 - strategy-heavy fan-out: run `complex_request_intake_v0` to create a small
   typed todo batch.
 
-After that writeback, `sync-loopx-todos` updates the status tracker. This keeps
-task identity, `todo_id`, gates, claims, and successor metadata in LoopX while
-letting Kanban remain the operator-visible tracker for current work.
+After that writeback, `sync-loopx-todos` updates the status tracker and derives
+issue-fix outcome rows from existing goal domain state. This keeps task identity,
+`todo_id`, gates, claims, issue/PR lifecycle state, and successor metadata in
+LoopX while letting Kanban remain the operator-visible tracker for current work
+and delivered outputs.
 
 ## Setup And Reuse
 
@@ -171,12 +173,18 @@ python3 -m loopx.cli lark-kanban heartbeat --execute-lark
 ```
 
 `sync-loopx-todos` reads the goal active state from the LoopX registry and
-upserts open user/agent todos into the board. User todos become `User Gate`
+upserts open user/agent todos plus derived issue-fix outcome rows into the board.
+User todos become `User Gate`
 cards; claimed agent todos become `Claimed`; blocked/done todos map to
 `Blocked`/`Done` when included. Synced LoopX todos intentionally leave
 `Worker Command` and `Workdir` empty unless a task row was explicitly authored
 as a worker-launch row; the shared board must not receive raw local checkout or
 active-state paths.
+
+Issue outcomes are derived, not persisted separately. Every feasibility row is
+projected; a PR lifecycle row enriches it only through an explicit matching
+`repo` and `issue_ref`. This avoids title/branch guessing and makes the issue
+grid and stage Kanban part of the default sync path.
 
 ## CLI Surface
 

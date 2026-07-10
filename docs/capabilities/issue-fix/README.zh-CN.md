@@ -462,6 +462,9 @@ review、maintainer correction、mergeability、stale branch 和 terminal status
 transition 必须生成 `runnable_successor`、具体 blocker 或结构化 no-follow-up；
 unchanged poll 保持安静且不消耗 delivery quota。
 
+持久化 PR lifecycle 时应传入 `--issue-ref`。这个显式、public-safe 的关联让 outcome
+read model 可以把 PR 精确连接到 issue，而不用从分支名、标题或正文中猜测。
+
 ## 状态与产出视图
 
 Todo 卡回答的是**agent 下一步要做什么**，但它本身不能完整回答**某个 issue 最后发生了
@@ -484,6 +487,12 @@ focused validation 已通过。
 卡片，稳定 outcome 卡则以 repository + issue 为 key。merged、closed 或 triaged 的
 终态卡默认保留可见，让看板能展示产出，而不只展示活跃工作。Shared sink 继续复用
 现有 local-path、private-link 与 private-reference redaction 边界。
+
+默认的 `loopx lark-kanban sync-loopx-todos` 还会从目标已有的 feasibility 与 PR
+lifecycle domain state 推导全部 issue outcome，并与 todo 行一起 upsert。因而 feasibility
+一经落盘，即使还没有 PR，也会作为 issue work 出现在看板；只有 lifecycle observation
+带有相同 `repo` 和显式 `issue_ref` 时，PR 才会补充到该行。这个自动 closeout projection
+不会新增 outcome ledger，也不会建立第二套状态机。
 
 Lark adapter 会把它渲染成一等 issue 维度，而不只是把 packet 压平写进 `Evidence`。
 Outcome 行设置 `Work Item Type=Issue Fix`，并填写 `Repository`、`Issue`、
@@ -536,6 +545,7 @@ loopx issue-fix reviewer-request \
 # 把 PR lifecycle 投影到 LoopX continuation state。
 loopx issue-fix pr-lifecycle \
   --url https://github.com/owner/repo/pull/456 \
+  --issue-ref issues_123 \
   --fetch-metadata \
   --goal-id example-goal \
   --format json

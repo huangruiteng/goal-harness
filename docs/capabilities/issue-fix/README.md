@@ -521,6 +521,10 @@ private material remain explicit gates. Each material transition must yield a
 `runnable_successor`, concrete blocker, or structured no-follow-up; unchanged
 polls remain quiet and do not spend delivery quota.
 
+Pass `--issue-ref` when persisting PR lifecycle state. This explicit public-safe
+link lets the outcome read model join the PR to its issue without guessing from
+branch names, titles, or text.
+
 ## Status And Output View
 
 Todo cards answer **what the agent should do next**. They do not, by
@@ -548,6 +552,13 @@ by repository and issue. A merged, closed, or triaged terminal card remains
 visible by default so the board shows outputs instead of only active work.
 Shared sinks continue to apply the existing local-path, private-link, and
 private-reference redaction boundary.
+
+The default `loopx lark-kanban sync-loopx-todos` path also derives all issue
+outcomes from the goal's existing feasibility and PR lifecycle domain state and
+upserts them beside todo rows. A feasibility row therefore appears as issue work
+even before a PR exists; a PR enriches that row only when its lifecycle
+observation carries the matching `repo` and explicit `issue_ref`. This automatic
+closeout projection adds no outcome ledger or second state machine.
 
 The Lark adapter renders this as a first-class issue dimension rather than
 only flattening the packet into `Evidence`. Outcome rows set
@@ -602,6 +613,7 @@ loopx issue-fix reviewer-request \
 # Project PR lifecycle into LoopX continuation state.
 loopx issue-fix pr-lifecycle \
   --url https://github.com/owner/repo/pull/456 \
+  --issue-ref issues_123 \
   --fetch-metadata \
   --goal-id example-goal \
   --format json

@@ -68,7 +68,9 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
    stale merge states create runnable successors instead of `monitor_quiet_skip`.
    The command writes compact domain state by default when a `--goal-id` or
    `--ledger-path` is provided, and `--no-write-domain-state` keeps it
-   preview-only.
+   preview-only. Persisted lifecycle state should carry an explicit public-safe
+   `issue_ref`; outcome projection must not infer the issue from a branch name,
+   PR title, or prose.
 11. **Gate handling:** surface concrete gates instead of silently blocking. Safe
    metadata-only triage, public-code search, and focused smoke drafting may
    continue when those gates do not cover the selected action.
@@ -78,6 +80,9 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
    lifecycle row. This projection writes no source state and creates no parallel
    workflow state machine. It must keep unknown delivery evidence explicit,
    retain terminal outputs, and remain consumable by generic projection sinks.
+   Default goal-level Kanban sync derives an
+   `issue_fix_outcome_collection_projection_v0` from all feasibility rows and
+   explicitly linked lifecycle rows before upserting issue outcome cards.
 
 ## Public-Safe Boundary
 
@@ -172,6 +177,7 @@ An issue-fix workflow is PR-review-ready only when all of these are true:
 - `issue_fix_delivery_evidence_input_v0`
 - `issue_fix_outcome_case_v0`
 - `issue_fix_outcome_projection_v0`
+- `issue_fix_outcome_collection_projection_v0`
 - `loopx_todo_writeback_preview_v0`
 - `issue_fix_caller_repo_branch_packet_v0`
 - `issue_fix_validated_fix_artifact_v0`
