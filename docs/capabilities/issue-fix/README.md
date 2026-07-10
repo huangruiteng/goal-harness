@@ -224,6 +224,15 @@ identities, never selects a different reviewer, and never copies the local bot
 profile, destination, member mapping, or raw provider response into public
 state. A stable hashed receipt prevents duplicate sends across retries.
 
+Long-running goals can register the local-private sink pointer once with
+`configure-goal --issue-fix-reviewer-notification-config`. Subsequent
+`reviewer-request --goal-id ... --project ...` calls discover it automatically,
+use explicit reader/user and sender/bot profiles without changing the machine
+default, verify mapped reviewer `open_id` values with the sender app before
+sending, and persist only new
+`sha256:` receipts in the existing PR lifecycle row. Restart/retry returns
+`already_notified`; no notification ledger or public config path is added.
+
 `--reviewer-sources-json` is the bridge for repository-specific public routing
 knowledge. The host reads an approved public source, such as a maintainer-map
 issue or repository document, and supplies only stable source id, public URL,
@@ -439,7 +448,7 @@ the current repository revision remains authoritative.
 
 ### Next stage
 
-- integrate reviewer-request transitions into PR-ready and lifecycle domain state;
+- trigger the goal-default reviewer request directly from PR-ready transitions;
 - resolve public GitHub identities and repository teams without leaking email;
 - make publication authority visible per external action;
 - make unchanged lifecycle observations physically idempotent everywhere;
@@ -688,6 +697,8 @@ loopx issue-fix reviewer-request \
   --repo-path /path/to/approved/repo \
   --base-ref origin/main \
   --reviewer-sources-json reviewer-sources.json \
+  --goal-id example-goal \
+  --project /path/to/approved/repo \
   --execute \
   --format json
 

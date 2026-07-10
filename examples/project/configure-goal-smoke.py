@@ -13,6 +13,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOAL_ID = "configure-goal-fixture"
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from loopx.control_plane.quota.goal_boundary import goal_boundary  # noqa: E402
+
 
 def write_registry(root: Path) -> Path:
     state_file = root / "project" / ".codex/goals/configure-goal-fixture/STATE.md"
@@ -127,6 +132,8 @@ def main() -> int:
             "operator_gate_resume_contract_v0:fixture",
             "--boundary-authority-decision-id",
             "gate-fixture-1",
+            "--issue-fix-reviewer-notification-config",
+            ".loopx/config/issue-fix/reviewer-notification-sinks.json",
         ))
         assert dry["ok"] is True, dry
         assert dry["dry_run"] is True, dry
@@ -136,11 +143,16 @@ def main() -> int:
         assert "registered_agents" in dry["changed_fields"], dry
         assert "configured_agent_model" in dry["changed_fields"], dry
         assert "write_scope" in dry["changed_fields"], dry
+        assert "issue_fix_reviewer_notification" in dry["changed_fields"], dry
         assert dry["after"]["waiting_on"] == "user_or_controller", dry
         assert dry["after"]["write_scope"] == ["docs/**", "tests/**"], dry
         assert dry["after"]["checkpointed_boundary_authority"]["active_write_scope"] == ["docs/**"], dry
         assert dry["after"]["registered_agents"] == ["codex-main-control", "codex-side-bypass"], dry
         assert dry["after"]["agent_model"] == "peer_v1", dry
+        assert dry["after"]["issue_fix_reviewer_notification"] == {
+            "enabled": True,
+            "config_pointer_registered": True,
+        }, dry
         assert dry["feature_summary"]["multi_subagent"] == "enabled", dry
         migration = dry["heartbeat_prompt_migration"]
         assert migration["schema_version"] == "heartbeat_prompt_migration_v1", migration
@@ -186,6 +198,8 @@ def main() -> int:
             "operator_gate_resume_contract_v0:fixture",
             "--boundary-authority-decision-id",
             "gate-fixture-1",
+            "--issue-fix-reviewer-notification-config",
+            ".loopx/config/issue-fix/reviewer-notification-sinks.json",
             "--execute",
         ))
         assert applied["ok"] is True, applied
@@ -206,6 +220,18 @@ def main() -> int:
         assert goal["coordination"]["agent_model"] == "peer_v1", goal
         assert goal["coordination"]["write_scope"] == ["docs/**", "tests/**"], goal
         assert goal["waiting_on"] == "user_or_controller", goal
+        reviewer_policy = goal["control_plane"]["issue_fix"][
+            "reviewer_notification"
+        ]
+        assert reviewer_policy == {
+            "enabled": True,
+            "config_path": ".loopx/config/issue-fix/reviewer-notification-sinks.json",
+        }, reviewer_policy
+        boundary = goal_boundary(goal)
+        assert boundary["capabilities"]["issue_fix_reviewer_notification"] == {
+            "enabled": True,
+            "config_pointer_registered": True,
+        }, boundary
         authority = goal["coordination"]["checkpointed_boundary_authority"][0]
         assert authority["schema_version"] == "checkpointed_boundary_authority_v0", authority
         assert authority["write_scope"] == ["docs/**"], authority
@@ -368,6 +394,30 @@ def main() -> int:
         ))
         assert invalid_replace["ok"] is False, invalid_replace
         assert "requires --write-scope" in invalid_replace["error"], invalid_replace
+
+        invalid_private_pointer = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--issue-fix-reviewer-notification-config",
+            "../outside/reviewer-notification-sinks.json",
+            check=False,
+        ))
+        assert invalid_private_pointer["ok"] is False, invalid_private_pointer
+        assert ".loopx/config" in invalid_private_pointer["error"], invalid_private_pointer
+
+        reviewer_config_cleared = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--clear-issue-fix-reviewer-notification-config",
+            "--execute",
+        ))
+        assert reviewer_config_cleared["ok"] is True, reviewer_config_cleared
+        cleared_goal = goal_from_registry(registry_path)
+        assert "issue_fix" not in cleared_goal["control_plane"], cleared_goal
 
     print("configure-goal-smoke ok")
     return 0

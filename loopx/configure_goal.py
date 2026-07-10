@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from copy import deepcopy
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .boundary_authority import (
@@ -49,6 +49,48 @@ WAITING_ON_CHOICES = (
 MULTI_SUBAGENT_FEATURE_CHOICES = ("off", "enabled")
 DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
 AGENT_MODEL_CHOICES = tuple(model.value for model in AgentRuntimeModel)
+
+
+def _reviewer_notification_config_summary(goal: dict[str, Any]) -> dict[str, bool]:
+    control_plane = (
+        goal.get("control_plane")
+        if isinstance(goal.get("control_plane"), dict)
+        else {}
+    )
+    issue_fix = (
+        control_plane.get("issue_fix")
+        if isinstance(control_plane.get("issue_fix"), dict)
+        else {}
+    )
+    reviewer_notification = (
+        issue_fix.get("reviewer_notification")
+        if isinstance(issue_fix.get("reviewer_notification"), dict)
+        else {}
+    )
+    return {
+        "enabled": reviewer_notification.get("enabled") is True,
+        "config_pointer_registered": bool(reviewer_notification.get("config_path")),
+    }
+
+
+def _local_private_config_path(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace("\\", "/")
+    path = PurePosixPath(text)
+    if (
+        not text
+        or path.is_absolute()
+        or ".." in path.parts
+        or len(path.parts) < 3
+        or path.parts[:2] != (".loopx", "config")
+        or path.suffix != ".json"
+    ):
+        raise ValueError(
+            "reviewer notification config must be a repo-relative JSON path "
+            "under .loopx/config/"
+        )
+    return path.as_posix()
 
 
 def _now_iso() -> str:
@@ -124,6 +166,9 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
             "window_hours": quota.get("window_hours"),
         },
         "control_plane": control_plane,
+        "issue_fix_reviewer_notification": _reviewer_notification_config_summary(
+            goal
+        ),
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
         "write_scope": _clean_write_scope(coordination.get("write_scope") or []) or [],
@@ -285,6 +330,8 @@ def configure_goal(
     boundary_authority_recorded_at: str | None = None,
     boundary_authority_expires_at: str | None = None,
     clear_boundary_authority: bool = False,
+    issue_fix_reviewer_notification_config: str | None = None,
+    clear_issue_fix_reviewer_notification_config: bool = False,
     execute: bool = False,
 ) -> dict[str, Any]:
     if not registry_path.exists():
@@ -332,6 +379,14 @@ def configure_goal(
     )
     if clear_boundary_authority and adding_boundary_authority:
         raise ValueError("--clear-boundary-authority cannot be combined with boundary authority fields")
+    if (
+        clear_issue_fix_reviewer_notification_config
+        and issue_fix_reviewer_notification_config
+    ):
+        raise ValueError(
+            "--clear-issue-fix-reviewer-notification-config cannot be combined "
+            "with --issue-fix-reviewer-notification-config"
+        )
     if waiting_on and waiting_on not in WAITING_ON_CHOICES:
         raise ValueError("--waiting-on must be one of: " + ", ".join(WAITING_ON_CHOICES))
     if multi_subagent_feature is not None and multi_subagent_feature not in MULTI_SUBAGENT_FEATURE_CHOICES:
@@ -360,6 +415,9 @@ def configure_goal(
             raise ValueError("--multi-subagent-feature off cannot be combined with --allowed-domain")
     registered_agents = _clean_registered_agents(registered_agents)
     write_scope = _clean_write_scope(write_scope)
+    issue_fix_reviewer_notification_config = _local_private_config_path(
+        issue_fix_reviewer_notification_config
+    )
 
     payload = read_json(registry_path)
     goals = registry_goals(payload)
@@ -425,6 +483,33 @@ def configure_goal(
         if self_repair_waiting_projection is not None:
             self_repair["allow_waiting_projection_repair"] = self_repair_waiting_projection
         control_plane["self_repair"] = self_repair
+        goal["control_plane"] = control_plane
+
+    if (
+        issue_fix_reviewer_notification_config is not None
+        or clear_issue_fix_reviewer_notification_config
+    ):
+        control_plane = (
+            goal.get("control_plane")
+            if isinstance(goal.get("control_plane"), dict)
+            else {}
+        )
+        issue_fix = (
+            control_plane.get("issue_fix")
+            if isinstance(control_plane.get("issue_fix"), dict)
+            else {}
+        )
+        if clear_issue_fix_reviewer_notification_config:
+            issue_fix.pop("reviewer_notification", None)
+        else:
+            issue_fix["reviewer_notification"] = {
+                "enabled": True,
+                "config_path": issue_fix_reviewer_notification_config,
+            }
+        if issue_fix:
+            control_plane["issue_fix"] = issue_fix
+        else:
+            control_plane.pop("issue_fix", None)
         goal["control_plane"] = control_plane
 
     if (

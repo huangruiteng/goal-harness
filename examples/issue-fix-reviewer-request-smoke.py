@@ -24,8 +24,20 @@ from loopx.capabilities.issue_fix.reviewer_request import (  # noqa: E402
     ISSUE_FIX_REVIEWER_REQUEST_SCHEMA_VERSION,
     build_issue_fix_reviewer_request_packet,
 )
+from loopx.capabilities.issue_fix.reviewer_notification import (  # noqa: E402
+    reviewer_notification_receipts_from_state,
+    with_reviewer_notification_receipts,
+)
+from loopx.capabilities.issue_fix.pr_lifecycle import (  # noqa: E402
+    build_issue_fix_pr_lifecycle_monitor_packet,
+)
 from loopx.capabilities.issue_fix.reviewer_recommendation import (  # noqa: E402
     ISSUE_FIX_REVIEWER_SOURCES_INPUT_SCHEMA_VERSION,
+)
+from loopx.domain_packs.issue_fix import (  # noqa: E402
+    default_issue_fix_domain_state_ledger_path,
+    persist_issue_fix_reviewer_notification_receipts,
+    upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
 
 
@@ -162,6 +174,18 @@ class FakeCombinedRunner:
             return self.github(command)
         if command[-4:] == ["auth", "status", "--verify", "--json"]:
             self.lark_calls.append(command)
+            if command[2] == "fixture-reader-profile":
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        {
+                            "identities": {
+                                "user": {"available": True, "verified": True}
+                            }
+                        }
+                    ),
+                    "stderr": "",
+                }
             return {
                 "returncode": 0,
                 "stdout": json.dumps(
@@ -174,6 +198,15 @@ class FakeCombinedRunner:
                             }
                         }
                     }
+                ),
+                "stderr": "",
+            }
+        if "chat.members" in command and "get" in command:
+            self.lark_calls.append(command)
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    {"items": [{"member_id": "ou_private_member"}]}
                 ),
                 "stderr": "",
             }
@@ -610,6 +643,182 @@ def main() -> int:
             "private_destination_captured"
         ] is False
         assert_public_safe(cli_packet)
+
+        goal_id = "reviewer-request-default-fixture"
+        goal_config = json.loads(json.dumps(cli_sinks_input))
+        goal_sink = goal_config["sinks"][0]
+        goal_sink.pop("bot_profile")
+        goal_sink.update(
+            {
+                "reader_profile": "fixture-reader-profile",
+                "reader_identity": "user",
+                "sender_profile": "fixture-sender-profile",
+                "sender_identity": "bot",
+            }
+        )
+        goal_config_path = (
+            path
+            / ".loopx/config/issue-fix/reviewer-notification-sinks.json"
+        )
+        write(goal_config_path, json.dumps(goal_config))
+        registry = path / ".loopx/registry.json"
+        write(
+            registry,
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "goals": [
+                        {
+                            "id": goal_id,
+                            "repo": str(path),
+                            "control_plane": {
+                                "issue_fix": {
+                                    "reviewer_notification": {
+                                        "enabled": True,
+                                        "config_path": (
+                                            ".loopx/config/issue-fix/"
+                                            "reviewer-notification-sinks.json"
+                                        ),
+                                    }
+                                }
+                            },
+                        }
+                    ],
+                }
+            ),
+        )
+        goal_default_cli = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "loopx.cli",
+                "--registry",
+                str(registry),
+                "--format",
+                "json",
+                "issue-fix",
+                "reviewer-request",
+                "--url",
+                "https://github.com/owner/repo/pull/42",
+                "--repo-path",
+                str(path),
+                "--base-ref",
+                "main",
+                "--changed-file",
+                "src/map_only.py",
+                "--exclude-reviewer",
+                "@fallback-owner",
+                "--reviewer-sources-json",
+                str(reviewer_sources_path),
+                "--metadata-json",
+                str(metadata_path),
+                "--goal-id",
+                goal_id,
+                "--project",
+                str(path),
+            ],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        goal_default_packet = json.loads(goal_default_cli.stdout)
+        assert goal_default_packet["secondary_notification_source"] == "goal_default"
+        assert goal_default_packet["secondary_notification_status"] == "preview_ready"
+        assert_public_safe(goal_default_packet)
+
+        lifecycle_path = default_issue_fix_domain_state_ledger_path(
+            project=path,
+            goal_id=goal_id,
+        )
+        lifecycle = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/42",
+            issue_ref="issues_40",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(lifecycle_path, lifecycle)
+        goal_execute_runner = FakeCombinedRunner(
+            FakeGitHubRunner(
+                before=metadata(),
+                after=metadata(requested=["map-owner"]),
+            )
+        )
+        goal_execute = build_issue_fix_reviewer_request_packet(
+            repo_path=path,
+            url="https://github.com/owner/repo/pull/42",
+            changed_files=["src/map_only.py"],
+            base_ref="main",
+            exclude_reviewers=["@fallback-owner"],
+            reviewer_sources_input=reviewer_sources,
+            notification_sinks_input=goal_config,
+            execute=True,
+            runner=goal_execute_runner,
+        )
+        assert goal_execute["secondary_notification_status"] == "sent_verified"
+        assert len(goal_execute_runner.lark_calls) == 6
+        receipt = goal_execute["secondary_notifications"]["receipts"][0]
+        receipt_write = persist_issue_fix_reviewer_notification_receipts(
+            lifecycle_path,
+            lifecycle,
+            [receipt],
+        )
+        assert receipt_write["write_performed"] is True, receipt_write
+        stored_lifecycle = json.loads(
+            lifecycle_path.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert stored_lifecycle["reviewer_notification_receipts"] == [receipt]
+        later_monitor = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/42",
+            issue_ref="issues_40",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [
+                    {"name": "focused", "conclusion": "SUCCESS"}
+                ],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(lifecycle_path, later_monitor)
+        stored_lifecycle = json.loads(
+            lifecycle_path.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert stored_lifecycle["reviewer_notification_receipts"] == [receipt]
+        retry_config = with_reviewer_notification_receipts(
+            goal_config,
+            reviewer_notification_receipts_from_state(stored_lifecycle),
+        )
+        restarted_runner = FakeCombinedRunner(
+            FakeGitHubRunner(before=metadata(requested=["map-owner"]))
+        )
+        restarted = build_issue_fix_reviewer_request_packet(
+            repo_path=path,
+            url="https://github.com/owner/repo/pull/42",
+            changed_files=["src/map_only.py"],
+            base_ref="main",
+            exclude_reviewers=["@fallback-owner"],
+            reviewer_sources_input=reviewer_sources,
+            notification_sinks_input=retry_config,
+            execute=True,
+            runner=restarted_runner,
+        )
+        assert restarted["secondary_notification_status"] == "already_notified"
+        assert restarted["secondary_notification_verified"] is True
+        assert restarted_runner.lark_calls == []
+        repeated_receipt_write = persist_issue_fix_reviewer_notification_receipts(
+            lifecycle_path,
+            stored_lifecycle,
+            [receipt],
+        )
+        assert repeated_receipt_write["status"] == "unchanged"
+        assert repeated_receipt_write["write_performed"] is False
+        assert_public_safe(restarted)
     finally:
         for attempt in range(10):
             try:

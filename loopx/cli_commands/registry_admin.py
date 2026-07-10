@@ -404,6 +404,18 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Clear coordination.checkpointed_boundary_authority.",
     )
     configure_goal_parser.add_argument(
+        "--issue-fix-reviewer-notification-config",
+        help=(
+            "Register a repo-relative local-private JSON config pointer under "
+            ".loopx/config/ for automatic issue-fix reviewer notifications."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-issue-fix-reviewer-notification-config",
+        action="store_true",
+        help="Remove the goal's automatic reviewer-notification config pointer.",
+    )
+    configure_goal_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the registry. Without this flag, configure-goal is a dry-run preview.",
@@ -594,6 +606,12 @@ def handle_registry_admin_command(
                 boundary_authority_recorded_at=args.boundary_authority_recorded_at,
                 boundary_authority_expires_at=args.boundary_authority_expires_at,
                 clear_boundary_authority=bool(args.clear_boundary_authority),
+                issue_fix_reviewer_notification_config=(
+                    args.issue_fix_reviewer_notification_config
+                ),
+                clear_issue_fix_reviewer_notification_config=bool(
+                    args.clear_issue_fix_reviewer_notification_config
+                ),
                 execute=bool(args.execute),
             )
             if payload.get("ok"):

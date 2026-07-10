@@ -13,6 +13,7 @@ from ...control_plane.runtime.time import now_utc_iso
 from ...domain_packs.issue_fix import (
     default_issue_fix_domain_state_ledger_path,
     default_issue_fix_feasibility_ledger_path,
+    persist_issue_fix_reviewer_notification_receipts,
     upsert_issue_fix_feasibility_ledger_jsonl,
     upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
@@ -31,6 +32,7 @@ from .outcome_projection import (
     compact_issue_fix_delivery_evidence,
     render_issue_fix_outcome_projection_markdown,
 )
+from .metadata_preview import normalise_github_issue_reference
 from .pr_lifecycle import (
     build_issue_fix_pr_lifecycle_monitor_packet,
     render_issue_fix_pr_lifecycle_monitor_markdown,
@@ -42,6 +44,11 @@ from .reviewer_recommendation import (
 from .reviewer_request import (
     build_issue_fix_reviewer_request_packet,
     render_issue_fix_reviewer_request_markdown,
+)
+from .reviewer_notification import (
+    load_goal_reviewer_notification_sinks_input,
+    reviewer_notification_receipts_from_state,
+    with_reviewer_notification_receipts,
 )
 from .repository_memory import SUPPORT_ASPECTS
 from .repository_memory_provider import (
@@ -740,6 +747,18 @@ def register_issue_fix_commands(
         ),
     )
     reviewer_request_parser.add_argument(
+        "--goal-id",
+        help=(
+            "Optional connected goal whose registered local-private default sink "
+            "and existing PR lifecycle receipts should be reused."
+        ),
+    )
+    reviewer_request_parser.add_argument(
+        "--project",
+        default=".",
+        help="Project root used for goal-default sink config and issue_fix domain state.",
+    )
+    reviewer_request_parser.add_argument(
         "--execute",
         action="store_true",
         help=(
@@ -1221,6 +1240,77 @@ def handle_issue_fix_command(
             )
             renderer = render_issue_fix_reviewer_recommendation_markdown
         elif args.issue_fix_command == "reviewer-request":
+            notification_sinks_input = (
+                _load_json_object(args.notification_sinks_json)
+                if args.notification_sinks_json
+                else None
+            )
+            notification_sinks_source = (
+                "explicit" if notification_sinks_input is not None else "not_configured"
+            )
+            notification_lifecycle_packet: dict[str, Any] | None = None
+            notification_lifecycle_path: Path | None = None
+            if notification_sinks_input is None and args.goal_id:
+                if registry_path is None:
+                    raise ValueError(
+                        "goal-default reviewer notification requires a registry"
+                    )
+                goal = load_goal_from_registry(registry_path, args.goal_id)
+                goal_repo = str(goal.get("repo") or "").strip()
+                if not goal_repo:
+                    raise ValueError(
+                        "connected goal repository is required for goal-default "
+                        "reviewer notification"
+                    )
+                goal_project = Path(goal_repo).expanduser().resolve()
+                requested_project = Path(args.project).expanduser().resolve()
+                if goal_project != requested_project:
+                    raise ValueError(
+                        "--project must match the connected goal repository for "
+                        "goal-default reviewer notification"
+                    )
+                notification_sinks_input = (
+                    load_goal_reviewer_notification_sinks_input(
+                        goal=goal,
+                        project=args.project,
+                    )
+                )
+                if notification_sinks_input is not None:
+                    notification_sinks_source = "goal_default"
+                    reference = normalise_github_issue_reference(
+                        repo="public_repo_fixture",
+                        issue_ref="pull_request_fixture",
+                        url=args.url,
+                    )
+                    if reference.get("kind") != "pull_request":
+                        raise ValueError(
+                            "goal-default reviewer notification requires a GitHub PR"
+                        )
+                    notification_lifecycle_path = (
+                        default_issue_fix_domain_state_ledger_path(
+                            project=args.project,
+                            goal_id=args.goal_id,
+                        )
+                    )
+                    try:
+                        notification_lifecycle_packet = _load_jsonl_row(
+                            notification_lifecycle_path,
+                            repo=str(reference["repo"]),
+                            ref_field="pr_ref",
+                            ref_value=f"pull_{int(reference['number'])}",
+                        )
+                    except ValueError:
+                        if args.execute:
+                            raise ValueError(
+                                "goal-default reviewer notification requires an "
+                                "existing PR lifecycle row before external send"
+                            ) from None
+                    notification_sinks_input = with_reviewer_notification_receipts(
+                        notification_sinks_input,
+                        reviewer_notification_receipts_from_state(
+                            notification_lifecycle_packet
+                        ),
+                    )
             payload = build_issue_fix_reviewer_request_packet(
                 repo_path=args.repo_path,
                 url=args.url,
@@ -1241,11 +1331,7 @@ def handle_issue_fix_command(
                     if args.reviewer_sources_json
                     else None
                 ),
-                notification_sinks_input=(
-                    _load_json_object(args.notification_sinks_json)
-                    if args.notification_sinks_json
-                    else None
-                ),
+                notification_sinks_input=notification_sinks_input,
                 provider_payload=(
                     _load_json_object(args.metadata_json)
                     if args.metadata_json
@@ -1254,6 +1340,47 @@ def handle_issue_fix_command(
                 execute=args.execute,
                 generated_at=generated_at,
             )
+            payload["secondary_notification_source"] = notification_sinks_source
+            payload["secondary_notification_receipts_persisted"] = False
+            secondary = payload.get("secondary_notifications")
+            new_receipts = (
+                secondary.get("receipts")
+                if isinstance(secondary, dict)
+                and isinstance(secondary.get("receipts"), list)
+                else []
+            )
+            if (
+                args.execute
+                and notification_sinks_source == "goal_default"
+                and notification_lifecycle_packet is not None
+                and notification_lifecycle_path is not None
+                and new_receipts
+            ):
+                try:
+                    write_result = persist_issue_fix_reviewer_notification_receipts(
+                        notification_lifecycle_path,
+                        notification_lifecycle_packet,
+                        list(new_receipts),
+                    )
+                except (OSError, ValueError):
+                    payload["ok"] = False
+                    payload["secondary_notification_receipt_blocker"] = (
+                        "reviewer_notification_receipt_persistence_failed"
+                    )
+                else:
+                    payload["secondary_notification_receipt_write"] = {
+                        "schema_version": (
+                            "issue_fix_reviewer_notification_receipt_write_v0"
+                        ),
+                        "domain_pack": "issue_fix",
+                        "stream": "pr_lifecycle",
+                        "write_performed": (
+                            write_result.get("write_performed") is True
+                        ),
+                        "status": write_result.get("status"),
+                        "path_recorded": False,
+                    }
+                    payload["secondary_notification_receipts_persisted"] = True
             renderer = render_issue_fix_reviewer_request_markdown
         elif args.issue_fix_command == "acceptance-fixture":
             payload = build_issue_fix_acceptance_fixture_packet(
