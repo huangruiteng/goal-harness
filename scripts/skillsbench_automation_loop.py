@@ -4667,12 +4667,6 @@ def _apply_host_local_acp_prereq_failure_attribution(
     """Prefer host Codex failures unless a completed verifier score is usable."""
 
     official_score = compact.get("official_score")
-    if (
-        isinstance(official_score, (int, float))
-        and not isinstance(official_score, bool)
-        and official_score >= 1.0
-    ):
-        return False
     validation = compact.get("validation")
     counters = compact.get("interaction_counters")
     task_activity_count = 0

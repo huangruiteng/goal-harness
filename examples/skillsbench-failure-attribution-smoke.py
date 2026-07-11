@@ -203,7 +203,7 @@ def _codex_exec_failure_prerequisites() -> dict:
 
 
 def test_postscore_transport_failure_preserves_countable_score() -> None:
-    for score in (0.0, 0.6):
+    for score in (0.0, 0.6, 1.0):
         compact = _completed_score_compact(score, task_operations=2)
         assert (
             _apply_host_local_acp_prereq_failure_attribution(
@@ -216,12 +216,40 @@ def test_postscore_transport_failure_preserves_countable_score() -> None:
 
 
 def test_zero_activity_transport_failure_remains_uncountable() -> None:
-    compact = _completed_score_compact(0.0, task_operations=0)
-    assert _apply_host_local_acp_prereq_failure_attribution(
-        compact,
-        _codex_exec_failure_prerequisites(),
+    for score in (0.0, 1.0):
+        compact = _completed_score_compact(score, task_operations=0)
+        assert _apply_host_local_acp_prereq_failure_attribution(
+            compact,
+            _codex_exec_failure_prerequisites(),
+        )
+        assert (
+            compact["attempt_accounting"]["official_score_attempt_countable"]
+            is False
+        )
+
+
+def test_full_score_without_completed_verifier_evidence_is_uncountable() -> None:
+    invalid_evidence = (
+        {"validation": {}},
+        {
+            "validation": {
+                "official_verifier_status": "incomplete",
+                "official_verifier_validation_present": True,
+            }
+        },
+        {"official_score_status": "missing"},
     )
-    assert compact["attempt_accounting"]["official_score_attempt_countable"] is False
+    for updates in invalid_evidence:
+        compact = _completed_score_compact(1.0, task_operations=2)
+        compact.update(updates)
+        assert _apply_host_local_acp_prereq_failure_attribution(
+            compact,
+            _codex_exec_failure_prerequisites(),
+        ), compact
+        assert (
+            compact["attempt_accounting"]["official_score_attempt_countable"]
+            is False
+        ), compact
 
 
 if __name__ == "__main__":
@@ -235,4 +263,5 @@ if __name__ == "__main__":
     test_failure_dependency_classes_ignore_unrelated_dockerfile_lines()
     test_postscore_transport_failure_preserves_countable_score()
     test_zero_activity_transport_failure_remains_uncountable()
+    test_full_score_without_completed_verifier_evidence_is_uncountable()
     print("skillsbench-failure-attribution-smoke: ok")
