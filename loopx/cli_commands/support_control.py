@@ -6,15 +6,27 @@ from pathlib import Path
 
 from ..agent_registry import (
     agent_profile_from_registry,
+    load_goal_from_registry,
     registered_agent_ids_from_registry,
     require_registered_agent_id,
+)
+from ..control_plane.agents.supervisor import (
+    build_supervisor_observation_packet,
+    build_supervisor_prompt,
+    peer_supervisor_for_goal,
+    render_supervisor_observation_markdown,
+    render_supervisor_prompt_markdown,
+)
+from ..control_plane.runtime.agent_scoped_evidence_log import (
+    build_agent_scoped_evidence_log,
+    goal_history_runs,
 )
 from ..heartbeat_prompt import (
     build_heartbeat_prompt,
     build_heartbeat_prompt_error_payload,
     render_heartbeat_prompt_markdown,
 )
-from ..history import load_registry
+from ..history import collect_history, load_registry
 from ..paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from ..promotion_gate import build_promotion_gate, render_promotion_gate_markdown
 from ..registry import (
@@ -25,6 +37,7 @@ from ..registry import (
     render_registry_markdown,
     resolve_state_file,
 )
+from ..rollout_event_log import load_rollout_events, rollout_event_log_path
 from ..self_update import (
     build_rollback_plan,
     build_update_plan,
@@ -37,7 +50,7 @@ from ..state_backup import (
     execute_state_backup_plan,
     render_state_backup_markdown,
 )
-from ..status import render_status_markdown
+from ..status import collect_status, render_status_markdown
 from ..status_server import (
     DEFAULT_STATUS_HOST,
     DEFAULT_STATUS_PATH,
@@ -63,6 +76,8 @@ SUPPORT_CONTROL_COMMANDS = {
     "registry",
     "registry-boundary",
     "serve-status",
+    "supervisor-observe",
+    "supervisor-prompt",
 }
 
 
@@ -225,6 +240,47 @@ def register_support_control_commands(
         "--thin",
         action="store_true",
         help="Generate the thinnest generic dispatcher body for trusted agents that inspect LoopX state themselves.",
+    )
+
+    supervisor_prompt_parser = subparsers.add_parser(
+        "supervisor-prompt",
+        help="Generate the dedicated prompt for an opt-in proposal-only peer supervisor.",
+    )
+    add_subcommand_format(supervisor_prompt_parser)
+    supervisor_prompt_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Stable LoopX goal id.",
+    )
+    supervisor_prompt_parser.add_argument(
+        "--agent-id",
+        required=True,
+        help="Registered peer configured as coordination.supervisor.agent_id.",
+    )
+    supervisor_prompt_parser.add_argument(
+        "--active-state",
+        help="Active goal state file. Defaults to the registry goal state_file.",
+    )
+    supervisor_prompt_parser.add_argument(
+        "--cli-bin",
+        default="loopx",
+        help="Command name embedded in generated observation commands.",
+    )
+
+    supervisor_observe_parser = subparsers.add_parser(
+        "supervisor-observe",
+        help="Build one read-only supervisor packet over peer status and evidence.",
+    )
+    add_subcommand_format(supervisor_observe_parser)
+    supervisor_observe_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Stable LoopX goal id.",
+    )
+    supervisor_observe_parser.add_argument(
+        "--agent-id",
+        required=True,
+        help="Registered peer configured as coordination.supervisor.agent_id.",
     )
 
     promotion_gate_parser = subparsers.add_parser(
@@ -394,12 +450,14 @@ def handle_support_control_command(
         registered_agents = None
         effective_agent_id = args.agent_id
         try:
-            active_state, resolved_active_state, active_state_source = resolve_heartbeat_active_state(
-                goal_id=args.goal_id,
-                active_state_arg=args.active_state,
-                registry_path=registry_path,
-                runtime_root_arg=args.runtime_root,
-                allow_global_goal_lookup_fallback=not registry_was_supplied,
+            active_state, resolved_active_state, active_state_source = (
+                resolve_heartbeat_active_state(
+                    goal_id=args.goal_id,
+                    active_state_arg=args.active_state,
+                    registry_path=registry_path,
+                    runtime_root_arg=args.runtime_root,
+                    allow_global_goal_lookup_fallback=not registry_was_supplied,
+                )
             )
             agent_registry_path = registry_path
             if active_state_source.startswith("registry:"):
@@ -459,6 +517,122 @@ def handle_support_control_command(
                 available_capabilities=args.available_capabilities,
             )
         print_payload(payload, output_format(args), render_heartbeat_prompt_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "supervisor-prompt":
+        try:
+            active_state, resolved_active_state, active_state_source = resolve_heartbeat_active_state(
+                goal_id=args.goal_id,
+                active_state_arg=args.active_state,
+                registry_path=registry_path,
+                runtime_root_arg=args.runtime_root,
+                allow_global_goal_lookup_fallback=not registry_was_supplied,
+            )
+            agent_registry_path = registry_path
+            if active_state_source.startswith("registry:"):
+                agent_registry_path = Path(active_state_source.removeprefix("registry:"))
+            agent_id = require_registered_agent_id(
+                registry_path=agent_registry_path,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                field="agent_id",
+            )
+            goal = load_goal_from_registry(agent_registry_path, args.goal_id)
+            supervisor = peer_supervisor_for_goal(goal)
+            if supervisor is None:
+                raise ValueError(
+                    "peer supervisor is disabled; configure it with "
+                    "loopx configure-goal --supervisor-agent ... --execute"
+                )
+            if supervisor.get("agent_id") != agent_id:
+                raise ValueError(
+                    f"agent_id={agent_id!r} is not the configured supervisor; "
+                    f"supervisor_agent={supervisor.get('agent_id')!r}"
+                )
+            state_text = str(
+                resolved_active_state
+                or active_state
+                or "the registry-declared active state"
+            )
+            payload = build_supervisor_prompt(
+                goal_id=args.goal_id,
+                active_state=state_text,
+                supervisor=supervisor,
+                cli_bin=args.cli_bin,
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "goal_id": args.goal_id,
+                "agent_id": args.agent_id,
+                "error": str(exc),
+            }
+        print_payload(payload, output_format(args), render_supervisor_prompt_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "supervisor-observe":
+        try:
+            agent_registry_path = fallback_global_registry(registry_path, args.runtime_root)
+            agent_id = require_registered_agent_id(
+                registry_path=agent_registry_path,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                field="agent_id",
+            )
+            goal = load_goal_from_registry(agent_registry_path, args.goal_id)
+            supervisor = peer_supervisor_for_goal(goal)
+            if supervisor is None:
+                raise ValueError("peer supervisor is disabled for this goal")
+            if supervisor.get("agent_id") != agent_id:
+                raise ValueError(
+                    f"agent_id={agent_id!r} is not the configured supervisor; "
+                    f"supervisor_agent={supervisor.get('agent_id')!r}"
+                )
+            registry = load_registry(agent_registry_path)
+            runtime_root = resolve_runtime_root(registry, args.runtime_root)
+            status_payload = collect_status(
+                registry_path=agent_registry_path,
+                runtime_root_override=str(runtime_root),
+                scan_roots=[Path(default_public_scan_root())],
+                limit=5,
+                goal_id=args.goal_id,
+            )
+            rollout_events = load_rollout_events(
+                rollout_event_log_path(runtime_root, args.goal_id),
+                limit=400,
+            )
+            history = collect_history(
+                registry_path=agent_registry_path,
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                limit=80,
+            )
+            history_runs = goal_history_runs(history, args.goal_id)
+            evidence_logs = {
+                peer: build_agent_scoped_evidence_log(
+                    goal_id=args.goal_id,
+                    agent_id=peer,
+                    rollout_events=rollout_events,
+                    history_runs=history_runs,
+                    limit=6,
+                )
+                for peer in supervisor.get("supervised_agents") or []
+            }
+            payload = build_supervisor_observation_packet(
+                goal_id=args.goal_id,
+                supervisor=supervisor,
+                status_payload=status_payload,
+                evidence_logs=evidence_logs,
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "supervisor_observation_v0",
+                "goal_id": args.goal_id,
+                "supervisor_agent_id": args.agent_id,
+                "error": str(exc),
+            }
+        print_payload(payload, output_format(args), render_supervisor_observation_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "promotion-gate":
