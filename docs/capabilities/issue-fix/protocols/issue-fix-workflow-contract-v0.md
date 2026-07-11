@@ -69,8 +69,10 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
    The command writes compact domain state by default when a `--goal-id` or
    `--ledger-path` is provided, and `--no-write-domain-state` keeps it
    preview-only. Persisted lifecycle state should carry an explicit public-safe
-   `issue_ref`; outcome projection must not infer the issue from a branch name,
-   PR title, or prose.
+   `issue_ref`; numeric aliases such as `#123`, `issue_123`, and `issues/123`
+   canonicalize to `issues_123` before writeback. Outcome projection applies
+   the same rule to legacy rows, but must not infer the issue from a branch
+   name, PR title, or prose.
 11. **Gate handling:** surface concrete gates instead of silently blocking. Safe
    metadata-only triage, public-code search, and focused smoke drafting may
    continue when those gates do not cover the selected action.

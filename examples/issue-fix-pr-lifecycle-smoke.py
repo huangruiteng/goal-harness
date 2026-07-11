@@ -186,6 +186,15 @@ def main() -> int:
     assert quiet["observation"]["issue_ref"] == "issues_1700", quiet
     assert quiet["transition"]["material_change"] is False
     assert quiet["writeback_contract"]["monitor_quiet_skip_allowed"] is True
+    for alias in ("#1700", "issue_1700", "issues/1700", "issue 1700"):
+        alias_packet = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/huangruiteng/loopx/pull/1715",
+            issue_ref=alias,
+            provider_payload={"state": "OPEN"},
+        )
+        assert alias_packet["observation"]["issue_ref"] == "issues_1700", (
+            alias_packet
+        )
     repo_ref = build_issue_fix_pr_lifecycle_monitor_packet(
         repo="huangruiteng/loopx",
         pr_ref="pull_1715",

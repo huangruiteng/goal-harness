@@ -548,8 +548,10 @@ focused validation 已通过。
 默认的 `loopx lark-kanban sync-loopx-todos` 还会从目标已有的 feasibility 与 PR
 lifecycle domain state 推导全部 issue outcome，并与 todo 行一起 upsert。因而 feasibility
 一经落盘，即使还没有 PR，也会作为 issue work 出现在看板；只有 lifecycle observation
-带有相同 `repo` 和显式 `issue_ref` 时，PR 才会补充到该行。这个自动 closeout projection
-不会新增 outcome ledger，也不会建立第二套状态机。
+带有相同 `repo` 和显式 `issue_ref` 时，PR 才会补充到该行。数字 issue 别名
+（`#123`、`issue_123`、`issues/123`）会在写入和读取旧行时统一为 `issues_123`，
+避免等价的显式关联静默落入 unlinked 计数。这个自动 closeout projection 不会新增
+outcome ledger，也不会建立第二套状态机。
 
 只传 `--delivery-evidence-json` 仍是只读预览。focused validation 完成后，加上
 `--write-delivery-evidence`，LoopX 会把经过校验、public-safe 的紧凑证据写回现有

@@ -7,8 +7,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote
 
-from ...control_plane.runtime.public_safety import public_safe_compact_text
-from .metadata_preview import normalise_github_issue_reference
+from .metadata_preview import (
+    normalise_github_issue_link_reference,
+    normalise_github_issue_reference,
+)
 
 
 ISSUE_FIX_PR_LIFECYCLE_MONITOR_SCHEMA_VERSION = (
@@ -176,9 +178,9 @@ def _build_observation(
             state = "MERGED"
     review_decision = _upper_label(provider_payload.get("reviewDecision"))
     merge_state = _upper_label(provider_payload.get("mergeStateStatus"))
-    linked_issue_ref = public_safe_compact_text(issue_ref, limit=180)
-    if issue_ref and not linked_issue_ref:
-        raise ValueError("issue_ref must be a compact public-safe value")
+    linked_issue_ref = (
+        normalise_github_issue_link_reference(issue_ref) if issue_ref else ""
+    )
     return {
         "schema_version": "issue_fix_pr_lifecycle_observation_v0",
         "repo": repo,
