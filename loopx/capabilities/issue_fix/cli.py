@@ -1287,6 +1287,18 @@ def handle_issue_fix_command(
                     writeback.get("external_writes_performed")
                 )
                 payload["ok"] = writeback.get("ok") is True
+                payload["source_contract"]["repository_memory_writeback"] = (
+                    "issue_fix_validated_outcome_memory_writeback_v0"
+                )
+                payload["source_contract"]["writes_external_provider"] = bool(
+                    writeback.get("external_writes_performed")
+                )
+                if payload["ok"] is not True:
+                    payload["error"] = (
+                        "repository memory writeback "
+                        f"{writeback.get('status')}: "
+                        f"{writeback.get('reason_code') or 'provider write failed'}"
+                    )
             if domain_state_write is not None:
                 payload["domain_state_write"] = domain_state_write
                 payload["source_contract"]["writes_source_state"] = True

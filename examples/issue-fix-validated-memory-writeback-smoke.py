@@ -281,6 +281,10 @@ def main() -> int:
         assert packet["repository_memory_writeback"]["status"] == "completed"
         assert packet["repository_memory_writeback"]["write_count"] == 1
         assert packet["external_writes_performed"] is True
+        assert packet["source_contract"]["repository_memory_writeback"] == (
+            "issue_fix_validated_outcome_memory_writeback_v0"
+        )
+        assert packet["source_contract"]["writes_external_provider"] is True
         assert_public_boundary(packet)
 
     print("issue-fix-validated-memory-writeback-smoke: ok")
