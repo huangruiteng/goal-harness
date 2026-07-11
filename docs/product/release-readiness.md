@@ -187,6 +187,19 @@ path, and canary route rather than as a user-facing release baseline.
   into the new stable snapshot. The no-clone release gate now covers this
   stale-checkout invocation directly (#1776). No product capability or state
   migration changes in this hotfix.
+- `v0.2.0` on 2026-07-11: peer-agent runtime and issue-fix control-plane
+  release at the matching `v0.2.0` tag. This release completes the v0.2
+  runtime cutover from hierarchical agent ownership toward equal peer agents:
+  task claims are soft routing signals, independent handoff uses
+  `continuation_policy=independent_handoff` plus `excluded_agents`, and stale
+  legacy review continuation paths are rejected or migrated. It also promotes
+  the issue-fix capability from feasibility planning into a fuller public
+  maintainer loop with caller-repo branch preparation, acceptance artifacts,
+  reviewer request fallback, PR lifecycle observation, and domain-state
+  writeback. Explore Harness and long-run benchmark projections gain stronger
+  public result contracts, while install/update, release provenance, quota,
+  todo, scheduler, and protocol-action smokes were swept under the full-public
+  suite for the 0.2 release cut.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
