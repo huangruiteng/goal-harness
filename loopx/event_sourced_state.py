@@ -20,6 +20,7 @@ from .control_plane.todos.contract import (
     format_todo_metadata_line,
     normalize_explicit_todo_task_class,
     normalize_required_write_scopes,
+    normalize_removed_todo_continuation_policy,
     normalize_todo_action_kind,
     normalize_todo_blocks_agent,
     normalize_todo_claimed_by,
@@ -265,6 +266,9 @@ def backfill_todo_events_from_markdown(
         continuation_policy = normalize_todo_continuation_policy(
             record.get("continuation_policy")
         )
+        removed_continuation_policy = normalize_removed_todo_continuation_policy(
+            record.get("removed_continuation_policy")
+        )
         required_write_scopes = normalize_required_write_scopes(
             record.get("required_write_scopes")
         )
@@ -276,6 +280,8 @@ def backfill_todo_events_from_markdown(
             payload["action_kind"] = action_kind
         if continuation_policy:
             payload["continuation_policy"] = continuation_policy
+        if removed_continuation_policy:
+            payload["removed_continuation_policy"] = removed_continuation_policy
         if required_write_scopes:
             payload["required_write_scopes"] = required_write_scopes
         if blocks_agent:
@@ -561,6 +567,10 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
     continuation_policy = normalize_todo_continuation_policy(
         payload.get("continuation_policy")
     )
+    removed_continuation_policy = normalize_removed_todo_continuation_policy(
+        payload.get("removed_continuation_policy")
+        or payload.get("continuation_policy")
+    )
     required_write_scopes = normalize_required_write_scopes(
         payload.get("required_write_scopes")
     )
@@ -585,7 +595,9 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         todo["task_class"] = task_class
     if action_kind:
         todo["action_kind"] = action_kind
-    if continuation_policy:
+    if removed_continuation_policy:
+        todo["removed_continuation_policy"] = removed_continuation_policy
+    elif continuation_policy:
         todo["continuation_policy"] = continuation_policy
     if required_write_scopes:
         todo["required_write_scopes"] = required_write_scopes
@@ -618,8 +630,26 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
         continuation_policy = normalize_todo_continuation_policy(
             payload.get("continuation_policy")
         )
-        if continuation_policy:
-            todo["continuation_policy"] = continuation_policy
+        removed_continuation_policy = normalize_removed_todo_continuation_policy(
+            payload.get("removed_continuation_policy")
+            or payload.get("continuation_policy")
+        )
+        update_excluded_agents = normalize_todo_excluded_agents(
+            payload.get("excluded_agents")
+        )
+        if removed_continuation_policy:
+            todo.pop("continuation_policy", None)
+            todo["removed_continuation_policy"] = removed_continuation_policy
+        elif continuation_policy:
+            explicit_repair = (
+                todo.get("removed_continuation_policy")
+                and continuation_policy == "independent_handoff"
+                and bool(update_excluded_agents)
+            )
+            if not todo.get("removed_continuation_policy") or explicit_repair:
+                todo["continuation_policy"] = continuation_policy
+            if explicit_repair:
+                todo.pop("removed_continuation_policy", None)
         required_write_scopes = normalize_required_write_scopes(
             payload.get("required_write_scopes")
         )
@@ -628,9 +658,8 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
         blocks_agent = normalize_todo_blocks_agent(payload.get("blocks_agent"))
         if blocks_agent:
             todo["blocks_agent"] = blocks_agent
-        excluded_agents = normalize_todo_excluded_agents(payload.get("excluded_agents"))
-        if excluded_agents:
-            todo["excluded_agents"] = excluded_agents
+        if update_excluded_agents:
+            todo["excluded_agents"] = update_excluded_agents
         for key in TODO_MONITOR_METADATA_FIELDS:
             if payload.get(key):
                 todo[key] = compact_text(payload[key])
@@ -766,6 +795,7 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         task_class=item.get("task_class"),
         action_kind=item.get("action_kind"),
         continuation_policy=item.get("continuation_policy"),
+        removed_continuation_policy=item.get("removed_continuation_policy"),
         required_write_scopes=item.get("required_write_scopes"),
         claimed_by=item.get("claimed_by"),
         blocks_agent=item.get("blocks_agent"),

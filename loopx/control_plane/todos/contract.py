@@ -648,6 +648,10 @@ def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
                 removed_policy = normalize_removed_todo_continuation_policy(value)
                 if removed_policy:
                     metadata["removed_continuation_policy"] = removed_policy
+        elif key == "removed_continuation_policy":
+            removed_policy = normalize_removed_todo_continuation_policy(value)
+            if removed_policy:
+                metadata["removed_continuation_policy"] = removed_policy
         elif key in {"required_write_scope", "required_write_scopes"}:
             scopes = normalize_required_write_scopes(value)
             if scopes:
@@ -724,6 +728,7 @@ def format_todo_metadata_line(
     task_class: str | None = None,
     action_kind: str | None = None,
     continuation_policy: str | None = None,
+    removed_continuation_policy: str | None = None,
     required_write_scopes: Any = None,
     required_capabilities: Any = None,
     target_capabilities: Any = None,
@@ -787,6 +792,23 @@ def format_todo_metadata_line(
         fields.append(
             "continuation_policy="
             f"{encode_metadata_value(normalized_continuation_policy)}"
+        )
+    normalized_removed_continuation_policy = (
+        normalize_removed_todo_continuation_policy(removed_continuation_policy)
+    )
+    if removed_continuation_policy and not normalized_removed_continuation_policy:
+        raise ValueError(
+            "removed_continuation_policy must be one of: "
+            + ", ".join(sorted(REMOVED_TODO_CONTINUATION_POLICY_VALUES))
+        )
+    if normalized_continuation_policy and normalized_removed_continuation_policy:
+        raise ValueError(
+            "continuation_policy and removed_continuation_policy are mutually exclusive"
+        )
+    if normalized_removed_continuation_policy:
+        fields.append(
+            "removed_continuation_policy="
+            f"{encode_metadata_value(normalized_removed_continuation_policy)}"
         )
     normalized_write_scopes = normalize_required_write_scopes(required_write_scopes)
     if required_write_scopes and not normalized_write_scopes:
