@@ -524,8 +524,11 @@ provider resource write 已获授权时才加 `--execute`。同一个 immutable 
 Validated-outcome writeback 是另一条默认关闭的 hook。只有调用方显式增加
 `--write-repository-memory`、本地 provider config 另行设置
 `writeback_enabled: true`、delivery evidence 为 `completed`、validation 为 `passed`，且
-delivery evidence 带有稳定 `recorded_at`、outcome revision 与公开 resource scope 一致时才会
-执行。LoopX 只写入一条 distilled fact：
+delivery evidence 带有稳定 `recorded_at`、outcome revision 与公开 resource scope 一致，
+并且 `--repo-path` 能通过 git 证明 delivery `commit_ref` 是该 pinned revision 的 ancestor
+时才会执行。Commit 缺失、无法解析或与 revision 分叉时，会在调用 provider 之前阻塞。
+Squash flow 应记录最终 merge/squash commit，而不是已经被替代的 feature-branch commit。
+Checkout path 与 raw git output 都不会保留。LoopX 只写入一条 distilled fact：
 revision、provenance、freshness、公开产出、风险、稳定 supersession key，以及显式的
 workspace/peer scope。内容 hash 决定 immutable target，因此相同重试会读取并接受已有 fact，
 不会二次写入；内容冲突则停止，不覆盖旧事实。Raw transcript、tool log/result、expert answer、
@@ -690,6 +693,7 @@ loopx issue-fix outcome \
   --write-delivery-evidence \
   --repository-memory-provider-json provider.json \
   --write-repository-memory \
+  --repo-path /path/to/approved/repo \
   --agent-id codex-issue-fix \
   --format json
 ```

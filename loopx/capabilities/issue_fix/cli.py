@@ -630,6 +630,15 @@ def register_issue_fix_commands(
         ),
     )
     outcome_parser.add_argument(
+        "--repo-path",
+        default=None,
+        help=(
+            "Caller-approved git checkout used only to prove that delivery commit_ref "
+            "is contained in the pinned repository revision before memory writeback. "
+            "The path and raw git output are never recorded."
+        ),
+    )
+    outcome_parser.add_argument(
         "--agent-id",
         help="Optional registered agent id projected as the case owner.",
     )
@@ -1361,6 +1370,10 @@ def handle_issue_fix_command(
                 generated_at=generated_at,
             )
             if args.write_repository_memory:
+                if not args.repo_path:
+                    raise ValueError(
+                        "--write-repository-memory requires --repo-path for commit ancestry verification"
+                    )
                 outcome_case = (payload.get("issue_fix_outcomes") or [{}])[0]
                 repository_context = (
                     outcome_case.get("repository_context")
@@ -1380,6 +1393,7 @@ def handle_issue_fix_command(
                     config=_load_json_object(str(provider_path)),
                     outcome_packet=payload,
                     repository_revision=revision,
+                    repo_path=args.repo_path,
                     observed_at=generated_at,
                     execute=True,
                 )
