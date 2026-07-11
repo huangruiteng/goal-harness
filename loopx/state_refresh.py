@@ -16,10 +16,16 @@ from .control_plane.work_items.repair_delta import (
 from .feedback import validate_local_control_text, validate_public_safe_text
 from .file_lock import exclusive_file_lock
 from .global_registry import sync_project_registry_to_global
-from .history import load_registry, reserve_unique_run_paths, unique_run_paths
+from .history import (
+    load_index,
+    load_registry,
+    reserve_unique_run_paths,
+    unique_run_paths,
+)
 from .control_plane.runtime.local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
 from .paths import resolve_runtime_root
 from .control_plane.goals.goal_vision import normalize_goal_vision_packet
+from .control_plane.goals.goal_frontier import latest_agent_vision_from_runs
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
 from .state_projection import state_projection_gap_warning
@@ -221,6 +227,7 @@ def build_vision_checkpoint(
     *,
     agent_id: str | None,
     agent_vision: dict[str, Any] | None,
+    existing_agent_vision: dict[str, Any] | None,
     vision_unchanged_reason: str | None,
     delivery_outcome: str | None,
     autonomous_replan_recorded: bool,
@@ -245,13 +252,16 @@ def build_vision_checkpoint(
     delta_kinds = set(repair_delta_kinds or [])
     unchanged = normalize_vision_unchanged_reason(vision_unchanged_reason)
 
-    required = bool(triggers)
+    required = bool(triggers or unchanged)
     if agent_vision:
         decision = "patched"
         satisfied = True
-    elif unchanged:
+    elif unchanged and existing_agent_vision:
         decision = "unchanged_with_reason"
         satisfied = True
+    elif unchanged:
+        decision = "missing_required"
+        satisfied = False
     elif delta_kinds & {"no_followup", "successor_or_supersede"}:
         decision = "retired_or_superseded"
         satisfied = True
@@ -272,17 +282,21 @@ def build_vision_checkpoint(
     }
     if agent_vision:
         checkpoint["agent_vision_state"] = agent_vision.get("state")
-    if unchanged:
+    if unchanged and existing_agent_vision:
         checkpoint["unchanged_reason"] = unchanged
+        checkpoint["agent_vision_state"] = existing_agent_vision.get("state")
+    elif unchanged:
+        checkpoint["missing_baseline"] = True
+        checkpoint["rejected_unchanged_reason"] = unchanged
     if delta_kinds:
         checkpoint["repair_delta_kinds"] = sorted(delta_kinds)
     if not satisfied:
-        checkpoint["required_resolution"] = [
-            "write_vision_patch",
-            "record_unchanged_reason",
-            "record_no_followup",
-            "link_successor_or_supersede",
-        ]
+        checkpoint["required_resolution"] = ["write_vision_patch"]
+        if not checkpoint.get("missing_baseline"):
+            checkpoint["required_resolution"].append("record_unchanged_reason")
+        checkpoint["required_resolution"].extend(
+            ["record_no_followup", "link_successor_or_supersede"]
+        )
     return checkpoint
 
 
@@ -837,6 +851,24 @@ def refresh_state_run(
     normalized_vision_unchanged_reason = normalize_vision_unchanged_reason(
         vision_unchanged_reason
     )
+    existing_agent_vision: dict[str, Any] | None = None
+    if normalized_agent_id and normalized_vision_unchanged_reason:
+        existing_runs, _ = load_index(
+            runtime_root / "goals" / safe_goal_id / "runs" / "index.jsonl"
+        )
+        newest_first_runs = [
+            run
+            for _, run in sorted(
+                enumerate(existing_runs),
+                key=lambda item: (str(item[1].get("generated_at") or ""), item[0]),
+                reverse=True,
+            )
+        ]
+        existing_agent_vision = latest_agent_vision_from_runs(
+            newest_first_runs,
+            goal_id=safe_goal_id,
+            agent_id=normalized_agent_id,
+        )
     generated_at = now_local()
     active_state_next_action_update: dict[str, Any] | None = None
     if normalized_next_action:
@@ -885,6 +917,7 @@ def refresh_state_run(
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,
+        existing_agent_vision=existing_agent_vision,
         vision_unchanged_reason=normalized_vision_unchanged_reason,
         delivery_outcome=normalized_delivery_outcome,
         autonomous_replan_recorded=bool(autonomous_replan_recorded),

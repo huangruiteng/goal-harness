@@ -277,7 +277,22 @@ def latest_agent_vision_from_status_payload(
 ) -> dict[str, Any] | None:
     """Return the newest compact agent vision packet visible in run history."""
 
-    for run in _latest_runs_for_goal(status_payload, goal_id=goal_id):
+    return latest_agent_vision_from_runs(
+        _latest_runs_for_goal(status_payload, goal_id=goal_id),
+        goal_id=goal_id,
+        agent_id=agent_id,
+    )
+
+
+def latest_agent_vision_from_runs(
+    runs: list[dict[str, Any]],
+    *,
+    goal_id: str,
+    agent_id: str | None,
+) -> dict[str, Any] | None:
+    """Return the newest active vision from newest-first compact run records."""
+
+    for run in runs:
         vision = run.get("agent_vision")
         if not isinstance(vision, dict):
             if _run_retires_prior_agent_vision(run, agent_id=agent_id):
@@ -348,6 +363,7 @@ def latest_missing_vision_checkpoint_from_status_payload(
             "required_resolution": checkpoint.get("required_resolution")
             if isinstance(checkpoint.get("required_resolution"), list)
             else [],
+            "missing_baseline": checkpoint.get("missing_baseline") is True,
             "generated_at": run.get("generated_at"),
         }
     return None
@@ -453,20 +469,29 @@ def acceptance_gaps_from_vision_checkpoint(
         if isinstance(trigger, dict) and str(trigger.get("kind") or "").strip()
     ]
     trigger_text = ", ".join(trigger_kinds[:3]) or "required vision checkpoint"
+    missing_baseline = checkpoint.get("missing_baseline") is True
     gap: dict[str, Any] = {
         "kind": VISION_CHECKPOINT_MISSING_TRIGGER,
         "source": "latest_vision_checkpoint",
         "agent_id": checkpoint.get("agent_id"),
         "decision": checkpoint.get("decision"),
         "replan_trigger_summary": (
-            "refresh-state closed a material segment without a per-agent vision "
+            "refresh-state tried to keep vision unchanged without a persisted "
+            f"per-agent baseline; triggers={trigger_text}"
+            if missing_baseline
+            else "refresh-state closed a material segment without a per-agent vision "
             f"decision; triggers={trigger_text}"
         ),
         "acceptance_summary": (
-            "Write a bounded agent vision patch, record an unchanged reason, "
+            "Write a bounded agent vision patch, or retire/supersede the frontier "
+            "with an explicit rationale."
+            if missing_baseline
+            else "Write a bounded agent vision patch, record an unchanged reason, "
             "or retire/supersede the frontier with an explicit rationale."
         ),
     }
+    if missing_baseline:
+        gap["missing_baseline"] = True
     generated_at = _compact_projection_text(checkpoint.get("generated_at"), limit=80)
     if generated_at:
         gap["generated_at"] = generated_at

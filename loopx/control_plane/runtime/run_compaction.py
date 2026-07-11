@@ -58,6 +58,7 @@ VISION_CHECKPOINT_COMPACT_FIELDS = (
     "decision",
     "agent_vision_state",
     "unchanged_reason",
+    "missing_baseline",
 )
 VISION_CHECKPOINT_TRIGGER_FIELDS = (
     "kind",
