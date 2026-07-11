@@ -30,7 +30,12 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "---\n\n"
         "# Goal Vision Budget Fixture\n\n"
         "## Next Action\n\n"
-        "- Refresh the compact goal vision packet.\n",
+        "- Refresh the compact goal vision packet.\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] Monitor the bounded fixture without replacing advancement.\n"
+        "  <!-- loopx:todo todo_id=todo_123456789abc status=open "
+        "task_class=continuous_monitor action_kind=monitor claimed_by=research-curator "
+        "target_key=fixture-monitor cadence=1h next_due_at=2099-01-01T00:00:00Z -->\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True)
@@ -142,6 +147,33 @@ def run_status(registry_path: Path, runtime: Path) -> dict:
     return payload(result)
 
 
+def run_quota(registry_path: Path, runtime: Path) -> dict:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime),
+            "--format",
+            "json",
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return payload(result)
+
+
 def payload(result: subprocess.CompletedProcess[str]) -> dict:
     return json.loads(result.stdout)
 
@@ -175,6 +207,50 @@ def main() -> int:
                 "validation": {"write_correctness_checked": True},
             },
         )
+        missing_baseline = payload(
+            run_cli(
+                registry_path,
+                runtime,
+                inline_vision_args=[
+                    "--vision-unchanged-reason",
+                    "A reason cannot stand in for a first per-agent vision baseline.",
+                ],
+                check=True,
+                dry_run=False,
+            )
+        )
+        missing_baseline_checkpoint = missing_baseline["vision_checkpoint"]
+        assert missing_baseline_checkpoint["required"] is True, missing_baseline
+        assert missing_baseline_checkpoint["satisfied"] is False, missing_baseline
+        assert missing_baseline_checkpoint["decision"] == "missing_required", (
+            missing_baseline
+        )
+        assert missing_baseline_checkpoint["missing_baseline"] is True, (
+            missing_baseline
+        )
+        assert missing_baseline_checkpoint["required_resolution"] == [
+            "write_vision_patch",
+            "record_no_followup",
+            "link_successor_or_supersede",
+        ], missing_baseline
+        missing_baseline_quota = run_quota(registry_path, runtime)
+        assert missing_baseline_quota["effective_action"] == (
+            "autonomous_replan_required"
+        ), missing_baseline_quota
+        assert missing_baseline_quota["interaction_contract"]["agent_channel"][
+            "must_attempt"
+        ] is True, missing_baseline_quota
+        assert missing_baseline_quota["goal_frontier_projection"]["acceptance_gaps"][
+            0
+        ]["kind"] == "vision_checkpoint_missing", missing_baseline_quota
+        missing_baseline_gap = missing_baseline_quota["goal_frontier_projection"][
+            "acceptance_gaps"
+        ][0]
+        assert missing_baseline_gap["missing_baseline"] is True, missing_baseline_gap
+        assert "record an unchanged reason" not in missing_baseline_gap[
+            "acceptance_summary"
+        ], missing_baseline_gap
+
         valid = payload(
             run_cli(registry_path, runtime, vision_path=valid_path, check=True)
         )

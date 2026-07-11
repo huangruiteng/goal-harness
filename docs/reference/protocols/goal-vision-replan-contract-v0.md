@@ -129,8 +129,10 @@ Valid checkpoint decisions are:
 
 - `patched`: the refresh wrote a bounded `agent_vision` packet for the same
   `agent_id`;
-- `unchanged_with_reason`: the current per-agent vision still applies, with a
-  compact public-safe reason;
+- `unchanged_with_reason`: an already persisted current per-agent vision still
+  applies, with a compact public-safe reason. A reason cannot create the first
+  vision baseline; without one, the checkpoint remains `missing_required` and
+  requires `write_vision_patch`;
 - `retired_or_superseded`: the frontier was explicitly closed, superseded, or
   given a no-follow-up rationale;
 - `missing_required`: the turn was material but did not make a per-agent vision
