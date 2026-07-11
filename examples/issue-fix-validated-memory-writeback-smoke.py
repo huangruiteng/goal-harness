@@ -27,7 +27,13 @@ from loopx.capabilities.issue_fix.repository_memory_provider import (  # noqa: E
 )
 
 
-REVISION = "9cf42405a8bb0a8a17a66d4f953515f5a2c82620"
+REVISION = subprocess.run(
+    ["git", "rev-parse", "HEAD"],
+    cwd=ROOT,
+    text=True,
+    stdout=subprocess.PIPE,
+    check=True,
+).stdout.strip()
 OBSERVED_AT = "2026-07-11T08:40:00+08:00"
 
 
@@ -61,10 +67,10 @@ class WritebackContractProvider:
         )
 
 
-def repository_context() -> dict[str, object]:
+def repository_context(revision: str = REVISION) -> dict[str, object]:
     return {
         "schema_version": "issue_fix_repository_context_input_v0",
-        "repository_revision": REVISION,
+        "repository_revision": revision,
         "sources": [
             {
                 "source_id": "current-source",
@@ -88,14 +94,18 @@ def repository_context() -> dict[str, object]:
     }
 
 
-def outcome_packet() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def outcome_packet(
+    *,
+    revision: str = REVISION,
+    commit_ref: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     feasibility = build_issue_fix_feasibility_packet(
         url="https://github.com/owner/repo/issues/7",
         reproduction_status="confirmed",
         reproduction_label="focused worker reproduction",
         scope_class="bounded",
         validation_label="focused worker regression",
-        repository_context_input=repository_context(),
+        repository_context_input=repository_context(revision),
     )
     delivery = {
         "schema_version": "issue_fix_delivery_evidence_input_v0",
@@ -103,7 +113,7 @@ def outcome_packet() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         "validation_status": "passed",
         "validation_label": "passed focused public contract test",
         "changed_files": ["src/worker.py", "tests/test_worker.py"],
-        "commit_ref": REVISION,
+        "commit_ref": commit_ref or revision,
         "outputs": [
             {"kind": "pull_request", "url": "https://github.com/owner/repo/pull/8"}
         ],
@@ -120,18 +130,22 @@ def outcome_packet() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     return feasibility, delivery, outcome
 
 
-def provider_config(provider: str = "contract_provider") -> dict[str, Any]:
+def provider_config(
+    provider: str = "contract_provider",
+    *,
+    revision: str = REVISION,
+) -> dict[str, Any]:
     return {
         "schema_version": "issue_fix_repository_memory_provider_config_v0",
         "enabled": True,
         "provider": provider,
         "namespace": "public-repository",
         "visibility": "public",
-        "scope_ref": f"viking://resources/public-repo/{REVISION}",
-        "repository_revision": REVISION,
+        "scope_ref": f"viking://resources/public-repo/{revision}",
+        "repository_revision": revision,
         "sync_timeout_seconds": 5,
         "writeback_enabled": True,
-        "writeback_scope_ref": f"viking://resources/public-repo/{REVISION}",
+        "writeback_scope_ref": f"viking://resources/public-repo/{revision}",
         "workspace_scope": "owner-repo",
         "peer_scope": "issue-fix-agent",
     }
@@ -150,6 +164,7 @@ def main() -> int:
         config=provider_config(),
         outcome_packet=outcome,
         repository_revision=REVISION,
+        repo_path=ROOT,
         observed_at=OBSERVED_AT,
         execute=True,
         provider=provider,
@@ -158,6 +173,7 @@ def main() -> int:
         config=provider_config(),
         outcome_packet=outcome,
         repository_revision=REVISION,
+        repo_path=ROOT,
         observed_at=OBSERVED_AT,
         execute=True,
         provider=provider,
@@ -166,6 +182,8 @@ def main() -> int:
     assert retry["status"] == "completed" and retry["write_count"] == 0, retry
     assert first["idempotency_key"] == retry["idempotency_key"]
     assert first["supersession_key_recorded"] is True
+    assert first["checkout_verification"]["commit_is_ancestor"] is True, first
+    assert first["checkout_verification"]["repo_path_recorded"] is False, first
     stored_fact = next(iter(provider.contents.values()))
     for expected in (
         "issue_fix_validated_outcome_memory_v0",
@@ -181,6 +199,7 @@ def main() -> int:
         config={**provider_config(), "writeback_enabled": False},
         outcome_packet=outcome,
         repository_revision=REVISION,
+        repo_path=ROOT,
         observed_at=OBSERVED_AT,
         execute=True,
         provider=provider,
@@ -191,6 +210,7 @@ def main() -> int:
             config=provider_config(),
             outcome_packet={**outcome, "raw_transcript": "must never be written"},
             repository_revision=REVISION,
+            repo_path=ROOT,
             observed_at=OBSERVED_AT,
             execute=True,
             provider=provider,
@@ -206,6 +226,7 @@ def main() -> int:
             config=provider_config(),
             outcome_packet=failed_outcome,
             repository_revision=REVISION,
+            repo_path=ROOT,
             observed_at=OBSERVED_AT,
             execute=True,
             provider=provider,
@@ -214,6 +235,85 @@ def main() -> int:
         assert "requires passed validation" in str(exc), exc
     else:
         raise AssertionError("failed validation must block memory writeback")
+
+    with tempfile.TemporaryDirectory(prefix="loopx-writeback-divergent-") as tmpdir:
+        checkout = Path(tmpdir)
+        subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "public@example.com"],
+            cwd=checkout,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Public Fixture"],
+            cwd=checkout,
+            check=True,
+        )
+        (checkout / "main.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "main.txt"], cwd=checkout, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=checkout, check=True)
+        main_branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=checkout,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "checkout", "--orphan", "delivery"],
+            cwd=checkout,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(["git", "rm", "-rf", "."], cwd=checkout, check=True, stdout=subprocess.DEVNULL)
+        (checkout / "delivery.txt").write_text("delivered\n", encoding="utf-8")
+        subprocess.run(["git", "add", "delivery.txt"], cwd=checkout, check=True)
+        subprocess.run(["git", "commit", "-qm", "delivery"], cwd=checkout, check=True)
+        divergent_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=checkout,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "checkout", main_branch],
+            cwd=checkout,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        (checkout / "main.txt").write_text("base\ncurrent\n", encoding="utf-8")
+        subprocess.run(["git", "add", "main.txt"], cwd=checkout, check=True)
+        subprocess.run(["git", "commit", "-qm", "current"], cwd=checkout, check=True)
+        current_revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=checkout,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+        _, _, divergent_outcome = outcome_packet(
+            revision=current_revision,
+            commit_ref=divergent_commit,
+        )
+        blocked_provider = WritebackContractProvider()
+        blocked = write_issue_fix_validated_outcome_memory(
+            config=provider_config(revision=current_revision),
+            outcome_packet=divergent_outcome,
+            repository_revision=current_revision,
+            repo_path=checkout,
+            observed_at=OBSERVED_AT,
+            execute=True,
+            provider=blocked_provider,
+        )
+        assert blocked["ok"] is False and blocked["status"] == "blocked", blocked
+        assert blocked["reason_code"] == "delivery_commit_not_in_repository_revision", blocked
+        assert blocked["checkout_verification"]["commit_is_ancestor"] is False, blocked
+        assert blocked["external_writes_performed"] is False, blocked
+        assert blocked_provider.contents == {}, blocked_provider.contents
+        assert_public_boundary(blocked)
 
     with tempfile.TemporaryDirectory(prefix="loopx-writeback-smoke-") as tmpdir:
         tmp = Path(tmpdir)
@@ -266,6 +366,8 @@ def main() -> int:
             "--repository-memory-provider-json",
             str(config_path),
             "--write-repository-memory",
+            "--repo-path",
+            str(ROOT),
             "--generated-at",
             OBSERVED_AT,
         ]

@@ -596,8 +596,12 @@ Validated-outcome writeback is a separate, default-off hook. It runs only when
 the caller explicitly adds `--write-repository-memory`, the local provider
 config independently sets `writeback_enabled: true`, delivery evidence says
 `completed`, validation says `passed`, the delivery evidence has a stable
-`recorded_at`, and the outcome revision matches the configured public resource
-scope. LoopX writes one distilled fact containing
+`recorded_at`, the outcome revision matches the configured public resource
+scope, and `--repo-path` proves with git that delivery `commit_ref` is an
+ancestor of that pinned revision. Divergent, missing, or unresolved commits
+block before the provider is called. Squash flows should record the final
+merge/squash commit, not a superseded feature-branch commit. The checkout path
+and raw git output are never retained. LoopX writes one distilled fact containing
 revision, provenance, freshness, public outputs, risks, a stable supersession
 key, and explicit workspace/peer scopes. A content hash selects the immutable
 target, so an identical retry reads and accepts the existing fact without a
@@ -785,6 +789,7 @@ loopx issue-fix outcome \
   --write-delivery-evidence \
   --repository-memory-provider-json provider.json \
   --write-repository-memory \
+  --repo-path /path/to/approved/repo \
   --agent-id codex-issue-fix \
   --format json
 ```

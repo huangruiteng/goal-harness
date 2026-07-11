@@ -99,7 +99,7 @@ def _delivery_evidence(value: Mapping[str, Any] | None) -> dict[str, Any]:
             f"{sorted(DELIVERY_OUTCOME_STATUSES)}"
         )
     commit_ref = _safe_text(value.get("commit_ref"), field="commit_ref", limit=80)
-    if commit_ref and not re.fullmatch(r"[A-Za-z0-9._/-]{4,80}", commit_ref):
+    if commit_ref and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{3,79}", commit_ref):
         raise ValueError("commit_ref must be a compact public-safe git reference")
     outputs: list[dict[str, str]] = []
     raw_outputs = value.get("outputs") or []

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -395,6 +396,7 @@ def write_issue_fix_validated_outcome_memory(
     config: Mapping[str, Any],
     outcome_packet: Mapping[str, Any],
     repository_revision: str,
+    repo_path: str | Path | None,
     observed_at: str,
     execute: bool,
     provider: ContextProvider | None = None,
@@ -429,6 +431,87 @@ def write_issue_fix_validated_outcome_memory(
             "reason_code": "writeback_not_owner_enabled",
             "external_writes_performed": False,
         }
+    outcomes = outcome_packet.get("issue_fix_outcomes")
+    cases = [item for item in outcomes or [] if isinstance(item, Mapping)]
+    case = cases[0] if len(cases) == 1 else {}
+    delivery = case.get("delivery") if isinstance(case, Mapping) else None
+    commit_ref = (
+        _compact(delivery.get("commit_ref"), field="commit ref", limit=80)
+        if isinstance(delivery, Mapping) and delivery.get("commit_ref")
+        else ""
+    )
+    verification = {
+        "schema_version": "issue_fix_validated_outcome_checkout_verification_v0",
+        "repository_revision": repository_revision,
+        "commit_ref": commit_ref or None,
+        "repository_revision_resolved": False,
+        "commit_ref_resolved": False,
+        "commit_is_ancestor": False,
+        "repo_path_recorded": False,
+        "raw_git_output_captured": False,
+    }
+    if repo_path is None:
+        return {
+            **base,
+            "ok": False,
+            "status": "blocked",
+            "reason_code": "repo_checkout_required",
+            "checkout_verification": verification,
+            "external_writes_performed": False,
+        }
+    if not commit_ref:
+        return {
+            **base,
+            "ok": False,
+            "status": "blocked",
+            "reason_code": "delivery_commit_ref_required",
+            "checkout_verification": verification,
+            "external_writes_performed": False,
+        }
+    checkout = Path(repo_path).expanduser().resolve()
+
+    def git_ok(*args: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=checkout,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0
+
+    verification["repository_revision_resolved"] = git_ok(
+        "cat-file", "-e", f"{repository_revision}^{{commit}}"
+    )
+    verification["commit_ref_resolved"] = git_ok(
+        "cat-file", "-e", f"{commit_ref}^{{commit}}"
+    )
+    if not verification["repository_revision_resolved"]:
+        reason_code = "repository_revision_not_in_checkout"
+    elif not verification["commit_ref_resolved"]:
+        reason_code = "delivery_commit_not_in_checkout"
+    else:
+        verification["commit_is_ancestor"] = git_ok(
+            "merge-base", "--is-ancestor", commit_ref, repository_revision
+        )
+        reason_code = (
+            None
+            if verification["commit_is_ancestor"]
+            else "delivery_commit_not_in_repository_revision"
+        )
+    if reason_code:
+        return {
+            **base,
+            "ok": False,
+            "status": "blocked",
+            "reason_code": reason_code,
+            "checkout_verification": verification,
+            "external_writes_performed": False,
+        }
     idempotency_key, body = _validated_outcome_fact(
         outcome_packet,
         repository_revision=repository_revision,
@@ -461,6 +544,7 @@ def write_issue_fix_validated_outcome_memory(
             "idempotency_key": idempotency_key,
             "supersession_key_recorded": True,
             "revision_scoped": True,
+            "checkout_verification": verification,
         }
     )
     return packet
