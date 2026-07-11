@@ -4664,13 +4664,28 @@ def _apply_host_local_acp_prereq_failure_attribution(
     compact: dict[str, Any],
     runner_prerequisites: dict[str, Any],
 ) -> bool:
-    """Prefer structured host-local Codex exec failures over zero-score labels."""
+    """Prefer host Codex failures unless a completed verifier score is usable."""
 
     official_score = compact.get("official_score")
+    validation = compact.get("validation")
+    counters = compact.get("interaction_counters")
+    task_activity_count = 0
+    if isinstance(counters, dict):
+        for key in (
+            "remote_command_file_bridge_agent_task_facing_operation_count",
+            "remote_command_file_bridge_agent_task_facing_success_count",
+        ):
+            value = counters.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                task_activity_count = max(task_activity_count, value)
     if (
         isinstance(official_score, (int, float))
         and not isinstance(official_score, bool)
-        and official_score >= 1.0
+        and compact.get("official_score_status") == "completed"
+        and isinstance(validation, dict)
+        and validation.get("official_verifier_validation_present") is True
+        and validation.get("official_verifier_status") in {"completed", "passed"}
+        and task_activity_count > 0
     ):
         return False
 

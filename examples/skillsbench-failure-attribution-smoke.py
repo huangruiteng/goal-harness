@@ -18,6 +18,9 @@ from loopx.benchmark_adapters.skillsbench_failure_signals import (
     reconcile_skillsbench_setup_attribution,
     skillsbench_failure_dependency_classes,
 )
+from scripts.skillsbench_automation_loop import (
+    _apply_host_local_acp_prereq_failure_attribution,
+)
 
 
 def test_pip_bootstrap_failure_attribution() -> None:
@@ -175,6 +178,80 @@ def test_failure_dependency_classes_ignore_unrelated_dockerfile_lines() -> None:
     assert "repo.anaconda.com" not in str(fingerprint), fingerprint
 
 
+def _completed_score_compact(score: float, *, task_operations: int) -> dict:
+    return {
+        "official_score": score,
+        "official_score_status": "completed",
+        "validation": {
+            "official_verifier_status": "completed",
+            "official_verifier_validation_present": True,
+        },
+        "interaction_counters": {
+            "remote_command_file_bridge_agent_task_facing_operation_count": (
+                task_operations
+            ),
+        },
+        "attempt_accounting": {"official_score_attempt_countable": True},
+    }
+
+
+def _codex_exec_failure_prerequisites() -> dict:
+    return {
+        "host_local_acp_codex_exec_failure_trace_present": True,
+        "host_local_acp_codex_exec_failure_category": "codex_exec_exit_1",
+    }
+
+
+def test_postscore_transport_failure_preserves_countable_score() -> None:
+    for score in (0.0, 0.6, 1.0):
+        compact = _completed_score_compact(score, task_operations=2)
+        assert (
+            _apply_host_local_acp_prereq_failure_attribution(
+                compact,
+                _codex_exec_failure_prerequisites(),
+            )
+            is False
+        ), compact
+        assert compact["attempt_accounting"]["official_score_attempt_countable"]
+
+
+def test_zero_activity_transport_failure_remains_uncountable() -> None:
+    for score in (0.0, 1.0):
+        compact = _completed_score_compact(score, task_operations=0)
+        assert _apply_host_local_acp_prereq_failure_attribution(
+            compact,
+            _codex_exec_failure_prerequisites(),
+        )
+        assert (
+            compact["attempt_accounting"]["official_score_attempt_countable"]
+            is False
+        )
+
+
+def test_full_score_without_completed_verifier_evidence_is_uncountable() -> None:
+    invalid_evidence = (
+        {"validation": {}},
+        {
+            "validation": {
+                "official_verifier_status": "incomplete",
+                "official_verifier_validation_present": True,
+            }
+        },
+        {"official_score_status": "missing"},
+    )
+    for updates in invalid_evidence:
+        compact = _completed_score_compact(1.0, task_operations=2)
+        compact.update(updates)
+        assert _apply_host_local_acp_prereq_failure_attribution(
+            compact,
+            _codex_exec_failure_prerequisites(),
+        ), compact
+        assert (
+            compact["attempt_accounting"]["official_score_attempt_countable"]
+            is False
+        ), compact
+
+
 if __name__ == "__main__":
     test_pip_bootstrap_failure_attribution()
     test_task_skills_context_does_not_shadow_pip_failure()
@@ -184,4 +261,7 @@ if __name__ == "__main__":
     test_setup_attribution_reconciles_to_public_fingerprint()
     test_supported_setup_attribution_is_unchanged()
     test_failure_dependency_classes_ignore_unrelated_dockerfile_lines()
+    test_postscore_transport_failure_preserves_countable_score()
+    test_zero_activity_transport_failure_remains_uncountable()
+    test_full_score_without_completed_verifier_evidence_is_uncountable()
     print("skillsbench-failure-attribution-smoke: ok")
