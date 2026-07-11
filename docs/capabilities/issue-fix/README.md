@@ -625,8 +625,11 @@ The default `loopx lark-kanban sync-loopx-todos` path also derives all issue
 outcomes from the goal's existing feasibility and PR lifecycle domain state and
 upserts them beside todo rows. A feasibility row therefore appears as issue work
 even before a PR exists; a PR enriches that row only when its lifecycle
-observation carries the matching `repo` and explicit `issue_ref`. This automatic
-closeout projection adds no outcome ledger or second state machine.
+observation carries the matching `repo` and explicit `issue_ref`. Numeric issue
+aliases (`#123`, `issue_123`, `issues/123`) canonicalize to `issues_123` on
+write and when reading legacy rows, so equivalent explicit links cannot silently
+fall into the unlinked count. This automatic closeout projection adds no outcome
+ledger or second state machine.
 
 Supplying `--delivery-evidence-json` alone is a read-only preview. Add
 `--write-delivery-evidence` after focused validation to store its validated,

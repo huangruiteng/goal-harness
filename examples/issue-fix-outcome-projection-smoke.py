@@ -188,7 +188,7 @@ def assert_default_goal_sync_composes_outcomes() -> None:
         )
         linked = build_issue_fix_pr_lifecycle_monitor_packet(
             url="https://github.com/public-fixture/widgets/pull/77",
-            issue_ref="issues_42",
+            issue_ref="#42",
             provider_payload={
                 "state": "OPEN",
                 "reviewDecision": "REVIEW_REQUIRED",
@@ -199,7 +199,30 @@ def assert_default_goal_sync_composes_outcomes() -> None:
             },
         )
         assert linked["observation"]["issue_ref"] == "issues_42", linked
+        receipt = "sha256:" + "a" * 64
+        linked["reviewer_notification_receipts"] = [receipt]
         upsert_issue_fix_pr_lifecycle_ledger_jsonl(lifecycle_ledger, linked)
+        equivalent_retry = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/public-fixture/widgets/pull/77",
+            issue_ref="issue_42",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [
+                    {"name": "focused", "conclusion": "SUCCESS"}
+                ],
+            },
+        )
+        retry_write = upsert_issue_fix_pr_lifecycle_ledger_jsonl(
+            lifecycle_ledger, equivalent_retry
+        )
+        assert retry_write["status"] == "unchanged", retry_write
+        stored_lifecycle = [
+            json.loads(line)
+            for line in lifecycle_ledger.read_text(encoding="utf-8").splitlines()
+        ]
+        assert stored_lifecycle[0]["reviewer_notification_receipts"] == [receipt]
         unlinked = build_issue_fix_pr_lifecycle_monitor_packet(
             url="https://github.com/public-fixture/widgets/pull/78",
             provider_payload={
@@ -230,6 +253,9 @@ def assert_default_goal_sync_composes_outcomes() -> None:
         assert collection_by_issue["issues_42"]["pull_request"]["number"] == 77
         assert collection_by_issue["issues_43"]["pull_request"] is None
         assert collection_by_issue["issues_42"]["validation"]["status"] == "declared"
+        assert collection["source_contract"]["association"] == (
+            "explicit_repo_and_issue_ref_only"
+        )
         assert collection["source_contract"]["creates_parallel_state_machine"] is False
 
         delivery_path = project / "delivery-evidence.json"

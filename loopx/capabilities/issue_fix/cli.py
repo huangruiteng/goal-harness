@@ -486,7 +486,8 @@ def register_issue_fix_commands(
         help=(
             "Optional public-safe issue reference linked to this PR. Persisting "
             "the explicit link lets default Kanban sync compose the issue outcome "
-            "without guessing from titles or branch names."
+            "without guessing from titles or branch names. Numeric aliases such "
+            "as #123 and issue_123 are stored as issues_123."
         ),
     )
     pr_lifecycle_parser.add_argument(

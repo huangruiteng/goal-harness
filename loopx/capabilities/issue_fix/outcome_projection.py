@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
+from .metadata_preview import normalise_github_issue_link_reference
 
 
 ISSUE_FIX_OUTCOME_PROJECTION_SCHEMA_VERSION = "issue_fix_outcome_projection_v0"
@@ -590,7 +591,12 @@ def build_issue_fix_outcome_collection_from_domain_state(
     for packet in lifecycle_packets:
         observation = _mapping(packet.get("observation"))
         repo = str(observation.get("repo") or "").strip()
-        issue_ref = str(observation.get("issue_ref") or "").strip()
+        raw_issue_ref = str(observation.get("issue_ref") or "").strip()
+        issue_ref = (
+            normalise_github_issue_link_reference(raw_issue_ref)
+            if raw_issue_ref
+            else ""
+        )
         if repo and issue_ref:
             lifecycle_by_issue.setdefault((repo, issue_ref), []).append(packet)
 
@@ -598,7 +604,12 @@ def build_issue_fix_outcome_collection_from_domain_state(
     for feasibility_packet in feasibility_packets:
         observation = _mapping(feasibility_packet.get("observation"))
         repo = str(observation.get("repo") or "").strip()
-        issue_ref = str(observation.get("issue_ref") or "").strip()
+        raw_issue_ref = str(observation.get("issue_ref") or "").strip()
+        issue_ref = (
+            normalise_github_issue_link_reference(raw_issue_ref)
+            if raw_issue_ref
+            else ""
+        )
         lifecycle_packet: dict[str, Any] | None = None
         candidates = lifecycle_by_issue.get((repo, issue_ref), [])
         if candidates:
