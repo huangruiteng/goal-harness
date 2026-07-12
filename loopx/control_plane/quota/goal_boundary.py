@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
 from ...benchmark_core import compact_run_permission_policy_for_quota
@@ -129,6 +130,28 @@ def goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> d
             "config_pointer_registered": bool(
                 reviewer_notification.get("config_path")
             ),
+        }
+    lark_event_inbox = (
+        control_plane.get("lark_event_inbox")
+        if isinstance(control_plane.get("lark_event_inbox"), dict)
+        else {}
+    )
+    if lark_event_inbox.get("enabled") is True:
+        drain_command = shlex.join(
+            [
+                "loopx",
+                "lark-inbox",
+                "drain",
+                "--goal-id",
+                str(goal.get("id") or ""),
+                "--project",
+                ".",
+            ]
+        )
+        boundary.setdefault("capabilities", {})["lark_event_inbox"] = {
+            "enabled": True,
+            "config_pointer_registered": bool(lark_event_inbox.get("config_path")),
+            "drain_command": drain_command,
         }
     if goal.get("next_probe"):
         boundary["next_probe"] = str(goal.get("next_probe"))

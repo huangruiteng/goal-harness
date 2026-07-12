@@ -41,6 +41,11 @@ def build_goal_configuration_catalog(
         if isinstance(feature_summary.get("explore_harness"), Mapping)
         else {}
     )
+    lark_event_inbox = (
+        feature_summary.get("lark_event_inbox")
+        if isinstance(feature_summary.get("lark_event_inbox"), Mapping)
+        else {}
+    )
     inspect_command = _configure_command(goal_id)
     multi_enable_args = (
         "--multi-subagent-feature",
@@ -223,6 +228,77 @@ def build_goal_configuration_catalog(
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
                         "docs/capabilities/explore/README.md"
+                    ),
+                },
+            },
+            {
+                "feature_id": "lark_event_inbox",
+                "display_name": "Lark event inbox",
+                "availability": "supported_opt_in",
+                "default": {"enabled": False},
+                "current": {
+                    "enabled": lark_event_inbox.get("enabled") is True,
+                    "config_pointer_registered": lark_event_inbox.get(
+                        "config_pointer_registered"
+                    )
+                    is True,
+                },
+                "required_inputs": {
+                    "ignored-inbox-config": (
+                        "Replace the placeholder with a repo-relative ignored JSON "
+                        "config under .loopx/config/."
+                    )
+                },
+                "consider_when": (
+                    "A goal should consume durable Lark feedback without keeping an "
+                    "agent process or hand-editing its heartbeat prompt."
+                ),
+                "effect": (
+                    "Projects a goal-configured generic inbox into quota and generated "
+                    "heartbeat drain behavior."
+                ),
+                "does_not": [
+                    "install lark-cli, authenticate a user, or configure bot credentials",
+                    "send Lark messages or turn inbound feedback into an automatic write",
+                ],
+                "commands": {
+                    "preview_enable": _configure_command(
+                        goal_id,
+                        "--lark-event-inbox-config",
+                        "<ignored-inbox-config>",
+                    ),
+                    "apply_enable": _configure_command(
+                        goal_id,
+                        "--lark-event-inbox-config",
+                        "<ignored-inbox-config>",
+                        execute=True,
+                    ),
+                    "preview_disable": _configure_command(
+                        goal_id, "--clear-lark-event-inbox-config"
+                    ),
+                    "apply_disable": _configure_command(
+                        goal_id, "--clear-lark-event-inbox-config", execute=True
+                    ),
+                    "verify": [
+                        inspect_command,
+                        shlex.join(
+                            [
+                                "loopx",
+                                "lark-inbox",
+                                "drain",
+                                "--goal-id",
+                                goal_id,
+                                "--project",
+                                ".",
+                            ]
+                        ),
+                    ],
+                },
+                "documentation": {
+                    "path": "docs/capabilities/lark-event-inbox.md",
+                    "url": (
+                        "https://github.com/huangruiteng/loopx/blob/main/"
+                        "docs/capabilities/lark-event-inbox.md"
                     ),
                 },
             },

@@ -78,7 +78,26 @@ def _reviewer_notification_config_summary(goal: dict[str, Any]) -> dict[str, boo
     }
 
 
-def _local_private_config_path(value: str | None) -> str | None:
+def _lark_event_inbox_config_summary(goal: dict[str, Any]) -> dict[str, bool]:
+    control_plane = (
+        goal.get("control_plane")
+        if isinstance(goal.get("control_plane"), dict)
+        else {}
+    )
+    inbox = (
+        control_plane.get("lark_event_inbox")
+        if isinstance(control_plane.get("lark_event_inbox"), dict)
+        else {}
+    )
+    return {
+        "enabled": inbox.get("enabled") is True,
+        "config_pointer_registered": bool(inbox.get("config_path")),
+    }
+
+
+def _local_private_config_path(
+    value: str | None, *, label: str = "local-private config"
+) -> str | None:
     if value is None:
         return None
     text = str(value).strip().replace("\\", "/")
@@ -92,7 +111,7 @@ def _local_private_config_path(value: str | None) -> str | None:
         or path.suffix != ".json"
     ):
         raise ValueError(
-            "reviewer notification config must be a repo-relative JSON path "
+            f"{label} must be a repo-relative JSON path "
             "under .loopx/config/"
         )
     return path.as_posix()
@@ -174,6 +193,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "issue_fix_reviewer_notification": _reviewer_notification_config_summary(
             goal
         ),
+        "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "explore_graph": compact_explore_graph_policy(goal.get("explore_graph")),
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
@@ -385,6 +405,8 @@ def configure_goal(
     clear_boundary_authority: bool = False,
     issue_fix_reviewer_notification_config: str | None = None,
     clear_issue_fix_reviewer_notification_config: bool = False,
+    lark_event_inbox_config: str | None = None,
+    clear_lark_event_inbox_config: bool = False,
     execute: bool = False,
 ) -> dict[str, Any]:
     if not registry_path.exists():
@@ -447,6 +469,11 @@ def configure_goal(
             "--clear-issue-fix-reviewer-notification-config cannot be combined "
             "with --issue-fix-reviewer-notification-config"
         )
+    if clear_lark_event_inbox_config and lark_event_inbox_config:
+        raise ValueError(
+            "--clear-lark-event-inbox-config cannot be combined with "
+            "--lark-event-inbox-config"
+        )
     if waiting_on and waiting_on not in WAITING_ON_CHOICES:
         raise ValueError("--waiting-on must be one of: " + ", ".join(WAITING_ON_CHOICES))
     if multi_subagent_feature is not None and multi_subagent_feature not in MULTI_SUBAGENT_FEATURE_CHOICES:
@@ -478,7 +505,12 @@ def configure_goal(
     supervised_agents = _clean_registered_agents(supervised_agents)
     write_scope = _clean_write_scope(write_scope)
     issue_fix_reviewer_notification_config = _local_private_config_path(
-        issue_fix_reviewer_notification_config
+        issue_fix_reviewer_notification_config,
+        label="reviewer notification config",
+    )
+    lark_event_inbox_config = _local_private_config_path(
+        lark_event_inbox_config,
+        label="lark event inbox config",
     )
 
     payload = read_json(registry_path)
@@ -605,6 +637,21 @@ def configure_goal(
             control_plane["issue_fix"] = issue_fix
         else:
             control_plane.pop("issue_fix", None)
+        goal["control_plane"] = control_plane
+
+    if lark_event_inbox_config is not None or clear_lark_event_inbox_config:
+        control_plane = (
+            goal.get("control_plane")
+            if isinstance(goal.get("control_plane"), dict)
+            else {}
+        )
+        if clear_lark_event_inbox_config:
+            control_plane.pop("lark_event_inbox", None)
+        else:
+            control_plane["lark_event_inbox"] = {
+                "enabled": True,
+                "config_path": lark_event_inbox_config,
+            }
         goal["control_plane"] = control_plane
 
     if explore_graph_enabled is not None:
@@ -805,6 +852,7 @@ def configure_goal(
             or {"enabled": False}
         ),
         "peer_supervisor": deepcopy(after.get("supervisor") or {"enabled": False}),
+        "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "default": "off",
         "configuration_entry": "multi_subagent_feature",
     }

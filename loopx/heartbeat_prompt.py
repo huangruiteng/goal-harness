@@ -537,6 +537,8 @@ run the quota guard:
 If that preflight still fails, do no implementation, adapter, file edit,
 research, exploration, or spend; return quiet `DONT_NOTIFY` with exact failure.
 
+`lark_event_inbox`: if configured, drain -> writeback -> ACK.
+
 If the result says `should_run=false`:
 
 - If `state=operator_gate`, treat it as a user/controller interaction. Read
@@ -743,6 +745,8 @@ Else quiet.
 Apply `scheduler_hint` stateful backoff for RRULE/backoff/self-stop; no spend.
 Action/open todo: list todos/questions; never only "owner gate";
 missing -> "具体 user todo 未投影，需修复 LoopX 状态投影"; false/0: 无用户待办/无需通知 or quiet.
+`lark_event_inbox`: `drain_command` -> writeback -> ACK;
+empty=no gate/spend.
 
 If `should_run=true`: fetch compact; read needed state priority slice + guard
 payload. Use `status --limit 3`; `review-packet --handoff-only`.
@@ -789,19 +793,22 @@ def render_compact_heartbeat_task_body(
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-This compact LoopX heartbeat body keeps project-specific branches out.
+This compact LoopX heartbeat body stays generic.
 Put local policy in registry/state/adapter/`goal_boundary`.
 Expanded lifecycle contract: `{expanded_prompt_command}`.
 {scope_block}
 
-Before delivery, make CLI reachable; run guard:
+Run CLI preflight/guard:
 
 ```bash
 {cli_preflight}
 {quota_guard_command}
 ```
 
-Preflight fail: quiet `DONT_NOTIFY`; no work/spend.
+Preflight fail: quiet; no work/spend.
+
+`lark_event_inbox`: `drain_command` -> writeback -> ACK;
+empty=no gate/spend.
 
 If `should_run=false`: `monitor_quiet_skip` appends at most one no-spend
 `quota monitor-poll --execute`, reruns guard, then stays quiet unless
@@ -916,10 +923,10 @@ Chinese concrete todos/questions; never only "owner gate"; missing ->
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
 Bounded batch/quiet no-op; spend after writeback.
-Plans/done -> LoopX todo/rationale; 2 no-progress -> self-repair.
+Plans/done -> todo/rationale; 2 stalls -> self-repair.
+`lark_event_inbox`: `drain_command` -> writeback -> ACK.
 
-If P0 is blocked but CLI contract permits safe work, continue verifiable
-P1/P2; monitor-only quiet skips stay active/no-spend.
+P0 blocked: continue safe P1/P2; monitor-only quiet/no-spend.
 
 No project-specific branches here. {material_sentence} Stop for private material,
 credentials, destructive git, or unauthorized production actions{permission_tail}"""
