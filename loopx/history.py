@@ -18,6 +18,7 @@ from .control_plane.work_items.delivery_batch_scale import require_delivery_batc
 from .control_plane.work_items.delivery_outcome import require_delivery_outcome
 from .doctor import PROMOTION_READINESS_CLASSIFICATIONS
 from .execution_profile import compact_execution_profile
+from .explore_graph import compact_explore_graph_policy
 from .paths import resolve_runtime_root
 from .presentation.markdown import (
     markdown_code,
@@ -776,6 +777,9 @@ def collect_history(
             "adapter_kind": adapter.get("kind"),
             "adapter_status": adapter.get("status"),
             "coordination": meta.get("coordination") if isinstance(meta.get("coordination"), dict) else None,
+            "explore_graph": compact_explore_graph_policy(meta.get("explore_graph"))
+            if isinstance(meta.get("explore_graph"), dict)
+            else None,
             "spawn_policy": meta.get("spawn_policy") if isinstance(meta.get("spawn_policy"), dict) else None,
             "execution_profile": compact_execution_profile(meta.get("execution_profile")) if registry_member else None,
             "control_plane": compact_control_plane_policy(meta.get("control_plane")) if registry_member else None,
