@@ -36,12 +36,15 @@ from ..presentation.sinks.lark.explore_results import (
     EXPLORE_TABLE_KEYS,
     LarkExploreConfig,
     build_explore_result_card,
+    configure_lark_explore_visual_sink,
     default_lark_explore_config_path,
+    explore_visual_semantic_digest,
     lark_explore_config_from_payload,
     lark_explore_schema_payload,
     read_lark_explore_local_config,
     setup_lark_explore_board,
     sync_explore_results_to_lark,
+    sync_explore_visual_to_lark,
     write_lark_explore_local_config,
 )
 from ..presentation.sinks.lark.kanban import DEFAULT_CLI_BIN
@@ -82,7 +85,10 @@ def register_explore_commands(
     node.add_argument("--kind", dest="node_kind", choices=sorted(NODE_KINDS))
     node.add_argument("--status", choices=sorted(NODE_STATUSES))
     node.add_argument("--summary", help="Optional compact public-safe detail.")
-    node.add_argument("--blocked-reason", help="Required when --status blocked: why the loop is stuck.")
+    node.add_argument(
+        "--blocked-reason",
+        help="Required when --status blocked: why the loop is stuck.",
+    )
     node.add_argument("--parent", dest="parent_id", help="Parent node id for the topology tree.")
     _add_common_record_args(node)
 
@@ -173,6 +179,35 @@ def register_explore_commands(
     setup.add_argument("--as", dest="identity", default="user", choices=["bot", "user", "auto"])
     setup.add_argument("--execute", action="store_true", help="Actually run lark-cli write commands.")
 
+    visual = sub.add_parser(
+        "feishu-visual-configure",
+        help="Configure an optional owner-facing Explore whiteboard. Dry-run unless --execute.",
+    )
+    add_subcommand_format(visual)
+    _add_config_path_arg(visual)
+    visual.add_argument("--whiteboard-token", required=True)
+    visual.add_argument("--docx-token")
+    visual.add_argument(
+        "--status",
+        dest="visual_statuses",
+        action="append",
+        choices=sorted(NODE_STATUSES),
+        default=[],
+    )
+    visual.add_argument("--tag", dest="visual_tags", action="append", default=[])
+    visual.add_argument(
+        "--projection-mode",
+        choices=["canonical_filtered", "issue_fix_two_lane"],
+        default="canonical_filtered",
+    )
+    visual.add_argument(
+        "--include-ancestors",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    visual.add_argument("--mermaid-node-limit", type=int, default=100)
+    visual.add_argument("--execute", action="store_true")
+
     sync = sub.add_parser(
         "feishu-sync",
         help="Upsert the goal's result projection into the Lark board. Dry-run unless --execute.",
@@ -192,7 +227,11 @@ def register_explore_commands(
         default="owner-only",
         help="Use shared to redact private links and external ids before writing rows.",
     )
-    sync.add_argument("--execute", action="store_true", help="Actually upsert records and remember record ids.")
+    sync.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually upsert records and remember record ids.",
+    )
 
     card = sub.add_parser(
         "feishu-card",
@@ -227,7 +266,10 @@ def _add_common_record_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_config_path_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--config-path", help="Local board config path. Defaults beside the LoopX registry.")
+    parser.add_argument(
+        "--config-path",
+        help="Local board config path. Defaults beside the LoopX registry.",
+    )
 
 
 def _add_projection_limit_args(parser: argparse.ArgumentParser) -> None:
@@ -244,9 +286,7 @@ def _target_config(args: argparse.Namespace, *, config_path: Path) -> LarkExplor
         if override:
             table_ids[table_key] = override
     if not base_token or not all(table_ids.get(key) for key in EXPLORE_TABLE_KEYS):
-        raise ValueError(
-            "explore feishu target requires --base-token/--table-id-* or local config from feishu-setup"
-        )
+        raise ValueError("explore feishu target requires --base-token/--table-id-* or local config from feishu-setup")
     return LarkExploreConfig(
         **{"base_" + "token": base_token},
         table_ids=table_ids,
@@ -268,20 +308,14 @@ def _projection_for(args: argparse.Namespace, *, runtime_root: Path) -> dict[str
     return projection
 
 
-def _append_event_payload(
-    event: dict[str, object], *, runtime_root: Path, goal_id: str
-) -> dict[str, object]:
-    payload = append_explore_result_event(
-        explore_result_log_path(runtime_root, goal_id), event
-    )
+def _append_event_payload(event: dict[str, object], *, runtime_root: Path, goal_id: str) -> dict[str, object]:
+    payload = append_explore_result_event(explore_result_log_path(runtime_root, goal_id), event)
     payload["goal_id"] = goal_id
     payload["event"] = event
     return payload
 
 
-def _goal_orchestration_boundary(
-    registry: dict[str, object], *, goal_id: str
-) -> dict[str, object] | None:
+def _goal_orchestration_boundary(registry: dict[str, object], *, goal_id: str) -> dict[str, object] | None:
     """Per-goal orchestration policy from the registered goal's spawn_policy.
 
     spawn_policy is the single writable source that the live quota/status
@@ -586,11 +620,7 @@ def handle_explore_command(
                 )
                 payload = build_explore_todo_branch_plan(
                     goal_id=args.goal_id,
-                    todos=[
-                        item
-                        for item in todo_payload.get("todos") or []
-                        if isinstance(item, dict)
-                    ],
+                    todos=[item for item in todo_payload.get("todos") or [] if isinstance(item, dict)],
                     projection=projection,
                     agent_id=args.agent_id,
                     orchestration=orchestration,
@@ -616,9 +646,7 @@ def handle_explore_command(
                 flag_name="--resource-usage",
             )
             orchestration = _goal_orchestration_boundary(registry, goal_id=args.goal_id)
-            gate = resolve_explore_harness_gate(
-                orchestration, requested_width=args.worker_width
-            )
+            gate = resolve_explore_harness_gate(orchestration, requested_width=args.worker_width)
             if gate["state"] == GATE_STATE_DISABLED:
                 # Short-circuit before goal-state projection so disabled and
                 # unregistered goals both get the explicit opt-in packet
@@ -643,21 +671,13 @@ def handle_explore_command(
                 )
                 router_state = None
                 if getattr(args, "router_state", None):
-                    router_state = json.loads(
-                        Path(args.router_state).read_text(encoding="utf-8-sig")
-                    )
+                    router_state = json.loads(Path(args.router_state).read_text(encoding="utf-8-sig"))
                 load_profile = None
                 if getattr(args, "load_profile", None):
-                    load_profile = json.loads(
-                        Path(args.load_profile).read_text(encoding="utf-8-sig")
-                    )
+                    load_profile = json.loads(Path(args.load_profile).read_text(encoding="utf-8-sig"))
                 payload = build_explore_worker_branch_plan(
                     goal_id=args.goal_id,
-                    todos=[
-                        item
-                        for item in todo_payload.get("todos") or []
-                        if isinstance(item, dict)
-                    ],
+                    todos=[item for item in todo_payload.get("todos") or [] if isinstance(item, dict)],
                     projection=projection,
                     agent_id=args.agent_id,
                     orchestration=orchestration,
@@ -688,15 +708,38 @@ def handle_explore_command(
                 identity=args.identity,
                 execute=bool(args.execute),
             )
+        elif args.explore_command == "feishu-visual-configure":
+            payload = configure_lark_explore_visual_sink(
+                config_path=config_path,
+                whiteboard_token=args.whiteboard_token,
+                docx_token=args.docx_token,
+                statuses=args.visual_statuses,
+                tags=args.visual_tags,
+                projection_mode=args.projection_mode,
+                include_ancestors=bool(args.include_ancestors),
+                mermaid_node_limit=args.mermaid_node_limit,
+                execute=bool(args.execute),
+            )
         elif args.explore_command == "feishu-sync":
             projection = _projection_for(args, runtime_root=runtime_root)
+            target = _target_config(args, config_path=config_path)
             payload = sync_explore_results_to_lark(
-                _target_config(args, config_path=config_path),
+                target,
                 projection=projection,
                 config_path=config_path,
                 sink_visibility=args.sink_visibility,
                 execute=bool(args.execute),
             )
+            local = read_lark_explore_local_config(config_path)
+            payload["visual_sync"] = sync_explore_visual_to_lark(
+                target,
+                projection=projection,
+                visual_sink=local.get("visual_sink") if isinstance(local.get("visual_sink"), dict) else None,
+                config_path=config_path,
+                semantic_digest=explore_visual_semantic_digest(projection),
+                execute=bool(args.execute),
+            )
+            payload["ok"] = bool(payload.get("ok")) and bool(payload["visual_sync"].get("ok"))
         elif args.explore_command == "feishu-card":
             projection = _projection_for(args, runtime_root=runtime_root)
             local = read_lark_explore_local_config(config_path)
@@ -712,11 +755,7 @@ def handle_explore_command(
                 write_lark_explore_local_config(
                     config_path,
                     {
-                        **{
-                            key: value
-                            for key, value in local.items()
-                            if key not in {"ok", "exists", "path"}
-                        },
+                        **{key: value for key, value in local.items() if key not in {"ok", "exists", "path"}},
                         "card": {**stored_card, "message_id": args.message_id},
                     },
                 )
