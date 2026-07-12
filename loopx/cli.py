@@ -430,6 +430,7 @@ def main(argv: list[str] | None = None) -> int:
 
     lark_inbox_result = handle_lark_inbox_command(
         args,
+        registry_path=registry_path,
         output_format=output_format,
         print_payload=print_payload,
     )

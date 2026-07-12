@@ -152,6 +152,8 @@ def main() -> int:
             "gate-fixture-1",
             "--issue-fix-reviewer-notification-config",
             ".loopx/config/issue-fix/reviewer-notification-sinks.json",
+            "--lark-event-inbox-config",
+            ".loopx/config/lark/event-inbox.json",
         ))
         assert dry["ok"] is True, dry
         assert dry["dry_run"] is True, dry
@@ -162,6 +164,7 @@ def main() -> int:
         assert "configured_agent_model" in dry["changed_fields"], dry
         assert "write_scope" in dry["changed_fields"], dry
         assert "issue_fix_reviewer_notification" in dry["changed_fields"], dry
+        assert "lark_event_inbox" in dry["changed_fields"], dry
         assert dry["after"]["waiting_on"] == "user_or_controller", dry
         assert dry["after"]["write_scope"] == ["docs/**", "tests/**"], dry
         assert dry["after"]["checkpointed_boundary_authority"]["active_write_scope"] == ["docs/**"], dry
@@ -171,19 +174,31 @@ def main() -> int:
             "enabled": True,
             "config_pointer_registered": True,
         }, dry
+        assert dry["after"]["lark_event_inbox"] == {
+            "enabled": True,
+            "config_pointer_registered": True,
+        }, dry
         assert dry["feature_summary"]["multi_subagent"] == "enabled", dry
         catalog = dry["configuration_catalog"]
         assert catalog["schema_version"] == "loopx_goal_configuration_catalog_v0", catalog
         assert catalog["scope"] == "default_off_optional_capabilities", catalog
         assert catalog["disclosure_policy"]["first_run_configuration_required"] is False
         features = {item["feature_id"]: item for item in catalog["features"]}
-        assert set(features) == {"multi_subagent", "explore_graph", "explore_harness"}
+        assert set(features) == {
+            "multi_subagent",
+            "explore_graph",
+            "explore_harness",
+            "lark_event_inbox",
+        }
         assert features["multi_subagent"]["current"]["enabled"] is True
         assert features["explore_graph"]["current"]["enabled"] is False
         assert "--execute" not in features["explore_harness"]["commands"]["preview_enable"]
         assert "--execute" in features["explore_harness"]["commands"]["apply_enable"]
         assert "--execute" not in features["explore_graph"]["commands"]["preview_disable"]
         assert "--execute" in features["explore_graph"]["commands"]["apply_disable"]
+        assert features["lark_event_inbox"]["current"]["enabled"] is True
+        assert "--execute" not in features["lark_event_inbox"]["commands"]["preview_enable"]
+        assert "--execute" in features["lark_event_inbox"]["commands"]["apply_enable"]
         migration = dry["heartbeat_prompt_migration"]
         assert migration["schema_version"] == "heartbeat_prompt_migration_v1", migration
         assert "agent identity changed" in migration["reason"], migration
@@ -232,6 +247,8 @@ def main() -> int:
             "gate-fixture-1",
             "--issue-fix-reviewer-notification-config",
             ".loopx/config/issue-fix/reviewer-notification-sinks.json",
+            "--lark-event-inbox-config",
+            ".loopx/config/lark/event-inbox.json",
             "--execute",
         ))
         assert applied["ok"] is True, applied
@@ -262,10 +279,21 @@ def main() -> int:
             "enabled": True,
             "config_path": ".loopx/config/issue-fix/reviewer-notification-sinks.json",
         }, reviewer_policy
+        assert goal["control_plane"]["lark_event_inbox"] == {
+            "enabled": True,
+            "config_path": ".loopx/config/lark/event-inbox.json",
+        }, goal
         boundary = goal_boundary(goal)
         assert boundary["capabilities"]["issue_fix_reviewer_notification"] == {
             "enabled": True,
             "config_pointer_registered": True,
+        }, boundary
+        assert boundary["capabilities"]["lark_event_inbox"] == {
+            "enabled": True,
+            "config_pointer_registered": True,
+            "drain_command": (
+                "loopx lark-inbox drain --goal-id configure-goal-fixture --project ."
+            ),
         }, boundary
         authority = goal["coordination"]["checkpointed_boundary_authority"][0]
         assert authority["schema_version"] == "checkpointed_boundary_authority_v0", authority

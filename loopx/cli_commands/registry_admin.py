@@ -422,6 +422,18 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Remove the goal's automatic reviewer-notification config pointer.",
     )
     configure_goal_parser.add_argument(
+        "--lark-event-inbox-config",
+        help=(
+            "Register a repo-relative local-private generic Lark event inbox "
+            "config pointer under .loopx/config/."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-lark-event-inbox-config",
+        action="store_true",
+        help="Remove the goal's generic Lark event inbox config pointer.",
+    )
+    configure_goal_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the registry. Without this flag, configure-goal is a dry-run preview.",
@@ -627,6 +639,10 @@ def handle_registry_admin_command(
                 ),
                 clear_issue_fix_reviewer_notification_config=bool(
                     args.clear_issue_fix_reviewer_notification_config
+                ),
+                lark_event_inbox_config=args.lark_event_inbox_config,
+                clear_lark_event_inbox_config=bool(
+                    args.clear_lark_event_inbox_config
                 ),
                 execute=bool(args.execute),
             )

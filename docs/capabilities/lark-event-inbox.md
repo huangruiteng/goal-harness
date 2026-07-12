@@ -12,9 +12,14 @@ Lark event stream
   -> loopx lark-inbox ack --message-id ... --execute
 ```
 
-The collector is host infrastructure. On macOS it may be supervised by
-`launchd`; other hosts may use systemd or another restart policy. It should
-filter before persistence and write one compact event per Lark
+The collector is host infrastructure. LoopX can validate a local-private
+collector config, preview or explicitly install a macOS `launchd` / Linux
+`systemd` user service, and report supervisor plus event-bus health. The
+installed service runs `lark-cli event consume` directly with a bounded timeout,
+so stdin EOF under a supervisor cannot terminate an otherwise unbounded
+consumer. When the official npm package exposes a Node wrapper, LoopX records
+absolute paths for both Node and the wrapper so launchd does not depend on an
+interactive-shell PATH. It filters before persistence and writes one compact event per Lark
 `event_id`/`message_id`. The agent does not need to keep a websocket open.
 
 Use `addressed_only` only when direct bot mentions are the entire feedback
@@ -46,6 +51,85 @@ configuration or host state and must not enter public LoopX packets.
 reports `thread_complete=false` and a coverage warning for that mode. For
 `configured_chat_all`, the collector's jq filter should select the configured
 chat only; do not add a content-level `@bot` predicate.
+
+## Host collector lifecycle
+
+Keep the collector config ignored and untracked. It references the generic
+inbox config but owns host-only details such as the chat id and supervisor:
+
+```json
+{
+  "schema_version": "lark_event_collector_config_v0",
+  "enabled": true,
+  "service_name": "loopx-lark-feedback",
+  "event_key": "im.message.receive_v1",
+  "identity": "bot",
+  "supervisor": "launchd",
+  "chat_id": "oc_<local-private-chat-id>",
+  "consume_timeout": "30m",
+  "lark_cli_bin": "lark-cli",
+  "event_inbox_config": ".loopx/config/lark/event-inbox.json"
+}
+```
+
+The packaged v0 lifecycle accepts only `im.message.receive_v1`, bot identity,
+an isolated `loopx-` service name, and `configured_chat_all`. These constraints
+match the canonical inbox schema, avoid collisions with unrelated user services,
+and make thread completeness explicit instead of pretending that an
+`addressed_only` consumer sees later unaddressed replies. Plan and install
+output never returns the chat id, local paths, generated jq, or credentials.
+
+```bash
+loopx lark-inbox collector-plan \
+  --project . \
+  --config .loopx/config/lark/collector.json
+
+# Preview first; this writes nothing and starts no process.
+loopx lark-inbox collector-install \
+  --project . \
+  --config .loopx/config/lark/collector.json
+
+# Explicitly write the user service and start/restart it.
+loopx lark-inbox collector-install \
+  --project . \
+  --config .loopx/config/lark/collector.json \
+  --execute
+
+# Read-only supervisor, event-bus, and real-event evidence check.
+loopx lark-inbox collector-status \
+  --project . \
+  --config .loopx/config/lark/collector.json \
+  --probe-event-bus
+```
+
+Missing `lark-cli` produces a non-blocking install hint. Missing scopes or bot
+configuration still belong to `lark-cli`; LoopX does not authenticate a bot,
+copy app credentials, or silently install packages. Service installation is a
+local host write and therefore requires explicit `--execute`. Status separates
+`healthy` from `real_event_evidence_present`: a running subscriber can be
+healthy before the first message, while acceptance of a real integration still
+requires one post-install event to appear in the inbox.
+
+Register the generic inbox pointer once at the goal boundary:
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --lark-event-inbox-config .loopx/config/lark/event-inbox.json
+
+# Review the preview, then apply explicitly.
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --lark-event-inbox-config .loopx/config/lark/event-inbox.json \
+  --execute
+```
+
+The configuration catalog exposes this optional capability on demand. Quota
+projects only `enabled`, `config_pointer_registered`, and a public-safe command,
+never the private path. Generated heartbeat bodies conditionally run the actual
+goal-boundary `drain_command`; `loopx lark-inbox drain --goal-id <goal-id> --project .`
+resolves the ignored config from the goal registry. A disabled or empty inbox
+is a quiet zero-spend path, so projects without Lark keep the default behavior.
 
 ## Drain and acknowledge
 

@@ -225,6 +225,7 @@ def inspect_lark_event_inbox(
             else "addressed_only capture does not include unaddressed thread replies"
         ),
         "pending_count": len(pending),
+        "captured_count": len(events),
         "returned_count": len(bounded),
         "processed_count": len(processed),
         "invalid_count": invalid_count,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -138,6 +139,51 @@ def main() -> None:
 
         processed = json.loads((inbox / "processed.json").read_text(encoding="utf-8"))
         assert processed["schema_version"] == "lark_event_inbox_processed_v0"
+
+        registry = project / ".loopx" / "registry.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "goals": [
+                        {
+                            "id": "lark-inbox-fixture",
+                            "control_plane": {
+                                "lark_event_inbox": {
+                                    "enabled": True,
+                                    "config_path": ".loopx/config/lark-event-inbox.json",
+                                }
+                            },
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        discovered = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "loopx.cli",
+                "--registry",
+                str(registry),
+                "--format",
+                "json",
+                "lark-inbox",
+                "drain",
+                "--goal-id",
+                "lark-inbox-fixture",
+                "--project",
+                str(project),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert discovered.returncode == 0, discovered.stderr
+        discovered_payload = json.loads(discovered.stdout)
+        assert discovered_payload["configured"] is True, discovered_payload
+        assert discovered_payload["pending_count"] == 0, discovered_payload
 
         outside = project / ".loopx" / "config" / "outside.json"
         outside.write_text(

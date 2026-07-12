@@ -134,6 +134,13 @@ def main() -> int:
     assert_no_project_specific_prompt_leaks("compact", str(compact_payload["task_body"]))
     assert_no_project_specific_prompt_leaks("brief", str(brief_payload["task_body"]))
     assert_no_project_specific_prompt_leaks("thin", str(thin_payload["task_body"]))
+    for prompt_payload in (payload, compact_payload, brief_payload, thin_payload):
+        task_body = str(prompt_payload["task_body"])
+        assert "lark_event_inbox" in task_body, task_body
+        assert "drain" in task_body and "ACK" in task_body, task_body
+        if prompt_payload is not payload:
+            assert "drain_command" in task_body, task_body
+            assert "writeback" in task_body, task_body
     thin_task = str(thin_payload["task_body"])
     assert "Observed runtime capabilities -> `--available-capability`, never user gates." in thin_task, thin_task
     assert payload["quota_guard_command"] == (
@@ -332,9 +339,9 @@ def main() -> int:
         "RRULE then run `ack_hint.cli_args`",
         "CLI/Claude final-check; no spend",
         "Bounded batch/quiet no-op; spend after writeback",
-        "Plans/done -> LoopX todo/rationale; 2 no-progress -> self-repair",
-        "If P0 is blocked but CLI contract permits safe work",
-        "monitor-only quiet skips stay active/no-spend",
+        "Plans/done -> todo/rationale; 2 stalls -> self-repair",
+        "P0 blocked: continue safe P1/P2",
+        "monitor-only quiet/no-spend",
         "No project-specific branches here",
         "Do not consume the learning material queue unless explicitly asked",
         "Stop for private material, credentials, destructive git, or unauthorized production actions",

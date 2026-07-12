@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Callable
 
 from ..capabilities.lark.event_inbox import (
@@ -10,6 +11,43 @@ from ..capabilities.lark.event_inbox import (
     ingest_lark_event_inbox,
     inspect_lark_event_inbox,
 )
+from ..capabilities.lark.event_collector import (
+    inspect_lark_event_collector,
+    install_lark_event_collector,
+    plan_lark_event_collector,
+)
+from ..registry import read_json, registry_goals
+
+
+def _goal_inbox_config(registry_path: Path, goal_id: str) -> str | None:
+    payload = read_json(registry_path)
+    goal = next(
+        (item for item in registry_goals(payload) if str(item.get("id")) == goal_id),
+        None,
+    )
+    if goal is None:
+        raise ValueError(f"goal_id not found in registry: {goal_id}")
+    control_plane = (
+        goal.get("control_plane")
+        if isinstance(goal.get("control_plane"), dict)
+        else {}
+    )
+    inbox = (
+        control_plane.get("lark_event_inbox")
+        if isinstance(control_plane.get("lark_event_inbox"), dict)
+        else {}
+    )
+    if inbox.get("enabled") is not True:
+        return None
+    return str(inbox.get("config_path") or "").strip() or None
+
+
+def _inbox_config(args: argparse.Namespace, registry_path: Path) -> str | None:
+    if getattr(args, "config", None):
+        return str(args.config)
+    if getattr(args, "goal_id", None):
+        return _goal_inbox_config(registry_path, str(args.goal_id))
+    raise ValueError("lark inbox requires --config or --goal-id")
 
 
 def register_lark_inbox_commands(
@@ -27,7 +65,8 @@ def register_lark_inbox_commands(
     )
     add_subcommand_format(drain)
     drain.add_argument("--project", default=".")
-    drain.add_argument("--config", required=True)
+    drain.add_argument("--config")
+    drain.add_argument("--goal-id")
     drain.add_argument("--limit", type=int, default=20)
     ack = sub.add_parser(
         "ack",
@@ -35,7 +74,8 @@ def register_lark_inbox_commands(
     )
     add_subcommand_format(ack)
     ack.add_argument("--project", default=".")
-    ack.add_argument("--config", required=True)
+    ack.add_argument("--config")
+    ack.add_argument("--goal-id")
     ack.add_argument("--message-id", action="append", required=True)
     ack.add_argument("--execute", action="store_true")
     ingest = sub.add_parser(
@@ -47,8 +87,32 @@ def register_lark_inbox_commands(
     )
     add_subcommand_format(ingest)
     ingest.add_argument("--project", default=".")
-    ingest.add_argument("--config", required=True)
+    ingest.add_argument("--config")
+    ingest.add_argument("--goal-id")
     ingest.add_argument("--execute", action="store_true")
+    collector_plan = sub.add_parser(
+        "collector-plan",
+        help="Validate a local-private collector config and preview host setup.",
+    )
+    add_subcommand_format(collector_plan)
+    collector_plan.add_argument("--project", default=".")
+    collector_plan.add_argument("--config", required=True)
+    collector_install = sub.add_parser(
+        "collector-install",
+        help="Preview or explicitly install the configured launchd/systemd collector.",
+    )
+    add_subcommand_format(collector_install)
+    collector_install.add_argument("--project", default=".")
+    collector_install.add_argument("--config", required=True)
+    collector_install.add_argument("--execute", action="store_true")
+    collector_status = sub.add_parser(
+        "collector-status",
+        help="Inspect collector installation, supervisor state, and event evidence.",
+    )
+    add_subcommand_format(collector_status)
+    collector_status.add_argument("--project", default=".")
+    collector_status.add_argument("--config", required=True)
+    collector_status.add_argument("--probe-event-bus", action="store_true")
 
 
 def _read_stdin_events() -> list[object]:
@@ -84,6 +148,7 @@ def _render(payload: dict[str, object]) -> str:
 def handle_lark_inbox_command(
     args: argparse.Namespace,
     *,
+    registry_path: Path,
     output_format: Callable[..., str],
     print_payload: Callable,
 ) -> int | None:
@@ -91,24 +156,61 @@ def handle_lark_inbox_command(
         return None
     try:
         if args.lark_inbox_command == "drain":
+            config_path = _inbox_config(args, registry_path)
+            if config_path is None:
+                payload = {
+                    "ok": True,
+                    "schema_version": "lark_event_inbox_projection_v0",
+                    "enabled": False,
+                    "configured": False,
+                    "pending_count": 0,
+                    "items": [],
+                    "local_private_content_returned": False,
+                    "external_reads_performed": False,
+                }
+                print_payload(payload, output_format(args), _render)
+                return 0
             payload = inspect_lark_event_inbox(
                 project=args.project,
-                config_path=args.config,
+                config_path=config_path,
                 limit=args.limit,
             )
         elif args.lark_inbox_command == "ack":
+            config_path = _inbox_config(args, registry_path)
+            if config_path is None:
+                raise ValueError("goal does not configure a Lark event inbox")
             payload = acknowledge_lark_event_inbox(
                 project=args.project,
-                config_path=args.config,
+                config_path=config_path,
                 message_ids=args.message_id,
                 execute=args.execute,
             )
-        else:
+        elif args.lark_inbox_command == "ingest":
+            config_path = _inbox_config(args, registry_path)
+            if config_path is None:
+                raise ValueError("goal does not configure a Lark event inbox")
             payload = ingest_lark_event_inbox(
                 project=args.project,
-                config_path=args.config,
+                config_path=config_path,
                 events=_read_stdin_events(),
                 execute=args.execute,
+            )
+        elif args.lark_inbox_command == "collector-plan":
+            payload = plan_lark_event_collector(
+                project=args.project,
+                config_path=args.config,
+            )
+        elif args.lark_inbox_command == "collector-install":
+            payload = install_lark_event_collector(
+                project=args.project,
+                config_path=args.config,
+                execute=args.execute,
+            )
+        else:
+            payload = inspect_lark_event_collector(
+                project=args.project,
+                config_path=args.config,
+                probe_event_bus=args.probe_event_bus,
             )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         payload = {
