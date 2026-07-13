@@ -168,7 +168,7 @@ def test_case_loopx_install_payload_uses_official_product_lifecycle() -> None:
     assert "/Users/" not in command
 
 
-def test_goal_start_product_mode_seeds_ranked_plan_before_todos() -> None:
+def test_goal_start_product_mode_defers_ranked_plan_to_agent() -> None:
     payload = benchmark_case_loopx_install_payload(
         benchmark_id="skillsbench",
         case_id="planning-granularity",
@@ -178,24 +178,32 @@ def test_goal_start_product_mode_seeds_ranked_plan_before_todos() -> None:
         goal_start_product_mode=True,
     )
     assert payload["goal_start_product_mode"] is True
-    assert payload["goal_start_plan_observed"] is True
-    assert payload["planner_before_todo_write"] is True
-    assert payload["planned_todo_count"] == 3
-    assert payload["planned_p0_count"] == 1
-    assert payload["planned_todo_ids"] == list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS)
+    assert payload["case_todo_seeded"] is False
+    assert payload["canonical_product_mode_lifecycle_driver"] is False
+    assert payload["goal_start_plan_observed"] is False
+    assert payload["goal_start_guided_command_required"] is True
+    assert payload["goal_start_agent_authored_plan_required"] is True
+    assert payload["goal_start_host_preseed_forbidden"] is True
+    assert payload["planner_before_todo_write"] is False
+    assert payload["planned_todo_count"] == 0
+    assert payload["planned_p0_count"] == 0
+    assert payload["planned_todo_ids"] == []
+    assert payload["planned_todo_ids_expected"] == list(
+        BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS
+    )
     assert payload["case_todo_id"] == BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
     assert payload["selected_p0_todo_id"] == BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
     assert payload["selected_todo_claimed"] is False
     assert payload["selected_todo_updated_before_solver"] is False
     assert payload["selected_todo_completed_before_spend"] is False
-    assert payload["non_selected_todos_preserved_open_or_deferred"] is True
+    assert payload["non_selected_todos_preserved_open_or_deferred"] is False
     command = str(payload["command"])
-    assert " bootstrap-command-pack " in command
-    assert " --goal-text " in command
-    assert command.count(" todo add ") == 3
-    assert command.index("bootstrap-command-pack") < command.index(" todo add ")
-    for todo_id in BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS:
-        assert todo_id in command
+    assert " bootstrap-command-pack " not in command
+    assert " --goal-text " not in command
+    assert " todo add " not in command
+    assert " quota should-run " not in command
+    assert " refresh-state " not in command
+    assert "loopx_case_init_phase:await_agent_goal_start" in command
     assert "/Users/" not in command
 
 
@@ -341,7 +349,7 @@ def test_case_loopx_install_command_uses_real_loopx_lifecycle() -> None:
         assert all("raw_task_text" not in line or "false" in line for line in event_lines)
 
 
-def test_goal_start_install_command_seeds_three_ranked_todos() -> None:
+def test_goal_start_install_command_connects_without_seeding_todos() -> None:
     import os
 
     if os.name == "nt":
@@ -413,15 +421,19 @@ def test_goal_start_install_command_seeds_three_ranked_todos() -> None:
             text=True,
         )
         status_payload = json.loads(status.stdout)
-        agent_todos = status_payload["attention_queue"]["items"][0]["agent_todos"]
-        assert agent_todos["total_count"] == 3
-        assert agent_todos["open_count"] == 3
-        items = agent_todos["first_executable_items"]
-        ids = {item["todo_id"] for item in items}
-        assert set(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS).issubset(ids)
-        assert status_payload["attention_queue"]["items"][0]["agent_lane_next_action"][
-            "todo_id"
-        ] == BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
+        attention_items = status_payload["attention_queue"]["items"]
+        assert attention_items
+        agent_todo_summaries = [
+            item.get("agent_todos")
+            for item in attention_items
+            if isinstance(item.get("agent_todos"), dict)
+        ]
+        assert sum(item.get("total_count", 0) for item in agent_todo_summaries) == 0
+        assert sum(item.get("open_count", 0) for item in agent_todo_summaries) == 0
+        assert all(
+            item.get("first_executable_items", []) == []
+            for item in agent_todo_summaries
+        )
 
 
 def test_case_loopx_install_command_uses_source_wrapper_without_local_installer() -> None:
@@ -556,9 +568,9 @@ if __name__ == "__main__":
     test_seed_text_uses_real_loopx_active_state_shape()
     test_seed_write_command_uses_canonical_path()
     test_case_loopx_install_payload_uses_official_product_lifecycle()
-    test_goal_start_product_mode_seeds_ranked_plan_before_todos()
+    test_goal_start_product_mode_defers_ranked_plan_to_agent()
     test_case_loopx_install_command_uses_real_loopx_lifecycle()
-    test_goal_start_install_command_seeds_three_ranked_todos()
+    test_goal_start_install_command_connects_without_seeding_todos()
     test_case_loopx_install_command_uses_source_wrapper_without_local_installer()
     test_case_lifecycle_contract_is_per_case_arm()
     test_ale_launch_packet_reuses_shared_contract()

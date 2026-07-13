@@ -13,6 +13,101 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _assert_agent_authored_goal_start_bootstrap() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    from loopx.benchmark_case_state import benchmark_case_loopx_install_payload
+
+    payload = benchmark_case_loopx_install_payload(
+        benchmark_id="skillsbench",
+        case_id="planning-granularity",
+        arm_id="loopx_goal_start_product_mode",
+        route="loopx-goal-start-product-mode",
+        max_rounds=5,
+        goal_start_product_mode=True,
+    )
+    command = str(payload["command"])
+    assert payload["case_todo_seeded"] is False, payload
+    assert payload["canonical_product_mode_lifecycle_driver"] is False, payload
+    assert payload["goal_start_plan_observed"] is False, payload
+    assert payload["goal_start_guided_command_required"] is True, payload
+    assert payload["goal_start_agent_authored_plan_required"] is True, payload
+    assert payload["goal_start_host_preseed_forbidden"] is True, payload
+    assert payload["planned_todo_count"] == 0, payload
+    assert payload["planned_todo_count_expected"] == 3, payload
+    assert "bootstrap-command-pack" not in command, command
+    assert " todo add " not in command, command
+    assert " quota should-run " not in command, command
+    assert " refresh-state " not in command, command
+    assert "loopx_case_init_phase:await_agent_goal_start" in command, command
+
+
+def _assert_bridge_tracks_guided_start_without_task_text() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    from loopx.benchmark_adapters.skillsbench_acp_relay import (
+        CodexExecConfig,
+        SkillsBenchLocalAcpRelay,
+    )
+    from loopx.benchmark_case_state import (
+        BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
+    )
+
+    private_task_text = "PRIVATE_TASK_SENTINEL do not publish"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        summary_path = temp_path / "agent-operations.jsonl"
+        relay = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(remote_command_file_bridge_command="cat")
+        )
+        wrapper = relay._write_instrumented_bridge_wrapper(
+            tmp_path=temp_path,
+            summary_path=summary_path,
+        )
+        start_request = {
+            "operation": "exec",
+            "cwd": "/app",
+            "command": (
+                "/app/.local/bin/loopx --registry /app/.loopx/registry.json "
+                "--runtime-root /app/.loopx/runtime --format json start-goal "
+                "--guided --project /app --goal-text "
+                + json.dumps(private_task_text)
+            ),
+        }
+        subprocess.run(
+            [str(wrapper)],
+            input=json.dumps(start_request),
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+        todo_request = {
+            "operation": "exec",
+            "cwd": "/app",
+            "command": (
+                "/app/.local/bin/loopx --format json todo add "
+                "--goal-id skillsbench-case --role agent --todo-id "
+                f"{BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS[0]} "
+                "--text 'public safe solver todo'"
+            ),
+        }
+        subprocess.run(
+            [str(wrapper)],
+            input=json.dumps(todo_request),
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+        summary_text = summary_path.read_text(encoding="utf-8")
+        records = [json.loads(line) for line in summary_text.splitlines()]
+    assert private_task_text not in summary_text, summary_text
+    completed = [record for record in records if record.get("record_phase") == "complete"]
+    assert completed[0]["loopx_subcommands"] == ["start-goal"], completed
+    assert completed[0]["loopx_state_read"] is True, completed
+    assert completed[0]["raw_task_text_recorded"] is False, completed
+    assert completed[1]["loopx_subcommands"] == ["todo", "add"], completed
+    assert completed[1]["loopx_state_write"] is True, completed
+    assert completed[1]["loopx_todo_id"] == BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS[0]
+
+
 def _assert_adapter_route_contract_surface() -> None:
     sys.path.insert(0, str(REPO_ROOT))
     from loopx.benchmark_adapters.skillsbench import (
@@ -28,7 +123,11 @@ def _assert_adapter_route_contract_surface() -> None:
     assert contract["product_mode"] is True, contract
     assert contract["loopx_inside_case"] is True, contract
     assert contract["loopx_automation_loop"] is True, contract
-    assert "ranked_todo_plan" in contract["skillsbench_route_semantics"], contract
+    assert contract["loopx_slash_command"] == "/loopx <task objective>", contract
+    assert contract["goal_start_guided_command_required"] is True, contract
+    assert contract["goal_start_agent_authored_plan_required"] is True, contract
+    assert contract["goal_start_host_preseed_forbidden"] is True, contract
+    assert "guided_loopx_slash_start" in contract["skillsbench_route_semantics"], contract
 
     skeleton = build_skillsbench_benchmark_run(route=route)
     assert skeleton["route"] == route, skeleton
@@ -126,21 +225,41 @@ def _assert_control_score_surface() -> None:
         _compact_benchmark_interaction_counters,
         _compact_benchmark_runner_prerequisites,
     )
+    from loopx.benchmark_case_state import (
+        BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
+    )
+
+    selected_todo_id = BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS[0]
+    command_records = [
+        {"subcommand": "start-goal"},
+        *[
+            {"subcommand": "todo add", "todo_id": todo_id}
+            for todo_id in BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS
+        ],
+        {"subcommand": "todo claim", "todo_id": selected_todo_id},
+        {"subcommand": "todo update", "todo_id": selected_todo_id},
+        {"subcommand": "todo complete", "todo_id": selected_todo_id},
+        {"subcommand": "refresh-state"},
+        {"subcommand": "quota spend-slot"},
+    ]
 
     compact = {
         "product_mode": True,
         "interaction_counters": {
             "goal_start_product_mode": True,
-            "goal_start_plan_observed": True,
-            "planned_todo_count": 3,
-            "planned_p0_count": 1,
-            "planner_before_todo_write": True,
-            "same_priority_order_preserved": True,
-            "selected_p0_todo_id": "todo_public_solver",
-            "selected_todo_claimed": True,
-            "selected_todo_updated_before_solver": True,
-            "non_selected_todos_preserved_open_or_deferred": True,
+            "goal_start_plan_observed": False,
+            "planned_todo_count": 0,
+            "planned_p0_count": 0,
+            "planner_before_todo_write": False,
+            "same_priority_order_preserved": False,
+            "remote_command_file_bridge_agent_successful_loopx_command_records": (
+                command_records
+            ),
             "remote_command_file_bridge_agent_successful_loopx_subcommand_counts": {
+                "start-goal": 1,
+                "todo add": 3,
+                "todo claim": 1,
+                "todo update": 1,
                 "todo complete": 1,
                 "quota spend-slot": 1,
             },
@@ -154,6 +273,9 @@ def _assert_control_score_surface() -> None:
         "runner_prerequisites": {
             "goal_start_product_mode": True,
             "goal_start_plan_required": True,
+            "goal_start_guided_command_required": True,
+            "goal_start_agent_authored_plan_required": True,
+            "goal_start_host_preseed_forbidden": True,
             "goal_start_planned_todo_count_expected": 3,
             "goal_start_selected_p0_lifecycle_required": True,
         },
@@ -162,7 +284,33 @@ def _assert_control_score_surface() -> None:
     assert control_score["satisfied"] is True, control_score
     assert control_score["score"] == 1.0, control_score
     assert control_score["raw_material_recorded"] is False, control_score
+    assert control_score["goal_start_guided_command_observed"] is True, control_score
+    assert control_score["agent_start_goal_count"] == 1, control_score
+    assert control_score["agent_todo_add_count"] == 3, control_score
     assert control_score["selected_todo_completed_before_spend"] is True, control_score
+    host_preseeded_score = _build_goal_start_product_mode_control_score(
+        {
+            "interaction_counters": {
+                "goal_start_product_mode": True,
+                "goal_start_plan_observed": True,
+                "planned_todo_count": 3,
+                "planned_p0_count": 1,
+                "planner_before_todo_write": True,
+                "same_priority_order_preserved": True,
+                "selected_p0_todo_id": selected_todo_id,
+                "selected_todo_claimed": True,
+                "selected_todo_updated_before_solver": True,
+                "selected_todo_completed_before_spend": True,
+                "non_selected_todos_preserved_open_or_deferred": True,
+            }
+        },
+        plan,
+    )
+    assert host_preseeded_score["satisfied"] is False, host_preseeded_score
+    assert (
+        host_preseeded_score["goal_start_guided_command_observed"] is False
+    ), host_preseeded_score
+    assert host_preseeded_score["planned_todo_count"] == 0, host_preseeded_score
     compact["goal_start_product_mode_control_score"] = control_score
     timeline = _build_case_event_timeline(compact, plan)
     events = timeline["events"]
@@ -175,7 +323,7 @@ def _assert_control_score_surface() -> None:
     goal_start = goal_start_events[0]
     assert goal_start["status"] == "satisfied", goal_start
     assert goal_start["planned_todo_count"] == 3, goal_start
-    assert goal_start["selected_p0_todo_id"] == "todo_public_solver", goal_start
+    assert goal_start["selected_p0_todo_id"] == selected_todo_id, goal_start
     assert timeline["raw_material_recorded"] is False, timeline
 
     continuation_compact = {
@@ -243,6 +391,9 @@ def _assert_control_score_surface() -> None:
         plan["runner_prerequisites"]
     )
     assert compacted_prerequisites["goal_start_plan_required"] is True
+    assert compacted_prerequisites["goal_start_guided_command_required"] is True
+    assert compacted_prerequisites["goal_start_agent_authored_plan_required"] is True
+    assert compacted_prerequisites["goal_start_host_preseed_forbidden"] is True
     assert compacted_prerequisites["goal_start_planned_todo_count_expected"] == 3
 
 
@@ -388,8 +539,15 @@ def main() -> int:
     prerequisites = plan["runner_prerequisites"]
     assert prerequisites["goal_start_product_mode"] is True, prerequisites
     assert prerequisites["goal_start_plan_required"] is True, prerequisites
+    assert prerequisites["goal_start_guided_command_required"] is True, prerequisites
+    assert prerequisites["goal_start_agent_authored_plan_required"] is True, prerequisites
+    assert prerequisites["goal_start_host_preseed_forbidden"] is True, prerequisites
     assert prerequisites["goal_start_planned_todo_count_expected"] == 3, prerequisites
     assert prerequisites["goal_start_selected_p0_lifecycle_required"] is True, prerequisites
+    assert prerequisites["loopx_workflow_lifecycle_checkpoint"] is False, prerequisites
+    assert prerequisites["loopx_product_mode_lifecycle_driver_kind"] == (
+        "prompt_driven_loopx_cli"
+    ), prerequisites
     assert prerequisites["benchflow_intermediate_soft_verify_policy"] == "every-round"
     assert plan["public_boundary"]["public_raw_prompt"] is False, plan
     assert plan["public_boundary"]["public_raw_trajectory"] is False, plan
@@ -411,6 +569,8 @@ def main() -> int:
     assert feedback_result.returncode != 0, feedback_result
     assert "invalid choice" in feedback_result.stderr, feedback_result.stderr
     _assert_adapter_route_contract_surface()
+    _assert_agent_authored_goal_start_bootstrap()
+    _assert_bridge_tracks_guided_start_without_task_text()
     _assert_control_score_surface()
     _assert_host_local_acp_return_arity_compat()
     _assert_app_server_goal_baseline_bridge_contract()
