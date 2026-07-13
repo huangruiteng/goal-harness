@@ -274,7 +274,8 @@ def _prompt_requires_bridge_first_action(prompt: str) -> bool:
         "your first agent action must be a shell/tool call",
         "your first agent action must be a task-facing shell/tool call",
         "first run the case-local quota/todo commands",
-        "this route simulates `/loopx <task objective>` goal start",
+        "first loopx cli action must invoke `start-goal",
+        "this benchmark treatment executes the actual agent contract for `/loopx",
         "compact ranked",
         "selected runnable p0",
     )
@@ -382,7 +383,7 @@ def loopx_subcommands(command: str) -> list[str]:
             skip = False
             continue
         if token.startswith("--"):
-            if "=" not in token and token in {{"--goal-id", "--todo-id", "--claimed-by", "--status", "--note", "--evidence", "--classification", "--registry", "--runtime-root", "--slots", "--source", "--format"}}:
+            if "=" not in token and token in {{"--goal-id", "--todo-id", "--claimed-by", "--status", "--note", "--evidence", "--classification", "--registry", "--runtime-root", "--slots", "--source", "--format", "--project", "--goal-text", "--agent-id", "--host-surface", "--role", "--task-class", "--action-kind", "--text"}}:
                 skip = True
             continue
         if token.startswith("-"):
@@ -417,7 +418,7 @@ if isinstance(payload, dict) and payload.get("operation") == "exec":
         subcommands = loopx_subcommands(command_text)
 record["loopx_cli_call"] = bool(subcommands)
 record["loopx_subcommands"] = subcommands[:2]
-record["loopx_state_read"] = subcommands[:2] in (["quota", "should-run"], ["status"], ["diagnose"])
+record["loopx_state_read"] = subcommands[:2] in (["start-goal"], ["quota", "should-run"], ["status"], ["diagnose"])
 record["loopx_state_write"] = bool(subcommands and (
     subcommands[0] in {{"todo", "refresh-state"}}
     or subcommands[:2] == ["quota", "spend-slot"]

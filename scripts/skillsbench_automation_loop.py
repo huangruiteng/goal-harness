@@ -83,6 +83,7 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_LOOPX_AGENT_ID,
     BENCHMARK_CASE_LOOPX_CLI_PATH,
     BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
+    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_ACTION_KINDS,
     BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
     BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
     BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
@@ -165,6 +166,12 @@ from loopx.benchmark_trajectory import (
     loopx_cli_state_usage,
     normalized_loopx_cli_call,
     summarize_public_acp_trajectory,
+)
+from loopx.control_plane.runtime.goal_start_control_score import (
+    build_goal_start_product_mode_control_score,
+    goal_start_public_command_records as _goal_start_public_command_records,
+    goal_start_public_text_list as _goal_start_public_text_list,
+    goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
 )
 
 
@@ -933,7 +940,10 @@ def _host_local_acp_launch_command(
                     args.remote_command_file_bridge_agent_command,
                 ]
         )
-        if _is_loopx_product_mode_route(args.route):
+        if (
+            _is_loopx_product_mode_route(args.route)
+            and not _is_goal_start_product_mode_route(args.route)
+        ):
             payload = benchmark_case_loopx_install_payload(
                 benchmark_id="skillsbench",
                 case_id=args.task_id,
@@ -968,6 +978,7 @@ def _host_local_acp_launch_command(
             )
     if (
         _is_loopx_product_mode_route(args.route)
+        and not _is_goal_start_product_mode_route(args.route)
         and args.host_local_acp_launch
         and "--loopx-workflow-lifecycle-checkpoint" not in command
     ):
@@ -2691,6 +2702,9 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_attempt_cleanup_raw_command_recorded",
         "goal_start_product_mode",
         "goal_start_plan_required",
+        "goal_start_guided_command_required",
+        "goal_start_agent_authored_plan_required",
+        "goal_start_host_preseed_forbidden",
         "goal_start_selected_p0_lifecycle_required",
         "benchflow_verifier_prep_timeout_override_enabled",
         "benchflow_verifier_prep_timeout_raw_command_recorded",
@@ -5106,540 +5120,16 @@ def _append_case_timeline_event(
     events.append(entry)
 
 
-def _goal_start_public_count_map(value: Any) -> dict[str, int]:
-    if not isinstance(value, dict):
-        return {}
-    compact: dict[str, int] = {}
-    for key, count in value.items():
-        if (
-            isinstance(key, str)
-            and key
-            and isinstance(count, int)
-            and not isinstance(count, bool)
-            and count >= 0
-        ):
-            compact[key[:80]] = count
-    return compact
-
-
-def _goal_start_subcommand_count(
-    families: tuple[str, ...],
-    *maps: Any,
-) -> int:
-    return max(
-        (
-            _subcommand_family_count(_goal_start_public_count_map(item), *families)
-            for item in maps
-        ),
-        default=0,
-    )
-
-
-_GOAL_START_TODO_ID_RE = re.compile(r"^todo_[A-Za-z0-9_-]{6,80}$")
-_GOAL_START_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
-
-
-def _goal_start_safe_todo_id(value: Any) -> str:
-    text = _case_timeline_safe_string(value, limit=100)
-    return text if _GOAL_START_TODO_ID_RE.match(text) else ""
-
-
-def _goal_start_safe_goal_id(value: Any) -> str:
-    text = _case_timeline_safe_string(value, limit=140)
-    return text if _GOAL_START_GOAL_ID_RE.match(text) else ""
-
-
-def _goal_start_public_text_list(value: Any, *, limit: int = 8) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = _case_timeline_safe_string(item, limit=180)
-        if text:
-            result.append(text)
-        if len(result) >= limit:
-            break
-    return result
-
-
-def _goal_start_public_todo_id_list(value: Any, *, limit: int = 16) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        todo_id = _goal_start_safe_todo_id(item)
-        if todo_id and todo_id not in result:
-            result.append(todo_id)
-        if len(result) >= limit:
-            break
-    return result
-
-
-def _goal_start_public_command_records(*values: Any) -> list[dict[str, str]]:
-    records: list[dict[str, str]] = []
-    allowed_subcommands = {
-        "quota should-run",
-        "todo claim",
-        "todo update",
-        "todo complete",
-        "refresh-state",
-        "quota spend-slot",
-        "status",
-        "diagnose",
-    }
-    for value in values:
-        if not isinstance(value, list):
-            continue
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            subcommand = _case_timeline_safe_string(
-                item.get("subcommand"),
-                limit=80,
-            )
-            if subcommand not in allowed_subcommands:
-                continue
-            record: dict[str, str] = {"subcommand": subcommand}
-            todo_id = _goal_start_safe_todo_id(item.get("todo_id"))
-            if todo_id:
-                record["todo_id"] = todo_id
-            goal_id = _goal_start_safe_goal_id(item.get("goal_id"))
-            if goal_id:
-                record["goal_id"] = goal_id
-            records.append(record)
-            if len(records) >= 128:
-                return records
-    return records
-
-
-def _goal_start_planned_todo_packet(
-    counters: dict[str, Any],
-    runner_prerequisites: dict[str, Any],
-) -> tuple[list[str], list[str]]:
-    ids = (
-        _goal_start_public_todo_id_list(counters.get("planned_todo_ids"))
-        or _goal_start_public_todo_id_list(
-            runner_prerequisites.get("planned_todo_ids")
-        )
-    )
-    texts = (
-        _goal_start_public_text_list(counters.get("planned_todo_texts_public_safe"))
-        or _goal_start_public_text_list(
-            runner_prerequisites.get("planned_todo_texts_public_safe")
-        )
-    )
-    if not ids and (
-        counters.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_plan_required") is True
-    ):
-        ids = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS)
-    if not texts and ids:
-        texts = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS)
-    return ids[:8], texts[:8]
-
-
-def _build_goal_start_todo_snapshot(
-    *,
-    counters: dict[str, Any],
-    runner_prerequisites: dict[str, Any],
-    selected_p0_todo_id: str,
-    agent_claim_count: int,
-    agent_update_count: int,
-    agent_complete_count: int,
-    selected_todo_claimed: bool,
-    selected_todo_updated_before_solver: bool,
-) -> dict[str, Any]:
-    planned_ids, planned_texts = _goal_start_planned_todo_packet(
-        counters,
-        runner_prerequisites,
-    )
-    if not selected_p0_todo_id and planned_ids:
-        selected_p0_todo_id = planned_ids[0]
-    records = _goal_start_public_command_records(
-        counters.get("remote_command_file_bridge_agent_successful_loopx_command_records"),
-        runner_prerequisites.get(
-            "remote_command_file_bridge_agent_successful_loopx_command_records"
-        ),
-    )
-    counts_by_todo: dict[str, dict[str, int]] = {}
-    complete_without_todo_id = 0
-    for record in records:
-        subcommand = record.get("subcommand", "")
-        if subcommand not in {"todo claim", "todo update", "todo complete"}:
-            continue
-        todo_id = _goal_start_safe_todo_id(record.get("todo_id"))
-        if not todo_id:
-            if subcommand == "todo complete":
-                complete_without_todo_id += 1
-            continue
-        counts = counts_by_todo.setdefault(
-            todo_id,
-            {"claim": 0, "update": 0, "complete": 0},
-        )
-        counts[subcommand.split()[1]] += 1
-
-    inferred_identity = False
-    if not records and selected_p0_todo_id:
-        selected_counts = counts_by_todo.setdefault(
-            selected_p0_todo_id,
-            {"claim": 0, "update": 0, "complete": 0},
-        )
-        if agent_claim_count > 0 or selected_todo_claimed:
-            selected_counts["claim"] = max(selected_counts["claim"], agent_claim_count)
-        if agent_update_count > 0 or selected_todo_updated_before_solver:
-            selected_counts["update"] = max(
-                selected_counts["update"],
-                agent_update_count,
-            )
-        if agent_complete_count > 0:
-            selected_counts["complete"] = max(
-                selected_counts["complete"],
-                agent_complete_count,
-            )
-            inferred_identity = True
-
-    completed_ids = sorted(
-        todo_id
-        for todo_id, counts in counts_by_todo.items()
-        if counts.get("complete", 0) > 0
-    )
-    selected_counts = counts_by_todo.get(
-        selected_p0_todo_id,
-        {"claim": 0, "update": 0, "complete": 0},
-    )
-    selected_complete_count = max(0, selected_counts.get("complete", 0))
-    selected_duplicate_complete_count = max(0, selected_complete_count - 1)
-    non_selected_complete_count = sum(
-        max(0, counts.get("complete", 0))
-        for todo_id, counts in counts_by_todo.items()
-        if todo_id != selected_p0_todo_id
-    )
-
-    planned_todos: list[dict[str, Any]] = []
-    for index, todo_id in enumerate(planned_ids):
-        counts = counts_by_todo.get(todo_id, {"claim": 0, "update": 0, "complete": 0})
-        complete_count = max(0, counts.get("complete", 0))
-        if complete_count > 0:
-            status = "done_observed"
-        elif todo_id == selected_p0_todo_id:
-            status = "open_or_in_progress_observed"
-        else:
-            status = "open_or_deferred_observed"
-        item: dict[str, Any] = {
-            "todo_id": todo_id,
-            "role": "selected_p0" if todo_id == selected_p0_todo_id else "supporting",
-            "status": status,
-            "claim_count": max(0, counts.get("claim", 0)),
-            "update_count": max(0, counts.get("update", 0)),
-            "complete_count": complete_count,
-        }
-        if index < len(planned_texts):
-            item["text_public_safe"] = planned_texts[index]
-        planned_todos.append(item)
-
-    return {
-        "schema_version": "skillsbench_goal_start_todo_snapshot_v0",
-        "raw_material_recorded": False,
-        "planned_todos": planned_todos,
-        "planned_todo_ids": planned_ids,
-        "planned_todo_texts_public_safe": planned_texts,
-        "selected_p0_todo_id": selected_p0_todo_id,
-        "completed_todo_ids": completed_ids[:8],
-        "completed_todo_id_count": len(completed_ids),
-        "selected_todo_complete_count": selected_complete_count,
-        "selected_todo_duplicate_complete_count": selected_duplicate_complete_count,
-        "non_selected_todo_complete_count": non_selected_complete_count,
-        "todo_complete_without_todo_id_count": complete_without_todo_id,
-        "todo_identity_attribution": (
-            "inferred_from_counts" if inferred_identity else "command_record_observed"
-        ),
-    }
-
-
 def _build_goal_start_product_mode_control_score(
     compact: dict[str, Any],
     plan: dict[str, Any],
 ) -> dict[str, Any]:
-    """Summarize goal-start control-plane closure from public compact counters."""
-
-    counters = (
-        compact.get("interaction_counters")
-        if isinstance(compact.get("interaction_counters"), dict)
-        else {}
-    )
-    runner_prerequisites = _public_runner_prerequisites(
-        plan.get("runner_prerequisites")
-    )
-    compact_runner_prerequisites = compact.get("runner_prerequisites")
-    if isinstance(compact_runner_prerequisites, dict):
-        runner_prerequisites.update(compact_runner_prerequisites)
-    lifecycle_contract = (
-        compact.get("product_mode_lifecycle_contract")
-        if isinstance(compact.get("product_mode_lifecycle_contract"), dict)
-        else {}
-    )
-
-    required = bool(
-        counters.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_plan_required") is True
-    )
-    if not required:
-        return {}
-
-    agent_successful_subcommands = counters.get(
-        "remote_command_file_bridge_agent_successful_loopx_subcommand_counts"
-    )
-    agent_requested_subcommands = counters.get(
-        "remote_command_file_bridge_agent_loopx_subcommand_counts"
-    )
-    prereq_agent_successful_subcommands = runner_prerequisites.get(
-        "remote_command_file_bridge_agent_successful_loopx_subcommand_counts"
-    )
-    prereq_agent_requested_subcommands = runner_prerequisites.get(
-        "remote_command_file_bridge_agent_loopx_subcommand_counts"
-    )
-    driver_commands = counters.get(
-        "remote_command_file_bridge_driver_lifecycle_command_counts"
-    )
-    prereq_driver_commands = runner_prerequisites.get(
-        "remote_command_file_bridge_driver_lifecycle_command_counts"
-    )
-    driver_failure_count = _case_timeline_max_int(
-        counters.get("remote_command_file_bridge_driver_lifecycle_failure_count"),
-        runner_prerequisites.get(
-            "remote_command_file_bridge_driver_lifecycle_failure_count"
+    return build_goal_start_product_mode_control_score(
+        compact,
+        runner_prerequisites=_public_runner_prerequisites(
+            plan.get("runner_prerequisites")
         ),
     )
-    driver_commands_count_as_successful = driver_failure_count == 0
-
-    selected_p0_todo_id = _case_timeline_safe_string(
-        counters.get("selected_p0_todo_id")
-        or runner_prerequisites.get("selected_p0_todo_id"),
-        limit=100,
-    )
-    planned_todo_ids, planned_todo_texts = _goal_start_planned_todo_packet(
-        counters,
-        runner_prerequisites,
-    )
-    if not selected_p0_todo_id and planned_todo_ids:
-        selected_p0_todo_id = planned_todo_ids[0]
-    planned_todo_count = _case_timeline_max_int(counters.get("planned_todo_count"))
-    if planned_todo_ids:
-        planned_todo_count = max(planned_todo_count, len(planned_todo_ids))
-    expected_todo_count = _case_timeline_max_int(
-        runner_prerequisites.get("goal_start_planned_todo_count_expected")
-    )
-    planned_p0_count = _case_timeline_max_int(counters.get("planned_p0_count"))
-    if selected_p0_todo_id:
-        planned_p0_count = max(planned_p0_count, 1)
-    closeout_spend_count = _case_timeline_max_int(
-        counters.get("remote_command_file_bridge_agent_quota_spend_slot_count"),
-        runner_prerequisites.get(
-            "remote_command_file_bridge_agent_quota_spend_slot_count"
-        ),
-        lifecycle_contract.get("agent_bridge_quota_spend_slot_count"),
-    )
-
-    agent_claim_count = _goal_start_subcommand_count(
-        ("todo claim",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    agent_update_count = _goal_start_subcommand_count(
-        ("todo update",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    agent_complete_count = _goal_start_subcommand_count(
-        ("todo complete",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    agent_spend_count = _goal_start_subcommand_count(
-        ("quota spend-slot",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    driver_claim_count = (
-        _goal_start_subcommand_count(("todo claim",), driver_commands, prereq_driver_commands)
-        if driver_commands_count_as_successful
-        else 0
-    )
-    driver_update_count = (
-        _goal_start_subcommand_count(("todo update",), driver_commands, prereq_driver_commands)
-        if driver_commands_count_as_successful
-        else 0
-    )
-
-    selected_todo_claimed = bool(
-        counters.get("selected_todo_claimed") is True
-        or agent_claim_count > 0
-        or driver_claim_count > 0
-    )
-    selected_todo_updated_before_solver = bool(
-        counters.get("selected_todo_updated_before_solver") is True
-        or agent_update_count > 0
-        or driver_update_count > 0
-    )
-    selected_todo_spend_observed = bool(closeout_spend_count > 0 or agent_spend_count > 0)
-    selected_todo_completed_before_spend = bool(
-        counters.get("selected_todo_completed_before_spend") is True
-        or (agent_complete_count > 0 and selected_todo_spend_observed)
-    )
-    todo_snapshot = _build_goal_start_todo_snapshot(
-        counters=counters,
-        runner_prerequisites=runner_prerequisites,
-        selected_p0_todo_id=selected_p0_todo_id,
-        agent_claim_count=agent_claim_count,
-        agent_update_count=agent_update_count,
-        agent_complete_count=agent_complete_count,
-        selected_todo_claimed=selected_todo_claimed,
-        selected_todo_updated_before_solver=selected_todo_updated_before_solver,
-    )
-    selected_todo_complete_count = _case_timeline_max_int(
-        todo_snapshot.get("selected_todo_complete_count")
-    )
-    selected_todo_duplicate_complete_count = _case_timeline_max_int(
-        todo_snapshot.get("selected_todo_duplicate_complete_count")
-    )
-    non_selected_todo_complete_count = _case_timeline_max_int(
-        todo_snapshot.get("non_selected_todo_complete_count")
-    )
-    todo_complete_without_todo_id_count = _case_timeline_max_int(
-        todo_snapshot.get("todo_complete_without_todo_id_count")
-    )
-    completed_todo_id_count = _case_timeline_max_int(
-        todo_snapshot.get("completed_todo_id_count")
-    )
-    selected_todo_completed_observed = bool(
-        selected_todo_complete_count > 0 or agent_complete_count > 0
-    )
-    quota_spend_missing_after_repeated_complete = bool(
-        selected_todo_duplicate_complete_count > 0
-        and not selected_todo_spend_observed
-    )
-    last_decision = _case_timeline_safe_string(counters.get("last_decision"), limit=100)
-    premature_done_signal_count = _case_timeline_max_int(
-        counters.get("product_mode_declared_done_below_passing_reward_count")
-    )
-    premature_done_stop_reason = ""
-    if counters.get("product_mode_no_open_todo_below_passing_reward_stop") is True:
-        premature_done_stop_reason = (
-            last_decision or "no_open_todo_below_passing_reward_stop"
-        )
-    elif (
-        counters.get("product_mode_declared_done_below_passing_reward") is True
-        and last_decision.startswith("stop_after")
-        and "below_passing_reward" in last_decision
-    ):
-        premature_done_stop_reason = (
-            last_decision or "declared_done_below_passing_reward"
-        )
-
-    component_results = [
-        {
-            "name": "plan_observed",
-            "satisfied": counters.get("goal_start_plan_observed") is True,
-        },
-        {
-            "name": "planned_todo_count",
-            "satisfied": bool(
-                planned_todo_count > 0
-                and (expected_todo_count == 0 or planned_todo_count >= expected_todo_count)
-            ),
-        },
-        {"name": "planned_p0_count", "satisfied": planned_p0_count > 0},
-        {
-            "name": "planner_before_todo_write",
-            "satisfied": counters.get("planner_before_todo_write") is True,
-        },
-        {
-            "name": "same_priority_order_preserved",
-            "satisfied": counters.get("same_priority_order_preserved") is True,
-        },
-        {"name": "selected_p0_todo_id", "satisfied": bool(selected_p0_todo_id)},
-        {"name": "selected_todo_claimed", "satisfied": selected_todo_claimed},
-        {
-            "name": "selected_todo_updated_before_solver",
-            "satisfied": selected_todo_updated_before_solver,
-        },
-        {
-            "name": "selected_todo_completed_before_spend",
-            "satisfied": selected_todo_completed_before_spend,
-        },
-        {
-            "name": "selected_todo_spend_observed",
-            "satisfied": selected_todo_spend_observed,
-        },
-        {
-            "name": "non_selected_todos_preserved_open_or_deferred",
-            "satisfied": (
-                counters.get("non_selected_todos_preserved_open_or_deferred") is True
-            ),
-        },
-        {"name": "no_premature_done_stop", "satisfied": not premature_done_stop_reason},
-    ]
-    satisfied_count = sum(1 for item in component_results if item["satisfied"])
-    component_count = len(component_results)
-    score = round(satisfied_count / component_count, 3) if component_count else 0.0
-    return {
-        "schema_version": "skillsbench_goal_start_product_mode_control_score_v0",
-        "required": True,
-        "satisfied": satisfied_count == component_count,
-        "score": score,
-        "component_count": component_count,
-        "satisfied_component_count": satisfied_count,
-        "raw_material_recorded": False,
-        "goal_start_plan_observed": counters.get("goal_start_plan_observed") is True,
-        "planned_todo_count": planned_todo_count,
-        "planned_todo_count_expected": expected_todo_count,
-        "planned_p0_count": planned_p0_count,
-        "planner_before_todo_write": counters.get("planner_before_todo_write") is True,
-        "same_priority_order_preserved": (
-            counters.get("same_priority_order_preserved") is True
-        ),
-        "selected_p0_todo_id": selected_p0_todo_id,
-        "selected_todo_claimed": selected_todo_claimed,
-        "selected_todo_updated_before_solver": selected_todo_updated_before_solver,
-        "selected_todo_completed_before_spend": selected_todo_completed_before_spend,
-        "selected_todo_completed_observed": selected_todo_completed_observed,
-        "selected_todo_spend_observed": selected_todo_spend_observed,
-        "non_selected_todos_preserved_open_or_deferred": (
-            counters.get("non_selected_todos_preserved_open_or_deferred") is True
-        ),
-        "quota_spend_missing_after_repeated_complete": (
-            quota_spend_missing_after_repeated_complete
-        ),
-        "premature_done_signal_count": premature_done_signal_count,
-        "premature_done_stop_reason": premature_done_stop_reason,
-        "agent_todo_claim_count": agent_claim_count,
-        "agent_todo_update_count": agent_update_count,
-        "agent_todo_complete_count": agent_complete_count,
-        "agent_todo_complete_unique_todo_count": completed_todo_id_count,
-        "selected_todo_complete_count": selected_todo_complete_count,
-        "selected_todo_duplicate_complete_count": (
-            selected_todo_duplicate_complete_count
-        ),
-        "non_selected_todo_complete_count": non_selected_todo_complete_count,
-        "todo_complete_without_todo_id_count": todo_complete_without_todo_id_count,
-        "agent_quota_spend_slot_count": max(closeout_spend_count, agent_spend_count),
-        "driver_todo_claim_count": driver_claim_count,
-        "driver_todo_update_count": driver_update_count,
-        "planned_todo_ids": planned_todo_ids,
-        "planned_todo_texts_public_safe": planned_todo_texts,
-        "goal_start_todo_snapshot": todo_snapshot,
-        "component_results": component_results,
-    }
 
 
 def _build_case_event_timeline(
@@ -9069,11 +8559,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "benchmark_egress_proxy_docker_config_raw_proxy_recorded": False,
             "loopx_workflow_lifecycle_checkpoint": bool(
                 _is_loopx_product_mode_route(args.route)
+                and not _is_goal_start_product_mode_route(args.route)
                 and args.host_local_acp_launch
             ),
             "loopx_product_mode_lifecycle_driver_kind": (
                 BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE
                 if _is_loopx_product_mode_route(args.route)
+                and not _is_goal_start_product_mode_route(args.route)
                 and args.host_local_acp_launch
                 else BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE
                 if _is_loopx_product_mode_route(args.route)
@@ -9081,6 +8573,15 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "goal_start_product_mode": _is_goal_start_product_mode_route(args.route),
             "goal_start_plan_required": _is_goal_start_product_mode_route(args.route),
+            "goal_start_guided_command_required": (
+                _is_goal_start_product_mode_route(args.route)
+            ),
+            "goal_start_agent_authored_plan_required": (
+                _is_goal_start_product_mode_route(args.route)
+            ),
+            "goal_start_host_preseed_forbidden": (
+                _is_goal_start_product_mode_route(args.route)
+            ),
             "goal_start_planned_todo_count_expected": (
                 3 if _is_goal_start_product_mode_route(args.route) else 0
             ),
@@ -12553,6 +12054,7 @@ def _build_product_mode_user(
         plan_prerequisites = {}
     workflow_lifecycle_driver = bool(
         treatment
+        and not goal_start_product_mode
         and payload.get("canonical_product_mode_lifecycle_driver") is True
         and (
             plan_prerequisites.get("loopx_workflow_lifecycle_checkpoint") is True
@@ -12570,9 +12072,13 @@ def _build_product_mode_user(
         if not goal_start_product_mode:
             return ""
         return (
-            "Goal-start loop alignment: this benchmark treatment models "
-            "headless `/loopx goal-start`, not a bare benchmark prompt and not "
-            "a live-user chat. The case-local `quota should-run` guard carries "
+            "Slash-command alignment: this benchmark treatment executes the "
+            "actual agent contract for `/loopx <task objective>`, not a "
+            "host-preseeded approximation and not a live-user chat. The host "
+            "only connected the case-local registry and registered the agent; "
+            "it did not create the ranked plan, write todos, refresh state, or "
+            "run quota on the solver's behalf. The case-local `quota "
+            "should-run` guard carries "
             "the same machine loop fields as `heartbeat-prompt` and Codex CLI "
             "TUI `/goal`: read `interaction_contract`, `workspace_guard`, "
             "`goal_boundary`, `execution_obligation`, and `scheduler_hint` "
@@ -12590,6 +12096,40 @@ def _build_product_mode_user(
             "exactly once only after the validated closeout sequence. "
         )
 
+    def goal_start_todo_write_commands() -> str:
+        todo_lines = []
+        for todo_id, todo_text, action_kind in zip(
+            BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
+            BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
+            BENCHMARK_CASE_LOOPX_GOAL_START_TODO_ACTION_KINDS,
+        ):
+            todo_lines.append(
+                f"{case_cli_prefix} todo add --goal-id {case_goal_id} "
+                f"--role agent --todo-id {todo_id} "
+                f"--text {shlex.quote(todo_text)} "
+                "--task-class advancement_task "
+                f"--action-kind {action_kind}"
+            )
+        todo_lines.extend(
+            [
+                (
+                    f"{case_cli_prefix} refresh-state --goal-id {case_goal_id} "
+                    "--classification benchmark_case_agent_goal_start "
+                    "--delivery-batch-scale single_surface "
+                    "--delivery-outcome surface_only --no-global-sync"
+                ),
+                (
+                    f"{case_cli_prefix} quota should-run --goal-id {case_goal_id} "
+                    f"--agent-id {case_agent_id}"
+                ),
+                (
+                    f"{case_cli_prefix} todo claim --goal-id {case_goal_id} "
+                    f"--todo-id {case_todo_id} --claimed-by {case_agent_id}"
+                ),
+            ]
+        )
+        return "```bash\n" + "\n".join(todo_lines) + "\n```\n"
+
     def treatment_state_contract() -> str:
         goal_start_clause = ""
         goal_start_alignment = goal_start_loop_alignment_contract()
@@ -12602,12 +12142,42 @@ def _build_product_mode_user(
                 else 3
             )
             goal_start_clause = (
-                "This route models `/loopx goal-start <task objective>`: "
-                f"a compact ranked {planned_count}-todo plan must exist before "
-                "todo writes, "
+                "This route executes `/loopx <task objective>`: "
+                f"the agent must author a compact ranked {planned_count}-todo "
+                "plan after the guided preview and before todo writes, "
                 f"with selected runnable P0 todo `{selected_p0_todo_id}` entering "
                 "the lifecycle. Non-selected todos remain open or deferred until "
                 "the selected P0 is validated. "
+            )
+            return (
+                "LoopX slash-command treatment contract: official case-local "
+                f"LoopX is connected before the agent starts at `{case_state_path}`, "
+                "but no plan or todo has been seeded. The benchmark task remains "
+                "the primary objective. After the bridge packet's required "
+                "connectivity probe and before prose planning, your first LoopX "
+                "CLI action must invoke `start-goal --guided --project /app` "
+                "through the private JSON bridge. Pass the exact visible TASK "
+                "INSTRUCTION as one shell-safe `--goal-text` argument; also pass "
+                f"`--goal-id {case_goal_id}`, `--agent-id {case_agent_id}`, and "
+                "`--host-surface shell`. Do not summarize, truncate, or replace "
+                "the task text, and do not expose that private command or its "
+                "output in public artifacts. Read the guided transaction, plan "
+                "ordered P0/P1/P2 work, then execute these public-safe todo, "
+                "refresh, quota, and claim commands through the same bridge in "
+                "the shown order:\n\n"
+                f"{goal_start_todo_write_commands()}"
+                "The benchmark controller is the already-active host loop, so "
+                "do not create or modify an external automation. Only after the "
+                "guided start, ordered todo writeback, refresh, quota guard, and "
+                "selected P0 claim may task-facing solving begin. "
+                f"{goal_start_clause}"
+                f"{goal_start_alignment}"
+                "After meaningful local task evidence or validation, update the "
+                "selected todo. Only after task-facing work indicates completion "
+                "may you use `todo complete`, then `refresh-state`, then `quota "
+                "spend-slot --source adapter --execute`. Do not run closeout as "
+                "setup, edit Markdown state as the source of truth, or answer "
+                "with prose only. "
             )
         if workflow_lifecycle_driver:
             return (
@@ -12674,7 +12244,29 @@ def _build_product_mode_user(
             "source of truth. "
         )
 
+    def entry_lifecycle_requirement() -> str:
+        if goal_start_product_mode:
+            return (
+                "run the guided `start-goal` preview with the exact task text, "
+                "then author the ordered P0/P1/P2 todos, refresh state, run "
+                "quota, and claim the selected P0 through the solver bridge "
+                "before task-facing solving"
+            )
+        return (
+            "run the case-local quota/todo commands through the solver bridge "
+            "before task inspection or solving"
+        )
+
     def lifecycle_checkpoint_commands(round_number: int) -> str:
+        if goal_start_product_mode:
+            return (
+                "First invoke `start-goal --guided --project /app` through the "
+                "private bridge with the exact TASK INSTRUCTION from the prior "
+                "turn as the single shell-safe `--goal-text` value. After "
+                "reading that private guided transaction, write the ordered "
+                "public-safe plan with these commands:\n\n"
+                f"{goal_start_todo_write_commands()}"
+            )
         safe_round = max(1, round_number)
         checkpoint_note = shlex.quote(
             f"round {safe_round} product-mode lifecycle checkpoint"
@@ -12738,27 +12330,6 @@ def _build_product_mode_user(
             "After meaningful local validation or completion, update the same "
             "case todo again; only spend quota after validated work or final "
             "closeout."
-        )
-
-    def workflow_bootstrap_prompt() -> str:
-        return (
-            "LoopX product-mode treatment round 1. "
-            "You are running inside the official SkillsBench sandbox transport, "
-            "but this local Codex process is outside the scored sandbox. "
-            f"{feedback_policy_clause}"
-            "--- LOOPX PRODUCT-MODE CONTROL PLANE ---\n"
-            "The canonical workflow lifecycle driver has already executed the "
-            "case-local quota/todo/update/refresh checkpoint through the sandbox "
-            "bridge before this prompt. This route models `/loopx goal-start "
-            "<task objective>`: a compact ranked todo plan and selected P0 "
-            "todo have already been seeded in the case-local LoopX state. "
-            f"{goal_start_loop_alignment_contract()}"
-            "Do not repeat setup lifecycle, do not solve from prose, and do not "
-            "declare done in this bootstrap round. Your only job in this round "
-            "is to prove task-facing sandbox access: copy and run the bridge "
-            "packet's FIRST ACTION REQUIRED shell command exactly, then briefly "
-            "report that bridge access is available. The benchmark task "
-            "instruction will be sent after that bridge action is observed."
         )
 
     def solver_activity_prompt(
@@ -13379,17 +12950,6 @@ def _build_product_mode_user(
                 if treatment:
                     prefix = "LoopX product-mode treatment round 1. "
                     trace["case_goal_state_packet_present"] = True
-                    if workflow_lifecycle_driver and goal_start_product_mode:
-                        self._task_instruction_sent = False
-                        trace[
-                            "product_mode_task_instruction_deferred_until_agent_lifecycle"
-                        ] = True
-                        trace["product_mode_task_instruction_sent_initially"] = False
-                        trace["last_decision"] = (
-                            "send_goal_start_workflow_bridge_bootstrap_prompt"
-                        )
-                        return workflow_bootstrap_prompt()
-
                     self._task_instruction_sent = True
                     trace[
                         "product_mode_task_instruction_deferred_until_agent_lifecycle"
@@ -13423,9 +12983,8 @@ def _build_product_mode_user(
                             "answer. "
                             if workflow_lifecycle_driver
                             else
-                            "first run the case-local quota/todo commands above "
-                            "through the solver bridge before any task inspection, "
-                            "planning, solving, or final answer. "
+                            f"{entry_lifecycle_requirement()} before any final "
+                            "answer. "
                         )
                         + "The benchmark task instruction is visible in this "
                         "first round so the task semantics stay aligned with the "
@@ -13456,8 +13015,8 @@ def _build_product_mode_user(
                         "\n\n--- LOOPX PRODUCT-MODE CONTROL PLANE ---\n"
                         f"{control_clause}"
                         "For this treatment, LoopX lifecycle evidence is a "
-                        "hard product-mode requirement: first run the "
-                        "case-local quota/todo commands above, then solve and "
+                        "hard product-mode requirement: "
+                        f"{entry_lifecycle_requirement()}, then solve and "
                         "validate the benchmark task. Do not run case closeout "
                         "or declare done until after meaningful task-facing work "
                         "or local validation. If you later declare done without "
