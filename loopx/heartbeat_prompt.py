@@ -40,16 +40,21 @@ SCHEDULER_HINT_COMPACT_RULE = (
     "Scheduler: no spend. App if apply_needed: update RRULE, ack via `ack_hint`; else skip."
 )
 SCHEDULER_HINT_THIN_RULE = (
-    "Apply `scheduler_hint`: if App `stateful_backoff.apply_needed`, "
-    "RRULE then run `ack_hint.cli_args`; CLI/Claude final-check; no spend."
+    "Scheduler: App apply_needed -> RRULE + `ack_hint.cli_args`; "
+    "final-check CLI/Claude; no spend."
 )
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
-    "Observed runtime capabilities -> `--available-capability`, never user gates."
+    "Observed capabilities -> `--available-capability`; never user gates."
 )
 EXPLORE_GRAPH_DELIVERY_RULE = (
     "Graph-on: material refresh must sync configured sinks and verify "
     "row/result-id readback before final delivery; unsatisfied -> retry or "
     "blocker/successor. Explore Harness stays independent."
+)
+EXPLORE_GRAPH_DELIVERY_THIN_RULE = (
+    "Graph-on: sync sinks; verify row/result-id readback before delivery; "
+    "else retry/blocker/successor. "
+    "Explore Harness independent."
 )
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
@@ -199,6 +204,7 @@ def render_peer_agent_scope_instruction(
         return ""
     identity = agent_id or "<registered-agent-id>"
     scope_text = "; ".join(agent_scopes) if agent_scopes else "registered peer lane"
+    scope_text = scope_text.rstrip(".!?")
     claim_command = (
         f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> "
         f"--claimed-by {agent_id}"
@@ -214,10 +220,9 @@ def render_peer_agent_scope_instruction(
     )
     if thin:
         return (
-            f"Agent: `{identity}`; model: peer_v1; scope: {scope_text}. Equal peer: "
-            "claim/lease before delivery; use an independent worktree; follow todo "
-            "continuation policy; no cross-agent authority. Do not write scope into "
-            "todo metadata."
+            f"Equal peer `{identity}` (peer_v1); scope: {scope_text}. Claim/lease first; "
+            "independent repo worktree; todo continuation; no cross-agent authority; "
+            "no scope in todo metadata."
         )
     if compact:
         return (
@@ -931,11 +936,11 @@ def render_thin_heartbeat_task_body(
 ) -> str:
     permission_tail = "" if permission_rule == DEFAULT_PERMISSION_RULE else f" {permission_rule}"
     material_sentence = (
-        "Do not consume the learning material queue unless explicitly asked."
+        "Do not consume learning queue unless asked."
         if material_queue_rule == DEFAULT_MATERIAL_QUEUE_RULE
         else material_queue_rule
     )
-    scope_sentence = f"\n\n{agent_scope_instruction}" if agent_scope_instruction else ""
+    scope_sentence = f"\n{agent_scope_instruction}" if agent_scope_instruction else ""
     quota_guard_instruction = (
         f"`{quota_guard_command}`"
         if "--available-capability" in quota_guard_command
@@ -943,25 +948,25 @@ def render_thin_heartbeat_task_body(
     )
     return f"""Advance `{goal_id}` from {active_state}.
 
-Use skills: `loopx-project`; if surprising/tiny/contradictory,
-`loopx-self-repair`. LoopX CLI is source of truth.
+Skills: `loopx-project`; surprise/tiny/conflict -> `loopx-self-repair`.
+LoopX CLI = truth.
 {scope_sentence}
 
-Inspect registry/global quota, active state, status/history, repo; run
+Inspect registry/state/status/history/repo; run
 {quota_guard_instruction}; follow `interaction_contract`.
-User NOTIFY: Chinese actions incl. non_blocking at false/0;
-never only "owner gate"; required missing ->
-"具体 user todo 未投影，需修复 LoopX 状态投影". Only DONT_NOTIFY+false/0: quiet.
+User NOTIFY: concrete Chinese actions even non_blocking false/0; never only
+"owner gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
+Quiet only if DONT_NOTIFY+false/0.
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-Bounded batch/quiet no-op; spend after writeback.
+Bounded batch/no-op; spend post-writeback.
 Plans/done -> todo/rationale; 2 stalls -> self-repair.
 `lark_event_inbox`: `drain_command` -> writeback -> ACK.
-{EXPLORE_GRAPH_DELIVERY_RULE}
+{EXPLORE_GRAPH_DELIVERY_THIN_RULE}
 
-P0 blocked: continue safe P1/P2; monitor-only quiet/no-spend.
+P0 blocked: safe P1/P2; monitor-only quiet/no-spend.
 
-No project-specific branches here. {material_sentence} Stop for private material,
+No project branches; {material_sentence} Stop for private material,
 credentials, destructive git, or unauthorized production actions{permission_tail}"""
 
 
