@@ -34,6 +34,13 @@ from ....capabilities.explore.result_log import (
     EDGE_TYPES,
     build_explore_graph_view,
 )
+from ...explore_views import (
+    PRESENTATION_MODE_DUAL_VIEW,
+    build_explore_presentation_bundle,
+    explore_source_digest,
+    explore_source_revision,
+    validate_explore_view_freshness,
+)
 from .kanban import (
     DEFAULT_CLI_BIN,
     CommandRunner,
@@ -57,6 +64,7 @@ LARK_EXPLORE_SYNC_VERSION = "loopx_lark_explore_sync_v0"
 LARK_EXPLORE_READBACK_VERSION = "loopx_lark_explore_readback_v0"
 LARK_EXPLORE_CARD_VERSION = "loopx_lark_explore_card_v0"
 LARK_EXPLORE_VISUAL_SYNC_VERSION = "loopx_lark_explore_visual_sync_v0"
+LARK_EXPLORE_VISUALS_SYNC_VERSION = "loopx_lark_explore_visuals_sync_v0"
 
 DEFAULT_EXPLORE_BASE_NAME = "LoopX Exploration Results"
 SINK_VISIBILITY_OWNER_ONLY = "owner-only"
@@ -447,6 +455,7 @@ def configure_lark_explore_visual_sink(
     projection_mode: str = "canonical_filtered",
     include_ancestors: bool = True,
     mermaid_node_limit: int = 100,
+    view_role: str | None = None,
     execute: bool = False,
 ) -> dict[str, Any]:
     """Configure an optional owner-facing whiteboard over canonical Explore data."""
@@ -454,8 +463,20 @@ def configure_lark_explore_visual_sink(
     token = str(whiteboard_token or "").strip()
     if not token:
         raise ValueError("whiteboard_token is required")
-    if projection_mode not in {"canonical_filtered", "issue_fix_two_lane"}:
-        raise ValueError("projection_mode must be canonical_filtered or issue_fix_two_lane")
+    valid_modes = {
+        "canonical_filtered",
+        "issue_fix_two_lane",
+        "canonical_full",
+        "executive_auto",
+    }
+    if projection_mode not in valid_modes:
+        raise ValueError(f"projection_mode must be one of {sorted(valid_modes)}")
+    role = str(view_role or "").strip() or None
+    if role not in {None, "canonical", "executive"}:
+        raise ValueError("view_role must be canonical or executive")
+    expected_mode = {"canonical": "canonical_full", "executive": "executive_auto"}.get(role)
+    if expected_mode and projection_mode != expected_mode:
+        raise ValueError(f"view_role {role} requires projection_mode {expected_mode}")
     local = read_lark_explore_local_config(config_path)
     if not local.get("ok") or not local.get("exists"):
         raise ValueError("run `loopx explore feishu-setup` before configuring a visual sink")
@@ -469,9 +490,16 @@ def configure_lark_explore_visual_sink(
         "include_ancestors": bool(include_ancestors),
         "mermaid_node_limit": max(1, int(mermaid_node_limit)),
     }
+    if role:
+        visual_sink["view_role"] = role
     if execute:
         updated = {key: value for key, value in local.items() if key not in {"ok", "exists", "path", "updated_at"}}
-        updated["visual_sink"] = visual_sink
+        if role:
+            visual_sinks = dict(updated.get("visual_sinks") or {})
+            visual_sinks[role] = visual_sink
+            updated["visual_sinks"] = visual_sinks
+        else:
+            updated["visual_sink"] = visual_sink
         write_lark_explore_local_config(config_path, updated)
     return {
         "ok": True,
@@ -479,6 +507,7 @@ def configure_lark_explore_visual_sink(
         "execute": execute,
         "status": "configured" if execute else "would_configure",
         "config_path": str(config_path),
+        "view_role": role,
         "visual_sink": visual_sink,
     }
 
@@ -491,6 +520,7 @@ def sync_explore_visual_to_lark(
     config_path: Path,
     semantic_digest: str,
     display_projection: Mapping[str, Any] | None = None,
+    view_key: str | None = None,
     execute: bool = False,
     runner: CommandRunner = default_subprocess_runner,
 ) -> dict[str, Any]:
@@ -514,6 +544,24 @@ def sync_explore_visual_to_lark(
             "published": False,
             "error": "visual_sink.whiteboard_token is required",
         }
+    source_digest = explore_source_digest(projection)
+    source_revision = explore_source_revision(projection, digest=source_digest)
+    if isinstance(display_projection, Mapping) and (
+        display_projection.get("source_digest") or display_projection.get("source_revision")
+    ):
+        freshness = validate_explore_view_freshness(projection, display_projection)
+        if not freshness["fresh"]:
+            return {
+                "ok": False,
+                "schema_version": LARK_EXPLORE_VISUAL_SYNC_VERSION,
+                "status": "stale_projection",
+                "execute": execute,
+                "published": False,
+                "source_digest": source_digest,
+                "source_revision": source_revision,
+                "freshness": freshness,
+                "error": freshness["reason"],
+            }
     graph = (
         dict(display_projection)
         if isinstance(display_projection, Mapping)
@@ -526,7 +574,20 @@ def sync_explore_visual_to_lark(
             node_limit=max(1, int(visual_sink.get("mermaid_node_limit") or 100)),
         )
     )
-    source_name = f".loopx-explore-visual-{semantic_digest[:12] or 'preview'}.mmd"
+    sink_key = str(view_key or visual_sink.get("view_role") or "visual").strip() or "visual"
+    delivery_material = json.dumps(
+        {
+            "source_digest": semantic_digest,
+            "source_revision": source_revision,
+            "view_role": sink_key,
+            "mermaid": str(graph.get("mermaid") or ""),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    delivery_digest = hashlib.sha256(delivery_material).hexdigest()
+    source_name = f".loopx-explore-{sink_key}-{delivery_digest[:12]}.mmd"
     command = [
         config.cli_bin,
         "whiteboard",
@@ -541,7 +602,7 @@ def sync_explore_visual_to_lark(
         f"@{source_name}",
         "--overwrite",
         "--idempotent-token",
-        f"loopx-explore-{semantic_digest[:24] or 'visual-preview'}",
+        f"loopx-explore-{sink_key}-{delivery_digest[:20]}",
         "--format",
         "json",
     ]
@@ -567,6 +628,10 @@ def sync_explore_visual_to_lark(
         "execute": execute,
         "published": bool(execute and result.get("ok")),
         "semantic_digest": semantic_digest,
+        "delivery_digest": delivery_digest,
+        "source_digest": source_digest,
+        "source_revision": source_revision,
+        "view_role": str(graph.get("view_role") or sink_key),
         "docx_token": str(visual_sink.get("docx_token") or "") or None,
         "graph_counts": graph.get("graph_counts"),
         "filter": graph.get("filter"),
@@ -578,48 +643,76 @@ def sync_explore_visual_to_lark(
 def explore_visual_semantic_digest(projection: Mapping[str, Any]) -> str:
     """Return a timestamp-free digest for an explicit visual projection sync."""
 
-    semantic = {
-        "goal_id": projection.get("goal_id"),
-        "nodes": [
-            {
-                key: node.get(key)
-                for key in (
-                    "node_id",
-                    "title",
-                    "node_kind",
-                    "status",
-                    "summary",
-                    "blocked_reason",
-                    "parent_id",
-                    "tags",
-                    "supersedes",
-                )
+    return explore_source_digest(projection)
+
+
+def sync_explore_visuals_to_lark(
+    config: LarkExploreConfig,
+    *,
+    projection: Mapping[str, Any],
+    visual_sinks: Mapping[str, Any],
+    config_path: Path,
+    execute: bool = False,
+    runner: CommandRunner = default_subprocess_runner,
+) -> dict[str, Any]:
+    """Generate and publish configured same-source Explore views."""
+
+    bundle = build_explore_presentation_bundle(projection)
+    requested_roles = [
+        role
+        for role in ("canonical", "executive")
+        if isinstance(visual_sinks.get(role), Mapping)
+    ]
+    active_roles = ["canonical"]
+    if bundle["presentation_mode"] == PRESENTATION_MODE_DUAL_VIEW:
+        active_roles.append("executive")
+    missing_recommended_roles = [
+        role for role in active_roles if role not in requested_roles
+    ]
+    results: dict[str, Any] = {}
+    for role in requested_roles:
+        if role not in active_roles:
+            results[role] = {
+                "ok": True,
+                "status": "not_recommended",
+                "execute": execute,
+                "published": False,
+                "source_digest": bundle["source_digest"],
+                "source_revision": bundle["source_revision"],
+                "view_role": role,
             }
-            for node in projection.get("nodes") or []
-            if isinstance(node, Mapping)
-        ],
-        "edges": [
-            {
-                key: edge.get(key)
-                for key in (
-                    "edge_id",
-                    "from_node",
-                    "to_node",
-                    "edge_type",
-                    "summary",
-                )
-            }
-            for edge in projection.get("edges") or []
-            if isinstance(edge, Mapping)
-        ],
+            continue
+        results[role] = sync_explore_visual_to_lark(
+            config,
+            projection=projection,
+            visual_sink=visual_sinks[role],
+            config_path=config_path,
+            semantic_digest=bundle["source_digest"],
+            display_projection=bundle[role],
+            view_key=role,
+            execute=execute,
+            runner=runner,
+        )
+    ok = all(bool(item.get("ok")) for item in results.values())
+    if not results:
+        status = "not_configured"
+    elif not ok:
+        status = "publish_failed" if execute else "invalid_projection"
+    else:
+        status = "published" if execute else "would_publish"
+    return {
+        "ok": ok,
+        "schema_version": LARK_EXPLORE_VISUALS_SYNC_VERSION,
+        "status": status,
+        "execute": execute,
+        "presentation_mode": bundle["presentation_mode"],
+        "reason_codes": bundle["reason_codes"],
+        "source_digest": bundle["source_digest"],
+        "source_revision": bundle["source_revision"],
+        "recommended_roles": active_roles,
+        "missing_recommended_roles": missing_recommended_roles,
+        "views": results,
     }
-    encoded = json.dumps(
-        semantic,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def setup_lark_explore_board(
