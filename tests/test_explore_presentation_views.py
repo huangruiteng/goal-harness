@@ -303,3 +303,32 @@ def test_visual_delivery_digest_changes_when_only_rendered_mermaid_changes(tmp_p
     assert first["source_digest"] == changed["source_digest"]
     assert first["delivery_digest"] != changed["delivery_digest"]
     assert first["command"]["command"] != changed["command"]["command"]
+
+
+def test_visual_delivery_digest_changes_when_target_whiteboard_changes(tmp_path) -> None:
+    projection = _complex_projection()
+    config = LarkExploreConfig(base_token="PUBLIC_FIXTURE_BASE")
+    bundle = build_explore_presentation_bundle(projection)
+
+    first = sync_explore_visual_to_lark(
+        config,
+        projection=projection,
+        visual_sink={"whiteboard_token": "wb_first", "view_role": "executive"},
+        config_path=tmp_path / "lark-explore.json",
+        semantic_digest=bundle["source_digest"],
+        display_projection=bundle["executive"],
+        view_key="executive",
+    )
+    changed = sync_explore_visual_to_lark(
+        config,
+        projection=projection,
+        visual_sink={"whiteboard_token": "wb_second", "view_role": "executive"},
+        config_path=tmp_path / "lark-explore.json",
+        semantic_digest=bundle["source_digest"],
+        display_projection=bundle["executive"],
+        view_key="executive",
+    )
+
+    assert first["source_digest"] == changed["source_digest"]
+    assert first["delivery_digest"] != changed["delivery_digest"]
+    assert first["command"]["command"] != changed["command"]["command"]

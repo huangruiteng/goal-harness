@@ -580,6 +580,7 @@ def sync_explore_visual_to_lark(
             "source_digest": semantic_digest,
             "source_revision": source_revision,
             "view_role": sink_key,
+            "whiteboard_token": whiteboard_token,
             "mermaid": str(graph.get("mermaid") or ""),
         },
         ensure_ascii=True,
@@ -712,6 +713,21 @@ def sync_explore_visuals_to_lark(
         "recommended_roles": active_roles,
         "missing_recommended_roles": missing_recommended_roles,
         "views": results,
+    }
+
+
+def _visual_delivery_digests(sync_payload: Mapping[str, Any] | None) -> dict[str, str]:
+    """Return the configured role digests that make a visual write idempotent."""
+
+    if not isinstance(sync_payload, Mapping):
+        return {}
+    views = sync_payload.get("views")
+    if not isinstance(views, Mapping):
+        return {}
+    return {
+        str(role): str(view.get("delivery_digest"))
+        for role, view in views.items()
+        if isinstance(view, Mapping) and str(view.get("delivery_digest") or "").strip()
     }
 
 
@@ -1288,10 +1304,28 @@ def sync_issue_fix_explore_on_material_change(
     digest = str(projection_result.get("semantic_digest") or "")
     prior_digest = str(prior.get("canonical_rows_semantic_digest") or prior.get("semantic_digest") or "")
     prior_row_readback_digest = str(prior.get("canonical_rows_readback_semantic_digest") or "")
-    visual_sink = local.get("visual_sink") if isinstance(local.get("visual_sink"), dict) else None
+    visual_sinks = (
+        local.get("visual_sinks")
+        if isinstance(local.get("visual_sinks"), dict) and local.get("visual_sinks")
+        else None
+    )
+    visual_sink = (
+        local.get("visual_sink")
+        if visual_sinks is None and isinstance(local.get("visual_sink"), dict)
+        else None
+    )
     prior_visual_digest = str(prior.get("visual_semantic_digest") or "")
+    prior_visual_delivery_digests = (
+        prior.get("visual_delivery_digests")
+        if isinstance(prior.get("visual_delivery_digests"), dict)
+        else {}
+    )
     needs_row_sync = bool(digest and (digest != prior_digest or digest != prior_row_readback_digest))
-    needs_visual_sync = bool(visual_sink and digest and digest != prior_visual_digest)
+    needs_visual_sync = bool(
+        (visual_sinks or visual_sink) and digest and digest != prior_visual_digest
+    )
+    visual_preview: dict[str, Any] | None = None
+    expected_visual_delivery_digests: dict[str, str] = {}
     needs_sync = needs_row_sync or needs_visual_sync
     if not projection_result.get("applicable"):
         return {
@@ -1326,6 +1360,27 @@ def sync_issue_fix_explore_on_material_change(
             "lark_sync": None,
             "config_path": str(config_path),
         }
+    if visual_sinks:
+        visual_preview = sync_explore_visuals_to_lark(
+            config,
+            projection=projection_result["projection"],
+            visual_sinks=visual_sinks,
+            config_path=config_path,
+            execute=False,
+            runner=runner,
+        )
+        expected_visual_delivery_digests = _visual_delivery_digests(visual_preview)
+        needs_visual_sync = bool(
+            digest
+            and (
+                not visual_preview.get("ok")
+                or any(
+                    prior_visual_delivery_digests.get(role) != delivery_digest
+                    for role, delivery_digest in expected_visual_delivery_digests.items()
+                )
+            )
+        )
+    needs_sync = needs_row_sync or needs_visual_sync
     if not needs_sync:
         return {
             "ok": True,
@@ -1340,6 +1395,7 @@ def sync_issue_fix_explore_on_material_change(
             "prior_semantic_digest": prior_digest or None,
             "projection": projection_result,
             "lark_sync": None,
+            "visual_preview": visual_preview,
             "config_path": str(config_path),
         }
     if not execute:
@@ -1356,6 +1412,7 @@ def sync_issue_fix_explore_on_material_change(
             "prior_semantic_digest": prior_digest or None,
             "projection": projection_result,
             "lark_sync": None,
+            "visual_preview": visual_preview,
             "config_path": str(config_path),
         }
     if not external_sink_delivery_authorized:
@@ -1372,9 +1429,11 @@ def sync_issue_fix_explore_on_material_change(
             "semantic_digest": digest,
             "prior_semantic_digest": prior_digest or None,
             "prior_visual_semantic_digest": prior_visual_digest or None,
+            "prior_visual_delivery_digests": dict(prior_visual_delivery_digests),
             "projection": projection_result,
             "lark_sync": None,
             "canonical_rows_sync": None,
+            "visual_preview": visual_preview,
             "visual_sync": None,
             "retryable": True,
             "config_path": str(config_path),
@@ -1390,8 +1449,19 @@ def sync_issue_fix_explore_on_material_change(
         if needs_row_sync
         else None
     )
-    visual_sync = (
-        sync_explore_visual_to_lark(
+    if not needs_visual_sync:
+        visual_sync = None
+    elif visual_sinks:
+        visual_sync = sync_explore_visuals_to_lark(
+            config,
+            projection=projection_result["projection"],
+            visual_sinks=visual_sinks,
+            config_path=config_path,
+            execute=True,
+            runner=runner,
+        )
+    else:
+        visual_sync = sync_explore_visual_to_lark(
             config,
             projection=projection_result["projection"],
             visual_sink=visual_sink,
@@ -1403,9 +1473,6 @@ def sync_issue_fix_explore_on_material_change(
             execute=True,
             runner=runner,
         )
-        if needs_visual_sync
-        else None
-    )
     row_ok = lark_sync is None or bool(lark_sync.get("ok"))
     row_readback_verified = bool(
         lark_sync is None
@@ -1435,6 +1502,10 @@ def sync_issue_fix_explore_on_material_change(
                     "visual_published_at": now_lark_datetime(),
                 }
             )
+            if visual_sinks:
+                updated_goal_state["visual_delivery_digests"] = _visual_delivery_digests(
+                    visual_sync
+                )
         updated_goal_state["synced_at"] = now_lark_datetime()
         updated_sync_state[goal_id] = updated_goal_state
         # The row sync persists record ids incrementally. Re-read that write
@@ -1457,9 +1528,11 @@ def sync_issue_fix_explore_on_material_change(
         "semantic_digest": digest,
         "prior_semantic_digest": prior_digest or None,
         "prior_visual_semantic_digest": prior_visual_digest or None,
+        "prior_visual_delivery_digests": dict(prior_visual_delivery_digests),
         "projection": projection_result,
         "lark_sync": lark_sync,
         "canonical_rows_sync": lark_sync,
+        "visual_preview": visual_preview,
         "visual_sync": visual_sync,
         "config_path": str(config_path),
     }
