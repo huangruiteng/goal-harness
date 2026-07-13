@@ -167,6 +167,19 @@ def test_flat_large_graph_is_classified_as_a_readability_failure() -> None:
     assert bundle["canonical"]["filter"]["layout"]["column_count"] == 1
 
 
+def test_configured_atlas_columns_fit_wide_whiteboard_embeds() -> None:
+    bundle = build_explore_presentation_bundle(
+        _complex_projection(),
+        policy={"atlas_column_count": 4},
+    )
+
+    assert bundle["executive"]["mermaid"].startswith("flowchart LR")
+    layout = bundle["executive"]["filter"]["layout"]
+    assert layout["strategy"] == "multi_column_evidence_atlas"
+    assert layout["column_count"] == layout["group_count"] == 2
+    assert layout["orientation"] == "left_to_right"
+
+
 def test_executive_view_suppresses_dense_hub_scaffolding_edges() -> None:
     nodes = [_node("hub", status="open", tags=["decision"])]
     nodes.extend(
@@ -250,6 +263,7 @@ def test_visual_configuration_preserves_legacy_and_supports_roles(tmp_path) -> N
         whiteboard_token="wb_executive_fixture",
         projection_mode="executive_auto",
         view_role="executive",
+        atlas_column_count=4,
         execute=True,
     )
 
@@ -257,6 +271,28 @@ def test_visual_configuration_preserves_legacy_and_supports_roles(tmp_path) -> N
     assert stored["visual_sink"]["whiteboard_token"] == "wb_legacy_fixture"
     assert stored["visual_sinks"]["canonical"]["view_role"] == "canonical"
     assert stored["visual_sinks"]["executive"]["view_role"] == "executive"
+    assert stored["visual_sinks"]["executive"]["atlas_column_count"] == 4
+
+
+def test_dual_visual_sync_applies_role_specific_atlas_columns(tmp_path) -> None:
+    projection = _complex_projection()
+    config = LarkExploreConfig(base_token="PUBLIC_FIXTURE_BASE")
+    synced = sync_explore_visuals_to_lark(
+        config,
+        projection=projection,
+        visual_sinks={
+            "executive": {
+                "whiteboard_token": "wb_executive_fixture",
+                "view_role": "executive",
+                "atlas_column_count": 4,
+            }
+        },
+        config_path=tmp_path / "lark-explore.json",
+    )
+
+    view = synced["views"]["executive"]
+    assert view["filter"]["layout"]["column_count"] == 2
+    assert view["filter"]["layout"]["orientation"] == "left_to_right"
 
 
 def test_dual_visual_sync_uses_one_revision_and_rejects_stale_view(tmp_path) -> None:

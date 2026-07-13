@@ -455,6 +455,7 @@ def configure_lark_explore_visual_sink(
     projection_mode: str = "canonical_filtered",
     include_ancestors: bool = True,
     mermaid_node_limit: int = 100,
+    atlas_column_count: int = 1,
     view_role: str | None = None,
     execute: bool = False,
 ) -> dict[str, Any]:
@@ -489,6 +490,7 @@ def configure_lark_explore_visual_sink(
         "projection_mode": projection_mode,
         "include_ancestors": bool(include_ancestors),
         "mermaid_node_limit": max(1, int(mermaid_node_limit)),
+        "atlas_column_count": max(1, int(atlas_column_count)),
     }
     if role:
         visual_sink["view_role"] = role
@@ -683,13 +685,23 @@ def sync_explore_visuals_to_lark(
                 "view_role": role,
             }
             continue
+        role_sink = visual_sinks[role]
+        role_bundle = build_explore_presentation_bundle(
+            projection,
+            policy={
+                "atlas_column_count": max(
+                    1,
+                    int(role_sink.get("atlas_column_count") or 1),
+                )
+            },
+        )
         results[role] = sync_explore_visual_to_lark(
             config,
             projection=projection,
-            visual_sink=visual_sinks[role],
+            visual_sink=role_sink,
             config_path=config_path,
-            semantic_digest=bundle["source_digest"],
-            display_projection=bundle[role],
+            semantic_digest=role_bundle["source_digest"],
+            display_projection=role_bundle[role],
             view_key=role,
             execute=execute,
             runner=runner,
