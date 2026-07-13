@@ -167,6 +167,41 @@ def test_flat_large_graph_is_classified_as_a_readability_failure() -> None:
     assert bundle["canonical"]["filter"]["layout"]["column_count"] == 1
 
 
+def test_executive_view_suppresses_dense_hub_scaffolding_edges() -> None:
+    nodes = [_node("hub", status="open", tags=["decision"])]
+    nodes.extend(
+        _node(f"active-{index}", parent_id="hub", status="exploring")
+        for index in range(6)
+    )
+    edges = [_edge("hub", f"active-{index}") for index in range(6)]
+    edges.append(
+        {
+            "edge_id": "edge-active-sequence",
+            "from_node": "active-0",
+            "to_node": "active-1",
+            "edge_type": "leads_to",
+        }
+    )
+    projection = {
+        "ok": True,
+        "goal_id": "goal-public-fixture",
+        "source_event_count": len(nodes) + len(edges),
+        "nodes": nodes,
+        "edges": edges,
+        "findings": [],
+    }
+
+    bundle = build_explore_presentation_bundle(projection)
+
+    assert bundle["canonical"]["graph_counts"]["edge_count"] == 7
+    assert bundle["executive"]["graph_counts"]["edge_count"] == 1
+    assert bundle["executive"]["graph_counts"]["suppressed_edge_count"] == 6
+    edge_projection = bundle["executive"]["filter"]["edge_projection"]
+    assert edge_projection["suppression_counts"]["dense_hub_scaffolding"] == 6
+    assert "hub -->|supports|" not in bundle["executive"]["mermaid"]
+    assert "active_0 -->|leads_to| active_1" in bundle["executive"]["mermaid"]
+
+
 def test_findings_change_digest_and_stale_view_is_rejected() -> None:
     projection = _small_projection()
     bundle = build_explore_presentation_bundle(projection)

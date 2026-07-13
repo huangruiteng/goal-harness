@@ -69,6 +69,7 @@ DEFAULT_EXPLORE_PRESENTATION_POLICY: dict[str, float | int] = {
     "readability_root_ratio_floor": 0.30,
     "atlas_group_node_limit": 10,
     "executive_counterevidence_limit": 8,
+    "executive_hub_edge_degree_floor": 4,
 }
 
 _MERMAID_STATUS_CLASS = {
@@ -489,6 +490,43 @@ def _view_node(
     return view
 
 
+def _executive_edge_projection(
+    edges: Sequence[Mapping[str, Any]],
+    executive_ids: set[str],
+    *,
+    hub_degree_floor: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Hide lineage and dense hub scaffolding that the executive layout already conveys."""
+
+    candidates = [
+        edge
+        for edge in edges
+        if str(edge.get("from_node") or "") in executive_ids
+        and str(edge.get("to_node") or "") in executive_ids
+    ]
+    outgoing_counts: dict[str, int] = defaultdict(int)
+    for edge in candidates:
+        outgoing_counts[str(edge.get("from_node") or "")] += 1
+
+    visible = []
+    suppressed = []
+    degree_floor = max(2, int(hub_degree_floor))
+    for edge in candidates:
+        edge_type = str(edge.get("edge_type") or "")
+        source = str(edge.get("from_node") or "")
+        suppression_reason = None
+        if edge_type == "subtopic_of":
+            suppression_reason = "lineage_encoded_on_node"
+        elif edge_type == "supports" and outgoing_counts[source] >= degree_floor:
+            suppression_reason = "dense_hub_scaffolding"
+        projected = dict(edge, source_edge_id=str(edge.get("edge_id") or ""))
+        if suppression_reason:
+            suppressed.append(dict(projected, suppression_reason=suppression_reason))
+        else:
+            visible.append(projected)
+    return visible, suppressed
+
+
 def build_explore_presentation_bundle(
     projection: Mapping[str, Any],
     *,
@@ -570,12 +608,11 @@ def build_explore_presentation_bundle(
         for node in nodes
         if str(node.get("node_id") or "") in executive_ids
     ]
-    executive_edges = [
-        dict(edge, source_edge_id=str(edge.get("edge_id") or ""))
-        for edge in edges
-        if str(edge.get("from_node") or "") in executive_ids
-        and str(edge.get("to_node") or "") in executive_ids
-    ]
+    executive_edges, suppressed_executive_edges = _executive_edge_projection(
+        edges,
+        executive_ids,
+        hub_degree_floor=int(thresholds["executive_hub_edge_degree_floor"]),
+    )
     executive_layout = build_vertical_explore_mermaid(
         executive_nodes,
         executive_edges,
@@ -601,6 +638,8 @@ def build_explore_presentation_bundle(
         "graph_counts": {
             "node_count": len(executive_nodes),
             "edge_count": len(executive_edges),
+            "canonical_edge_count": len(canonical_edges),
+            "suppressed_edge_count": len(suppressed_executive_edges),
             "finding_count": len(executive_findings),
             "canonical_node_count": len(canonical_nodes),
         },
@@ -608,6 +647,24 @@ def build_explore_presentation_bundle(
             "projection_mode": "executive_auto",
             "selection": "active_or_tagged_plus_material_neighbors_and_lineage",
             "truncated": False,
+            "edge_projection": {
+                "selection": "material_edges_without_lineage_or_dense_hub_scaffolding",
+                "suppressed_source_edge_ids": [
+                    str(edge.get("source_edge_id") or "")
+                    for edge in suppressed_executive_edges
+                ],
+                "suppression_counts": {
+                    reason: sum(
+                        1
+                        for edge in suppressed_executive_edges
+                        if edge.get("suppression_reason") == reason
+                    )
+                    for reason in (
+                        "lineage_encoded_on_node",
+                        "dense_hub_scaffolding",
+                    )
+                },
+            },
             "layout": {
                 key: value
                 for key, value in executive_layout.items()
