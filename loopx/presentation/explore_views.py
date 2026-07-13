@@ -68,6 +68,7 @@ DEFAULT_EXPLORE_PRESENTATION_POLICY: dict[str, float | int] = {
     "readability_root_count_floor": 16,
     "readability_root_ratio_floor": 0.30,
     "atlas_group_node_limit": 10,
+    "atlas_column_count": 1,
     "executive_counterevidence_limit": 8,
     "executive_hub_edge_degree_floor": 4,
 }
@@ -199,19 +200,35 @@ def build_vertical_explore_mermaid(
     *,
     view_role: str,
     group_node_limit: int = 10,
+    column_count: int = 1,
 ) -> dict[str, Any]:
-    """Render a complete top-to-bottom evidence atlas for a large graph."""
+    """Render a complete evidence atlas for a large graph.
+
+    The single-column default preserves the timeline view. Wider embedded
+    whiteboards can opt into multiple columns without changing the canonical
+    source projection.
+    """
 
     node_list = [node for node in nodes if str(node.get("node_id") or "")]
     group_limit = max(4, int(group_node_limit))
     groups = _canonical_group_specs(node_list, group_node_limit=group_limit)
+    columns = min(max(1, int(column_count)), max(1, len(groups)))
+    multi_column = columns > 1
     role = "executive" if view_role == "executive" else "canonical"
-    atlas_title = f"{role.title()} evidence timeline"
+    atlas_title = (
+        f"{role.title()} evidence atlas"
+        if multi_column
+        else f"{role.title()} evidence timeline"
+    )
 
     node_by_id = {str(node.get("node_id") or ""): node for node in node_list}
     shown_ids = set(node_by_id)
-    lines = ["flowchart TB", f'    subgraph {role}_atlas["{atlas_title}"]']
-    lines.append("        direction TB")
+    flow_direction = "LR" if multi_column else "TB"
+    lines = [
+        f"flowchart {flow_direction}",
+        f'    subgraph {role}_atlas["{atlas_title}"]',
+    ]
+    lines.append(f"        direction {flow_direction}")
     group_chains = []
     for group_index, group in enumerate(groups, start=1):
         group_id = f"{role}_group_{group_index}"
@@ -264,11 +281,15 @@ def build_vertical_explore_mermaid(
     )
     return {
         "mermaid": "\n".join(lines),
-        "strategy": "vertical_evidence_timeline",
+        "strategy": (
+            "multi_column_evidence_atlas"
+            if multi_column
+            else "vertical_evidence_timeline"
+        ),
         "view_role": role,
         "group_count": len(groups),
-        "column_count": 1,
-        "orientation": "top_to_bottom",
+        "column_count": columns,
+        "orientation": "left_to_right" if multi_column else "top_to_bottom",
         "max_group_node_count": group_limit,
     }
 
@@ -570,6 +591,7 @@ def build_explore_presentation_bundle(
         canonical_edges,
         view_role="canonical",
         group_node_limit=int(thresholds["atlas_group_node_limit"]),
+        column_count=int(thresholds["atlas_column_count"]),
     )
     canonical = {
         "schema_version": EXPLORE_CANONICAL_VIEW_VERSION,
@@ -618,6 +640,7 @@ def build_explore_presentation_bundle(
         executive_edges,
         view_role="executive",
         group_node_limit=int(thresholds["atlas_group_node_limit"]),
+        column_count=int(thresholds["atlas_column_count"]),
     )
     executive_findings = [
         finding

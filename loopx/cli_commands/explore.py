@@ -225,6 +225,12 @@ def register_explore_commands(
         default=True,
     )
     visual.add_argument("--mermaid-node-limit", type=int, default=100)
+    visual.add_argument(
+        "--atlas-columns",
+        type=int,
+        default=1,
+        help="Arrange evidence epochs into this many whiteboard columns.",
+    )
     visual.add_argument("--execute", action="store_true")
 
     sync = sub.add_parser(
@@ -765,6 +771,7 @@ def handle_explore_command(
                 }.get(args.view_role, "canonical_filtered"),
                 include_ancestors=bool(args.include_ancestors),
                 mermaid_node_limit=args.mermaid_node_limit,
+                atlas_column_count=args.atlas_columns,
                 view_role=args.view_role,
                 execute=bool(args.execute),
             )
