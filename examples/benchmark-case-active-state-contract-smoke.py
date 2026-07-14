@@ -29,7 +29,6 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_PROOF_FIELDS,
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LIFECYCLE_SCHEMA_VERSION,
-    BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID,
     BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
     BENCHMARK_CASE_LOOPX_TODO_ID,
     benchmark_case_active_state_init_contract,
@@ -188,11 +187,11 @@ def test_goal_start_product_mode_defers_ranked_plan_to_agent() -> None:
     assert payload["planned_todo_count"] == 0
     assert payload["planned_p0_count"] == 0
     assert payload["planned_todo_ids"] == []
-    assert payload["planned_todo_ids_expected"] == list(
-        BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS
-    )
-    assert payload["case_todo_id"] == BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
-    assert payload["selected_p0_todo_id"] == BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
+    assert payload["planned_todo_ids_expected"] == []
+    assert payload["planned_todo_texts_expected_public_safe"] == []
+    assert payload["case_todo_id"] == ""
+    assert payload["case_todo_text_public_safe"] == ""
+    assert payload["selected_p0_todo_id"] == ""
     assert payload["selected_todo_claimed"] is False
     assert payload["selected_todo_updated_before_solver"] is False
     assert payload["selected_todo_completed_before_spend"] is False
@@ -203,6 +202,8 @@ def test_goal_start_product_mode_defers_ranked_plan_to_agent() -> None:
     assert " todo add " not in command
     assert " quota should-run " not in command
     assert " refresh-state " not in command
+    for fixed_todo_id in BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS:
+        assert fixed_todo_id not in command
     assert "loopx_case_init_phase:await_agent_goal_start" in command
     assert "/Users/" not in command
 

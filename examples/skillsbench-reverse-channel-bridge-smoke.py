@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -111,6 +112,63 @@ def test_reverse_channel_clients_fail_closed_on_empty_response() -> None:
             assert "reverse channel response missing" in proc.stderr
             server.join(timeout=5)
             assert not server.is_alive()
+
+
+def test_prompt_bridge_rejects_batched_loopx_commands() -> None:
+    sys.path.insert(0, str(REPO_ROOT))
+    from scripts.skillsbench_reverse_channel_bridge import (
+        _write_instrumented_prompt_bridge,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="loopx-prompt-bridge-batch-") as tmp:
+        root = Path(tmp)
+        marker = root / "bridge-invoked"
+        fake_bridge = root / "fake-bridge.py"
+        fake_bridge.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('invoked', encoding='utf-8')\n"
+            "print('{}')\n",
+            encoding="utf-8",
+        )
+        wrapper, summary_path = _write_instrumented_prompt_bridge(
+            tmp_path=root,
+            bridge_command=(
+                f"{shlex.quote(sys.executable)} {shlex.quote(str(fake_bridge))}"
+            ),
+            private_bridge_command=None,
+        )
+        request = {
+            "operation": "exec",
+            "cwd": "/app",
+            "command": (
+                "/app/.local/bin/loopx todo add --goal-id case "
+                "--todo-id todo_agent_first --role agent --text first\n"
+                "/app/.local/bin/loopx todo claim --goal-id case "
+                "--todo-id todo_agent_first --claimed-by agent"
+            ),
+        }
+        result = subprocess.run(
+            [str(wrapper)],
+            input=json.dumps(request),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        records = [
+            json.loads(line)
+            for line in summary_path.read_text(encoding="utf-8").splitlines()
+        ]
+        marker_exists = marker.exists()
+
+    assert result.returncode == 2, result
+    assert "exactly one LoopX CLI command" in result.stderr, result.stderr
+    assert marker_exists is False
+    completed = [record for record in records if record.get("record_phase") == "complete"]
+    assert completed[-1]["loopx_invocation_count"] == 2, completed
+    assert completed[-1]["failure_category"] == (
+        "multiple_loopx_commands_per_bridge_request"
+    ), completed
 
 
 def test_codex_client_writes_last_message_and_rewrites_bridge() -> None:
@@ -1073,6 +1131,7 @@ def test_socket_probe_reports_missing_or_orphaned() -> None:
 
 
 def main() -> int:
+    test_prompt_bridge_rejects_batched_loopx_commands()
     test_codex_client_writes_last_message_and_rewrites_bridge()
     test_codex_bridge_template_preserves_dynamic_private_command()
     test_codex_client_plain_prompt_does_not_require_bridge_action()
