@@ -24,6 +24,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from loopx.benchmark_adapters.skillsbench_bridge_guard import (  # noqa: E402
+    LOOPX_COMMAND_INSTRUMENTATION_SOURCE,
+)
+
 
 CLIENT_SCHEMA_VERSION = "skillsbench_reverse_channel_client_v0"
 SERVER_RESPONSE_SCHEMA_VERSION = "skillsbench_reverse_channel_response_v0"
@@ -364,35 +372,7 @@ def bridge_command() -> str:
     command = command.replace("{{loopx_allowed_env}}", allowed_env_assignments())
     return command
 
-def loopx_subcommands(command: str) -> list[str]:
-    try:
-        tokens = shlex.split(command or "")
-    except ValueError:
-        tokens = (command or "").split()
-    idx = -1
-    for i, token in enumerate(tokens):
-        if token == "loopx" or token.endswith("/loopx"):
-            idx = i
-            break
-    if idx < 0:
-        return []
-    out: list[str] = []
-    skip = False
-    for token in tokens[idx + 1:]:
-        if skip:
-            skip = False
-            continue
-        if token.startswith("--"):
-            if "=" not in token and token in {{"--goal-id", "--todo-id", "--claimed-by", "--status", "--note", "--evidence", "--classification", "--registry", "--runtime-root", "--slots", "--source", "--format", "--project", "--goal-text", "--agent-id", "--host-surface", "--role", "--task-class", "--action-kind", "--text"}}:
-                skip = True
-            continue
-        if token.startswith("-"):
-            continue
-        if re.match(r"^[A-Za-z][A-Za-z0-9_-]{{0,40}}$", token):
-            out.append(token)
-            if len(out) >= 2:
-                break
-    return out
+{LOOPX_COMMAND_INSTRUMENTATION_SOURCE}
 
 raw = sys.stdin.read()
 record: dict[str, object] = {{
@@ -412,11 +392,14 @@ except Exception:
 operation = payload.get("operation") if isinstance(payload, dict) else ""
 record["operation"] = operation if isinstance(operation, str) else "unknown"
 subcommands: list[str] = []
+loopx_invocations = 0
 if isinstance(payload, dict) and payload.get("operation") == "exec":
     command_text = payload.get("command")
     if isinstance(command_text, str):
+        loopx_invocations = loopx_invocation_count(command_text)
         subcommands = loopx_subcommands(command_text)
-record["loopx_cli_call"] = bool(subcommands)
+record["loopx_invocation_count"] = loopx_invocations
+record["loopx_cli_call"] = loopx_invocations > 0
 record["loopx_subcommands"] = subcommands[:2]
 record["loopx_state_read"] = subcommands[:2] in (["start-goal"], ["quota", "should-run"], ["status"], ["diagnose"])
 record["loopx_state_write"] = bool(subcommands and (
@@ -425,7 +408,7 @@ record["loopx_state_write"] = bool(subcommands and (
 ))
 record["task_facing_operation"] = bool(
     operation in {{"read_file", "write_file", "cleanup"}}
-    or (operation == "exec" and not subcommands)
+    or (operation == "exec" and loopx_invocations == 0)
 )
 record["operation_observed"] = True
 
@@ -439,6 +422,7 @@ def append_record(item: dict[str, object]) -> None:
 
 record["record_phase"] = "start"
 append_record(record)
+enforce_single_loopx_invocation(loopx_invocations, record, append_record)
 proc = subprocess.run(
     bridge_command(),
     input=raw,

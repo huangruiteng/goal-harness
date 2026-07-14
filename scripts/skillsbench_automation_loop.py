@@ -82,9 +82,6 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LOOPX_AGENT_ID,
     BENCHMARK_CASE_LOOPX_CLI_PATH,
-    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
-    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_ACTION_KINDS,
-    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
     BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
     BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
     BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
@@ -12039,7 +12036,6 @@ def _build_product_mode_user(
     case_agent_id = str(payload.get("case_agent_id") or BENCHMARK_CASE_LOOPX_AGENT_ID)
     case_todo_id = str(payload.get("case_todo_id") or BENCHMARK_CASE_LOOPX_TODO_ID)
     planned_todo_count = payload.get("planned_todo_count")
-    selected_p0_todo_id = str(payload.get("selected_p0_todo_id") or case_todo_id)
     case_cli_prefix = benchmark_case_loopx_command_prefix(
         case_cli_path=str(payload.get("case_cli_path") or "/app/.local/bin/loopx"),
         case_registry_path=str(payload.get("case_registry_path") or "/app/.loopx/registry.json"),
@@ -12096,21 +12092,20 @@ def _build_product_mode_user(
             "exactly once only after the validated closeout sequence. "
         )
 
-    def goal_start_todo_write_commands() -> str:
-        todo_lines = []
-        for todo_id, todo_text, action_kind in zip(
-            BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
-            BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
-            BENCHMARK_CASE_LOOPX_GOAL_START_TODO_ACTION_KINDS,
-        ):
-            todo_lines.append(
-                f"{case_cli_prefix} todo add --goal-id {case_goal_id} "
-                f"--role agent --todo-id {todo_id} "
-                f"--text {shlex.quote(todo_text)} "
-                "--task-class advancement_task "
-                f"--action-kind {action_kind}"
-            )
-        todo_lines.extend(
+    def bridge_request_command_sequence(commands: list[str]) -> str:
+        return "".join(
+            f"- Send one separate `operation=exec` bridge request: `{command}`\n"
+            for command in commands
+        )
+
+    def goal_start_plan_write_contract(planned_count: int) -> str:
+        todo_template = (
+            f"{case_cli_prefix} todo add --goal-id {case_goal_id} --role agent "
+            "--todo-id <TODO_ID> --text <SHELL_QUOTED_TODO_TEXT> "
+            "--task-class advancement_task --action-kind <ACTION_KIND>"
+        )
+        commands = [todo_template for _ in range(planned_count)]
+        commands.extend(
             [
                 (
                     f"{case_cli_prefix} refresh-state --goal-id {case_goal_id} "
@@ -12124,11 +12119,20 @@ def _build_product_mode_user(
                 ),
                 (
                     f"{case_cli_prefix} todo claim --goal-id {case_goal_id} "
-                    f"--todo-id {case_todo_id} --claimed-by {case_agent_id}"
+                    f"--todo-id <SELECTED_TODO_ID> --claimed-by {case_agent_id}"
                 ),
             ]
         )
-        return "```bash\n" + "\n".join(todo_lines) + "\n```\n"
+        return (
+            f"Author exactly {planned_count} ordered public-safe todos from the "
+            "guided transaction. Choose the todo ids, texts, and action kinds "
+            "yourself; ids must be unique. Replace every placeholder below, "
+            "select the first ranked todo or an explicit P0 you authored, and "
+            "preserve write order as plan order. Exactly one LoopX CLI command "
+            "is allowed in each `operation=exec` bridge request: never batch "
+            "commands with a newline, semicolon, `&&`, `||`, or pipe.\n"
+            + bridge_request_command_sequence(commands)
+        )
 
     def treatment_state_contract() -> str:
         goal_start_clause = ""
@@ -12145,9 +12149,9 @@ def _build_product_mode_user(
                 "This route executes `/loopx <task objective>`: "
                 f"the agent must author a compact ranked {planned_count}-todo "
                 "plan after the guided preview and before todo writes, "
-                f"with selected runnable P0 todo `{selected_p0_todo_id}` entering "
-                "the lifecycle. Non-selected todos remain open or deferred until "
-                "the selected P0 is validated. "
+                "with the first ranked todo or an explicit P0 authored by the "
+                "agent entering the lifecycle. Non-selected todos remain open or "
+                "deferred until the selected P0 is validated. "
             )
             return (
                 "LoopX slash-command treatment contract: official case-local "
@@ -12161,11 +12165,9 @@ def _build_product_mode_user(
                 f"`--goal-id {case_goal_id}`, `--agent-id {case_agent_id}`, and "
                 "`--host-surface shell`. Do not summarize, truncate, or replace "
                 "the task text, and do not expose that private command or its "
-                "output in public artifacts. Read the guided transaction, plan "
-                "ordered P0/P1/P2 work, then execute these public-safe todo, "
-                "refresh, quota, and claim commands through the same bridge in "
-                "the shown order:\n\n"
-                f"{goal_start_todo_write_commands()}"
+                "output in public artifacts. Read the guided transaction, then "
+                "author and write the plan through the same bridge:\n\n"
+                f"{goal_start_plan_write_contract(planned_count)}"
                 "The benchmark controller is the already-active host loop, so "
                 "do not create or modify an external automation. Only after the "
                 "guided start, ordered todo writeback, refresh, quota guard, and "
@@ -12259,13 +12261,20 @@ def _build_product_mode_user(
 
     def lifecycle_checkpoint_commands(round_number: int) -> str:
         if goal_start_product_mode:
+            planned_count = (
+                planned_todo_count
+                if isinstance(planned_todo_count, int)
+                and not isinstance(planned_todo_count, bool)
+                and planned_todo_count > 0
+                else 3
+            )
             return (
                 "First invoke `start-goal --guided --project /app` through the "
                 "private bridge with the exact TASK INSTRUCTION from the prior "
                 "turn as the single shell-safe `--goal-text` value. After "
-                "reading that private guided transaction, write the ordered "
-                "public-safe plan with these commands:\n\n"
-                f"{goal_start_todo_write_commands()}"
+                "reading that private guided transaction, author and write the "
+                "ordered public-safe plan.\n\n"
+                f"{goal_start_plan_write_contract(planned_count)}"
             )
         safe_round = max(1, round_number)
         checkpoint_note = shlex.quote(
@@ -12300,20 +12309,33 @@ def _build_product_mode_user(
             "public-safe closeout: task-facing work validated and case todo complete"
         )
         classification = shlex.quote("benchmark_case_agent_closeout")
-        return (
-            "```bash\n"
+        selected_todo_ref = (
+            "<SELECTED_TODO_ID>" if goal_start_product_mode else case_todo_id
+        )
+        commands = [
             f"{case_cli_prefix} todo complete --goal-id {case_goal_id} "
-            f"--todo-id {case_todo_id} --note {complete_note} "
-            f"--evidence {complete_evidence}\n"
+            f"--todo-id {selected_todo_ref} --note {complete_note} "
+            f"--evidence {complete_evidence}",
             f"{case_cli_prefix} refresh-state --goal-id {case_goal_id} "
             f"--classification {classification} "
             "--delivery-batch-scale implementation "
             "--delivery-outcome primary_goal_outcome "
             f"--agent-id {case_agent_id} --agent-lane benchmark_case "
-            "--no-global-sync\n"
+            "--no-global-sync",
             f"{case_cli_prefix} quota spend-slot --goal-id {case_goal_id} "
-            f"--agent-id {case_agent_id} --source adapter --execute\n"
-            "```\n"
+            f"--agent-id {case_agent_id} --source adapter --execute",
+        ]
+        placeholder_clause = (
+            "Replace `<SELECTED_TODO_ID>` with the selected id from your own "
+            "ranked plan. "
+            if goal_start_product_mode
+            else ""
+        )
+        return (
+            placeholder_clause
+            + "Send each closeout command in its own bridge request. "
+            "Do not batch the sequence into one shell command.\n"
+            + bridge_request_command_sequence(commands)
         )
 
     def lifecycle_checkpoint_prompt(round_number: int) -> str:

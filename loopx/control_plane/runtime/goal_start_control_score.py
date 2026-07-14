@@ -134,18 +134,7 @@ def _planned_todo_packet(
         if todo_id and todo_id not in command_ids:
             command_ids.append(todo_id)
     if agent_authored_required:
-        expected_text_by_id = dict(
-            zip(
-                BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
-                BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
-            )
-        )
-        texts = [
-            expected_text_by_id[todo_id]
-            for todo_id in command_ids
-            if todo_id in expected_text_by_id
-        ]
-        return command_ids[:MAX_GOAL_START_TODOS], texts[:MAX_GOAL_START_TODOS]
+        return command_ids[:MAX_GOAL_START_TODOS], []
 
     ids = command_ids or (
         goal_start_public_todo_id_list(counters.get("planned_todo_ids"))
@@ -367,6 +356,16 @@ def build_goal_start_product_mode_control_score(
         for index, record in enumerate(command_records)
         if record.get("subcommand") == "todo add"
     ]
+    todo_add_ids = [
+        record.get("todo_id", "")
+        for record in command_records
+        if record.get("subcommand") == "todo add"
+    ]
+    claimed_todo_ids = [
+        record.get("todo_id", "")
+        for record in command_records
+        if record.get("subcommand") == "todo claim"
+    ]
 
     selected_p0_todo_id_from_state = _safe_string(
         counters.get("selected_p0_todo_id")
@@ -380,12 +379,18 @@ def build_goal_start_product_mode_control_score(
     expected_todo_count = _max_int(
         runner_prerequisites.get("goal_start_planned_todo_count_expected")
     )
-    expected_todo_ids = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS)
     if agent_authored_required:
-        selected_p0_todo_id = (
-            planned_todo_ids[0]
-            if planned_todo_ids and planned_todo_ids[0] == expected_todo_ids[0]
-            else ""
+        selected_p0_todo_id = selected_p0_todo_id_from_state
+        if selected_p0_todo_id not in planned_todo_ids:
+            selected_p0_todo_id = next(
+                (todo_id for todo_id in claimed_todo_ids if todo_id in planned_todo_ids),
+                planned_todo_ids[0] if planned_todo_ids else "",
+            )
+        ordered_unique_todo_adds = bool(
+            todo_add_ids
+            and all(todo_add_ids)
+            and len(todo_add_ids) == len(set(todo_add_ids))
+            and todo_add_ids == planned_todo_ids
         )
         planned_todo_count = len(planned_todo_ids)
         planned_p0_count = 1 if selected_p0_todo_id else 0
@@ -395,13 +400,18 @@ def build_goal_start_product_mode_control_score(
             and todo_add_indexes
             and start_goal_indexes[0] < todo_add_indexes[0]
         )
-        same_priority_order_preserved = bool(
-            planned_todo_ids[: len(expected_todo_ids)] == expected_todo_ids
+        same_priority_order_preserved = ordered_unique_todo_adds
+        planned_todo_count_satisfied = bool(
+            planned_todo_count > 0
+            and (
+                expected_todo_count == 0
+                or planned_todo_count == expected_todo_count
+            )
         )
         goal_start_plan_observed = bool(
             goal_start_guided_observed
-            and planned_todo_count > 0
-            and (expected_todo_count == 0 or planned_todo_count >= expected_todo_count)
+            and planned_todo_count_satisfied
+            and ordered_unique_todo_adds
         )
     else:
         selected_p0_todo_id = selected_p0_todo_id_from_state
@@ -419,6 +429,13 @@ def build_goal_start_product_mode_control_score(
             counters.get("same_priority_order_preserved") is True
         )
         goal_start_plan_observed = counters.get("goal_start_plan_observed") is True
+        planned_todo_count_satisfied = bool(
+            planned_todo_count > 0
+            and (
+                expected_todo_count == 0
+                or planned_todo_count >= expected_todo_count
+            )
+        )
 
     closeout_spend_count = _max_int(
         counters.get("remote_command_file_bridge_agent_quota_spend_slot_count"),
@@ -601,10 +618,7 @@ def build_goal_start_product_mode_control_score(
         {"name": "plan_observed", "satisfied": goal_start_plan_observed},
         {
             "name": "planned_todo_count",
-            "satisfied": bool(
-                planned_todo_count > 0
-                and (expected_todo_count == 0 or planned_todo_count >= expected_todo_count)
-            ),
+            "satisfied": planned_todo_count_satisfied,
         },
         {"name": "planned_p0_count", "satisfied": planned_p0_count > 0},
         {"name": "planner_before_todo_write", "satisfied": planner_before_todo_write},

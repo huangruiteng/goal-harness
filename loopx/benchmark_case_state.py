@@ -836,7 +836,9 @@ def benchmark_case_loopx_install_command(
         "--no-global-sync"
     )
     expected_todo_comment = (
-        f"# expected stable case todo id: {shlex.quote(case_todo_id)}"
+        "# agent authors the ranked todo ids after guided start"
+        if goal_start_product_mode
+        else f"# expected stable case todo id: {shlex.quote(case_todo_id)}"
     )
     lifecycle_seed_cmd = (
         "echo 'loopx_case_init_phase:await_agent_goal_start' >&2\n"
@@ -953,11 +955,7 @@ def benchmark_case_loopx_install_payload(
         () if goal_start_product_mode else (BENCHMARK_CASE_LOOPX_TODO_TEXT,)
     )
     planned_todo_ids = () if goal_start_product_mode else (case_todo_id,)
-    selected_todo_id = (
-        BENCHMARK_CASE_LOOPX_GOAL_START_SELECTED_TODO_ID
-        if goal_start_product_mode
-        else case_todo_id
-    )
+    selected_todo_id = "" if goal_start_product_mode else case_todo_id
     return {
         "schema_version": BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
         "install_flow_schema_version": (
@@ -982,7 +980,9 @@ def benchmark_case_loopx_install_payload(
         "case_rollout_event_log_path": case_rollout_event_log_path,
         "case_agent_id": case_agent_id,
         "case_todo_id": selected_todo_id,
-        "case_todo_text_public_safe": BENCHMARK_CASE_LOOPX_TODO_TEXT,
+        "case_todo_text_public_safe": (
+            "" if goal_start_product_mode else BENCHMARK_CASE_LOOPX_TODO_TEXT
+        ),
         "case_todo_seeded": not goal_start_product_mode,
         "case_todo_preclaimed": False,
         "case_todo_seeded_by": (
@@ -1008,16 +1008,8 @@ def benchmark_case_loopx_install_payload(
             if goal_start_product_mode
             else len(planned_todo_ids)
         ),
-        "planned_todo_ids_expected": (
-            list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS)
-            if goal_start_product_mode
-            else list(planned_todo_ids)
-        ),
-        "planned_todo_texts_expected_public_safe": (
-            list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS)
-            if goal_start_product_mode
-            else list(planned_todo_texts)
-        ),
+        "planned_todo_ids_expected": list(planned_todo_ids),
+        "planned_todo_texts_expected_public_safe": list(planned_todo_texts),
         "planned_p0_count": 0,
         "same_priority_order_preserved": False,
         "selected_p0_todo_id": selected_todo_id,
