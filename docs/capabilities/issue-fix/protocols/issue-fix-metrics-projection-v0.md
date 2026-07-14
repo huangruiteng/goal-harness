@@ -222,11 +222,15 @@ adapters over this packet. They must not become a second source of truth.
 
 `loopx issue-fix repository-snapshot` is the bounded public GitHub collector.
 It reads repository stock/flow plus the current state of issue/PR references
-already present in the goal's issue-fix domain state. The command never retains
-raw provider payloads. With `--retain-material-snapshot`, it writes at most one
-row per day to the existing `issue_fix/repository-snapshots.jsonl` stream and
-skips the write when stock, flow, issue state, PR state, CI, and review are
-unchanged:
+already present in the goal's issue-fix domain state. When `--supplement-json`
+is supplied, the collector also refreshes every deduplicated issue ref in the
+supplement's recommendation, published-request, observed-close, and
+observed-reopen activity. This lets later conversion/reversal projection use a
+complete current-state snapshot without maintaining a second issue list. The
+command never retains raw provider payloads. With
+`--retain-material-snapshot`, it writes at most one row per day to the existing
+`issue_fix/repository-snapshots.jsonl` stream and skips the write when stock,
+flow, issue state, PR state, CI, and review are unchanged:
 
 ```bash
 loopx --format json issue-fix repository-snapshot \
@@ -234,6 +238,7 @@ loopx --format json issue-fix repository-snapshot \
   --project /path/to/connected/project \
   --repo owner/repo \
   --repository-baseline-json baseline.json \
+  --supplement-json metrics-supplement.json \
   --fetch-public-github \
   --retain-material-snapshot
 ```

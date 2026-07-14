@@ -8,10 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
+from .metrics_supplement import SUPPLEMENT_SCHEMA_VERSION
+
 
 SNAPSHOT_SCHEMA_VERSION = "issue_fix_repository_reporting_snapshot_v0"
 COLLECTION_SCHEMA_VERSION = "issue_fix_repository_snapshot_collection_v0"
 RECORD_SCHEMA_VERSION = "issue_fix_repository_snapshot_record_v0"
+ISSUE_CLOSE_ACTIVITY_SCHEMA_VERSION = "issue_fix_issue_close_activity_v0"
 
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _REF_NUMBER_PATTERN = re.compile(r"(?:issues|pull)_(\d+)")
@@ -80,6 +83,35 @@ def _reference_numbers(
             numbers.add(int(match.group(1)))
     if len(numbers) > 50:
         raise ValueError(f"at most 50 {ref_field} references may be refreshed")
+    return sorted(numbers)
+
+
+def _supplement_issue_reference_numbers(
+    metrics_supplement: dict[str, Any] | None,
+) -> list[int]:
+    if metrics_supplement is None:
+        return []
+    if metrics_supplement.get("schema_version") != SUPPLEMENT_SCHEMA_VERSION:
+        raise ValueError(f"metrics supplement must use {SUPPLEMENT_SCHEMA_VERSION}")
+    raw_activity = metrics_supplement.get("issue_close_activity")
+    if not isinstance(raw_activity, list):
+        raise ValueError("metrics supplement issue_close_activity must be a list")
+
+    numbers: set[int] = set()
+    for index, row in enumerate(raw_activity):
+        if not isinstance(row, dict):
+            raise ValueError(f"issue_close_activity[{index}] must be an object")
+        if row.get("schema_version") != ISSUE_CLOSE_ACTIVITY_SCHEMA_VERSION:
+            raise ValueError(
+                f"issue_close_activity[{index}] must use "
+                f"{ISSUE_CLOSE_ACTIVITY_SCHEMA_VERSION}"
+            )
+        match = re.fullmatch(r"issues_(\d+)", str(row.get("issue_ref") or ""))
+        if match is None:
+            raise ValueError(
+                f"issue_close_activity[{index}].issue_ref must use issues_<number>"
+            )
+        numbers.add(int(match.group(1)))
     return sorted(numbers)
 
 
@@ -294,6 +326,7 @@ def collect_public_github_repository_snapshot(
     baseline_snapshot: dict[str, Any],
     feasibility_rows: list[dict[str, Any]],
     pr_lifecycle_rows: list[dict[str, Any]],
+    metrics_supplement: dict[str, Any] | None = None,
     generated_at: str,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
@@ -334,9 +367,17 @@ def collect_public_github_repository_snapshot(
     ):
         raise ValueError("public GitHub stock and flow do not reconcile")
 
-    issue_numbers = _reference_numbers(
+    feasibility_issue_numbers = _reference_numbers(
         feasibility_rows, repo=repo, ref_field="issue_ref"
     )
+    supplement_issue_numbers = _supplement_issue_reference_numbers(
+        metrics_supplement
+    )
+    issue_numbers = sorted(
+        set(feasibility_issue_numbers) | set(supplement_issue_numbers)
+    )
+    if len(issue_numbers) > 50:
+        raise ValueError("at most 50 issue_ref references may be refreshed")
     pr_numbers = _reference_numbers(pr_lifecycle_rows, repo=repo, ref_field="pr_ref")
     with ThreadPoolExecutor(
         max_workers=min(8, max(1, len(issue_numbers) + len(pr_numbers)))
@@ -376,7 +417,14 @@ def collect_public_github_repository_snapshot(
         "source_contract": {
             "provider": "public_github_cli",
             "reads_existing_issue_fix_domain_state": True,
+            "reads_metrics_supplement": metrics_supplement is not None,
             "writes_source_state": False,
+        },
+        "source_summary": {
+            "feasibility_issue_refs": len(feasibility_issue_numbers),
+            "supplement_issue_refs": len(supplement_issue_numbers),
+            "issue_refs_collected": len(issue_numbers),
+            "pr_lifecycle_refs": len(pr_numbers),
         },
         "external_reads_performed": True,
         "external_writes_performed": False,
