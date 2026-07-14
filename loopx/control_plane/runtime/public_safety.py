@@ -16,7 +16,9 @@ SECRET_LIKE_SURFACE_PATTERN = re.compile(
     r"\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
 )
 LOOPX_COMMAND_RECORD_ALLOWED_SUBCOMMANDS = {
+    "start-goal",
     "quota should-run",
+    "todo add",
     "todo claim",
     "todo update",
     "todo complete",

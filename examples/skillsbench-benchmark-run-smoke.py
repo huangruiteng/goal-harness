@@ -1487,7 +1487,7 @@ def test_product_mode_initial_prompt_keeps_task_visible_after_lifecycle_gate() -
     assert trace["followup_prompt_count"] == 1, trace
 
 
-def test_goal_start_workflow_driver_bootstraps_bridge_before_task_packet() -> None:
+def test_goal_start_agent_runs_guided_slash_contract_before_solving() -> None:
     trace = {
         "schema_version": "skillsbench_loopx_controller_trace_v0",
         "route": "loopx-goal-start-product-mode",
@@ -1517,11 +1517,6 @@ def test_goal_start_workflow_driver_bootstraps_bridge_before_task_packet() -> No
     class FakeRoundResultBase:
         pass
 
-    class FakeRoundResult:
-        rewards: dict[str, float] = {}
-        n_tool_calls = 1
-        trajectory: list[object] = []
-
     fake_user.BaseUser = FakeBaseUser
     fake_user.RoundResult = FakeRoundResultBase
     sys.modules["benchflow"] = fake_benchflow
@@ -1534,15 +1529,19 @@ def test_goal_start_workflow_driver_bootstraps_bridge_before_task_packet() -> No
             trace=trace,
             plan={
                 "runner_prerequisites": {
-                    "loopx_workflow_lifecycle_checkpoint": True,
+                    "loopx_workflow_lifecycle_checkpoint": False,
                     "loopx_product_mode_lifecycle_driver_kind": (
-                        "orchestrated_agentloop_loopx_cli"
+                        "prompt_driven_loopx_cli"
                     ),
+                    "goal_start_guided_command_required": True,
+                    "goal_start_agent_authored_plan_required": True,
+                    "goal_start_host_preseed_forbidden": True,
                 }
             },
             case_payload={
                 "canonical_product_mode_lifecycle_driver": True,
-                "planned_todo_count": 3,
+                "case_todo_seeded": False,
+                "planned_todo_count": 0,
                 "selected_p0_todo_id": "todo_goalstart_p0",
             },
         )
@@ -1553,70 +1552,37 @@ def test_goal_start_workflow_driver_bootstraps_bridge_before_task_packet() -> No
             else:
                 sys.modules[name] = module
 
-    bootstrap_prompt = asyncio.run(user.run(0, "Compute the requested coefficient."))
-    assert bootstrap_prompt is not None
-    assert "--- LOOPX PRODUCT-MODE CONTROL PLANE ---" in bootstrap_prompt
-    assert "--- TASK INSTRUCTION ---" not in bootstrap_prompt
-    assert "Compute the requested coefficient." not in bootstrap_prompt
-    assert "FIRST ACTION REQUIRED" in bootstrap_prompt
-    assert "/loopx goal-start" in bootstrap_prompt
-    assert "headless `/loopx goal-start`" in bootstrap_prompt
-    assert "not a live-user chat" in bootstrap_prompt
-    assert "heartbeat-prompt" in bootstrap_prompt
-    assert "Codex CLI TUI `/goal`" in bootstrap_prompt
-    assert "interaction_contract" in bootstrap_prompt
-    assert "workspace_guard" in bootstrap_prompt
-    assert "goal_boundary" in bootstrap_prompt
-    assert "execution_obligation" in bootstrap_prompt
-    assert "scheduler_hint" in bootstrap_prompt
-    assert "there is no human available" in bootstrap_prompt
-    assert "do not ask or wait for the user" in bootstrap_prompt
-    assert "proceed with the task-facing work" in bootstrap_prompt
-    assert "Only record a blocker when the sandbox bridge" in bootstrap_prompt
-    assert "ordinary benchmark routing" in bootstrap_prompt
-    assert "never authorizes quota spend" in bootstrap_prompt
-    assert "selected P0 todo" in bootstrap_prompt
-    assert "benchmark task instruction will be sent after" in bootstrap_prompt
-    assert trace["product_mode_task_instruction_deferred_until_agent_lifecycle"] is True
-    assert trace["product_mode_task_instruction_sent_initially"] is False
-    assert trace["last_decision"] == "send_goal_start_workflow_bridge_bootstrap_prompt"
-
-    trace.update(
-        {
-            "remote_command_file_bridge_driver_lifecycle_execution_style": (
-                "orchestrated_agentloop_loopx_cli"
-            ),
-            "remote_command_file_bridge_driver_lifecycle_checkpoint_count": 1,
-            "remote_command_file_bridge_driver_lifecycle_success_count": 1,
-            "remote_command_file_bridge_driver_lifecycle_failure_count": 0,
-            "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count": 4,
-            "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count": 1,
-            "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count": 3,
-            "remote_command_file_bridge_agent_request_count": 1,
-            "remote_command_file_bridge_agent_task_facing_operation_count": 1,
-            "remote_command_file_bridge_agent_task_facing_success_count": 1,
-        }
-    )
-    task_prompt = asyncio.run(
-        user.run(1, "Compute the requested coefficient.", FakeRoundResult())
-    )
-    assert task_prompt is not None
-    assert "--- TASK INSTRUCTION ---" in task_prompt
-    assert "Compute the requested coefficient." in task_prompt
-    assert "The task packet is now available" in task_prompt
-    assert "/loopx goal-start" in task_prompt
-    assert "headless `/loopx goal-start`" in task_prompt
-    assert "interaction_contract" in task_prompt
-    assert "workspace_guard" in task_prompt
-    assert "goal_boundary" in task_prompt
-    assert "execution_obligation" in task_prompt
-    assert "scheduler_hint" in task_prompt
-    assert "there is no human available" in task_prompt
-    assert "do not ask or wait for the user" in task_prompt
-    assert "proceed with the task-facing work" in task_prompt
-    assert "Only record a blocker when the sandbox bridge" in task_prompt
-    assert trace["product_mode_task_instruction_sent_after_agent_lifecycle"] is True
-    assert trace["last_decision"] == "send_product_mode_task_instruction_after_agent_lifecycle"
+    prompt = asyncio.run(user.run(0, "Compute the requested coefficient."))
+    assert prompt is not None
+    assert "--- LOOPX PRODUCT-MODE CONTROL PLANE ---" in prompt
+    assert "--- TASK INSTRUCTION ---" in prompt
+    assert "Compute the requested coefficient." in prompt
+    assert "actual agent contract for `/loopx <task objective>`" in prompt
+    assert "start-goal --guided --project /app" in prompt
+    assert "exact visible TASK INSTRUCTION" in prompt
+    assert "--goal-text" in prompt
+    assert "no plan or todo has been seeded" in prompt
+    assert "todo add" in prompt
+    assert "refresh-state" in prompt
+    assert "quota should-run" in prompt
+    assert "todo claim" in prompt
+    assert "host-preseeded approximation" in prompt
+    assert "heartbeat-prompt" in prompt
+    assert "Codex CLI TUI `/goal`" in prompt
+    assert "interaction_contract" in prompt
+    assert "workspace_guard" in prompt
+    assert "goal_boundary" in prompt
+    assert "execution_obligation" in prompt
+    assert "scheduler_hint" in prompt
+    assert "there is no human available" in prompt
+    assert "do not ask or wait for the user" in prompt
+    assert "proceed with the task-facing work" in prompt
+    assert "Only record a blocker when the sandbox bridge" in prompt
+    assert "ordinary benchmark routing" in prompt
+    assert "never authorizes quota spend" in prompt
+    assert trace["product_mode_task_instruction_deferred_until_agent_lifecycle"] is False
+    assert trace["product_mode_task_instruction_sent_initially"] is True
+    assert trace["last_decision"] == "send_initial_product_mode_prompt"
 
 
 def test_loopx_subcommand_family_counts_include_arguments() -> None:
@@ -4087,7 +4053,7 @@ def test_product_mode_official_success_stops_without_final_closeout_checkpoint()
     sys.modules["benchflow.sandbox.user"] = fake_user
     try:
         user = _build_product_mode_user(
-            route="loopx-goal-start-product-mode",
+            route="loopx-product-mode",
             max_rounds=2,
             trace=trace,
             plan=plan,

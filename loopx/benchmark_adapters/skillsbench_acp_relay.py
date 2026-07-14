@@ -39,6 +39,9 @@ from loopx.benchmark_adapters.skillsbench_bridge_summary import (
     bridge_operation_record_interrupted as _bridge_operation_record_interrupted,
     prompt_requires_meaningful_bridge_progress as _prompt_requires_meaningful_bridge_progress,
 )
+from loopx.benchmark_adapters.skillsbench_bridge_guard import (
+    LOOPX_COMMAND_INSTRUMENTATION_SOURCE,
+)
 from loopx.benchmark_adapters.skillsbench_codex_goal_recovery import (
     CODEX_CLI_GOAL_POST_BRIDGE_CONTINUE_PROMPT,
     POST_BRIDGE_RECOVERY_ATTEMPT_LIMIT,
@@ -155,7 +158,8 @@ def _prompt_requires_bridge_first_action(prompt: str) -> bool:
         "your first agent action must be a shell/tool call",
         "your first agent action must be a task-facing shell/tool call",
         "first run the case-local quota/todo commands",
-        "this route simulates `/loopx <task objective>` goal start",
+        "first loopx cli action must invoke `start-goal",
+        "this benchmark treatment executes the actual agent contract for `/loopx",
         "compact ranked",
         "selected runnable p0",
     )
@@ -2324,35 +2328,7 @@ PROBE_OPERATION_LABELS = {{
 }}
 PROBE_PATH_LABELS = {{"bridge_probe_marker"}}
 
-def loopx_subcommands(command: str) -> list[str]:
-    try:
-        tokens = shlex.split(command or "")
-    except ValueError:
-        tokens = (command or "").split()
-    idx = -1
-    for i, token in enumerate(tokens):
-        if token == "loopx" or token.endswith("/loopx"):
-            idx = i
-            break
-    if idx < 0:
-        return []
-    out: list[str] = []
-    skip = False
-    for token in tokens[idx + 1:]:
-        if skip:
-            skip = False
-            continue
-        if token.startswith("--"):
-            if "=" not in token and token in {{"--goal-id", "--todo-id", "--claimed-by", "--status", "--note", "--evidence", "--classification", "--registry", "--runtime-root", "--slots", "--source", "--format"}}:
-                skip = True
-            continue
-        if token.startswith("-"):
-            continue
-        if re.match(r"^[A-Za-z][A-Za-z0-9_-]{{0,40}}$", token):
-            out.append(token)
-            if len(out) >= 2:
-                break
-    return out
+{LOOPX_COMMAND_INSTRUMENTATION_SOURCE}
 
 SAFE_LOOPX_TODO_ID_RE = re.compile(r"^todo_[A-Za-z0-9_-]{{6,80}}$")
 SAFE_LOOPX_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{{0,120}}$")
@@ -2417,15 +2393,18 @@ bridge_probe_operation = bool(
 )
 subcommands: list[str] = []
 loopx_fields: dict[str, str] = {{}}
+loopx_invocations = 0
 if isinstance(payload, dict) and payload.get("operation") == "exec":
     command_text = payload.get("command")
     if isinstance(command_text, str):
+        loopx_invocations = loopx_invocation_count(command_text)
         subcommands = loopx_subcommands(command_text)
         loopx_fields = loopx_public_fields(command_text)
-record["loopx_cli_call"] = bool(subcommands)
+record["loopx_invocation_count"] = loopx_invocations
+record["loopx_cli_call"] = loopx_invocations > 0
 record["loopx_subcommands"] = subcommands[:2]
 record.update(loopx_fields)
-record["loopx_state_read"] = subcommands[:2] in (["quota", "should-run"], ["status"], ["diagnose"])
+record["loopx_state_read"] = subcommands[:2] in (["start-goal"], ["quota", "should-run"], ["status"], ["diagnose"])
 record["loopx_state_write"] = bool(subcommands and (
     subcommands[0] in {{"todo", "refresh-state"}}
     or subcommands[:2] == ["quota", "spend-slot"]
@@ -2434,7 +2413,7 @@ record["task_facing_operation"] = bool(
     not bridge_probe_operation
     and (
         operation in {{"read_file", "write_file", "cleanup"}}
-        or (operation == "exec" and not subcommands)
+        or (operation == "exec" and loopx_invocations == 0)
     )
 )
 record["bridge_probe_operation"] = bridge_probe_operation
@@ -2450,6 +2429,7 @@ def append_record(item: dict[str, object]) -> None:
 
 record["record_phase"] = "start"
 append_record(record)
+enforce_single_loopx_invocation(loopx_invocations, record, append_record)
 proc = subprocess.run(
     BRIDGE_COMMAND,
     input=raw,

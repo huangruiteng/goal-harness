@@ -291,7 +291,7 @@ def skillsbench_route_contract(route: str) -> dict[str, Any]:
             ),
             "arm_id": _skillsbench_product_mode_arm_id(route),
             "source_runner": (
-                "loopx_skillsbench_goal_start_product_lifecycle_driver"
+                "loopx_skillsbench_slash_command_treatment"
                 if goal_start_product_mode
                 else "loopx_skillsbench_canonical_product_lifecycle_driver"
             ),
@@ -301,13 +301,19 @@ def skillsbench_route_contract(route: str) -> dict[str, Any]:
             "native_goal_mode_confirmation_status": "not_requested",
             "codex_acp_protocol_used": True,
             "skillsbench_route_semantics": (
-                "codex_agent_with_loopx_goal_start_ranked_todo_plan_selected_p0_lifecycle_no_reward_feedback"
+                "codex_agent_executes_guided_loopx_slash_start_then_authors_ranked_todos_and_selected_p0_lifecycle_no_reward_feedback"
                 if goal_start_product_mode
                 else "codex_agent_with_loopx_state_todo_replan_cli_no_reward_feedback"
             ),
             "curated_skills_visible": False,
             "loopx_automation_loop": True,
             "loopx_inside_case": True,
+            "loopx_slash_command": (
+                "/loopx <task objective>" if goal_start_product_mode else ""
+            ),
+            "goal_start_guided_command_required": goal_start_product_mode,
+            "goal_start_agent_authored_plan_required": goal_start_product_mode,
+            "goal_start_host_preseed_forbidden": goal_start_product_mode,
             "product_mode": True,
             "verifier_failure_feedback_todo_route": False,
             "verifier_failure_feedback_forwarded": False,
@@ -320,10 +326,10 @@ def skillsbench_route_contract(route: str) -> dict[str, Any]:
             "official_score_comparable_to_loopx_treatment": True,
             "first_blocker": "none",
             "next_action": (
-                "run LoopX goal-start product-mode treatment with a compact ranked "
-                "todo plan, selected P0 todo lifecycle, replan/status writeback, "
-                "and LoopX CLI/ledger surfaces; do not return official reward or "
-                "verifier feedback during execution"
+                "run the actual `/loopx <task objective>` guided start, let the "
+                "agent author the compact ranked todo plan and selected P0 "
+                "lifecycle, and do not return official reward or verifier "
+                "feedback during execution"
                 if goal_start_product_mode
                 else (
                     "run LoopX product-mode treatment with goal state, todos, "
