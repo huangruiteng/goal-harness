@@ -25,10 +25,10 @@ from .control_plane.agents.runtime_model import (
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
 USER_TODO_FINAL_MESSAGE_RULE = (
-    "Only if action_required=true/open_count>0: name concrete payload todo(s)/questions, "
-    'never only "owner gate"; missing -> '
+    "notify=NOTIFY: concrete actions/todos, including non_blocking at false/0; "
+    "never only \"owner gate\"; required missing -> "
     '"具体 user todo 未投影，需修复 LoopX 状态投影". '
-    "If false/0, allow quiet/no-user-todo."
+    "Only notify=DONT_NOTIFY + false/0: quiet."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "Apply `scheduler_hint` for wait backoff and CLI/Claude final-check/self-stop; no spend. "
@@ -40,16 +40,21 @@ SCHEDULER_HINT_COMPACT_RULE = (
     "Scheduler: no spend. App if apply_needed: update RRULE, ack via `ack_hint`; else skip."
 )
 SCHEDULER_HINT_THIN_RULE = (
-    "Apply `scheduler_hint`: if App `stateful_backoff.apply_needed`, "
-    "RRULE then run `ack_hint.cli_args`; CLI/Claude final-check; no spend."
+    "Scheduler: App apply_needed -> RRULE + `ack_hint.cli_args`; "
+    "final-check CLI/Claude; no spend."
 )
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
-    "Observed runtime capabilities -> `--available-capability`, never user gates."
+    "Observed capabilities -> `--available-capability`; never user gates."
 )
 EXPLORE_GRAPH_DELIVERY_RULE = (
     "Graph-on: material refresh must sync configured sinks and verify "
     "row/result-id readback before final delivery; unsatisfied -> retry or "
     "blocker/successor. Explore Harness stays independent."
+)
+EXPLORE_GRAPH_DELIVERY_THIN_RULE = (
+    "Graph-on: sync sinks; verify row/result-id readback before delivery; "
+    "else retry/blocker/successor. "
+    "Explore Harness independent."
 )
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
@@ -199,6 +204,7 @@ def render_peer_agent_scope_instruction(
         return ""
     identity = agent_id or "<registered-agent-id>"
     scope_text = "; ".join(agent_scopes) if agent_scopes else "registered peer lane"
+    scope_text = scope_text.rstrip(".!?")
     claim_command = (
         f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> "
         f"--claimed-by {agent_id}"
@@ -214,10 +220,9 @@ def render_peer_agent_scope_instruction(
     )
     if thin:
         return (
-            f"Agent: `{identity}`; model: peer_v1; scope: {scope_text}. Equal peer: "
-            "claim/lease before delivery; use an independent worktree; follow todo "
-            "continuation policy; no cross-agent authority. Do not write scope into "
-            "todo metadata."
+            f"Equal peer `{identity}` (peer_v1); scope: {scope_text}. Claim/lease first; "
+            "independent repo worktree; todo continuation; no cross-agent authority; "
+            "no scope in todo metadata."
         )
     if compact:
         return (
@@ -565,6 +570,8 @@ If that preflight still fails: no work/spend; quiet `DONT_NOTIFY`.
 
 `lark_event_inbox`: if configured, drain -> writeback -> ACK.
 
+{USER_TODO_FINAL_MESSAGE_RULE}
+
 If the result says `should_run=false`:
 
 - If `state=operator_gate`, treat it as a user/controller interaction. Read
@@ -574,8 +581,8 @@ If the result says `should_run=false`:
   with one concise Chinese question listing the gate and expected reply format.
   If `user_todo_summary.open_count > 0`, list existing open user todos even
   when nothing new was found; never say "no new user action".
-  {USER_TODO_FINAL_MESSAGE_RULE} Do not execute `agent_command`, adapter work,
-  write-control, production actions, or the gated path while asking.
+  Do not execute `agent_command`, adapter work, write-control, production
+  actions, or the gated path while asking.
 - If `notify_user_on_open_todo=true`, existing open `user_todo_summary` is a
   blocker-push opportunity, not a silent skip. For focus/wait/evidence lanes,
   a user/owner answer can unlock progress. If the payload explicitly includes
@@ -764,13 +771,14 @@ Preflight and quota guard:
 
 Preflight fail: quiet.
 
+User NOTIFY: Chinese actions incl. non_blocking at false/0; never only "owner
+gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
+Only DONT_NOTIFY+false/0: quiet.
+
 If `should_run=false`: no work/spend except `safe_bypass_allowed=true`.
-Gate/open todo -> Chinese `NOTIFY`. external/wait monitor -> one read-only
-status/log/metric/marker poll; new evidence -> writeback/spend once.
-Else quiet.
+external/wait monitor -> one read-only status/log/metric/marker poll;
+new evidence -> writeback/spend once. Otherwise obey user channel.
 Apply `scheduler_hint` stateful backoff for RRULE/backoff/self-stop; no spend.
-Action/open todo: list todos/questions; never only "owner gate";
-missing -> "具体 user todo 未投影，需修复 LoopX 状态投影"; false/0: 无用户待办/无需通知 or quiet.
 `lark_event_inbox`: `drain_command` -> writeback -> ACK;
 empty=no gate/spend.
 
@@ -841,10 +849,10 @@ If `should_run=false`: `monitor_quiet_skip` appends at most one no-spend
 `quota monitor-poll --execute`, reruns guard, then stays quiet unless
 `autonomous_replan_required` / `must_attempt_work=true`; no edits/spend;
 unchanged monitor-only polls are not self-stop signals.
-`state=operator_gate` or `notify_user_on_open_todo=true`: blocker-push;
-`open_todo_notification_policy=repeat_until_resolved`: repeat `NOTIFY`;
-if action/open todo exists, list payload todo(s)/questions, never only
-"owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
+`state=operator_gate` / `notify_user_on_open_todo=true` /
+`user_channel.notify=NOTIFY`: blocker-push with actions, including
+non_blocking; `open_todo_notification_policy=repeat_until_resolved`: repeat;
+never only "owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
 gate-independent safe-bypass, validate/writeback/spend. External/wait monitor:
 one read-only status/log/metric/marker poll; unchanged quiet, new evidence
 writeback/spend. Otherwise quiet `DONT_NOTIFY`.
@@ -928,11 +936,11 @@ def render_thin_heartbeat_task_body(
 ) -> str:
     permission_tail = "" if permission_rule == DEFAULT_PERMISSION_RULE else f" {permission_rule}"
     material_sentence = (
-        "Do not consume the learning material queue unless explicitly asked."
+        "Do not consume learning queue unless asked."
         if material_queue_rule == DEFAULT_MATERIAL_QUEUE_RULE
         else material_queue_rule
     )
-    scope_sentence = f"\n\n{agent_scope_instruction}" if agent_scope_instruction else ""
+    scope_sentence = f"\n{agent_scope_instruction}" if agent_scope_instruction else ""
     quota_guard_instruction = (
         f"`{quota_guard_command}`"
         if "--available-capability" in quota_guard_command
@@ -940,24 +948,25 @@ def render_thin_heartbeat_task_body(
     )
     return f"""Advance `{goal_id}` from {active_state}.
 
-Use skills: `loopx-project`; if surprising/tiny/contradictory,
-`loopx-self-repair`. LoopX CLI is source of truth.
+Skills: `loopx-project`; surprise/tiny/conflict -> `loopx-self-repair`.
+LoopX CLI = truth.
 {scope_sentence}
 
-Inspect registry/global quota, active state, status/history, repo; run
-{quota_guard_instruction}; follow `interaction_contract`. If action_required/open_count:
-Chinese concrete todos/questions; never only "owner gate"; missing ->
-"具体 user todo 未投影，需修复 LoopX 状态投影". If false/0: quiet/no-user-todo.
+Inspect registry/state/status/history/repo; run
+{quota_guard_instruction}; follow `interaction_contract`.
+User NOTIFY: concrete Chinese actions even non_blocking false/0; never only
+"owner gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
+Quiet only if DONT_NOTIFY+false/0.
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-Bounded batch/quiet no-op; spend after writeback.
+Bounded batch/no-op; spend post-writeback.
 Plans/done -> todo/rationale; 2 stalls -> self-repair.
 `lark_event_inbox`: `drain_command` -> writeback -> ACK.
-{EXPLORE_GRAPH_DELIVERY_RULE}
+{EXPLORE_GRAPH_DELIVERY_THIN_RULE}
 
-P0 blocked: continue safe P1/P2; monitor-only quiet/no-spend.
+P0 blocked: safe P1/P2; monitor-only quiet/no-spend.
 
-No project-specific branches here. {material_sentence} Stop for private material,
+No project branches; {material_sentence} Stop for private material,
 credentials, destructive git, or unauthorized production actions{permission_tail}"""
 
 
