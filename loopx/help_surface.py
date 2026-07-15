@@ -98,6 +98,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "Other agent or shell",
                 "purpose": "Use a CLI, task, automation, heartbeat, or scheduler hook; otherwise drive LoopX manually.",
             },
+            {
+                "command": "loopx agent-loop shadow-tick --goal-id <goal-id> --agent-id <agent-id>",
+                "purpose": "Preview one host-neutral typed turn from live LoopX state without launching an agent or writing state.",
+            },
         ],
     },
     {
