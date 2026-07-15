@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from enum import Enum
-from hashlib import sha256
 from typing import Any
+
+from .transaction import build_loopx_turn_transaction_plan
 
 
 LOOPX_TURN_PLAN_SCHEMA_VERSION = "loopx_turn_plan_v0"
 LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION = "loopx_turn_session_binding_v0"
-LOOPX_TURN_TRANSACTION_PLAN_SCHEMA_VERSION = "loopx_turn_transaction_plan_v0"
-LOOPX_TURN_RECEIPT_SCHEMA_VERSION = "loopx_turn_receipt_v0"
 TURN_ENVELOPE_SCHEMA_VERSION = "loopx_turn_envelope_v0"
 SUPPORTED_HOSTS = {"codex-cli", "claude-code", "generic-cli"}
 SUPPORTED_EXECUTION_MODES = {"interactive-visible", "isolated-headless"}
@@ -26,15 +24,6 @@ REPAIR_ACTIONS = {
     "state_projection_repair",
     "workspace_repair",
 }
-TRANSACTION_PHASES = (
-    "host_execute",
-    "typed_result",
-    "validation",
-    "durable_writeback",
-    "quota_spend",
-    "scheduler_apply",
-    "scheduler_ack",
-)
 
 
 class LoopXTurnRoute(str, Enum):
@@ -49,16 +38,6 @@ class LoopXTurnRoute(str, Enum):
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _canonical_hash(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return "sha256:" + sha256(encoded).hexdigest()
 
 
 def _typed_route(envelope: Mapping[str, Any]) -> LoopXTurnRoute:
@@ -165,41 +144,6 @@ def _session_plan(
     }, None
 
 
-def _transaction_plan(
-    *,
-    route: LoopXTurnRoute,
-    lineage: Mapping[str, str],
-    host: str,
-    execution_mode: str,
-    session_action: str,
-) -> dict[str, Any]:
-    planned = route in {
-        LoopXTurnRoute.READY_FOR_HOST,
-        LoopXTurnRoute.REPAIR_REQUIRED,
-        LoopXTurnRoute.REPLAN_REQUIRED,
-    }
-    turn_key = _canonical_hash(
-        {
-            "lineage": dict(lineage),
-            "host": host,
-            "execution_mode": execution_mode,
-            "session_action": session_action,
-        }
-    )
-    return {
-        "schema_version": LOOPX_TURN_TRANSACTION_PLAN_SCHEMA_VERSION,
-        "status": "planned" if planned else "not_applicable",
-        "turn_key": turn_key,
-        "phases": list(TRANSACTION_PHASES) if planned else [],
-        "commit_policy": "result<validate<writeback<spend;apply<ack;cadence:no-spend",
-        "receipt_seed": {
-            "schema_version": LOOPX_TURN_RECEIPT_SCHEMA_VERSION,
-            "status": "not_executed",
-            "next_phase": TRANSACTION_PHASES[0] if planned else None,
-        },
-    }
-
-
 def build_loopx_turn_plan(
     turn_envelope: Mapping[str, Any],
     *,
@@ -250,8 +194,8 @@ def build_loopx_turn_plan(
             "selected_todo": selected_todo or None,
         },
         "turn_envelope": envelope,
-        "transaction": _transaction_plan(
-            route=route,
+        "transaction": build_loopx_turn_transaction_plan(
+            planned=would_invoke_host,
             lineage=lineage,
             host=host,
             execution_mode=execution_mode,
