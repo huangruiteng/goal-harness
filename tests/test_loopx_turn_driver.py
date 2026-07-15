@@ -373,6 +373,7 @@ def test_turn_cli_consumes_live_state_without_writes(
                 "codex-fixture",
                 "--scan-root",
                 str(project),
+                "--include-transaction-detail",
             ]
         )
 
@@ -384,6 +385,37 @@ def test_turn_cli_consumes_live_state_without_writes(
     assert payload["turn_envelope"]["action_signature"]["matches"] is True
     assert payload["effects"]["state_written"] is False
     assert before == after
+
+
+def test_turn_cli_omits_transaction_detail_by_default(tmp_path: Path) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "plan",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--scan-root",
+                str(project),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0
+    assert "session" not in payload
+    assert "transaction" not in payload
+    assert "opaque_session_handle_omitted" not in payload["boundary"]
 
 
 def test_turn_cli_requires_complete_resume_identity(tmp_path: Path) -> None:

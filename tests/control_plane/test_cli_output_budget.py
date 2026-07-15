@@ -416,6 +416,18 @@ def _mode_variant_commands(
             str(project),
             "--turn-envelope",
         ],
+        "loopx_turn_plan_transaction_detail": common
+        + [
+            "turn",
+            "plan",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_IDS[0],
+            "--scan-root",
+            str(project),
+            "--include-transaction-detail",
+        ],
         "status_task_graph_detail": common
         + [
             "status",
@@ -488,6 +500,7 @@ def test_manifest_covers_the_declared_agent_facing_surface_set() -> None:
         "bootstrap_command_pack_message_only",
         "quota_should_run_scheduler_detail",
         "quota_should_run_turn_envelope",
+        "loopx_turn_plan_transaction_detail",
         "status_task_graph_detail",
         "review_packet_full",
         "heartbeat_prompt_brief",

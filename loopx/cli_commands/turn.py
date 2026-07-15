@@ -72,6 +72,11 @@ def register_turn_commands(
         action="append",
     )
     plan.add_argument(
+        "--include-transaction-detail",
+        action="store_true",
+        help="Include session binding and transaction receipt planning detail.",
+    )
+    plan.add_argument(
         "--scan-root",
         default=_default_public_scan_root(),
         help="Public files to scan for obvious private material.",
@@ -167,6 +172,12 @@ def handle_turn_command(
             execution_mode=args.execution_mode,
             session_binding=session_binding,
         )
+        if not args.include_transaction_detail:
+            payload.pop("session", None)
+            payload.pop("transaction", None)
+            boundary = payload.get("boundary")
+            if isinstance(boundary, dict):
+                boundary.pop("opaque_session_handle_omitted", None)
     except Exception as exc:
         payload = {
             "ok": False,
