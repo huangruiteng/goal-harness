@@ -1,4 +1,4 @@
-# Codex CLI Agent-loop Driver
+# Codex CLI Adapter for LoopX Turn
 
 Status: experimental product route and implementation audit.
 
@@ -9,13 +9,13 @@ without copying App-specific heartbeat logic or turning Codex session files
 into project state.
 
 The host-neutral lifecycle is defined by
-[`agent_loop_cli_driver_v0`](../reference/protocols/agent-loop-cli-driver-v0.md).
-This page records the Codex CLI adapter policy and the current parity gap.
+[`loopx_turn_v0`](../reference/protocols/loopx-turn-v0.md). This page records
+the Codex CLI adapter policy and the current parity gap.
 
 ## Current Verdict
 
 The repository has useful Codex CLI probes and wrappers, but they are not yet a
-complete agent-loop driver.
+complete LoopX Turn adapter.
 
 Reusable pieces include:
 
@@ -67,13 +67,13 @@ already match.
 The experimental user-facing surface should converge on one command group:
 
 ```bash
-loopx agent-loop diagnose \
+loopx turn diagnose \
   --project . \
   --goal-id <goal-id> \
   --agent-id <agent-id> \
   --host codex-cli
 
-loopx agent-loop run-once \
+loopx turn run-once \
   --project . \
   --goal-id <goal-id> \
   --agent-id <agent-id> \
@@ -118,7 +118,7 @@ manually.
 
 ## Typed Repair And Replan
 
-The driver uses typed repair when the current todo is still correct but the
+LoopX Turn uses typed repair when the current todo is still correct but the
 host, workspace, capability, validation, or writeback path is recoverable. It
 uses typed replan when the route itself is no longer a valid way to close the
 goal acceptance gap.
@@ -148,7 +148,7 @@ polling indefinitely.
    countable `/goal` baseline under matched source, budget, concurrency,
    no-feedback, no-sync, no-upload, and no-submit boundaries.
 6. **Promotion review**: decide whether to keep the adapter experimental,
-   replace old probe entry points, or generalize the driver to another CLI
+   replace old probe entry points, or generalize LoopX Turn to another CLI
    host.
 
 Benchmark dogfood records compact parity, trajectory, and closeout evidence. It

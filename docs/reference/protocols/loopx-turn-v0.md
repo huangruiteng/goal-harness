@@ -1,12 +1,12 @@
-# Agent-loop CLI Driver v0
+# LoopX Governed Turn v0
 
 Status: experimental protocol and implementation target.
 
-`agent_loop_cli_driver_v0` defines how LoopX CLI can drive an external
-agent-loop CLI, such as Codex CLI, without turning the host into a second
-control plane. LoopX remains authoritative for goal state, todos, claims,
-gates, quota, scheduler hints, and compact evidence. The host owns model
-execution, tools, and an opaque resumable session handle.
+`loopx_turn_v0` defines how LoopX can govern one bounded turn executed by an
+external agent-loop host, such as Codex CLI, without turning that host into a
+second control plane. LoopX remains authoritative for goal state, todos,
+claims, gates, quota, scheduler hints, and compact evidence. The host owns
+model execution, tools, and an opaque resumable session handle.
 
 The protocol is host-neutral. A Codex CLI adapter is the first target, but the
 driver lifecycle must not depend on Codex-specific session files, transcript
@@ -17,7 +17,7 @@ formats, or benchmark task schemas.
 | Concern | Authority |
 | --- | --- |
 | Goal, todo, claim, gate, quota, and cadence | LoopX CLI and registry-backed state |
-| Session creation, resume, cancellation, and tool execution | Agent-loop host adapter |
+| Session creation, resume, cancellation, and tool execution | External host adapter |
 | Repository write isolation | LoopX workspace guard plus repository policy |
 | Validation | Task-specific validator selected by the agent or adapter |
 | Durable outcome and quota spend | LoopX writeback after validation |
@@ -64,7 +64,7 @@ The driver input is a small composition of existing contracts:
 
 ```json
 {
-  "schema_version": "agent_loop_cli_driver_turn_v0",
+  "schema_version": "loopx_turn_request_v0",
   "goal_id": "example-goal",
   "agent_id": "codex-worker",
   "host": {
@@ -146,7 +146,7 @@ state with a concrete projected action.
 
 ## Adapter Requirements
 
-An agent-loop CLI adapter must provide:
+An external host adapter must provide:
 
 - capability discovery that can be passed to `--available-capability`;
 - start, resume, cancel, and bounded-timeout operations;
