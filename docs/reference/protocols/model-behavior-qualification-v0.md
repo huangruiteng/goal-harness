@@ -163,6 +163,59 @@ in manually triggered or low-frequency shadow qualification where cost,
 repetition, corpus selection, and promotion policy are explicit. Only compact
 decision receipts and paired drift results may become durable evidence.
 
+## New-User Onboarding Closed Loop
+
+`onboarding_actual_behavior_qualification_v0` extends the same low-frequency
+boundary to the first new-user transaction. Its durable contract has one arm:
+the currently shipped default `start-goal --guided` packet. The qualification
+does not retain a retired full-detail implementation as a second product
+contract.
+
+The closed loop checks three decisions:
+
+1. the entry turn must select `connect_if_needed` from the actual default
+   packet;
+2. an allowlisted local transition runner performs the canonical connection in
+   an isolated fixture, after which the model must select
+   `continue_validation` for the healthy executable todo;
+3. a known-bad `state_projection_gap` observation calibrates the model's
+   `repair_projection` decision against the regression class tracked by issue
+   #2134: a visible onboarding Next Action without an executable structured
+   todo.
+
+Two checks are deliberately independent. Before any provider call, a stable
+behavior oracle requires the canonical connect, refresh, host-activation, and
+quota commands; goal and agent identity; no write or quota spend during the
+preview; and host-loop activation only after todo writeback. The model then
+has to reproduce the semantic contract derived from the actual packet. This
+separation prevents an implementation and its source-alignment expectation
+from deleting the same behavior and still passing.
+
+The model never supplies a shell command to the transition runner. The runner
+is a caller-owned allowlist and returns only the compact
+`onboarding_postcondition_observation_v0` shape. A missing command or host-loop
+contract fails before model invocation; a damaged actual postcondition fails
+the qualification even when the model correctly recognizes the damage.
+
+The result retains only source-alignment flags, route names, safety codes, and
+receipt digests. Packets, observations, model responses, local paths, and
+credentials are not retained. It always sets
+`automatic_release_promotion_allowed=false`.
+
+For a sensitive behavior-changing pull request, maintainers may additionally
+run a temporary base/candidate differential evaluation. That comparison is PR
+evidence, not a merged API, fixture, or permanent test arm. Once the candidate
+becomes the default, the one-arm qualification follows the new actual packet;
+changing the independent behavior invariants remains an explicit reviewable
+contract change.
+
+This profile is a local/manual gate for sensitive agent-facing changes and
+release qualification. Deterministic onboarding fixtures and catalog canaries
+remain the normal CI gate. A future trusted scheduled job may invoke the live
+profile with injected credentials and explicit cost limits, but ordinary pull
+requests must not depend on provider availability, latency, rate limits, or
+stochastic output.
+
 ## Promotion Boundary
 
 This contract is one gate in a larger promotion process. Turning a candidate
