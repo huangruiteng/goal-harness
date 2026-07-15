@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -448,3 +449,128 @@ def test_turn_cli_requires_complete_resume_identity(tmp_path: Path) -> None:
     assert exit_code == 1
     assert payload["ok"] is False
     assert "requires --resume-goal-id" in payload["error"]
+
+
+def test_turn_run_once_cli_commits_validated_result_and_one_quota_slot(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    host_script = """
+import json
+import sys
+request = json.load(sys.stdin)
+json.dump({
+    "schema_version": "loopx_turn_result_v0",
+    "turn_key": request["turn_key"],
+    "result_kind": "validated_progress",
+    "completed_phases": ["host_execute", "typed_result"],
+    "classification": "fixture_progress",
+    "recommended_action": "Continue the public fixture",
+    "next_action": "Run the next public fixture check",
+    "delivery_batch_scale": "implementation",
+    "delivery_outcome": "outcome_progress",
+    "vision_unchanged_reason": "The fixture objective remains unchanged.",
+    "summary": "One public fixture advanced."
+}, sys.stdout)
+"""
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "run-once",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--project",
+                str(project),
+                "--host-command-json",
+                json.dumps([sys.executable, "-c", host_script]),
+                "--scan-root",
+                str(project),
+                "--no-global-sync",
+                "--execute",
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+    assert payload["status"] == "scheduler_action_required"
+    assert payload["receipt"]["status"] == "validated"
+    assert payload["receipt"]["next_phase"] == "scheduler_apply"
+    assert payload["resume_turn_key"].startswith("sha256:")
+    assert payload["effects"] == {
+        "host_invoked": True,
+        "state_written": True,
+        "quota_spent": True,
+        "scheduler_acknowledged": False,
+    }
+    state_path = (
+        project
+        / ".codex"
+        / "goals"
+        / "loopx-turn-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    assert "Run the next public fixture check" in state_path.read_text(encoding="utf-8")
+    index_path = runtime / "goals" / "loopx-turn-fixture" / "runs" / "index.jsonl"
+    rows = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["classification"] for row in rows] == [
+        "fixture_progress",
+        "quota_slot_spent",
+    ]
+
+    resumed_output = io.StringIO()
+    with contextlib.redirect_stdout(resumed_output):
+        resumed_exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "run-once",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--project",
+                str(project),
+                "--host-command-json",
+                json.dumps([sys.executable, "-c", host_script]),
+                "--scan-root",
+                str(project),
+                "--no-global-sync",
+                "--resume-turn-key",
+                payload["resume_turn_key"],
+                "--execute",
+            ]
+        )
+
+    resumed = json.loads(resumed_output.getvalue())
+    assert resumed_exit_code == 0, resumed
+    assert resumed["status"] == "scheduler_action_required"
+    assert resumed["effects"] == {
+        "host_invoked": False,
+        "state_written": False,
+        "quota_spent": False,
+        "scheduler_acknowledged": False,
+    }
+    replayed_rows = [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["classification"] for row in replayed_rows] == [
+        "fixture_progress",
+        "quota_slot_spent",
+    ]
