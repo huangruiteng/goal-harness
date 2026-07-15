@@ -257,6 +257,17 @@ def onboarding_agent_review_todo_text(
     return text
 
 
+def onboarding_connection_validation_action() -> dict[str, str]:
+    return {
+        "text": (
+            "[P1] Run `loopx check` against the project registry and record the first "
+            "project-specific adapter signal or an explicit no-follow-up rationale."
+        ),
+        "task_class": "advancement_task",
+        "action_kind": "onboarding_connection_validation",
+    }
+
+
 def onboarding_next_action(
     *,
     onboarding_scan: dict[str, Any] | None,
@@ -265,7 +276,7 @@ def onboarding_next_action(
     codex_app_heartbeat: str,
 ) -> str:
     if not onboarding_scan:
-        return "Run `loopx check` against the project registry and decide the first project-specific adapter signal."
+        return onboarding_connection_validation_action()["text"]
     need_heartbeat_choice = codex_app_heartbeat == "ask"
     if not accept_onboarding_agent_todos or not begin_autonomous_advance or need_heartbeat_choice:
         asks: list[str] = []
@@ -315,7 +326,17 @@ def apply_onboarding_todos_to_state(
     codex_app_heartbeat: str,
 ) -> str:
     if not onboarding_scan:
-        return text
+        lines = text.splitlines()
+        action = onboarding_connection_validation_action()
+        add_todo_to_lines(
+            lines,
+            role="agent",
+            text=action["text"],
+            task_class=action["task_class"],
+            action_kind=action["action_kind"],
+            updated_at=updated_at,
+        )
+        return "\n".join(lines) + "\n"
     lines = text.splitlines()
     if accept_onboarding_agent_todos:
         for candidate in onboarding_candidates(onboarding_scan):

@@ -16,6 +16,7 @@ from .control_plane.todos.active_state_editing import COMPLETED_WORK_ARCHIVE_HEA
 from .history import collect_history, load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs, resolve_runtime_root
 from .registry import inspect_registry, inspect_registry_boundary, registry_goals, resolve_state_file
+from .state_projection import state_projection_gap_warning
 from .control_plane.todos.contract import (
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,
@@ -450,6 +451,31 @@ def _active_state_user_gate_scope_errors(registry: dict[str, Any]) -> tuple[list
     return errors, checked
 
 
+def _active_state_projection_gap_warnings(registry: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for goal in registry_goals(registry):
+        goal_id = str(goal.get("id") or "")
+        repo_text = str(goal.get("repo") or "").strip()
+        if not repo_text:
+            continue
+        state_file = resolve_state_file(Path(repo_text).expanduser(), goal.get("state_file"))
+        if not state_file or not state_file.exists():
+            continue
+        try:
+            state_text = state_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        projection_gap = state_projection_gap_warning(state_text)
+        if not projection_gap:
+            continue
+        target_roles = ",".join(str(role) for role in projection_gap.get("target_roles") or [])
+        warnings.append(
+            f"{goal_id}: active state has a state_projection_gap for {target_roles or 'todo'}; "
+            "expand executable Next Action work into an open Agent Todo or user wait into an open User Todo"
+        )
+    return warnings
+
+
 def _tracked_scan_files(scan_root: Path) -> list[Path]:
     scan_root = scan_root.resolve()
     target = scan_root if scan_root.is_dir() else scan_root.parent
@@ -622,6 +648,7 @@ def check_contract(
     if checked_user_gates:
         checks.append(f"user-gate scopes checked: {checked_user_gates} open multi-agent gates")
     errors.extend(user_gate_scope_errors)
+    warnings.extend(_active_state_projection_gap_warnings(registry))
 
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     if runtime_root == DEFAULT_RUNTIME_ROOT or runtime_root.exists():
