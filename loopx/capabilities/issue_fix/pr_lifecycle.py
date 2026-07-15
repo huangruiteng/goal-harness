@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -63,6 +64,26 @@ PENDING_CHECK_STATES = {
 PASSING_CHECK_STATES = {"NEUTRAL", "SKIPPED", "SUCCESS"}
 BRANCH_REPLAN_MERGE_STATES = {"BEHIND", "DIRTY"}
 
+_REVIEW_RESPONSE_QUERY = """
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:100){
+        totalCount
+        pageInfo{hasNextPage}
+        nodes{isResolved}
+      }
+      reviews(last:100){
+        nodes{state submittedAt}
+      }
+      commits(last:1){
+        nodes{commit{committedDate}}
+      }
+    }
+  }
+}
+""".strip()
+
 
 def _upper_label(value: Any, default: str = "UNKNOWN") -> str:
     text = str(value or "").strip().upper()
@@ -88,6 +109,64 @@ def _safe_count(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return number if number >= 0 else None
+
+
+def _timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _review_response_observation(
+    provider_payload: Mapping[str, Any], *, review_decision: str
+) -> dict[str, Any]:
+    summary = provider_payload.get("reviewThreadSummary")
+    thread_summary = summary if isinstance(summary, Mapping) else {}
+    total = _safe_count(thread_summary.get("totalCount"))
+    resolved = _safe_count(thread_summary.get("resolvedCount"))
+    unresolved = _safe_count(thread_summary.get("unresolvedCount"))
+    complete = thread_summary.get("complete") is True
+    changes_requested_at = provider_payload.get("latestChangesRequestedAt")
+    head_committed_at = provider_payload.get("headCommittedAt")
+    requested_time = _timestamp(changes_requested_at)
+    head_time = _timestamp(head_committed_at)
+    addressed = bool(
+        review_decision == "CHANGES_REQUESTED"
+        and complete
+        and total is not None
+        and total > 0
+        and resolved == total
+        and unresolved == 0
+        and requested_time is not None
+        and head_time is not None
+        and head_time > requested_time
+    )
+    if addressed:
+        status = "changes_addressed_awaiting_rereview"
+    elif review_decision == "CHANGES_REQUESTED":
+        status = "changes_requested_unverified"
+    else:
+        status = "not_applicable"
+    return {
+        "schema_version": "issue_fix_pr_review_response_v0",
+        "status": status,
+        "metadata_status": str(
+            provider_payload.get("reviewResponseMetadataStatus") or "not_fetched"
+        ),
+        "thread_count": total,
+        "resolved_thread_count": resolved,
+        "unresolved_thread_count": unresolved,
+        "thread_page_complete": complete,
+        "latest_changes_requested_at": changes_requested_at,
+        "head_committed_at": head_committed_at,
+        "raw_reviews_captured": False,
+        "raw_thread_comments_captured": False,
+    }
 
 
 def _compact_public_text(value: Any, *, field: str, limit: int) -> str:
@@ -446,6 +525,9 @@ def _build_observation(
         or provider_payload.get("head_commit_ref"),
         "commit_count": commit_count,
         "checks": _check_rollup(provider_payload),
+        "review_response": _review_response_observation(
+            provider_payload, review_decision=review_decision
+        ),
         "body_captured": False,
         "comment_bodies_captured": False,
         "timeline_captured": False,
@@ -493,6 +575,12 @@ def _decide_transition(observation: Mapping[str, Any]) -> dict[str, Any]:
     check_rollup = checks if isinstance(checks, Mapping) else {}
     failing_checks = int(check_rollup.get("failing_count") or 0)
     pending_checks = int(check_rollup.get("pending_count") or 0)
+    review_response = observation.get("review_response")
+    review_response_status = (
+        str(review_response.get("status") or "")
+        if isinstance(review_response, Mapping)
+        else ""
+    )
     is_draft = bool(observation.get("is_draft"))
 
     if state == "MERGED":
@@ -535,6 +623,20 @@ def _decide_transition(observation: Mapping[str, Any]) -> dict[str, Any]:
             "material_change": True,
         }
     if review_decision == "CHANGES_REQUESTED":
+        if review_response_status == "changes_addressed_awaiting_rereview":
+            return _transition_preview(
+                decision="monitor_continuation",
+                action_kind="issue_fix_review_changes_addressed_monitor",
+                priority="P2",
+                reason=(
+                    "Review changes have a newer repair commit and every fetched "
+                    "review thread is resolved; wait for reviewer re-approval."
+                ),
+                depends_on=["issue_fix_pr_lifecycle_monitor"],
+            ) | {
+                "terminal_state_precedence": False,
+                "material_change": False,
+            }
         return _transition_preview(
             decision="runnable_successor",
             action_kind="issue_fix_review_changes_replan",
@@ -594,6 +696,88 @@ def _decide_transition(observation: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _fetch_github_review_response_metadata(
+    *, owner: str, repo_name: str, number: int, timeout_seconds: int
+) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"name={repo_name}",
+                "-F",
+                f"number={number}",
+                "-f",
+                f"query={_REVIEW_RESPONSE_QUERY}",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"reviewResponseMetadataStatus": "unavailable"}
+    if result.returncode != 0:
+        return {"reviewResponseMetadataStatus": "unavailable"}
+    try:
+        response = json.loads(result.stdout)
+        pull_request = response["data"]["repository"]["pullRequest"]
+        threads = pull_request["reviewThreads"]
+        thread_nodes = threads["nodes"]
+        reviews = pull_request["reviews"]["nodes"]
+        commit_nodes = pull_request["commits"]["nodes"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return {"reviewResponseMetadataStatus": "unavailable"}
+    if not all(isinstance(items, list) for items in (thread_nodes, reviews, commit_nodes)):
+        return {"reviewResponseMetadataStatus": "unavailable"}
+
+    total = _safe_count(threads.get("totalCount"))
+    page_info = threads.get("pageInfo")
+    page_complete = bool(
+        isinstance(page_info, Mapping)
+        and page_info.get("hasNextPage") is False
+        and total == len(thread_nodes)
+    )
+    resolved = sum(
+        1
+        for item in thread_nodes
+        if isinstance(item, Mapping) and item.get("isResolved") is True
+    )
+    changes_requested_at = max(
+        (
+            str(item.get("submittedAt"))
+            for item in reviews
+            if isinstance(item, Mapping)
+            and _upper_label(item.get("state"), "") == "CHANGES_REQUESTED"
+            and _timestamp(item.get("submittedAt")) is not None
+        ),
+        default="",
+    )
+    head_committed_at = ""
+    if commit_nodes:
+        head = commit_nodes[-1]
+        commit = head.get("commit") if isinstance(head, Mapping) else None
+        if isinstance(commit, Mapping) and _timestamp(commit.get("committedDate")):
+            head_committed_at = str(commit.get("committedDate"))
+    return {
+        "reviewResponseMetadataStatus": "available",
+        "reviewThreadSummary": {
+            "totalCount": total,
+            "resolvedCount": resolved,
+            "unresolvedCount": (
+                total - resolved if total is not None and page_complete else None
+            ),
+            "complete": page_complete,
+        },
+        "latestChangesRequestedAt": changes_requested_at or None,
+        "headCommittedAt": head_committed_at or None,
+    }
+
+
 def fetch_github_pr_lifecycle_payload(
     reference: Mapping[str, Any],
     *,
@@ -646,6 +830,15 @@ def fetch_github_pr_lifecycle_payload(
     payload = json.loads(result.stdout)
     if not isinstance(payload, dict):
         raise ValueError("GitHub PR lifecycle fetch must return a JSON object")
+    if _upper_label(payload.get("reviewDecision")) == "CHANGES_REQUESTED":
+        payload.update(
+            _fetch_github_review_response_metadata(
+                owner=owner,
+                repo_name=repo_name,
+                number=number,
+                timeout_seconds=timeout_seconds,
+            )
+        )
     return payload
 
 
@@ -820,7 +1013,16 @@ def validate_issue_fix_pr_lifecycle_monitor_packet(
             errors.append("checks log_output_captured must be false")
     else:
         errors.append("observation checks are required")
-
+    review_response = observation.get("review_response")
+    if not isinstance(review_response, Mapping):
+        errors.append("observation review_response is required")
+    else:
+        if review_response.get("raw_reviews_captured") is not False:
+            errors.append("review_response raw_reviews_captured must be false")
+        if review_response.get("raw_thread_comments_captured") is not False:
+            errors.append(
+                "review_response raw_thread_comments_captured must be false"
+            )
     transition = packet.get("transition")
     if not isinstance(transition, Mapping):
         errors.append("transition is required")
