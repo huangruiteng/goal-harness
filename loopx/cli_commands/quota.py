@@ -20,6 +20,7 @@ from ..quota import (
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
 from ..upgrade import resolve_codex_app_automation_rrule
 from ..control_plane.quota.turn_envelope import build_turn_envelope
+from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
 from ..control_plane.quota.scheduler_ack import (
     record_quota_scheduler_failure_for_decision,
 )
@@ -37,46 +38,6 @@ PrintPayload = Callable[
     None,
 ]
 RolloutEventAppender = Callable[..., dict[str, object]]
-
-
-def _bind_scheduler_followup_cli_routes(
-    payload: dict[str, object],
-    *,
-    registry_path: Path,
-    runtime_root: Path,
-) -> None:
-    """Keep the follow-up ACK on the registry/runtime that built the hint."""
-
-    scheduler_hint = payload.get("scheduler_hint")
-    if not isinstance(scheduler_hint, dict):
-        return
-    codex_app = scheduler_hint.get("codex_app")
-    if not isinstance(codex_app, dict):
-        return
-    for hint_name in ("ack_hint", "failure_hint"):
-        followup_hint = codex_app.get(hint_name)
-        if not isinstance(followup_hint, dict):
-            continue
-        cli_args = followup_hint.get("cli_args")
-        if not isinstance(cli_args, list) or not cli_args or cli_args[0] == "--registry":
-            continue
-        followup_hint["cli_args"] = [
-            "--registry",
-            str(registry_path.expanduser().resolve()),
-            "--runtime-root",
-            str(runtime_root.expanduser().resolve()),
-            *cli_args,
-        ]
-        followup_hint["route_binding"] = {
-            "schema_version": (
-                "scheduler_ack_cli_route_v0"
-                if hint_name == "ack_hint"
-                else "scheduler_failure_cli_route_v0"
-            ),
-            "source": "quota_cli_invocation",
-            "registry_bound": True,
-            "runtime_root_bound": True,
-        }
 
 
 def default_public_scan_root() -> str:
@@ -287,26 +248,16 @@ def handle_quota_command(
         if args.quota_command == "should-run":
             if not args.goal_id:
                 raise ValueError("`loopx quota should-run` requires --goal-id")
-            codex_app_rrule = str(args.codex_app_current_rrule or "").strip()
-            if not codex_app_rrule:
-                host_observation = resolve_codex_app_automation_rrule(
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
-                )
-                if host_observation.get("available") is True:
-                    codex_app_rrule = str(host_observation.get("rrule") or "")
-            payload = build_quota_should_run(
+            payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 available_capabilities=args.available_capabilities,
                 include_scheduler_detail=bool(args.include_scheduler_detail),
-                codex_app_current_rrule=codex_app_rrule,
-            )
-            _bind_scheduler_followup_cli_routes(
-                payload,
+                codex_app_current_rrule=args.codex_app_current_rrule,
                 registry_path=registry_path,
                 runtime_root=runtime_root,
+                host_observation_resolver=resolve_codex_app_automation_rrule,
             )
         elif args.quota_command == "monitor-poll":
             if not args.goal_id:

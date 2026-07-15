@@ -98,6 +98,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "Other agent or shell",
                 "purpose": "Use a CLI, task, automation, heartbeat, or scheduler hook; otherwise drive LoopX manually.",
             },
+            {
+                "command": "loopx turn plan --goal-id <goal-id> --agent-id <agent-id>",
+                "purpose": "Plan one governed external-host turn from live LoopX state without launching an agent or writing state.",
+            },
         ],
     },
     {
