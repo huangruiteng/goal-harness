@@ -1354,11 +1354,7 @@ def build_quota_should_run(
             recovery_allowed = False
             reason = str(quota["reason"])
         goal_boundary = _goal_boundary(registry_goal or item, item=item, agent_id=normalize_todo_claimed_by((agent_identity or {}).get("agent_id")), lark_event_inbox_urgency_projector=_project_lark_event_inbox_urgency)
-        workspace_guard = build_agent_workspace_guard(
-            item,
-            agent_identity,
-            agent_todo_summary=agent_todo_summary,
-        )
+        workspace_guard = None
         automation_prompt_upgrade = _automation_prompt_upgrade(
             item,
             goal_id=safe_goal_id,
@@ -1411,9 +1407,15 @@ def build_quota_should_run(
             scoped_user_gate_fallback, current_contract=work_lane_contract) or work_lane_contract
         work_lane_contract = lark_inbox_reply_due_work_lane_contract(goal_boundary, current_contract=work_lane_contract)
         inbox_reply_due = work_lane_contract_is_lark_inbox_reply_due(work_lane_contract)
+        work_lane_selected_todo = _selected_todo_projection(
+            agent_lane_next_action=None, work_lane_contract=work_lane_contract)
         if inbox_reply_due:
             task_orchestration_contract = capability_gate = capability_monitor_contract = None
             capability_monitor_fallback = scoped_user_gate_fallback = workspace_guard = None
+        else:
+            workspace_guard = build_agent_workspace_guard(
+                item, agent_identity, agent_todo_summary=agent_todo_summary,
+                selected_todo=work_lane_selected_todo)
         agent_frontier_id = (
             normalize_todo_claimed_by(agent_identity.get("agent_id"))
             if isinstance(agent_identity, dict)
@@ -1468,7 +1470,7 @@ def build_quota_should_run(
             candidate_should_run=bool(
                 normal_delivery_allowed or recovery_allowed or self_repair_allowed
             ),
-            capability_gate=capability_gate,
+            capability_gate=capability_gate, selected_todo=work_lane_selected_todo,
         )
         if boundary_projection_repair:
             stall_self_repair = boundary_projection_repair

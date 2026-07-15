@@ -242,16 +242,23 @@ def _peer_candidate_items(agent_todo_summary: dict[str, Any] | None) -> list[dic
 def _peer_work_requires_isolated_workspace(
     workspace_guard_policy: dict[str, Any],
     agent_todo_summary: dict[str, Any] | None,
+    *,
+    selected_todo: dict[str, Any] | None = None,
 ) -> bool:
     explicit = workspace_guard_policy.get("peer_independent_worktree_required")
     if explicit is not None:
         return explicit is True
-    candidates = _peer_candidate_items(agent_todo_summary)
-    if not candidates:
+    candidate = (
+        selected_todo
+        if isinstance(selected_todo, dict) and selected_todo
+        else next(iter(_peer_candidate_items(agent_todo_summary)), None)
+    )
+    if not isinstance(candidate, dict):
         return False
-    candidate = candidates[0]
     if candidate.get("required_write_scopes"):
         return True
+    if str(candidate.get("task_class") or "").strip().lower() == "continuous_monitor":
+        return False
     action_kind = str(candidate.get("action_kind") or "").strip().lower()
     return action_kind in PEER_WRITE_ACTION_KINDS or action_kind.startswith(
         tuple(f"{prefix}_" for prefix in PEER_WRITE_ACTION_KINDS)
@@ -263,6 +270,7 @@ def build_agent_workspace_guard(
     agent_identity: dict[str, Any] | None,
     *,
     agent_todo_summary: dict[str, Any] | None = None,
+    selected_todo: dict[str, Any] | None = None,
     current_path: Path | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
@@ -277,11 +285,15 @@ def build_agent_workspace_guard(
     if not _peer_work_requires_isolated_workspace(
         workspace_guard_policy,
         agent_todo_summary,
+        selected_todo=selected_todo,
     ):
         return None
     current_path = current_path or Path.cwd()
-    candidates = _peer_candidate_items(agent_todo_summary)
-    candidate = candidates[0] if candidates else {}
+    candidate = (
+        selected_todo
+        if isinstance(selected_todo, dict) and selected_todo
+        else next(iter(_peer_candidate_items(agent_todo_summary)), {})
+    )
     task_repository = normalize_todo_task_repository(candidate.get("task_repository"))
     current_workspace = ""
     repository_source = "goal.repo"

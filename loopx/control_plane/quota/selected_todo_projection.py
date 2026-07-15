@@ -15,6 +15,7 @@ SELECTED_TODO_COMPACT_FIELDS = (
     "task_class",
     "action_kind",
     "task_repository",
+    "required_write_scopes",
     "claimed_by",
     "blocks_agent",
     "excluded_agents",
