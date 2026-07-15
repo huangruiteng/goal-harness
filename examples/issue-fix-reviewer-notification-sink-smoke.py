@@ -18,6 +18,7 @@ from loopx.capabilities.issue_fix.reviewer_notification import (  # noqa: E402
     ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_INPUT_SCHEMA_VERSION,
     ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_RESULT_SCHEMA_VERSION,
     build_issue_fix_reviewer_notification_sinks_result,
+    with_reviewer_notification_state,
 )
 
 
@@ -245,6 +246,118 @@ def main() -> int:
     assert preview["external_writes_performed"] is False
     assert preview_runner.calls == []
     assert_public_safe(preview)
+
+    outside_window_config = fixture()
+    outside_window_config["delivery_policy"] = {
+        "timezone": "Asia/Shanghai",
+        "allowed_local_time": {"start": "09:00", "end": "21:00"},
+        "outside_window": "queue_without_send",
+    }
+    outside_window_runner = FakeSinkRunner()
+    queued = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=outside_window_config,
+        execute=True,
+        delivery_observed_at="2026-07-10T14:30:00Z",
+        runner=outside_window_runner,
+    )
+    assert queued["ok"] is True, queued
+    assert queued["status"] == "queued_until_window"
+    assert queued["external_writes_performed"] is False
+    assert queued["notification_verified"] is False
+    assert queued["queued_receipts"][0]["not_before"] == (
+        "2026-07-11T01:00:00Z"
+    )
+    assert outside_window_runner.calls == []
+    assert_public_safe(queued)
+
+    queued_retry_config = with_reviewer_notification_state(
+        outside_window_config,
+        (),
+        queued["queued_receipts"],
+    )
+    queued_retry_runner = FakeSinkRunner()
+    queued_retry = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=queued_retry_config,
+        execute=True,
+        delivery_observed_at="2026-07-10T14:35:00Z",
+        runner=queued_retry_runner,
+    )
+    assert queued_retry["ok"] is True, queued_retry
+    assert queued_retry["status"] == "already_queued"
+    assert queued_retry["queued_receipts"] == queued["queued_receipts"]
+    assert queued_retry_runner.calls == []
+    assert_public_safe(queued_retry)
+
+    inside_window_runner = FakeSinkRunner()
+    inside_window = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=outside_window_config,
+        execute=True,
+        delivery_observed_at="2026-07-10T02:30:00Z",
+        runner=inside_window_runner,
+    )
+    assert inside_window["status"] == "sent_verified", inside_window
+    assert len(inside_window_runner.calls) == 3
+
+    overnight_config = fixture()
+    overnight_config["delivery_policy"] = {
+        "timezone": "Asia/Shanghai",
+        "allowed_local_time": {"start": "21:00", "end": "09:00"},
+        "outside_window": "queue_without_send",
+    }
+    overnight_runner = FakeSinkRunner()
+    overnight = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=overnight_config,
+        execute=True,
+        delivery_observed_at="2026-07-10T15:30:00Z",
+        runner=overnight_runner,
+    )
+    assert overnight["status"] == "sent_verified", overnight
+    assert len(overnight_runner.calls) == 3
+
+    invalid_window_config = fixture()
+    invalid_window_config["delivery_policy"] = {
+        "timezone": "Asia/Shanghai",
+        "allowed_local_time": {"start": "9am", "end": "21:00"},
+        "outside_window": "queue_without_send",
+    }
+    invalid_window_runner = FakeSinkRunner()
+    invalid_window = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=invalid_window_config,
+        execute=True,
+        delivery_observed_at="2026-07-10T14:30:00Z",
+        runner=invalid_window_runner,
+    )
+    assert invalid_window["ok"] is False
+    assert invalid_window["blocker"] == (
+        "reviewer_notification_delivery_policy_invalid"
+    )
+    assert invalid_window_runner.calls == []
+    assert_public_safe(invalid_window)
 
     runner = FakeSinkRunner()
     sent = build_issue_fix_reviewer_notification_sinks_result(

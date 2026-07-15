@@ -28,7 +28,9 @@ from loopx.capabilities.issue_fix.cli import (  # noqa: E402
     _materialize_goal_reviewer_notification_lifecycle,
 )
 from loopx.capabilities.issue_fix.reviewer_notification import (  # noqa: E402
+    reviewer_notification_queue_from_state,
     reviewer_notification_receipts_from_state,
+    with_reviewer_notification_state,
     with_reviewer_notification_receipts,
 )
 from loopx.capabilities.issue_fix.pr_lifecycle import (  # noqa: E402
@@ -40,6 +42,7 @@ from loopx.capabilities.issue_fix.reviewer_recommendation import (  # noqa: E402
 from loopx.domain_packs.issue_fix import (  # noqa: E402
     default_issue_fix_domain_state_ledger_path,
     persist_issue_fix_reviewer_notification_receipts,
+    persist_issue_fix_reviewer_notification_state,
     upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
 
@@ -393,6 +396,36 @@ def main() -> int:
         assert with_secondary["secondary_notifications"]["receipts"]
         assert len(combined.lark_calls) == 3
         assert_public_safe(with_secondary)
+
+        windowed_sinks_input = json.loads(json.dumps(sinks_input))
+        windowed_sinks_input["delivery_policy"] = {
+            "timezone": "Asia/Shanghai",
+            "allowed_local_time": {"start": "09:00", "end": "21:00"},
+            "outside_window": "queue_without_send",
+        }
+        trusted_clock_runner = FakeCombinedRunner(
+            FakeGitHubRunner(
+                before=metadata(),
+                after=metadata(requested=["service-owner"]),
+            )
+        )
+        trusted_clock = build_issue_fix_reviewer_request_packet(
+            repo_path=path,
+            url="https://github.com/owner/repo/pull/42",
+            base_ref="main",
+            notification_sinks_input=windowed_sinks_input,
+            execute=True,
+            generated_at="2026-07-10T02:30:00Z",
+            notification_delivery_observed_at="2026-07-10T14:30:00Z",
+            runner=trusted_clock_runner,
+        )
+        assert trusted_clock["generated_at"] == "2026-07-10T02:30:00Z"
+        assert trusted_clock["secondary_notification_status"] == (
+            "queued_until_window"
+        )
+        assert trusted_clock["secondary_notifications"]["queued_receipts"]
+        assert trusted_clock_runner.lark_calls == []
+        assert_public_safe(trusted_clock)
 
         fallback_sink_input = json.loads(json.dumps(sinks_input))
         fallback_sink_input["sinks"][0]["reviewer_identities"] = {
@@ -1282,6 +1315,59 @@ def main() -> int:
         assert repeated_receipt_write["status"] == "unchanged"
         assert repeated_receipt_write["write_performed"] is False
         assert_public_safe(restarted)
+
+        queued_key = "sha256:" + "b" * 64
+        queued_receipt = {
+            "schema_version": "issue_fix_reviewer_notification_queue_receipt_v0",
+            "idempotency_key": queued_key,
+            "sink_kind": "lark_chat",
+            "reviewer_handles": ["@map-owner"],
+            "queued_at": "2026-07-10T14:30:00Z",
+            "not_before": "2026-07-11T01:00:00Z",
+            "timezone": "Asia/Shanghai",
+            "allowed_local_time": {"start": "09:00", "end": "21:00"},
+            "status": "queued",
+        }
+        queue_write = persist_issue_fix_reviewer_notification_state(
+            lifecycle_path,
+            stored_lifecycle,
+            receipts=[],
+            queued_receipts=[queued_receipt],
+        )
+        assert queue_write["write_performed"] is True, queue_write
+        stored_with_queue = json.loads(
+            lifecycle_path.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert reviewer_notification_queue_from_state(stored_with_queue) == [
+            queued_receipt
+        ]
+        restored_config = with_reviewer_notification_state(
+            goal_config,
+            reviewer_notification_receipts_from_state(stored_with_queue),
+            reviewer_notification_queue_from_state(stored_with_queue),
+        )
+        assert restored_config["queued_receipts"] == [queued_receipt]
+        repeated_queue_write = persist_issue_fix_reviewer_notification_state(
+            lifecycle_path,
+            stored_with_queue,
+            receipts=[],
+            queued_receipts=[queued_receipt],
+        )
+        assert repeated_queue_write["status"] == "unchanged"
+        assert repeated_queue_write["write_performed"] is False
+
+        queue_clear = persist_issue_fix_reviewer_notification_state(
+            lifecycle_path,
+            stored_with_queue,
+            receipts=[queued_key],
+            queued_receipts=[],
+        )
+        assert queue_clear["write_performed"] is True, queue_clear
+        stored_after_send = json.loads(
+            lifecycle_path.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert queued_key in stored_after_send["reviewer_notification_receipts"]
+        assert stored_after_send["reviewer_notification_queue"] == []
     finally:
         for attempt in range(10):
             try:
