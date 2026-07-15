@@ -149,8 +149,8 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         consumer_action="route one live LoopX decision without host or state side effects",
         qualification_policy="absolute_hot_path",
         cold_path=(
-            "--include-transaction-detail, TurnEnvelope detail_ref commands, "
-            "and full quota should-run decision"
+            "--include-transaction-detail, turn run-once, TurnEnvelope detail_ref "
+            "commands, and full quota should-run decision"
         ),
         semantic_json_keys=("route", "turn_envelope", "effects", "boundary"),
         markdown_anchor="# LoopX Turn Plan",
@@ -381,6 +381,16 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         markdown_anchor=None,
         max_chars={"json": 13_000},
         max_lines={"json": 360},
+    ),
+    CliOutputModeVariantSpec(
+        variant_id="loopx_turn_run_once_preview",
+        parent_surface_id="loopx_turn_plan",
+        command="turn run-once",
+        output_formats=("json", "markdown"),
+        semantic_json_keys=("status", "host", "effects", "resume_turn_key"),
+        markdown_anchor="# LoopX Turn Run Once",
+        max_chars={"json": 3_000, "markdown": 350},
+        max_lines={"json": 90, "markdown": 12},
     ),
     CliOutputModeVariantSpec(
         variant_id="status_task_graph_detail",

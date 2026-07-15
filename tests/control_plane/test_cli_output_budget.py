@@ -428,6 +428,22 @@ def _mode_variant_commands(
             str(project),
             "--include-transaction-detail",
         ],
+        "loopx_turn_run_once_preview": common
+        + [
+            "turn",
+            "run-once",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_IDS[0],
+            "--project",
+            str(project),
+            "--host-command-json",
+            '["python3","-c","raise SystemExit(9)"]',
+            "--scan-root",
+            str(project),
+            "--no-global-sync",
+        ],
         "status_task_graph_detail": common
         + [
             "status",
@@ -501,6 +517,7 @@ def test_manifest_covers_the_declared_agent_facing_surface_set() -> None:
         "quota_should_run_scheduler_detail",
         "quota_should_run_turn_envelope",
         "loopx_turn_plan_transaction_detail",
+        "loopx_turn_run_once_preview",
         "status_task_graph_detail",
         "review_packet_full",
         "heartbeat_prompt_brief",

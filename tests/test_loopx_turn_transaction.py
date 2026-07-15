@@ -135,6 +135,16 @@ def test_receipt_rejects_turn_lineage_drift() -> None:
             ["host_execute", "typed_result", "validation"],
             "durable_writeback",
         ),
+        (
+            LoopXTurnResultKind.QUOTA_SPEND_FAILED,
+            [
+                "host_execute",
+                "typed_result",
+                "validation",
+                "durable_writeback",
+            ],
+            "quota_spend",
+        ),
     ],
 )
 def test_typed_failure_stops_at_its_declared_phase(
