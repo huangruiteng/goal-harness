@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ...benchmark_core import compact_run_permission_policy_for_quota
@@ -68,7 +70,12 @@ def quota_execution_profile_boundary_summary(value: Any) -> dict[str, Any] | Non
     return compact or None
 
 
-def goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def goal_boundary(
+    goal: dict[str, Any],
+    item: dict[str, Any] | None = None,
+    *,
+    lark_event_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     boundary: dict[str, Any] = {}
     adapter_kind = goal.get("adapter_kind")
     adapter_status = goal.get("adapter_status")
@@ -148,11 +155,34 @@ def goal_boundary(goal: dict[str, Any], item: dict[str, Any] | None = None) -> d
                 ".",
             ]
         )
-        boundary.setdefault("capabilities", {})["lark_event_inbox"] = {
+        inbox_capability: dict[str, Any] = {
             "enabled": True,
             "config_pointer_registered": bool(lark_event_inbox.get("config_path")),
             "drain_command": drain_command,
         }
+        project = Path(str(goal.get("repo") or "")).expanduser()
+        config_path = str(lark_event_inbox.get("config_path") or "").strip()
+        if project.is_dir() and config_path and lark_event_inbox_urgency_projector:
+            try:
+                inbox_capability["urgency"] = lark_event_inbox_urgency_projector(
+                    project=project,
+                    config_path=config_path,
+                )
+            except (OSError, ValueError):
+                inbox_capability["urgency"] = {
+                    "schema_version": "lark_event_inbox_urgency_v0",
+                    "enabled": True,
+                    "projection_status": "unavailable",
+                    "local_private_content_returned": False,
+                }
+        elif config_path:
+            inbox_capability["urgency"] = {
+                "schema_version": "lark_event_inbox_urgency_v0",
+                "enabled": True,
+                "projection_status": "unavailable",
+                "local_private_content_returned": False,
+            }
+        boundary.setdefault("capabilities", {})["lark_event_inbox"] = inbox_capability
     if goal.get("next_probe"):
         boundary["next_probe"] = str(goal.get("next_probe"))
     if isinstance(goal.get("explore_graph"), dict):
