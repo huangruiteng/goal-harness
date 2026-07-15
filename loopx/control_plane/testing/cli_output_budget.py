@@ -143,6 +143,28 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         max_json_growth_chars_per_unit=400,
     ),
     CliOutputBudgetSpec(
+        surface_id="agent_loop_shadow_tick",
+        command="agent-loop shadow-tick",
+        owner="experimental agent-loop driver",
+        consumer_action="route one live LoopX decision without host or state side effects",
+        qualification_policy="absolute_hot_path",
+        cold_path="TurnEnvelope detail_ref commands and full quota should-run decision",
+        semantic_json_keys=("route", "turn_envelope", "effects", "boundary"),
+        markdown_anchor="# LoopX Agent-Loop Shadow Tick",
+        max_chars={
+            "small": {"json": 12_000, "markdown": 300},
+            "crowded": {"json": 12_000, "markdown": 300},
+            "multi_agent": {"json": 12_000, "markdown": 300},
+        },
+        max_lines={
+            "small": {"json": 320, "markdown": 12},
+            "crowded": {"json": 320, "markdown": 12},
+            "multi_agent": {"json": 320, "markdown": 12},
+        },
+        scale_axis="todo_count",
+        max_json_growth_chars_per_unit=60,
+    ),
+    CliOutputBudgetSpec(
         surface_id="status",
         command="status --goal-id",
         owner="operator and agent status",

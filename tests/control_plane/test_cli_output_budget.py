@@ -241,6 +241,17 @@ def _surface_commands(
             "--scan-root",
             str(project),
         ],
+        "agent_loop_shadow_tick": common
+        + [
+            "agent-loop",
+            "shadow-tick",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_IDS[0],
+            "--scan-root",
+            str(project),
+        ],
         "status": common
         + [
             "status",
@@ -459,6 +470,7 @@ def test_manifest_covers_the_declared_agent_facing_surface_set() -> None:
         "start_goal_guided",
         "bootstrap_command_pack",
         "quota_should_run",
+        "agent_loop_shadow_tick",
         "status",
         "diagnose",
         "review_packet_handoff_only",
