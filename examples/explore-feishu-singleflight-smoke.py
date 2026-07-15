@@ -15,11 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx.cli_commands import explore as explore_cli  # noqa: E402
-from loopx.presentation.sinks.lark.explore_results import (  # noqa: E402
-    sync_issue_fix_explore_on_material_change,
-)
 from loopx.presentation.sinks.lark.explore_singleflight import (  # noqa: E402
     explore_feishu_sync_singleflight,
+    singleflight_issue_fix_material_sync,
 )
 
 
@@ -38,12 +36,6 @@ def main() -> None:
         config_path.parent.mkdir(parents=True)
         sentinel = '{"sentinel":"unchanged"}\n'
         config_path.write_text(sentinel, encoding="utf-8")
-
-        runner_calls: list[list[str]] = []
-
-        def runner(args, cwd=None, timeout=None):
-            runner_calls.append(list(args))
-            raise AssertionError("busy sync must fail before connector calls")
 
         with explore_feishu_sync_singleflight(
             config_path=config_path, execute=True
@@ -66,21 +58,54 @@ def main() -> None:
             ) as dry_run_acquired:
                 assert dry_run_acquired is True
 
-            material = sync_issue_fix_explore_on_material_change(
+            with explore_feishu_sync_singleflight(
+                config_path=config_path, execute=True
+            ) as nested_acquired:
+                assert nested_acquired is True
+
+            nested_calls: list[str] = []
+
+            @singleflight_issue_fix_material_sync(lambda _path: config_path)
+            def nested_material(**_kwargs):
+                nested_calls.append("material")
+                return {"ok": True, "status": "synced"}
+
+            material = nested_material(
                 registry_path=registry_path,
                 goal_id="fixture-goal",
                 execute=True,
-                runner=runner,
             )
-            assert material["status"] == "sync_busy", material
-            assert material["retryable"] is True, material
-            assert material["external_write_performed"] is False, material
+            assert material == {"ok": True, "status": "synced"}, material
+            assert nested_calls == ["material"], nested_calls
 
             captured: list[dict[str, object]] = []
             original_load_registry = explore_cli.load_registry
             original_resolve_runtime_root = explore_cli.resolve_runtime_root
+            original_projection_for = explore_cli._projection_for
+            original_target_config = explore_cli._target_config
+            original_sync_results = explore_cli.sync_explore_results_to_lark
+            original_read_config = explore_cli.read_lark_explore_local_config
+            original_sync_visual = explore_cli.sync_explore_visual_to_lark
+            direct_calls: list[str] = []
             explore_cli.load_registry = lambda _path: {}
             explore_cli.resolve_runtime_root = lambda _registry, _arg: root
+            explore_cli._projection_for = lambda _args, **_kwargs: {
+                "schema_version": "loopx_explore_result_projection_v0",
+                "goal_id": "fixture-goal",
+                "nodes": [],
+                "edges": [],
+                "findings": [],
+            }
+            explore_cli._target_config = lambda _args, **_kwargs: object()
+            explore_cli.sync_explore_results_to_lark = lambda *_args, **_kwargs: (
+                direct_calls.append("rows")
+                or {"ok": True, "status": "synced", "execute": True}
+            )
+            explore_cli.read_lark_explore_local_config = lambda _path: {}
+            explore_cli.sync_explore_visual_to_lark = lambda *_args, **_kwargs: (
+                direct_calls.append("visual")
+                or {"ok": True, "status": "published", "execute": True}
+            )
             try:
                 result = explore_cli.handle_explore_command(
                     argparse.Namespace(
@@ -88,6 +113,8 @@ def main() -> None:
                         explore_command="feishu-sync",
                         config_path=str(config_path),
                         execute=True,
+                        goal_id="",
+                        sink_visibility="owner-only",
                     ),
                     registry_path=registry_path,
                     runtime_root_arg=None,
@@ -99,13 +126,16 @@ def main() -> None:
             finally:
                 explore_cli.load_registry = original_load_registry
                 explore_cli.resolve_runtime_root = original_resolve_runtime_root
-            assert result == 1, result
-            assert captured[0]["status"] == "sync_busy", captured
-            assert captured[0]["visual_sync"]["status"] == (
-                "not_attempted_sync_busy"
-            ), captured
+                explore_cli._projection_for = original_projection_for
+                explore_cli._target_config = original_target_config
+                explore_cli.sync_explore_results_to_lark = original_sync_results
+                explore_cli.read_lark_explore_local_config = original_read_config
+                explore_cli.sync_explore_visual_to_lark = original_sync_visual
+            assert result == 0, result
+            assert captured[0]["status"] == "synced", captured
+            assert captured[0]["visual_sync"]["status"] == "published", captured
+            assert direct_calls == ["rows", "visual"], direct_calls
             assert config_path.read_text(encoding="utf-8") == sentinel
-            assert runner_calls == []
 
         with explore_feishu_sync_singleflight(
             config_path=config_path, execute=True

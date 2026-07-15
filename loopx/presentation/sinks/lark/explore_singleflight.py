@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -9,23 +10,42 @@ from typing import Any
 from ....file_lock import try_exclusive_file_lock
 
 
+_held_sync_targets: ContextVar[frozenset[str]] = ContextVar(
+    "loopx_explore_feishu_sync_targets",
+    default=frozenset(),
+)
+
+
 @contextmanager
 def explore_feishu_sync_singleflight(
     *, config_path: Path, execute: bool
 ) -> Iterator[bool]:
-    """Fail fast when another process is already delivering this board.
+    """Fail fast when another execution context is delivering this board.
 
     Dry-runs never contend because they perform no remote or config writes.
-    The lock target is local-private and only the acquired/busy state enters
-    public packets.
+    Nested calls in the current context reuse an exact same-target lock; other
+    contexts and processes still contend. The lock target is local-private and
+    only the acquired/busy state enters public packets.
     """
 
     if not execute:
         yield True
         return
     target = config_path.with_name(f"{config_path.name}.feishu-sync")
+    target_key = str(target.expanduser().resolve())
+    held_targets = _held_sync_targets.get()
+    if target_key in held_targets:
+        yield True
+        return
     with try_exclusive_file_lock(target) as lock_path:
-        yield lock_path is not None
+        if lock_path is None:
+            yield False
+            return
+        token = _held_sync_targets.set(held_targets | {target_key})
+        try:
+            yield True
+        finally:
+            _held_sync_targets.reset(token)
 
 
 def explore_feishu_sync_busy_packet(
