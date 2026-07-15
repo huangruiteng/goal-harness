@@ -137,3 +137,30 @@ def test_fetch_metadata_reads_compact_review_response_without_bodies() -> None:
     encoded = json.dumps(payload, sort_keys=True).lower()
     assert "body" not in encoded
     assert "comment" not in encoded
+
+
+def test_review_response_fetch_timeout_fails_closed() -> None:
+    lifecycle = _changes_requested_payload()
+    lifecycle.pop("reviewResponseMetadataStatus")
+    lifecycle.pop("reviewThreadSummary")
+    lifecycle.pop("latestChangesRequestedAt")
+    lifecycle.pop("headCommittedAt")
+    responses = [
+        subprocess.CompletedProcess([], 0, json.dumps(lifecycle), ""),
+        subprocess.TimeoutExpired(["gh", "api", "graphql"], 5),
+    ]
+
+    with patch(
+        "loopx.capabilities.issue_fix.pr_lifecycle.subprocess.run",
+        side_effect=responses,
+    ):
+        payload = fetch_github_pr_lifecycle_payload(
+            {"repo": "example/project", "number": 3258}, timeout_seconds=5
+        )
+
+    assert payload["reviewResponseMetadataStatus"] == "unavailable"
+    packet = build_issue_fix_pr_lifecycle_monitor_packet(
+        url="https://github.com/example/project/pull/3258",
+        provider_payload=payload,
+    )
+    assert packet["transition"]["action_kind"] == "issue_fix_review_changes_replan"

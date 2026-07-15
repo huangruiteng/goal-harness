@@ -699,25 +699,28 @@ def _decide_transition(observation: Mapping[str, Any]) -> dict[str, Any]:
 def _fetch_github_review_response_metadata(
     *, owner: str, repo_name: str, number: int, timeout_seconds: int
 ) -> dict[str, Any]:
-    result = subprocess.run(
-        [
-            "gh",
-            "api",
-            "graphql",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={repo_name}",
-            "-F",
-            f"number={number}",
-            "-f",
-            f"query={_REVIEW_RESPONSE_QUERY}",
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout_seconds,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"name={repo_name}",
+                "-F",
+                f"number={number}",
+                "-f",
+                f"query={_REVIEW_RESPONSE_QUERY}",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"reviewResponseMetadataStatus": "unavailable"}
     if result.returncode != 0:
         return {"reviewResponseMetadataStatus": "unavailable"}
     try:
