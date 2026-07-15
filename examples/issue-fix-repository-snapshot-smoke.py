@@ -140,6 +140,32 @@ def main() -> int:
                 },
             ],
         )
+        supplement = root / "supplement.json"
+        _write_json(
+            supplement,
+            {
+                "schema_version": "issue_fix_metrics_supplement_v0",
+                "counts": {},
+                "issue_close_activity": [
+                    {
+                        "schema_version": "issue_fix_issue_close_activity_v0",
+                        "issue_ref": "issues_42",
+                        "events": [],
+                    },
+                    {
+                        "schema_version": "issue_fix_issue_close_activity_v0",
+                        "issue_ref": "issues_44",
+                        "events": [],
+                    },
+                    {
+                        "schema_version": "issue_fix_issue_close_activity_v0",
+                        "issue_ref": "issues_45",
+                        "events": [],
+                    },
+                ],
+                "coverage": {},
+            },
+        )
         command = [
             sys.executable,
             "-m",
@@ -156,6 +182,8 @@ def main() -> int:
             "public-fixture/widgets",
             "--repository-baseline-json",
             str(baseline),
+            "--supplement-json",
+            str(supplement),
             "--fetch-public-github",
             "--retain-material-snapshot",
             "--generated-at",
@@ -176,8 +204,20 @@ def main() -> int:
         assert snapshot["open_issues"] == 12, packet
         assert snapshot["open_pull_requests"] == 5, packet
         assert snapshot["flow_since_baseline"]["issues_closed"] == 3, packet
-        assert len(snapshot["issue_states"]) == 2, packet
+        assert [item["issue_ref"] for item in snapshot["issue_states"]] == [
+            "issues_42",
+            "issues_43",
+            "issues_44",
+            "issues_45",
+        ], packet
         assert len(snapshot["pull_request_states"]) == 2, packet
+        assert packet["source_summary"] == {
+            "feasibility_issue_refs": 2,
+            "supplement_issue_refs": 3,
+            "issue_refs_collected": 4,
+            "pr_lifecycle_refs": 2,
+        }, packet
+        assert packet["source_contract"]["reads_metrics_supplement"] is True, packet
         assert packet["retention"]["write_performed"] is True, packet
         assert packet["raw_provider_payload_captured"] is False, packet
         assert packet["credentials_captured"] is False, packet

@@ -723,6 +723,14 @@ def register_issue_fix_commands(
     snapshot_parser.add_argument("--repo", required=True)
     snapshot_parser.add_argument("--repository-baseline-json", required=True)
     snapshot_parser.add_argument(
+        "--supplement-json",
+        default=None,
+        help=(
+            "Optional public-safe issue_fix_metrics_supplement_v0 whose "
+            "issue-close activity refs must be included in current-state collection."
+        ),
+    )
+    snapshot_parser.add_argument(
         "--fetch-public-github",
         action="store_true",
         help="Explicitly read bounded public repository metadata through gh.",
@@ -1482,6 +1490,17 @@ def handle_issue_fix_command(
         elif args.issue_fix_command == "repository-snapshot":
             if not args.fetch_public_github:
                 raise ValueError("repository-snapshot requires --fetch-public-github")
+            if sum(
+                value == "-"
+                for value in (
+                    args.repository_baseline_json,
+                    args.supplement_json,
+                )
+                if value is not None
+            ) > 1:
+                raise ValueError(
+                    "only one repository-snapshot JSON input may read from stdin"
+                )
             project = Path(args.project).expanduser()
             payload = collect_public_github_repository_snapshot(
                 repo=args.repo,
@@ -1495,6 +1514,11 @@ def handle_issue_fix_command(
                     default_issue_fix_domain_state_ledger_path(
                         project=project, goal_id=args.goal_id
                     )
+                ),
+                metrics_supplement=(
+                    _load_json_object(args.supplement_json)
+                    if args.supplement_json
+                    else None
                 ),
                 generated_at=generated_at,
                 timeout_seconds=args.fetch_timeout_seconds,
