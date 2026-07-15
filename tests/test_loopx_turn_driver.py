@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from loopx.cli import main as cli_main
-from loopx.control_plane.turn_driver import LoopXTurnRoute, build_loopx_turn_plan
+from loopx.control_plane.turn_driver import (
+    LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+    LoopXTurnRoute,
+    build_loopx_turn_plan,
+)
 from loopx.control_plane.quota.live_decision import bind_scheduler_followup_cli_routes
 
 
@@ -66,6 +70,22 @@ def test_turn_plan_projects_ready_route_without_side_effects() -> None:
     assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
     assert payload["route"]["would_invoke_host"] is True
     assert payload["route"]["host_invocation_allowed"] is False
+    assert payload["session"] == {
+        "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+        "action": "start_new",
+    }
+    assert payload["transaction"]["status"] == "planned"
+    assert payload["transaction"]["phases"] == [
+        "host_execute",
+        "typed_result",
+        "validation",
+        "durable_writeback",
+        "quota_spend",
+        "scheduler_apply",
+        "scheduler_ack",
+    ]
+    assert payload["transaction"]["receipt_seed"]["status"] == "not_executed"
+    assert payload["transaction"]["receipt_seed"]["next_phase"] == "host_execute"
     assert payload["turn_envelope"] == envelope
     assert payload["effects"] == {
         "host_invoked": False,
@@ -85,6 +105,69 @@ def test_turn_help_omits_legacy_agent_loop_entrypoint() -> None:
     assert exit_code == 0
     assert "agent-loop" not in output.getvalue()
     assert "turn" in output.getvalue()
+
+
+def test_turn_plan_resumes_only_a_matching_session_binding() -> None:
+    payload = build_loopx_turn_plan(
+        _envelope(),
+        host="codex-cli",
+        execution_mode="interactive-visible",
+        session_binding={
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "goal_id": "fixture-goal",
+            "agent_id": "codex-fixture",
+            "todo_id": "todo_fixture0001",
+        },
+    )
+
+    assert payload["ok"] is True
+    assert payload["session"]["action"] == "resume"
+    assert payload["boundary"]["opaque_session_handle_omitted"] is True
+
+
+def test_turn_plan_rejects_session_binding_identity_drift() -> None:
+    payload = build_loopx_turn_plan(
+        _envelope(),
+        host="codex-cli",
+        execution_mode="interactive-visible",
+        session_binding={
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "goal_id": "another-goal",
+            "agent_id": "codex-fixture",
+            "todo_id": "todo_fixture0001",
+        },
+    )
+
+    assert payload["ok"] is False
+    assert payload["route"]["kind"] == LoopXTurnRoute.CONTRACT_ERROR.value
+    assert payload["route"]["would_invoke_host"] is False
+    assert payload["session"]["action"] == "reject"
+    assert payload["session"]["binding_status"] == "identity_mismatch"
+    assert payload["transaction"]["status"] == "not_applicable"
+    assert payload["effects"]["host_invoked"] is False
+
+
+def test_turn_plan_transaction_key_is_stable_and_todo_scoped() -> None:
+    first = build_loopx_turn_plan(
+        _envelope(),
+        host="generic-cli",
+        execution_mode="isolated-headless",
+    )
+    repeated = build_loopx_turn_plan(
+        _envelope(),
+        host="generic-cli",
+        execution_mode="isolated-headless",
+    )
+    changed_envelope = _envelope()
+    changed_envelope["action"]["selected_todo"]["todo_id"] = "todo_fixture0002"
+    changed = build_loopx_turn_plan(
+        changed_envelope,
+        host="generic-cli",
+        execution_mode="isolated-headless",
+    )
+
+    assert first["transaction"]["turn_key"] == repeated["transaction"]["turn_key"]
+    assert first["transaction"]["turn_key"] != changed["transaction"]["turn_key"]
 
 
 @pytest.mark.parametrize(
@@ -144,6 +227,9 @@ def test_turn_plan_projects_non_run_routes(
 
     assert payload["route"]["kind"] == expected.value
     assert payload["route"]["would_invoke_host"] is False
+    assert payload["session"]["action"] == "none"
+    assert payload["transaction"]["status"] == "not_applicable"
+    assert payload["transaction"]["phases"] == []
 
 
 def test_turn_plan_fails_closed_on_action_signature_drift() -> None:
@@ -180,9 +266,7 @@ def test_scheduler_followup_binding_preserves_turn_lineage(
 ) -> None:
     payload = {
         "scheduler_hint": {
-            "codex_app": {
-                "ack_hint": {"cli_args": ["quota", "scheduler-ack-current"]}
-            }
+            "codex_app": {"ack_hint": {"cli_args": ["quota", "scheduler-ack-current"]}}
         }
     }
 
@@ -237,7 +321,10 @@ def _write_live_fixture(root: Path) -> tuple[Path, Path, Path]:
                         "status": "active",
                         "repo": str(project),
                         "state_file": str(state.relative_to(project)),
-                        "adapter": {"kind": "fixture_v0", "status": "connected-delivery"},
+                        "adapter": {
+                            "kind": "fixture_v0",
+                            "status": "connected-delivery",
+                        },
                         "quota": {"compute": 1.0, "window_hours": 24},
                         "coordination": {
                             "agent_model": "peer_v1",
@@ -286,6 +373,7 @@ def test_turn_cli_consumes_live_state_without_writes(
                 "codex-fixture",
                 "--scan-root",
                 str(project),
+                "--include-transaction-detail",
             ]
         )
 
@@ -293,6 +381,70 @@ def test_turn_cli_consumes_live_state_without_writes(
     after = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
     assert exit_code == 0
     assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
+    assert payload["session"]["action"] == "start_new"
     assert payload["turn_envelope"]["action_signature"]["matches"] is True
     assert payload["effects"]["state_written"] is False
     assert before == after
+
+
+def test_turn_cli_omits_transaction_detail_by_default(tmp_path: Path) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "plan",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--scan-root",
+                str(project),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0
+    assert "session" not in payload
+    assert "transaction" not in payload
+    assert "opaque_session_handle_omitted" not in payload["boundary"]
+
+
+def test_turn_cli_requires_complete_resume_identity(tmp_path: Path) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "plan",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--resume-goal-id",
+                "loopx-turn-fixture",
+                "--scan-root",
+                str(project),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert "requires --resume-goal-id" in payload["error"]

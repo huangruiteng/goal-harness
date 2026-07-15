@@ -4,8 +4,11 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any
 
+from .transaction import build_loopx_turn_transaction_plan
+
 
 LOOPX_TURN_PLAN_SCHEMA_VERSION = "loopx_turn_plan_v0"
+LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION = "loopx_turn_session_binding_v0"
 TURN_ENVELOPE_SCHEMA_VERSION = "loopx_turn_envelope_v0"
 SUPPORTED_HOSTS = {"codex-cli", "claude-code", "generic-cli"}
 SUPPORTED_EXECUTION_MODES = {"interactive-visible", "isolated-headless"}
@@ -77,11 +80,76 @@ def _typed_route(envelope: Mapping[str, Any]) -> LoopXTurnRoute:
     return LoopXTurnRoute.BLOCKED
 
 
+def _turn_lineage(envelope: Mapping[str, Any]) -> dict[str, str]:
+    action = _mapping(envelope.get("action"))
+    selected_todo = _mapping(action.get("selected_todo"))
+    signature = _mapping(envelope.get("action_signature"))
+    return {
+        "goal_id": str(envelope.get("goal_id") or ""),
+        "agent_id": str(envelope.get("agent_id") or ""),
+        "todo_id": str(selected_todo.get("todo_id") or ""),
+        "action_hash": str(signature.get("source_hash") or ""),
+    }
+
+
+def _session_plan(
+    *,
+    route: LoopXTurnRoute,
+    lineage: Mapping[str, str],
+    session_binding: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], str | None]:
+    host_route = route in {
+        LoopXTurnRoute.READY_FOR_HOST,
+        LoopXTurnRoute.REPAIR_REQUIRED,
+        LoopXTurnRoute.REPLAN_REQUIRED,
+    }
+    if not host_route:
+        return {
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "action": "none",
+            "binding_status": "not_applicable",
+        }, None
+    if not all(lineage.values()):
+        return {
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "action": "reject",
+            "binding_status": "missing_turn_lineage",
+        }, "host-bound routes require goal, agent, todo, and action-hash lineage"
+
+    binding = dict(session_binding or {})
+    if not binding:
+        return {
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "action": "start_new",
+        }, None
+    if binding.get("schema_version") != LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION:
+        return {
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "action": "reject",
+            "binding_status": "unsupported_schema",
+        }, "unsupported LoopX Turn session binding schema"
+
+    identity_fields = ("goal_id", "agent_id", "todo_id")
+    actual = {field: str(binding.get(field) or "") for field in identity_fields}
+    expected = {field: lineage[field] for field in identity_fields}
+    if actual != expected:
+        return {
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "action": "reject",
+            "binding_status": "identity_mismatch",
+        }, "session binding does not match the current goal, agent, and todo"
+    return {
+        "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+        "action": "resume",
+    }, None
+
+
 def build_loopx_turn_plan(
     turn_envelope: Mapping[str, Any],
     *,
     host: str,
     execution_mode: str,
+    session_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project a TurnEnvelope into a typed, side-effect-free host decision."""
 
@@ -92,6 +160,14 @@ def build_loopx_turn_plan(
 
     envelope = dict(turn_envelope)
     route = _typed_route(envelope)
+    lineage = _turn_lineage(envelope)
+    session, session_error = _session_plan(
+        route=route,
+        lineage=lineage,
+        session_binding=session_binding,
+    )
+    if session_error:
+        route = LoopXTurnRoute.CONTRACT_ERROR
     action = _mapping(envelope.get("action"))
     selected_todo = _mapping(action.get("selected_todo"))
     would_invoke_host = route in {
@@ -108,6 +184,7 @@ def build_loopx_turn_plan(
             "execution_mode": execution_mode,
             "explicit_isolation": execution_mode == "isolated-headless",
         },
+        "session": session,
         "route": {
             "schema_version": "loopx_turn_route_v0",
             "kind": route.value,
@@ -117,6 +194,13 @@ def build_loopx_turn_plan(
             "selected_todo": selected_todo or None,
         },
         "turn_envelope": envelope,
+        "transaction": build_loopx_turn_transaction_plan(
+            planned=would_invoke_host,
+            lineage=lineage,
+            host=host,
+            execution_mode=execution_mode,
+            session_action=str(session.get("action") or "none"),
+        ),
         "effects": {
             "host_invoked": False,
             "state_written": False,
@@ -127,5 +211,7 @@ def build_loopx_turn_plan(
             "read_only": True,
             "requires_explicit_execute_surface": True,
             "preserves_turn_envelope": True,
+            "opaque_session_handle_omitted": True,
         },
+        **({"error": session_error} if session_error else {}),
     }
