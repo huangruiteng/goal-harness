@@ -149,7 +149,14 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         consumer_action="route one live LoopX decision without host or state side effects",
         qualification_policy="absolute_hot_path",
         cold_path="TurnEnvelope detail_ref commands and full quota should-run decision",
-        semantic_json_keys=("route", "turn_envelope", "effects", "boundary"),
+        semantic_json_keys=(
+            "route",
+            "session",
+            "transaction",
+            "turn_envelope",
+            "effects",
+            "boundary",
+        ),
         markdown_anchor="# LoopX Turn Plan",
         max_chars={
             "small": {"json": 12_000, "markdown": 300},

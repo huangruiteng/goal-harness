@@ -4,7 +4,10 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
-from ..control_plane.turn_driver import build_loopx_turn_plan
+from ..control_plane.turn_driver import (
+    LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+    build_loopx_turn_plan,
+)
 from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
@@ -50,6 +53,18 @@ def register_turn_commands(
         "--execution-mode",
         choices=["interactive-visible", "isolated-headless"],
         default="interactive-visible",
+    )
+    plan.add_argument(
+        "--resume-goal-id",
+        help="Goal identity bound to an available opaque host session.",
+    )
+    plan.add_argument(
+        "--resume-agent-id",
+        help="Agent identity bound to an available opaque host session.",
+    )
+    plan.add_argument(
+        "--resume-todo-id",
+        help="Todo identity bound to an available opaque host session.",
     )
     plan.add_argument(
         "--available-capability",
@@ -125,10 +140,32 @@ def handle_turn_command(
             runtime_root=runtime_root,
             route_source="loopx_turn_plan",
         )
+        resume_identity = {
+            "goal_id": args.resume_goal_id,
+            "agent_id": args.resume_agent_id,
+            "todo_id": args.resume_todo_id,
+        }
+        supplied_resume_fields = [
+            field for field, value in resume_identity.items() if value is not None
+        ]
+        if supplied_resume_fields and len(supplied_resume_fields) != len(
+            resume_identity
+        ):
+            raise ValueError(
+                "resume planning requires --resume-goal-id, --resume-agent-id, "
+                "and --resume-todo-id together"
+            )
+        session_binding = None
+        if supplied_resume_fields:
+            session_binding = {
+                "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+                **resume_identity,
+            }
         payload = build_loopx_turn_plan(
             build_turn_envelope(decision),
             host=args.host,
             execution_mode=args.execution_mode,
+            session_binding=session_binding,
         )
     except Exception as exc:
         payload = {
