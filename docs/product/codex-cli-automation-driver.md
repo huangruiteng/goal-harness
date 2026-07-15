@@ -1,209 +1,172 @@
-# Codex CLI Automation Driver Audit
+# Codex CLI Adapter for LoopX Turn
 
-Status: product contract and implementation target.
+Status: experimental product route and implementation audit.
 
-LoopX should make Codex CLI feel easy before it feels automated. The
-primary path is still the Codex TUI: the user starts from a project repo, sends
-one LoopX-generated message, and can keep watching, steering, reviewing,
-or taking over. Automation is allowed only when it preserves that visible
-control surface. The default `/goal` product path does not offer headless
-fallback.
+The product goal is one reusable mechanism: LoopX CLI decides what may run,
+Codex CLI performs one bounded agent turn, and LoopX validates and records the
+outcome. It should approach the control-plane behavior available in Codex App
+without copying App-specific heartbeat logic or turning Codex session files
+into project state.
 
-## Current Finding
+The host-neutral lifecycle is defined by
+[`loopx_turn_v0`](../reference/protocols/loopx-turn-v0.md). This page records
+the Codex CLI adapter policy and the current parity gap.
 
-The current local Codex CLI help surface exposes useful execution and session
-primitives:
+## Current Verdict
 
-- `codex [PROMPT]` starts the interactive TUI with an initial prompt.
-- `codex resume [SESSION_ID] [PROMPT]` can resume an interactive session and
-  start it with a prompt.
-- `codex exec [PROMPT]` runs a non-interactive executor loop.
-- `codex --remote <ADDR>`, `codex app-server`, and `codex remote-control` expose
-  experimental app-server / remote-control surfaces worth probing.
+The repository has useful Codex CLI probes and wrappers, but they are not yet a
+complete LoopX Turn adapter.
 
-It does not expose a mature native recurring scheduler for LoopX. Treat
-recurrence as a LoopX local-driver concern until Codex provides a
-first-class automation primitive.
+Reusable pieces include:
 
-The important product distinction is:
+- `codex-cli-session-probe` for help-only capability discovery;
+- visible-session proof and runtime-idle checks;
+- `codex-cli-local-scheduler-tick` for a no-execution candidate/blocker packet;
+- `codex-cli-local-scheduler-exec` for explicit prefix-gated command execution;
+  and
+- strong transcript, credential, session-file, and hidden-fallback boundaries.
 
-| Surface | What It Proves | What It Does Not Prove |
-| --- | --- | --- |
-| `codex [PROMPT]` | one-message TUI bootstrap is viable | scheduled wakeups |
-| `codex resume ... [PROMPT]` | a visible resume proof is plausible | safe injection into an already-open TUI |
-| `codex exec` | non-interactive execution exists | preserved TUI experience or default LoopX fallback |
-| `remote-control` / app-server | a future visible-control bridge may exist | production-safe LoopX driver semantics |
+The outer orchestration is incomplete. A current dry-run scheduler tick can
+route visible-session proof blockers, but it does not itself:
 
-## Driver Shape
+- read a live `quota should-run --turn-envelope` decision;
+- pass observed tool capabilities into that decision;
+- preserve the selected todo and claim/continuation contract;
+- enforce the workspace guard before host execution;
+- receive a typed task result and validate it;
+- perform idempotent todo/state writeback followed by one quota spend; or
+- apply and acknowledge the resulting scheduler state.
 
-The v0 driver should be explicit and conservative:
+Therefore the existing `codex-cli-local-scheduler-*` commands should be treated
+as adapter probes, not advertised as App-parity automation. Their session proof,
+idle, prefix, and privacy checks should be reused behind a smaller host-neutral
+driver.
 
-1. A scheduler wakes up: manual command, `launchd`, cron, or a future local
-   daemon.
-2. The driver runs `loopx quota should-run --goal-id <goal> --agent-id
-   <agent>`.
-3. If user action is required, the driver surfaces only the concrete user gate
-   and stops.
-4. If the peer task workspace guard fires, the driver relocates to an
-   independent worktree before any file edit.
-5. The driver runs `loopx codex-cli-visible-driver-plan`.
-6. If the plan proves a visible attach path, the driver may attempt a visible
-   `resume` / remote-control turn behind an idle guard.
-7. If no visible attach path is proven, the driver keeps TUI bootstrap primary.
-   `loopx codex-cli-exec-handoff` reports the disabled boundary and does
-   not print a runnable `codex exec` script.
-8. The driver spends quota only after validated writeback.
+## Codex App Parity Matrix
 
-The local driver must never read or publish:
-
-- raw Codex transcripts;
-- credentials;
-- hidden session files;
-- private logs;
-- local LoopX runtime state that would leak into public docs or
-  fixtures.
-
-## Scheduler Options
-
-| Option | Good For | Not Good For | v0 Use |
+| Capability | Codex App baseline | Current Codex CLI route | v0 driver requirement |
 | --- | --- | --- | --- |
-| Manual command | transparent user testing | unattended work | default proof path |
-| `launchd` | local recurring wakeups on macOS | cross-platform install, visible TUI attach by itself | first packaged scheduler |
-| cron | simple Unix recurrence | user-friendly install, logs, env repair | documented fallback |
-| GitHub Actions | public docs/build/status checks | local TUI, local credentials, workstation state | Pages and public bundle only |
-| Local daemon | best long-term UX | install/update/auth complexity | later product milestone |
+| Persistent identity | Automation thread plus registered LoopX agent | Goal and agent ids exist; resume handle is only a host candidate | Keep `(goal, agent, todo)` authoritative and session handle opaque/local |
+| Wake and resume | Heartbeat wakes the existing thread | External scheduler can emit a resume candidate after proof | Start or resume one bounded turn with typed timeout/failure |
+| Fresh control decision | Agent runs live `quota should-run` and follows `interaction_contract` | Tick accepts an optional quota fixture and otherwise has no live decision | Run live TurnEnvelope decision on every tick; fixtures only for tests |
+| User gate | Concrete projected action is shown; host work stops | Proof blocker is modeled, but current LoopX user gate is not routed by the tick | Route exact user action without invoking Codex or spending |
+| Todo continuation | Selected todo, claim, continuation, and successor policy survive turns | Not part of scheduler tick | Preserve todo id and apply claim/complete/successor transitions |
+| Tool capability | Observed capabilities are passed to quota routing | Codex help probe is not projected into capability routing | Declare observed capabilities; use capability repair rather than user gates |
+| Workspace isolation | Agent obeys workspace guard and repository policy | Not enforced by scheduler tick | Stop or relocate before repository writes |
+| Bounded execution | Heartbeat prompt asks for one validated segment | Candidate command execution exists, but no task result contract | Require typed result with bounded timeout and no silent mode fallback |
+| Validation and writeback | Validate, refresh, then spend one slot | Wrapper intentionally does not validate or spend | Validate artifact, write idempotently, then spend exactly once |
+| Scheduler/backoff | App RRULE is applied and acknowledged without spend | Tick can render cadence only when a quota fixture supplies it | Apply and ack live scheduler hint, including failure recovery |
+| Repair/replan | Typed control state can preserve, repair, or replace the current route | Existing decisions describe session proof only | Distinguish `repair_required` from `replan_required`; terminate only on acceptance or explicit stop |
+| Privacy | Raw host material stays outside LoopX state | Existing boundaries are strong | Preserve current boundary and add a typed result channel |
 
-## Success Criteria
+This matrix is an implementation checklist, not evidence that the capabilities
+already match.
 
-- One pasted TUI message can start the LoopX loop in a repo.
-- A scheduled driver can decide whether work is allowed without reading private
-  Codex session data.
-- A visible resume / remote-control proof shows the turn is visible,
-  interruptible, and idle-guarded before LoopX calls it
-  session-attached automation.
-- Headless `codex exec` is disabled for the default `/goal` product path, not a
-  named fallback.
-- Every automatic turn writes compact evidence or a precise blocker before
-  quota spend.
+## Product Shape
 
-## Current MVP
-
-The dry-run-first local driver planner composes the existing quota, TUI,
-visible-driver, and headless-disabled boundary into one operator-facing packet:
+The experimental user-facing surface should converge on one command group:
 
 ```bash
-loopx codex-cli-local-driver-plan --project . --goal-id <goal> --agent-id <agent>
-```
-
-It is intentionally not a scheduler yet. It does not run Codex, read raw
-transcripts, inspect session files, mutate a Codex session, or spend Goal
-Harness quota. It emits:
-
-- the quota guard command that must run before work;
-- the visible-driver decision for TUI bootstrap, visible attach proof, or
-  resume/remote-control spike;
-- the repo-specific TUI bootstrap message command;
-- the disabled `codex exec` boundary;
-- the idle-guard placeholder that must exist before any same-session attach is
-  treated as production automation.
-
-A separate proof harness validates whether a resume or remote-control
-observation is strong enough to become a same-session automation candidate:
-
-```bash
-loopx codex-cli-visible-session-proof \
+loopx turn diagnose \
   --project . \
-  --goal-id <goal> \
-  --agent-id <agent> \
-  --proof-fixture visible-proof.public.json
-```
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --host codex-cli
 
-The fixture is public-safe and boolean-only: user opt-in, quota guard, idle
-guard, visibility, interruptibility, private-data boundary, and compact
-writeback planning. It does not run Codex or inspect session state.
-
-The next v0 packet turns those dry-run pieces into one driver decision without
-executing anything:
-
-```bash
-loopx codex-cli-visible-driver-run --project . --goal-id <goal> --agent-id <agent>
-```
-
-This is still a run packet, not a Codex runner. It does not run Codex, read raw
-transcripts, inspect session files, mutate a Codex session, or spend Goal
-Harness quota. It only chooses the next safe boundary:
-
-- require a public-safe visible-session proof before any resume or
-  remote-control path is treated as same-session automation;
-- keep the TUI bootstrap as the default when no proof exists;
-- never emit a headless `codex exec` fallback command from the default `/goal`
-  product path;
-- mark a visible session as a candidate only when the proof fixture confirms
-  user opt-in, quota guard, idle guard, visibility, interruptibility, boundary,
-  and compact writeback planning.
-
-The first local scheduler-facing spike wraps that packet as a one-shot tick:
-
-```bash
-loopx codex-cli-local-scheduler-tick --project . --goal-id <goal> --agent-id <agent>
-```
-
-This command is still no-execution by design. A launchd/cron/local-daemon
-wrapper can call it and receive one of two safe outputs:
-
-- a candidate external command, when visible-session proof is present;
-- a precise blocker writeback command, when proof is missing.
-
-The tick itself does not run Codex, read transcripts, inspect session files,
-mutate sessions, write LoopX state, or spend quota. That boundary keeps
-the product path honest: first make the scheduler decision visible and
-reviewable, then implement the actual external executor only after the proof
-and opt-in contract is stable.
-
-The next wrapper is the first explicit executor mode:
-
-```bash
-loopx codex-cli-local-scheduler-exec --project . --goal-id <goal> --agent-id <agent>
-```
-
-By default it still executes nothing. It builds the same scheduler tick and
-prints an executor packet. A local scheduler may opt into exactly one side
-effect:
-
-```bash
-loopx codex-cli-local-scheduler-exec \
+loopx turn run-once \
   --project . \
-  --goal-id <goal> \
-  --agent-id <agent> \
-  --guard-checked \
-  --execute-candidate \
-  --candidate-command-prefix "codex resume"
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --host codex-cli \
+  --execution-mode interactive-visible
 ```
 
-or:
+This is an implementation target, not a shipped command. The first command
+should report host capability and parity gaps without execution. The second
+should compose a live LoopX decision, one Codex turn, typed closeout,
+validation, writeback, spend, and scheduler acknowledgement.
 
-```bash
-loopx codex-cli-local-scheduler-exec \
-  --project . \
-  --goal-id <goal> \
-  --agent-id <agent> \
-  --guard-checked \
-  --execute-blocker-writeback
+Codex CLI policy supports two explicit modes:
+
+- `interactive-visible` is the normal product route. The user can see,
+  interrupt, and take over the turn. Missing idle or attach proof stops the
+  tick.
+- `isolated-headless` is an explicit experimental worker or benchmark route.
+  It uses an isolated workspace and never claims to preserve the visible TUI.
+
+The driver must never switch from `interactive-visible` to
+`isolated-headless` as a fallback. This preserves the existing `/goal`
+visible-first promise while allowing controlled non-interactive dogfood to test
+the host-neutral mechanism.
+
+## Run-once Algorithm
+
+```text
+1. Resolve project, goal, registered agent, execution mode, and Codex capability.
+2. Run live quota should-run --turn-envelope with observed capabilities.
+3. Route user notification, quiet wait, repair, or delivery exactly as decided.
+4. Claim/preserve the selected todo and satisfy workspace guard.
+5. Start or resume one Codex turn with the thin task body and TurnEnvelope.
+6. Require a typed result; validate the material artifact or state change.
+7. Update/complete the todo or write a repair/replan delta; refresh state.
+8. Spend once only for validated delivery; apply and ack scheduler state.
 ```
 
-`--guard-checked` is an explicit assertion that the local scheduler just ran the
-fresh quota/user-gate guard. Candidate execution additionally requires an
-allowed command prefix, so a public-safe proof fixture cannot smuggle an
-arbitrary shell command into the scheduler. The wrapper discards command
-stdout/stderr, reports only return code and timeout, never reads transcripts or
-session files, never mutates hidden Codex session state, and never spends Goal
-Harness quota. Quota spend remains the responsibility of the validated
-post-turn writeback path.
+The host adapter may use existing session proof, runtime idle, timeout, and
+command-prefix helpers. It should not make callers assemble the old probe chain
+manually.
 
-## Next Build Slice
+## Typed Repair And Replan
 
-Use the executor wrapper as the smallest local-driver bridge, then move toward
-the real product loop: one TUI message starts LoopX, recurring wakeups
-run the guard, a visible same-session turn is attempted only after proof and
-idle checks, and headless `codex exec` remains disabled for the default
-`/goal` path.
+LoopX Turn uses typed repair when the current todo is still correct but the
+host, workspace, capability, validation, or writeback path is recoverable. It
+uses typed replan when the route itself is no longer a valid way to close the
+goal acceptance gap.
+
+Replan is triggered by any of these conditions:
+
+- the active vision remains open but no runnable todo exists;
+- negative evidence invalidates the selected route;
+- host capabilities make the todo non-executable and repair would change its
+  intent; or
+- two eligible turns repeat the same no-progress result.
+
+A replan turn must write a bounded todo delta or vision replan trigger. If it
+cannot produce a material delta, it returns a concrete blocker instead of
+polling indefinitely.
+
+## Experimental Stages
+
+1. **Contract**: land the host-neutral lifecycle and this parity matrix.
+2. **Shadow**: feed real TurnEnvelope decisions through a no-execution adapter
+   and compare action signatures and typed routes.
+3. **One turn**: run a real Codex CLI turn in an explicit mode, require typed
+   result, validate, write back, and prove spend ordering.
+4. **Scheduled continuation**: prove resume/new-session policy, stateful
+   backoff, acknowledgement, retries, and no duplicate spend.
+5. **Benchmark dogfood**: compare the driver with Codex App and the canonical
+   countable `/goal` baseline under matched source, budget, concurrency,
+   no-feedback, no-sync, no-upload, and no-submit boundaries.
+6. **Promotion review**: decide whether to keep the adapter experimental,
+   replace old probe entry points, or generalize LoopX Turn to another CLI
+   host.
+
+Benchmark dogfood records compact parity, trajectory, and closeout evidence. It
+must not commit raw task text, raw trajectories, verifier output, credentials,
+or local artifact paths.
+
+## Rollback And Non-goals
+
+The adapter must be disableable without changing LoopX goal state, normal CLI
+commands, or Codex App heartbeat operation. Old probe commands may remain as
+diagnostics until the consolidated driver covers their durable boundaries; they
+must not be the default product narrative.
+
+This route does not:
+
+- replace Codex App before measured parity evidence exists;
+- make Codex CLI session data authoritative;
+- silently answer user gates or handle credentials;
+- launch benchmark jobs, upload artifacts, or submit leaderboard results; or
+- treat process exit zero, generated prose, or a session resume as validated
+  task progress.
