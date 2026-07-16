@@ -134,6 +134,35 @@ dedicated typed result channel; passing `trae chat` directly as the adapter is
 not sufficient. Check the installed CLI's help and pin the qualified command
 shape because flags and headless behavior may vary by version.
 
+### Repeatable Codex CLI Qualification
+
+The repository includes an opt-in end-to-end qualification that creates an
+ephemeral LoopX project and workspace. Its default mode uses a no-model Codex
+fixture while exercising the built-in host adapter, independent validator,
+state writeback, one quota spend, and idempotent transaction replay:
+
+```bash
+python3 examples/loopx-turn-codex-cli-e2e-smoke.py
+```
+
+Use the real mode only when a local Codex login is available and one isolated
+model call is intended:
+
+```bash
+python3 examples/loopx-turn-codex-cli-e2e-smoke.py \
+  --real-codex-cli \
+  --codex-model <compatible-model>
+```
+
+The real mode emits only a compact LoopX qualification summary. LoopX does not
+copy the prompt, transcript, stdout, or stderr into fixture state, the temporary
+workspace and LoopX session binding are removed, and the disposable goal never
+syncs into the global registry. Codex CLI may retain its opaque host session
+according to local Codex policy so a later adapter turn can resume it. A compact
+`codex_cli_model_requires_newer_codex` failure is a host-compatibility result:
+the transaction must show zero state writes and zero quota spend; select a
+compatible model or update Codex before retrying.
+
 For a coding collaboration, the validator may run focused tests and inspect the
 expected git diff. For operations, it may read back the declared resource
 state. For data work, it may check a schema and bounded quality assertions. For
