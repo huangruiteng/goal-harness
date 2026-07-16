@@ -14,14 +14,17 @@ for anchor in (
     "loopx/extensions/",
     "extensions/<extension-id>/",
     "capability id, provider id",
+    "name public capabilities after caller outcomes",
 ):
     assert anchor in AGENTS, anchor
 
 for anchor in (
     "## Placement Decision For Agents",
-    "What caller-visible contract is being added or changed?",
+    "What user outcome and caller-visible contract is being added or changed?",
     "Does the implementation need independent installation",
     "Some work belongs on both axes.",
+    "`value-connectors` is an existing compatibility CLI",
+    "Migrate each profile to",
     "capability_id: <existing-or-new-contract>",
     "reason: <why the nearest existing owner is or is not sufficient>",
 ):

@@ -139,6 +139,10 @@ turn a design possibility into unused production structure.
 Before adding an ability, decide its capability owner and provider boundary;
 do not choose a directory from the feature name alone:
 
+- name public capabilities after caller outcomes, not delivery mechanisms. A
+  proposed `connector`, `provider`, `adapter`, or `sink` capability needs an
+  independently useful caller contract; otherwise make it an extension
+  provider or an internal part of the outcome capability it serves;
 - extend `loopx/capabilities/<capability>/` when the change belongs to an
   existing product contract and shares that built-in capability's lifecycle;
 - create a new built-in capability only when LoopX core must ship it by

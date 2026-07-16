@@ -58,7 +58,11 @@ paths to the registry.
 Before creating a directory, LoopX or an executing agent must answer these
 questions in order:
 
-1. **What caller-visible contract is being added or changed?** If an existing
+1. **What user outcome and caller-visible contract is being added or changed?**
+   Capability ids describe outcomes, not transports. Names such as
+   `connector`, `provider`, `adapter`, or `sink` usually describe an extension
+   or internal mechanism unless callers use and validate that mechanism as an
+   independent product contract. If an existing
    capability already owns that contract, add the implementation to
    `loopx/capabilities/<existing-capability>/` instead of creating a sibling.
 2. **Must LoopX core always ship and maintain the implementation?** If yes, it
@@ -86,12 +90,19 @@ Use this placement map after answering the questions:
 | Separately distributed provider | provider-owned package or repository |
 | Internal implementation helper | nearest owning module |
 
-Some work belongs on both axes. For example, a finance-discovery provider can
-live in `extensions/finance-value-discovery/` while providing the existing
-`value-connectors` contract. Register a separate `finance-value-discovery`
-capability only when callers need a distinct stable contract that
-`value-connectors` cannot express. The extension directory owns delivery and
-lifecycle; capability registration owns the caller-visible promise.
+Some work belongs on both axes. Finance research should expose the outcome
+capability `finance-value-discovery`; public-market, filing, and news sources
+can be extension providers of that capability. Shared connector intent,
+permission, and approval logic is internal runtime machinery, not another
+public capability. The extension directory owns delivery and lifecycle;
+capability registration owns the caller-visible promise.
+
+`value-connectors` is an existing compatibility CLI and protocol surface. Do
+not use it as the public capability owner for new work. Migrate each profile to
+the outcome capability it serves, such as `finance-value-discovery`,
+`issue-fix`, or `content-ops`, before retiring the compatibility surface. This
+keeps the migration behavior-preserving instead of replacing one broad bucket
+with another broad bucket.
 
 Before editing, record a compact rationale in the active todo or plan:
 
