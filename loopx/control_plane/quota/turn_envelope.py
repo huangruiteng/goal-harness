@@ -212,7 +212,29 @@ def _compact_fields(
     return compact
 
 
-def _selected_todo(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+def _same_action_text(left: Any, right: Any) -> bool:
+    left_text = _text(left, limit=2_000)
+    right_text = _text(right, limit=2_000)
+    if not left_text or not right_text:
+        return False
+    left_folded = left_text.casefold()
+    right_folded = right_text.casefold()
+    if left_folded == right_folded:
+        return True
+    if left_folded.endswith("..."):
+        prefix = left_folded[:-3].rstrip()
+        return len(prefix) >= 80 and right_folded.startswith(prefix)
+    if right_folded.endswith("..."):
+        prefix = right_folded[:-3].rstrip()
+        return len(prefix) >= 80 and left_folded.startswith(prefix)
+    return False
+
+
+def _selected_todo(
+    payload: Mapping[str, Any],
+    *,
+    recommended_action: str | None,
+) -> dict[str, Any] | None:
     source = _mapping(payload.get("selected_todo"))
     if not source:
         return None
@@ -233,7 +255,9 @@ def _selected_todo(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     )
     compact = {field: source[field] for field in fields if source.get(field) is not None}
     text = _text(source.get("text"), limit=360)
-    if text:
+    if text and _same_action_text(source.get("text"), recommended_action):
+        compact["text_ref"] = "action.recommended_action"
+    elif text:
         compact["text"] = text
     return compact or None
 
@@ -370,12 +394,9 @@ def _scheduler(payload: Mapping[str, Any]) -> dict[str, Any]:
             "request": SCHEDULER_DETAIL_REQUEST,
         }
     failure_hint = _mapping(codex_app.get("failure_hint"))
-    failure_cli_args = _executable_cli_args(failure_hint.get("cli_args"))
-    if failure_cli_args:
-        app["failure_cli_args"] = failure_cli_args
-    elif failure_hint.get("cli_args"):
+    if failure_hint.get("cli_args"):
         app["failure_cli_args_detail_ref"] = {
-            "reason": "omitted_to_preserve_executable_argv",
+            "reason": "cold_path_until_host_update_failure",
             "request": SCHEDULER_DETAIL_REQUEST,
         }
     if app:
@@ -549,13 +570,17 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
     interaction = _mapping(payload.get("interaction_contract"))
     agent_channel = _mapping(interaction.get("agent_channel"))
     cli_channel = _mapping(interaction.get("cli_channel"))
+    recommended_action = _text(payload.get("recommended_action"), limit=480)
     action = {
-        "recommended_action": _text(payload.get("recommended_action"), limit=480),
+        "recommended_action": recommended_action,
         "primary_action": _text(agent_channel.get("primary_action"), limit=480),
         "must_attempt": bool(agent_channel.get("must_attempt")),
         "delivery_allowed": bool(agent_channel.get("delivery_allowed")),
         "quiet_noop_allowed": bool(agent_channel.get("quiet_noop_allowed")),
-        "selected_todo": _selected_todo(payload),
+        "selected_todo": _selected_todo(
+            payload,
+            recommended_action=recommended_action,
+        ),
     }
     user = _user_channel(interaction, payload)
     scheduler = _scheduler(payload)

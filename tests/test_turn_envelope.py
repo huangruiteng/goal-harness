@@ -382,6 +382,121 @@ def test_turn_envelope_omits_oversized_scheduler_argv_instead_of_truncating() ->
     }
 
 
+def test_turn_envelope_stays_actionable_during_scheduler_reset() -> None:
+    source = _full_decision()
+    todo_text = (
+        "[P1] Continue host-neutral Agent CLI orchestration with start and resume, "
+        "typed result, independent validation, repair or replan, exactly-once "
+        "writeback and spend, and one real CLI end-to-end validation."
+    )
+    source["recommended_action"] = todo_text
+    source["selected_todo"]["text"] = todo_text[:160].rstrip() + "..."
+    source["interaction_contract"]["user_channel"] = {
+        "action_required": False,
+        "notify": "NOTIFY",
+        "actions": ["Review an optional public documentation wording update."],
+        "reason": "The optional review does not block the agent work lane.",
+    }
+    source["goal_boundary"].update(
+        {
+            "write_scope": [f"public/surface/{index}/**" for index in range(8)],
+            "guards": [
+                "stop before private material, credentials, destructive git, or "
+                f"unauthorized production action {index}"
+                for index in range(6)
+            ],
+        }
+    )
+    source["execution_profile"] = {
+        "cadence": "bounded_progress_segment",
+        "minimum_scale": "multi_surface_or_implementation",
+        "spend_rule": "spend_only_after_artifact_validation_writeback",
+        "must_include": ["coherent_artifact", "targeted_validation", "state_writeback"],
+    }
+    source["automation_liveness"]["pause_policy"] = (
+        "pause only after a bounded repair or replan path is itself stuck for "
+        "two more eligible turns"
+    )
+    source["vision_continuation_audit"] = {
+        "schema_version": "vision_continuation_audit_v0",
+        "required": True,
+        "decision": "acceptance_gap_open",
+        "selected_todo_is_goal_completion": False,
+        "closeout_allowed_without_evidence": False,
+        "required_before_closeout": [
+            "derive requirements from the active vision and current todo",
+            "name authoritative evidence for each requirement",
+            "run bounded public research when local evidence is missing",
+            "create a successor or replan trigger when acceptance remains unproven",
+        ],
+        "recommended_action": (
+            "audit active vision acceptance before todo closeout and keep the vision "
+            "active with a concrete successor when evidence remains incomplete"
+        ),
+    }
+    capabilities = ["network", "shell", "filesystem_read", "filesystem_write"]
+    ack_cli_args = [
+        "--registry",
+        "registry.json",
+        "--runtime-root",
+        ".runtime",
+        "quota",
+        "scheduler-ack-current",
+        "--goal-id",
+        "fixture-goal",
+        "--agent-id",
+        "codex-fixture",
+    ]
+    for capability in capabilities:
+        ack_cli_args.extend(["--available-capability", capability])
+    ack_cli_args.extend(
+        [
+            "--surface",
+            "codex_app",
+            "--state-key",
+            "scheduler_hint.codex_app.stateful_backoff",
+            "--applied-rrule",
+            "FREQ=MINUTELY;INTERVAL=3",
+            "--execute",
+        ]
+    )
+    failure_cli_args = [
+        *ack_cli_args[:4],
+        "quota",
+        "scheduler-fail-current",
+        *ack_cli_args[6:-4],
+        "--failed-rrule",
+        "FREQ=MINUTELY;INTERVAL=3",
+        "--codex-app-current-rrule",
+        "FREQ=MINUTELY;INTERVAL=3",
+        "--execute",
+    ]
+    codex_app = source["scheduler_hint"]["codex_app"]
+    codex_app["ack_hint"]["cli_args"] = ack_cli_args
+    codex_app["failure_hint"] = {"cli_args": failure_cli_args}
+    source["protocol_action_packet"] = build_protocol_action_packet(source)
+
+    envelope = build_turn_envelope(source)
+    compact_app = envelope["scheduler"]["codex_app"]
+
+    assert envelope["action"]["selected_todo"]["text_ref"] == (
+        "action.recommended_action"
+    )
+    assert "text" not in envelope["action"]["selected_todo"]
+    assert compact_app["ack_cli_args"] == ack_cli_args
+    assert "failure_cli_args" not in compact_app
+    assert compact_app["failure_cli_args_detail_ref"] == {
+        "reason": "cold_path_until_host_update_failure",
+        "request": "loopx quota should-run --include-scheduler-detail",
+    }
+    assert envelope["action_signature"]["matches"] is True
+    assert envelope["compaction"]["within_budget"] is True
+    assert envelope["compaction"]["envelope_json_bytes"] <= TURN_ENVELOPE_BUDGET_BYTES
+    assert envelope["compaction"]["envelope_json_bytes"] >= (
+        TURN_ENVELOPE_BUDGET_BYTES - 1_024
+    )
+
+
 def test_turn_envelope_keeps_concrete_user_gate() -> None:
     source = _full_decision()
     source["action_required"] = True
