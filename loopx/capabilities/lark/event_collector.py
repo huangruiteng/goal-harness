@@ -11,7 +11,11 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .event_inbox import inspect_lark_event_inbox, load_lark_event_inbox_config
+from .event_inbox import (
+    SAFE_PROFILE_PATTERN,
+    inspect_lark_event_inbox,
+    load_lark_event_inbox_config,
+)
 
 
 CONFIG_SCHEMA_VERSION = "lark_event_collector_config_v0"
@@ -114,6 +118,30 @@ def load_lark_event_collector_config(
     if enabled and not inbox["thread_complete"]:
         raise ValueError(
             "collector lifecycle currently requires configured_chat_all capture"
+    )
+    configured_profile = str(payload.get("profile") or "").strip()
+    reply_profile = (
+        str(inbox["reply"].get("sender_profile") or "").strip()
+        if inbox["reply"].get("enabled") is True
+        else ""
+    )
+    profile = configured_profile or reply_profile
+    profile_source = None
+    if configured_profile:
+        profile_source = "collector_config"
+    elif reply_profile:
+        profile_source = "event_inbox_reply"
+    if enabled and (
+        not SAFE_PROFILE_PATTERN.fullmatch(profile)
+        or profile.lower() == "default"
+    ):
+        raise ValueError(
+            "enabled lark collector requires an explicit non-default profile "
+            "or an enabled inbox reply sender_profile"
+        )
+    if configured_profile and reply_profile and configured_profile != reply_profile:
+        raise ValueError(
+            "lark collector profile must match the inbox reply sender_profile"
         )
     return {
         "enabled": enabled,
@@ -122,6 +150,8 @@ def load_lark_event_collector_config(
         "service_name": service_name,
         "event_key": event_key,
         "identity": identity,
+        "profile": profile,
+        "profile_source": profile_source,
         "supervisor": supervisor,
         "chat_id": chat_id,
         "consume_timeout": timeout,
@@ -161,8 +191,11 @@ def _executable_prefix(executable: str) -> list[str]:
 def _collector_argv(config: Mapping[str, Any], executable: str) -> list[str]:
     inbox_path = Path(config["inbox"]["inbox_path"])
     relative_inbox = inbox_path.relative_to(Path(config["project"]))
+    prefix = _executable_prefix(executable)
+    if config.get("profile"):
+        prefix.extend(["--profile", str(config["profile"])])
     return [
-        *_executable_prefix(executable),
+        *prefix,
         "event",
         "consume",
         str(config["event_key"]),
@@ -225,6 +258,9 @@ def _plan(config: Mapping[str, Any]) -> tuple[dict[str, Any], list[str], bytes]:
             "supervisor": config["supervisor"],
             "event_key": config["event_key"],
             "identity": config["identity"],
+            "profile_bound": bool(config.get("profile")),
+            "profile_source": config["profile_source"],
+            "profile_returned": False,
             "capture_scope": config["inbox"]["capture_scope"],
             "thread_complete": config["inbox"]["thread_complete"],
             "lark_cli_available": executable is not None,
@@ -359,8 +395,19 @@ def inspect_lark_event_collector(
     bus_healthy = None
     if probe_event_bus and plan["lark_cli_available"]:
         executable = shutil.which(str(config["lark_cli_bin"]))
+        profile_args = (
+            ["--profile", str(config["profile"])] if config.get("profile") else []
+        )
         bus = _run(
-            runner, [str(executable), "event", "status", "--json", "--fail-on-orphan"]
+            runner,
+            [
+                str(executable),
+                *profile_args,
+                "event",
+                "status",
+                "--json",
+                "--fail-on-orphan",
+            ],
         )
         bus_healthy = bus.returncode == 0
     inbox_status = inspect_lark_event_inbox(
@@ -388,6 +435,9 @@ def inspect_lark_event_collector(
         "healthy": healthy,
         "service_name": config["service_name"],
         "supervisor": config["supervisor"],
+        "profile_bound": bool(config.get("profile")),
+        "profile_source": config["profile_source"],
+        "profile_returned": False,
         "installed": installed,
         "active": active,
         "lark_cli_available": plan["lark_cli_available"],

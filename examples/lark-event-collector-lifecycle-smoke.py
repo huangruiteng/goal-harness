@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,13 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
                 "enabled": True,
                 "inbox_dir": ".loopx/inbox/team-feedback",
                 "capture_scope": "configured_chat_all",
+                "reply": {
+                    "enabled": True,
+                    "sender_profile": "project-review-bot",
+                    "sender_identity": "bot",
+                    "bot_display_name": "Project Review Bot",
+                    "chat_id": "oc_private_fixture_chat",
+                },
             }
         ),
         encoding="utf-8",
@@ -90,6 +98,10 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
         plan = plan_lark_event_collector(project=project, config_path=collector_config)
         assert plan["status"] == "install_ready", plan
         assert plan["thread_complete"] is True, plan
+        assert plan["profile_bound"] is True, plan
+        assert plan["profile_source"] == "event_inbox_reply", plan
+        assert plan["profile_returned"] is False, plan
+        assert "project-review-bot" not in json.dumps(plan), plan
         assert plan["chat_id_returned"] is False, plan
         assert "oc_private_fixture_chat" not in json.dumps(plan), plan
         preview = install_lark_event_collector(
@@ -117,6 +129,15 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
         plist_text = plist.read_text(encoding="utf-8")
         assert str(node) in plist_text, plist_text
         assert str(lark_cli) in plist_text, plist_text
+        service_argv = plistlib.loads(plist.read_bytes())["ProgramArguments"]
+        assert service_argv[:6] == [
+            str(node),
+            str(lark_cli),
+            "--profile",
+            "project-review-bot",
+            "event",
+            "consume",
+        ], service_argv
 
         inbox = project / ".loopx" / "inbox" / "team-feedback"
         inbox.mkdir(parents=True)
@@ -141,6 +162,10 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
         assert status["healthy"] is True, status
         assert status["real_event_evidence_present"] is True, status
         assert status["captured_event_count"] == 1, status
+        assert status["profile_bound"] is True, status
+        assert status["profile_source"] == "event_inbox_reply", status
+        assert status["profile_returned"] is False, status
+        assert "project-review-bot" not in json.dumps(status), status
         assert status["local_paths_returned"] is False, status
         assert status["chat_id_returned"] is False, status
 
@@ -170,6 +195,52 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
             raise AssertionError("unsupported identity should fail closed")
         unsupported["identity"] = "bot"
         collector_config.write_text(json.dumps(unsupported), encoding="utf-8")
+
+        mismatched = json.loads(collector_config.read_text())
+        mismatched["profile"] = "another-review-bot"
+        collector_config.write_text(json.dumps(mismatched), encoding="utf-8")
+        try:
+            plan_lark_event_collector(
+                project=project,
+                config_path=collector_config,
+            )
+        except ValueError as exc:
+            assert "must match" in str(exc), exc
+        else:
+            raise AssertionError("collector and reply profiles must not diverge")
+        mismatched.pop("profile")
+        collector_config.write_text(json.dumps(mismatched), encoding="utf-8")
+
+        no_profile = json.loads(inbox_config.read_text())
+        no_profile.pop("reply")
+        inbox_config.write_text(json.dumps(no_profile), encoding="utf-8")
+        try:
+            plan_lark_event_collector(
+                project=project,
+                config_path=collector_config,
+            )
+        except ValueError as exc:
+            assert "explicit non-default profile" in str(exc), exc
+        else:
+            raise AssertionError("enabled collector must not use the default profile")
+        explicit = json.loads(collector_config.read_text())
+        explicit["profile"] = "project-review-bot"
+        collector_config.write_text(json.dumps(explicit), encoding="utf-8")
+        explicit_plan = plan_lark_event_collector(
+            project=project,
+            config_path=collector_config,
+        )
+        assert explicit_plan["profile_source"] == "collector_config", explicit_plan
+        explicit.pop("profile")
+        collector_config.write_text(json.dumps(explicit), encoding="utf-8")
+        no_profile["reply"] = {
+            "enabled": True,
+            "sender_profile": "project-review-bot",
+            "sender_identity": "bot",
+            "bot_display_name": "Project Review Bot",
+            "chat_id": "oc_private_fixture_chat",
+        }
+        inbox_config.write_text(json.dumps(no_profile), encoding="utf-8")
 
         addressed = json.loads(inbox_config.read_text())
         addressed["capture_scope"] = "addressed_only"
