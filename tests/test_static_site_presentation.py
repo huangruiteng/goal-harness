@@ -13,10 +13,18 @@ from loopx.presentation.static_site import (
     REVISION_DIR,
     REVISION_FILE,
     StaticSiteContractError,
+    _utc_now,
     package_static_site,
     rollback_static_site,
     verify_static_site_readback,
 )
+
+
+def test_utc_timestamp_uses_the_legacy_compatible_timezone_alias() -> None:
+    timestamp = _utc_now()
+
+    assert timestamp.endswith("Z")
+    assert "+00:00" not in timestamp
 
 
 def _site(root: Path, *, body: str = "first") -> Path:
