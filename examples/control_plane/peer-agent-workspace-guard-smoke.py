@@ -16,6 +16,7 @@ GOAL_ID = "workspace-guard-canary"
 PEER_ALPHA = "codex-alpha"
 PEER_BETA = "codex-beta"
 TASK_REPOSITORY = "git:example.invalid/loopx/task-repo"
+PROJECT_REPOSITORY = "git:example.invalid/loopx/project-repo"
 
 
 def run_git(cwd: Path, *args: str) -> None:
@@ -67,6 +68,13 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
     project.mkdir(parents=True)
     (project / "README.md").write_text("# Workspace Guard Canary\n", encoding="utf-8")
     run_git(project, "init", "--initial-branch", "main")
+    run_git(
+        project,
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/loopx/project-repo.git",
+    )
     run_git(project, "add", "README.md")
     run_git(
         project,
@@ -261,6 +269,44 @@ def main() -> None:
         assert goal_worktree_guarded["workspace_guard"]["task_repository"] == (
             TASK_REPOSITORY
         ), goal_worktree_guarded
+
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry["goals"][0].pop("workspace_guard_policy", None)
+        registry_path.write_text(
+            json.dumps(registry, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        state_path = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+        state_path.write_text(
+            "---\nstatus: active\nowner_mode: goal\n"
+            'objective: "Exercise selected-todo workspace routing."\n'
+            "updated_at: 2026-01-01T00:00:00+00:00\n---\n\n"
+            "# Selected Todo Workspace Guard Canary\n\n## Agent Todo\n\n"
+            "- [ ] [P0] Monitor one due repository lifecycle without repository writes.\n"
+            f"  <!-- loopx:todo todo_id=todo_due_monitor status=open "
+            f"task_class=continuous_monitor action_kind=monitor_repository_lifecycle "
+            f"task_repository={PROJECT_REPOSITORY} claimed_by={PEER_ALPHA} "
+            "target_key=repository-lifecycle cadence=30m "
+            "next_due_at=2020-01-01T00:00:00+00:00 "
+            "expires_at=2099-01-01T00:00:00+00:00 -->\n"
+            "- [ ] [P1] Repair a separate repository-writing control-plane task.\n"
+            f"  <!-- loopx:todo todo_id=todo_unrelated_repair status=open "
+            f"task_class=advancement_task action_kind=repair_workspace_route "
+            f"task_repository={TASK_REPOSITORY} required_write_scopes=loopx/** "
+            f"claimed_by={PEER_ALPHA} -->\n",
+            encoding="utf-8",
+        )
+
+        monitor_selected = should_run(project, project, runtime, registry_path)
+        assert monitor_selected["decision"] == "run", monitor_selected
+        assert "workspace_guard" not in monitor_selected, monitor_selected
+        assert "boundary_projection_gap" not in monitor_selected, monitor_selected
+        assert monitor_selected["selected_todo"]["todo_id"] == (
+            "todo_due_monitor"
+        ), monitor_selected
+        assert monitor_selected["selected_todo"]["task_repository"] == (
+            PROJECT_REPOSITORY
+        ), monitor_selected
 
 
 if __name__ == "__main__":

@@ -1196,6 +1196,11 @@ an independent worktree/branch, and require rerunning `quota should-run` with
 the same `--agent-id` before repository edits. This preflight does not spend
 quota; `quota spend-slot` should fail closed until the guard is rerun from the
 independent worktree.
+Workspace and boundary guards must bind to the final work-lane `selected_todo`
+after due-monitor, capability-fallback, and scoped-gate routing. They must not
+inherit repository or write-scope semantics from an unrelated first executable
+backlog item; in particular, a selected read-only continuous monitor stays
+monitor work even when a separate repository repair is also runnable.
 If the selected todo declares `task_repository`, the guard should also project
 that credential-free identity with
 `workspace_guard.repository_source=selected_todo.task_repository`; otherwise
