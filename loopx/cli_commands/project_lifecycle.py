@@ -143,6 +143,14 @@ def register_project_lifecycle_commands(
         help="Optional explicit outcome-floor signal for this refresh run.",
     )
     refresh_state_parser.add_argument(
+        "--delivery-workspace-path",
+        help=(
+            "Local git worktree that produced this accountable delivery. Use when "
+            "refresh-state must run from a separate registry checkout; the local "
+            "path is validated but is not persisted."
+        ),
+    )
+    refresh_state_parser.add_argument(
         "--autonomous-replan-recorded",
         action="store_true",
         help=(
@@ -444,6 +452,11 @@ def handle_project_lifecycle_command(
                 next_action=args.next_action,
                 delivery_batch_scale=args.delivery_batch_scale,
                 delivery_outcome=args.delivery_outcome,
+                delivery_workspace_path=(
+                    Path(args.delivery_workspace_path).expanduser()
+                    if args.delivery_workspace_path
+                    else None
+                ),
                 agent_id=args.agent_id,
                 agent_lane=args.agent_lane,
                 progress_scope=args.progress_scope,
