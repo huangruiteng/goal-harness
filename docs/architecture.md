@@ -57,6 +57,11 @@ generic compact benchmark fields; its shipped schema remains compatible. Hiding
 an adapter dependency inside a function or dynamic import does not count as
 architectural separation.
 
+Capabilities and extensions are also orthogonal: a capability is a product
+contract, while an extension is an independently managed provider that may
+offer one or more capabilities. The provider-aware registration and manifest
+boundary is documented in [extensions.md](extensions.md).
+
 LoopX should still absorb field-tested project-control mechanisms such
 as authority registries, current-belief TODOs, managed external-source
 manifests, experiment boards, validation surface maps, and gated handoff
