@@ -12,6 +12,7 @@ from ..agent_onboarding import (
     render_agent_type_catalog_markdown,
 )
 from ..bootstrap_command_pack import (
+    build_start_goal_host_surface_selection_packet,
     build_start_goal_guided_packet,
     build_loopx_bootstrap_command_pack,
     render_start_goal_guided_markdown,
@@ -67,7 +68,14 @@ def handle_agent_onboard_command(
         exc = AgentTypeError(
             value=None,
             reason="--agent-type is required unless --list-agent-types is used",
-            suggestions=["codex-app", "codex-cli", "claude-code", "manual", "other-agent"],
+            suggestions=[
+                "codex-app",
+                "codex-ide",
+                "codex-cli",
+                "claude-code",
+                "manual",
+                "other-agent",
+            ],
         )
         print_payload(exc.to_payload(), args.format, render_agent_onboarding_markdown)
         return 2
@@ -121,6 +129,18 @@ def handle_start_goal_command(
         }
         print_payload(payload, args.format, render_start_goal_guided_markdown)
         return 2
+    if not args.host_surface:
+        payload = build_start_goal_host_surface_selection_packet(
+            project=Path(args.project),
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            cli_bin=args.cli_bin,
+            goal_text=args.goal_text,
+            available_capabilities=args.available_capabilities,
+            include_command_pack_detail=bool(args.include_command_pack_detail),
+        )
+        print_payload(payload, args.format, render_start_goal_guided_markdown)
+        return 0
     payload = build_start_goal_guided_packet(
         project=Path(args.project),
         goal_id=args.goal_id,

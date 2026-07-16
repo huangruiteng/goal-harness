@@ -36,9 +36,12 @@ def test_codex_install_upgrades_managed_loopx_facade(tmp_path: Path) -> None:
         claude_home=str(tmp_path / "claude"),
     )
 
-    assert "Treat this as the LoopX `/loopx` explicit LoopX command skill." in skill.read_text(
-        encoding="utf-8"
-    )
+    skill_text = skill.read_text(encoding="utf-8")
+    assert "Treat this as the LoopX `/loopx` explicit LoopX command skill." in skill_text
+    assert "--host-surface <exact-current-host>" in skill_text
+    assert "`codex-ide` for the IDE extension" in skill_text
+    assert "Codex IDE or CLI visible `/goal <task_body>`" in skill_text
+    assert "do not return merely after setup, planning, or claim" in skill_text
     metadata_text = metadata.read_text(encoding="utf-8")
     assert 'display_name: "LoopX"' in metadata_text
     assert 'display_name: "LoopX /loopx"' not in metadata_text

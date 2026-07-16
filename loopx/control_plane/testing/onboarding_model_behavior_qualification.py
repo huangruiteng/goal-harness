@@ -45,6 +45,10 @@ _ENTRY_CONTRACT_FIELDS = (
     "action_command_ids",
     "host_loop_activation_available",
     "host_loop_activation_after_todo_write",
+    "requested_host_surface",
+    "host_surface",
+    "activation_method",
+    "visible_goal_command_available",
     "writes_now",
     "spends_quota_now",
 )
@@ -162,6 +166,9 @@ def onboarding_entry_semantic_contract(
         _command_pack_value(packet, "host_loop_activation"),
         field="host_loop_activation",
     )
+    host_mutation = _optional_mapping(
+        activation.get("host_mutation"), field="host_loop_activation.host_mutation"
+    )
     command_ids = [
         command_id
         for command_id in ONBOARDING_REQUIRED_CONNECT_COMMAND_IDS
@@ -178,6 +185,18 @@ def onboarding_entry_semantic_contract(
         "host_loop_activation_available": bool(activation),
         "host_loop_activation_after_todo_write": bool(
             activation.get("activation_required_after_todo_write")
+        ),
+        "requested_host_surface": _nullable_token(
+            packet.get("host_surface"), field="requested_host_surface"
+        ),
+        "host_surface": _nullable_token(
+            activation.get("host_surface"), field="host_surface"
+        ),
+        "activation_method": _nullable_token(
+            activation.get("activation_method"), field="activation_method"
+        ),
+        "visible_goal_command_available": (
+            host_mutation.get("host_command") == "/goal <task_body>"
         ),
         "writes_now": bool(transaction.get("writes_now")),
         "spends_quota_now": bool(transaction.get("spends_quota_now")),
@@ -210,6 +229,13 @@ def onboarding_entry_contract_violations(
             violations.append("connect_route_requires_host_loop_activation")
         if contract.get("host_loop_activation_after_todo_write") is not True:
             violations.append("host_loop_must_activate_after_todo_write")
+        if contract.get("requested_host_surface") == "codex-ide":
+            if contract.get("host_surface") != "codex_ide_visible_goal_mode":
+                violations.append("codex_ide_requires_ide_goal_surface")
+            if contract.get("activation_method") != "set_visible_goal":
+                violations.append("codex_ide_requires_visible_goal_activation")
+            if contract.get("visible_goal_command_available") is not True:
+                violations.append("codex_ide_requires_goal_command")
     return violations
 
 

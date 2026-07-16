@@ -28,6 +28,14 @@ PACKET_MEASUREMENT_SCHEMA_VERSION = "loopx_packet_duplication_measurement_v0"
 GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION = (
     "loopx_guided_command_pack_projection_v0"
 )
+HOST_SURFACE_SELECTION_SCHEMA_VERSION = "loopx_host_surface_selection_gate_v0"
+START_GOAL_HOST_SURFACES = (
+    "codex-app",
+    "codex-ide",
+    "codex-cli-tui",
+    "claude-code",
+    "shell",
+)
 
 
 def _iter_string_leaves(
@@ -213,6 +221,123 @@ def _guided_command_pack_projection(
         compact_projection_default=True,
     )
     return projection
+
+
+def build_start_goal_host_surface_selection_packet(
+    *,
+    project: Path,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    goal_text: str,
+    available_capabilities: list[str] | None = None,
+    include_command_pack_detail: bool = False,
+) -> dict[str, Any]:
+    """Fail closed when the caller has not identified the current Codex host."""
+
+    resolved_project = str(_resolve_project(project))
+    normalized_goal_text = " ".join(goal_text.split())
+    host_descriptions = {
+        "codex-app": "Codex desktop app with heartbeat automation support",
+        "codex-ide": "Codex IDE extension; activate its visible goal mode",
+        "codex-cli-tui": "terminal Codex TUI with visible /goal support",
+        "claude-code": "Claude Code with native /loop",
+        "shell": "manual shell or an explicitly configured external scheduler",
+    }
+    choices: list[dict[str, Any]] = []
+    for host_surface in START_GOAL_HOST_SURFACES:
+        rerun_command = (
+            f"{shell_arg(cli_bin)} start-goal --guided "
+            f"--project {shell_arg(resolved_project)}"
+            + (f" --goal-id {shell_arg(goal_id)}" if goal_id else "")
+            + (f" --agent-id {shell_arg(agent_id)}" if agent_id else "")
+            + f" --host-surface {shell_arg(host_surface)}"
+            + render_available_capability_args(available_capabilities)
+            + f" --goal-text {shell_arg(normalized_goal_text)}"
+            + (" --include-command-pack-detail" if include_command_pack_detail else "")
+        )
+        choices.append(
+            {
+                "host_surface": host_surface,
+                "description": host_descriptions[host_surface],
+                "rerun_command": rerun_command,
+            }
+        )
+    reason = (
+        "host surface is required because Codex App, Codex IDE, and Codex CLI "
+        "have different continuation contracts"
+    )
+    gate = {
+        "schema_version": HOST_SURFACE_SELECTION_SCHEMA_VERSION,
+        "state": "selection_required",
+        "action_required": True,
+        "reason": reason,
+        "required_cli_arg": "--host-surface <exact-host-surface>",
+        "choices": choices,
+    }
+    transaction = {
+        "schema_version": GUIDED_START_SCHEMA_VERSION,
+        "mode": "dry_run_preview",
+        "writes_now": False,
+        "spends_quota_now": False,
+        "goal_text": normalized_goal_text,
+        "blocked_by": "host_surface_selection",
+        "host_surface_selection_gate": gate,
+        "ordered_steps": [
+            {
+                "id": "select_host_surface",
+                "kind": "host_surface_selection_gate",
+                "choices": choices,
+                "purpose": "select the current host before planning, mutation, or loop activation",
+            }
+        ],
+        "idempotency_policy": {"safe_to_rerun_preview": True},
+        "preserve_todos_policy": {
+            "force_bootstrap_default": "forbidden_in_guided_flow",
+            "before_destructive_reconnect": "select a host before any mutation",
+            "preferred_scope_change": "select a host before any mutation",
+        },
+    }
+    payload: dict[str, Any] = {
+        "ok": True,
+        "schema_version": GUIDED_START_SCHEMA_VERSION,
+        "read_only": True,
+        "guided": True,
+        "project": resolved_project,
+        "goal_id": goal_id,
+        "agent_id": agent_id,
+        "host_surface": None,
+        "goal_text": normalized_goal_text,
+        "host_surface_selection_gate": gate,
+        "recommended_next_step": {
+            "kind": "select_host_surface",
+            "requires_user_confirmation": False,
+            "requires_host_surface_selection": True,
+            "summary": reason,
+        },
+        "guided_transaction": transaction,
+        "command_pack_detail_included": include_command_pack_detail,
+        "safety_contract": {
+            "writes_registry": False,
+            "writes_state_file": False,
+            "creates_heartbeat": False,
+            "spends_quota": False,
+            "mutation_commands_are_previewed": False,
+            "force_bootstrap_allowed": False,
+        },
+    }
+    payload["message"] = render_start_goal_guided_markdown(payload)
+    payload["packet_summary"] = _build_packet_summary(
+        payload,
+        packet_kind="guided_start_host_surface_selection",
+        detail_refs={
+            "host_surface_selection_gate": "#/host_surface_selection_gate",
+            "guided_transaction": "#/guided_transaction",
+            "safety_contract": "#/safety_contract",
+            "compatibility_message": "#/message",
+        },
+    )
+    return payload
 
 
 def _resolve_project(project: Path) -> Path:
@@ -1285,6 +1410,22 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
             + "\n".join(choices)
             + "\n"
         )
+    host_gate = transaction.get("host_surface_selection_gate")
+    host_gate = host_gate if isinstance(host_gate, dict) else {}
+    host_gate_lines = ""
+    if host_gate:
+        choices = [
+            f"- `{choice.get('host_surface')}`: {choice.get('description')}  "
+            f"\n  `{choice.get('rerun_command')}`"
+            for choice in host_gate.get("choices") or []
+            if isinstance(choice, dict)
+        ]
+        host_gate_lines = (
+            "\n## Host Surface Gate\n\n"
+            f"{host_gate.get('reason')}\n\n"
+            + "\n".join(choices)
+            + "\n"
+        )
     return f"""# Guided Start Goal
 
 - schema: `{payload.get("schema_version")}`
@@ -1299,6 +1440,7 @@ behind explicit command execution by the host/agent.
 ## Ordered Transaction
 
 {chr(10).join(step_lines)}
+{host_gate_lines}
 {goal_gate_lines}
 {identity_gate_lines}
 

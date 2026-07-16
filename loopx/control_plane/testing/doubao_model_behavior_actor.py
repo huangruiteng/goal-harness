@@ -341,12 +341,18 @@ For phase=entry, derive the contract from the start-goal packet:
   command_pack.host_loop_activation is a non-empty object.
 - host_loop_activation_after_todo_write: copy
   activation_required_after_todo_write from that activation object, else false.
+- requested_host_surface: copy the packet's top-level host_surface, including
+  null. Copy host_surface and activation_method from the activation object,
+  including null.
+- visible_goal_command_available: true exactly when
+  activation.host_mutation.host_command is `/goal <task_body>`.
 - writes_now and spends_quota_now: copy the corresponding booleans from
   guided_transaction, defaulting to false.
 Set next_action equal to route. The semantic_contract must contain exactly:
 route, goal_id, agent_id, action_command_ids,
 host_loop_activation_available, host_loop_activation_after_todo_write,
-writes_now, spends_quota_now."""
+requested_host_surface, host_surface, activation_method,
+visible_goal_command_available, writes_now, spends_quota_now."""
     return common + """
 
 For phase=postcondition, the packet is a locally derived observation:
