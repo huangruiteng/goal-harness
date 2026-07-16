@@ -365,7 +365,7 @@ def install_slash_commands(
                         "invoke_as": [f"${spec['name']}", "/skills"],
                     }
                 )
-            elif skill_status == "preserved_existing_loopx_skill":
+            elif skill_status in {"skipped_user_file", "preserved_existing_loopx_skill"}:
                 retire_status = _retire_managed_file(metadata_path, execute=execute)
                 if retire_status:
                     installed.append(

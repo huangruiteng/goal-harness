@@ -72,3 +72,29 @@ def test_codex_install_preserves_user_owned_loopx_facade(tmp_path: Path) -> None
     assert skill.read_text(encoding="utf-8") == "# user-owned loopx skill\n"
     assert metadata.read_text(encoding="utf-8") == "# user-owned metadata\n"
     assert _row(payload, "codex_explicit_skills")["status"] == "skipped_user_file"
+    assert _row(payload, "retired_codex_command_metadata")["status"] == "skipped_user_file"
+
+
+def test_codex_install_retires_managed_metadata_beside_user_owned_skill(
+    tmp_path: Path,
+) -> None:
+    codex_home = tmp_path / "codex"
+    skill, metadata = _loopx_paths(codex_home)
+    skill.parent.mkdir(parents=True)
+    skill.write_text("# user-owned loopx skill\n", encoding="utf-8")
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text(MANAGED_METADATA, encoding="utf-8")
+
+    payload = install_slash_commands(
+        execute=True,
+        surfaces=["codex"],
+        codex_home=str(codex_home),
+        claude_home=str(tmp_path / "claude"),
+    )
+
+    assert skill.read_text(encoding="utf-8") == "# user-owned loopx skill\n"
+    assert not metadata.exists()
+    assert _row(payload, "codex_explicit_skills")["status"] == "skipped_user_file"
+    assert _row(payload, "retired_codex_command_metadata")["status"] == (
+        "retired_managed_file"
+    )
