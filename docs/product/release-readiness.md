@@ -283,7 +283,9 @@ path, and canary route rather than as a user-facing release baseline.
   [#2177](https://github.com/huangruiteng/loopx/pull/2177),
   [#2187](https://github.com/huangruiteng/loopx/pull/2187),
   [#2188](https://github.com/huangruiteng/loopx/pull/2188),
-  [#2198](https://github.com/huangruiteng/loopx/pull/2198)). LoopX Turn becomes
+  [#2198](https://github.com/huangruiteng/loopx/pull/2198),
+  [#2203](https://github.com/huangruiteng/loopx/pull/2203),
+  [#2204](https://github.com/huangruiteng/loopx/pull/2204)). LoopX Turn becomes
   a shipped isolated-headless route with executable envelopes, session
   recovery, independent validation, real CLI qualification, and a SkillsBench
   integration ([#2158](https://github.com/huangruiteng/loopx/pull/2158),
