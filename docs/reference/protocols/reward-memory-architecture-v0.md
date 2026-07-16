@@ -94,7 +94,11 @@ provider/corpus identity are still checked independently for every corpus.
 The abbreviated corpus and standing-policy objects above represent the full
 existing record contracts. `experiment-status` reports the v1 config schema,
 corpus/surface counts, recall-profile ids, and the effective automatic policy
-without exposing scope refs. The runtime accepts only
+without exposing scope refs. Agent-scoped `quota should-run` and `status
+--agent-id` resolve that policy through the same invoked registry and config
+reader; they do not copy automation flags into registry summaries. Their compact
+`config_runtime_route` names the registry role and project/shared runtime scope,
+and marks exact config readback without exposing either local path. The runtime accepts only
 `reward_memory_experiment_config_v1`; local ignored configs must be migrated
 explicitly before rollout. Setting a flag only authorizes a compatible runtime
 hook; it does not create a scheduler, infer a query, widen authority, or bypass
