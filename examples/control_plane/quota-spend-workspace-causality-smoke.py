@@ -75,7 +75,12 @@ def working_directory(path: Path):
         os.chdir(previous)
 
 
-def write_goal_fixture(project: Path, runtime: Path) -> Path:
+def write_goal_fixture(
+    project: Path,
+    runtime: Path,
+    *,
+    peer_independent_worktree_required: bool | None = None,
+) -> Path:
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     state_path = project / state_file
     state_path.parent.mkdir(parents=True)
@@ -92,29 +97,32 @@ def write_goal_fixture(project: Path, runtime: Path) -> Path:
     )
     registry_path = project / ".loopx" / "registry.json"
     registry_path.parent.mkdir(parents=True)
+    goal = {
+        "id": GOAL_ID,
+        "domain": "quota-workspace-fixture",
+        "status": "active",
+        "repo": str(project),
+        "state_file": state_file,
+        "adapter": {
+            "kind": "quota_workspace_fixture_v0",
+            "status": "connected-read-only",
+        },
+        "authority_sources": [],
+        "coordination": {
+            "agent_model": "peer_v1",
+            "registered_agents": [AGENT_ID, "codex-other"],
+        },
+    }
+    if peer_independent_worktree_required is not None:
+        goal["workspace_guard_policy"] = {
+            "peer_independent_worktree_required": peer_independent_worktree_required,
+        }
     registry_path.write_text(
         json.dumps(
             {
                 "schema_version": "0.1",
                 "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "quota-workspace-fixture",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": state_file,
-                        "adapter": {
-                            "kind": "quota_workspace_fixture_v0",
-                            "status": "connected-read-only",
-                        },
-                        "authority_sources": [],
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": [AGENT_ID, "codex-other"],
-                        },
-                    }
-                ],
+                "goals": [goal],
             },
             indent=2,
         )
@@ -263,6 +271,54 @@ def main() -> None:
         assert legacy_preview["delivery_workspace_validated"] is False, legacy_preview
         assert "moving to an independent worktree" in legacy_preview["reason"], (
             legacy_preview
+        )
+
+        # Explicit policy overrides are part of the delivery snapshot contract.
+        # A multi-agent goal may deliberately allow a canonical CI checkout; its
+        # accountable refresh and spend must preserve that configured boundary.
+        canonical_delivery, _canonical_peer = create_repository(
+            root,
+            "canonical-delivery",
+        )
+        canonical_runtime = root / "canonical-runtime"
+        canonical_registry = write_goal_fixture(
+            canonical_delivery,
+            canonical_runtime,
+            peer_independent_worktree_required=False,
+        )
+        with working_directory(canonical_delivery):
+            canonical_refresh = refresh_state_run(
+                registry_path=canonical_registry,
+                runtime_root_override=str(canonical_runtime),
+                goal_id=GOAL_ID,
+                project=None,
+                state_file=None,
+                classification="validated_canonical_delivery_fixture",
+                recommended_action="complete the canonical fixture todo",
+                delivery_batch_scale="implementation",
+                delivery_outcome="outcome_progress",
+                agent_id=AGENT_ID,
+                progress_scope="agent_lane",
+                dry_run=False,
+                sync_global=False,
+            )
+            canonical_preview = preview(
+                canonical_runtime,
+                quota_decision(workspace_repair=True),
+            )
+        assert canonical_refresh["delivery_workspace"] == {
+            "schema_version": "delivery_workspace_v0",
+            "task_repository": "git:example.invalid/loopx/canonical-delivery",
+            "repository_source": "current_git_origin",
+            "workspace_kind": "canonical_checkout",
+            "peer_independent_worktree_required": False,
+        }, canonical_refresh
+        assert canonical_preview["ok"] is True, canonical_preview
+        assert canonical_preview["delivery_completion_spend"] is True, (
+            canonical_preview
+        )
+        assert canonical_preview["delivery_workspace_validated"] is True, (
+            canonical_preview
         )
 
     print("quota-spend-workspace-causality-smoke ok")

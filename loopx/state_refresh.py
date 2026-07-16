@@ -869,6 +869,18 @@ def refresh_state_run(
     registered_agents = registered_agents_for_goal(registry_goal)
     known_agents = {agent for agent in registered_agents if agent}
     multi_agent_goal = len(known_agents) > 1
+    workspace_guard_policy = (
+        registry_goal.get("workspace_guard_policy")
+        if isinstance(registry_goal.get("workspace_guard_policy"), dict)
+        else {}
+    )
+    explicit_peer_worktree_requirement = workspace_guard_policy.get(
+        "peer_independent_worktree_required"
+    )
+    peer_independent_worktree_required = multi_agent_goal and (
+        explicit_peer_worktree_requirement is None
+        or explicit_peer_worktree_requirement is True
+    )
     if normalized_agent_id and known_agents and normalized_agent_id not in known_agents:
         raise ValueError(
             f"agent_id {normalized_agent_id!r} is not registered for goal {safe_goal_id!r}"
@@ -979,7 +991,7 @@ def refresh_state_run(
     )
     delivery_workspace = (
         capture_delivery_workspace(
-            peer_independent_worktree_required=multi_agent_goal,
+            peer_independent_worktree_required=peer_independent_worktree_required,
         )
         if normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES
         else None

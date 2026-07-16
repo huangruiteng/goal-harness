@@ -331,6 +331,14 @@ into one of four decisions:
 - `user_gate`: an explicit human decision is required;
 - `no_followup`: the PR is merged or closed and the monitor can terminate.
 
+With `--fetch-metadata`, a `CHANGES_REQUESTED` observation also reads a compact
+review-response summary: thread counts, the latest changes-requested time, and
+the head commit time. LoopX waits for re-review instead of creating another
+patch successor only when at least one fetched thread exists, every fetched
+thread is resolved, pagination is complete, and the head commit is newer than
+the review. Missing, partial, or older evidence fails closed to the actionable
+replan route. Review and thread bodies are never captured.
+
 Identical polls should not create work, consume delivery quota, or spam the
 maintainer. Material transitions must produce a successor, concrete blocker,
 or structured no-follow-up; the agent must not stop silently in monitor-only

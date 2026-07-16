@@ -149,11 +149,14 @@ def build_boundary_projection_repair_hint(
     *,
     candidate_should_run: bool,
     capability_gate: dict[str, Any] | None = None,
+    selected_todo: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not candidate_should_run or not isinstance(agent_todo_summary, dict):
         return None
     candidate_items: list[dict[str, Any]] = []
-    if isinstance(capability_gate, dict):
+    if isinstance(selected_todo, dict) and selected_todo:
+        candidate_items.append(selected_todo)
+    elif isinstance(capability_gate, dict):
         if capability_gate.get("action") != "run":
             return None
         runnable_candidates = capability_gate.get("runnable_candidates")
@@ -161,7 +164,7 @@ def build_boundary_projection_repair_hint(
             candidate_items.extend(
                 item for item in runnable_candidates if isinstance(item, dict)
             )
-    if not candidate_items:
+    if not candidate_items and not selected_todo:
         for key in ("first_executable_items", "first_open_items"):
             value = agent_todo_summary.get(key)
             if isinstance(value, list):
