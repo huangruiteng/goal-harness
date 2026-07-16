@@ -641,7 +641,7 @@ def project_issue_fix_explore_graph(
         state_file=state_file,
     )
     registry = load_registry(registry_path)
-    runtime_root = resolve_runtime_root(registry)
+    runtime_root = resolve_runtime_root(registry, registry_path=registry_path)
     result_log = explore_result_log_path(runtime_root, goal_id)
     existing_events = load_explore_result_events(result_log, goal_id=goal_id)
     outcomes_packet = build_issue_fix_outcome_collection_from_domain_state(

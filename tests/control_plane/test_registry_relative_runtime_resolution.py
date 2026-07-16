@@ -6,7 +6,17 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from examples.control_plane.quota_plan_fixtures import write_cli_fixture
+from loopx.capabilities.explore.result_log import (
+    append_explore_result_event,
+    build_explore_node_event,
+    explore_result_log_path,
+)
+from loopx.capabilities.issue_fix.explore_projection import (
+    project_issue_fix_explore_graph,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -105,3 +115,37 @@ def test_history_and_quota_anchor_relative_runtime_to_registry_project(
     assert decision["should_run"] is True
     assert decision["normal_delivery_allowed"] is True
     assert decision["decision"] == "run"
+
+
+def test_issue_fix_explore_projection_anchors_relative_runtime_to_registry_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path, runtime_root, project = write_cli_fixture(tmp_path / "fixture")
+    target_runtime = _make_runtime_paths_project_relative(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+    )
+    result_log = explore_result_log_path(target_runtime, "half-speed")
+    append_explore_result_event(
+        result_log,
+        build_explore_node_event(
+            goal_id="half-speed",
+            node_id="canonical_source_node",
+            title="Canonical source node",
+        ),
+    )
+    independent_worktree = tmp_path / "independent-worktree"
+    independent_worktree.mkdir()
+    monkeypatch.chdir(independent_worktree)
+
+    projection = project_issue_fix_explore_graph(
+        registry_path=registry_path,
+        goal_id="half-speed",
+    )
+
+    assert projection["material_event_count"] == 0
+    assert {
+        node["node_id"] for node in projection["projection"]["nodes"]
+    } == {"canonical_source_node"}
