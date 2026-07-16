@@ -53,6 +53,61 @@ prematurely defining an installer, package repository, or global activation
 store. Those lifecycle surfaces can later provide the same validated manifest
 paths to the registry.
 
+## Placement Decision For Agents
+
+Before creating a directory, LoopX or an executing agent must answer these
+questions in order:
+
+1. **What caller-visible contract is being added or changed?** If an existing
+   capability already owns that contract, add the implementation to
+   `loopx/capabilities/<existing-capability>/` instead of creating a sibling.
+2. **Must LoopX core always ship and maintain the implementation?** If yes, it
+   may be a built-in capability. A new built-in needs a stable id, a real
+   entrypoint or protocol call site, focused validation, and catalog
+   registration.
+3. **Does the implementation need independent installation, enablement,
+   disablement, upgrade, dependencies, credentials, or provider ownership?**
+   If yes, it is an extension provider. The capability remains the contract;
+   the extension manifest declares that it provides the contract.
+4. **Is this only registration or lifecycle machinery shared by all
+   extensions?** Put that mechanism in `loopx/extensions/`, not in a provider
+   package.
+5. **Is this only an internal helper?** Put it in the nearest module that owns
+   its change reason. Do not register a capability or create an extension.
+
+Use this placement map after answering the questions:
+
+| Change | Placement |
+| --- | --- |
+| Existing built-in capability behavior | `loopx/capabilities/<capability-id>/` |
+| Built-in catalog and registration contract | `loopx/capabilities/catalog.py` or `registry.py` |
+| Generic extension runtime | `loopx/extensions/` |
+| Co-located optional provider | `extensions/<extension-id>/` |
+| Separately distributed provider | provider-owned package or repository |
+| Internal implementation helper | nearest owning module |
+
+Some work belongs on both axes. For example, a finance-discovery provider can
+live in `extensions/finance-value-discovery/` while providing the existing
+`value-connectors` contract. Register a separate `finance-value-discovery`
+capability only when callers need a distinct stable contract that
+`value-connectors` cannot express. The extension directory owns delivery and
+lifecycle; capability registration owns the caller-visible promise.
+
+Before editing, record a compact rationale in the active todo or plan:
+
+```text
+capability_id: <existing-or-new-contract>
+provider_id: loopx-core | <extension-id>
+origin: builtin | extension
+placement: <target-directory-or-package>
+reason: <why the nearest existing owner is or is not sufficient>
+```
+
+Do not create a new capability directory merely because no current directory
+has the feature name. Do not create an extension merely because an external
+service is involved: a built-in connector can still belong to an existing
+capability when it shares the core release and lifecycle.
+
 ## Manifest Contract
 
 An extension manifest is declarative TOML. `[[provides]]` records carry enough
