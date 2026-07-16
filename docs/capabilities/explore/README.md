@@ -763,6 +763,11 @@ concurrent because they cannot mutate the sink. Retry after the active process
 exits instead of allowing two upsert scans to create duplicate Result IDs or
 overwrite each other's local checkpoint snapshot.
 
+The lock is reentrant inside one execution context, so a batch that already
+owns the board lock can call the direct command or automatic material sync
+without rejecting itself as `sync_busy`. Reuse never crosses an execution
+context or process; independent writers still fail fast.
+
 The text `From Node` / `To Node` columns remain stable public ids for
 automation and review, while the linked-record columns are the Feishu-native
 graph substrate. A Base plugin, relationship-aware view, or Feishu dashboard

@@ -202,16 +202,26 @@ def main() -> None:
         assert activated["source_runtime_route"]["status"] == "source_registry", activated
         assert activated["delivery_postcondition"]["blocks_delivery"] is False, activated
 
+        current_config = json.loads(config_path.read_text(encoding="utf-8"))
+        current_config["automatic_projection_sync"][GOAL_ID].update(
+            {
+                "canonical_rows_semantic_digest": routed["semantic_digest"],
+                "canonical_rows_readback_semantic_digest": routed[
+                    "semantic_digest"
+                ],
+            }
+        )
+        write_lark_explore_local_config(config_path, current_config)
         with explore_feishu_sync_singleflight(config_path=config_path, execute=True):
-            busy = sync_issue_fix_explore_on_material_change(
+            reentrant = sync_issue_fix_explore_on_material_change(
                 registry_path=shared_registry,
                 goal_id=GOAL_ID,
                 project=project,
                 state_file=state,
                 execute=True,
             )
-        assert busy["status"] == "sync_busy", busy
-        assert busy["external_write_performed"] is False, busy
+        assert reentrant["status"] == "unchanged", reentrant
+        assert reentrant["row_readback_verified"] is True, reentrant
         assert not stale_config_path.exists()
 
         divergent_config = json.loads(config_path.read_text(encoding="utf-8"))
