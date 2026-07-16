@@ -35,6 +35,9 @@ ACTIVATION = {
     "schema_version": "loopx_host_loop_activation_v1",
     "agent_id": "codex-fixture",
     "activation_required_after_todo_write": True,
+    "host_surface": "codex_ide_visible_goal_mode",
+    "activation_method": "set_visible_goal",
+    "host_mutation": {"host_command": "/goal <task_body>"},
 }
 TRANSACTION = {
     "schema_version": "loopx_goal_start_transaction_v0",
@@ -56,6 +59,7 @@ def _actual_entry_packet() -> dict[str, Any]:
         "command_pack_detail_included": False,
         "goal_id": "fixture-goal",
         "agent_id": "codex-fixture",
+        "host_surface": "codex-ide",
         "guided_transaction": TRANSACTION,
         "safety_contract": {
             "writes_registry": False,
@@ -235,6 +239,37 @@ def test_independent_oracle_rejects_host_activation_loss_before_model() -> None:
         run_onboarding_actual_behavior_qualification(
             packet,
             qualification_id="onboarding-activation-gap-001",
+            actor=actor,
+            transition_runner=_healthy_observation,
+            repair_observation=_projection_gap_observation(),
+        )
+
+    assert calls == 0
+
+
+def test_independent_oracle_rejects_codex_ide_routed_to_app_before_model() -> None:
+    calls = 0
+    packet = _actual_entry_packet()
+    packet["command_pack"]["host_loop_activation"].update(
+        {
+            "host_surface": "codex_app_heartbeat_automation",
+            "activation_method": "create_or_update_codex_app_automation",
+            "host_mutation": {},
+        }
+    )
+
+    def actor(_: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {}
+
+    with pytest.raises(
+        OnboardingActualBehaviorValidationError,
+        match="codex_ide_requires_ide_goal_surface",
+    ):
+        run_onboarding_actual_behavior_qualification(
+            packet,
+            qualification_id="onboarding-codex-ide-app-route-001",
             actor=actor,
             transition_runner=_healthy_observation,
             repair_observation=_projection_gap_observation(),

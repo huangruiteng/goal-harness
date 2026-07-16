@@ -271,3 +271,71 @@ def test_projection_preserves_multi_goal_selection_actions(tmp_path: Path) -> No
         "select_goal",
     ]
     assert _host_shadow_document(compact) == _host_shadow_document(detailed)
+
+
+def test_cli_without_host_returns_read_only_host_selection_gate(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--agent-id",
+                AGENT_ID,
+                "--goal-text",
+                GOAL_TEXT,
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.getvalue())
+    assert payload["guided_transaction"]["blocked_by"] == "host_surface_selection"
+    assert payload["safety_contract"]["writes_registry"] is False
+    choices = payload["host_surface_selection_gate"]["choices"]
+    assert [choice["host_surface"] for choice in choices] == [
+        "codex-app",
+        "codex-ide",
+        "codex-cli-tui",
+        "claude-code",
+        "shell",
+    ]
+    ide = next(choice for choice in choices if choice["host_surface"] == "codex-ide")
+    assert "--host-surface codex-ide" in ide["rerun_command"]
+
+
+def test_codex_ide_uses_visible_goal_and_preserves_compact_parity(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    common = {
+        "project": project,
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "cli_bin": "loopx",
+        "host_surface": "codex-ide",
+        "goal_text": GOAL_TEXT,
+        "available_capabilities": ["network"],
+    }
+    compact = build_start_goal_guided_packet(
+        **common,
+        include_command_pack_detail=False,
+    )
+    detailed = build_start_goal_guided_packet(
+        **common,
+        include_command_pack_detail=True,
+    )
+
+    activation = compact["command_pack"]["host_loop_activation"]
+    assert activation["host_surface"] == "codex_ide_visible_goal_mode"
+    assert activation["activation_method"] == "set_visible_goal"
+    assert activation["host_mutation"]["host_command"] == "/goal <task_body>"
+    assert _host_shadow_document(compact) == _host_shadow_document(detailed)

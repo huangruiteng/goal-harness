@@ -17,7 +17,14 @@ SCHEMA_VERSION = "loopx_host_loop_activation_v1"
 AGENT_TYPE_CATALOG_SCHEMA_VERSION = "loopx_agent_type_catalog_v0"
 IDENTITY_SELECTION_SCHEMA_VERSION = "loopx_host_loop_identity_selection_v0"
 
-SUPPORTED_AGENT_TYPES = ["codex-app", "codex-cli", "claude-code", "manual", "other-agent"]
+SUPPORTED_AGENT_TYPES = [
+    "codex-app",
+    "codex-ide",
+    "codex-cli",
+    "claude-code",
+    "manual",
+    "other-agent",
+]
 
 AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
     "codex-app": {
@@ -37,6 +44,20 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
             "codex-cli-tui",
             "codex_cli_tui",
             "codex tui",
+        ],
+    },
+    "codex-ide": {
+        "display_name": "Codex IDE extension",
+        "host_loop": "visible Codex IDE /goal",
+        "entry": "$loopx <task> or the explicit LoopX skill from /skills",
+        "accepted_inputs": [
+            "codex-ide",
+            "codex_ide",
+            "codex ide",
+            "codex-vscode",
+            "codex vscode",
+            "vscode-codex",
+            "vscode codex",
         ],
     },
     "claude-code": {
@@ -60,9 +81,9 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 AMBIGUOUS_AGENT_TYPE_INPUTS: dict[str, list[str]] = {
-    "codex": ["codex-app", "codex-cli"],
-    "openai-codex": ["codex-app", "codex-cli"],
-    "openai codex": ["codex-app", "codex-cli"],
+    "codex": ["codex-app", "codex-ide", "codex-cli"],
+    "openai-codex": ["codex-app", "codex-ide", "codex-cli"],
+    "openai codex": ["codex-app", "codex-ide", "codex-cli"],
     "cli": ["codex-cli", "manual", "other-agent"],
 }
 
@@ -100,6 +121,7 @@ class AgentTypeError(ValueError):
 HOST_SURFACE_TO_AGENT_TYPE = {
     "codex-app": "codex-app",
     "chat-box": "codex-app",
+    "codex-ide": "codex-ide",
     "codex-cli-tui": "codex-cli",
     "claude-code": "claude-code",
     "shell": "manual",
@@ -128,7 +150,7 @@ def build_agent_type_catalog() -> dict[str, Any]:
         ],
         "selection_rule": (
             "Agents should pass a canonical agent_type. Ambiguous values such as "
-            "`codex` are rejected because Codex App and Codex CLI have different "
+            "`codex` are rejected because Codex App, Codex IDE, and Codex CLI have different "
             "host-loop activation paths."
         ),
     }
@@ -220,6 +242,7 @@ def _heartbeat_commands(
 ) -> dict[str, str]:
     scope_by_type = {
         "codex-app": "Codex App heartbeat automation",
+        "codex-ide": "Codex IDE /goal visible task loop",
         "codex-cli": "Codex CLI /goal visible TUI loop",
         "claude-code": "Claude Code native /loop gated by LoopX",
         "manual": "External scheduler or manual shell LoopX poll",
@@ -336,32 +359,53 @@ def _codex_app_activation(commands: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def _codex_cli_activation(commands: dict[str, str]) -> dict[str, Any]:
+def _codex_goal_activation(
+    commands: dict[str, str],
+    *,
+    host_label: str,
+    host_surface: str,
+) -> dict[str, Any]:
     return {
-        "host_surface": "codex_cli_visible_goal_mode",
+        "host_surface": host_surface,
         "entry_command_hint": "$loopx <task> or the explicit LoopX skill from /skills",
-        "activation_method": "set_visible_tui_goal",
+        "activation_method": "set_visible_goal",
         "activation_input_command": commands["heartbeat_prompt_json"],
         "host_mutation": {
-            "owner": "Codex CLI TUI",
+            "owner": host_label,
             "host_command": "/goal <task_body>",
             "cli_can_mutate_directly": False,
             "missing_host_tool_gate": (
-                "Current session cannot set Codex CLI /goal; show the exact "
+                f"Current session cannot set {host_label} /goal; show the exact "
                 "`/goal <task_body>` text for the user to paste."
             ),
         },
         "activation_steps": [
             "Run the heartbeat-prompt JSON command after project state and todos are written.",
             "Read task_body from the JSON payload.",
-            "Set the visible Codex CLI TUI goal to `/goal <task_body>`.",
-            "Keep delivery in the visible TUI; do not switch to hidden headless execution.",
+            f"Set the visible {host_label} goal to `/goal <task_body>`.",
+            "Keep delivery in the visible task; do not switch to hidden headless execution.",
         ],
         "success_criteria": [
-            "The visible Codex CLI TUI has `/goal <task_body>` active for this goal.",
-            "Future TUI turns enter through LoopX quota/status/state before delivery work.",
+            f"The visible {host_label} has `/goal <task_body>` active for this goal.",
+            "Future goal turns enter through LoopX quota/status/state before delivery work.",
         ],
     }
+
+
+def _codex_cli_activation(commands: dict[str, str]) -> dict[str, Any]:
+    return _codex_goal_activation(
+        commands,
+        host_label="Codex CLI TUI",
+        host_surface="codex_cli_visible_goal_mode",
+    )
+
+
+def _codex_ide_activation(commands: dict[str, str]) -> dict[str, Any]:
+    return _codex_goal_activation(
+        commands,
+        host_label="Codex IDE composer",
+        host_surface="codex_ide_visible_goal_mode",
+    )
 
 
 def _claude_code_activation(commands: dict[str, str], cli_bin: str) -> dict[str, Any]:
@@ -450,6 +494,8 @@ def build_host_loop_activation_packet(
     )
     if canonical == "codex-app":
         surface = _codex_app_activation(commands)
+    elif canonical == "codex-ide":
+        surface = _codex_ide_activation(commands)
     elif canonical == "codex-cli":
         surface = _codex_cli_activation(commands)
     elif canonical == "claude-code":
