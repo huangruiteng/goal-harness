@@ -91,12 +91,13 @@ provider/corpus identity are still checked independently for every corpus.
 ```
 
 The abbreviated corpus and standing-policy objects above represent the full
-existing v0 contracts. `experiment-status` reports the source/effective schema,
-migration state, corpus/surface counts, recall-profile ids, and the effective
-automatic policy without exposing scope refs. Existing single-corpus config v0
-files migrate in memory to one surface with both automatic flags off. Setting a
-flag only authorizes a compatible runtime hook; it does not create a scheduler,
-infer a query, widen authority, or bypass the exact surface/corpus guards.
+existing record contracts. `experiment-status` reports the v1 config schema,
+corpus/surface counts, recall-profile ids, and the effective automatic policy
+without exposing scope refs. The runtime accepts only
+`reward_memory_experiment_config_v1`; local ignored configs must be migrated
+explicitly before rollout. Setting a flag only authorizes a compatible runtime
+hook; it does not create a scheduler, infer a query, widen authority, or bypass
+the exact surface/corpus guards.
 
 An allowlisted agent supplies only the compact event at runtime:
 
@@ -108,11 +109,10 @@ loopx reward-memory ingest-event \
 
 Real provider writes require this configured goal-and-agent route. The legacy
 full-packet form remains available only as a no-write evaluation fixture.
-The default v0 migration does not enable automatic feedback capture, ingest,
-recall, or provider authentication. Issue Fix continues normally when the
-experiment is disabled, unavailable, rejected by guards, or fails exact
-readback. Invalid v1 configuration also resolves unavailable with both
-automatic flags false.
+Config loading does not enable automatic feedback capture, ingest, recall, or
+provider authentication. Issue Fix continues normally when the experiment is
+disabled, unavailable, rejected by guards, or fails exact readback. Invalid or
+non-v1 configuration resolves unavailable with both automatic flags false.
 
 ## Five first-class classes
 
