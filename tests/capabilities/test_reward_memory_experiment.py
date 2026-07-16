@@ -20,6 +20,13 @@ from loopx.capabilities.reward_memory.runtime_hooks import (
     run_reward_memory_automatic_recall_hook,
 )
 from loopx.cli import main
+from loopx.cli_commands.status import attach_agent_lane_next_actions
+from loopx.control_plane.testing.quota_fixtures import (
+    quota_status_payload,
+    quota_todo_item,
+)
+from loopx.quota import build_quota_should_run
+from loopx.presentation.renderers.status_markdown import render_status_markdown
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -275,6 +282,16 @@ def test_status_is_agent_scoped_and_public_safe(tmp_path: Path) -> None:
     assert allowed["automatic_ingest"] is False
     assert allowed["automatic_recall"] is False
     assert allowed["config_schema_version"] == ("reward_memory_experiment_config_v1")
+    assert allowed["config_runtime_route"] == {
+        "schema_version": "reward_memory_config_runtime_route_v0",
+        "registry_source": "invoked_registry",
+        "registry_role": "project-local",
+        "runtime_scope": "project_runtime",
+        "goal_source": "registry.goals",
+        "config_source": "goal_repo_relative_config_pointer",
+        "readback_status": "verified",
+        "exact_readback_verified": True,
+    }
     assert "config_path" not in allowed
     assert config is not None
     assert not {
@@ -285,6 +302,84 @@ def test_status_is_agent_scoped_and_public_safe(tmp_path: Path) -> None:
     }.intersection(config)
     assert denied["status"] == "agent_not_enabled"
     assert denied_config is None
+
+
+def test_split_runtime_quota_and_status_use_v1_config_readback(
+    tmp_path: Path,
+) -> None:
+    source_registry, _, _ = _experiment(tmp_path)
+    _write_v1_config(source_registry, _v1_config())
+    shared_registry = tmp_path / "shared-runtime/registry.global.json"
+    shared_registry.parent.mkdir()
+    registry = json.loads(source_registry.read_text(encoding="utf-8"))
+    registry.update(
+        {
+            "registry_role": "global-local",
+            "common_runtime_root": str(shared_registry.parent),
+        }
+    )
+    goal = registry["goals"][0]
+    goal["source_registry"] = str(source_registry)
+    goal["control_plane"]["reward_memory"].update(
+        {
+            "automatic_ingest": False,
+            "automatic_recall": False,
+        }
+    )
+    shared_registry.write_text(json.dumps(registry), encoding="utf-8")
+
+    todo = quota_todo_item(
+        todo_id="todo_reward_memory_projection",
+        text="[P1] Project the configured Reward Memory automation policy.",
+        claimed_by="pilot",
+    )
+    status_payload = quota_status_payload(
+        goal_id="reward-memory-goal",
+        status="active",
+        recommended_action=todo["text"],
+        agent_todo_items=[todo],
+        coordination={
+            "agent_model": "peer_v1",
+            "registered_agents": ["pilot", "meta"],
+        },
+    )
+    status_payload["registry"] = str(shared_registry)
+
+    guard = build_quota_should_run(
+        status_payload,
+        goal_id="reward-memory-goal",
+        agent_id="pilot",
+    )
+    projected = guard["goal_boundary"]["capabilities"]["reward_memory"]
+    assert projected["automatic_ingest"] is True
+    assert projected["automatic_recall"] is True
+    assert projected["automation_projection_source"] == (
+        "reward_memory_experiment_status_v1"
+    )
+    assert projected["config_runtime_route"]["runtime_scope"] == "shared_runtime"
+    assert projected["config_runtime_route"]["exact_readback_verified"] is True
+
+    attach_agent_lane_next_actions(status_payload, agent_id="pilot")
+    status_projection = status_payload["attention_queue"]["items"][0][
+        "agent_reward_memory"
+    ]
+    assert status_projection["automatic_ingest"] is True
+    assert status_projection["automatic_recall"] is True
+    assert status_projection["config_runtime_route"] == projected[
+        "config_runtime_route"
+    ]
+    assert status_payload["agent_reward_memory_projection"] == {
+        "schema_version": "agent_reward_memory_projection_summary_v1",
+        "agent_id": "pilot",
+        "attached_count": 1,
+        "source": "quota.goal_boundary.capabilities.reward_memory",
+    }
+    markdown = render_status_markdown(status_payload)
+    assert (
+        "agent_reward_memory: agent=pilot status=available "
+        "automatic_ingest=True automatic_recall=True "
+        "runtime_scope=shared_runtime exact_readback=True"
+    ) in markdown
 
 
 def test_registry_cannot_enable_experiment_without_explicit_marker(

@@ -1400,6 +1400,29 @@ def append_attention_queue_project_asset_markdown(
             f"spend_after_validation={agent_interaction.get('spend_after_validation')}"
         )
 
+    agent_reward_memory = (
+        project_asset.get("agent_reward_memory")
+        if isinstance(project_asset.get("agent_reward_memory"), dict)
+        else item.get("agent_reward_memory")
+        if isinstance(item.get("agent_reward_memory"), dict)
+        else {}
+    )
+    if agent_reward_memory:
+        config_runtime_route = (
+            agent_reward_memory.get("config_runtime_route")
+            if isinstance(agent_reward_memory.get("config_runtime_route"), dict)
+            else {}
+        )
+        lines.append(
+            "    - agent_reward_memory: "
+            f"agent={markdown_scalar(agent_reward_memory.get('agent_id') or '')} "
+            f"status={markdown_scalar(agent_reward_memory.get('experiment_status') or '')} "
+            f"automatic_ingest={agent_reward_memory.get('automatic_ingest')} "
+            f"automatic_recall={agent_reward_memory.get('automatic_recall')} "
+            f"runtime_scope={markdown_scalar(config_runtime_route.get('runtime_scope') or '')} "
+            f"exact_readback={config_runtime_route.get('exact_readback_verified')}"
+        )
+
     _append_project_asset_agent_lane_markdown(
         lines,
         item,

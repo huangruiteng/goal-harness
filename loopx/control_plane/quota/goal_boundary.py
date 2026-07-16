@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +78,7 @@ def goal_boundary(
     *,
     agent_id: str | None = None,
     lark_event_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    reward_memory_experiment_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     boundary: dict[str, Any] = {}
     adapter_kind = goal.get("adapter_kind")
@@ -197,7 +198,46 @@ def goal_boundary(
             "enabled_agents": list(reward_memory["enabled_agents"]),
             "automatic_ingest": False,
             "automatic_recall": False,
+            "automation_projection_source": "default_off_unresolved",
         }
+        if (
+            agent_id is not None
+            and isinstance(reward_memory_experiment_status, Mapping)
+            and reward_memory_experiment_status.get("goal_id") == goal.get("id")
+            and reward_memory_experiment_status.get("agent_id") == agent_id
+        ):
+            reward_capability.update(
+                {
+                    "experiment_status": str(
+                        reward_memory_experiment_status.get("status") or "unavailable"
+                    ),
+                    "experiment_available": (
+                        reward_memory_experiment_status.get("available") is True
+                    ),
+                    "automatic_ingest": (
+                        reward_memory_experiment_status.get("automatic_ingest") is True
+                    ),
+                    "automatic_recall": (
+                        reward_memory_experiment_status.get("automatic_recall") is True
+                    ),
+                    "fail_open": reward_memory_experiment_status.get("fail_open")
+                    is not False,
+                    "automation_projection_source": (
+                        "reward_memory_experiment_status_v1"
+                    ),
+                }
+            )
+            if reward_memory_experiment_status.get("config_schema_version"):
+                reward_capability["config_schema_version"] = str(
+                    reward_memory_experiment_status["config_schema_version"]
+                )
+            config_runtime_route = reward_memory_experiment_status.get(
+                "config_runtime_route"
+            )
+            if isinstance(config_runtime_route, Mapping):
+                reward_capability["config_runtime_route"] = dict(
+                    config_runtime_route
+                )
         if agent_id is not None:
             reward_capability.update(
                 {
