@@ -21,6 +21,9 @@ from .control_plane.work_items.repair_delta import (
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
     normalize_repair_delta_kinds,
 )
+from .control_plane.work_items.autonomous_replan_ack import (
+    latest_blocked_successor_frontier_identity,
+)
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
     write_shared_runtime_projection,
@@ -549,6 +552,7 @@ def build_state_refresh_record(
     agent_lane: str | None = None,
     autonomous_replan_recorded: bool = False,
     repair_delta_contract: dict[str, Any] | None = None,
+    autonomous_replan_frontier_identity: str | None = None,
     agent_vision: dict[str, Any] | None = None,
     vision_checkpoint: dict[str, Any] | None = None,
     delivery_workspace: dict[str, Any] | None = None,
@@ -604,6 +608,10 @@ def build_state_refresh_record(
         }
         if repair_delta_contract:
             record["autonomous_replan_ack"]["delta_contract"] = repair_delta_contract
+        if autonomous_replan_frontier_identity:
+            record["autonomous_replan_ack"]["frontier_identity"] = (
+                autonomous_replan_frontier_identity
+            )
     if agent_vision:
         record["agent_vision"] = agent_vision
     if vision_checkpoint:
@@ -917,6 +925,7 @@ def refresh_state_run(
         vision_unchanged_reason
     )
     existing_agent_vision: dict[str, Any] | None = None
+    autonomous_replan_frontier_identity: str | None = None
     if normalized_agent_id and normalized_vision_unchanged_reason:
         existing_runs, _ = load_index(
             runtime_root / "goals" / safe_goal_id / "runs" / "index.jsonl"
@@ -933,6 +942,21 @@ def refresh_state_run(
             newest_first_runs,
             goal_id=safe_goal_id,
             agent_id=normalized_agent_id,
+        )
+    if autonomous_replan_recorded:
+        existing_runs, _ = load_index(
+            runtime_root / "goals" / safe_goal_id / "runs" / "index.jsonl"
+        )
+        newest_first_runs = [
+            run
+            for _, run in sorted(
+                enumerate(existing_runs),
+                key=lambda item: (str(item[1].get("generated_at") or ""), item[0]),
+                reverse=True,
+            )
+        ]
+        autonomous_replan_frontier_identity = (
+            latest_blocked_successor_frontier_identity(newest_first_runs)
         )
     generated_at = now_local()
     active_state_next_action_update: dict[str, Any] | None = None
@@ -1012,6 +1036,7 @@ def refresh_state_run(
         agent_lane=normalized_agent_lane or None,
         autonomous_replan_recorded=effective_autonomous_replan_recorded,
         repair_delta_contract=repair_delta_contract,
+        autonomous_replan_frontier_identity=autonomous_replan_frontier_identity,
         agent_vision=agent_vision,
         vision_checkpoint=vision_checkpoint,
         delivery_workspace=delivery_workspace,
@@ -1025,6 +1050,10 @@ def refresh_state_run(
                 "delta_contract": repair_delta_contract,
             }
         record["autonomous_replan_ack"]["requested"] = True
+        if autonomous_replan_frontier_identity:
+            record["autonomous_replan_ack"]["frontier_identity"] = (
+                autonomous_replan_frontier_identity
+            )
         if requested_classification != classification:
             record["autonomous_replan_ack"]["requested_classification"] = requested_classification
             record["autonomous_replan_noop"] = {

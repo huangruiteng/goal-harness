@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from ..todos.contract import normalize_todo_id
@@ -8,6 +10,54 @@ from ..todos.deferred_resume import todo_summary_blocked_successor_items
 
 GOAL_VISION_WAIT_STATE_SCHEMA_VERSION = "goal_vision_wait_state_v0"
 VISION_ACCEPTANCE_GAP_KIND = "vision_acceptance_gap"
+
+
+def exact_blocked_successor_wait_state(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    candidate = value
+    if value.get("schema_version") != GOAL_VISION_WAIT_STATE_SCHEMA_VERSION:
+        candidate = (
+            value.get("vision_wait_state")
+            if isinstance(value.get("vision_wait_state"), dict)
+            else {}
+        )
+        if not candidate:
+            projection = (
+                value.get("goal_frontier_projection")
+                if isinstance(value.get("goal_frontier_projection"), dict)
+                else {}
+            )
+            candidate = (
+                projection.get("vision_wait_state")
+                if isinstance(projection.get("vision_wait_state"), dict)
+                else {}
+            )
+    if (
+        candidate.get("schema_version") != GOAL_VISION_WAIT_STATE_SCHEMA_VERSION
+        or candidate.get("state") != "waiting"
+        or candidate.get("reason_code") != "exact_blocked_successor"
+        or candidate.get("automatic_resume") is not True
+        or not normalize_todo_id(candidate.get("selected_todo_id"))
+        or not str(candidate.get("resume_when") or "").strip()
+    ):
+        return {}
+    return candidate
+
+
+def exact_blocked_successor_frontier_identity(value: Any) -> str | None:
+    wait = exact_blocked_successor_wait_state(value)
+    if not wait:
+        return None
+    parts = {
+        "agent_id": str(wait.get("agent_id") or "").strip(),
+        "reason_code": "exact_blocked_successor",
+        "selected_todo_id": normalize_todo_id(wait.get("selected_todo_id")),
+        "resume_when": str(wait.get("resume_when") or "").strip(),
+    }
+    return hashlib.sha256(
+        json.dumps(parts, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
 
 
 def _compact_resume_condition(value: Any) -> dict[str, Any]:

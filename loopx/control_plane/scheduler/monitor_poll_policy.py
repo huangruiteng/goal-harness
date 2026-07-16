@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..goals.goal_vision_wait import exact_blocked_successor_wait_state
 from ..todos.contract import TODO_TASK_CLASS_MONITOR, normalize_todo_id
 from ..todos.projection import todo_item_task_class
 
@@ -14,6 +15,15 @@ EXTERNAL_MONITOR_REASON_CODES = {
     "external_evidence_poll_signal",
 }
 DUE_MONITOR_OBLIGATION = "attempt_due_monitor"
+
+
+def allows_no_spend_blocked_successor_wait_poll(decision: dict[str, Any]) -> bool:
+    return bool(
+        decision.get("effective_action") == "agent_scope_wait"
+        and decision.get("should_run") is False
+        and decision.get("requires_user_action") is not True
+        and exact_blocked_successor_wait_state(decision)
+    )
 
 
 def work_lane_reason_codes(work_lane_contract: dict[str, Any]) -> set[str]:

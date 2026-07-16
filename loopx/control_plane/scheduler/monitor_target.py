@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+from ..goals.goal_vision_wait import exact_blocked_successor_frontier_identity
 from ..todos.contract import normalize_todo_claimed_by
 
 QUOTA_MONITOR_TARGET_SCHEMA_VERSION = "quota_monitor_target_v0"
@@ -36,13 +37,16 @@ def build_quota_monitor_target(
         limit=160,
     )
     agent_id = monitor_target_agent_id(decision) or ""
+    frontier_identity = exact_blocked_successor_frontier_identity(decision)
     parts = {
         "goal_id": str(decision.get("goal_id") or ""),
         "agent_id": agent_id,
         "monitor_mode": str(monitor_mode or ""),
         "effective_action": str(decision.get("effective_action") or ""),
-        "action_summary": action_summary,
+        "frontier_identity": frontier_identity or "",
     }
+    if not frontier_identity:
+        parts["action_summary"] = action_summary
     target_id = hashlib.sha256(
         json.dumps(parts, ensure_ascii=True, sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]
@@ -55,4 +59,6 @@ def build_quota_monitor_target(
     }
     if agent_id:
         target["agent_id"] = agent_id
+    if frontier_identity:
+        target["frontier_identity"] = frontier_identity
     return target
