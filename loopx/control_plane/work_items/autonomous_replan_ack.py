@@ -41,7 +41,47 @@ def compact_autonomous_replan_ack(run: dict[str, Any] | None) -> dict[str, Any] 
     agent_id = str(run.get("agent_id") or "").strip()
     if agent_id:
         result["agent_id"] = agent_id
+    frontier_identity = str(ack.get("frontier_identity") or "").strip()
+    if frontier_identity:
+        result["frontier_identity"] = frontier_identity
     return result
+
+
+def latest_blocked_successor_frontier_identity(
+    latest_runs: list[dict[str, Any]] | None,
+) -> str | None:
+    for run in latest_runs or []:
+        if not isinstance(run, dict):
+            continue
+        classification = str(run.get("classification") or "").strip()
+        if classification != "quota_monitor_poll":
+            return None
+        target = (
+            run.get("monitor_target")
+            if isinstance(run.get("monitor_target"), dict)
+            else {}
+        )
+        if target.get("monitor_mode") != (
+            "blocked_successor_wait_without_material_transition"
+        ):
+            continue
+        frontier_identity = str(target.get("frontier_identity") or "").strip()
+        return frontier_identity or None
+    return None
+
+
+def autonomous_replan_ack_matches_frontier(
+    ack: dict[str, Any] | None,
+    obligation: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(obligation, dict):
+        return True
+    frontier_identity = str(obligation.get("frontier_identity") or "").strip()
+    if not frontier_identity:
+        return True
+    if not isinstance(ack, dict):
+        return False
+    return str(ack.get("frontier_identity") or "").strip() == frontier_identity
 
 
 def autonomous_replan_ack_matches_agent(

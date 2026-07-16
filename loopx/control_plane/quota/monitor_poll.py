@@ -11,6 +11,7 @@ from .spend_sources import DEFAULT_SLOT_SPEND_SOURCE, VALID_SLOT_SPEND_SOURCES
 from ..runtime.time import now_local_iso
 from ..runtime.run_artifacts import run_file_stem, unique_run_artifact_paths
 from ..scheduler.monitor_poll_policy import (
+    allows_no_spend_blocked_successor_wait_poll,
     allows_due_monitor_poll,
     allows_no_spend_external_monitor_poll,
     work_lane_reason_codes,
@@ -48,6 +49,7 @@ def build_quota_monitor_poll_event(
     if safe_source not in VALID_SLOT_SPEND_SOURCES:
         raise ValueError(f"quota monitor-poll source must be one of: {', '.join(sorted(VALID_SLOT_SPEND_SOURCES))}")
     external_monitor_poll = allows_no_spend_external_monitor_poll(before)
+    blocked_successor_wait_poll = allows_no_spend_blocked_successor_wait_poll(before)
     due_monitor_poll = (
         allows_due_monitor_poll(
             before,
@@ -57,9 +59,15 @@ def build_quota_monitor_poll_event(
         if authorized_due_monitor_poll is None
         else authorized_due_monitor_poll
     )
-    if before.get("effective_action") != "monitor_quiet_skip" and not external_monitor_poll and not due_monitor_poll:
+    if (
+        before.get("effective_action") != "monitor_quiet_skip"
+        and not external_monitor_poll
+        and not due_monitor_poll
+        and not blocked_successor_wait_poll
+    ):
         raise ValueError(
-            "quota monitor-poll requires a monitor_quiet_skip, due monitor todo, or external monitor observation decision"
+            "quota monitor-poll requires a monitor_quiet_skip, due monitor todo, "
+            "external monitor observation, or exact blocked successor wait decision"
         )
     recommendation = (
         before.get("heartbeat_recommendation")
@@ -70,9 +78,16 @@ def build_quota_monitor_poll_event(
         recommendation.get("recommended_mode") != "monitor_quiet_until_material_transition"
         and not external_monitor_poll
         and not due_monitor_poll
+        and not blocked_successor_wait_poll
     ):
-        raise ValueError("quota monitor-poll requires monitor_quiet_until_material_transition mode")
-    if external_monitor_poll:
+        raise ValueError(
+            "quota monitor-poll requires monitor_quiet_until_material_transition "
+            "or exact blocked successor wait mode"
+        )
+    if blocked_successor_wait_poll:
+        monitor_kind = "blocked successor wait"
+        monitor_mode_prefix = "blocked_successor_wait"
+    elif external_monitor_poll:
         monitor_kind = "external monitor"
         monitor_mode_prefix = "external_monitor"
     elif due_monitor_poll:
@@ -87,6 +102,17 @@ def build_quota_monitor_poll_event(
         health_check = (
             f"{monitor_kind} material transition observed; follow-up state updated; "
             "no quota spend by monitor-poll"
+        )
+    elif blocked_successor_wait_poll:
+        monitor_mode = "blocked_successor_wait_without_material_transition"
+        default_reason_summary = (
+            recommendation.get("reason")
+            or before.get("reason")
+            or "exact blocked successor wait produced no material transition"
+        )
+        health_check = (
+            "exact blocked successor wait unchanged; no quota spend; "
+            "bounded replan after two identical frontier observations"
         )
     elif external_monitor_poll:
         monitor_mode = "external_monitor_observed_without_material_transition"
@@ -306,10 +332,11 @@ def record_quota_monitor_poll_for_decision(
         before.get("effective_action") != "monitor_quiet_skip"
         and not allows_no_spend_external_monitor_poll(before)
         and not due_monitor_poll
+        and not allows_no_spend_blocked_successor_wait_poll(before)
     ):
         return failure(
             "monitor-poll requires monitor_quiet_skip, due monitor todo, "
-            "or external monitor observation",
+            "external monitor observation, or exact blocked successor wait",
             include_capability_retry=True,
         )
 

@@ -7,6 +7,7 @@ from ..agents.agent_scope_frontier import (
     agent_scope_frontier_action as _agent_scope_frontier_action,
 )
 from ..goals.goal_frontier import AUTONOMOUS_REPLAN_REQUIRED_MODE
+from ..goals.goal_vision_wait import exact_blocked_successor_wait_state
 from ..todos.contract import TODO_TASK_CLASS_MONITOR, TODO_TASK_CLASS_USER_ACTION
 from ..todos.projection import todo_item_task_class
 from ..todos.user_gate import open_todo_count
@@ -22,6 +23,14 @@ from .primary_action import (
 INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 PROTOCOL_ACTION_PACKET_LLM_POLICY = "no_api"
+
+
+def _blocked_successor_wait_observation_required(payload: dict[str, Any]) -> bool:
+    return bool(
+        payload.get("effective_action")
+        == AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value
+        and exact_blocked_successor_wait_state(payload)
+    )
 
 
 def _user_todo_item_is_explicitly_non_gating(item: dict[str, Any]) -> bool:
@@ -183,7 +192,12 @@ def protocol_action_packet_fields(payload: dict[str, Any]) -> dict[str, Any]:
         else {}
     )
     requires_user_action = user_channel_action_required(payload)
-    must_attempt_work = bool(execution_obligation.get("must_attempt_work"))
+    blocked_successor_wait_observation = (
+        _blocked_successor_wait_observation_required(payload)
+    )
+    must_attempt_work = bool(execution_obligation.get("must_attempt_work")) or (
+        blocked_successor_wait_observation
+    )
     scoped_user_gate_fallback = isinstance(payload.get("scoped_user_gate_fallback"), dict)
     bounded_delivery_with_user_notice = (
         requires_user_action
@@ -230,6 +244,12 @@ def protocol_action_packet_fields(payload: dict[str, Any]) -> dict[str, Any]:
             if capability_gate.get("action") == "ask_owner"
             and capability_gate.get("owner_action")
             else "wait for user/owner action after surfacing the blocker or gate"
+        )
+    elif blocked_successor_wait_observation:
+        primary_actor = "agent"
+        agent_action_required = True
+        agent_action = (
+            "record one no-spend blocked-successor wait observation, then rerun quota"
         )
     elif must_attempt_work:
         primary_actor = "agent"
@@ -463,6 +483,14 @@ def interaction_next_cli_actions(payload: dict[str, Any], *, mode: str) -> list[
             f"loopx todo update --goal-id {goal_id} --todo-id {todo_id} --status open --note '<public-safe successor replan reason>'",
             f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{agent_arg}",
             f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{agent_arg}",
+        ]
+    if (
+        mode == AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value
+        and _blocked_successor_wait_observation_required(payload)
+    ):
+        return [
+            f"loopx quota monitor-poll --goal-id {goal_id}{agent_arg} --execute",
+            f"loopx --format json quota should-run --goal-id {goal_id}{agent_arg}",
         ]
     if _agent_scope_frontier_action(mode) is not None:
         return [
@@ -718,6 +746,11 @@ def _build_interaction_agent_channel(
         "quiet_noop_allowed": quiet_noop_allowed,
     }
     channel.update(build_primary_action_projection(payload, mode=mode))
+    if _blocked_successor_wait_observation_required(payload):
+        channel["primary_action"] = (
+            "record one no-spend blocked-successor wait observation, rerun quota, "
+            "then replan after the second unchanged frontier"
+        )
     return channel
 
 
@@ -876,6 +909,8 @@ def build_interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         scoped_user_gate_fallback=scoped_user_gate_fallback,
         bounded_delivery_with_user_notice=bounded_delivery_with_user_notice,
     )
+    if _blocked_successor_wait_observation_required(payload):
+        must_attempt = True
     delivery_allowed = _interaction_delivery_allowed(
         payload,
         execution_obligation,

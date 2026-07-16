@@ -113,7 +113,14 @@ def run_history_stall_signal(
         signal["monitor_target_id"] = str(monitor_target.get("target_id") or "")
         signal["monitor_target"] = {
             key: monitor_target.get(key)
-            for key in ("schema_version", "target_id", "monitor_mode", "effective_action", "agent_id")
+            for key in (
+                "schema_version",
+                "target_id",
+                "monitor_mode",
+                "effective_action",
+                "agent_id",
+                "frontier_identity",
+            )
             if monitor_target.get(key)
         }
     return signal
@@ -241,6 +248,14 @@ def build_autonomous_replan_obligation(
         (item for item in evidence if item.get("kind") == "dead_monitor_repeat"),
         None,
     )
+    blocked_successor_evidence = next(
+        (
+            item
+            for item in evidence
+            if item.get("kind") == "blocked_successor_no_progress_repeat"
+        ),
+        None,
+    )
     first_open: dict[str, Any] = {}
     if isinstance(agent_todos, dict):
         open_items = agent_todos.get("first_open_items")
@@ -263,7 +278,19 @@ def build_autonomous_replan_obligation(
         if first_open.get("priority"):
             action["priority"] = first_open.get("priority")
         todo_actions.append(action)
-    if dead_monitor_evidence:
+    if blocked_successor_evidence:
+        todo_actions.append(
+            {
+                "action": "add",
+                "role": "agent",
+                "priority": "P1",
+                "text": (
+                    "discover and promote one safe in-scope evidence-backed successor; "
+                    "otherwise record watch-lane continuation for this frontier"
+                ),
+            }
+        )
+    elif dead_monitor_evidence:
         todo_actions.append(
             {
                 "action": "add",
@@ -309,7 +336,13 @@ def build_autonomous_replan_obligation(
             }
         )
 
-    if dead_monitor_evidence:
+    if blocked_successor_evidence:
+        recommended_action = (
+            "run a bounded autonomous replan for the exact blocked successor: "
+            "promote one safe in-scope evidence-backed successor when available; "
+            "otherwise record a no-spend wait continuation for this frontier"
+        )
+    elif dead_monitor_evidence:
         recommended_action = (
             "resolve a dead monitor loop: record watch-lane continuation with expiry, "
             "a concrete blocker, todo supersede, or successor runnable todo before "
@@ -338,6 +371,8 @@ def build_autonomous_replan_obligation(
         guidance_actions=(
             ["set_watch_expiry", "write_blocker", "supersede_monitor", "create_successor"]
             if dead_monitor_evidence
+            else ["discover_safe_successor", "create_successor", "record_wait_continuation"]
+            if blocked_successor_evidence
             else ["keep", "split", "add", "retire", "ask_decision"]
         ),
         todo_actions=todo_actions[:3],
@@ -347,6 +382,16 @@ def build_autonomous_replan_obligation(
         ),
         recommended_action=recommended_action,
         agent_id=replan_agent_id,
+        extra_fields=(
+            {
+                "frontier_identity": blocked_successor_evidence.get(
+                    "frontier_identity"
+                )
+            }
+            if blocked_successor_evidence
+            and blocked_successor_evidence.get("frontier_identity")
+            else None
+        ),
     )
     if dead_monitor_evidence:
         result["dead_monitor_detector"] = {
@@ -458,6 +503,48 @@ def autonomous_replan_obligation_from_runs(
     if len(signatures) > 1 and len(classifications) > 1:
         return periodic_review()
     if classifications == {"quota_monitor_poll"}:
+        blocked_successor_signals = signals[:autonomous_replan_stall_threshold]
+        blocked_successor_modes = {
+            str((signal.get("monitor_target") or {}).get("monitor_mode") or "")
+            for signal in blocked_successor_signals
+        }
+        if blocked_successor_modes == {
+            "blocked_successor_wait_without_material_transition"
+        }:
+            monitor_target_ids = {
+                str(signal.get("monitor_target_id") or "")
+                for signal in blocked_successor_signals
+                if signal.get("monitor_target_id")
+            }
+            frontier_identities = {
+                str((signal.get("monitor_target") or {}).get("frontier_identity") or "")
+                for signal in blocked_successor_signals
+                if (signal.get("monitor_target") or {}).get("frontier_identity")
+            }
+            if len(monitor_target_ids) != 1 or len(frontier_identities) != 1:
+                return periodic_review()
+            monitor_target_id = next(iter(monitor_target_ids))
+            frontier_identity = next(iter(frontier_identities))
+            evidence = [
+                {
+                    "kind": "blocked_successor_no_progress_repeat",
+                    "section": "run_history",
+                    "text": (
+                        f"latest {autonomous_replan_stall_threshold} exact blocked "
+                        "successor waits repeated the same frontier without progress"
+                    ),
+                    "run_count": len(blocked_successor_signals),
+                    "threshold": autonomous_replan_stall_threshold,
+                    "monitor_target_id": monitor_target_id,
+                    "frontier_identity": frontier_identity,
+                    "latest_generated_at": signals[0].get("generated_at"),
+                    "agent_id": _single_public_agent_id(blocked_successor_signals),
+                }
+            ]
+            return build_autonomous_replan_obligation(
+                evidence,
+                agent_todos=agent_todos,
+            )
         monitor_signals = signals[:dead_monitor_repeat_threshold]
         if len(monitor_signals) < dead_monitor_repeat_threshold:
             return periodic_review()

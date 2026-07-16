@@ -10,6 +10,7 @@ from ..agents.agent_scope import (
 )
 from ..agents.runtime_model import peer_work_key, select_peer_for_work
 from ..work_items.autonomous_replan_ack import (
+    autonomous_replan_ack_matches_frontier,
     autonomous_replan_ack_matches_agent,
     latest_autonomous_replan_ack_for_projection,
 )
@@ -1573,6 +1574,10 @@ def build_goal_frontier_projection_context_from_status(
     if (
         autonomous_replan_is_required(replan_obligation)
         and autonomous_replan_ack_has_frontier_delta(effective_replan_ack)
+        and autonomous_replan_ack_matches_frontier(
+            effective_replan_ack,
+            replan_obligation,
+        )
         and not acceptance_gaps
     ):
         replan_obligation = None
@@ -1621,13 +1626,16 @@ def build_goal_frontier_projection_context_from_status(
 
 
 def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, Any]:
-    return {
+    compact = {
         "schema_version": replan_obligation.get("schema_version"),
         "stall_threshold": replan_obligation.get("stall_threshold"),
         "trigger_count": replan_obligation.get("trigger_count"),
         "triggers": replan_obligation.get("triggers") or [],
         "stop_condition": replan_obligation.get("stop_condition"),
     }
+    if replan_obligation.get("frontier_identity"):
+        compact["frontier_identity"] = replan_obligation.get("frontier_identity")
+    return compact
 
 
 def build_autonomous_replan_recommendation(
