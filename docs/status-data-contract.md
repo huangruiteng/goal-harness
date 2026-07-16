@@ -1157,6 +1157,14 @@ when the subcommand supports it. A spend preview that drops the identity may
 correctly show `automation_prompt_upgrade_required` for an unscoped automation,
 but that is an accounting/projection mismatch for the scoped turn, not evidence
 that the earlier peer guard was invalid.
+An accountable `refresh-state` normally records the current checkout as
+`delivery_workspace`. When implementation and validation happened in an
+independent worktree but registry/state projection must run from another
+checkout, pass `--delivery-workspace-path <delivery-worktree>`. LoopX validates
+the referenced checkout against the peer-isolation policy and persists only its
+credential-free repository identity and workspace class, never the local path.
+An explicit canonical checkout is rejected for peer delivery, so this causal
+override cannot turn non-isolated work into an accountable delivery.
 For registered agent-scoped turns, `quota should-run --agent-id` may include
 `agent_lane_next_action.schema_version=agent_lane_next_action_v0`. This is a
 read-only derived pointer to the current agent's selected advancement slice,
