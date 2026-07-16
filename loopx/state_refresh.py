@@ -815,6 +815,7 @@ def refresh_state_run(
     next_action: str | None = None,
     delivery_batch_scale: str | None = None,
     delivery_outcome: str | None = None,
+    delivery_workspace_path: Path | None = None,
     agent_id: str | None = None,
     agent_lane: str | None = None,
     progress_scope: str | None = None,
@@ -842,6 +843,12 @@ def refresh_state_run(
     normalized_delivery_outcome = (
         require_delivery_outcome(delivery_outcome).value if delivery_outcome else None
     )
+    if delivery_workspace_path is not None and (
+        normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
+    ):
+        raise ValueError(
+            "--delivery-workspace-path requires an accountable --delivery-outcome"
+        )
     normalized_repair_delta_kinds = normalize_repair_delta_kinds(repair_delta_kinds)
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
@@ -1013,13 +1020,30 @@ def refresh_state_run(
         active_state_next_action_update=active_state_next_action_update,
         repair_delta_kinds=normalized_repair_delta_kinds,
     )
-    delivery_workspace = (
-        capture_delivery_workspace(
+    delivery_workspace = None
+    if normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        delivery_workspace = capture_delivery_workspace(
+            current_path=delivery_workspace_path,
             peer_independent_worktree_required=peer_independent_worktree_required,
         )
-        if normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES
-        else None
-    )
+        if delivery_workspace_path is not None:
+            if delivery_workspace is None:
+                raise ValueError(
+                    "--delivery-workspace-path must identify a git checkout with "
+                    "a credential-free origin repository"
+                )
+            if (
+                peer_independent_worktree_required
+                and delivery_workspace.get("workspace_kind")
+                != "independent_git_worktree"
+            ):
+                raise ValueError(
+                    "--delivery-workspace-path must identify the independent git "
+                    "worktree that produced this peer delivery"
+                )
+            delivery_workspace["repository_source"] = (
+                "refresh_state.delivery_workspace_path"
+            )
     record = build_state_refresh_record(
         goal_id=safe_goal_id,
         state_file=resolved_state_file,

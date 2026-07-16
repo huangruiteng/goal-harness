@@ -845,6 +845,9 @@ def render_prompt_text(
 
    不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账；如果
    `should_run=false` 但实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账。
+   accountable `refresh-state` 应从实际交付 worktree 运行；若 registry/state 投影只能从另一个
+   checkout 执行，显式加 `--delivery-workspace-path <delivery-worktree>`，不要让 canonical checkout
+   覆盖交付归因。
    不要重复执行。
 12. 最后用中文汇报：
    - changed files；

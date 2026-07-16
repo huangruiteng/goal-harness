@@ -937,6 +937,11 @@ Post-turn accounting protocol:
   account the latest unspent `outcome_progress` delivery run once; a later
   duplicate spend is rejected because the latest run is then the spend event,
   not the delivery run.
+- keep accountable delivery attribution on the worktree that produced it. If
+  `refresh-state` must run from a separate registry checkout, pass
+  `--delivery-workspace-path <delivery-worktree>`; the path is validated locally
+  and omitted from persisted history. Do not point this option at the canonical
+  checkout for peer work.
 - autonomous replans follow the same accountable-outcome rule: spend after a
   concrete successor, blocker, or `outcome_progress`/`primary_goal_outcome`
   writeback, but do not spend for a `surface_only` watch-lane continuation or

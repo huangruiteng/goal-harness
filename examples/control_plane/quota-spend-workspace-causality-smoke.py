@@ -205,6 +205,68 @@ def main() -> None:
             "peer_independent_worktree_required": True,
         }, workspace
 
+        # Registry/state projection may need to run from the canonical source
+        # checkout after implementation and validation happened in the peer
+        # worktree. An explicit causal path preserves the delivery identity
+        # without persisting that local path.
+        split_runtime = root / "split-runtime"
+        with working_directory(delivery):
+            split_refresh = refresh_state_run(
+                registry_path=registry_path,
+                runtime_root_override=str(split_runtime),
+                goal_id=GOAL_ID,
+                project=None,
+                state_file=None,
+                classification="validated_split_runtime_delivery_fixture",
+                recommended_action="complete the current todo",
+                delivery_batch_scale="implementation",
+                delivery_outcome="outcome_progress",
+                delivery_workspace_path=delivery_peer,
+                agent_id=AGENT_ID,
+                progress_scope="agent_lane",
+                dry_run=False,
+                sync_global=False,
+            )
+        split_workspace = split_refresh["delivery_workspace"]
+        assert split_workspace == {
+            **workspace,
+            "repository_source": "refresh_state.delivery_workspace_path",
+        }, split_workspace
+        assert str(delivery_peer) not in json.dumps(split_refresh), split_refresh
+        with working_directory(delivery_peer):
+            split_preview = preview(
+                split_runtime,
+                quota_decision(workspace_repair=True),
+            )
+        assert split_preview["ok"] is True, split_preview
+        assert split_preview["delivery_workspace"] == split_workspace, split_preview
+        assert split_preview["delivery_workspace_validated"] is True, split_preview
+
+        # An explicit canonical path cannot bless a peer delivery. Omitting the
+        # override retains the existing fail-closed recorded-history behavior.
+        with working_directory(delivery):
+            try:
+                refresh_state_run(
+                    registry_path=registry_path,
+                    runtime_root_override=str(root / "invalid-runtime"),
+                    goal_id=GOAL_ID,
+                    project=None,
+                    state_file=None,
+                    classification="invalid_canonical_delivery_fixture",
+                    recommended_action="complete the current todo",
+                    delivery_batch_scale="implementation",
+                    delivery_outcome="outcome_progress",
+                    delivery_workspace_path=delivery,
+                    agent_id=AGENT_ID,
+                    progress_scope="agent_lane",
+                    dry_run=False,
+                    sync_global=False,
+                )
+            except ValueError as exc:
+                assert "independent git worktree" in str(exc), exc
+            else:
+                raise AssertionError("canonical delivery override must fail closed")
+
         # Completing the todo may select work in another repository.  Spending
         # from the original delivery worktree remains valid and attributable.
         with working_directory(delivery_peer):
