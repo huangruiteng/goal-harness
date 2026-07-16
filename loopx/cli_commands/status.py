@@ -670,6 +670,44 @@ def _sync_next_action_projection_warning_from_guard(
         project_asset["next_action_projection_warning"] = warning
 
 
+def _agent_reward_memory_projection(
+    guard: dict[str, object],
+    *,
+    agent_id: str,
+) -> dict[str, object] | None:
+    boundary = guard.get("goal_boundary")
+    if not isinstance(boundary, dict):
+        return None
+    capabilities = boundary.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return None
+    reward_memory = capabilities.get("reward_memory")
+    if not isinstance(reward_memory, dict):
+        return None
+    compact: dict[str, object] = {
+        "schema_version": "agent_reward_memory_projection_v1",
+        "agent_id": agent_id,
+    }
+    for key in (
+        "enabled",
+        "experimental",
+        "configured_for_agent",
+        "experiment_status",
+        "experiment_available",
+        "config_schema_version",
+        "automatic_ingest",
+        "automatic_recall",
+        "fail_open",
+        "automation_projection_source",
+    ):
+        if key in reward_memory:
+            compact[key] = reward_memory[key]
+    route = reward_memory.get("config_runtime_route")
+    if isinstance(route, dict):
+        compact["config_runtime_route"] = dict(route)
+    return compact
+
+
 def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str) -> dict[str, object]:
     safe_agent_id = str(agent_id or "").strip()
     if not safe_agent_id:
@@ -686,6 +724,7 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
     goal_frontier_attached = 0
     member_attached = 0
     interaction_attached = 0
+    reward_memory_attached = 0
     current_agent_next_action: dict[str, Any] | None = None
     for item in items:
         if not isinstance(item, dict):
@@ -756,6 +795,16 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
                 project_asset["agent_interaction_summary"] = interaction_summary
             interaction_attached += 1
             changed = True
+        reward_memory_projection = _agent_reward_memory_projection(
+            guard,
+            agent_id=safe_agent_id,
+        )
+        if isinstance(reward_memory_projection, dict):
+            item["agent_reward_memory"] = reward_memory_projection
+            if isinstance(project_asset, dict):
+                project_asset["agent_reward_memory"] = reward_memory_projection
+            reward_memory_attached += 1
+            changed = True
         if not changed:
             continue
     if (
@@ -765,6 +814,7 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
         or goal_frontier_attached
         or member_attached
         or interaction_attached
+        or reward_memory_attached
     ):
         projection: dict[str, object] = {
             "schema_version": "agent_lane_next_action_projection_v0",
@@ -775,6 +825,7 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
             "goal_frontier_attached_count": goal_frontier_attached,
             "agent_member_attached_count": member_attached,
             "agent_interaction_attached_count": interaction_attached,
+            "reward_memory_attached_count": reward_memory_attached,
             "preserves_goal_next_action": True,
         }
         if isinstance(current_agent_next_action, dict):
@@ -801,6 +852,13 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
             "attached_count": member_attached,
             "source": "registry+quota_should_run+todo_projection",
             "projection_is_authoritative": False,
+        }
+    if reward_memory_attached:
+        payload["agent_reward_memory_projection"] = {
+            "schema_version": "agent_reward_memory_projection_summary_v1",
+            "agent_id": safe_agent_id,
+            "attached_count": reward_memory_attached,
+            "source": "quota.goal_boundary.capabilities.reward_memory",
         }
     return payload
 

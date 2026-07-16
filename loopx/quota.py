@@ -93,6 +93,9 @@ from .control_plane.quota.selected_todo_projection import (
     selected_todo_projection as _selected_todo_projection,
 )
 from .capabilities.lark.event_inbox import project_lark_event_inbox_urgency as _project_lark_event_inbox_urgency
+from .capabilities.reward_memory.experiment import (
+    resolve_reward_memory_experiment_from_status as _resolve_reward_memory_experiment_from_status,
+)
 from .control_plane.quota.task_orchestration import (
     apply_task_orchestration_contract,
     attach_task_orchestration_payload,
@@ -1297,7 +1300,21 @@ def build_quota_should_run(
             }
             recovery_allowed = False
             reason = str(quota["reason"])
-        goal_boundary = _goal_boundary(registry_goal or item, item=item, agent_id=normalize_todo_claimed_by((agent_identity or {}).get("agent_id")), lark_event_inbox_urgency_projector=_project_lark_event_inbox_urgency)
+        boundary_agent_id = normalize_todo_claimed_by(
+            (agent_identity or {}).get("agent_id")
+        )
+        reward_memory_experiment_status = _resolve_reward_memory_experiment_from_status(
+            status_payload,
+            goal_id=safe_goal_id,
+            agent_id=boundary_agent_id,
+        )
+        goal_boundary = _goal_boundary(
+            registry_goal or item,
+            item=item,
+            agent_id=boundary_agent_id,
+            lark_event_inbox_urgency_projector=_project_lark_event_inbox_urgency,
+            reward_memory_experiment_status=reward_memory_experiment_status,
+        )
         workspace_guard = None
         automation_prompt_upgrade = _automation_prompt_upgrade(
             item,

@@ -456,6 +456,19 @@ def resolve_reward_memory_experiment(
     if normalized_agent not in registered_agents:
         raise ValueError(f"agent_id is not registered for goal {goal_id}")
     policy = reward_memory_goal_policy(goal)
+    registry_role = str(registry.get("registry_role") or "project-local").strip()
+    config_runtime_route = {
+        "schema_version": "reward_memory_config_runtime_route_v0",
+        "registry_source": "invoked_registry",
+        "registry_role": registry_role,
+        "runtime_scope": (
+            "shared_runtime" if registry_role == "global-local" else "project_runtime"
+        ),
+        "goal_source": "registry.goals",
+        "config_source": "goal_repo_relative_config_pointer",
+        "readback_status": "not_attempted",
+        "exact_readback_verified": False,
+    }
     base = {
         "ok": True,
         "schema_version": "reward_memory_experiment_status_v1",
@@ -468,6 +481,7 @@ def resolve_reward_memory_experiment(
         "automatic_ingest": False,
         "automatic_recall": False,
         "fail_open": True,
+        "config_runtime_route": config_runtime_route,
         "external_writes_performed": False,
     }
     if not policy["enabled"]:
@@ -487,6 +501,8 @@ def resolve_reward_memory_experiment(
             "status": "config_invalid",
             "available": False,
             "reason_code": "config_unavailable_or_invalid",
+            "config_runtime_route": config_runtime_route
+            | {"readback_status": "rejected"},
         }, None
     corpora = config["corpora"]
     surfaces = config["surfaces"]
@@ -511,6 +527,11 @@ def resolve_reward_memory_experiment(
         "automatic_ingest": automation["automatic_ingest"],
         "automatic_recall": automation["automatic_recall"],
         "fail_open": automation["fail_open"],
+        "config_runtime_route": config_runtime_route
+        | {
+            "readback_status": "verified",
+            "exact_readback_verified": True,
+        },
         "raw_content_captured": False,
     }
     if len(surfaces) == 1:
@@ -522,3 +543,25 @@ def resolve_reward_memory_experiment(
             }
         )
     return result, config
+
+
+def resolve_reward_memory_experiment_from_status(
+    status_payload: Mapping[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str | None,
+) -> dict[str, Any] | None:
+    """Resolve the agent policy from the registry that produced a status packet."""
+
+    registry_value = str(status_payload.get("registry") or "").strip()
+    if not agent_id or not registry_value:
+        return None
+    try:
+        status, _ = resolve_reward_memory_experiment(
+            registry_path=Path(registry_value).expanduser(),
+            goal_id=goal_id,
+            agent_id=agent_id,
+        )
+    except (OSError, ValueError):
+        return None
+    return status
