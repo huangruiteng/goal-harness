@@ -1637,6 +1637,14 @@ def main() -> int:
 
         drain_ledger = path / ".loopx/domain-state/drain/pr-lifecycle.jsonl"
         drain_calls: list[dict[str, Any]] = []
+        drain_sink_two = {
+            **goal_sink,
+            "sink_instance_key": "openviking-reviewer-group-secondary",
+        }
+        drain_goal_config = {
+            **goal_config,
+            "sinks": [goal_sink, drain_sink_two],
+        }
 
         def drain_adapter(**kwargs: Any) -> dict[str, Any]:
             assert kwargs["execute"] is True
@@ -1649,7 +1657,12 @@ def main() -> int:
                 reviewer_handles=kwargs["reviewer_handles"],
             )
             drain_calls.append(
-                {"number": kwargs["pr_number"], "summary": kwargs["pr_title"]}
+                {
+                    "number": kwargs["pr_number"],
+                    "summary": kwargs["pr_title"],
+                    "sink": kwargs["sink"]["sink_instance_key"],
+                    "reviewers": list(kwargs["reviewer_handles"]),
+                }
             )
             return {
                 "ok": True,
@@ -1675,7 +1688,7 @@ def main() -> int:
         drain_live = {
             101: {
                 "author_handle": "@author-a",
-                "reviewed_by": [],
+                "reviewed_by": ["@reviewed-owner"],
                 "state": "OPEN",
                 "review_decision": "REVIEW_REQUIRED",
                 "is_draft": False,
@@ -1712,36 +1725,50 @@ def main() -> int:
                 },
             )
             upsert_issue_fix_pr_lifecycle_ledger_jsonl(drain_ledger, lifecycle_row)
-            key = reviewer_notification_idempotency_key(
-                repo="owner/repo",
-                pr_number=number,
-                sink_kind="lark_chat",
-                sink_instance_key=goal_sink["sink_instance_key"],
-                reviewer_handles=["@map-owner"],
+            queue_receipts = []
+            sinks = (
+                [goal_sink, drain_sink_two]
+                if number == 101
+                else [goal_sink]
             )
-            queue_receipt = {
-                "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
-                "idempotency_key": key,
-                "sink_kind": "lark_chat",
-                "reviewer_handles": ["@map-owner"],
-                "message_summary": summary,
-                "summary_policy_status": "reward_memory_verified",
-                "queued_at": "2026-07-17T18:00:00Z",
-                "not_before": not_before,
-                "timezone": "Asia/Shanghai",
-                "allowed_local_time": {"start": "09:00", "end": "21:00"},
-                "status": "queued",
-            }
+            for sink in sinks:
+                reviewers = (
+                    ["@reviewed-owner", "@map-owner"]
+                    if number == 101
+                    else ["@map-owner"]
+                )
+                key = reviewer_notification_idempotency_key(
+                    repo="owner/repo",
+                    pr_number=number,
+                    sink_kind="lark_chat",
+                    sink_instance_key=sink["sink_instance_key"],
+                    reviewer_handles=reviewers,
+                )
+                queue_receipts.append(
+                    {
+                        "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
+                        "idempotency_key": key,
+                        "sink_kind": "lark_chat",
+                        "reviewer_handles": reviewers,
+                        "message_summary": summary,
+                        "summary_policy_status": "reward_memory_verified",
+                        "queued_at": "2026-07-17T18:00:00Z",
+                        "not_before": not_before,
+                        "timezone": "Asia/Shanghai",
+                        "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                        "status": "queued",
+                    }
+                )
             persist_issue_fix_reviewer_notification_state(
                 drain_ledger,
                 lifecycle_row,
                 receipts=[],
-                queued_receipts=[queue_receipt],
+                queued_receipts=queue_receipts,
             )
 
         drained = drain_issue_fix_reviewer_notification_queue(
             ledger_path=drain_ledger,
-            sinks_input=goal_config,
+            sinks_input=drain_goal_config,
             execute=True,
             delivery_observed_at="2026-07-18T01:01:00Z",
             metadata_loader=drain_metadata_loader,
@@ -1756,11 +1783,22 @@ def main() -> int:
         assert drained["cancelled_pr_count"] == 1
         assert drained["not_due_receipt_count"] == 1
         assert drain_calls == [
-            {"number": 101, "summary": "修复队列到点后无人消费的问题"}
-        ]
+            {
+                "number": 101,
+                "summary": "修复队列到点后无人消费的问题",
+                "sink": "fixture-review-lane",
+                "reviewers": ["@map-owner"],
+            },
+            {
+                "number": 101,
+                "summary": "修复队列到点后无人消费的问题",
+                "sink": "openviking-reviewer-group-secondary",
+                "reviewers": ["@map-owner"],
+            },
+        ], drain_calls
         repeated_drain = drain_issue_fix_reviewer_notification_queue(
             ledger_path=drain_ledger,
-            sinks_input=goal_config,
+            sinks_input=drain_goal_config,
             execute=True,
             delivery_observed_at="2026-07-18T01:02:00Z",
             metadata_loader=drain_metadata_loader,
@@ -1768,7 +1806,7 @@ def main() -> int:
         )
         assert repeated_drain["status"] == "no_due_notifications"
         assert repeated_drain["due_pr_count"] == 0
-        assert len(drain_calls) == 1
+        assert len(drain_calls) == 2
     finally:
         for attempt in range(10):
             try:

@@ -105,7 +105,7 @@ def drain_issue_fix_reviewer_notification_queue(
     metadata_loader: MetadataLoader = fetch_issue_fix_reviewer_notification_metadata,
     sink_adapters: Mapping[str, NotificationSinkAdapter] | None = None,
 ) -> dict[str, Any]:
-    """Drain one bounded state-group batch while emitting at most one message per PR."""
+    """Drain one bounded state-group batch with one PR in each sink message."""
 
     if not 1 <= int(limit) <= 100:
         raise ValueError("reviewer notification drain limit must be between 1 and 100")
@@ -166,6 +166,10 @@ def drain_issue_fix_reviewer_notification_queue(
                 str(receipt.get("message_summary") or "") for receipt in due_queue
             )
         )
+        reviewer_sets = {
+            tuple(str(handle) for handle in receipt.get("reviewer_handles") or [])
+            for receipt in due_queue
+        }
         item: dict[str, Any] = {
             "repo": repo,
             "pr_ref": f"#{number}",
@@ -186,10 +190,10 @@ def drain_issue_fix_reviewer_notification_queue(
             blocked_count += 1
             items.append(item)
             continue
-        if len(due_queue) != 1:
+        if len(reviewer_sets) != 1:
             item.update(
                 status="blocked",
-                blocker="reviewer_notification_queue_granularity_invalid",
+                blocker="reviewer_notification_queue_reviewer_set_mismatch",
             )
             blocked_count += 1
             items.append(item)
@@ -237,8 +241,8 @@ def drain_issue_fix_reviewer_notification_queue(
             stale_reason = "pr_is_draft"
         elif live_review_decision != "REVIEW_REQUIRED":
             stale_reason = "review_no_longer_required"
-        elif live_reviewed.intersection(reviewers):
-            stale_reason = "queued_reviewer_already_reviewed"
+        elif reviewers and set(reviewers).issubset(live_reviewed):
+            stale_reason = "all_queued_reviewers_already_reviewed"
         elif live_state_bucket not in {"review_required", "unknown"}:
             stale_reason = "pr_left_review_required_bucket"
         if stale_reason:
@@ -268,6 +272,11 @@ def drain_issue_fix_reviewer_notification_queue(
                 )
             items.append(item)
             continue
+        covered_reviewers = [reviewer for reviewer in reviewers if reviewer in live_reviewed]
+        reviewers = [reviewer for reviewer in reviewers if reviewer not in live_reviewed]
+        item["reviewer_handles"] = reviewers
+        if covered_reviewers:
+            item["covered_reviewer_handles"] = covered_reviewers
         author = str(metadata.get("author_handle") or "")
         if not author or author in reviewers:
             item.update(
