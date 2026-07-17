@@ -281,6 +281,27 @@ def _user_channel(interaction: Mapping[str, Any], payload: Mapping[str, Any]) ->
     return channel
 
 
+def _response_plan(interaction: Mapping[str, Any]) -> dict[str, Any] | None:
+    source = _mapping(interaction.get("response_plan"))
+    if not source:
+        return None
+    plan: dict[str, Any] = {}
+    for field in ("schema_version", "kind", "decision"):
+        text = _text(source.get(field), limit=80)
+        if text:
+            plan[field] = text
+    action_sequence = _text_list(
+        source.get("action_sequence"),
+        limit=8,
+        item_limit=80,
+    )
+    if action_sequence:
+        plan["action_sequence"] = action_sequence
+    if isinstance(source.get("silent_wait_allowed"), bool):
+        plan["silent_wait_allowed"] = source["silent_wait_allowed"]
+    return plan or None
+
+
 def _required_reads(interaction: Mapping[str, Any], payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     raw_reads = interaction.get("required_reads") or payload.get("required_reads")
     if not isinstance(raw_reads, list):
@@ -591,7 +612,7 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     user = _user_channel(interaction, payload)
     scheduler = _scheduler(payload)
-    return {
+    projection = {
         "agent_id": agent_id,
         "decision": payload.get("decision"),
         "should_run": bool(payload.get("should_run")),
@@ -620,6 +641,10 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
             scheduler=scheduler,
         ),
     }
+    response_plan = _response_plan(interaction)
+    if response_plan is not None:
+        projection["response_plan"] = response_plan
+    return projection
 
 
 def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -638,11 +663,14 @@ def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict
         "scheduler",
         "contract_capsule",
     )
-    return {
+    signature = {
         "schema_version": ACTION_SIGNATURE_SCHEMA_VERSION,
         "coverage": ACTION_SIGNATURE_COVERAGE,
         **{field: envelope.get(field) for field in fields},
     }
+    if isinstance(envelope.get("response_plan"), Mapping):
+        signature["response_plan"] = dict(envelope["response_plan"])
+    return signature
 
 
 def quota_action_signature_document(payload: Mapping[str, Any]) -> dict[str, Any]:

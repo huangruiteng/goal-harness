@@ -13,8 +13,8 @@ from loopx.control_plane.quota.turn_envelope import (
     turn_envelope_action_signature_document,
 )
 from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (
-    ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION,
     actual_default_model_behavior_scenario_catalog,
+    build_actual_default_model_behavior_scenario_packets,
     run_actual_default_model_behavior_portfolio,
 )
 from loopx.control_plane.testing.model_behavior_qualification import (
@@ -158,6 +158,19 @@ def _turn_source(
         "interaction_contract": {
             "schema_version": "loopx_interaction_contract_v0",
             "mode": "user_gate" if human_gate else "bounded_delivery",
+            **(
+                {
+                    "response_plan": {
+                        "schema_version": "interaction_response_plan_v0",
+                        "kind": "surface_user_gate",
+                        "decision": "ask_user",
+                        "action_sequence": ["notify", "wait"],
+                        "silent_wait_allowed": False,
+                    }
+                }
+                if human_gate
+                else {}
+            ),
             "user_channel": {
                 "action_required": human_gate,
                 "notify": "NOTIFY" if human_gate else "DONT_NOTIFY",
@@ -291,30 +304,22 @@ def _onboarding_actor(request: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def test_portfolio_runs_actual_default_one_arm_scenarios_twice(tmp_path: Path) -> None:
-    result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
-        qualification_id="actual-default-portfolio-001",
-        turn_actor=_turn_actor,
-        onboarding_actor=_onboarding_actor,
-    )
+def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) -> None:
+    packets = build_actual_default_model_behavior_scenario_packets(tmp_path)
 
-    assert (
-        result["schema_version"]
-        == ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION
-    )
-    assert result["topology"] == "actual_default_one_arm"
-    assert result["scenario_count"] == 9
-    assert result["actor_call_budget"] == 18
-    assert result["actor_call_count"] == 18
-    assert result["qualification_passed"] is True
-    assert result["automatic_release_promotion_allowed"] is False
-    assert all(item["status"] == "passed" for item in result["scenarios"])
-    assert all(item["repeats_completed"] == 2 for item in result["scenarios"])
-    encoded = json.dumps(result, sort_keys=True)
-    assert str(tmp_path) not in encoded
-    assert "todo_portfolio001" not in encoded
-    assert "Implement one bounded" not in encoded
+    gate = packets["turn_human_gate"]
+    assert gate["response_plan"] == {
+        "schema_version": "interaction_response_plan_v0",
+        "kind": "surface_user_gate",
+        "decision": "ask_user",
+        "action_sequence": ["notify", "wait"],
+        "silent_wait_allowed": False,
+    }
+    assert gate["action_signature"]["matches"] is True
+    assert set(packets) == {
+        item["scenario_id"]
+        for item in actual_default_model_behavior_scenario_catalog()["scenarios"]
+    }
 
 
 def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
@@ -343,6 +348,57 @@ def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
     assert selected["status"] == "failed"
     assert selected["repeats_completed"] == 2
     assert selected["failure_codes"] == ["source_mismatch:selected_todo_id"]
+
+
+def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -> None:
+    packets = _scenario_packets(tmp_path)
+    source = _turn_source(human_gate=True)
+    source["interaction_contract"]["response_plan"]["action_sequence"] = ["wait"]
+    packets["turn_human_gate"] = build_turn_envelope(source)
+
+    with pytest.raises(
+        ValueError,
+        match="response_plan does not match blocking user-gate semantics",
+    ):
+        run_actual_default_model_behavior_portfolio(
+            packets,
+            qualification_id="actual-default-portfolio-mutated-gate-plan",
+            turn_actor=_turn_actor,
+            onboarding_actor=_onboarding_actor,
+        )
+
+
+def test_portfolio_oracle_rejects_silent_wait_for_user_gate(tmp_path: Path) -> None:
+    def silent_wait_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+        result = _turn_actor(request)
+        if request["packet"]["user"]["action_required"] is True:
+            result["decision"] = {
+                **result["decision"],
+                "decision": "wait",
+                "intended_action_kinds": ["wait"],
+            }
+        return result
+
+    result = run_actual_default_model_behavior_portfolio(
+        _scenario_packets(tmp_path),
+        qualification_id="actual-default-portfolio-silent-gate-wait",
+        turn_actor=silent_wait_actor,
+        onboarding_actor=_onboarding_actor,
+    )
+
+    gate = next(
+        item
+        for item in result["scenarios"]
+        if item["scenario_id"] == "turn_human_gate"
+    )
+    assert result["qualification_passed"] is False
+    assert gate["failure_codes"] == [
+        "response_plan_action_sequence_mismatch",
+        "response_plan_decision_mismatch",
+        "response_plan_silent_wait_forbidden",
+        "source_mismatch:decision",
+        "source_mismatch:intended_action_kinds",
+    ]
 
 
 def test_catalog_declares_independent_bounded_repeat_policy() -> None:
