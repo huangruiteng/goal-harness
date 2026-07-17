@@ -13,6 +13,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from loopx.control_plane.agents.agent_scope import AgentScopeFrontierAction  # noqa: E402
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint  # noqa: E402
+from loopx.control_plane.todos.quota_summary import (  # noqa: E402
+    compact_quota_todo_summary_for_payload,
+)
 from loopx.control_plane.work_items.execution_obligation import (  # noqa: E402
     build_execution_obligation,
 )
@@ -428,16 +431,22 @@ def assert_user_action_is_non_blocking_notice() -> None:
         work_lane=advancement_lane(),
         heartbeat_mode="steering_audit_then_one_step",
     )
-    user_action = {
-        "todo_id": "todo_user_action",
-        "status": "open",
-        "task_class": "user_action",
-        "text": "Review the optional repository setting.",
-    }
-    payload["user_todo_summary"] = {
-        "first_open_items": [user_action],
-        "user_action_items": [user_action],
-    }
+    user_actions = [
+        {
+            "todo_id": f"todo_user_action_{index}",
+            "status": "open",
+            "task_class": "user_action",
+            "text": f"Review optional repository setting {index}.",
+        }
+        for index in range(4)
+    ]
+    payload["user_todo_summary"] = compact_quota_todo_summary_for_payload(
+        {
+            "first_open_items": user_actions,
+            "user_action_open_count": len(user_actions),
+            "user_action_items": user_actions,
+        }
+    )
     payload = finalize(payload)
     contract = payload["interaction_contract"]
     assert contract["mode"] == "bounded_delivery", contract
@@ -445,7 +454,9 @@ def assert_user_action_is_non_blocking_notice() -> None:
     assert contract["user_channel"]["notify"] == "NOTIFY", contract
     assert contract["user_channel"]["non_blocking"] is True, contract
     assert contract["user_channel"]["actions"] == [
-        "Review the optional repository setting."
+        "Review optional repository setting 0.",
+        "Review optional repository setting 1.",
+        "Review optional repository setting 2.",
     ], contract
     assert contract["agent_channel"]["must_attempt"] is True, contract
     assert contract["agent_channel"]["delivery_allowed"] is True, contract
