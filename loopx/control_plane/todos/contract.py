@@ -515,7 +515,21 @@ def normalize_todo_decision_scope(value: Any) -> dict[str, str] | None:
     return payload
 
 
-def normalize_todo_required_decision_scopes(value: Any) -> list[dict[str, str]]:
+def require_todo_decision_scope(value: Any) -> dict[str, str]:
+    scope = normalize_todo_decision_scope(value)
+    if not scope:
+        raise ValueError(
+            "decision_scope must use kind:granularity:scope_key, such as "
+            "private_read:project:authority"
+        )
+    return scope
+
+
+def _normalize_todo_required_decision_scopes(
+    value: Any,
+    *,
+    strict: bool,
+) -> list[dict[str, str]]:
     if value is None:
         return []
     if isinstance(value, (list, tuple, set)):
@@ -527,6 +541,11 @@ def normalize_todo_required_decision_scopes(value: Any) -> list[dict[str, str]]:
     for raw in raw_values:
         scope = normalize_todo_decision_scope(raw)
         if not scope:
+            if strict:
+                raise ValueError(
+                    "required_decision_scopes must contain "
+                    "kind:granularity:scope_key tokens"
+                )
             continue
         identity = (scope["kind"], scope["granularity"], scope["scope_key"])
         if identity in seen:
@@ -536,15 +555,25 @@ def normalize_todo_required_decision_scopes(value: Any) -> list[dict[str, str]]:
     return scopes
 
 
+def normalize_todo_required_decision_scopes(value: Any) -> list[dict[str, str]]:
+    return _normalize_todo_required_decision_scopes(value, strict=False)
+
+
+def require_todo_required_decision_scopes(value: Any) -> list[dict[str, str]]:
+    return _normalize_todo_required_decision_scopes(value, strict=True)
+
+
 def decision_scope_metadata_value(value: Any) -> str | None:
-    scope = normalize_todo_decision_scope(value)
-    if not scope:
+    if value is None:
         return None
+    scope = require_todo_decision_scope(value)
     return f"{scope['kind']}:{scope['granularity']}:{scope['scope_key']}"
 
 
 def required_decision_scopes_metadata_value(value: Any) -> str | None:
-    scopes = normalize_todo_required_decision_scopes(value)
+    if value is None:
+        return None
+    scopes = require_todo_required_decision_scopes(value)
     if not scopes:
         return None
     return ",".join(
@@ -874,13 +903,9 @@ def format_todo_metadata_line(
             f"{encode_metadata_value(','.join(normalized_explore_result_node_refs))}"
         )
     normalized_decision_scope = decision_scope_metadata_value(decision_scope)
-    if decision_scope and not normalized_decision_scope:
-        raise ValueError("decision_scope must use kind:granularity:scope_key, such as private_read:project:authority")
     if normalized_decision_scope:
         fields.append(f"decision_scope={encode_metadata_value(normalized_decision_scope)}")
     normalized_required_decision_scopes = required_decision_scopes_metadata_value(required_decision_scopes)
-    if required_decision_scopes and not normalized_required_decision_scopes:
-        raise ValueError("required_decision_scopes must contain kind:granularity:scope_key tokens")
     if normalized_required_decision_scopes:
         fields.append(
             "required_decision_scopes="
@@ -1053,13 +1078,9 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key == "decision_scope":
-            normalized = normalize_todo_decision_scope(value)
-            if normalized:
-                metadata[key] = normalized
-            else:
-                metadata.pop(key, None)
+            metadata[key] = require_todo_decision_scope(value)
         elif key == "required_decision_scopes":
-            normalized = normalize_todo_required_decision_scopes(value)
+            normalized = require_todo_required_decision_scopes(value)
             if normalized:
                 metadata[key] = normalized
             else:
