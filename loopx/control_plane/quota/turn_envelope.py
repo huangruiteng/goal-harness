@@ -247,6 +247,7 @@ def _selected_todo(
         "task_class",
         "action_kind",
         "task_repository",
+        "continuation_policy",
         "claimed_by",
         "blocks_agent",
         "unblocks_todo_id",
@@ -569,6 +570,10 @@ def _contract_capsule(
 
 
 def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
+    agent_identity = _mapping(payload.get("agent_identity"))
+    agent_id = str(
+        payload.get("agent_id") or agent_identity.get("agent_id") or ""
+    ).strip() or None
     interaction = _mapping(payload.get("interaction_contract"))
     agent_channel = _mapping(interaction.get("agent_channel"))
     cli_channel = _mapping(interaction.get("cli_channel"))
@@ -587,6 +592,7 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
     user = _user_channel(interaction, payload)
     scheduler = _scheduler(payload)
     return {
+        "agent_id": agent_id,
         "decision": payload.get("decision"),
         "should_run": bool(payload.get("should_run")),
         "effective_action": payload.get("effective_action"),
@@ -618,6 +624,7 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict[str, Any]:
     fields = (
+        "agent_id",
         "decision",
         "should_run",
         "effective_action",

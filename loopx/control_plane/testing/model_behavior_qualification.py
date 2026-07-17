@@ -79,6 +79,7 @@ MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS = (
     "concrete_user_question",
     "required_reads",
     "gate_or_stop",
+    "peer_route",
     "write_scope",
     "spend_rule",
     "scheduler_action",
@@ -323,6 +324,13 @@ def model_behavior_semantic_contract_from_packet(
     boundary = dict(signature.get("boundary") or {})
     capsule = dict(signature.get("contract_capsule") or {})
     interaction = dict(capsule.get("interaction_contract") or {})
+    action = dict(signature.get("action") or {})
+    selected_todo = dict(action.get("selected_todo") or {})
+    agent_id = str(signature.get("agent_id") or "").strip() or None
+    claimed_by = str(selected_todo.get("claimed_by") or "").strip() or None
+    continuation_policy = (
+        str(selected_todo.get("continuation_policy") or "").strip() or None
+    )
     return {
         "concrete_user_question": user_actions[0] if user_actions else None,
         "required_reads": list(signature.get("required_reads") or []),
@@ -335,6 +343,16 @@ def model_behavior_semantic_contract_from_packet(
             "user_action_required": bool(user.get("action_required")),
             "guards": list(boundary.get("guards") or []),
             "stop_condition": boundary.get("stop_condition"),
+        },
+        "peer_route": {
+            "agent_id": agent_id,
+            "selected_todo_claimed_by": claimed_by,
+            "continuation_policy": continuation_policy,
+            "same_agent_continuation": bool(
+                agent_id
+                and claimed_by == agent_id
+                and continuation_policy == "same_agent_non_delivery"
+            ),
         },
         "write_scope": list(boundary.get("write_scope") or []),
         "spend_rule": dict(signature.get("writeback") or {}),

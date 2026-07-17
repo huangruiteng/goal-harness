@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ..runtime.public_safety import public_safe_compact_text
+from .actual_default_model_behavior_portfolio import (
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS,
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT,
+)
 
 
 EXACT_RELEASE_COMMIT_MANIFEST_SCHEMA_VERSION = (
@@ -306,8 +310,8 @@ def _validate_doubao(value: Any) -> tuple[dict[str, Any], list[str]]:
     )
     valid = bool(
         topology == "actual_default_one_arm"
-        and scenario_count == 7
-        and repeats == 2
+        and scenario_count == ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT
+        and repeats == ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
         and calls == scenario_count * repeats
         and failures == 0
         and skips == 0

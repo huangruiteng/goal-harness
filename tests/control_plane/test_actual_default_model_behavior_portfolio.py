@@ -121,7 +121,23 @@ def _entry_packets(tmp_path: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def _turn_source(*, human_gate: bool) -> dict[str, Any]:
+def _turn_source(
+    *,
+    human_gate: bool,
+    agent_id: str = AGENT_ID,
+    continuation_policy: str | None = None,
+) -> dict[str, Any]:
+    selected_todo = None
+    if not human_gate:
+        selected_todo = {
+            "todo_id": "todo_portfolio001",
+            "status": "open",
+            "task_class": "advancement_task",
+            "claimed_by": agent_id,
+            "text": "Implement one bounded public-safe slice.",
+        }
+        if continuation_policy:
+            selected_todo["continuation_policy"] = continuation_policy
     return {
         "ok": True,
         "mode": "should-run",
@@ -137,18 +153,8 @@ def _turn_source(*, human_gate: bool) -> dict[str, Any]:
             if human_gate
             else "Implement one bounded public-safe slice."
         ),
-        "selected_todo": (
-            None
-            if human_gate
-            else {
-                "todo_id": "todo_portfolio001",
-                "status": "open",
-                "task_class": "advancement_task",
-                "claimed_by": AGENT_ID,
-                "text": "Implement one bounded public-safe slice.",
-            }
-        ),
-        "agent_identity": {"agent_id": AGENT_ID},
+        "selected_todo": selected_todo,
+        "agent_identity": {"agent_id": agent_id},
         "interaction_contract": {
             "schema_version": "loopx_interaction_contract_v0",
             "mode": "user_gate" if human_gate else "bounded_delivery",
@@ -192,6 +198,18 @@ def _scenario_packets(tmp_path: Path) -> dict[str, dict[str, Any]]:
     packets.update(
         {
             "turn_selected_todo": build_turn_envelope(_turn_source(human_gate=False)),
+            "turn_peer_agent_identity": build_turn_envelope(
+                _turn_source(
+                    human_gate=False,
+                    agent_id="codex-portfolio-reviewer",
+                )
+            ),
+            "turn_same_agent_continuation": build_turn_envelope(
+                _turn_source(
+                    human_gate=False,
+                    continuation_policy="same_agent_non_delivery",
+                )
+            ),
             "turn_human_gate": build_turn_envelope(_turn_source(human_gate=True)),
             "onboarding_healthy_continue": build_onboarding_postcondition_observation(
                 check_warning_codes=[],
@@ -286,9 +304,9 @@ def test_portfolio_runs_actual_default_one_arm_scenarios_twice(tmp_path: Path) -
         == ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION
     )
     assert result["topology"] == "actual_default_one_arm"
-    assert result["scenario_count"] == 7
-    assert result["actor_call_budget"] == 14
-    assert result["actor_call_count"] == 14
+    assert result["scenario_count"] == 9
+    assert result["actor_call_budget"] == 18
+    assert result["actor_call_count"] == 18
     assert result["qualification_passed"] is True
     assert result["automatic_release_promotion_allowed"] is False
     assert all(item["status"] == "passed" for item in result["scenarios"])
@@ -331,7 +349,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
     catalog = actual_default_model_behavior_scenario_catalog()
 
     assert catalog["topology"] == "actual_default_one_arm"
-    assert len(catalog["scenarios"]) == 7
+    assert len(catalog["scenarios"]) == 9
     assert all(
         scenario["repeat_policy"]
         == {
@@ -373,3 +391,41 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
         )
 
     assert calls == 0
+
+
+def test_portfolio_oracle_catches_wrong_same_agent_route(tmp_path: Path) -> None:
+    def wrong_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+        result = _turn_actor(request)
+        selected_todo = request["packet"]["action"].get("selected_todo") or {}
+        if selected_todo.get("continuation_policy") == "same_agent_non_delivery":
+            semantics = dict(result["decision"]["semantic_contract"])
+            semantics["peer_route"] = {
+                **semantics["peer_route"],
+                "agent_id": "codex-wrong-peer",
+                "same_agent_continuation": False,
+            }
+            result["decision"] = {
+                **result["decision"],
+                "semantic_contract": semantics,
+            }
+        return result
+
+    result = run_actual_default_model_behavior_portfolio(
+        _scenario_packets(tmp_path),
+        qualification_id="actual-default-portfolio-wrong-peer",
+        turn_actor=wrong_actor,
+        onboarding_actor=_onboarding_actor,
+    )
+
+    scenario = next(
+        item
+        for item in result["scenarios"]
+        if item["scenario_id"] == "turn_same_agent_continuation"
+    )
+    assert result["qualification_passed"] is False
+    assert scenario["status"] == "failed"
+    assert scenario["repeats_completed"] == 2
+    assert scenario["failure_codes"] == [
+        "semantic_contract_incomplete",
+        "semantic_contract_mismatch:peer_route",
+    ]

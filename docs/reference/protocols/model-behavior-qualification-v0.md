@@ -229,21 +229,23 @@ stochastic output.
 `actual_default_model_behavior_portfolio_v0` is the regular low-frequency live
 suite. It composes the existing TurnEnvelope and onboarding one-arm actors; it
 does not introduce a third model protocol or retain a retired product arm. Its
-fixed catalog covers seven high-risk decisions:
+fixed catalog covers nine high-risk decisions:
 
 1. the normal guided onboarding packet selects `connect_if_needed`;
 2. an unresolved agent identity selects `select_agent_identity`;
 3. multiple goals select `select_goal` before any mutation;
 4. the current TurnEnvelope preserves the exact selected todo;
-5. a final human gate selects `ask_user` and forbids normal delivery;
-6. a healthy onboarding postcondition selects `continue_validation`;
-7. a missing executable todo with an actionable projection selects
+5. the selected peer identity matches the todo claim in the model-facing route;
+6. `same_agent_non_delivery` keeps the successor with the completing peer;
+7. a final human gate selects `ask_user` and forbids normal delivery;
+8. a healthy onboarding postcondition selects `continue_validation`;
+9. a missing executable todo with an actionable projection selects
    `repair_projection`.
 
 Every scenario declares its own semantic oracle and runs exactly twice. All
 attempts must align. Actor or transport errors are not retried automatically;
 the portfolio fails closed and stops further calls. The maximum regular run is
-therefore 14 provider calls. Pair mode remains available only for temporary
+therefore 18 provider calls. Pair mode remains available only for temporary
 sensitive differentials or explicit stable-versus-candidate outcome claims,
 not as a permanent regular-behavior baseline.
 

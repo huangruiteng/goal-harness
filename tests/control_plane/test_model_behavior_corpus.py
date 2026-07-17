@@ -141,10 +141,11 @@ def test_corpus_covers_matrix_retained_counterfactual_and_ablation() -> None:
         "explicit_owner_review_required",
     ]
     assert result["coverage"]["graded_semantic_contract"] == [
-        "concrete_user_question",
-        "required_reads",
-        "gate_or_stop",
-        "write_scope",
+            "concrete_user_question",
+            "required_reads",
+            "gate_or_stop",
+            "peer_route",
+            "write_scope",
         "spend_rule",
         "scheduler_action",
         "vision_continuation",

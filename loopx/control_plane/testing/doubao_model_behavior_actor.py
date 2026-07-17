@@ -146,7 +146,7 @@ def _provider_input(request: Mapping[str, Any]) -> dict[str, Any]:
 
 def _semantic_contract_instruction() -> str:
     return """
-When semantic_contract_required=true, include all eight semantic_contract
+When semantic_contract_required=true, include all nine semantic_contract
 fields and normalize them as follows. Never copy schema placeholders.
 - concrete_user_question: first user.actions value, else null.
 - required_reads: candidate packet.required_reads; for a full packet use
@@ -181,6 +181,12 @@ fields and normalize them as follows. Never copy schema placeholders.
   state_action_projection_warning, next_action_projection_warning,
   stale_latest_run_warning, and decision_freshness_warning. Use [] when absent;
   guards are not warnings.
+- peer_route: always include exactly agent_id, selected_todo_claimed_by,
+  continuation_policy, and same_agent_continuation. Read agent_id from the
+  action signature. Read the other values from action.selected_todo, using
+  null when absent. same_agent_continuation is true only when agent_id and
+  selected_todo_claimed_by are equal and continuation_policy is exactly
+  same_agent_non_delivery.
 """
 
 
@@ -204,6 +210,7 @@ these fields and no others:
     "concrete_user_question": null,
     "required_reads": [],
     "gate_or_stop": {},
+    "peer_route": {},
     "write_scope": [],
     "spend_rule": {},
     "scheduler_action": {},
