@@ -180,6 +180,14 @@ timezone and allowed local-time window frozen in the v1 receipt. A sink removed
 from current configuration cancels only its own stale receipt; other configured
 sinks for that PR continue independently.
 
+Semantic history dedupe is sink-scoped. A single Lark sink may use the goal-level
+`feedback_inbox_config`; multiple Lark sinks must each declare their own
+`feedback_inbox_config`. If a multi-sink inbox cannot be attributed to one sink,
+the drain fails closed and preserves the queue instead of suppressing another
+chat's delivery. Bounded executions also report `remaining_due_pr_count` and
+return `partial_drain` whenever verified or cancelled work coexists with due
+rows held by a delivery window or left for the next `--limit` batch.
+
 Profile names, `destination_id`, and `member_id` are execution inputs. They are
 never copied into the result, domain state, todo, Kanban, PR, or public log.
 The first contract requires a named, project-dedicated sender profile and expected

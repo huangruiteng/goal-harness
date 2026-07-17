@@ -29,7 +29,7 @@ ISSUE_FIX_REVIEWER_NOTIFICATION_DRAIN_SCHEMA_VERSION = (
     "issue_fix_reviewer_notification_drain_v0"
 )
 MetadataLoader = Callable[..., tuple[Optional[dict[str, Any]], Optional[str]]]
-SemanticHistoryMatcher = Callable[[str], bool]
+SemanticHistoryMatcher = Callable[[str, Mapping[str, Any]], bool | None]
 
 
 def _row_with_live_lifecycle_facts(
@@ -315,6 +315,8 @@ def drain_issue_fix_reviewer_notification_queue(
             "cancelled_sink_receipt_count": 0,
             "held_pr_count": 0,
             "blocked_pr_count": 1,
+            "remaining_due_pr_count": 0,
+            "has_more_due": False,
             "items": [],
             "external_reads_performed": False,
             "external_writes_performed": False,
@@ -491,31 +493,6 @@ def drain_issue_fix_reviewer_notification_queue(
             items.append(item)
             continue
 
-        if semantic_history_matcher is not None:
-            try:
-                semantic_history_match = semantic_history_matcher(permalink)
-            except (OSError, ValueError):
-                semantic_history_status = "unavailable"
-            else:
-                semantic_history_status = (
-                    "matched" if semantic_history_match else "no_match"
-                )
-                if semantic_history_match:
-                    existing_refs = sinks_input.get("_semantic_history_pr_refs")
-                    refs = [
-                        str(value)
-                        for value in (
-                            existing_refs if isinstance(existing_refs, list) else []
-                        )
-                    ]
-                    row_sinks_input = {
-                        **dict(sinks_input),
-                        "_semantic_history_pr_refs": list(
-                            dict.fromkeys([*refs, permalink])
-                        ),
-                    }
-            item["semantic_history_status"] = semantic_history_status
-
         external_reads = True
         kwargs: dict[str, Any] = {"repo": repo, "number": number}
         if runner is not None:
@@ -654,6 +631,52 @@ def drain_issue_fix_reviewer_notification_queue(
             items.append(item)
             continue
 
+        semantic_receipt_keys: list[str] = []
+        if semantic_history_matcher is not None:
+            semantic_statuses: list[str] = []
+            semantic_scope_ambiguous = False
+            for sink in matching_sinks:
+                if str(sink.get("sink_kind") or "").strip() != "lark_chat":
+                    continue
+                try:
+                    semantic_history_match = semantic_history_matcher(permalink, sink)
+                except (OSError, ValueError):
+                    semantic_statuses.append("unavailable")
+                    continue
+                if semantic_history_match is None:
+                    semantic_scope_ambiguous = True
+                    semantic_statuses.append("scope_ambiguous")
+                    continue
+                semantic_statuses.append(
+                    "matched" if semantic_history_match else "no_match"
+                )
+                if semantic_history_match:
+                    semantic_receipt_keys.extend(
+                        _matched_queue_keys(
+                            sinks_input={"sinks": [sink]},
+                            repo=repo,
+                            number=number,
+                            queue=due_queue,
+                        )
+                    )
+            if "matched" in semantic_statuses:
+                semantic_history_status = "matched"
+            elif "scope_ambiguous" in semantic_statuses:
+                semantic_history_status = "scope_ambiguous"
+            elif "unavailable" in semantic_statuses:
+                semantic_history_status = "unavailable"
+            elif semantic_statuses:
+                semantic_history_status = "no_match"
+            item["semantic_history_status"] = semantic_history_status
+            if semantic_scope_ambiguous:
+                item.update(
+                    status="blocked",
+                    blocker="reviewer_notification_semantic_history_scope_ambiguous",
+                )
+                blocked_count += 1
+                items.append(item)
+                continue
+
         scoped_input = with_reviewer_notification_state(
             {
                 **dict(row_sinks_input),
@@ -664,7 +687,10 @@ def drain_issue_fix_reviewer_notification_queue(
                     "outside_window": "queue_without_send",
                 },
             },
-            reviewer_notification_receipts_from_state(row),
+            [
+                *reviewer_notification_receipts_from_state(row),
+                *semantic_receipt_keys,
+            ],
             full_queue,
         )
         build_kwargs: dict[str, Any] = {
@@ -729,6 +755,8 @@ def drain_issue_fix_reviewer_notification_queue(
             )
         items.append(item)
 
+    unprocessed_due_count = max(0, len(queued_rows) - len(items))
+    remaining_due_pr_count = held_count + unprocessed_due_count
     if not execute:
         if blocked_count:
             status = (
@@ -740,6 +768,8 @@ def drain_issue_fix_reviewer_notification_queue(
             status = "preview_due" if queued_rows else "no_due_notifications"
     elif blocked_count:
         status = "partial_failure" if len(items) > blocked_count else "blocked"
+    elif remaining_due_pr_count and (verified_count or cancelled_count):
+        status = "partial_drain"
     elif verified_count:
         status = "drained_verified"
     elif cancelled_count:
@@ -767,6 +797,8 @@ def drain_issue_fix_reviewer_notification_queue(
         "cancelled_sink_receipt_count": cancelled_sink_receipt_count,
         "held_pr_count": held_count,
         "blocked_pr_count": blocked_count,
+        "remaining_due_pr_count": remaining_due_pr_count,
+        "has_more_due": remaining_due_pr_count > 0,
         "items": items,
         "external_reads_performed": external_reads,
         "external_writes_performed": external_writes,

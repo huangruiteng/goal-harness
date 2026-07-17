@@ -394,6 +394,7 @@ def render_issue_fix_reviewer_notification_drain_markdown(
                 f"- verified_pr_count: {packet.get('verified_pr_count')}",
                 f"- cancelled_pr_count: {packet.get('cancelled_pr_count')}",
                 f"- blocked_pr_count: {packet.get('blocked_pr_count')}",
+                f"- remaining_due_pr_count: {packet.get('remaining_due_pr_count')}",
             ]
         ).rstrip()
         + "\n"
@@ -506,6 +507,8 @@ def handle_issue_fix_reviewer_command(
                 "verified_pr_count": 0,
                 "cancelled_pr_count": 0,
                 "blocked_pr_count": 0,
+                "remaining_due_pr_count": 0,
+                "has_more_due": False,
                 "external_reads_performed": False,
                 "external_writes_performed": False,
                 "state_write_performed": False,
@@ -521,15 +524,28 @@ def handle_issue_fix_reviewer_command(
             )
             semantic_history_matcher = None
             if lark_group_configured:
-                config_ref = str(
+                default_config_ref = str(
                     sinks_input.get("feedback_inbox_config")
                     or ".loopx/config/lark/event-inbox.json"
                 )
+                lark_sink_count = sum(
+                    1
+                    for sink in (sinks_input.get("sinks") or [])
+                    if isinstance(sink, Mapping)
+                    and sink.get("sink_kind") == "lark_chat"
+                )
 
-                def semantic_history_matcher(permalink: str) -> bool:
+                def semantic_history_matcher(
+                    permalink: str, sink: Mapping[str, Any]
+                ) -> bool | None:
+                    sink_config_ref = str(
+                        sink.get("feedback_inbox_config") or ""
+                    ).strip()
+                    if not sink_config_ref and lark_sink_count != 1:
+                        return None
                     return lark_event_inbox_contains_text(
                         project=requested_project,
-                        config_path=config_ref,
+                        config_path=sink_config_ref or default_config_ref,
                         text=permalink,
                     )
 

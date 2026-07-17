@@ -198,7 +198,7 @@ def main() -> int:
         def semantic_metadata_loader(
             *, repo: str, number: int, runner: Any = None
         ) -> tuple[dict[str, Any], None]:
-            assert (repo, number) == ("owner/repo", 106)
+            assert repo == "owner/repo" and number in {106, 109}
             return {
                 "author_handle": "@author-f",
                 "reviewed_by": [],
@@ -221,7 +221,7 @@ def main() -> int:
             delivery_observed_at="2026-07-18T01:01:00Z",
             runner=no_lark_write,
             metadata_loader=semantic_metadata_loader,
-            semantic_history_matcher=lambda permalink: permalink.endswith(
+            semantic_history_matcher=lambda permalink, sink: permalink.endswith(
                 "/pull/106"
             ),
         )
@@ -233,6 +233,91 @@ def main() -> int:
         )
         assert semantic_stored["reviewer_notification_queue"] == []
         assert semantic_key in semantic_stored["reviewer_notification_receipts"]
+
+        scoped_ledger = path / "scoped-semantic-pr-lifecycle.jsonl"
+        scoped_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/109",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(scoped_ledger, scoped_row)
+        second_sink = {**sink, "sink_instance_key": "fixture-review-lane-b"}
+        scoped_queue = [
+            {
+                "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
+                "idempotency_key": reviewer_notification_idempotency_key(
+                    repo="owner/repo",
+                    pr_number=109,
+                    sink_kind="lark_chat",
+                    sink_instance_key=current_sink["sink_instance_key"],
+                    reviewer_handles=["@map-owner"],
+                ),
+                "sink_kind": "lark_chat",
+                "reviewer_handles": ["@map-owner"],
+                "message_summary": "仅对已有消息的群做精确去重",
+                "summary_policy_status": "reward_memory_verified",
+                "queued_at": "2026-07-17T18:00:00Z",
+                "not_before": "2026-07-18T01:00:00Z",
+                "timezone": "Asia/Shanghai",
+                "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                "status": "queued",
+            }
+            for current_sink in (sink, second_sink)
+        ]
+        persist_issue_fix_reviewer_notification_state(
+            scoped_ledger,
+            scoped_row,
+            receipts=[],
+            queued_receipts=scoped_queue,
+        )
+        scoped_writes: list[str] = []
+
+        def scoped_adapter(**kwargs: Any) -> dict[str, Any]:
+            instance_key = str(kwargs["sink"]["sink_instance_key"]).strip()
+            key = reviewer_notification_idempotency_key(
+                repo="owner/repo",
+                pr_number=int(kwargs["pr_number"]),
+                sink_kind="lark_chat",
+                sink_instance_key=instance_key,
+                reviewer_handles=["@map-owner"],
+            )
+            already_notified = key in kwargs["receipts"]
+            if not already_notified:
+                scoped_writes.append(instance_key)
+            return {
+                **unverified_adapter(**kwargs),
+                "ok": True,
+                "status": (
+                    "already_notified" if already_notified else "sent_verified"
+                ),
+                "idempotency_key": key,
+                "external_write_performed": not already_notified,
+                "notification_verified": True,
+            }
+
+        scoped_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=scoped_ledger,
+            sinks_input={**sinks_input, "sinks": [sink, second_sink]},
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            metadata_loader=semantic_metadata_loader,
+            semantic_history_matcher=lambda permalink, current_sink: (
+                str(current_sink["sink_instance_key"]).strip()
+                == "fixture-review-lane"
+            ),
+            sink_adapters={"lark_chat": scoped_adapter},
+        )
+        assert scoped_drain["status"] == "drained_verified", scoped_drain
+        assert scoped_writes == ["fixture-review-lane-b"], scoped_writes
+        scoped_stored = json.loads(
+            scoped_ledger.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert scoped_stored["reviewer_notification_queue"] == []
+        assert len(scoped_stored["reviewer_notification_receipts"]) == 2
 
         mixed_ledger = path / "mixed-reviewers-pr-lifecycle.jsonl"
         mixed_row = build_issue_fix_pr_lifecycle_monitor_packet(
@@ -338,6 +423,79 @@ def main() -> int:
         )
         assert preview["status"] == "preview_blocked", preview
         assert preview["blocked_pr_count"] == 1, preview
+        assert reviewer_notification_idempotency_key(
+            repo="owner/repo",
+            pr_number=108,
+            sink_kind=" lark_chat ",
+            sink_instance_key=" fixture-review-lane ",
+            reviewer_handles=["@map-owner"],
+        ) == reviewer_notification_idempotency_key(
+            repo="owner/repo",
+            pr_number=108,
+            sink_kind="lark_chat",
+            sink_instance_key="fixture-review-lane",
+            reviewer_handles=["@map-owner"],
+        )
+
+        limit_ledger = path / "limit-pr-lifecycle.jsonl"
+        for number in (110, 111):
+            limit_row = build_issue_fix_pr_lifecycle_monitor_packet(
+                url=f"https://github.com/owner/repo/pull/{number}",
+                provider_payload={
+                    "state": "OPEN",
+                    "reviewDecision": "REVIEW_REQUIRED",
+                    "mergeStateStatus": "BLOCKED",
+                    "statusCheckRollup": [],
+                },
+            )
+            upsert_issue_fix_pr_lifecycle_ledger_jsonl(limit_ledger, limit_row)
+            persist_issue_fix_reviewer_notification_state(
+                limit_ledger,
+                limit_row,
+                receipts=[],
+                queued_receipts=[
+                    {
+                        **mixed_receipt,
+                        "idempotency_key": reviewer_notification_idempotency_key(
+                            repo="owner/repo",
+                            pr_number=number,
+                            sink_kind="lark_chat",
+                            sink_instance_key=sink["sink_instance_key"],
+                            reviewer_handles=["@map-owner"],
+                        ),
+                        "reviewer_handles": ["@map-owner"],
+                    }
+                ],
+            )
+
+        def limit_metadata_loader(
+            *, repo: str, number: int
+        ) -> tuple[dict[str, Any], None]:
+            assert repo == "owner/repo" and number in {110, 111}
+            return {
+                "author_handle": "@author-h",
+                "reviewed_by": [],
+                "requested_reviewers": ["@map-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "review_required",
+                "is_draft": False,
+                "linked_issue_refs": [],
+            }, None
+
+        limit_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=limit_ledger,
+            sinks_input=sinks_input,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            limit=1,
+            metadata_loader=limit_metadata_loader,
+            sink_adapters={"lark_chat": scoped_adapter},
+        )
+        assert limit_drain["status"] == "partial_drain", limit_drain
+        assert limit_drain["remaining_due_pr_count"] == 1, limit_drain
+        assert limit_drain["has_more_due"] is True, limit_drain
 
     print("issue-fix-reviewer-notification-drain-postwrite-smoke: ok")
     return 0

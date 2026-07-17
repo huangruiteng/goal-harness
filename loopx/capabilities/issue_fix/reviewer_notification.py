@@ -319,8 +319,8 @@ def reviewer_notification_idempotency_key(
     return _idempotency_key(
         repo=public_safe_compact_text(repo, limit=200),
         pr_number=int(pr_number),
-        sink_kind=public_safe_compact_text(sink_kind, limit=50),
-        sink_instance_key=str(sink_instance_key),
+        sink_kind=public_safe_compact_text(sink_kind, limit=50).strip(),
+        sink_instance_key=str(sink_instance_key).strip(),
         reviewer_handles=reviewers,
     )
 
