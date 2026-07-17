@@ -231,6 +231,62 @@ def autonomous_replan_obligation_from_state(
     return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
 
 
+def _monitor_no_change_evidence(
+    agent_todos: dict[str, Any] | None,
+    *,
+    threshold: int,
+    schema_version: str,
+) -> dict[str, Any] | None:
+    if not isinstance(agent_todos, dict):
+        return None
+    raw_monitors = agent_todos.get("monitor_open_items")
+    monitors = [item for item in raw_monitors or [] if isinstance(item, dict)]
+    stalled: list[tuple[int, dict[str, Any]]] = []
+    for item in monitors:
+        try:
+            no_change_count = int(str(item.get("consecutive_no_change") or "0"))
+        except ValueError:
+            continue
+        if no_change_count >= threshold:
+            stalled.append((no_change_count, item))
+    if not stalled:
+        return None
+
+    stalled.sort(key=lambda pair: pair[0], reverse=True)
+    no_change_count, monitor = stalled[0]
+    agent_id = str(monitor.get("claimed_by") or "").strip() or None
+    raw_advancements = agent_todos.get("executable_backlog_items")
+    if not isinstance(raw_advancements, list):
+        raw_advancements = agent_todos.get("items")
+    for item in raw_advancements or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").strip().lower() != "open":
+            continue
+        if str(item.get("task_class") or "").strip() != "advancement_task":
+            continue
+        claimed_by = str(item.get("claimed_by") or "").strip() or None
+        if not claimed_by or claimed_by == agent_id:
+            return None
+
+    monitor_target_id = str(
+        monitor.get("target_key") or monitor.get("todo_id") or "monitor"
+    ).strip()
+    return {
+        "kind": "monitor_no_change_streak",
+        "schema_version": schema_version,
+        "section": "agent_todos",
+        "text": (
+            f"monitor {monitor_target_id} recorded {no_change_count} "
+            "consecutive unchanged polls without runnable advancement"
+        ),
+        "run_count": no_change_count,
+        "threshold": threshold,
+        "monitor_target_id": monitor_target_id,
+        "agent_id": agent_id,
+    }
+
+
 def build_autonomous_replan_obligation(
     evidence: list[dict[str, Any]],
     *,
@@ -242,10 +298,22 @@ def build_autonomous_replan_obligation(
     dead_monitor_repeat_schema_version: str,
 ) -> dict[str, Any] | None:
     if not evidence:
+        monitor_evidence = _monitor_no_change_evidence(
+            agent_todos,
+            threshold=autonomous_replan_stall_threshold,
+            schema_version=dead_monitor_repeat_schema_version,
+        )
+        if monitor_evidence:
+            evidence = [monitor_evidence]
+    if not evidence:
         return None
 
     dead_monitor_evidence = next(
-        (item for item in evidence if item.get("kind") == "dead_monitor_repeat"),
+        (
+            item
+            for item in evidence
+            if item.get("kind") in {"dead_monitor_repeat", "monitor_no_change_streak"}
+        ),
         None,
     )
     blocked_successor_evidence = next(
@@ -362,7 +430,7 @@ def build_autonomous_replan_obligation(
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,
         stall_threshold=(
-            dead_monitor_repeat_threshold
+            int(dead_monitor_evidence.get("threshold") or dead_monitor_repeat_threshold)
             if dead_monitor_evidence
             else autonomous_replan_stall_threshold
         ),
