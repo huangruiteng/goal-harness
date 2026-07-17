@@ -1756,6 +1756,7 @@ def main() -> int:
                 "comment_notified_reviewers": [],
                 "state": "OPEN",
                 "review_decision": "APPROVED",
+                "state_bucket": "ready_to_merge",
                 "is_draft": False,
                 "linked_issue_refs": ["#92"],
             },
@@ -1784,7 +1785,7 @@ def main() -> int:
         }
 
         def drain_metadata_loader(
-            *, repo: str, number: int
+            *, repo: str, number: int, runner: Any = None
         ) -> tuple[dict[str, Any] | None, str | None]:
             assert repo == "owner/repo"
             return dict(drain_live[number]), None
@@ -1865,6 +1866,21 @@ def main() -> int:
         assert drained["not_due_receipt_count"] == 1
         pr_101 = next(item for item in drained["items"] if item["pr_ref"] == "#101")
         assert pr_101["inactive_reviewer_handles"] == ["@removed-owner"]
+        stored_drain_rows = [
+            json.loads(line)
+            for line in drain_ledger.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        pr_102_row = next(
+            row
+            for row in stored_drain_rows
+            if row["observation"]["pr_ref"] == "pull_102"
+        )
+        assert pr_102_row["observation"]["review_decision"] == "APPROVED"
+        assert (
+            pr_102_row["grouped_monitor_projection"]["state_bucket"]
+            == "ready_to_merge"
+        )
         assert drain_calls == [
             {
                 "number": 101,

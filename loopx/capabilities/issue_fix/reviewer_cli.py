@@ -515,12 +515,31 @@ def handle_issue_fix_reviewer_command(
                 project=requested_project,
                 goal_id=args.goal_id,
             )
+            lark_group_configured = any(
+                isinstance(sink, Mapping) and sink.get("sink_kind") == "lark_chat"
+                for sink in (sinks_input.get("sinks") or [])
+            )
+            semantic_history_matcher = None
+            if lark_group_configured:
+                config_ref = str(
+                    sinks_input.get("feedback_inbox_config")
+                    or ".loopx/config/lark/event-inbox.json"
+                )
+
+                def semantic_history_matcher(permalink: str) -> bool:
+                    return lark_event_inbox_contains_text(
+                        project=requested_project,
+                        config_path=config_ref,
+                        text=permalink,
+                    )
+
             payload = drain_issue_fix_reviewer_notification_queue(
                 ledger_path=lifecycle_path,
                 sinks_input=sinks_input,
                 execute=args.execute,
                 delivery_observed_at=delivery_observed_at,
                 limit=args.limit,
+                semantic_history_matcher=semantic_history_matcher,
             )
             payload["notification_source"] = "goal_default"
         return payload, render_issue_fix_reviewer_notification_drain_markdown

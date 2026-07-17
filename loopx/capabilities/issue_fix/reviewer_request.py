@@ -393,6 +393,10 @@ def fetch_issue_fix_reviewer_notification_metadata(
     grouped = lifecycle.get("grouped_monitor_projection")
     grouped = grouped if isinstance(grouped, Mapping) else {}
     identities["state_bucket"] = str(grouped.get("state_bucket") or "unknown")
+    # The grouped queue drain must persist the same verified lifecycle facts it
+    # used to cancel a stale notification. Keep the full public-safe packet
+    # internal to this adapter instead of reconstructing only a few fields.
+    identities["_lifecycle_packet"] = lifecycle
     return identities, None
 
 

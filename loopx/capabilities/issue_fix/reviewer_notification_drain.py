@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, time, timezone
 from pathlib import Path
@@ -27,6 +29,61 @@ ISSUE_FIX_REVIEWER_NOTIFICATION_DRAIN_SCHEMA_VERSION = (
     "issue_fix_reviewer_notification_drain_v0"
 )
 MetadataLoader = Callable[..., tuple[Optional[dict[str, Any]], Optional[str]]]
+SemanticHistoryMatcher = Callable[[str], bool]
+
+
+def _row_with_live_lifecycle_facts(
+    row: Mapping[str, Any], metadata: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge freshly verified lifecycle facts without dropping local receipts."""
+
+    updated = dict(row)
+    lifecycle = metadata.get("_lifecycle_packet")
+    if isinstance(lifecycle, Mapping):
+        for key in (
+            "generated_at",
+            "observation",
+            "observation_fingerprint",
+            "transition",
+            "grouped_monitor_projection",
+            "first_screen",
+            "writeback_contract",
+            "evidence",
+        ):
+            if key in lifecycle:
+                value = lifecycle[key]
+                updated[key] = dict(value) if isinstance(value, Mapping) else value
+        return updated
+
+    observation = row.get("observation")
+    fresh_observation = dict(observation) if isinstance(observation, Mapping) else {}
+    fresh_observation.update(
+        state=str(metadata.get("state") or "UNKNOWN").upper(),
+        review_decision=str(
+            metadata.get("review_decision") or "UNKNOWN"
+        ).upper(),
+        is_draft=metadata.get("is_draft") is True,
+    )
+    updated["observation"] = fresh_observation
+    serialized = json.dumps(fresh_observation, sort_keys=True, separators=(",", ":"))
+    updated["observation_fingerprint"] = hashlib.sha256(
+        serialized.encode("utf-8")
+    ).hexdigest()[:16]
+    state_bucket = str(metadata.get("state_bucket") or "unknown")
+    grouped = row.get("grouped_monitor_projection")
+    fresh_grouped = dict(grouped) if isinstance(grouped, Mapping) else {}
+    fresh_grouped["state_bucket"] = state_bucket
+    terminal = state_bucket == "terminal"
+    fresh_grouped["target_key"] = (
+        None if terminal else f"github-pr-state-{state_bucket.replace('_', '-')}"
+    )
+    fresh_grouped["action_kind"] = (
+        None if terminal else f"issue_fix_pr_state_{state_bucket}_monitor"
+    )
+    fresh_grouped["member_operation"] = "remove" if terminal else "upsert"
+    fresh_grouped["materialize_nonempty_bucket_monitor"] = not terminal
+    updated["grouped_monitor_projection"] = fresh_grouped
+    return updated
 
 
 def _parse_timestamp(value: str | None) -> datetime:
@@ -222,6 +279,7 @@ def drain_issue_fix_reviewer_notification_queue(
     limit: int = 20,
     runner: CommandRunner | None = None,
     metadata_loader: MetadataLoader = fetch_issue_fix_reviewer_notification_metadata,
+    semantic_history_matcher: SemanticHistoryMatcher | None = None,
     sink_adapters: Mapping[str, NotificationSinkAdapter] | None = None,
 ) -> dict[str, Any]:
     """Drain one bounded state-group batch with one PR in each sink message."""
@@ -304,6 +362,8 @@ def drain_issue_fix_reviewer_notification_queue(
         permalink = str(
             observation.get("permalink") or f"https://github.com/{repo}/pull/{number}"
         )
+        row_sinks_input = sinks_input
+        semantic_history_status = "not_checked"
         full_queue = reviewer_notification_queue_from_state(row)
         due_queue = [
             receipt for receipt in full_queue if _queue_due(receipt, observed_at)
@@ -313,7 +373,7 @@ def drain_issue_fix_reviewer_notification_queue(
         ]
         original_due_count = len(due_queue)
         matched_keys = _matched_queue_keys(
-            sinks_input=sinks_input,
+            sinks_input=row_sinks_input,
             repo=repo,
             number=number,
             queue=due_queue,
@@ -329,7 +389,7 @@ def drain_issue_fix_reviewer_notification_queue(
             if str(receipt.get("idempotency_key") or "") in matched_keys
         ]
         matching_sinks = _matching_sinks(
-            sinks_input=sinks_input,
+            sinks_input=row_sinks_input,
             repo=repo,
             number=number,
             queue=due_queue,
@@ -361,6 +421,7 @@ def drain_issue_fix_reviewer_notification_queue(
             "notification_verified": False,
             "external_write_performed": False,
             "queue_write_performed": False,
+            "semantic_history_status": semantic_history_status,
         }
         if unmatched_due_queue:
             item["stale_sink_receipt_count"] = len(unmatched_due_queue)
@@ -430,6 +491,31 @@ def drain_issue_fix_reviewer_notification_queue(
             items.append(item)
             continue
 
+        if semantic_history_matcher is not None:
+            try:
+                semantic_history_match = semantic_history_matcher(permalink)
+            except (OSError, ValueError):
+                semantic_history_status = "unavailable"
+            else:
+                semantic_history_status = (
+                    "matched" if semantic_history_match else "no_match"
+                )
+                if semantic_history_match:
+                    existing_refs = sinks_input.get("_semantic_history_pr_refs")
+                    refs = [
+                        str(value)
+                        for value in (
+                            existing_refs if isinstance(existing_refs, list) else []
+                        )
+                    ]
+                    row_sinks_input = {
+                        **dict(sinks_input),
+                        "_semantic_history_pr_refs": list(
+                            dict.fromkeys([*refs, permalink])
+                        ),
+                    }
+            item["semantic_history_status"] = semantic_history_status
+
         external_reads = True
         kwargs: dict[str, Any] = {"repo": repo, "number": number}
         if runner is not None:
@@ -489,10 +575,11 @@ def drain_issue_fix_reviewer_notification_queue(
         elif reviewers and not set(reviewers).intersection(live_active_coverage):
             stale_reason = "all_queued_reviewers_no_longer_active"
         if stale_reason:
+            fresh_row = _row_with_live_lifecycle_facts(row, metadata)
             try:
                 write = persist_issue_fix_reviewer_notification_state(
                     ledger_path,
-                    row,
+                    fresh_row,
                     receipts=[],
                     queued_receipts=[],
                     replace_queued_receipts=True,
@@ -564,7 +651,7 @@ def drain_issue_fix_reviewer_notification_queue(
 
         scoped_input = with_reviewer_notification_state(
             {
-                **dict(sinks_input),
+                **dict(row_sinks_input),
                 "sinks": matching_sinks,
                 "delivery_policy": {
                     "timezone": delivery_policy["timezone"],
