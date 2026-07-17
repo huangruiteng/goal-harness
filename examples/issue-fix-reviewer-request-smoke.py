@@ -33,10 +33,14 @@ from loopx.capabilities.issue_fix.cli import (  # noqa: E402
     _materialize_goal_reviewer_notification_lifecycle,
 )
 from loopx.capabilities.issue_fix.reviewer_notification import (  # noqa: E402
+    reviewer_notification_idempotency_key,
     reviewer_notification_queue_from_state,
     reviewer_notification_receipts_from_state,
     with_reviewer_notification_state,
     with_reviewer_notification_receipts,
+)
+from loopx.capabilities.issue_fix.reviewer_notification_drain import (  # noqa: E402
+    drain_issue_fix_reviewer_notification_queue,
 )
 from loopx.capabilities.issue_fix.pr_lifecycle import (  # noqa: E402
     build_issue_fix_pr_lifecycle_monitor_packet,
@@ -144,6 +148,7 @@ def metadata(
         "isDraft": False,
         "reviewRequests": [{"login": login} for login in (requested or [])],
         "reviews": [{"author": {"login": login}} for login in (reviewed or [])],
+        "reviewDecision": "REVIEW_REQUIRED",
         "state": "OPEN",
         "title": "fix: reject file URI for consistency check",
         "url": "https://github.com/owner/repo/pull/42",
@@ -241,9 +246,7 @@ class FakeCombinedRunner:
             self.lark_calls.append(command)
             return {
                 "returncode": 0,
-                "stdout": json.dumps(
-                    {"items": [{"body": {"content": "another PR"}}]}
-                ),
+                "stdout": json.dumps({"items": [{"body": {"content": "another PR"}}]}),
                 "stderr": "",
             }
         if "+messages-send" in command:
@@ -1530,10 +1533,12 @@ def main() -> int:
 
         queued_key = "sha256:" + "b" * 64
         queued_receipt = {
-            "schema_version": "issue_fix_reviewer_notification_queue_receipt_v0",
+            "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
             "idempotency_key": queued_key,
             "sink_kind": "lark_chat",
             "reviewer_handles": ["@map-owner"],
+            "message_summary": "修复一致性检查对文件 URI 的错误接受行为",
+            "summary_policy_status": "reward_memory_verified",
             "queued_at": "2026-07-10T14:30:00Z",
             "not_before": "2026-07-11T01:00:00Z",
             "timezone": "Asia/Shanghai",
@@ -1629,6 +1634,141 @@ def main() -> int:
             lifecycle_path.read_text(encoding="utf-8").splitlines()[0]
         )
         assert stored_after_cancel["reviewer_notification_queue"] == []
+
+        drain_ledger = path / ".loopx/domain-state/drain/pr-lifecycle.jsonl"
+        drain_calls: list[dict[str, Any]] = []
+
+        def drain_adapter(**kwargs: Any) -> dict[str, Any]:
+            assert kwargs["execute"] is True
+            assert "修复" in kwargs["pr_title"]
+            key = reviewer_notification_idempotency_key(
+                repo=kwargs["repo"],
+                pr_number=kwargs["pr_number"],
+                sink_kind=kwargs["sink"]["sink_kind"],
+                sink_instance_key=kwargs["sink"]["sink_instance_key"],
+                reviewer_handles=kwargs["reviewer_handles"],
+            )
+            drain_calls.append(
+                {"number": kwargs["pr_number"], "summary": kwargs["pr_title"]}
+            )
+            return {
+                "ok": True,
+                "schema_version": "issue_fix_reviewer_notification_sink_result_v0",
+                "sink_kind": "lark_chat",
+                "status": "sent_verified",
+                "reviewer_handles": list(kwargs["reviewer_handles"]),
+                "resolved_reviewer_count": len(kwargs["reviewer_handles"]),
+                "idempotency_key": key,
+                "identity_scope": "project_dedicated",
+                "external_write_authority_asserted": True,
+                "external_write_performed": True,
+                "verification_performed": True,
+                "notification_verified": True,
+                "bot_identity_verified": True,
+                "reader_identity_verified": True,
+                "private_destination_captured": False,
+                "private_member_ids_captured": False,
+                "private_bot_profile_captured": False,
+                "raw_provider_payload_captured": False,
+            }
+
+        drain_live = {
+            101: {
+                "author_handle": "@author-a",
+                "reviewed_by": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "is_draft": False,
+                "linked_issue_refs": ["#91"],
+            },
+            102: {
+                "author_handle": "@author-b",
+                "reviewed_by": [],
+                "state": "OPEN",
+                "review_decision": "APPROVED",
+                "is_draft": False,
+                "linked_issue_refs": ["#92"],
+            },
+        }
+
+        def drain_metadata_loader(
+            *, repo: str, number: int
+        ) -> tuple[dict[str, Any] | None, str | None]:
+            assert repo == "owner/repo"
+            return dict(drain_live[number]), None
+
+        for number, not_before, summary in (
+            (101, "2026-07-18T01:00:00Z", "修复队列到点后无人消费的问题"),
+            (102, "2026-07-18T01:00:00Z", "修复已批准请求仍重复提醒的问题"),
+            (103, "2026-07-19T01:00:00Z", "修复未来窗口被提前发送的问题"),
+        ):
+            lifecycle_row = build_issue_fix_pr_lifecycle_monitor_packet(
+                url=f"https://github.com/owner/repo/pull/{number}",
+                provider_payload={
+                    "state": "OPEN",
+                    "reviewDecision": "REVIEW_REQUIRED",
+                    "mergeStateStatus": "BLOCKED",
+                    "statusCheckRollup": [],
+                },
+            )
+            upsert_issue_fix_pr_lifecycle_ledger_jsonl(drain_ledger, lifecycle_row)
+            key = reviewer_notification_idempotency_key(
+                repo="owner/repo",
+                pr_number=number,
+                sink_kind="lark_chat",
+                sink_instance_key=goal_sink["sink_instance_key"],
+                reviewer_handles=["@map-owner"],
+            )
+            queue_receipt = {
+                "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
+                "idempotency_key": key,
+                "sink_kind": "lark_chat",
+                "reviewer_handles": ["@map-owner"],
+                "message_summary": summary,
+                "summary_policy_status": "reward_memory_verified",
+                "queued_at": "2026-07-17T18:00:00Z",
+                "not_before": not_before,
+                "timezone": "Asia/Shanghai",
+                "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                "status": "queued",
+            }
+            persist_issue_fix_reviewer_notification_state(
+                drain_ledger,
+                lifecycle_row,
+                receipts=[],
+                queued_receipts=[queue_receipt],
+            )
+
+        drained = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=drain_ledger,
+            sinks_input=goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            metadata_loader=drain_metadata_loader,
+            sink_adapters={"lark_chat": drain_adapter},
+        )
+        assert drained["ok"] is True, drained
+        assert drained["grouping_scope"] == "review_required_state_bucket"
+        assert drained["monitor_granularity"] == "one_monitor_per_state_bucket"
+        assert drained["notification_granularity"] == "one_pr_per_message"
+        assert drained["due_pr_count"] == 2
+        assert drained["verified_pr_count"] == 1
+        assert drained["cancelled_pr_count"] == 1
+        assert drained["not_due_receipt_count"] == 1
+        assert drain_calls == [
+            {"number": 101, "summary": "修复队列到点后无人消费的问题"}
+        ]
+        repeated_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=drain_ledger,
+            sinks_input=goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:02:00Z",
+            metadata_loader=drain_metadata_loader,
+            sink_adapters={"lark_chat": drain_adapter},
+        )
+        assert repeated_drain["status"] == "no_due_notifications"
+        assert repeated_drain["due_pr_count"] == 0
+        assert len(drain_calls) == 1
     finally:
         for attempt in range(10):
             try:

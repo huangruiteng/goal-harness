@@ -141,11 +141,30 @@ explicit sink value, then the unrestricted default. When configured, execute
 mode sends only while the current local time is inside the half-open
 `[start, end)` window; overnight windows are supported. Outside the window,
 LoopX performs no provider call and returns `queued_until_window` with a
-compact `issue_fix_reviewer_notification_queue_receipt_v0`. Invalid timezone,
-time, or outside-window policy fails closed. Preview remains read-only and is
-never converted into a queued execution. The execute path uses the trusted
-invocation clock for this decision; the public `--generated-at` artifact field
-cannot move a send into or out of the delivery window.
+compact `issue_fix_reviewer_notification_queue_receipt_v1`. The v1 receipt also
+persists the public-safe summary and whether it came from a verified Reward
+Memory artifact, so a later drain cannot regress a Chinese reviewer summary to
+the raw PR title. Invalid timezone, time, or outside-window policy fails closed.
+Preview remains read-only and is never converted into a queued execution. The
+execute path uses the trusted invocation clock for this decision; the public
+`--generated-at` artifact field cannot move a send into or out of the delivery
+window.
+
+The grouped state monitor drains due receipts with:
+
+```bash
+loopx issue-fix reviewer-notification-drain \
+  --goal-id <goal-id> \
+  --project <project> \
+  --execute \
+  --format json
+```
+
+One bounded invocation scans every queued PR in the review-required state
+bucket; it does not create one continuous monitor per PR. Before each message,
+LoopX refreshes compact live GitHub state and cancels stale queues for closed,
+merged, draft, approved, or already-reviewed PRs. A send remains one PR per
+message and is complete only after semantic readback and receipt persistence.
 
 Profile names, `destination_id`, and `member_id` are execution inputs. They are
 never copied into the result, domain state, todo, Kanban, PR, or public log.

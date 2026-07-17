@@ -21,11 +21,9 @@ ISSUE_FIX_FEASIBILITY_LEDGER_FILENAME = "feasibility.jsonl"
 ISSUE_FIX_REPOSITORY_SNAPSHOT_LEDGER_FILENAME = "repository-snapshots.jsonl"
 REVIEWER_NOTIFICATION_RECEIPT_PATTERN = re.compile(r"sha256:[a-f0-9]{64}")
 REVIEWER_NOTIFICATION_QUEUE_RECEIPT_SCHEMA_VERSION = (
-    "issue_fix_reviewer_notification_queue_receipt_v0"
+    "issue_fix_reviewer_notification_queue_receipt_v1"
 )
-REVIEWER_NOTIFICATION_LOCAL_TIME_PATTERN = re.compile(
-    r"(?:[01]\d|2[0-3]):[0-5]\d"
-)
+REVIEWER_NOTIFICATION_LOCAL_TIME_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
 REVIEWER_NOTIFICATION_HANDLE_PATTERN = re.compile(r"@?[A-Za-z0-9_.-]{1,100}")
 
 
@@ -338,6 +336,10 @@ def _validated_reviewer_notification_queue_receipt(
             for handle in reviewers
         )
         or not isinstance(window, dict)
+        or not str(value.get("message_summary") or "").strip()
+        or len(str(value.get("message_summary") or "")) > 240
+        or value.get("summary_policy_status")
+        not in {"reward_memory_verified", "sink_config"}
         or not REVIEWER_NOTIFICATION_LOCAL_TIME_PATTERN.fullmatch(
             str(window.get("start") or "")
         )
@@ -384,9 +386,7 @@ def persist_issue_fix_reviewer_notification_state(
     existing_receipts = payload.get("reviewer_notification_receipts")
     merged_receipts = [
         str(value)
-        for value in (
-            existing_receipts if isinstance(existing_receipts, list) else []
-        )
+        for value in (existing_receipts if isinstance(existing_receipts, list) else [])
         if REVIEWER_NOTIFICATION_RECEIPT_PATTERN.fullmatch(str(value))
     ]
     for receipt in receipts:

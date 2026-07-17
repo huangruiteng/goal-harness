@@ -28,7 +28,7 @@ ISSUE_FIX_REVIEWER_NOTIFICATION_SINK_RESULT_SCHEMA_VERSION = (
     "issue_fix_reviewer_notification_sink_result_v0"
 )
 ISSUE_FIX_REVIEWER_NOTIFICATION_QUEUE_RECEIPT_SCHEMA_VERSION = (
-    "issue_fix_reviewer_notification_queue_receipt_v0"
+    "issue_fix_reviewer_notification_queue_receipt_v1"
 )
 LARK_PERMISSION_PATTERN = re.compile(
     r"(?:missing\s+scope|permission|not\s+in\s+(?:the\s+)?chat|"
@@ -124,9 +124,7 @@ def load_goal_reviewer_notification_sinks_input(
         if sink.get("sink_kind") == "lark_chat" and not (
             SAFE_LOCAL_KEY_PATTERN.fullmatch(str(sink.get("reader_profile") or ""))
             and sink.get("reader_identity") == "user"
-            and SAFE_LOCAL_KEY_PATTERN.fullmatch(
-                str(sink.get("sender_profile") or "")
-            )
+            and SAFE_LOCAL_KEY_PATTERN.fullmatch(str(sink.get("sender_profile") or ""))
             and sink.get("sender_identity") == "bot"
         ):
             raise ValueError(
@@ -181,10 +179,7 @@ def with_reviewer_notification_state(
     )
     for value in sinks_input.get("receipts") or []:
         text = str(value)
-        if (
-            re.fullmatch(r"sha256:[a-f0-9]{64}", text)
-            and text not in merged_receipts
-        ):
+        if re.fullmatch(r"sha256:[a-f0-9]{64}", text) and text not in merged_receipts:
             merged_receipts.append(text)
 
     queue = reviewer_notification_queue_from_state(
@@ -277,6 +272,32 @@ def _idempotency_key(
     return f"sha256:{hashlib.sha256(logical_effect.encode('utf-8')).hexdigest()}"
 
 
+def reviewer_notification_idempotency_key(
+    *,
+    repo: str,
+    pr_number: int,
+    sink_kind: str,
+    sink_instance_key: str,
+    reviewer_handles: Sequence[str],
+) -> str:
+    """Return the public logical-effect key used by queue/drain reconciliation."""
+
+    reviewers = list(
+        dict.fromkeys(
+            handle
+            for value in reviewer_handles
+            if (handle := _normalise_handle(value)) is not None
+        )
+    )[:3]
+    return _idempotency_key(
+        repo=public_safe_compact_text(repo, limit=200),
+        pr_number=int(pr_number),
+        sink_kind=public_safe_compact_text(sink_kind, limit=50),
+        sink_instance_key=str(sink_instance_key),
+        reviewer_handles=reviewers,
+    )
+
+
 def _parse_delivery_observed_at(value: str | None) -> datetime:
     if value is None:
         return datetime.now(timezone.utc)
@@ -325,9 +346,7 @@ def _delivery_window_decision(
     end = time.fromisoformat(end_text)
     current = local.timetz().replace(tzinfo=None)
     allowed = (
-        start <= current < end
-        if start < end
-        else current >= start or current < end
+        start <= current < end if start < end else current >= start or current < end
     )
     decision: dict[str, Any] = {
         "configured": True,
@@ -344,9 +363,7 @@ def _delivery_window_decision(
         if local >= next_start:
             next_start += timedelta(days=1)
         decision["not_before"] = (
-            next_start.astimezone(timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z")
+            next_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         )
     return decision
 
@@ -358,6 +375,8 @@ def _queued_result(
     sink_kind: str,
     sink_instance_key: str,
     reviewer_handles: Sequence[str],
+    message_summary: str,
+    summary_policy_status: str,
     execute: bool,
     window: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -393,6 +412,10 @@ def _queued_result(
         "idempotency_key": key,
         "sink_kind": sink_kind,
         "reviewer_handles": list(reviewer_handles),
+        "message_summary": public_safe_compact_text(message_summary, limit=240),
+        "summary_policy_status": public_safe_compact_text(
+            summary_policy_status, limit=80
+        ),
         "queued_at": window["observed_at"],
         "not_before": window["not_before"],
         "timezone": window["timezone"],
@@ -539,9 +562,7 @@ def _lark_result(
     )
     reader_profile = str(sink.get("reader_profile") or "").strip()
     reader_identity = str(sink.get("reader_identity") or "").strip()
-    profile = str(
-        sink.get("sender_profile") or sink.get("bot_profile") or ""
-    ).strip()
+    profile = str(sink.get("sender_profile") or sink.get("bot_profile") or "").strip()
     sender_identity = str(sink.get("sender_identity") or "bot").strip()
     expected_bot_name = public_safe_compact_text(
         sink.get("bot_display_name"),
@@ -775,8 +796,7 @@ def _lark_result(
             semantic_dedupe_status = "configured_chat_no_match"
         else:
             provider_error = " ".join(
-                str(semantic_search.get(field) or "")
-                for field in ("stderr", "stdout")
+                str(semantic_search.get(field) or "") for field in ("stderr", "stdout")
             )
             if LARK_SEARCH_PERMISSION_PATTERN.search(provider_error):
                 semantic_dedupe_status = "permission_fallback"
@@ -857,8 +877,7 @@ def _lark_result(
             sender_members = {"returncode": 1}
         if sender_members.get("returncode") != 0:
             provider_error = " ".join(
-                str(sender_members.get(field) or "")
-                for field in ("stderr", "stdout")
+                str(sender_members.get(field) or "") for field in ("stderr", "stdout")
             )
             return _public_result(
                 sink_kind=sink_kind,
@@ -901,7 +920,9 @@ def _lark_result(
     )
     summary = f"：{pr_title}" if pr_title else ""
     content = json.dumps(
-        {"text": f"{mentions} 请帮忙 review PR #{pr_number}{issue_clause}{summary}。{pr_url}"},
+        {
+            "text": f"{mentions} 请帮忙 review PR #{pr_number}{issue_clause}{summary}。{pr_url}"
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -1083,6 +1104,9 @@ def validate_issue_fix_reviewer_notification_sinks_result(
             or receipt.get("status") != "queued"
             or not public_safe_compact_text(receipt.get("sink_kind"), limit=50)
             or not isinstance(receipt.get("reviewer_handles"), list)
+            or not public_safe_compact_text(receipt.get("message_summary"), limit=240)
+            or receipt.get("summary_policy_status")
+            not in {"reward_memory_verified", "sink_config"}
             or not isinstance(window, Mapping)
             or not LOCAL_TIME_PATTERN.fullmatch(str(window.get("start") or ""))
             or not LOCAL_TIME_PATTERN.fullmatch(str(window.get("end") or ""))
@@ -1142,9 +1166,7 @@ def build_issue_fix_reviewer_notification_sinks_result(
 
     author = _normalise_handle(author_handle)
     title = _humanize_pr_title(pr_title)
-    artifact_gate = reviewer_artifact_notification_gate(
-        reviewer_artifact_application
-    )
+    artifact_gate = reviewer_artifact_notification_gate(reviewer_artifact_application)
     before_send_gate = reviewer_notification_before_send_gate(
         reviewer_notification_policy_application,
         repo=repo,
@@ -1160,8 +1182,7 @@ def build_issue_fix_reviewer_notification_sinks_result(
     if artifact_gate["passed"] is True and not (
         artifact.get("repo") == public_safe_compact_text(repo, limit=200)
         and artifact.get("pr_ref") == f"#{int(pr_number)}"
-        and artifact.get("permalink")
-        == public_safe_compact_text(pr_url, limit=300)
+        and artifact.get("permalink") == public_safe_compact_text(pr_url, limit=300)
     ):
         artifact_gate = {
             **artifact_gate,
@@ -1332,6 +1353,12 @@ def build_issue_fix_reviewer_notification_sinks_result(
                     sink_kind=sink_kind,
                     sink_instance_key=sink_instance_key,
                     reviewer_handles=reviewers,
+                    message_summary=title or "待代码审查",
+                    summary_policy_status=(
+                        "reward_memory_verified"
+                        if artifact_gate["passed"] is True
+                        else "sink_config"
+                    ),
                     execute=execute,
                     window=delivery_window,
                 )

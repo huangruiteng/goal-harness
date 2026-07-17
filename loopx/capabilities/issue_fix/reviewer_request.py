@@ -328,6 +328,9 @@ def _metadata_identities(
         "semantic_comment_notified_reviewers": semantic_comment_notified,
         "reviewer_comment_urls": comment_urls,
         "state": str(payload.get("state") or "UNKNOWN").upper(),
+        "review_decision": str(
+            payload.get("reviewDecision") or payload.get("review_decision") or "UNKNOWN"
+        ).upper(),
         "is_draft": payload.get("isDraft") is True or payload.get("is_draft") is True,
     }
 
@@ -349,7 +352,8 @@ def _fetch_pr_metadata(
                 repo,
                 "--json",
                 "author,closingIssuesReferences,comments,isDraft,reviewRequests,"
-                "reviews,state,title,url",
+                "mergeStateStatus,reviewDecision,reviews,state,statusCheckRollup,"
+                "title,url",
             ]
         )
     except (OSError, subprocess.SubprocessError):
@@ -365,6 +369,31 @@ def _fetch_pr_metadata(
         if isinstance(payload, Mapping)
         else (None, "github_pr_metadata_invalid")
     )
+
+
+def fetch_issue_fix_reviewer_notification_metadata(
+    *,
+    repo: str,
+    number: int,
+    runner: CommandRunner = _default_runner,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Fetch compact live PR facts required before a queued group notification."""
+
+    payload, error = _fetch_pr_metadata(repo=repo, number=number, runner=runner)
+    if payload is None:
+        return None, error
+    identities = _metadata_identities(payload, repo=repo, number=number)
+    from .pr_lifecycle import build_issue_fix_pr_lifecycle_monitor_packet
+
+    lifecycle = build_issue_fix_pr_lifecycle_monitor_packet(
+        url=f"https://github.com/{repo}/pull/{number}",
+        provider_payload=payload,
+        generated_at=None,
+    )
+    grouped = lifecycle.get("grouped_monitor_projection")
+    grouped = grouped if isinstance(grouped, Mapping) else {}
+    identities["state_bucket"] = str(grouped.get("state_bucket") or "unknown")
+    return identities, None
 
 
 def _request_reviewers(
@@ -1030,9 +1059,7 @@ def build_issue_fix_reviewer_request_packet(
                     reviewer_notification_policy_application = None
             packet["reviewer_notification_reward_memory_status"] = (
                 (
-                    reviewer_notification_policy_application.get(
-                        "before_send_gate", {}
-                    )
+                    reviewer_notification_policy_application.get("before_send_gate", {})
                     if reviewer_notification_policy_application
                     else {}
                 ).get("status", "unavailable")

@@ -1,0 +1,405 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from ...domain_packs.issue_fix import (
+    persist_issue_fix_reviewer_notification_state,
+)
+from .cli_input import load_jsonl_rows
+from .reviewer_notification import (
+    CommandRunner,
+    NotificationSinkAdapter,
+    build_issue_fix_reviewer_notification_sinks_result,
+    reviewer_notification_idempotency_key,
+    reviewer_notification_queue_from_state,
+    reviewer_notification_receipts_from_state,
+    with_reviewer_notification_state,
+)
+from .reviewer_request import fetch_issue_fix_reviewer_notification_metadata
+
+
+ISSUE_FIX_REVIEWER_NOTIFICATION_DRAIN_SCHEMA_VERSION = (
+    "issue_fix_reviewer_notification_drain_v0"
+)
+MetadataLoader = Callable[..., tuple[Optional[dict[str, Any]], Optional[str]]]
+
+
+def _parse_timestamp(value: str | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("delivery_observed_at must be an ISO timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("delivery_observed_at must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_lifecycle_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw in rows:
+        observation = raw.get("observation")
+        if not isinstance(observation, Mapping):
+            continue
+        repo = str(observation.get("repo") or "").strip()
+        pr_ref = str(observation.get("pr_ref") or "").strip()
+        if repo and pr_ref:
+            latest[(repo, pr_ref)] = dict(raw)
+    return list(latest.values())
+
+
+def _queue_due(receipt: Mapping[str, Any], observed_at: datetime) -> bool:
+    try:
+        not_before = _parse_timestamp(str(receipt.get("not_before") or ""))
+    except ValueError:
+        return False
+    return not_before <= observed_at
+
+
+def _matching_sinks(
+    *,
+    sinks_input: Mapping[str, Any],
+    repo: str,
+    number: int,
+    queue: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    queued_keys = {str(receipt.get("idempotency_key") or "") for receipt in queue}
+    matches: list[dict[str, Any]] = []
+    for raw_sink in sinks_input.get("sinks") or []:
+        if not isinstance(raw_sink, Mapping):
+            continue
+        sink = dict(raw_sink)
+        sink_kind = str(sink.get("sink_kind") or "")
+        sink_instance_key = str(sink.get("sink_instance_key") or "")
+        for receipt in queue:
+            reviewers = receipt.get("reviewer_handles")
+            reviewers = reviewers if isinstance(reviewers, list) else []
+            try:
+                key = reviewer_notification_idempotency_key(
+                    repo=repo,
+                    pr_number=number,
+                    sink_kind=sink_kind,
+                    sink_instance_key=sink_instance_key,
+                    reviewer_handles=reviewers,
+                )
+            except (TypeError, ValueError):
+                continue
+            if key in queued_keys and key == receipt.get("idempotency_key"):
+                matches.append(sink)
+                break
+    return matches
+
+
+def drain_issue_fix_reviewer_notification_queue(
+    *,
+    ledger_path: str | Path,
+    sinks_input: Mapping[str, Any],
+    execute: bool = False,
+    delivery_observed_at: str | None = None,
+    limit: int = 20,
+    runner: CommandRunner | None = None,
+    metadata_loader: MetadataLoader = fetch_issue_fix_reviewer_notification_metadata,
+    sink_adapters: Mapping[str, NotificationSinkAdapter] | None = None,
+) -> dict[str, Any]:
+    """Drain one bounded state-group batch while emitting at most one message per PR."""
+
+    if not 1 <= int(limit) <= 100:
+        raise ValueError("reviewer notification drain limit must be between 1 and 100")
+    observed_at = _parse_timestamp(delivery_observed_at)
+    observed_text = observed_at.isoformat().replace("+00:00", "Z")
+    rows = _latest_lifecycle_rows(load_jsonl_rows(Path(ledger_path)))
+    queued_rows: list[tuple[datetime, str, int, dict[str, Any]]] = []
+    queued_count = 0
+    not_due_count = 0
+    for row in rows:
+        queue = reviewer_notification_queue_from_state(row)
+        if not queue:
+            continue
+        queued_count += len(queue)
+        due = [receipt for receipt in queue if _queue_due(receipt, observed_at)]
+        not_due_count += len(queue) - len(due)
+        if not due:
+            continue
+        observation = row.get("observation")
+        observation = observation if isinstance(observation, Mapping) else {}
+        number = observation.get("number")
+        repo = str(observation.get("repo") or "")
+        if not isinstance(number, int) or not repo:
+            continue
+        first_due = min(_parse_timestamp(str(item["not_before"])) for item in due)
+        queued_rows.append((first_due, repo, number, row))
+    queued_rows.sort(key=lambda value: (value[0], value[1], value[2]))
+
+    items: list[dict[str, Any]] = []
+    write_performed = False
+    external_reads = False
+    external_writes = False
+    blocked_count = 0
+    cancelled_count = 0
+    verified_count = 0
+    for _, repo, number, row in queued_rows[: int(limit)]:
+        observation = row.get("observation")
+        observation = observation if isinstance(observation, Mapping) else {}
+        permalink = str(
+            observation.get("permalink") or f"https://github.com/{repo}/pull/{number}"
+        )
+        full_queue = reviewer_notification_queue_from_state(row)
+        due_queue = [
+            receipt for receipt in full_queue if _queue_due(receipt, observed_at)
+        ]
+        future_queue = [
+            receipt for receipt in full_queue if not _queue_due(receipt, observed_at)
+        ]
+        reviewers = list(
+            dict.fromkeys(
+                str(handle)
+                for receipt in due_queue
+                for handle in receipt.get("reviewer_handles") or []
+            )
+        )
+        summaries = list(
+            dict.fromkeys(
+                str(receipt.get("message_summary") or "") for receipt in due_queue
+            )
+        )
+        item: dict[str, Any] = {
+            "repo": repo,
+            "pr_ref": f"#{number}",
+            "permalink": permalink,
+            "reviewer_handles": reviewers,
+            "queued_receipt_count": len(due_queue),
+            "status": "preview_due",
+            "live_state_verified": False,
+            "notification_verified": False,
+            "external_write_performed": False,
+            "queue_write_performed": False,
+        }
+        if len(summaries) != 1 or not summaries[0]:
+            item.update(
+                status="blocked",
+                blocker="reviewer_notification_queue_summary_invalid",
+            )
+            blocked_count += 1
+            items.append(item)
+            continue
+        if len(due_queue) != 1:
+            item.update(
+                status="blocked",
+                blocker="reviewer_notification_queue_granularity_invalid",
+            )
+            blocked_count += 1
+            items.append(item)
+            continue
+        item["message_summary"] = summaries[0]
+        if not execute:
+            items.append(item)
+            continue
+
+        external_reads = True
+        kwargs: dict[str, Any] = {"repo": repo, "number": number}
+        if runner is not None:
+            kwargs["runner"] = runner
+        metadata, metadata_error = metadata_loader(**kwargs)
+        if metadata is None:
+            item.update(
+                status="blocked",
+                blocker=metadata_error or "github_pr_metadata_unavailable",
+            )
+            blocked_count += 1
+            items.append(item)
+            continue
+        live_state = str(metadata.get("state") or "UNKNOWN").upper()
+        live_review_decision = str(metadata.get("review_decision") or "UNKNOWN").upper()
+        live_state_bucket = str(metadata.get("state_bucket") or "unknown")
+        live_reviewed = {str(value) for value in metadata.get("reviewed_by") or []}
+        item.update(
+            live_state=live_state,
+            live_review_decision=live_review_decision,
+            live_state_bucket=live_state_bucket,
+            live_state_verified=True,
+        )
+        if live_state == "UNKNOWN" or live_review_decision == "UNKNOWN":
+            item.update(
+                status="blocked",
+                blocker="github_pr_live_state_incomplete",
+            )
+            blocked_count += 1
+            items.append(item)
+            continue
+        stale_reason = None
+        if live_state != "OPEN":
+            stale_reason = "pr_not_open"
+        elif metadata.get("is_draft") is True:
+            stale_reason = "pr_is_draft"
+        elif live_review_decision != "REVIEW_REQUIRED":
+            stale_reason = "review_no_longer_required"
+        elif live_reviewed.intersection(reviewers):
+            stale_reason = "queued_reviewer_already_reviewed"
+        elif live_state_bucket not in {"review_required", "unknown"}:
+            stale_reason = "pr_left_review_required_bucket"
+        if stale_reason:
+            try:
+                write = persist_issue_fix_reviewer_notification_state(
+                    ledger_path,
+                    row,
+                    receipts=[],
+                    queued_receipts=[],
+                    replace_queued_receipts=True,
+                )
+            except (OSError, ValueError):
+                item.update(
+                    status="blocked",
+                    blocker="reviewer_notification_state_persistence_failed",
+                )
+                blocked_count += 1
+            else:
+                item.update(
+                    status="cancelled_stale",
+                    cancellation_reason=stale_reason,
+                    queue_write_performed=write.get("write_performed") is True,
+                )
+                cancelled_count += 1
+                write_performed = bool(
+                    write_performed or write.get("write_performed") is True
+                )
+            items.append(item)
+            continue
+        author = str(metadata.get("author_handle") or "")
+        if not author or author in reviewers:
+            item.update(
+                status="blocked",
+                blocker=(
+                    "reviewer_notification_author_unavailable"
+                    if not author
+                    else "reviewer_notification_author_exclusion_failed"
+                ),
+            )
+            blocked_count += 1
+            items.append(item)
+            continue
+
+        matching_sinks = _matching_sinks(
+            sinks_input=sinks_input,
+            repo=repo,
+            number=number,
+            queue=due_queue,
+        )
+        if len(matching_sinks) != len(due_queue):
+            item.update(
+                status="blocked",
+                blocker="reviewer_notification_queue_sink_mismatch",
+            )
+            blocked_count += 1
+            items.append(item)
+            continue
+        scoped_input = with_reviewer_notification_state(
+            {**dict(sinks_input), "sinks": matching_sinks},
+            reviewer_notification_receipts_from_state(row),
+            full_queue,
+        )
+        build_kwargs: dict[str, Any] = {
+            "repo": repo,
+            "pr_number": number,
+            "pr_url": permalink,
+            "pr_title": summaries[0],
+            "linked_issue_refs": metadata.get("linked_issue_refs") or [],
+            "author_handle": author,
+            "reviewer_handles": reviewers,
+            "sinks_input": scoped_input,
+            "reviewer_artifact_required": False,
+            "execute": True,
+            "delivery_observed_at": observed_text,
+            "sink_adapters": sink_adapters,
+        }
+        if runner is not None:
+            build_kwargs["runner"] = runner
+        result = build_issue_fix_reviewer_notification_sinks_result(**build_kwargs)
+        result_queue = result.get("queued_receipts")
+        result_queue = result_queue if isinstance(result_queue, list) else []
+        new_queue = [dict(value) for value in future_queue]
+        if result.get("ok") is True:
+            new_queue.extend(
+                dict(value) for value in result_queue if isinstance(value, Mapping)
+            )
+        else:
+            new_queue.extend(dict(value) for value in due_queue)
+        receipts = result.get("receipts")
+        receipts = receipts if isinstance(receipts, list) else []
+        try:
+            write = persist_issue_fix_reviewer_notification_state(
+                ledger_path,
+                row,
+                receipts=[str(value) for value in receipts],
+                queued_receipts=new_queue,
+                replace_queued_receipts=True,
+            )
+        except (OSError, ValueError):
+            item.update(
+                status="blocked",
+                blocker="reviewer_notification_state_persistence_failed",
+            )
+            blocked_count += 1
+        else:
+            item.update(
+                status=str(result.get("status") or "blocked"),
+                notification_verified=result.get("notification_verified") is True,
+                external_write_performed=(
+                    result.get("external_writes_performed") is True
+                ),
+                queue_write_performed=write.get("write_performed") is True,
+            )
+            if result.get("blocker"):
+                item["blocker"] = result["blocker"]
+            if result.get("ok") is not True:
+                blocked_count += 1
+            if result.get("notification_verified") is True:
+                verified_count += 1
+            external_writes = bool(
+                external_writes or result.get("external_writes_performed") is True
+            )
+            write_performed = bool(
+                write_performed or write.get("write_performed") is True
+            )
+        items.append(item)
+
+    if not execute:
+        status = "preview_due" if queued_rows else "no_due_notifications"
+    elif blocked_count:
+        status = "partial_failure" if len(items) > blocked_count else "blocked"
+    elif verified_count:
+        status = "drained_verified"
+    elif cancelled_count:
+        status = "cancelled_stale"
+    else:
+        status = "no_due_notifications"
+    return {
+        "ok": blocked_count == 0,
+        "schema_version": ISSUE_FIX_REVIEWER_NOTIFICATION_DRAIN_SCHEMA_VERSION,
+        "mode": "issue-fix-reviewer-notification-drain",
+        "status": status,
+        "execute": execute,
+        "delivery_observed_at": observed_text,
+        "grouping_scope": "review_required_state_bucket",
+        "monitor_granularity": "one_monitor_per_state_bucket",
+        "notification_granularity": "one_pr_per_message",
+        "queued_receipt_count": queued_count,
+        "due_pr_count": len(queued_rows),
+        "processed_pr_count": len(items),
+        "not_due_receipt_count": not_due_count,
+        "verified_pr_count": verified_count,
+        "cancelled_pr_count": cancelled_count,
+        "blocked_pr_count": blocked_count,
+        "items": items,
+        "external_reads_performed": external_reads,
+        "external_writes_performed": external_writes,
+        "state_write_performed": write_performed,
+        "private_destination_captured": False,
+        "private_member_ids_captured": False,
+        "private_bot_profile_captured": False,
+        "raw_provider_payload_captured": False,
+        "local_paths_captured": False,
+    }

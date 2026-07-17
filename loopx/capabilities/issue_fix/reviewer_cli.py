@@ -29,6 +29,9 @@ from .reviewer_notification import (
     reviewer_notification_receipts_from_state,
     with_reviewer_notification_state,
 )
+from .reviewer_notification_drain import (
+    drain_issue_fix_reviewer_notification_queue,
+)
 from .reviewer_recommendation import (
     build_issue_fix_reviewer_recommendation_packet,
     render_issue_fix_reviewer_recommendation_markdown,
@@ -44,7 +47,12 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 AddGeneratedAt = Callable[..., None]
 Renderer = Callable[[dict[str, object]], str]
 REVIEWER_COMMANDS = frozenset(
-    {"reviewer-plan", "reviewer-request", "reviewer-feedback-inbox"}
+    {
+        "reviewer-plan",
+        "reviewer-request",
+        "reviewer-notification-drain",
+        "reviewer-feedback-inbox",
+    }
 )
 
 
@@ -259,6 +267,30 @@ def register_issue_fix_reviewer_commands(
     )
     add_generated_at_arg(reviewer_request_parser, artifact="the request packet")
 
+    reviewer_drain_parser = issue_fix_sub.add_parser(
+        "reviewer-notification-drain",
+        help=(
+            "Drain one bounded batch of due reviewer notifications from the "
+            "grouped review-required state bucket, one PR per message."
+        ),
+    )
+    add_subcommand_format(reviewer_drain_parser)
+    reviewer_drain_parser.add_argument("--goal-id", required=True)
+    reviewer_drain_parser.add_argument("--project")
+    reviewer_drain_parser.add_argument("--limit", type=int, default=20)
+    reviewer_drain_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Verify live PR state, deliver due messages, and persist semantic "
+            "receipts or stale-queue cancellation."
+        ),
+    )
+    add_generated_at_arg(
+        reviewer_drain_parser,
+        artifact="the grouped reviewer notification drain packet",
+    )
+
     reviewer_feedback_parser = issue_fix_sub.add_parser(
         "reviewer-feedback-inbox",
         help=(
@@ -326,6 +358,8 @@ def reviewer_renderer(command: str | None) -> Renderer:
         return render_issue_fix_reviewer_recommendation_markdown
     if command == "reviewer-feedback-inbox":
         return render_issue_fix_reviewer_feedback_inbox_markdown
+    if command == "reviewer-notification-drain":
+        return render_issue_fix_reviewer_notification_drain_markdown
     return render_issue_fix_reviewer_request_markdown
 
 
@@ -340,6 +374,25 @@ def render_issue_fix_reviewer_feedback_inbox_markdown(
                 f"- enabled: {packet.get('enabled')}",
                 f"- pending_count: {packet.get('pending_count')}",
                 f"- write_performed: {packet.get('write_performed')}",
+            ]
+        ).rstrip()
+        + "\n"
+    )
+
+
+def render_issue_fix_reviewer_notification_drain_markdown(
+    packet: dict[str, object],
+) -> str:
+    return (
+        "\n".join(
+            [
+                "# Issue-fix Reviewer Notification Drain",
+                "",
+                f"- status: {packet.get('status')}",
+                f"- due_pr_count: {packet.get('due_pr_count')}",
+                f"- verified_pr_count: {packet.get('verified_pr_count')}",
+                f"- cancelled_pr_count: {packet.get('cancelled_pr_count')}",
+                f"- blocked_pr_count: {packet.get('blocked_pr_count')}",
             ]
         ).rstrip()
         + "\n"
@@ -431,6 +484,45 @@ def handle_issue_fix_reviewer_command(
                 "source": "goal_default_lark_event_inbox",
             }
         return payload, render_issue_fix_reviewer_feedback_inbox_markdown
+
+    if args.issue_fix_command == "reviewer-notification-drain":
+        goal, requested_project = _load_goal_for_project(
+            registry_path=registry_path,
+            goal_id=args.goal_id,
+            project=args.project,
+        )
+        sinks_input = load_goal_reviewer_notification_sinks_input(
+            goal=goal,
+            project=requested_project,
+        )
+        if sinks_input is None:
+            payload = {
+                "ok": True,
+                "schema_version": "issue_fix_reviewer_notification_drain_v0",
+                "mode": "issue-fix-reviewer-notification-drain",
+                "status": "not_configured",
+                "due_pr_count": 0,
+                "verified_pr_count": 0,
+                "cancelled_pr_count": 0,
+                "blocked_pr_count": 0,
+                "external_reads_performed": False,
+                "external_writes_performed": False,
+                "state_write_performed": False,
+            }
+        else:
+            lifecycle_path = default_issue_fix_domain_state_ledger_path(
+                project=requested_project,
+                goal_id=args.goal_id,
+            )
+            payload = drain_issue_fix_reviewer_notification_queue(
+                ledger_path=lifecycle_path,
+                sinks_input=sinks_input,
+                execute=args.execute,
+                delivery_observed_at=delivery_observed_at,
+                limit=args.limit,
+            )
+            payload["notification_source"] = "goal_default"
+        return payload, render_issue_fix_reviewer_notification_drain_markdown
 
     if args.issue_fix_command != "reviewer-request":
         return None
@@ -536,15 +628,11 @@ def handle_issue_fix_reviewer_command(
                 except (OSError, ValueError):
                     semantic_history_status = "unavailable"
                 else:
-                    semantic_history_status = (
-                        "matched" if history_match else "no_match"
-                    )
+                    semantic_history_status = "matched" if history_match else "no_match"
                     if history_match:
                         notification_sinks_input = {
                             **notification_sinks_input,
-                            "_semantic_history_pr_refs": [
-                                str(reference["permalink"])
-                            ],
+                            "_semantic_history_pr_refs": [str(reference["permalink"])],
                         }
             else:
                 semantic_history_status = "not_applicable"
@@ -644,9 +732,7 @@ def handle_issue_fix_reviewer_command(
     payload["secondary_notification_lifecycle_materialized"] = (
         notification_lifecycle_materialized
     )
-    payload["secondary_notification_semantic_history_status"] = (
-        semantic_history_status
-    )
+    payload["secondary_notification_semantic_history_status"] = semantic_history_status
     payload["secondary_notification_receipts_persisted"] = False
     payload["secondary_notification_queue_persisted"] = False
     payload["secondary_notification_queue_reconciled"] = False

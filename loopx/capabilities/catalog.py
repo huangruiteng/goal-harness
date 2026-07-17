@@ -51,6 +51,11 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "write_boundary": "one formal GitHub review request, or one reviewer-tagging comment only after confirmed permission denial; optional configured secondary sends consume local-private identity/destination data without copying it; no arbitrary comment, push, merge, or publish",
             },
             {
+                "command": "loopx issue-fix reviewer-notification-drain --goal-id <goal-id> --project <project> --execute --format json",
+                "purpose": "Drain one bounded review-required state bucket after live PR verification while preserving one PR per group message.",
+                "write_boundary": "verified configured secondary sends plus compact receipt or stale-queue state writeback; no per-PR continuous monitor, arbitrary comment, push, merge, or publish",
+            },
+            {
                 "command": "loopx issue-fix pr-lifecycle --url <github-pr-url> --goal-id <goal-id> --format json",
                 "purpose": "Project public PR lifecycle state into a successor, monitor continuation, user gate, or no-follow-up transition.",
                 "write_boundary": "writes compact project-local domain state when goal or ledger context is provided; no external comment, PR creation, merge, raw logs, or body/comment capture",
@@ -140,6 +145,11 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "schema_version": "issue_fix_reviewer_notification_sinks_result_v0",
                 "module": "loopx.capabilities.issue_fix.reviewer_notification",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_reviewer_notification_drain_v0",
+                "module": "loopx.capabilities.issue_fix.reviewer_notification_drain",
                 "doc": "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md",
             },
             {

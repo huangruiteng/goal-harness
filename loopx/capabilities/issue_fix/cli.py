@@ -1579,7 +1579,7 @@ def handle_issue_fix_command(
                 "`acceptance-fixture`, `pr-lifecycle`, `pr-gate-reconcile`, `outcome`, `metrics`, "
                 "`metrics-supplement`, "
                 "`repository-snapshot`, `reviewer-plan`, "
-                "`reviewer-request`, "
+                "`reviewer-request`, `reviewer-notification-drain`, "
                 "`repo-branch-fixture`, or `caller-repo-branch`"
             )
     except Exception as exc:
