@@ -234,6 +234,111 @@ def main() -> int:
         assert semantic_stored["reviewer_notification_queue"] == []
         assert semantic_key in semantic_stored["reviewer_notification_receipts"]
 
+        mixed_ledger = path / "mixed-reviewers-pr-lifecycle.jsonl"
+        mixed_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/107",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(mixed_ledger, mixed_row)
+        mixed_receipt = {
+            "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
+            "idempotency_key": reviewer_notification_idempotency_key(
+                repo="owner/repo",
+                pr_number=107,
+                sink_kind="lark_chat",
+                sink_instance_key=sink["sink_instance_key"],
+                reviewer_handles=["@map-owner", "@removed-owner"],
+            ),
+            "sink_kind": "lark_chat",
+            "reviewer_handles": ["@map-owner", "@removed-owner"],
+            "message_summary": "取消已评审或已移除 reviewer 的过期提醒",
+            "summary_policy_status": "reward_memory_verified",
+            "queued_at": "2026-07-17T18:00:00Z",
+            "not_before": "2026-07-18T01:00:00Z",
+            "timezone": "Asia/Shanghai",
+            "allowed_local_time": {"start": "09:00", "end": "21:00"},
+            "status": "queued",
+        }
+        persist_issue_fix_reviewer_notification_state(
+            mixed_ledger,
+            mixed_row,
+            receipts=[],
+            queued_receipts=[mixed_receipt],
+        )
+
+        def mixed_metadata_loader(
+            *, repo: str, number: int
+        ) -> tuple[dict[str, Any], None]:
+            assert (repo, number) == ("owner/repo", 107)
+            return {
+                "author_handle": "@author-g",
+                "reviewed_by": ["@map-owner"],
+                "requested_reviewers": [],
+                "comment_notified_reviewers": ["@map-owner"],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "review_required",
+                "is_draft": False,
+                "linked_issue_refs": [],
+            }, None
+
+        mixed_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=mixed_ledger,
+            sinks_input=sinks_input,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            metadata_loader=mixed_metadata_loader,
+        )
+        assert mixed_drain["status"] == "cancelled_stale", mixed_drain
+        assert mixed_drain["items"][0]["cancellation_reason"] == (
+            "all_queued_reviewers_already_covered_or_inactive"
+        )
+
+        preview_ledger = path / "preview-blocked-pr-lifecycle.jsonl"
+        preview_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/108",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(preview_ledger, preview_row)
+        preview_key = reviewer_notification_idempotency_key(
+            repo="owner/repo",
+            pr_number=108,
+            sink_kind="lark_chat",
+            sink_instance_key=sink["sink_instance_key"],
+            reviewer_handles=["@map-owner"],
+        )
+        persist_issue_fix_reviewer_notification_state(
+            preview_ledger,
+            preview_row,
+            receipts=[],
+            queued_receipts=[
+                {
+                    **mixed_receipt,
+                    "idempotency_key": preview_key,
+                    "reviewer_handles": ["@map-owner"],
+                    "allowed_local_time": {"start": "09:00", "end": "09:00"},
+                }
+            ],
+        )
+        preview = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=preview_ledger,
+            sinks_input=sinks_input,
+            execute=False,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+        )
+        assert preview["status"] == "preview_blocked", preview
+        assert preview["blocked_pr_count"] == 1, preview
+
     print("issue-fix-reviewer-notification-drain-postwrite-smoke: ok")
     return 0
 

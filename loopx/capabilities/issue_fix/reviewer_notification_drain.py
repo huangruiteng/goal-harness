@@ -529,6 +529,7 @@ def drain_issue_fix_reviewer_notification_queue(
             blocked_count += 1
             items.append(item)
             continue
+        fresh_row = _row_with_live_lifecycle_facts(row, metadata)
         live_state = str(metadata.get("state") or "UNKNOWN").upper()
         live_review_decision = str(metadata.get("review_decision") or "UNKNOWN").upper()
         live_state_bucket = str(metadata.get("state_bucket") or "unknown")
@@ -574,8 +575,12 @@ def drain_issue_fix_reviewer_notification_queue(
             stale_reason = "all_queued_reviewers_already_reviewed"
         elif reviewers and not set(reviewers).intersection(live_active_coverage):
             stale_reason = "all_queued_reviewers_no_longer_active"
+        elif reviewers and not any(
+            reviewer not in live_reviewed and reviewer in live_active_coverage
+            for reviewer in reviewers
+        ):
+            stale_reason = "all_queued_reviewers_already_covered_or_inactive"
         if stale_reason:
-            fresh_row = _row_with_live_lifecycle_facts(row, metadata)
             try:
                 write = persist_issue_fix_reviewer_notification_state(
                     ledger_path,
@@ -690,7 +695,7 @@ def drain_issue_fix_reviewer_notification_queue(
         try:
             write = persist_issue_fix_reviewer_notification_state(
                 ledger_path,
-                row,
+                fresh_row,
                 receipts=[str(value) for value in receipts],
                 queued_receipts=new_queue,
                 replace_queued_receipts=True,
@@ -725,7 +730,14 @@ def drain_issue_fix_reviewer_notification_queue(
         items.append(item)
 
     if not execute:
-        status = "preview_due" if queued_rows else "no_due_notifications"
+        if blocked_count:
+            status = (
+                "preview_partial_failure"
+                if len(items) > blocked_count
+                else "preview_blocked"
+            )
+        else:
+            status = "preview_due" if queued_rows else "no_due_notifications"
     elif blocked_count:
         status = "partial_failure" if len(items) > blocked_count else "blocked"
     elif verified_count:

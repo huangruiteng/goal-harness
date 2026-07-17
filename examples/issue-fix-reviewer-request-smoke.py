@@ -1881,6 +1881,15 @@ def main() -> int:
             pr_102_row["grouped_monitor_projection"]["state_bucket"]
             == "ready_to_merge"
         )
+        pr_101_row = next(
+            row
+            for row in stored_drain_rows
+            if row["observation"]["pr_ref"] == "pull_101"
+        )
+        assert (
+            pr_101_row["grouped_monitor_projection"]["state_bucket"]
+            == "checks_pending"
+        )
         assert drain_calls == [
             {
                 "number": 101,
