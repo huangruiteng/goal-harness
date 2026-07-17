@@ -367,6 +367,17 @@ def assert_quota_payload_summary_compacts_hot_path_lanes() -> None:
             }
             for index in range(12)
         ],
+        "user_action_open_count": 4,
+        "user_action_items": [
+            {
+                "index": index,
+                "todo_id": f"todo_user_action_{index:03d}",
+                "text": f"Review user action {index}",
+                "status": "open",
+                "task_class": "user_action",
+            }
+            for index in range(4)
+        ],
         "claim_scope": {
             "schema_version": "agent_claim_scope_v0",
             "agent_id": "codex-product-capability",
@@ -387,6 +398,7 @@ def assert_quota_payload_summary_compacts_hot_path_lanes() -> None:
     assert compact["open_count"] == 12, compact
     assert compact["claimed_open_count"] == 12, compact
     assert len(compact["claimed_open_items"]) == 2, compact
+    assert len(compact["user_action_items"]) == 3, compact
     assert len(compact["claim_scope"]["other_agent_claimed_items"]) == 2, compact
     first = compact["claimed_open_items"][0]
     assert first["todo_id"] == "todo_payload_000", compact
@@ -400,6 +412,10 @@ def assert_quota_payload_summary_compacts_hot_path_lanes() -> None:
     assert compaction["compacted_lanes"]["claimed_open_items"] == {
         "shown": 2,
         "total": 12,
+    }, compaction
+    assert compaction["compacted_lanes"]["user_action_items"] == {
+        "shown": 3,
+        "total": 4,
     }, compaction
     assert len(json.dumps(compact, ensure_ascii=False, sort_keys=True)) < 5000, compact
 
