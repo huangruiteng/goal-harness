@@ -164,7 +164,9 @@ This is a deliberate queue-schema cutover: existing
 `issue_fix_reviewer_notification_queue_receipt_v0` rows must be manually
 migrated to v1 before enabling the grouped drain. The runtime does not retain a
 v0 compatibility reader because a v0 row lacks the persisted Chinese summary
-and therefore cannot satisfy the current reviewer-message contract.
+and therefore cannot satisfy the current reviewer-message contract. A detected
+v0 row fails closed with `reviewer_notification_queue_v1_migration_required`;
+it is never silently treated as an empty queue.
 
 One bounded invocation scans every queued PR in the review-required state
 bucket; it does not create one continuous monitor per PR. Before each message,
@@ -174,7 +176,9 @@ per message (and at most one message per configured sink) and is complete only
 after semantic readback and receipt persistence. If only some queued reviewers
 already reviewed, the drain targets only the remaining reviewers. Temporary CI
 or branch-state changes keep the queue intact, and the drain always reuses the
-timezone and allowed local-time window frozen in the v1 receipt.
+timezone and allowed local-time window frozen in the v1 receipt. A sink removed
+from current configuration cancels only its own stale receipt; other configured
+sinks for that PR continue independently.
 
 Profile names, `destination_id`, and `member_id` are execution inputs. They are
 never copied into the result, domain state, todo, Kanban, PR, or public log.

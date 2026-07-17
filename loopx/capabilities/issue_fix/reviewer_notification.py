@@ -30,6 +30,9 @@ ISSUE_FIX_REVIEWER_NOTIFICATION_SINK_RESULT_SCHEMA_VERSION = (
 ISSUE_FIX_REVIEWER_NOTIFICATION_QUEUE_RECEIPT_SCHEMA_VERSION = (
     "issue_fix_reviewer_notification_queue_receipt_v1"
 )
+ISSUE_FIX_REVIEWER_NOTIFICATION_LEGACY_QUEUE_RECEIPT_SCHEMA_VERSION = (
+    "issue_fix_reviewer_notification_queue_receipt_v0"
+)
 LARK_PERMISSION_PATTERN = re.compile(
     r"(?:missing\s+scope|permission|not\s+in\s+(?:the\s+)?chat|"
     r"lacks?\s+authority|99991672|230027|232033)",
@@ -160,6 +163,30 @@ def reviewer_notification_queue_from_state(
         if (
             value.get("schema_version")
             != ISSUE_FIX_REVIEWER_NOTIFICATION_QUEUE_RECEIPT_SCHEMA_VERSION
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", key)
+            or key in seen
+        ):
+            continue
+        queue.append(dict(value))
+        seen.add(key)
+    return queue
+
+
+def reviewer_notification_legacy_queue_from_state(
+    packet: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Detect pre-cutover rows without interpreting them as deliverable work."""
+
+    values = packet.get("reviewer_notification_queue") if packet else []
+    queue: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values if isinstance(values, list) else []:
+        if not isinstance(value, Mapping):
+            continue
+        key = str(value.get("idempotency_key") or "")
+        if (
+            value.get("schema_version")
+            != ISSUE_FIX_REVIEWER_NOTIFICATION_LEGACY_QUEUE_RECEIPT_SCHEMA_VERSION
             or not re.fullmatch(r"sha256:[a-f0-9]{64}", key)
             or key in seen
         ):

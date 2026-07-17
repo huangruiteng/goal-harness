@@ -25,6 +25,7 @@ from .metadata_preview import normalise_github_issue_reference
 from .pr_lifecycle import build_issue_fix_pr_lifecycle_monitor_packet
 from .reviewer_notification import (
     load_goal_reviewer_notification_sinks_input,
+    reviewer_notification_legacy_queue_from_state,
     reviewer_notification_queue_from_state,
     reviewer_notification_receipts_from_state,
     with_reviewer_notification_state,
@@ -600,6 +601,12 @@ def handle_issue_fix_reviewer_command(
                             "external send"
                         ) from None
                     notification_lifecycle_materialized = True
+            if reviewer_notification_legacy_queue_from_state(
+                notification_lifecycle_packet
+            ):
+                raise ValueError(
+                    "reviewer_notification_queue_v1_migration_required"
+                )
             notification_sinks_input = with_reviewer_notification_state(
                 notification_sinks_input,
                 reviewer_notification_receipts_from_state(

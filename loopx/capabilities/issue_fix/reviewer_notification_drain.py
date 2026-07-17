@@ -15,6 +15,7 @@ from .reviewer_notification import (
     NotificationSinkAdapter,
     build_issue_fix_reviewer_notification_sinks_result,
     reviewer_notification_idempotency_key,
+    reviewer_notification_legacy_queue_from_state,
     reviewer_notification_queue_from_state,
     reviewer_notification_receipts_from_state,
     with_reviewer_notification_state,
@@ -133,6 +134,41 @@ def _matching_sinks(
     return matches
 
 
+def _matched_queue_keys(
+    *,
+    sinks_input: Mapping[str, Any],
+    repo: str,
+    number: int,
+    queue: Sequence[Mapping[str, Any]],
+) -> set[str]:
+    keys: set[str] = set()
+    for sink in _matching_sinks(
+        sinks_input=sinks_input,
+        repo=repo,
+        number=number,
+        queue=queue,
+    ):
+        sink_kind = str(sink.get("sink_kind") or "").strip()
+        sink_instance_key = str(sink.get("sink_instance_key") or "").strip()
+        for receipt in queue:
+            reviewers = receipt.get("reviewer_handles")
+            reviewers = reviewers if isinstance(reviewers, list) else []
+            try:
+                key = reviewer_notification_idempotency_key(
+                    repo=repo,
+                    pr_number=number,
+                    sink_kind=sink_kind,
+                    sink_instance_key=sink_instance_key,
+                    reviewer_handles=reviewers,
+                )
+            except (TypeError, ValueError):
+                continue
+            if key == receipt.get("idempotency_key"):
+                keys.add(key)
+                break
+    return keys
+
+
 def drain_issue_fix_reviewer_notification_queue(
     *,
     ledger_path: str | Path,
@@ -150,7 +186,43 @@ def drain_issue_fix_reviewer_notification_queue(
         raise ValueError("reviewer notification drain limit must be between 1 and 100")
     observed_at = _parse_timestamp(delivery_observed_at)
     observed_text = observed_at.isoformat().replace("+00:00", "Z")
-    rows = _latest_lifecycle_rows(load_jsonl_rows(Path(ledger_path)))
+    path = Path(ledger_path)
+    rows = _latest_lifecycle_rows(load_jsonl_rows(path) if path.is_file() else [])
+    legacy_queue_count = sum(
+        len(reviewer_notification_legacy_queue_from_state(row)) for row in rows
+    )
+    if legacy_queue_count:
+        return {
+            "ok": False,
+            "schema_version": ISSUE_FIX_REVIEWER_NOTIFICATION_DRAIN_SCHEMA_VERSION,
+            "mode": "issue-fix-reviewer-notification-drain",
+            "status": "blocked",
+            "blocker": "reviewer_notification_queue_v1_migration_required",
+            "execute": execute,
+            "delivery_observed_at": observed_text,
+            "grouping_scope": "review_required_state_bucket",
+            "monitor_granularity": "one_monitor_per_state_bucket",
+            "notification_granularity": "one_pr_per_message",
+            "legacy_queue_receipt_count": legacy_queue_count,
+            "queued_receipt_count": 0,
+            "due_pr_count": 0,
+            "processed_pr_count": 0,
+            "not_due_receipt_count": 0,
+            "verified_pr_count": 0,
+            "cancelled_pr_count": 0,
+            "cancelled_sink_receipt_count": 0,
+            "held_pr_count": 0,
+            "blocked_pr_count": 1,
+            "items": [],
+            "external_reads_performed": False,
+            "external_writes_performed": False,
+            "state_write_performed": False,
+            "private_destination_captured": False,
+            "private_member_ids_captured": False,
+            "private_bot_profile_captured": False,
+            "raw_provider_payload_captured": False,
+            "local_paths_captured": False,
+        }
     queued_rows: list[tuple[datetime, str, int, dict[str, Any]]] = []
     queued_count = 0
     not_due_count = 0
@@ -179,6 +251,7 @@ def drain_issue_fix_reviewer_notification_queue(
     external_writes = False
     blocked_count = 0
     cancelled_count = 0
+    cancelled_sink_receipt_count = 0
     verified_count = 0
     held_count = 0
     for _, repo, number, row in queued_rows[: int(limit)]:
@@ -194,6 +267,29 @@ def drain_issue_fix_reviewer_notification_queue(
         future_queue = [
             receipt for receipt in full_queue if not _queue_due(receipt, observed_at)
         ]
+        original_due_count = len(due_queue)
+        matched_keys = _matched_queue_keys(
+            sinks_input=sinks_input,
+            repo=repo,
+            number=number,
+            queue=due_queue,
+        )
+        unmatched_due_queue = [
+            receipt
+            for receipt in due_queue
+            if str(receipt.get("idempotency_key") or "") not in matched_keys
+        ]
+        due_queue = [
+            receipt
+            for receipt in due_queue
+            if str(receipt.get("idempotency_key") or "") in matched_keys
+        ]
+        matching_sinks = _matching_sinks(
+            sinks_input=sinks_input,
+            repo=repo,
+            number=number,
+            queue=due_queue,
+        )
         reviewers = list(
             dict.fromkeys(
                 str(handle)
@@ -215,13 +311,46 @@ def drain_issue_fix_reviewer_notification_queue(
             "pr_ref": f"#{number}",
             "permalink": permalink,
             "reviewer_handles": reviewers,
-            "queued_receipt_count": len(due_queue),
+            "queued_receipt_count": original_due_count,
             "status": "preview_due",
             "live_state_verified": False,
             "notification_verified": False,
             "external_write_performed": False,
             "queue_write_performed": False,
         }
+        if unmatched_due_queue:
+            item["stale_sink_receipt_count"] = len(unmatched_due_queue)
+            if execute:
+                try:
+                    write = persist_issue_fix_reviewer_notification_state(
+                        ledger_path,
+                        row,
+                        receipts=[],
+                        queued_receipts=[*future_queue, *due_queue],
+                        replace_queued_receipts=True,
+                    )
+                except (OSError, ValueError):
+                    item.update(
+                        status="blocked",
+                        blocker="reviewer_notification_state_persistence_failed",
+                    )
+                    blocked_count += 1
+                    items.append(item)
+                    continue
+                item["queue_write_performed"] = write.get("write_performed") is True
+                write_performed = bool(
+                    write_performed or write.get("write_performed") is True
+                )
+                cancelled_sink_receipt_count += len(unmatched_due_queue)
+                full_queue = [*future_queue, *due_queue]
+        if not due_queue:
+            item["status"] = (
+                "cancelled_stale_sink" if execute else "preview_cancel_stale_sink"
+            )
+            if execute:
+                cancelled_count += 1
+            items.append(item)
+            continue
         if len(summaries) != 1 or not summaries[0]:
             item.update(
                 status="blocked",
@@ -343,20 +472,6 @@ def drain_issue_fix_reviewer_notification_queue(
             items.append(item)
             continue
 
-        matching_sinks = _matching_sinks(
-            sinks_input=sinks_input,
-            repo=repo,
-            number=number,
-            queue=due_queue,
-        )
-        if len(matching_sinks) != len(due_queue):
-            item.update(
-                status="blocked",
-                blocker="reviewer_notification_queue_sink_mismatch",
-            )
-            blocked_count += 1
-            items.append(item)
-            continue
         scoped_input = with_reviewer_notification_state(
             {
                 **dict(sinks_input),
@@ -463,6 +578,7 @@ def drain_issue_fix_reviewer_notification_queue(
         "not_due_receipt_count": not_due_count,
         "verified_pr_count": verified_count,
         "cancelled_pr_count": cancelled_count,
+        "cancelled_sink_receipt_count": cancelled_sink_receipt_count,
         "held_pr_count": held_count,
         "blocked_pr_count": blocked_count,
         "items": items,

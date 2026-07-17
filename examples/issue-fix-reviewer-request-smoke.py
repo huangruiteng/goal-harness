@@ -1641,10 +1641,62 @@ def main() -> int:
             **goal_sink,
             "sink_instance_key": " openviking-reviewer-group-secondary ",
         }
+        drain_removed_sink = {
+            **goal_sink,
+            "sink_instance_key": "removed-reviewer-lane",
+        }
         drain_goal_config = {
             **goal_config,
             "sinks": [goal_sink, drain_sink_two],
         }
+
+        empty_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=path / ".loopx/domain-state/empty/pr-lifecycle.jsonl",
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+        )
+        assert empty_drain["status"] == "no_due_notifications", empty_drain
+        assert empty_drain["external_reads_performed"] is False
+
+        legacy_ledger = path / ".loopx/domain-state/legacy/pr-lifecycle.jsonl"
+        legacy_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/100",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+        legacy_row["reviewer_notification_queue"] = [
+            {
+                "schema_version": (
+                    "issue_fix_reviewer_notification_queue_receipt_v0"
+                ),
+                "idempotency_key": "sha256:" + "e" * 64,
+                "sink_kind": "lark_chat",
+                "reviewer_handles": ["@map-owner"],
+                "queued_at": "2026-07-17T18:00:00Z",
+                "not_before": "2026-07-18T01:00:00Z",
+                "timezone": "Asia/Shanghai",
+                "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                "status": "queued",
+            }
+        ]
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(legacy_ledger, legacy_row)
+        legacy_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=legacy_ledger,
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+        )
+        assert legacy_drain["status"] == "blocked", legacy_drain
+        assert legacy_drain["blocker"] == (
+            "reviewer_notification_queue_v1_migration_required"
+        )
+        assert legacy_drain["legacy_queue_receipt_count"] == 1
+        assert legacy_drain["external_reads_performed"] is False
 
         def drain_adapter(**kwargs: Any) -> dict[str, Any]:
             assert kwargs["execute"] is True
@@ -1737,7 +1789,7 @@ def main() -> int:
             upsert_issue_fix_pr_lifecycle_ledger_jsonl(drain_ledger, lifecycle_row)
             queue_receipts = []
             sinks = (
-                [goal_sink, drain_sink_two]
+                [goal_sink, drain_sink_two, drain_removed_sink]
                 if number == 101
                 else [goal_sink]
             )
@@ -1791,6 +1843,7 @@ def main() -> int:
         assert drained["due_pr_count"] == 2
         assert drained["verified_pr_count"] == 1
         assert drained["cancelled_pr_count"] == 1
+        assert drained["cancelled_sink_receipt_count"] == 1
         assert drained["not_due_receipt_count"] == 1
         assert drain_calls == [
             {
