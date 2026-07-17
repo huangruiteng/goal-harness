@@ -1327,32 +1327,24 @@ def build_issue_fix_reviewer_notification_sinks_result(
     results: list[dict[str, Any]] = []
     for sink in sinks:
         sink_kind = str(sink.get("sink_kind") or "").strip()
+        sink_instance_key = str(sink.get("sink_instance_key") or "").strip()
+        current_key = (
+            _idempotency_key(
+                repo=repo,
+                pr_number=int(pr_number),
+                sink_kind=sink_kind,
+                sink_instance_key=sink_instance_key,
+                reviewer_handles=reviewers,
+            )
+            if sink_kind and SAFE_LOCAL_KEY_PATTERN.fullmatch(sink_instance_key)
+            else None
+        )
         if sink_kind == "lark_chat" and pr_url in semantic_history_pr_refs:
-            sink_instance_key = str(sink.get("sink_instance_key") or "").strip()
-            if SAFE_LOCAL_KEY_PATTERN.fullmatch(sink_instance_key):
-                receipts.add(
-                    _idempotency_key(
-                        repo=repo,
-                        pr_number=int(pr_number),
-                        sink_kind=sink_kind,
-                        sink_instance_key=sink_instance_key,
-                        reviewer_handles=reviewers,
-                    )
-                )
+            if current_key:
+                receipts.add(current_key)
         adapter = adapters.get(sink_kind)
         if adapter and execute and not delivery_window["allowed"]:
-            sink_instance_key = str(sink.get("sink_instance_key") or "").strip()
-            queued_key = (
-                _idempotency_key(
-                    repo=repo,
-                    pr_number=int(pr_number),
-                    sink_kind=sink_kind,
-                    sink_instance_key=sink_instance_key,
-                    reviewer_handles=reviewers,
-                )
-                if SAFE_LOCAL_KEY_PATTERN.fullmatch(sink_instance_key)
-                else None
-            )
+            queued_key = current_key
             if queued_key and queued_key in receipts:
                 result = _public_result(
                     sink_kind=sink_kind,
@@ -1412,6 +1404,8 @@ def build_issue_fix_reviewer_notification_sinks_result(
                 external_write_authority_asserted=execute,
                 blocker="reviewer_notification_sink_unsupported",
             )
+        if result.get("idempotency_key") is None and current_key:
+            result = {**result, "idempotency_key": current_key}
         results.append(result)
 
     successful_receipts = list(

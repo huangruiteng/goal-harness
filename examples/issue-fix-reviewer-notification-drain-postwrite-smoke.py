@@ -384,6 +384,154 @@ def main() -> int:
             "all_queued_reviewers_already_covered_or_inactive"
         )
 
+        failed_ledger = path / "failed-send-pr-lifecycle.jsonl"
+        failed_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/112",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(failed_ledger, failed_row)
+        failed_key = reviewer_notification_idempotency_key(
+            repo="owner/repo",
+            pr_number=112,
+            sink_kind="lark_chat",
+            sink_instance_key=sink["sink_instance_key"],
+            reviewer_handles=["@map-owner"],
+        )
+        failed_receipt = {
+            **mixed_receipt,
+            "idempotency_key": failed_key,
+            "reviewer_handles": ["@map-owner"],
+        }
+        persist_issue_fix_reviewer_notification_state(
+            failed_ledger,
+            failed_row,
+            receipts=[],
+            queued_receipts=[failed_receipt],
+        )
+
+        def failed_metadata_loader(
+            *, repo: str, number: int
+        ) -> tuple[dict[str, Any], None]:
+            assert (repo, number) == ("owner/repo", 112)
+            return {
+                "author_handle": "@author-i",
+                "reviewed_by": [],
+                "requested_reviewers": ["@map-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "review_required",
+                "is_draft": False,
+                "linked_issue_refs": [],
+            }, None
+
+        failed_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=failed_ledger,
+            sinks_input={
+                **sinks_input,
+                "sinks": [{**sink, "destination_id": "invalid destination"}],
+            },
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            metadata_loader=failed_metadata_loader,
+        )
+        assert failed_drain["status"] == "blocked", failed_drain
+        assert failed_drain["external_writes_performed"] is False
+        failed_stored = json.loads(
+            failed_ledger.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert failed_stored["reviewer_notification_queue"] == [failed_receipt]
+
+        correction_ledger = path / "maintainer-correction-pr-lifecycle.jsonl"
+        correction_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/113",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+            maintainer_correction_input={
+                "schema_version": "issue_fix_maintainer_correction_input_v0",
+                "correction_kind": "semantic_ambiguity",
+                "source_kind": "maintainer_comment",
+                "source_ref": "https://github.com/owner/repo/pull/113#issuecomment-1",
+                "summary": "需要确认队列失败后是立即重试还是等待下一窗口。",
+                "user_question": "失败发送应立即重试，还是保持到下一发送窗口？",
+            },
+        )
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(
+            correction_ledger, correction_row
+        )
+        correction_receipt = {
+            **mixed_receipt,
+            "idempotency_key": reviewer_notification_idempotency_key(
+                repo="owner/repo",
+                pr_number=113,
+                sink_kind="lark_chat",
+                sink_instance_key=sink["sink_instance_key"],
+                reviewer_handles=["@map-owner"],
+            ),
+            "reviewer_handles": ["@map-owner"],
+        }
+        persist_issue_fix_reviewer_notification_state(
+            correction_ledger,
+            correction_row,
+            receipts=[],
+            queued_receipts=[correction_receipt],
+        )
+        fresh_lifecycle = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/113",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+
+        def correction_metadata_loader(
+            *, repo: str, number: int
+        ) -> tuple[dict[str, Any], None]:
+            assert (repo, number) == ("owner/repo", 113)
+            return {
+                "author_handle": "@author-j",
+                "reviewed_by": [],
+                "requested_reviewers": ["@map-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "review_required",
+                "is_draft": False,
+                "linked_issue_refs": [],
+                "_lifecycle_packet": fresh_lifecycle,
+            }, None
+
+        correction_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=correction_ledger,
+            sinks_input=sinks_input,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            metadata_loader=correction_metadata_loader,
+            sink_adapters={"lark_chat": scoped_adapter},
+        )
+        assert correction_drain["status"] == "drained_verified", correction_drain
+        correction_stored = json.loads(
+            correction_ledger.read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert correction_stored["transition"]["action_kind"] == (
+            "clarify_issue_fix_maintainer_correction"
+        )
+        assert correction_stored["grouped_monitor_projection"] == (
+            correction_row["grouped_monitor_projection"]
+        )
+        assert correction_stored["first_screen"] == correction_row["first_screen"]
+
         preview_ledger = path / "preview-blocked-pr-lifecycle.jsonl"
         preview_row = build_issue_fix_pr_lifecycle_monitor_packet(
             url="https://github.com/owner/repo/pull/108",

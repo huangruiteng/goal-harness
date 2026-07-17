@@ -39,6 +39,28 @@ def _row_with_live_lifecycle_facts(
 
     updated = dict(row)
     lifecycle = metadata.get("_lifecycle_packet")
+    correction = row.get("maintainer_correction")
+    fresh_observation = (
+        lifecycle.get("observation") if isinstance(lifecycle, Mapping) else None
+    )
+    fresh_state = str(
+        (
+            fresh_observation.get("state")
+            if isinstance(fresh_observation, Mapping)
+            else metadata.get("state")
+        )
+        or "UNKNOWN"
+    ).upper()
+    preserve_correction_projection = (
+        isinstance(correction, Mapping)
+        and fresh_state not in {"MERGED", "CLOSED"}
+    )
+    correction_projection_keys = {
+        "transition",
+        "grouped_monitor_projection",
+        "first_screen",
+        "writeback_contract",
+    }
     if isinstance(lifecycle, Mapping):
         for key in (
             "generated_at",
@@ -50,6 +72,8 @@ def _row_with_live_lifecycle_facts(
             "writeback_contract",
             "evidence",
         ):
+            if preserve_correction_projection and key in correction_projection_keys:
+                continue
             if key in lifecycle:
                 value = lifecycle[key]
                 updated[key] = dict(value) if isinstance(value, Mapping) else value
@@ -69,6 +93,8 @@ def _row_with_live_lifecycle_facts(
     updated["observation_fingerprint"] = hashlib.sha256(
         serialized.encode("utf-8")
     ).hexdigest()[:16]
+    if preserve_correction_projection:
+        return updated
     state_bucket = str(metadata.get("state_bucket") or "unknown")
     grouped = row.get("grouped_monitor_projection")
     fresh_grouped = dict(grouped) if isinstance(grouped, Mapping) else {}
@@ -716,6 +742,20 @@ def drain_issue_fix_reviewer_notification_queue(
         new_queue.extend(
             dict(value) for value in result_queue if isinstance(value, Mapping)
         )
+        if (
+            result.get("ok") is not True
+            and result.get("external_writes_performed") is not True
+        ):
+            queued_keys = {
+                str(value.get("idempotency_key") or "")
+                for value in new_queue
+                if isinstance(value, Mapping)
+            }
+            new_queue.extend(
+                dict(value)
+                for value in due_queue
+                if str(value.get("idempotency_key") or "") not in queued_keys
+            )
         receipts = result.get("receipts")
         receipts = receipts if isinstance(receipts, list) else []
         try:
