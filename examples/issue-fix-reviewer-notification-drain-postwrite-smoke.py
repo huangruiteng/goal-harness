@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -446,6 +447,50 @@ def main() -> int:
             failed_ledger.read_text(encoding="utf-8").splitlines()[0]
         )
         assert failed_stored["reviewer_notification_queue"] == [failed_receipt]
+
+        with patch(
+            "loopx.capabilities.issue_fix.reviewer_notification_drain."
+            "persist_issue_fix_reviewer_notification_state",
+            side_effect=OSError("fixture writeback failure"),
+        ):
+            failed_writeback = drain_issue_fix_reviewer_notification_queue(
+                ledger_path=failed_ledger,
+                sinks_input=sinks_input,
+                execute=True,
+                delivery_observed_at="2026-07-18T01:01:00Z",
+                metadata_loader=failed_metadata_loader,
+                sink_adapters={"lark_chat": scoped_adapter},
+            )
+        assert failed_writeback["status"] == "blocked", failed_writeback
+        assert failed_writeback["external_writes_performed"] is True
+        assert failed_writeback["items"][0]["external_write_performed"] is True
+        assert failed_writeback["remaining_due_pr_count"] == 1
+        assert failed_writeback["has_more_due"] is True
+
+        malformed_row = json.loads(
+            failed_ledger.read_text(encoding="utf-8").splitlines()[0]
+        )
+        malformed_row["reviewer_notification_queue"][0]["not_before"] = (
+            "not-a-timestamp"
+        )
+        failed_ledger.write_text(
+            json.dumps(malformed_row, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        malformed_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=failed_ledger,
+            sinks_input=sinks_input,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+        )
+        assert malformed_drain["status"] == "blocked", malformed_drain
+        assert malformed_drain["blocker"] == (
+            "reviewer_notification_queue_not_before_invalid"
+        )
+        assert malformed_drain["invalid_queue_receipt_count"] == 1
+        assert malformed_drain["has_more_due"] is True
+        assert malformed_drain["external_reads_performed"] is False
+        assert malformed_drain["external_writes_performed"] is False
 
         correction_ledger = path / "maintainer-correction-pr-lifecycle.jsonl"
         correction_row = build_issue_fix_pr_lifecycle_monitor_packet(

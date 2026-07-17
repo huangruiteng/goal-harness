@@ -584,6 +584,7 @@ def handle_issue_fix_reviewer_command(
     reviewer_notification_reward_memory: dict[str, Any] | None = None
     reward_memory_experiment_status = "not_configured"
     semantic_history_status = "not_checked"
+    legacy_queue_blocker: str | None = None
     if args.goal_id:
         goal, requested_project = _load_goal_for_project(
             registry_path=registry_path,
@@ -639,45 +640,55 @@ def handle_issue_fix_reviewer_command(
             if reviewer_notification_legacy_queue_from_state(
                 notification_lifecycle_packet
             ):
-                raise ValueError(
+                legacy_queue_blocker = (
                     "reviewer_notification_queue_v1_migration_required"
                 )
-            notification_sinks_input = with_reviewer_notification_state(
-                notification_sinks_input,
-                reviewer_notification_receipts_from_state(
-                    notification_lifecycle_packet
-                ),
-                reviewer_notification_queue_from_state(notification_lifecycle_packet),
-            )
-            existing_queued_receipts = reviewer_notification_queue_from_state(
-                notification_lifecycle_packet
-            )
-            lark_group_configured = any(
-                isinstance(sink, Mapping) and sink.get("sink_kind") == "lark_chat"
-                for sink in (notification_sinks_input.get("sinks") or [])
-            )
-            if lark_group_configured:
-                config_ref = str(
-                    notification_sinks_input.get("feedback_inbox_config")
-                    or ".loopx/config/lark/event-inbox.json"
-                )
-                try:
-                    history_match = lark_event_inbox_contains_text(
-                        project=requested_project,
-                        config_path=config_ref,
-                        text=str(reference["permalink"]),
-                    )
-                except (OSError, ValueError):
-                    semantic_history_status = "unavailable"
-                else:
-                    semantic_history_status = "matched" if history_match else "no_match"
-                    if history_match:
-                        notification_sinks_input = {
-                            **notification_sinks_input,
-                            "_semantic_history_pr_refs": [str(reference["permalink"])],
-                        }
+                notification_sinks_input = None
+                semantic_history_status = "blocked_v1_migration_required"
             else:
-                semantic_history_status = "not_applicable"
+                notification_sinks_input = with_reviewer_notification_state(
+                    notification_sinks_input,
+                    reviewer_notification_receipts_from_state(
+                        notification_lifecycle_packet
+                    ),
+                    reviewer_notification_queue_from_state(
+                        notification_lifecycle_packet
+                    ),
+                )
+                existing_queued_receipts = reviewer_notification_queue_from_state(
+                    notification_lifecycle_packet
+                )
+                lark_group_configured = any(
+                    isinstance(sink, Mapping)
+                    and sink.get("sink_kind") == "lark_chat"
+                    for sink in (notification_sinks_input.get("sinks") or [])
+                )
+                if lark_group_configured:
+                    config_ref = str(
+                        notification_sinks_input.get("feedback_inbox_config")
+                        or ".loopx/config/lark/event-inbox.json"
+                    )
+                    try:
+                        history_match = lark_event_inbox_contains_text(
+                            project=requested_project,
+                            config_path=config_ref,
+                            text=str(reference["permalink"]),
+                        )
+                    except (OSError, ValueError):
+                        semantic_history_status = "unavailable"
+                    else:
+                        semantic_history_status = (
+                            "matched" if history_match else "no_match"
+                        )
+                        if history_match:
+                            notification_sinks_input = {
+                                **notification_sinks_input,
+                                "_semantic_history_pr_refs": [
+                                    str(reference["permalink"])
+                                ],
+                            }
+                else:
+                    semantic_history_status = "not_applicable"
         reward_policy = reward_memory_goal_policy(goal)
         reviewer_artifact_required = bool(notification_sinks_input) and (
             reward_policy["enabled"] is True
@@ -775,6 +786,8 @@ def handle_issue_fix_reviewer_command(
         notification_lifecycle_materialized
     )
     payload["secondary_notification_semantic_history_status"] = semantic_history_status
+    if legacy_queue_blocker is not None:
+        payload["secondary_notification_blocker"] = legacy_queue_blocker
     payload["secondary_notification_receipts_persisted"] = False
     payload["secondary_notification_queue_persisted"] = False
     payload["secondary_notification_queue_reconciled"] = False

@@ -1116,6 +1116,27 @@ def main() -> int:
                 }
             ),
         )
+        legacy_request_lifecycle_path = default_issue_fix_domain_state_ledger_path(
+            project=path, goal_id=goal_id
+        )
+        legacy_request_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/42",
+            provider_payload={"state": "OPEN", "reviewDecision": "REVIEW_REQUIRED"},
+        )
+        legacy_request_row["reviewer_notification_queue"] = [
+            {
+                "schema_version": "issue_fix_reviewer_notification_queue_receipt_v0",
+                "idempotency_key": "sha256:" + "f" * 64,
+                "sink_kind": "lark_chat",
+                "reviewer_handles": ["@map-owner"],
+                "queued_at": "2026-07-17T18:00:00Z",
+                "not_before": "2026-07-18T01:00:00Z",
+                "timezone": "Asia/Shanghai",
+                "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                "status": "queued",
+            }
+        ]
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(legacy_request_lifecycle_path, legacy_request_row)
         goal_default_cli = subprocess.run(
             [
                 sys.executable,
@@ -1154,7 +1175,14 @@ def main() -> int:
         )
         goal_default_packet = json.loads(goal_default_cli.stdout)
         assert goal_default_packet["secondary_notification_source"] == "goal_default"
-        assert goal_default_packet["secondary_notification_status"] == "preview_ready"
+        assert goal_default_packet["secondary_notification_status"] == "not_configured"
+        assert goal_default_packet["secondary_notification_blocker"] == (
+            "reviewer_notification_queue_v1_migration_required"
+        )
+        assert goal_default_packet["selected_reviewers"] == ["@map-owner"]
+        assert goal_default_packet["ok"] is True
+        assert goal_default_packet["review_request_performed"] is False
+        legacy_request_lifecycle_path.unlink()
         assert_public_safe(goal_default_packet)
 
         reward_application_calls: list[dict[str, Any]] = []

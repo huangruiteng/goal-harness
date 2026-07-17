@@ -138,10 +138,7 @@ def _latest_lifecycle_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, 
 
 
 def _queue_due(receipt: Mapping[str, Any], observed_at: datetime) -> bool:
-    try:
-        not_before = _parse_timestamp(str(receipt.get("not_before") or ""))
-    except ValueError:
-        return False
+    not_before = _parse_timestamp(str(receipt.get("not_before") or ""))
     return not_before <= observed_at
 
 
@@ -344,6 +341,67 @@ def drain_issue_fix_reviewer_notification_queue(
             "remaining_due_pr_count": 0,
             "has_more_due": False,
             "items": [],
+            "external_reads_performed": False,
+            "external_writes_performed": False,
+            "state_write_performed": False,
+            "private_destination_captured": False,
+            "private_member_ids_captured": False,
+            "private_bot_profile_captured": False,
+            "raw_provider_payload_captured": False,
+            "local_paths_captured": False,
+        }
+    invalid_queue_items: list[dict[str, Any]] = []
+    invalid_queue_receipt_count = 0
+    total_queue_receipt_count = 0
+    for row in rows:
+        queue = reviewer_notification_queue_from_state(row)
+        total_queue_receipt_count += len(queue)
+        invalid_count = 0
+        for receipt in queue:
+            try:
+                _parse_timestamp(str(receipt.get("not_before") or ""))
+            except ValueError:
+                invalid_count += 1
+        if not invalid_count:
+            continue
+        invalid_queue_receipt_count += invalid_count
+        observation = row.get("observation")
+        observation = observation if isinstance(observation, Mapping) else {}
+        invalid_queue_items.append(
+            {
+                "repo": str(observation.get("repo") or "unknown"),
+                "pr_ref": str(observation.get("pr_ref") or "unknown"),
+                "status": "blocked",
+                "blocker": "reviewer_notification_queue_not_before_invalid",
+                "invalid_queue_receipt_count": invalid_count,
+                "external_write_performed": False,
+            }
+        )
+    if invalid_queue_receipt_count:
+        return {
+            "ok": False,
+            "schema_version": ISSUE_FIX_REVIEWER_NOTIFICATION_DRAIN_SCHEMA_VERSION,
+            "mode": "issue-fix-reviewer-notification-drain",
+            "status": "blocked",
+            "blocker": "reviewer_notification_queue_not_before_invalid",
+            "execute": execute,
+            "delivery_observed_at": observed_text,
+            "grouping_scope": "review_required_state_bucket",
+            "monitor_granularity": "one_monitor_per_state_bucket",
+            "notification_granularity": "one_pr_per_message",
+            "queued_receipt_count": total_queue_receipt_count,
+            "invalid_queue_receipt_count": invalid_queue_receipt_count,
+            "due_pr_count": 0,
+            "processed_pr_count": len(invalid_queue_items),
+            "not_due_receipt_count": 0,
+            "verified_pr_count": 0,
+            "cancelled_pr_count": 0,
+            "cancelled_sink_receipt_count": 0,
+            "held_pr_count": 0,
+            "blocked_pr_count": len(invalid_queue_items),
+            "remaining_due_pr_count": len(invalid_queue_items),
+            "has_more_due": True,
+            "items": invalid_queue_items,
             "external_reads_performed": False,
             "external_writes_performed": False,
             "state_write_performed": False,
@@ -736,6 +794,8 @@ def drain_issue_fix_reviewer_notification_queue(
         if runner is not None:
             build_kwargs["runner"] = runner
         result = build_issue_fix_reviewer_notification_sinks_result(**build_kwargs)
+        result_external_write = result.get("external_writes_performed") is True
+        external_writes = bool(external_writes or result_external_write)
         result_queue = result.get("queued_receipts")
         result_queue = result_queue if isinstance(result_queue, list) else []
         new_queue = [dict(value) for value in future_queue]
@@ -770,6 +830,7 @@ def drain_issue_fix_reviewer_notification_queue(
             item.update(
                 status="blocked",
                 blocker="reviewer_notification_state_persistence_failed",
+                external_write_performed=result_external_write,
             )
             blocked_count += 1
         else:
@@ -787,16 +848,22 @@ def drain_issue_fix_reviewer_notification_queue(
                 blocked_count += 1
             if result.get("notification_verified") is True:
                 verified_count += 1
-            external_writes = bool(
-                external_writes or result.get("external_writes_performed") is True
-            )
             write_performed = bool(
                 write_performed or write.get("write_performed") is True
             )
         items.append(item)
 
-    unprocessed_due_count = max(0, len(queued_rows) - len(items))
-    remaining_due_pr_count = held_count + unprocessed_due_count
+    final_rows = _latest_lifecycle_rows(
+        load_jsonl_rows(path) if path.is_file() else []
+    )
+    remaining_due_pr_count = sum(
+        1
+        for row in final_rows
+        if any(
+            _queue_due(receipt, observed_at)
+            for receipt in reviewer_notification_queue_from_state(row)
+        )
+    )
     if not execute:
         if blocked_count:
             status = (
