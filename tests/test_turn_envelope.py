@@ -66,6 +66,7 @@ def _full_decision() -> dict[str, object]:
             "status": "open",
             "task_class": "advancement_task",
             "action_kind": "fixture_action",
+            "continuation_policy": "same_agent_non_delivery",
             "claimed_by": "codex-fixture",
             "text": "Implement one bounded public-safe slice",
         },
@@ -241,7 +242,11 @@ def test_turn_envelope_preserves_action_boundary_and_writeback() -> None:
     assert envelope["view"] == "turn_envelope"
     assert envelope["goal_id"] == "fixture-goal"
     assert envelope["agent_id"] == "codex-fixture"
+    assert envelope["action_signature"]["matches"] is True
     assert envelope["action"]["selected_todo"]["todo_id"] == "todo_fixture0001"
+    assert envelope["action"]["selected_todo"]["continuation_policy"] == (
+        "same_agent_non_delivery"
+    )
     assert envelope["action"]["must_attempt"] is True
     assert envelope["user"] == {
         "action_required": False,
@@ -529,6 +534,22 @@ def test_action_signature_detects_semantic_drift() -> None:
 
     envelope = build_turn_envelope(source)
     envelope["execution_policy"]["safe_bypass_allowed"] = True
+
+    assert quota_action_signature_document(
+        source
+    ) != turn_envelope_action_signature_document(envelope)
+
+    envelope = build_turn_envelope(source)
+    envelope["agent_id"] = "codex-other-peer"
+
+    assert quota_action_signature_document(
+        source
+    ) != turn_envelope_action_signature_document(envelope)
+
+    envelope = build_turn_envelope(source)
+    envelope["action"]["selected_todo"]["continuation_policy"] = (
+        "independent_handoff"
+    )
 
     assert quota_action_signature_document(
         source

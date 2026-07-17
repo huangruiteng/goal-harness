@@ -350,12 +350,10 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
             "host_upgrade": _covered(
                 "examples/project/configure-goal-global-sync-smoke.py"
             ),
-            "model_behavior": _deferred(
-                owner="codex-quality-qualification",
-                rationale=(
-                    "The actual-default one-arm portfolio does not yet exercise peer identity "
-                    "selection and same-agent continuation as a model interpretation scenario."
-                ),
+            "model_behavior": _covered(
+                "actual_default_model_behavior_portfolio_v0",
+                "turn_peer_agent_identity",
+                "turn_same_agent_continuation",
             ),
             "release_gate": _covered("loopx canary premerge --profile peer-agent-runtime"),
         },

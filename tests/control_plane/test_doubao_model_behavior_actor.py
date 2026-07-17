@@ -12,6 +12,7 @@ from loopx.control_plane.testing.doubao_model_behavior_actor import (
     MODEL_BEHAVIOR_PROVIDER_INPUT_SCHEMA_VERSION,
     DoubaoActorTransportError,
     DoubaoModelBehaviorActor,
+    _decision_instruction,
     _provider_input,
 )
 from loopx.control_plane.testing.model_behavior_qualification import (
@@ -70,6 +71,16 @@ def test_provider_input_does_not_select_a_diagnostic_todo() -> None:
         ]
         == "todo_diagnostic001"
     )
+
+
+def test_semantic_instruction_requires_exact_peer_route() -> None:
+    instruction = " ".join(
+        _decision_instruction(semantic_contract_required=True).split()
+    )
+
+    assert "peer_route: always include exactly agent_id" in instruction
+    assert "selected_todo_claimed_by" in instruction
+    assert "same_agent_non_delivery" in instruction
 
 
 def test_direct_actor_uses_canonical_endpoint_without_tools_or_raw_retention() -> None:

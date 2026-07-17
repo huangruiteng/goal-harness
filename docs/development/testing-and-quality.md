@@ -270,18 +270,19 @@ for the actor and promotion contract.
 与 mismatch code。普通贡献者当前不需要一个公开的 live-provider CLI。
 
 The regular live suite is
-`actual_default_model_behavior_portfolio_v0`: seven one-arm scenarios, two
-attempts each, and at most 14 provider calls. It checks normal onboarding,
-agent identity and goal selection, selected todo, final human gate, healthy
-continuation, and projection repair. Each scenario has an independent semantic
-oracle; every repeat must pass, hard actor errors are not retried, and pair mode
-is reserved for temporary sensitive differentials or explicit outcome claims.
+`actual_default_model_behavior_portfolio_v0`: nine one-arm scenarios, two
+attempts each, and at most 18 provider calls. It checks normal onboarding,
+agent identity and goal selection, selected todo, peer identity routing,
+same-agent continuation, final human gate, healthy continuation, and projection
+repair. Each scenario has an independent semantic oracle; every repeat must
+pass, hard actor errors are not retried, and pair mode is reserved for temporary
+sensitive differentials or explicit outcome claims.
 
-常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：7 个 one-arm
-场景，每个重复 2 次，最多 14 次模型调用。它覆盖正常接入、agent 身份与 goal 选择、
-selected todo、最终 human gate、健康继续和 projection repair。每个场景都有独立语义
-oracle，所有重复都必须通过；actor 硬错误不自动重试，pair 只用于临时敏感差分或明确的
-结果提升声明。
+常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：9 个 one-arm
+场景，每个重复 2 次，最多 18 次模型调用。它覆盖正常接入、agent 身份与 goal 选择、
+selected todo、peer 身份路由、same-agent 续接、最终 human gate、健康继续和 projection
+repair。每个场景都有独立语义 oracle，所有重复都必须通过；actor 硬错误不自动重试，
+pair 只用于临时敏感差分或明确的结果提升声明。
 
 For onboarding packets, the suite uses the shipped guided packet builder and
 redacts only local absolute path surfaces before provider transport. The
@@ -329,7 +330,7 @@ results from an earlier commit cannot qualify a later tag.
 | `full_public` | Fleet receipt is ready with no failure or timeout / 全量集群 ready 且无失败或超时 |
 | `install_upgrade_host` | Install, upgrade, and host routes all passed / 安装、升级与 host 路径均通过 |
 | `public_boundary` | Zero public/private violations / 零公开私有边界违规 |
-| `doubao_actual_default` | The 7-scenario, 2-repeat actual-default one-arm portfolio passed all 14 calls / 7 场景、2 次重复的实际默认 one-arm 共 14 次调用全部通过 |
+| `doubao_actual_default` | The 9-scenario, 2-repeat actual-default one-arm portfolio passed all 18 calls / 9 场景、2 次重复的实际默认 one-arm 共 18 次调用全部通过 |
 
 Alongside repeated source identity and status, each receipt keeps only its
 result schema, result digest, completion time, and bounded counters. Result

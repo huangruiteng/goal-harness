@@ -408,6 +408,29 @@ def test_required_semantic_contract_keeps_only_aligned_digests() -> None:
     assert "Implement one bounded" not in encoded
 
 
+def test_semantic_contract_preserves_peer_identity_and_continuation() -> None:
+    full = _full_packet()
+    full["selected_todo"]["continuation_policy"] = "same_agent_non_delivery"
+
+    full_semantics = model_behavior_semantic_contract_from_packet(
+        full,
+        arm="full_packet",
+    )
+    candidate_semantics = model_behavior_semantic_contract_from_packet(
+        build_turn_envelope(full),
+        arm="candidate_packet",
+    )
+
+    expected = {
+        "agent_id": "codex-fixture",
+        "selected_todo_claimed_by": "codex-fixture",
+        "continuation_policy": "same_agent_non_delivery",
+        "same_agent_continuation": True,
+    }
+    assert full_semantics["peer_route"] == expected
+    assert candidate_semantics["peer_route"] == expected
+
+
 def test_same_wrong_semantics_in_both_arms_fail_source_alignment() -> None:
     def wrong_actor(request: Mapping[str, Any]) -> dict[str, Any]:
         semantics = model_behavior_semantic_contract_from_packet(

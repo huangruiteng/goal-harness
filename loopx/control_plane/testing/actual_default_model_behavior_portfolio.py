@@ -14,6 +14,7 @@ from .model_behavior_qualification import (
     ModelBehaviorActor,
     _actor_failure_code,
     build_model_behavior_actor_request,
+    model_behavior_semantic_contract_from_packet,
     run_model_behavior_qualification_arm,
 )
 from .onboarding_model_behavior_qualification import (
@@ -70,6 +71,18 @@ _SCENARIOS = (
         "execute",
     ),
     _ScenarioSpec(
+        "turn_peer_agent_identity",
+        "turn",
+        None,
+        "execute",
+    ),
+    _ScenarioSpec(
+        "turn_same_agent_continuation",
+        "turn",
+        None,
+        "execute",
+    ),
+    _ScenarioSpec(
         "turn_human_gate",
         "turn",
         None,
@@ -88,6 +101,7 @@ _SCENARIOS = (
         "repair_projection",
     ),
 )
+ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT = len(_SCENARIOS)
 
 
 def _canonical_json(value: Any) -> str:
@@ -204,6 +218,25 @@ def _scenario_contract(
         "selected_todo_id"
     ):
         raise ValueError("selected-todo scenario requires selected work")
+    if spec.scenario_id in {
+        "turn_peer_agent_identity",
+        "turn_same_agent_continuation",
+    }:
+        peer_route = model_behavior_semantic_contract_from_packet(
+            packet,
+            arm="candidate_packet",
+        )["peer_route"]
+        if not peer_route.get("agent_id"):
+            raise ValueError("peer-agent scenario requires a selected agent identity")
+        if peer_route.get("selected_todo_claimed_by") != peer_route.get("agent_id"):
+            raise ValueError("peer-agent scenario must route work to the selected peer")
+        if spec.scenario_id == "turn_same_agent_continuation":
+            if peer_route.get("continuation_policy") != "same_agent_non_delivery":
+                raise ValueError(
+                    "same-agent scenario requires same_agent_non_delivery"
+                )
+            if peer_route.get("same_agent_continuation") is not True:
+                raise ValueError("same-agent scenario must preserve the completing peer")
     if spec.scenario_id == "turn_human_gate":
         required = {
             "selected_todo_id": None,
@@ -369,9 +402,10 @@ def run_actual_default_model_behavior_portfolio(
         "qualification_id": qualification_id,
         "topology": "actual_default_one_arm",
         "scenario_catalog_digest": _digest(catalog),
-        "scenario_count": len(_SCENARIOS),
+        "scenario_count": ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT,
         "actor_call_budget": (
-            len(_SCENARIOS) * ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
+            ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT
+            * ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
         ),
         "actor_call_count": actor_call_count,
         "qualification_passed": passed,
