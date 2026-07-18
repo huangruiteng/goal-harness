@@ -5,7 +5,9 @@ from importlib.util import resolve_name
 from pathlib import Path
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "loopx"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = REPOSITORY_ROOT / "loopx"
+SCRIPTS_ROOT = REPOSITORY_ROOT / "scripts"
 CONTROL_PLANE_ROOT = PACKAGE_ROOT / "control_plane"
 STATUS_MODULE = PACKAGE_ROOT / "status.py"
 QUOTA_MODULE = PACKAGE_ROOT / "quota.py"
@@ -62,6 +64,35 @@ def _resolved_imports(path: Path) -> set[str]:
     return imports
 
 
+def _resolved_from_imports(path: Path) -> dict[str, set[str]]:
+    package_name = ""
+    if path.is_relative_to(PACKAGE_ROOT):
+        module_name = _module_name(path)
+        package_name = module_name if path.name == "__init__.py" else module_name.rpartition(".")[0]
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = node.module or ""
+        if node.level:
+            if not package_name:
+                continue
+            module = resolve_name("." * node.level + module, package_name)
+        imports.setdefault(module, set()).update(alias.name for alias in node.names)
+    return imports
+
+
+def _top_level_imported_names(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+
+
 def test_control_plane_does_not_gain_outward_dependencies() -> None:
     outward_dependencies = {
         (_module_name(path), dependency)
@@ -85,6 +116,31 @@ def test_quota_markdown_is_owned_by_the_presentation_layer() -> None:
 
     assert not legacy_renderer.exists()
     assert "loopx.presentation.renderers.quota_markdown" in imports
+
+
+def test_internal_consumers_bypass_status_and_quota_reexport_routes() -> None:
+    facade_reexports = {
+        "loopx.status": _top_level_imported_names(STATUS_MODULE),
+        "loopx.quota": _top_level_imported_names(QUOTA_MODULE),
+    }
+    internal_paths = (
+        path
+        for root in (PACKAGE_ROOT, SCRIPTS_ROOT)
+        for path in root.rglob("*.py")
+        if path not in {STATUS_MODULE, QUOTA_MODULE}
+    )
+    indirect_imports = {
+        (_module_name(path) if path.is_relative_to(PACKAGE_ROOT) else str(path.relative_to(REPOSITORY_ROOT)), facade, name)
+        for path in internal_paths
+        for facade, imported_names in _resolved_from_imports(path).items()
+        if facade in facade_reexports
+        for name in imported_names & facade_reexports[facade]
+    }
+
+    assert not indirect_imports, (
+        "repository-internal consumers must import extracted symbols from their "
+        f"canonical modules instead of status/quota re-export routes: {sorted(indirect_imports)}"
+    )
 
 
 def test_status_outward_dependency_debt_only_shrinks() -> None:
