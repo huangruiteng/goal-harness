@@ -2340,14 +2340,14 @@ def record_quota_monitor_poll(
     next_due_at: str | None = None,
     next_agent_todo: str | None = None,
     next_user_todo: str | None = None,
-    next_claimed_by: str | None = None,
+    next_claimed_by: str | None = None, scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
     before = build_quota_should_run(
         status_payload,
         goal_id=safe_goal_id,
         agent_id=agent_id,
-        available_capabilities=available_capabilities,
+        available_capabilities=available_capabilities, scheduler_execution_context=scheduler_execution_context,
     )
     return record_quota_monitor_poll_for_decision(
         before,
@@ -2357,7 +2357,7 @@ def record_quota_monitor_poll(
             after_status,
             goal_id=safe_goal_id,
             agent_id=agent_id,
-            available_capabilities=available_capabilities,
+            available_capabilities=available_capabilities, scheduler_execution_context=scheduler_execution_context,
         ),
         registry_path=registry_path,
         execute=execute,

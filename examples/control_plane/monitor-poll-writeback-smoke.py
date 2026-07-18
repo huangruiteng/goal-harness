@@ -795,6 +795,30 @@ def assert_cli_help_names_capability_sensitive_commands() -> None:
         assert command in option_help, (command, option_help)
 
 
+def assert_cli_monitor_poll_preserves_codex_app_scheduler_context() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-monitor-poll-codex-app-") as tmp:
+        registry_path, _state_file = write_fixture(Path(tmp))
+        payload = run_cli(
+            registry_path,
+            "quota",
+            "monitor-poll",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--codex-app",
+            "--todo-id",
+            TODO_ID,
+            "--result-hash",
+            "old",
+        )
+
+        for decision in (payload["before"], payload["after"]):
+            scheduler_hint = decision["scheduler_hint"]
+            assert scheduler_hint["codex_app"]["applicability"] == "applicable", decision
+            assert scheduler_hint["action"] != "repair_scheduler_execution_context", decision
+
+
 def assert_writeback_helper_preview_contract() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-monitor-poll-helper-parity-") as tmp:
         registry_path, _state_file = write_fixture(Path(tmp))
@@ -861,6 +885,11 @@ def assert_cli_monitor_poll_uses_should_run_lookback() -> None:
         next_agent_todo=None,
         next_user_todo=None,
         next_claimed_by=None,
+        codex_app=True,
+        runtime_profile=None,
+        host_surface=None,
+        scheduler_owner=None,
+        execution_mode=None,
         surface="codex_app",
         state_key="scheduler_hint.codex_app.stateful_backoff",
         applied_rrule=None,
@@ -892,12 +921,18 @@ def assert_cli_monitor_poll_uses_should_run_lookback() -> None:
     assert rc == 0, rc
     assert seen["limit"] == AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, seen
     assert seen["record_kwargs"]["available_capabilities"] == ["network"], seen
+    scheduler_context = seen["record_kwargs"]["scheduler_execution_context"]
+    assert scheduler_context.ok is True, scheduler_context
+    assert scheduler_context.context.host_surface.value == "codex_app", scheduler_context
+    assert scheduler_context.context.scheduler_owner.value == "host_automation", scheduler_context
+    assert scheduler_context.context.execution_mode.value == "hosted_automation", scheduler_context
     assert seen["payload"] == {"ok": True, "mode": "monitor-poll", "dry_run": True, "appended": False}, seen
 
 
 def main() -> int:
     assert_cli_help_names_capability_sensitive_commands()
     assert_cli_monitor_poll_uses_should_run_lookback()
+    assert_cli_monitor_poll_preserves_codex_app_scheduler_context()
     assert_writeback_helper_preview_contract()
     assert_unchanged_writeback()
     assert_interleaved_monitor_stalls_replan_blocked_benchmark()
