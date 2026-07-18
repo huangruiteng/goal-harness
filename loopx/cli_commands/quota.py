@@ -327,6 +327,7 @@ def handle_quota_command(
         scheduler_context = None
         if args.quota_command in {
             "should-run",
+            "monitor-poll",
             "scheduler-ack",
             "scheduler-ack-current",
             "scheduler-fail-current",
@@ -370,6 +371,7 @@ def handle_quota_command(
                 next_agent_todo=args.next_agent_todo,
                 next_user_todo=args.next_user_todo,
                 next_claimed_by=args.next_claimed_by,
+                scheduler_execution_context=scheduler_context,
             )
         elif args.quota_command in {"scheduler-ack", "scheduler-ack-current"}:
             if not args.goal_id:
