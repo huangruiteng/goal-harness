@@ -288,6 +288,8 @@ def lease_expires_at(lease: dict[str, Any] | None) -> datetime | None:
 def lease_is_active(lease: dict[str, Any] | None, *, at: datetime | None = None) -> bool:
     if not lease or lease.get("schema_version") != TASK_LEASE_SCHEMA_VERSION:
         return False
+    if lease.get("status") != "active":
+        return False
     expires_at = lease_expires_at(lease)
     return bool(expires_at and expires_at > (at or now_utc()))
 
@@ -704,12 +706,16 @@ def release_task_lease(
         ):
             raise TaskLeaseError("lease owner or idempotency key mismatch", code="lease_cas_mismatch")
         remove_lease(lease_path)
+        released_lease = dict(lease)
+        released_lease["status"] = "released"
+        released_lease["released_at"] = isoformat(at)
+        released_lease["updated_at"] = isoformat(at)
         return {
             "ok": True,
             "schema_version": TASK_LEASE_SCHEMA_VERSION,
             "action": "release",
             "released": True,
-            "lease": lease,
+            "lease": released_lease,
             "lease_path": str(lease_path),
         }
 
