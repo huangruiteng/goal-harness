@@ -5,11 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..agent_onboarding import (
-    AgentTypeError,
     build_agent_onboarding_packet,
-    build_agent_type_catalog,
     render_agent_onboarding_markdown,
-    render_agent_type_catalog_markdown,
 )
 from ..bootstrap_command_pack import (
     build_start_goal_host_surface_selection_packet,
@@ -17,6 +14,11 @@ from ..bootstrap_command_pack import (
     build_loopx_bootstrap_command_pack,
     render_start_goal_guided_markdown,
     render_loopx_bootstrap_command_pack_markdown,
+)
+from ..host_loop_activation import (
+    AgentTypeError,
+    build_agent_type_catalog,
+    render_agent_type_catalog_markdown,
 )
 from ..project_prompt import (
     build_codex_cli_bootstrap_message,
@@ -70,7 +72,7 @@ def handle_agent_onboard_command(
             reason="--agent-type is required unless --list-agent-types is used",
             suggestions=[
                 "codex-app",
-                "codex-ide",
+                "codex-ide-plugin",
                 "codex-cli",
                 "claude-code",
                 "manual",

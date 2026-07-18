@@ -85,14 +85,14 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app, `codex-ide` for the IDE extension, or `codex-cli-tui` for the terminal TUI.",
+                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app, `codex-ide-plugin` only for the IDE plugin, or `codex-cli-tui` for the terminal TUI.",
                 f"If arguments are present, preserve them as the task text and run `{cli_bin} start-goal --guided --project . --goal-text \"$ARGUMENTS\" --host-surface <exact-current-host>` before planning work. If the host is unclear, omit the flag once and follow the returned host-surface selection gate.",
                 f"If that packet exposes a goal-selection gate, rerun one exact choice before any mutation. When the user asks to create or become a new peer/meta/supervisor agent, do not reuse an existing registered identity: choose a new public-safe agent id, preview then apply `{cli_bin} register-agent --goal-id <selected-goal-id> --agent-id <new-agent-id> --execute`, and rerun start-goal with explicit `--goal-id` and `--agent-id` before todo writeback.",
                 f"If arguments are empty, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
-                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-ide`, `codex-cli`, or `claude-code`, never ambiguous `codex`.",
+                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-ide-plugin`, `codex-cli`, or `claude-code`, never ambiguous `codex`.",
                 f"Do not configure optional features during first-run. Only when the task needs bounded child agents or Explore, inspect `{cli_bin} configure-goal --goal-id <resolved-goal-id>` and its `configuration_catalog`; preview before explicit apply and never auto-enable a feature merely because it exists.",
                 "When project work is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, activate the host loop if missing/stale, run quota, and complete one bounded delivery segment through validation plus LoopX writeback or an exact blocker; do not return merely after setup, planning, or claim.",
-                "Host loop activation means Codex App heartbeat automation, Codex IDE or CLI visible `/goal <task_body>`, Claude Code native `/loop`, or a custom host-loop gate from `loopx agent-onboard`.",
+                "Host loop activation means Codex App heartbeat automation, Codex IDE plugin or CLI visible `/goal <task_body>`, Claude Code native `/loop`, or a custom host-loop gate from `loopx agent-onboard`.",
                 "If this session cannot mutate the host loop surface, surface the exact pasteable gate instead of saying LoopX is autonomously connected.",
             ],
         },
@@ -236,7 +236,7 @@ def _normalize_surfaces(surfaces: list[str] | None) -> list[str]:
             candidates = ["codex", "claude-code"]
         elif surface == "codex":
             candidates = ["codex"]
-        elif surface in {"codex-app", "codex-ide", "codex-cli"}:
+        elif surface in {"codex-app", "codex-ide-plugin", "codex-ide", "codex-cli"}:
             candidates = ["codex"]
         else:
             candidates = [surface]
@@ -271,7 +271,7 @@ def install_slash_commands(
                 installed.append(
                     {
                         "surface": "codex",
-                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                         "mechanism": "retired_codex_custom_prompt",
                         "command": spec["command"],
                         "path": str(prompt_path),
@@ -285,7 +285,7 @@ def install_slash_commands(
                 installed.append(
                     {
                         "surface": "codex",
-                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                         "mechanism": "retired_codex_custom_prompt",
                         "command": spec["command"],
                         "path": str(prompt_path),
@@ -303,7 +303,7 @@ def install_slash_commands(
                 installed.append(
                     {
                         "surface": "codex",
-                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                         "mechanism": "codex_explicit_skills",
                         "command": spec["command"],
                         "path": str(skill_path),
@@ -315,7 +315,7 @@ def install_slash_commands(
                 installed.append(
                     {
                         "surface": "codex",
-                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                         "mechanism": "codex_skill_openai_metadata",
                         "command": spec["command"],
                         "path": str(metadata_path),
@@ -337,7 +337,7 @@ def install_slash_commands(
             installed.append(
                 {
                     "surface": "codex",
-                    "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                    "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                     "mechanism": "codex_explicit_skills",
                     "command": spec["command"],
                     "path": str(skill_path),
@@ -358,7 +358,7 @@ def install_slash_commands(
                 installed.append(
                     {
                         "surface": "codex",
-                        "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                        "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                         "mechanism": "codex_skill_openai_metadata",
                         "command": spec["command"],
                         "path": str(metadata_path),
@@ -372,7 +372,7 @@ def install_slash_commands(
                     installed.append(
                         {
                             "surface": "codex",
-                            "host_surfaces": ["codex-cli", "codex-ide", "codex-app"],
+                            "host_surfaces": ["codex-cli", "codex-ide-plugin", "codex-app"],
                             "mechanism": "retired_codex_command_metadata",
                             "command": spec["command"],
                             "path": str(metadata_path),

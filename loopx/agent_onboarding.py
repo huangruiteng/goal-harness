@@ -6,8 +6,6 @@ from typing import Any
 from .agent_registry import registered_agent_ids_from_registry
 from .bootstrap_command_pack import inspect_bootstrap_connection
 from .host_loop_activation import (
-    AgentTypeError,
-    build_agent_type_catalog,
     build_host_loop_activation_packet,
     normalize_agent_type,
     render_agent_type_catalog_markdown,
@@ -25,7 +23,7 @@ SCHEMA_VERSION = "loopx_agent_onboarding_v0"
 
 
 def _surface_install_command(agent_type: str, cli_bin: str) -> str | None:
-    if agent_type in {"codex-app", "codex-cli"}:
+    if agent_type in {"codex-app", "codex-ide-plugin", "codex-cli"}:
         return f"{shell_arg(cli_bin)} slash-commands --install --surface codex"
     if agent_type == "claude-code":
         return f"{shell_arg(cli_bin)} slash-commands --install --surface claude-code"
@@ -44,6 +42,7 @@ def _bootstrap_pack_command(
 ) -> str:
     surface_by_type = {
         "codex-app": "codex-app",
+        "codex-ide-plugin": "codex-ide-plugin",
         "codex-cli": "codex-cli-tui",
         "claude-code": "claude-code",
         "manual": "shell",
@@ -71,6 +70,8 @@ def _bootstrap_pack_command(
 def _start_instruction(agent_type: str) -> str:
     if agent_type == "codex-app":
         return "Use `$loopx <task>` or select the LoopX skill from `/skills`; Codex App should then create/update the heartbeat automation."
+    if agent_type == "codex-ide-plugin":
+        return "Use `$loopx <task>` or select the LoopX skill from `/skills`; after todos are written, set `/goal <task_body>` in the visible IDE plugin."
     if agent_type == "codex-cli":
         return "Use `$loopx <task>` or select the LoopX skill from `/skills`; after todos are written, set `/goal <task_body>` in the visible TUI."
     if agent_type == "claude-code":
