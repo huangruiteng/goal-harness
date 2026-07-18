@@ -141,11 +141,52 @@ explicit sink value, then the unrestricted default. When configured, execute
 mode sends only while the current local time is inside the half-open
 `[start, end)` window; overnight windows are supported. Outside the window,
 LoopX performs no provider call and returns `queued_until_window` with a
-compact `issue_fix_reviewer_notification_queue_receipt_v0`. Invalid timezone,
-time, or outside-window policy fails closed. Preview remains read-only and is
-never converted into a queued execution. The execute path uses the trusted
-invocation clock for this decision; the public `--generated-at` artifact field
-cannot move a send into or out of the delivery window.
+compact `issue_fix_reviewer_notification_queue_receipt_v1`. The v1 receipt also
+persists the public-safe summary and whether it came from a verified Reward
+Memory artifact, so a later drain cannot regress a Chinese reviewer summary to
+the raw PR title. Invalid timezone, time, or outside-window policy fails closed.
+Preview remains read-only and is never converted into a queued execution. The
+execute path uses the trusted invocation clock for this decision; the public
+`--generated-at` artifact field cannot move a send into or out of the delivery
+window.
+
+The grouped state monitor drains due receipts with:
+
+```bash
+loopx issue-fix reviewer-notification-drain \
+  --goal-id <goal-id> \
+  --project <project> \
+  --execute \
+  --format json
+```
+
+This is a deliberate queue-schema cutover: existing
+`issue_fix_reviewer_notification_queue_receipt_v0` rows must be manually
+migrated to v1 before enabling the grouped drain. The runtime does not retain a
+v0 compatibility reader because a v0 row lacks the persisted Chinese summary
+and therefore cannot satisfy the current reviewer-message contract. A detected
+v0 row fails closed with `reviewer_notification_queue_v1_migration_required`;
+it is never silently treated as an empty queue.
+
+One bounded invocation scans every queued PR in the review-required state
+bucket; it does not create one continuous monitor per PR. Before each message,
+LoopX refreshes compact live GitHub state and cancels stale queues for closed,
+merged, draft, approved, or fully-covered reviewer sets. A send remains one PR
+per message (and at most one message per configured sink) and is complete only
+after semantic readback and receipt persistence. If only some queued reviewers
+already reviewed, the drain targets only the remaining reviewers. Temporary CI
+or branch-state changes keep the queue intact, and the drain always reuses the
+timezone and allowed local-time window frozen in the v1 receipt. A sink removed
+from current configuration cancels only its own stale receipt; other configured
+sinks for that PR continue independently.
+
+Semantic history dedupe is sink-scoped. A single Lark sink may use the goal-level
+`feedback_inbox_config`; multiple Lark sinks must each declare their own
+`feedback_inbox_config`. If a multi-sink inbox cannot be attributed to one sink,
+the drain fails closed and preserves the queue instead of suppressing another
+chat's delivery. Bounded executions also report `remaining_due_pr_count` and
+return `partial_drain` whenever verified or cancelled work coexists with due
+rows held by a delivery window or left for the next `--limit` batch.
 
 Profile names, `destination_id`, and `member_id` are execution inputs. They are
 never copied into the result, domain state, todo, Kanban, PR, or public log.

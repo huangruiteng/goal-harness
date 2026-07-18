@@ -33,10 +33,14 @@ from loopx.capabilities.issue_fix.cli import (  # noqa: E402
     _materialize_goal_reviewer_notification_lifecycle,
 )
 from loopx.capabilities.issue_fix.reviewer_notification import (  # noqa: E402
+    reviewer_notification_idempotency_key,
     reviewer_notification_queue_from_state,
     reviewer_notification_receipts_from_state,
     with_reviewer_notification_state,
     with_reviewer_notification_receipts,
+)
+from loopx.capabilities.issue_fix.reviewer_notification_drain import (  # noqa: E402
+    drain_issue_fix_reviewer_notification_queue,
 )
 from loopx.capabilities.issue_fix.pr_lifecycle import (  # noqa: E402
     build_issue_fix_pr_lifecycle_monitor_packet,
@@ -144,6 +148,7 @@ def metadata(
         "isDraft": False,
         "reviewRequests": [{"login": login} for login in (requested or [])],
         "reviews": [{"author": {"login": login}} for login in (reviewed or [])],
+        "reviewDecision": "REVIEW_REQUIRED",
         "state": "OPEN",
         "title": "fix: reject file URI for consistency check",
         "url": "https://github.com/owner/repo/pull/42",
@@ -241,9 +246,7 @@ class FakeCombinedRunner:
             self.lark_calls.append(command)
             return {
                 "returncode": 0,
-                "stdout": json.dumps(
-                    {"items": [{"body": {"content": "another PR"}}]}
-                ),
+                "stdout": json.dumps({"items": [{"body": {"content": "another PR"}}]}),
                 "stderr": "",
             }
         if "+messages-send" in command:
@@ -1113,6 +1116,27 @@ def main() -> int:
                 }
             ),
         )
+        legacy_request_lifecycle_path = default_issue_fix_domain_state_ledger_path(
+            project=path, goal_id=goal_id
+        )
+        legacy_request_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/42",
+            provider_payload={"state": "OPEN", "reviewDecision": "REVIEW_REQUIRED"},
+        )
+        legacy_request_row["reviewer_notification_queue"] = [
+            {
+                "schema_version": "issue_fix_reviewer_notification_queue_receipt_v0",
+                "idempotency_key": "sha256:" + "f" * 64,
+                "sink_kind": "lark_chat",
+                "reviewer_handles": ["@map-owner"],
+                "queued_at": "2026-07-17T18:00:00Z",
+                "not_before": "2026-07-18T01:00:00Z",
+                "timezone": "Asia/Shanghai",
+                "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                "status": "queued",
+            }
+        ]
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(legacy_request_lifecycle_path, legacy_request_row)
         goal_default_cli = subprocess.run(
             [
                 sys.executable,
@@ -1151,7 +1175,14 @@ def main() -> int:
         )
         goal_default_packet = json.loads(goal_default_cli.stdout)
         assert goal_default_packet["secondary_notification_source"] == "goal_default"
-        assert goal_default_packet["secondary_notification_status"] == "preview_ready"
+        assert goal_default_packet["secondary_notification_status"] == "not_configured"
+        assert goal_default_packet["secondary_notification_blocker"] == (
+            "reviewer_notification_queue_v1_migration_required"
+        )
+        assert goal_default_packet["selected_reviewers"] == ["@map-owner"]
+        assert goal_default_packet["ok"] is True
+        assert goal_default_packet["review_request_performed"] is False
+        legacy_request_lifecycle_path.unlink()
         assert_public_safe(goal_default_packet)
 
         reward_application_calls: list[dict[str, Any]] = []
@@ -1530,10 +1561,12 @@ def main() -> int:
 
         queued_key = "sha256:" + "b" * 64
         queued_receipt = {
-            "schema_version": "issue_fix_reviewer_notification_queue_receipt_v0",
+            "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
             "idempotency_key": queued_key,
             "sink_kind": "lark_chat",
             "reviewer_handles": ["@map-owner"],
+            "message_summary": "修复一致性检查对文件 URI 的错误接受行为",
+            "summary_policy_status": "reward_memory_verified",
             "queued_at": "2026-07-10T14:30:00Z",
             "not_before": "2026-07-11T01:00:00Z",
             "timezone": "Asia/Shanghai",
@@ -1629,6 +1662,323 @@ def main() -> int:
             lifecycle_path.read_text(encoding="utf-8").splitlines()[0]
         )
         assert stored_after_cancel["reviewer_notification_queue"] == []
+
+        drain_ledger = path / ".loopx/domain-state/drain/pr-lifecycle.jsonl"
+        drain_calls: list[dict[str, Any]] = []
+        drain_sink_two = {
+            **goal_sink,
+            "sink_instance_key": " openviking-reviewer-group-secondary ",
+        }
+        drain_removed_sink = {
+            **goal_sink,
+            "sink_instance_key": "removed-reviewer-lane",
+        }
+        drain_goal_config = {
+            **goal_config,
+            "sinks": [goal_sink, drain_sink_two],
+        }
+
+        empty_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=path / ".loopx/domain-state/empty/pr-lifecycle.jsonl",
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+        )
+        assert empty_drain["status"] == "no_due_notifications", empty_drain
+        assert empty_drain["external_reads_performed"] is False
+
+        legacy_ledger = path / ".loopx/domain-state/legacy/pr-lifecycle.jsonl"
+        legacy_row = build_issue_fix_pr_lifecycle_monitor_packet(
+            url="https://github.com/owner/repo/pull/100",
+            provider_payload={
+                "state": "OPEN",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [],
+            },
+        )
+        legacy_row["reviewer_notification_queue"] = [
+            {
+                "schema_version": (
+                    "issue_fix_reviewer_notification_queue_receipt_v0"
+                ),
+                "idempotency_key": "sha256:" + "e" * 64,
+                "sink_kind": "lark_chat",
+                "reviewer_handles": ["@map-owner"],
+                "queued_at": "2026-07-17T18:00:00Z",
+                "not_before": "2026-07-18T01:00:00Z",
+                "timezone": "Asia/Shanghai",
+                "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                "status": "queued",
+            }
+        ]
+        upsert_issue_fix_pr_lifecycle_ledger_jsonl(legacy_ledger, legacy_row)
+        legacy_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=legacy_ledger,
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+        )
+        assert legacy_drain["status"] == "blocked", legacy_drain
+        assert legacy_drain["blocker"] == (
+            "reviewer_notification_queue_v1_migration_required"
+        )
+        assert legacy_drain["legacy_queue_receipt_count"] == 1
+        assert legacy_drain["external_reads_performed"] is False
+
+        def drain_adapter(**kwargs: Any) -> dict[str, Any]:
+            assert kwargs["execute"] is True
+            assert "修复" in kwargs["pr_title"]
+            key = reviewer_notification_idempotency_key(
+                repo=kwargs["repo"],
+                pr_number=kwargs["pr_number"],
+                sink_kind=kwargs["sink"]["sink_kind"],
+                sink_instance_key=kwargs["sink"]["sink_instance_key"],
+                reviewer_handles=kwargs["reviewer_handles"],
+            )
+            drain_calls.append(
+                {
+                    "number": kwargs["pr_number"],
+                    "summary": kwargs["pr_title"],
+                    "sink": kwargs["sink"]["sink_instance_key"],
+                    "reviewers": list(kwargs["reviewer_handles"]),
+                }
+            )
+            return {
+                "ok": True,
+                "schema_version": "issue_fix_reviewer_notification_sink_result_v0",
+                "sink_kind": "lark_chat",
+                "status": "sent_verified",
+                "reviewer_handles": list(kwargs["reviewer_handles"]),
+                "resolved_reviewer_count": len(kwargs["reviewer_handles"]),
+                "idempotency_key": key,
+                "identity_scope": "project_dedicated",
+                "external_write_authority_asserted": True,
+                "external_write_performed": True,
+                "verification_performed": True,
+                "notification_verified": True,
+                "bot_identity_verified": True,
+                "reader_identity_verified": True,
+                "private_destination_captured": False,
+                "private_member_ids_captured": False,
+                "private_bot_profile_captured": False,
+                "raw_provider_payload_captured": False,
+            }
+
+        drain_live = {
+            101: {
+                "author_handle": "@author-a",
+                "reviewed_by": ["@reviewed-owner"],
+                "requested_reviewers": ["@map-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "checks_pending",
+                "is_draft": False,
+                "linked_issue_refs": ["#91"],
+            },
+            102: {
+                "author_handle": "@author-b",
+                "reviewed_by": [],
+                "requested_reviewers": ["@map-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "APPROVED",
+                "state_bucket": "ready_to_merge",
+                "is_draft": False,
+                "linked_issue_refs": ["#92"],
+            },
+            103: {
+                "author_handle": "@author-c",
+                "reviewed_by": [],
+                "requested_reviewers": ["@map-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "review_required",
+                "is_draft": False,
+                "linked_issue_refs": ["#93"],
+            },
+            104: {
+                "author_handle": "@author-d",
+                "reviewed_by": [],
+                "requested_reviewers": ["@other-owner"],
+                "comment_notified_reviewers": [],
+                "state": "OPEN",
+                "review_decision": "REVIEW_REQUIRED",
+                "state_bucket": "review_required",
+                "is_draft": False,
+                "linked_issue_refs": ["#94"],
+            },
+        }
+
+        def drain_metadata_loader(
+            *, repo: str, number: int, runner: Any = None
+        ) -> tuple[dict[str, Any] | None, str | None]:
+            assert repo == "owner/repo"
+            return dict(drain_live[number]), None
+
+        for number, not_before, summary in (
+            (101, "2026-07-18T01:00:00Z", "修复队列到点后无人消费的问题"),
+            (102, "2026-07-18T01:00:00Z", "修复已批准请求仍重复提醒的问题"),
+            (103, "2026-07-19T01:00:00Z", "修复未来窗口被提前发送的问题"),
+            (104, "2026-07-18T01:00:00Z", "修复 reviewer 换人后误提醒旧人的问题"),
+        ):
+            lifecycle_row = build_issue_fix_pr_lifecycle_monitor_packet(
+                url=f"https://github.com/owner/repo/pull/{number}",
+                provider_payload={
+                    "state": "OPEN",
+                    "reviewDecision": "REVIEW_REQUIRED",
+                    "mergeStateStatus": "BLOCKED",
+                    "statusCheckRollup": [],
+                },
+            )
+            upsert_issue_fix_pr_lifecycle_ledger_jsonl(drain_ledger, lifecycle_row)
+            queue_receipts = []
+            sinks = (
+                [goal_sink, drain_sink_two, drain_removed_sink]
+                if number == 101
+                else [goal_sink]
+            )
+            for sink in sinks:
+                reviewers = (
+                    ["@reviewed-owner", "@removed-owner", "@map-owner"]
+                    if number == 101
+                    else ["@map-owner"]
+                )
+                key = reviewer_notification_idempotency_key(
+                    repo="owner/repo",
+                    pr_number=number,
+                    sink_kind="lark_chat",
+                    sink_instance_key=sink["sink_instance_key"].strip(),
+                    reviewer_handles=reviewers,
+                )
+                queue_receipts.append(
+                    {
+                        "schema_version": "issue_fix_reviewer_notification_queue_receipt_v1",
+                        "idempotency_key": key,
+                        "sink_kind": "lark_chat",
+                        "reviewer_handles": reviewers,
+                        "message_summary": summary,
+                        "summary_policy_status": "reward_memory_verified",
+                        "queued_at": "2026-07-17T18:00:00Z",
+                        "not_before": not_before,
+                        "timezone": "Asia/Shanghai",
+                        "allowed_local_time": {"start": "09:00", "end": "21:00"},
+                        "status": "queued",
+                    }
+                )
+            persist_issue_fix_reviewer_notification_state(
+                drain_ledger,
+                lifecycle_row,
+                receipts=[],
+                queued_receipts=queue_receipts,
+            )
+
+        drained = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=drain_ledger,
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:01:00Z",
+            metadata_loader=drain_metadata_loader,
+            sink_adapters={"lark_chat": drain_adapter},
+        )
+        assert drained["ok"] is True, drained
+        assert drained["grouping_scope"] == "review_required_state_bucket"
+        assert drained["monitor_granularity"] == "one_monitor_per_state_bucket"
+        assert drained["notification_granularity"] == "one_pr_per_message"
+        assert drained["due_pr_count"] == 3
+        assert drained["verified_pr_count"] == 1
+        assert drained["cancelled_pr_count"] == 2
+        assert drained["cancelled_sink_receipt_count"] == 1
+        assert drained["not_due_receipt_count"] == 1
+        pr_101 = next(item for item in drained["items"] if item["pr_ref"] == "#101")
+        assert pr_101["inactive_reviewer_handles"] == ["@removed-owner"]
+        stored_drain_rows = [
+            json.loads(line)
+            for line in drain_ledger.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        pr_102_row = next(
+            row
+            for row in stored_drain_rows
+            if row["observation"]["pr_ref"] == "pull_102"
+        )
+        assert pr_102_row["observation"]["review_decision"] == "APPROVED"
+        assert (
+            pr_102_row["grouped_monitor_projection"]["state_bucket"]
+            == "ready_to_merge"
+        )
+        pr_101_row = next(
+            row
+            for row in stored_drain_rows
+            if row["observation"]["pr_ref"] == "pull_101"
+        )
+        assert (
+            pr_101_row["grouped_monitor_projection"]["state_bucket"]
+            == "checks_pending"
+        )
+        assert drain_calls == [
+            {
+                "number": 101,
+                "summary": "修复队列到点后无人消费的问题",
+                "sink": "fixture-review-lane",
+                "reviewers": ["@map-owner"],
+            },
+            {
+                "number": 101,
+                "summary": "修复队列到点后无人消费的问题",
+                "sink": " openviking-reviewer-group-secondary ",
+                "reviewers": ["@map-owner"],
+            },
+        ], drain_calls
+        repeated_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=drain_ledger,
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-18T01:02:00Z",
+            metadata_loader=drain_metadata_loader,
+            sink_adapters={"lark_chat": drain_adapter},
+        )
+        assert repeated_drain["status"] == "no_due_notifications"
+        assert repeated_drain["due_pr_count"] == 0
+        assert len(drain_calls) == 2
+        held_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=drain_ledger,
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-19T15:00:00Z",
+            metadata_loader=drain_metadata_loader,
+            sink_adapters={"lark_chat": drain_adapter},
+        )
+        assert held_drain["status"] == "held_outside_delivery_window", held_drain
+        assert held_drain["held_pr_count"] == 1
+        assert held_drain["external_reads_performed"] is False
+        assert len(drain_calls) == 2
+        resumed_drain = drain_issue_fix_reviewer_notification_queue(
+            ledger_path=drain_ledger,
+            sinks_input=drain_goal_config,
+            execute=True,
+            delivery_observed_at="2026-07-20T01:01:00Z",
+            metadata_loader=drain_metadata_loader,
+            sink_adapters={"lark_chat": drain_adapter},
+        )
+        assert resumed_drain["status"] == "drained_verified", resumed_drain
+        assert resumed_drain["verified_pr_count"] == 1
+        assert drain_calls[-1]["number"] == 103
+        assert len(drain_calls) == 3
+
+        subprocess.run(
+            [
+                sys.executable,
+                str(
+                    ROOT
+                    / "examples/issue-fix-reviewer-notification-drain-postwrite-smoke.py"
+                ),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
     finally:
         for attempt in range(10):
             try:
