@@ -12,6 +12,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.agents.agent_scope import AgentScopeFrontierAction  # noqa: E402
+from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
+    scheduler_execution_context_for_runtime_profile,
+)
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint  # noqa: E402
 from loopx.control_plane.todos.quota_summary import (  # noqa: E402
     compact_quota_todo_summary_for_payload,
@@ -29,6 +32,9 @@ from loopx.control_plane.work_items.work_lane import build_work_lane_contract  #
 
 GOAL_ID = "interaction-state-machine-goal"
 AGENT_ID = "codex-product-capability"
+APP_SCHEDULER_CONTEXT = scheduler_execution_context_for_runtime_profile(
+    "codex_app_heartbeat"
+)
 
 
 def advancement_item(todo_id: str = "todo_active") -> dict[str, Any]:
@@ -175,11 +181,15 @@ def base_payload(
 
 
 def finalize(payload: dict[str, Any]) -> dict[str, Any]:
-    payload["interaction_contract"] = build_interaction_contract(payload)
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        scheduler_execution_context=APP_SCHEDULER_CONTEXT,
+    )
     payload["scheduler_hint"] = build_scheduler_hint(
         payload,
         user_action_required=user_channel_action_required(payload),
         agent_scope_frontier_actions=[action.value for action in AgentScopeFrontierAction],
+        scheduler_execution_context=APP_SCHEDULER_CONTEXT,
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)
     return payload
