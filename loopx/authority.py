@@ -48,6 +48,13 @@ AUTHORITY_REGISTRY_SUMMARY_FIELDS = (
     "conflict_risk",
 )
 
+AUTHORITY_REGISTRY_CANONICAL_FIELDS = (
+    "default_entry_docs",
+    "topic_authority",
+    "project_materials",
+    "deprecated_sources",
+)
+
 
 def now_local() -> str:
     return now_local_iso()
@@ -143,6 +150,23 @@ def normalize_topic_authority(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
     return {}
+
+
+def authority_registry_has_canonical_fields(raw: dict[str, Any]) -> bool:
+    """Return whether a registry carries source data richer than a summary."""
+
+    return any(key in raw for key in AUTHORITY_REGISTRY_CANONICAL_FIELDS)
+
+
+def apply_authority_registry_summary(
+    authority_registry: dict[str, Any],
+    summary: dict[str, Any],
+) -> None:
+    """Refresh co-located summary fields without replacing canonical source data."""
+
+    for key in AUTHORITY_REGISTRY_SUMMARY_FIELDS:
+        if key in summary:
+            authority_registry[key] = summary[key]
 
 
 def compact_registered_authority_source(
@@ -416,6 +440,7 @@ def register_authority_source(
     updated_registry["updated_at"] = registered_at
     summary = compact_authority_registry(goal, project=Path(str(goal.get("repo"))).expanduser() if goal.get("repo") else None)
     summary.pop("default_entries", None)
+    apply_authority_registry_summary(authority_registry, summary)
     if not dry_run:
         write_json(registry_path, updated_registry)
 
@@ -565,6 +590,7 @@ def import_doc_registry_authority(
     updated_registry["updated_at"] = registered_at
     summary = compact_authority_registry(goal, project=Path(str(goal.get("repo"))).expanduser() if goal.get("repo") else None)
     summary.pop("default_entries", None)
+    apply_authority_registry_summary(authority_registry, summary)
     if not dry_run:
         write_json(registry_path, updated_registry)
 
@@ -682,14 +708,9 @@ def authority_registry_project_material_stats(raw_materials: Any) -> dict[str, i
     return stats
 
 
-def authority_registry_deprecated_count(raw: dict[str, Any]) -> int:
-    for key in ("deprecated_source_count", "deprecated_sources_seen"):
-        value = raw.get(key)
-        if isinstance(value, int):
-            return value
-    deprecated_sources = raw.get("deprecated_sources")
-    if isinstance(deprecated_sources, list):
-        return len(deprecated_sources)
+def authority_registry_deprecated_count(raw_sources: Any) -> int:
+    if isinstance(raw_sources, (dict, list)):
+        return len(raw_sources)
     return 0
 
 
@@ -716,61 +737,13 @@ def compact_authority_registry(goal: dict[str, Any] | None, *, project: Path | N
             "default_entries": [],
         }
 
-    compact = authority_registry_from_compact(raw)
-    if compact:
-        path_text = _path_text(compact.get("path"))
-        resolved_path = _resolve_project_path(project, path_text)
-        if resolved_path:
-            compact["path_exists"] = resolved_path.exists()
-        compact["default_entries"] = []
-        return compact
-
     path_text = _path_text(raw.get("path"))
     resolved_path = _resolve_project_path(project, path_text)
-    default_entries = authority_registry_default_entries(raw.get("default_entry_docs"))
-    checked_entries: list[dict[str, Any]] = []
-    present = 0
-    checked = 0
-    for entry_path in default_entries:
-        resolved_entry = _resolve_project_path(project, entry_path)
-        exists = resolved_entry.exists() if resolved_entry else None
-        if exists is not None:
-            checked += 1
-        if exists:
-            present += 1
-        checked_entries.append({"path": entry_path, "exists": exists})
-
-    return {
-        "declared": True,
-        "required": authority_registry_required(goal),
+    summary: dict[str, Any] = {
+        "declared": True if authority_registry_has_canonical_fields(raw) else bool(raw.get("declared")),
+        "required": bool(raw.get("required") or authority_registry_required(goal)),
         "path": path_text,
-        "path_exists": resolved_path.exists() if resolved_path else None,
-        "read_status": raw.get("read_status"),
-        "default_entry_count": len(default_entries),
-        "default_entries_checked": checked,
-        "default_entries_present": present,
-        "topic_authority_count": authority_registry_topic_count(raw.get("topic_authority")),
-        **authority_registry_project_material_stats(raw.get("project_materials")),
-        "deprecated_source_count": authority_registry_deprecated_count(raw),
-        "conflict_risk": str(raw.get("conflict_risk") or "unknown"),
-        "default_entries": checked_entries,
-    }
-
-
-def authority_registry_summary(goal: dict[str, Any] | None) -> dict[str, Any]:
-    compact = compact_authority_registry(goal, project=None)
-    compact.pop("default_entries", None)
-    return compact
-
-
-def authority_registry_from_compact(raw: dict[str, Any]) -> dict[str, Any] | None:
-    if "declared" not in raw or "default_entry_count" not in raw:
-        return None
-    return {
-        "declared": bool(raw.get("declared")),
-        "required": bool(raw.get("required")),
-        "path": raw.get("path"),
-        "path_exists": raw.get("path_exists"),
+        "path_exists": resolved_path.exists() if resolved_path else raw.get("path_exists"),
         "read_status": raw.get("read_status"),
         "default_entry_count": int(raw.get("default_entry_count") or 0),
         "default_entries_checked": int(raw.get("default_entries_checked") or 0),
@@ -785,12 +758,48 @@ def authority_registry_from_compact(raw: dict[str, Any]) -> dict[str, Any] | Non
         "project_material_current_authority_count": int(
             raw.get("project_material_current_authority_count") or 0
         ),
-        "deprecated_source_count": int(raw.get("deprecated_source_count") or 0),
+        "deprecated_source_count": int(
+            raw.get("deprecated_source_count") or raw.get("deprecated_sources_seen") or 0
+        ),
         "conflict_risk": str(raw.get("conflict_risk") or "unknown"),
+        "default_entries": [],
     }
+
+    if "default_entry_docs" in raw:
+        default_entries = authority_registry_default_entries(raw.get("default_entry_docs"))
+        checked_entries: list[dict[str, Any]] = []
+        present = 0
+        checked = 0
+        for entry_path in default_entries:
+            resolved_entry = _resolve_project_path(project, entry_path)
+            exists = resolved_entry.exists() if resolved_entry else None
+            if exists is not None:
+                checked += 1
+            if exists:
+                present += 1
+            checked_entries.append({"path": entry_path, "exists": exists})
+        summary.update(
+            {
+                "default_entry_count": len(default_entries),
+                "default_entries_checked": checked,
+                "default_entries_present": present,
+                "default_entries": checked_entries,
+            }
+        )
+    if "topic_authority" in raw:
+        summary["topic_authority_count"] = authority_registry_topic_count(raw.get("topic_authority"))
+    if "project_materials" in raw:
+        summary.update(authority_registry_project_material_stats(raw.get("project_materials")))
+    if "deprecated_sources" in raw:
+        summary["deprecated_source_count"] = authority_registry_deprecated_count(raw.get("deprecated_sources"))
+    return summary
+
+
+def authority_registry_summary(goal: dict[str, Any] | None) -> dict[str, Any]:
+    compact = compact_authority_registry(goal, project=None)
+    compact.pop("default_entries", None)
+    return compact
 
 
 def goal_authority_registry_summary(goal: dict[str, Any] | None) -> dict[str, Any]:
-    raw = goal.get("authority_registry") if goal and isinstance(goal.get("authority_registry"), dict) else {}
-    compact = authority_registry_from_compact(raw) if raw else None
-    return compact or authority_registry_summary(goal)
+    return authority_registry_summary(goal)
