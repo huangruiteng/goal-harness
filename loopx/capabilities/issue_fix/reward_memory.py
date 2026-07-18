@@ -43,6 +43,9 @@ ISSUE_FIX_REVIEWER_NOTIFICATION_POLICY_SCHEMA_VERSION = (
     "issue_fix_reviewer_notification_delivery_policy_v0"
 )
 ISSUE_FIX_REWARD_MEMORY_EVENT_SCHEMA_VERSION = "issue_fix_reward_memory_event_v0"
+ISSUE_FIX_REWARD_MEMORY_EXECUTION_EVIDENCE_SCHEMA_VERSION = (
+    "issue_fix_reward_memory_execution_evidence_v0"
+)
 
 _LOCAL_TIME_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
 
@@ -68,6 +71,99 @@ _GUARD_FIELDS = {
     "conflict_state",
     "current_artifact_verified",
 }
+
+
+def _execution_evidence(
+    recall: Mapping[str, Any] | None,
+    application: Mapping[str, Any] | None = None,
+    *,
+    query_kind: str | None = None,
+) -> dict[str, Any]:
+    """Build the minimum evidence needed for conservative outcome reporting."""
+
+    recall_packet = recall if isinstance(recall, Mapping) else {}
+    application_packet = application if isinstance(application, Mapping) else {}
+    receipt_raw = application_packet.get("receipt")
+    receipt = receipt_raw if isinstance(receipt_raw, Mapping) else None
+    provider_call_count = int(recall_packet.get("provider_call_count") or 0)
+    effective_query_kind = str(
+        query_kind or recall_packet.get("query_kind") or "business_recall"
+    )
+    exact_readback_verified = recall_packet.get("result_readback_verified") is True
+    query_evidence_raw = recall_packet.get("query_evidence")
+    query_evidence = (
+        [dict(item) for item in query_evidence_raw if isinstance(item, Mapping)]
+        if isinstance(query_evidence_raw, (list, tuple))
+        else []
+    )
+    query_evidence_verified = bool(query_evidence) and all(
+        len(str(item.get("query_digest") or "")) == 16
+        and bool(str(item.get("query_summary") or "").strip())
+        and item.get("exact_query_exposed") is False
+        for item in query_evidence
+    )
+    provider_recall_verified = bool(
+        provider_call_count > 0 and exact_readback_verified and query_evidence_verified
+    )
+    receipt_verified = bool(
+        receipt
+        and effective_query_kind == "business_recall"
+        and receipt.get("schema_version") == "reward_memory_application_receipt_v0"
+        and receipt.get("query_kind") == "business_recall"
+        and receipt.get("query_evidence") == query_evidence
+        and receipt.get("provider_call_count") == provider_call_count
+        and provider_recall_verified
+        and receipt.get("outcome") == "applied"
+        and receipt.get("result_readback_verified") is True
+        and receipt.get("current_artifact_verified") is True
+        and receipt.get("memory_ref_digests")
+    )
+    if effective_query_kind == "ingest_verification" and provider_recall_verified:
+        verified_result = "ingest_exact_readback_verified"
+    elif effective_query_kind == "ingest_verification" and provider_call_count:
+        verified_result = "ingest_provider_called_without_verified_readback"
+    elif effective_query_kind == "ingest_verification":
+        verified_result = "ingest_provider_not_called"
+    elif receipt_verified:
+        verified_result = "memory_applied"
+    elif provider_recall_verified:
+        verified_result = "memory_recalled_not_applied"
+    elif provider_call_count:
+        verified_result = "provider_called_without_verified_recall"
+    else:
+        verified_result = "provider_not_called"
+
+    unknowns: list[str] = []
+    if provider_call_count == 0:
+        unknowns.append("provider_result_unknown")
+    if not query_evidence_verified:
+        unknowns.append("query_evidence_unknown")
+    if not exact_readback_verified:
+        unknowns.append("exact_recall_readback_unknown")
+    if (
+        effective_query_kind == "business_recall"
+        and application is not None
+        and not receipt_verified
+    ):
+        unknowns.append("memory_application_effect_unknown")
+
+    return {
+        "schema_version": ISSUE_FIX_REWARD_MEMORY_EXECUTION_EVIDENCE_SCHEMA_VERSION,
+        "verified_result": verified_result,
+        "unknowns": unknowns,
+        "minimum_evidence": {
+            "query_kind": effective_query_kind,
+            "query_evidence": query_evidence,
+            "provider_call_count": provider_call_count,
+            "exact_readback_verified": exact_readback_verified,
+            "application_receipt": dict(receipt) if receipt is not None else None,
+        },
+        "claim_policy": (
+            "claim_recalled_only_after_query_provider_call_and_exact_readback_and_"
+            "claim_applied_only_after_matching_verified_application_receipt"
+        ),
+        "raw_content_captured": False,
+    }
 
 
 def _strict_object(
@@ -141,12 +237,17 @@ def ingest_issue_fix_reward_memory_event(
         provider=provider,
     )
     summary = public_safe_compact_text(raw.get("content_summary"), limit=500)
+    readback_raw = result.get("readback")
+    readback = readback_raw if isinstance(readback_raw, Mapping) else None
     return result | {
         "adapter_schema_version": ISSUE_FIX_REWARD_MEMORY_EVENT_SCHEMA_VERSION,
         "issue_ref": public_safe_compact_text(raw.get("issue_ref"), limit=160),
         "event_summary_digest": hashlib.sha256(summary.encode("utf-8")).hexdigest()[
             :16
         ],
+        "execution_evidence": _execution_evidence(
+            readback, query_kind="ingest_verification"
+        ),
         "next_issue_fix_call": "run_issue_fix_patch_planning_reward_memory",
     }
 
@@ -192,6 +293,7 @@ def run_issue_fix_patch_planning_reward_memory(
             "surface_id": ISSUE_FIX_PATCH_PLANNING_SURFACE,
             "revision_ref": revision_ref,
             "mode": mode,
+            "query_kind": "business_recall",
             "queries": queries,
             "limit": limit,
             "observed_at": observed_at,
@@ -216,6 +318,9 @@ def run_issue_fix_patch_planning_reward_memory(
         "patch_plan": dict(output),
         "recall": shared["recall"],
         "application": shared["application"],
+        "execution_evidence": _execution_evidence(
+            shared["recall"], shared["application"]
+        ),
         "shared_core": shared["shared_core"],
         "adapter_role": "field_mapping_only_model_owns_patch_tradeoffs",
         "automatic_recall": False,
@@ -583,9 +688,7 @@ def _reviewer_notification_before_send_applier(
             return {
                 "outcome": "ignored",
                 "output": dict(base),
-                "memory_refs": [
-                    ref for _, refs in policies.values() for ref in refs
-                ],
+                "memory_refs": [ref for _, refs in policies.values() for ref in refs],
                 "reasoning_summary": (
                     "No single active structured reviewer delivery policy was recalled."
                 ),
@@ -644,9 +747,7 @@ def reviewer_notification_before_send_gate(
     ):
         reasons.append("current_artifact_identity_mismatch")
     try:
-        policy = _reviewer_notification_delivery_policy(
-            decision.get("delivery_policy")
-        )
+        policy = _reviewer_notification_delivery_policy(decision.get("delivery_policy"))
     except ValueError:
         policy = None
         reasons.append("delivery_policy_invalid")
@@ -756,9 +857,7 @@ def run_issue_fix_reviewer_notification_automatic_reward_memory(
     )
     result = {
         "ok": True,
-        "schema_version": (
-            ISSUE_FIX_REVIEWER_NOTIFICATION_APPLICATION_SCHEMA_VERSION
-        ),
+        "schema_version": (ISSUE_FIX_REVIEWER_NOTIFICATION_APPLICATION_SCHEMA_VERSION),
         "surface_id": ISSUE_FIX_REVIEWER_NOTIFICATION_SURFACE,
         "decision": dict(output),
         "recall": attempts[-1] if attempts else {"status": automatic["status"]},
