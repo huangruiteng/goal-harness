@@ -13,10 +13,8 @@ from .state_refresh import now_local, resolve_goal_state
 from .status import (
     MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
     active_state_event_projection_fields,
-    compact_todo_group,
-    normalize_todo_text,
-    parse_active_state_todos,
 )
+from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from .control_plane.todos.contract import (
     TodoContinuationPolicy,
     TODO_STATUS_DEFERRED,
@@ -78,6 +76,7 @@ from .control_plane.todos.line_update import (
 )
 from .control_plane.todos.monitor_metadata import require_monitor_metadata_scope
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
+from .control_plane.todos.todo_summary import compact_todo_group, normalize_todo_text
 from .control_plane.todos.succession_warning import build_open_parent_successor_advisory
 from .control_plane.todos.todo_index import MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL
 from .control_plane.todos.text import (
