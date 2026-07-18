@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -267,13 +268,18 @@ def assert_no_changes_does_not_mask_direct_failures() -> None:
     assert status["merge_gate_passed"] is False, status
 
 
-def assert_installed_wrapper_premerge_redirects_to_checkout() -> None:
+def assert_installed_wrapper_uses_bound_python_and_redirects_to_checkout() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         release_root = Path(temp_dir) / "release"
         scripts_dir = release_root / "scripts"
         scripts_dir.mkdir(parents=True)
         wrapper = scripts_dir / "loopx"
         shutil.copy2(REPO_ROOT / "scripts" / "loopx", wrapper)
+        fake_bin = Path(temp_dir) / "fake-bin"
+        fake_bin.mkdir()
+        poisoned_python = fake_bin / "python3"
+        poisoned_python.write_text("#!/usr/bin/env bash\nexit 86\n", encoding="utf-8")
+        poisoned_python.chmod(0o755)
         completed = subprocess.run(
             [
                 str(wrapper),
@@ -286,6 +292,11 @@ def assert_installed_wrapper_premerge_redirects_to_checkout() -> None:
                 "--no-execute",
             ],
             cwd=REPO_ROOT,
+            env={
+                **os.environ,
+                "LOOPX_PYTHON": sys.executable,
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            },
             check=False,
             text=True,
             stdout=subprocess.PIPE,
@@ -339,6 +350,7 @@ def assert_external_dirty_worktree_uses_caller_repo() -> None:
                 "60",
             ],
             cwd=external_repo,
+            env={**os.environ, "LOOPX_PYTHON": sys.executable},
             check=False,
             text=True,
             stdout=subprocess.PIPE,
@@ -379,6 +391,7 @@ def assert_external_dirty_worktree_uses_caller_repo() -> None:
                 "60",
             ],
             cwd=external_repo,
+            env={**os.environ, "LOOPX_PYTHON": sys.executable},
             check=False,
             text=True,
             stdout=subprocess.PIPE,
@@ -462,7 +475,7 @@ def main() -> None:
     assert_cli_json_preview()
     assert_cli_premerge_reports_progress_by_default()
     assert_no_changes_does_not_mask_direct_failures()
-    assert_installed_wrapper_premerge_redirects_to_checkout()
+    assert_installed_wrapper_uses_bound_python_and_redirects_to_checkout()
     assert_external_dirty_worktree_uses_caller_repo()
     assert_inherited_line_budget_red_is_advisory_only()
     print("premerge-validation-gate-smoke ok")
