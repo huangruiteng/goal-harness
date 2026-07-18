@@ -9,6 +9,10 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "loopx"
 CONTROL_PLANE_ROOT = PACKAGE_ROOT / "control_plane"
 STATUS_MODULE = PACKAGE_ROOT / "status.py"
 QUOTA_MODULE = PACKAGE_ROOT / "quota.py"
+GOAL_BOUNDARY_MODULE = CONTROL_PLANE_ROOT / "quota" / "goal_boundary.py"
+OPERATOR_INBOX_MODULE = CONTROL_PLANE_ROOT / "work_items" / "operator_inbox.py"
+QUOTA_CLI_MODULE = PACKAGE_ROOT / "cli_commands" / "quota.py"
+TURN_CLI_MODULE = PACKAGE_ROOT / "cli_commands" / "turn.py"
 LARK_INBOX_CLI_MODULE = PACKAGE_ROOT / "cli_commands" / "lark_inbox.py"
 ISSUE_FIX_REVIEWER_CLI_MODULE = (
     PACKAGE_ROOT / "capabilities" / "issue_fix" / "reviewer_cli.py"
@@ -109,11 +113,29 @@ def test_status_outward_dependency_debt_only_shrinks() -> None:
     )
 
 
-def test_quota_operator_inbox_dependency_points_inward() -> None:
-    imports = _resolved_imports(QUOTA_MODULE)
+def test_quota_receives_lark_urgency_only_through_cli_composition() -> None:
+    for module in (QUOTA_MODULE, GOAL_BOUNDARY_MODULE):
+        imports = _resolved_imports(module)
+        assert not any(
+            dependency == "loopx.extensions.lark"
+            or dependency.startswith("loopx.extensions.lark.")
+            for dependency in imports
+        )
 
-    assert "loopx.capabilities.lark.event_inbox" not in imports
-    assert "loopx.control_plane.work_items.operator_inbox" in imports
+    assert "loopx.cli_commands.lark_inbox" in _resolved_imports(QUOTA_CLI_MODULE)
+    assert "loopx.cli_commands.lark_inbox" in _resolved_imports(TURN_CLI_MODULE)
+
+
+def test_lark_operator_inbox_contract_is_extension_owned() -> None:
+    core_source = OPERATOR_INBOX_MODULE.read_text(encoding="utf-8")
+    extension_source = (LARK_EXTENSION_ROOT / "event_inbox.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "LARK_OPERATOR_INBOX_SOURCE_CONTRACT" not in core_source
+    assert "lark_event_inbox_config_v0" not in core_source
+    assert "LARK_OPERATOR_INBOX_SOURCE_CONTRACT" in extension_source
+    assert "OperatorInboxSourceContract" in extension_source
 
 
 def test_lark_inbox_provider_is_owned_by_the_extension_layer() -> None:
