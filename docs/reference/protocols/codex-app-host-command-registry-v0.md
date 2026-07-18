@@ -165,12 +165,15 @@ fields can rerun the advertised command or pass
 `--include-command-pack-detail`. Both modes must produce the same host-action
 projection before a compact default is promoted.
 
-`start-goal` does not guess among Codex App, Codex IDE, and Codex CLI TUI.
-Callers should pass `--host-surface codex-app`, `codex-ide`, or
-`codex-cli-tui` for the exact current host. If the option is omitted, the
-command returns a read-only `host_surface_selection` gate with exact rerun
-commands; it must not connect a project, write todos, activate a host, or spend
-quota.
+`start-goal` does not guess among Codex App, the Codex IDE plugin, and Codex CLI
+TUI. Callers should pass `--host-surface codex-app`,
+`codex-ide-plugin`, or `codex-cli-tui` for the exact current host.
+`codex-ide-plugin` means the installed IDE plugin host, not any Codex session
+used alongside an editor. The legacy `codex-ide` value remains accepted as a
+compatibility alias but is not offered by the selection gate. If the option is
+omitted, the command returns a read-only `host_surface_selection` gate with
+exact rerun commands; it must not connect a project, write todos, activate a
+host, or spend quota.
 
 ## Permission Boundary
 
@@ -207,7 +210,7 @@ loopx agent-onboard --list-agent-types
 loopx agent-onboard --agent-type codex-cli --project .
 loopx bootstrap-command-pack --project .
 loopx start-goal --guided --project . --goal-text "<goal text>" --host-surface codex-cli-tui
-loopx --format json start-goal --guided --project . --goal-text "<goal text>" --host-surface codex-ide --include-command-pack-detail
+loopx --format json start-goal --guided --project . --goal-text "<goal text>" --host-surface codex-ide-plugin --include-command-pack-detail
 loopx bootstrap-command-pack --project . --goal-text "<goal text>"
 loopx pr-review
 loopx global-summary

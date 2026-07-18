@@ -43,21 +43,22 @@ def main() -> int:
     agent_types = {item["agent_type"] for item in catalog["canonical_agent_types"]}
     assert {
         "codex-app",
-        "codex-ide",
+        "codex-ide-plugin",
         "codex-cli",
         "claude-code",
         "manual",
         "other-agent",
     } <= agent_types
     ambiguous = {item["input"]: item["use_one_of"] for item in catalog["ambiguous_inputs"]}
-    assert ambiguous["codex"] == ["codex-app", "codex-ide", "codex-cli"], ambiguous
+    assert ambiguous["codex"] == ["codex-app", "codex-ide-plugin", "codex-cli"], ambiguous
 
     assert agent_type_for_host_surface("chat-box") == "codex-app"
-    assert agent_type_for_host_surface("codex-ide") == "codex-ide"
+    assert agent_type_for_host_surface("codex-ide-plugin") == "codex-ide-plugin"
+    assert agent_type_for_host_surface("codex-ide") == "codex-ide-plugin"
     assert agent_type_for_host_surface("codex-cli-tui") == "codex-cli"
 
     codex_app = build_host_loop_activation_packet(agent_type="codex-app", goal_id="demo")
-    codex_ide = build_host_loop_activation_packet(agent_type="codex-ide", goal_id="demo")
+    codex_ide = build_host_loop_activation_packet(agent_type="codex-ide-plugin", goal_id="demo")
     codex_cli = build_host_loop_activation_packet(agent_type="codex-cli", goal_id="demo")
     claude_code = build_host_loop_activation_packet(agent_type="claude-code", goal_id="demo")
     assert codex_app["activation_method"] == "create_or_update_codex_app_automation", codex_app
@@ -112,7 +113,7 @@ def main() -> int:
     assert ambiguous_payload["ok"] is False, ambiguous_payload
     assert ambiguous_payload["suggestions"] == [
         "codex-app",
-        "codex-ide",
+        "codex-ide-plugin",
         "codex-cli",
     ], ambiguous_payload
 
@@ -257,6 +258,18 @@ def main() -> int:
                 key,
                 selected_pack["commands"],
             )
+
+        ide_onboarding = build_agent_onboarding_packet(
+            project=project,
+            agent_type="codex-ide-plugin",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        ide_bootstrap = ide_onboarding["commands"]["bootstrap_command_pack"]
+        assert "--host-surface codex-ide-plugin" in ide_bootstrap, ide_onboarding
+        assert "worker-bridge" not in ide_bootstrap, ide_onboarding
+        assert "visible IDE plugin" in ide_onboarding["recommended_start"], ide_onboarding
 
     return 0
 

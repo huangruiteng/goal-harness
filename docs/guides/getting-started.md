@@ -123,11 +123,14 @@ integrations that need the lower-level handoff packet can use
 manager or PR review commands, use `loopx slash-commands` to print the current
 canonical command list and fallback CLI shapes.
 
-Use `codex-app`, `codex-ide`, or `codex-cli-tui` for the corresponding Codex
-host. If the exact host is not known, omit `--host-surface` once: LoopX returns
-a read-only selection gate with exact rerun commands and does not write project
-state. This prevents an upgrade from silently routing an IDE or terminal start
-to a desktop-app heartbeat.
+Use `codex-app`, `codex-ide-plugin`, or `codex-cli-tui` for the corresponding
+Codex host. Select `codex-ide-plugin` only when LoopX is running through the
+installed IDE plugin; using Codex beside an editor does not make the host an IDE
+plugin. If the exact host is not known, omit `--host-surface` once: LoopX
+returns a read-only selection gate with exact rerun commands and does not write
+project state. The legacy `codex-ide` value remains an accepted compatibility
+alias but is no longer advertised. This prevents an upgrade from silently
+routing an IDE plugin or terminal start to a desktop-app heartbeat.
 
 ## Local State Backup
 

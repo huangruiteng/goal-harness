@@ -241,7 +241,7 @@ def onboarding_entry_contract_violations(
             violations.append("connect_route_requires_host_loop_activation")
         if contract.get("host_loop_activation_after_todo_write") is not True:
             violations.append("host_loop_must_activate_after_todo_write")
-        if contract.get("requested_host_surface") == "codex-ide":
+        if contract.get("requested_host_surface") in {"codex-ide-plugin", "codex-ide"}:
             if contract.get("host_surface") != "codex_ide_visible_goal_mode":
                 violations.append("codex_ide_requires_ide_goal_surface")
             if contract.get("activation_method") != "set_visible_goal":

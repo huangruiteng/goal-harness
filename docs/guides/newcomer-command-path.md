@@ -59,10 +59,12 @@ loopx start-goal --guided --project . --goal-text "<your first long-running task
 The command pack checks the host-facing recovery packet. The guided start
 packet is the first task path: paste the generated transaction into Codex,
 Claude Code, or another compatible agent that can run shell commands from the
-project root. Replace `codex-cli-tui` with `codex-app`, `codex-ide`,
-`claude-code`, or `shell` when that is the actual host. When the host is
-unclear, omit the flag once and follow the returned read-only selection gate;
-that preview does not write project state.
+project root. Replace `codex-cli-tui` with `codex-app`, `codex-ide-plugin`,
+`claude-code`, or `shell` when that is the actual host. Use
+`codex-ide-plugin` only for the installed IDE plugin, not for another Codex
+surface that happens to be used near an editor. When the host is unclear, omit
+the flag once and follow the returned read-only selection gate; that preview
+does not write project state.
 
 ## Multi-Project Manager Commands
 

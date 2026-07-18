@@ -50,7 +50,7 @@ def register_slash_commands_command(
     parser.add_argument(
         "--surface",
         action="append",
-        choices=["all", "codex", "codex-cli", "codex-app", "codex-ide", "claude-code"],
+        choices=["all", "codex", "codex-cli", "codex-app", "codex-ide-plugin", "codex-ide", "claude-code"],
         help=(
             "Host surface to install. Repeatable. Defaults to all "
             "(Codex explicit skills plus Claude Code skills)."

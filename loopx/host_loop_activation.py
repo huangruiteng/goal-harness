@@ -26,7 +26,7 @@ def scheduler_command_binding_for_agent_type(
     runtime_profile = {
         "codex-app": SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
         "codex-cli": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
-        "codex-ide": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
+        "codex-ide-plugin": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
         "claude-code": SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE,
     }.get(canonical)
     if runtime_profile is not None:
@@ -36,7 +36,7 @@ def scheduler_command_binding_for_agent_type(
 
 SUPPORTED_AGENT_TYPES = [
     "codex-app",
-    "codex-ide",
+    "codex-ide-plugin",
     "codex-cli",
     "claude-code",
     "manual",
@@ -63,14 +63,19 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
             "codex tui",
         ],
     },
-    "codex-ide": {
-        "display_name": "Codex IDE extension",
-        "host_loop": "visible Codex IDE /goal",
+    "codex-ide-plugin": {
+        "display_name": "Codex IDE plugin",
+        "host_loop": "visible Codex IDE plugin /goal",
         "entry": "$loopx <task> or the explicit LoopX skill from /skills",
         "accepted_inputs": [
+            "codex-ide-plugin",
+            "codex_ide_plugin",
+            "codex ide plugin",
             "codex-ide",
             "codex_ide",
             "codex ide",
+            "codex-ide-extension",
+            "codex ide extension",
             "codex-vscode",
             "codex vscode",
             "vscode-codex",
@@ -98,9 +103,9 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 AMBIGUOUS_AGENT_TYPE_INPUTS: dict[str, list[str]] = {
-    "codex": ["codex-app", "codex-ide", "codex-cli"],
-    "openai-codex": ["codex-app", "codex-ide", "codex-cli"],
-    "openai codex": ["codex-app", "codex-ide", "codex-cli"],
+    "codex": ["codex-app", "codex-ide-plugin", "codex-cli"],
+    "openai-codex": ["codex-app", "codex-ide-plugin", "codex-cli"],
+    "openai codex": ["codex-app", "codex-ide-plugin", "codex-cli"],
     "cli": ["codex-cli", "manual", "other-agent"],
 }
 
@@ -138,7 +143,8 @@ class AgentTypeError(ValueError):
 HOST_SURFACE_TO_AGENT_TYPE = {
     "codex-app": "codex-app",
     "chat-box": "codex-app",
-    "codex-ide": "codex-ide",
+    "codex-ide-plugin": "codex-ide-plugin",
+    "codex-ide": "codex-ide-plugin",
     "codex-cli-tui": "codex-cli",
     "claude-code": "claude-code",
     "shell": "manual",
@@ -167,7 +173,8 @@ def build_agent_type_catalog() -> dict[str, Any]:
         ],
         "selection_rule": (
             "Agents should pass a canonical agent_type. Ambiguous values such as "
-            "`codex` are rejected because Codex App, Codex IDE, and Codex CLI have different "
+            "`codex` are rejected because Codex App, the Codex IDE plugin, and Codex CLI "
+            "have different "
             "host-loop activation paths."
         ),
     }
@@ -259,7 +266,7 @@ def _heartbeat_commands(
 ) -> dict[str, str]:
     scope_by_type = {
         "codex-app": "Codex App heartbeat automation",
-        "codex-ide": "Codex IDE /goal visible task loop",
+        "codex-ide-plugin": "Codex IDE plugin /goal visible task loop",
         "codex-cli": "Codex CLI /goal visible TUI loop",
         "claude-code": "Claude Code native /loop gated by LoopX",
         "manual": "External scheduler or manual shell LoopX poll",
@@ -423,7 +430,7 @@ def _codex_cli_activation(commands: dict[str, str]) -> dict[str, Any]:
 def _codex_ide_activation(commands: dict[str, str]) -> dict[str, Any]:
     return _codex_goal_activation(
         commands,
-        host_label="Codex IDE composer",
+        host_label="Codex IDE plugin composer",
         host_surface="codex_ide_visible_goal_mode",
     )
 
@@ -514,7 +521,7 @@ def build_host_loop_activation_packet(
     )
     if canonical == "codex-app":
         surface = _codex_app_activation(commands)
-    elif canonical == "codex-ide":
+    elif canonical == "codex-ide-plugin":
         surface = _codex_ide_activation(commands)
     elif canonical == "codex-cli":
         surface = _codex_cli_activation(commands)
