@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any
+
+from .registry import CapabilityRegistry
+from ..extensions.manifest import load_extension_manifest
 
 
 CAPABILITY_CATALOG_SCHEMA_VERSION = "loopx_capability_catalog_v0"
 CAPABILITY_DETAIL_SCHEMA_VERSION = "loopx_capability_detail_v0"
 
 
-CAPABILITIES: tuple[dict[str, Any], ...] = (
+BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "id": "issue-fix",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "Repo issue-fix loop",
         "status": "active-preview",
         "real_world_anchor": "open-source issue/PR solver",
@@ -220,6 +227,9 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "semantic-preference",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "Optional semantic preference hook",
         "status": "active-preview",
         "real_world_anchor": "provider-neutral preference recall before domain work",
@@ -297,6 +307,9 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "reward-memory",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "Reward-memory candidate, recall, and application foundation",
         "status": "active-preview",
         "real_world_anchor": (
@@ -494,6 +507,9 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "content-ops",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "Creator/content operations loop",
         "status": "active-preview",
         "real_world_anchor": "self-media operations and public/private source intake",
@@ -579,6 +595,9 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "value-connectors",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "External value connector starters",
         "status": "active-preview",
         "real_world_anchor": "external channel intake for revenue, cost, demand, and connector reuse",
@@ -677,12 +696,18 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
 )
 
+# Preserve the original import surface while routing all reads through the registry.
+CAPABILITIES = BUILTIN_CAPABILITIES
+
 
 def _summary(record: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "id": record["id"],
         "title": record["title"],
         "status": record["status"],
+        "origin": record["origin"],
+        "visibility": record["visibility"],
+        "provider_id": record["provider_id"],
         "real_world_anchor": record["real_world_anchor"],
         "entry_command": record["entry_command"],
         "implemented_protocol_count": len(record.get("implemented_protocols") or []),
@@ -691,30 +716,66 @@ def _summary(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def capability_ids() -> list[str]:
-    return [str(record["id"]) for record in CAPABILITIES]
+def build_capability_registry(
+    extension_manifest_paths: Iterable[str | Path] = (),
+) -> CapabilityRegistry:
+    registry = CapabilityRegistry()
+    registry.register_provider(
+        {
+            "id": "loopx-core",
+            "origin": "builtin",
+            "enabled": True,
+        }
+    )
+    for record in BUILTIN_CAPABILITIES:
+        registry.register_capability(record)
+    for manifest_path in extension_manifest_paths:
+        manifest = load_extension_manifest(manifest_path)
+        registry.register_provider(manifest["provider"])
+        for record in manifest["capabilities"]:
+            registry.register_capability(record)
+    return registry
 
 
-def get_capability(capability_id: str) -> dict[str, Any]:
-    wanted = str(capability_id or "").strip()
-    for record in CAPABILITIES:
-        if record["id"] == wanted:
-            return dict(record)
-    raise ValueError(
-        f"unknown capability `{wanted}`; expected one of {capability_ids()}"
+def capability_ids(
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    include_internal: bool = False,
+) -> list[str]:
+    return build_capability_registry(extension_manifest_paths).capability_ids(
+        include_internal=include_internal
     )
 
 
-def build_capability_catalog_packet() -> dict[str, Any]:
+def get_capability(
+    capability_id: str,
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    include_internal: bool = False,
+) -> dict[str, Any]:
+    return build_capability_registry(extension_manifest_paths).get(
+        capability_id,
+        include_internal=include_internal,
+    )
+
+
+def build_capability_catalog_packet(
+    extension_manifest_paths: Iterable[str | Path] = (),
+) -> dict[str, Any]:
+    registry = build_capability_registry(extension_manifest_paths)
     return {
         "ok": True,
         "schema_version": CAPABILITY_CATALOG_SCHEMA_VERSION,
-        "capabilities": [_summary(record) for record in CAPABILITIES],
+        "capabilities": [_summary(record) for record in registry.records()],
+        "providers": registry.providers(),
     }
 
 
-def build_capability_detail_packet(capability_id: str) -> dict[str, Any]:
-    record = get_capability(capability_id)
+def build_capability_detail_packet(
+    capability_id: str,
+    extension_manifest_paths: Iterable[str | Path] = (),
+) -> dict[str, Any]:
+    record = get_capability(capability_id, extension_manifest_paths)
     return {
         "ok": True,
         "schema_version": CAPABILITY_DETAIL_SCHEMA_VERSION,
@@ -732,6 +793,8 @@ def render_capability_catalog_markdown(payload: dict[str, Any]) -> str:
                 f"## {item.get('id')}: {item.get('title')}",
                 "",
                 f"- status: `{item.get('status')}`",
+                f"- provider: `{item.get('provider_id')}` ({item.get('origin')})",
+                f"- visibility: `{item.get('visibility')}`",
                 f"- anchor: {item.get('real_world_anchor')}",
                 f"- entry: `{item.get('entry_command')}`",
                 f"- implemented_protocol_count: `{item.get('implemented_protocol_count')}`",
@@ -752,6 +815,8 @@ def render_capability_detail_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- id: `{record.get('id')}`",
         f"- status: `{record.get('status')}`",
+        f"- provider: `{record.get('provider_id')}` ({record.get('origin')})",
+        f"- visibility: `{record.get('visibility')}`",
         f"- anchor: {record.get('real_world_anchor')}",
         f"- value: {record.get('user_value')}",
         f"- entry: `{record.get('entry_command')}`",

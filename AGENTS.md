@@ -134,6 +134,36 @@ Treat code volume as a cost, especially during refactors. A good LoopX change
 should make the next change easier to localize, test, and revert; it should not
 turn a design possibility into unused production structure.
 
+## Capability And Extension Placement
+
+Before adding an ability, decide its capability owner and provider boundary;
+do not choose a directory from the feature name alone:
+
+- name public capabilities after caller outcomes, not delivery mechanisms. A
+  proposed `connector`, `provider`, `adapter`, or `sink` capability needs an
+  independently useful caller contract; otherwise make it an extension
+  provider or an internal part of the outcome capability it serves;
+- extend `loopx/capabilities/<capability>/` when the change belongs to an
+  existing product contract and shares that built-in capability's lifecycle;
+- create a new built-in capability only when LoopX core must ship it by
+  default and it has a stable caller contract, real entrypoint, and focused
+  validation;
+- put generic manifest, registration, compatibility, and lifecycle mechanics
+  in `loopx/extensions/`;
+- put an independently versioned or optional provider in
+  `extensions/<extension-id>/` when it is co-located, or in its own package or
+  repository when it is distributed separately;
+- when a provider introduces a new product contract, register the capability
+  contract and implement it through the extension rather than choosing only
+  one side;
+- keep private helpers in the nearest owning module. A helper is not a new
+  capability or extension merely because several files are involved.
+
+Record the placement rationale before editing: capability id, provider id,
+whether the provider is built-in or extension-delivered, and why the nearest
+existing owner is or is not sufficient. See `docs/extensions.md` for the full
+decision guide.
+
 Before adding a new module, builder, protocol field, CLI option, fixture, smoke
 section, or abstraction, pass a scope-fit review:
 
