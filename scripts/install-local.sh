@@ -17,6 +17,7 @@ Common environment variables:
   LOOPX_INSTALL_CANARY=0           Skip the loopx-canary executable.
   LOOPX_INSTALL_SKILL=0            Skip packaged Codex workflow skills.
   LOOPX_INSTALL_SLASH_COMMANDS=0   Skip Codex and Claude command skills.
+  LOOPX_INSTALL_OPENCODE=0         Install the OpenCode goal bridge surface.
   CODEX_HOME=/path                 Override the Codex home directory.
 EOF
 }
@@ -631,6 +632,22 @@ if [[ "$install_claude" != "0" && -f "$claude_installer" ]]; then
   fi
 fi
 
+# loopx OpenCode goal bridge: OPT-IN, OFF by default. Static OpenCode commands
+# remain part of the ordinary slash-command install; this flag additionally
+# provisions the plugin, runtime, and pinned dependencies. The bridge wraps
+# opencode-goal-plugin@0.6.5 and gates idle continuation plus timer wakes
+# through LoopX quota should-run. Install manually with:
+#   loopx slash-commands --install --surface opencode --with-goal-bridge
+install_opencode="${LOOPX_INSTALL_OPENCODE:-0}"
+opencode_line="- loopx OpenCode bridge: skipped (opt-in; LOOPX_INSTALL_OPENCODE=1, or run: loopx slash-commands --install --surface opencode --with-goal-bridge)"
+if [[ "$install_opencode" != "0" ]]; then
+  if "$bin_dir/loopx" slash-commands --install --surface opencode --with-goal-bridge >/dev/null 2>&1; then
+    opencode_line="- loopx OpenCode bridge: ~/.config/opencode (commands, plugin, runtime, pinned deps; restart OpenCode after install)"
+  else
+    opencode_line="- loopx OpenCode bridge: install attempted; run manually: loopx slash-commands --install --surface opencode --with-goal-bridge"
+  fi
+fi
+
 cat <<EOF
 loopx installed locally
 - executable: $bin_dir/loopx
@@ -645,6 +662,7 @@ $legacy_line
 $skill_line
 $slash_line
 $claude_line
+$opencode_line
 
 Current shell can use it with:
   export PATH="$bin_dir:\$PATH"

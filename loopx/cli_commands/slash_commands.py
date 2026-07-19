@@ -50,10 +50,18 @@ def register_slash_commands_command(
     parser.add_argument(
         "--surface",
         action="append",
-        choices=["all", "codex", "codex-cli", "codex-app", "codex-ide-plugin", "codex-ide", "claude-code"],
+        choices=["all", "codex", "codex-cli", "codex-app", "codex-ide-plugin", "codex-ide", "claude-code", "opencode"],
         help=(
-            "Host surface to install. Repeatable. Defaults to all "
-            "(Codex explicit skills plus Claude Code skills)."
+            "Host surface to install. Repeatable. Defaults to static command facades "
+            "for Codex, Claude Code, and OpenCode."
+        ),
+    )
+    parser.add_argument(
+        "--with-goal-bridge",
+        action="store_true",
+        help=(
+            "Also install or uninstall the executable OpenCode goal bridge. Requires "
+            "an effective OpenCode surface and explicit opt-in."
         ),
     )
     parser.add_argument(
@@ -63,6 +71,10 @@ def register_slash_commands_command(
     parser.add_argument(
         "--claude-home",
         help="Claude Code home for skill installation. Defaults to CLAUDE_HOME or ~/.claude.",
+    )
+    parser.add_argument(
+        "--opencode-home",
+        help="OpenCode config directory. Defaults to OPENCODE_CONFIG_DIR or ~/.config/opencode.",
     )
     parser.add_argument(
         "--dry-run",
@@ -83,14 +95,16 @@ def handle_slash_commands_command(
         payload = install_slash_commands(
             execute=bool((args.install or args.uninstall) and not args.dry_run),
             uninstall=bool(args.uninstall),
+            with_goal_bridge=bool(args.with_goal_bridge),
             surfaces=args.surface,
             cli_bin=args.cli_bin,
             include_legacy_aliases=not bool(args.no_legacy_aliases),
             codex_home=args.codex_home,
             claude_home=args.claude_home,
+            opencode_home=args.opencode_home,
         )
         print_payload(payload, output_format(args), render_slash_command_install_markdown)
-        return 0
+        return 0 if payload.get("ok") is True else 1
     payload = build_slash_command_catalog(
         cli_bin=args.cli_bin,
         include_legacy_aliases=not bool(args.no_legacy_aliases),

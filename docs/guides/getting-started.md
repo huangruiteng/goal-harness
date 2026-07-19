@@ -79,6 +79,10 @@ can discover user-installed skills:
 - Claude Code: lightweight user skills under `~/.claude/skills/loopx*`, so the
   command family can appear as Claude Code slash commands without enabling the
   opt-in MCP/hook adapter.
+- OpenCode: static command files under `~/.config/opencode/commands/` expose
+  native `/loopx` slash commands after restart. The executable goal bridge
+  (timer-based idle continuation gated by LoopX quota) requires an explicit
+  `--with-goal-bridge` install.
 
 The command family is the same across surfaces, even when the host-specific
 entry point is different:
@@ -123,8 +127,8 @@ integrations that need the lower-level handoff packet can use
 manager or PR review commands, use `loopx slash-commands` to print the current
 canonical command list and fallback CLI shapes.
 
-Use `codex-app`, `codex-ide-plugin`, or `codex-cli-tui` for the corresponding
-Codex host. Select `codex-ide-plugin` only when LoopX is running through the
+Use `codex-app`, `codex-ide-plugin`, `codex-cli-tui`, or `opencode` for the
+corresponding host. Select `codex-ide-plugin` only when LoopX is running through the
 installed IDE plugin; using Codex beside an editor does not make the host an IDE
 plugin. If the exact host is not known, omit `--host-surface` once: LoopX
 returns a read-only selection gate with exact rerun commands and does not write
