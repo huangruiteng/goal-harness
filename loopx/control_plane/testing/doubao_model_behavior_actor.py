@@ -166,14 +166,17 @@ fields and normalize them as follows. Never copy schema placeholders.
 - spend_rule: candidate writeback. For a full packet construct exactly
   next_cli_actions, spend_allowed_now, spend_after_validation, and spend_policy
   from interaction_contract.cli_channel; use []/false/null when absent.
-- scheduler_action: candidate scheduler. For a full packet project
-  scheduler_hint using only non-null action, cadence_class, spend_policy, and a
+- scheduler_action: for a candidate copy packet.scheduler exactly, preserving
+  every key, nested object, array, and value without filtering. For a full
+  packet project scheduler_hint using only non-null action, cadence_class, spend_policy, and a
   codex_app object containing only non-null apply, host_action,
   recommended_rrule, no_spend_for_cadence_change, stateful_backoff
   {state_key,current_rrule,apply_needed,state_status}, and ack_cli_args copied
   from ack_hint.cli_args. Use {} when absent.
-- vision_continuation: candidate contract_capsule.vision_continuation_audit.
-  For a full packet copy only non-null schema_version, required, decision,
+- vision_continuation: for a candidate copy
+  packet.contract_capsule.vision_continuation_audit exactly, preserving every
+  key, array, and value, including trigger_kinds. For a full packet copy only
+  non-null schema_version, required, decision,
   selected_todo_is_goal_completion, closeout_allowed_without_evidence,
   required_before_closeout, and recommended_action from
   vision_continuation_audit. Use {} when absent.

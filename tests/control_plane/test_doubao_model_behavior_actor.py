@@ -83,6 +83,19 @@ def test_semantic_instruction_requires_exact_peer_route() -> None:
     assert "same_agent_non_delivery" in instruction
 
 
+def test_semantic_instruction_preserves_candidate_scheduler_and_vision_exactly() -> None:
+    instruction = " ".join(
+        _decision_instruction(semantic_contract_required=True).split()
+    )
+
+    assert "for a candidate copy packet.scheduler exactly" in instruction
+    assert "every key, nested object, array, and value without filtering" in instruction
+    assert (
+        "packet.contract_capsule.vision_continuation_audit exactly" in instruction
+    )
+    assert "including trigger_kinds" in instruction
+
+
 def test_direct_actor_uses_canonical_endpoint_without_tools_or_raw_retention() -> None:
     captured: dict[str, Any] = {}
 
