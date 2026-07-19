@@ -181,6 +181,7 @@ from loopx.control_plane.runtime.goal_start_control_score import (
     goal_start_public_text_list as _goal_start_public_text_list,
     goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
 )
+from loopx.control_plane.turn_driver import loopx_turn_execution_committed
 
 
 class SkillsBenchRunnerInterrupted(RuntimeError):
@@ -12383,6 +12384,19 @@ def _build_blind_loop_user(
                 return None
             if round_result is not None and _is_loopx_turn_agent_cli_route(route):
                 _merge_host_local_acp_relay_trace_summary(plan or {}, trace)
+                turn_executions = trace.get("loopx_turn_executions")
+                latest_turn = (
+                    turn_executions[-1]
+                    if isinstance(turn_executions, list) and turn_executions
+                    else None
+                )
+                if isinstance(latest_turn, Mapping) and loopx_turn_execution_committed(
+                    latest_turn
+                ):
+                    _inc_counter(trace, "controller_action_decisions")
+                    _inc_counter(trace, "stop_decision_count")
+                    trace["last_decision"] = "stop_after_loopx_turn_commit"
+                    return None
                 handled, response = resolve_skillsbench_typed_repair_response(
                     trace,
                     agent_round=round,
