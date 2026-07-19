@@ -48,9 +48,6 @@ _EXISTING_DECISION_DEBT_REASON = (
     "Existing multi-branch control-plane decision owner predates the ratchet."
 )
 _OVERSIZED_DECISION_RETIREMENT_PLANS = {
-    "loopx.control_plane.agents.agent_scope:_agent_scope_no_candidate_frontier": (
-        "Extract the distinct no-candidate frontier policies into ordered rule helpers."
-    ),
     "loopx.control_plane.quota.goal_boundary:goal_boundary": (
         "Split registry boundary resolution from capability and write-scope projection."
     ),
@@ -93,10 +90,6 @@ _OVERSIZED_DECISION_RETIREMENT_PLANS = {
 }
 
 _OVERSIZED_DECISION_METRIC_CEILINGS = {
-    "loopx.control_plane.agents.agent_scope:_agent_scope_no_candidate_frontier": {
-        "statements": 97,
-        "decision_points": 69,
-    },
     "loopx.control_plane.quota.goal_boundary:goal_boundary": {
         "statements": 96,
         "decision_points": 66,
