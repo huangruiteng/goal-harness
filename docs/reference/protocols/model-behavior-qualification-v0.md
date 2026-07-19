@@ -274,12 +274,20 @@ and TurnEnvelope path and deliberately contains competing signals:
     monitor schedule remains repairable, so the selected and primary action is
     monitor-schedule repair rather than wait or the blocked task.
 
-Every scenario declares its own semantic oracle and runs exactly twice. All
-attempts must align. Actor or transport errors are not retried automatically;
-the portfolio fails closed and stops further calls. The maximum regular run is
-therefore 24 provider calls. Pair mode remains available only for temporary
-sensitive differentials or explicit stable-versus-candidate outcome claims,
-not as a permanent regular-behavior baseline.
+Every scenario declares its own deterministic source oracle and runs exactly
+twice. The oracle validates exact packet fields before provider spend. The live
+turn actor then reads the shipped `TurnEnvelope` directly and must preserve the
+runtime-facing decision, selected todo, user gate, execution obligation,
+delivery boundary, quiet-wait rule, and ordered action kinds. It is not asked to
+echo the testing-only nine-field semantic contract. Exact scheduler, vision,
+writeback, and warning projections remain deterministic action-signature tests;
+explicit pair/corpus mode retains semantic-contract extraction when a packet
+differential is the thing under test. All attempts must align. Actor or
+transport errors are not retried automatically; the portfolio fails closed and
+stops further calls. The maximum regular run is therefore 24 provider calls.
+Pair mode remains available only for temporary sensitive differentials or
+explicit stable-versus-candidate outcome claims, not as a permanent
+regular-behavior baseline.
 
 The complete catalog is preflighted before the first provider call. Schema,
 public-safety, action-signature, actual-default, and scenario-oracle failures

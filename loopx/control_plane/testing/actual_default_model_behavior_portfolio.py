@@ -439,7 +439,7 @@ def _scenario_contract(
             packet,
             qualification_id=f"portfolio-preflight-{spec.scenario_id}",
             arm="candidate_packet",
-            semantic_contract_required=True,
+            semantic_contract_required=False,
         )
         contract = _turn_expected_contract(packet)
     else:
@@ -585,8 +585,6 @@ def _receipt_alignment(
             for field in fields
             if receipt.get(field) != expected[field]
         ]
-        if receipt.get("semantic_contract_complete") is not True:
-            mismatches.append("semantic_contract_incomplete")
         mismatches.extend(str(item) for item in receipt.get("safety_violations") or [])
     else:
         mismatches = []
@@ -620,7 +618,7 @@ def _scenario_result(
                     qualification_id=run_id,
                     arm="candidate_packet",
                     actor=turn_actor,
-                    semantic_contract_required=True,
+                    semantic_contract_required=False,
                 )
                 observed_route = str(receipt.get("decision") or "")
             else:

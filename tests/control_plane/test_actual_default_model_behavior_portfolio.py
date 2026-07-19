@@ -513,42 +513,57 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
     assert calls == 0
 
 
-def test_portfolio_oracle_catches_wrong_same_agent_route(tmp_path: Path) -> None:
-    def wrong_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> None:
+    packets = _scenario_packets(tmp_path)
+    source = _turn_source(
+        human_gate=False,
+        continuation_policy="same_agent_non_delivery",
+    )
+    source["selected_todo"]["claimed_by"] = "codex-wrong-peer"
+    packets["turn_same_agent_continuation"] = build_turn_envelope(source)
+    calls = 0
+
+    def turn_actor(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal calls
+        calls += 1
+        return _turn_actor(request)
+
+    with pytest.raises(
+        ValueError,
+        match="peer-agent scenario must route work to the selected peer",
+    ):
+        run_actual_default_model_behavior_portfolio(
+            packets,
+            qualification_id="actual-default-portfolio-wrong-peer",
+            turn_actor=turn_actor,
+            onboarding_actor=_onboarding_actor,
+        )
+
+    assert calls == 0
+
+
+def test_portfolio_turn_actor_reads_actual_packet_without_semantic_echo(
+    tmp_path: Path,
+) -> None:
+    requests: list[Mapping[str, Any]] = []
+
+    def turn_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+        requests.append(request)
         result = _turn_actor(request)
-        selected_todo = request["packet"]["action"].get("selected_todo") or {}
-        if selected_todo.get("continuation_policy") == "same_agent_non_delivery":
-            semantics = dict(result["decision"]["semantic_contract"])
-            semantics["peer_route"] = {
-                **semantics["peer_route"],
-                "agent_id": "codex-wrong-peer",
-                "same_agent_continuation": False,
-            }
-            result["decision"] = {
-                **result["decision"],
-                "semantic_contract": semantics,
-            }
+        result["decision"].pop("semantic_contract", None)
         return result
 
     result = run_actual_default_model_behavior_portfolio(
         _scenario_packets(tmp_path),
-        qualification_id="actual-default-portfolio-wrong-peer",
-        turn_actor=wrong_actor,
+        qualification_id="actual-default-portfolio-runtime-shaped",
+        turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
     )
 
-    scenario = next(
-        item
-        for item in result["scenarios"]
-        if item["scenario_id"] == "turn_same_agent_continuation"
-    )
-    assert result["qualification_passed"] is False
-    assert scenario["status"] == "failed"
-    assert scenario["repeats_completed"] == 2
-    assert scenario["failure_codes"] == [
-        "semantic_contract_incomplete",
-        "semantic_contract_mismatch:peer_route",
-    ]
+    assert result["qualification_passed"] is True
+    assert requests
+    assert all(request["arm"] == "candidate_packet" for request in requests)
+    assert all(request["semantic_contract_required"] is False for request in requests)
 
 
 def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
