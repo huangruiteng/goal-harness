@@ -12395,6 +12395,8 @@ def _build_blind_loop_user(
                     ),
                     case_state_path=PRODUCT_MODE_CASE_STATE_PATH,
                     persistent_constraint_clause=self._persistent_constraint_clause,
+                    outer_turn_owns_lifecycle=True,
+                    task_instruction=instruction,
                 )
                 if handled:
                     return response

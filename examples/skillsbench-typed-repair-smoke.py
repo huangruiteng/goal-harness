@@ -235,6 +235,21 @@ def test_turn_recovery_requires_todo_or_committed_validation_delta() -> None:
     assert "reward" not in prompt.lower(), prompt
     assert "verifier" not in prompt.lower(), prompt
 
+    outer_owned_prompt = build_skillsbench_typed_repair_prompt(
+        scheduled_round=5,
+        max_rounds=8,
+        case_state_path="/app/.codex/goals/case/ACTIVE_GOAL_STATE.md",
+        loop_alignment_contract="",
+        trigger_kind="turn_transaction_recovery",
+        outer_turn_owns_lifecycle=True,
+        task_instruction="Repair the synthetic task output.",
+    )
+    assert "outer Turn owns" in outer_owned_prompt, outer_owned_prompt
+    assert "Do not invoke external LoopX CLI" in outer_owned_prompt, outer_owned_prompt
+    assert "quota should-run" not in outer_owned_prompt, outer_owned_prompt
+    assert "create one scoped successor" not in outer_owned_prompt, outer_owned_prompt
+    assert "Repair the synthetic task output." in outer_owned_prompt, outer_owned_prompt
+
 
 def test_turn_recovery_controller_stops_or_continues_from_receipts() -> None:
     repeated_failure_trace = base_trace()
