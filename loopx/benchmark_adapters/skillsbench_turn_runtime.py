@@ -73,15 +73,20 @@ class SkillsBenchTurnAgentFailure(RuntimeError):
     """A recoverable host Agent CLI failure that must not commit a Turn."""
 
 
-def _loopx_cli_failure_category(stdout: Any) -> str:
+def _loopx_cli_failure_category(stdout: Any, stderr: Any) -> str:
     try:
         payload = json.loads(str(stdout or ""))
     except json.JSONDecodeError:
-        return "scored_workspace_command_failed"
-    if not isinstance(payload, dict):
-        return "scored_workspace_command_failed"
-    error = " ".join(str(payload.get("error") or "").lower().split())
+        payload = {}
+    error = " ".join(
+        f"{payload.get('error') if isinstance(payload, dict) else ''} {stderr or ''}"
+        .lower()
+        .split()
+    )
     classifiers = (
+        (r"/app/\.local/bin/loopx.*not found", "case_loopx_cli_missing"),
+        (r"no module named loopx", "case_loopx_source_missing"),
+        (r"loopx cli requires python", "case_python_runtime_missing"),
         (r"python 3\.11\+ is required", "unsupported_python_runtime"),
         (r"permission denied", "scored_workspace_permission_denied"),
         (r"no such file|not found", "scored_workspace_path_missing"),
@@ -141,7 +146,9 @@ class SkillsBenchTurnBridge:
             exit_code = payload.get("exit_code")
             raise SkillsBenchTurnBridgeError(
                 "scored-workspace command failed",
-                category=_loopx_cli_failure_category(payload.get("stdout")),
+                category=_loopx_cli_failure_category(
+                    payload.get("stdout"), payload.get("stderr")
+                ),
                 exit_code=(
                     exit_code
                     if isinstance(exit_code, int) and not isinstance(exit_code, bool)

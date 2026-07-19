@@ -310,12 +310,8 @@ print(json.dumps({
     "schema_version": "skillsbench_remote_command_file_bridge_operation_response_v0",
     "ok": False,
     "exit_code": 13,
-    "stdout": json.dumps({
-        "ok": False,
-        "mode": "plan",
-        "error": "Permission denied: SENSITIVE_PATH_SENTINEL",
-    }),
-    "stderr": "SENSITIVE_STDERR_SENTINEL",
+    "stdout": "",
+    "stderr": "/bin/sh: /app/.local/bin/loopx: not found SENSITIVE_STDERR_SENTINEL",
     "stdout_truncated": False,
     "stderr_truncated": False,
 }))
@@ -357,7 +353,7 @@ print(json.dumps({
     assert execution.get("status") == "failed", execution
     assert execution.get("receipt", {}).get("failed_phase") == "turn_plan", execution
     assert execution.get("failure") == {
-        "category": "scored_workspace_permission_denied",
+        "category": "case_loopx_cli_missing",
         "exit_code": 13,
     }, execution
     assert execution.get("effects") == {
@@ -370,9 +366,8 @@ print(json.dumps({
     assert validation.get("meaningful_operation_count") == 0, validation
     assert all(value is False for value in boundary.values()), boundary
     public_trace = json.dumps(traces[0], sort_keys=True)
-    assert "SENSITIVE_PATH_SENTINEL" not in public_trace, public_trace
     assert "SENSITIVE_STDERR_SENTINEL" not in public_trace, public_trace
-    assert "loopx_turn_turn_plan_scored_workspace_permission_denied" in response, (
+    assert "loopx_turn_turn_plan_case_loopx_cli_missing" in response, (
         response
     )
     return {
