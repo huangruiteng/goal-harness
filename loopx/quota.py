@@ -1339,6 +1339,9 @@ def _apply_agent_monitor_only_precedence(
         payload["selected_todo"] = monitor_selected_todo
     else:
         payload.pop("selected_todo", None)
+    frontier = payload.get("goal_frontier_projection")
+    if isinstance(frontier, dict):
+        frontier.pop("vision_continuation_audit", None)
     for key in (
         "agent_command",
         "agent_lane_frontier_hint",

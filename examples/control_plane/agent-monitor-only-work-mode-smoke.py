@@ -76,6 +76,9 @@ def assert_monitor_only_wait(decision: dict, *, action: str) -> None:
         "vision_wait_state",
     ):
         assert field not in decision, (field, decision)
+    assert "vision_continuation_audit" not in decision.get(
+        "goal_frontier_projection", {}
+    ), decision
     interaction = decision["interaction_contract"]
     assert interaction["user_channel"]["notify"] == "DONT_NOTIFY", interaction
     assert interaction["agent_channel"]["must_attempt"] is False, interaction
