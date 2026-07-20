@@ -52,6 +52,31 @@ Before promoting a stable install/update recommendation, maintainers must move
 the public `stable` ref to the release commit that passed this gate. Do not
 claim stable-channel readiness while `stable` is missing or stale.
 
+## Merged Is Not Runtime-Active
+
+A post-merge check proves behavior on the tested source commit. It does not
+prove that an installed LoopX runtime contains that commit. This distinction
+matters when a fix reaches `main` after the latest named release: package
+versions may still match while the installed source commit is behind.
+
+Use `loopx update --check --ref main` for maintainer qualification. Its
+`runtime_activation_qualification` result compares the release-manifest source
+commit with the trusted source lineage reported by `loopx doctor`:
+
+- `runtime_active` means the installed commit is the target commit or contains it;
+- `release_or_install_successor_required` means the installed commit is behind
+  or diverged, so a release/install successor must remain explicit;
+- `activation_qualification_required` means commit lineage is unavailable or
+  belongs to a different `repo/ref`; the runtime-active claim must fail closed
+  until identity is refreshed.
+
+Closing a PR monitor after latest-`main` validation is valid, but the closeout
+must not say the fix is active in the installed runtime unless this receipt is
+`runtime_active`. Publishing a release remains a separate maintainer action.
+When the qualification command itself runs from newer source code, pass a local
+snapshot from the older installed CLI with `--installed-doctor-json`; this
+option is read-only and accepted only by `update --check`.
+
 ## Named Version Contract
 
 LoopX v0.x is distributed from GitHub, but each stable promotion still needs a
