@@ -32,7 +32,7 @@ from loopx.quota import build_quota_should_run, render_quota_should_run_markdown
 GOAL_ID = "lark-inbox-priority-fixture"
 
 
-def status_payload(project: Path) -> dict:
+def status_payload(project: Path, *, paused: bool = False) -> dict:
     next_action = "Advance the ordinary implementation todo."
     payload = quota_status_payload(
         goal_id=GOAL_ID,
@@ -64,6 +64,8 @@ def status_payload(project: Path) -> dict:
                 },
             },
         ],
+        quota_state="paused" if paused else "eligible",
+        quota_extra={"compute": 0.0} if paused else None,
         goal_extra={
             "repo": str(project),
             "control_plane": {
@@ -149,7 +151,7 @@ def main() -> None:
         )
 
         decision = build_quota_should_run(
-            status_payload(project),
+            status_payload(project, paused=True),
             goal_id=GOAL_ID,
             operator_inbox_urgency_projector=project_lark_event_inbox_urgency,
         )
@@ -222,7 +224,7 @@ def main() -> None:
             encoding="utf-8",
         )
         reply_decision = build_quota_should_run(
-            status_payload(project),
+            status_payload(project, paused=True),
             goal_id=GOAL_ID,
             operator_inbox_urgency_projector=project_lark_event_inbox_urgency,
         )
@@ -245,6 +247,13 @@ def main() -> None:
         )
         assert after_ack["work_lane_contract"]["lane"] == "advancement_task", after_ack
         assert after_ack["effective_action"] == "normal_run", after_ack
+        paused_after_ack = build_quota_should_run(
+            status_payload(project, paused=True),
+            goal_id=GOAL_ID,
+            operator_inbox_urgency_projector=project_lark_event_inbox_urgency,
+        )
+        assert paused_after_ack["should_run"] is False, paused_after_ack
+        assert paused_after_ack["effective_action"] == "owner_pause", paused_after_ack
 
     print("lark-inbox-priority-smoke: ok")
 

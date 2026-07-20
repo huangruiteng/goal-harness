@@ -1037,6 +1037,20 @@ def build_scheduler_hint(
                 scheduler_hint["cold_path_detail"]["cadence_context"] = cadence_context_detail
         return contextualize(scheduler_hint)
 
+    if arbitration.disposition == SchedulerDisposition.OWNER_PAUSE_WAIT:
+        return hint(
+            action="backoff_owner_pause_reply_only",
+            cadence_class="owner_pause",
+            reason=(
+                "owner pause blocks autonomous work while a quiet poll keeps verified "
+                "direct operator replies responsive"
+            ),
+            codex_interval=15,
+            codex_max=60,
+            cli_limit=3,
+            claude_limit=3,
+        )
+
     if arbitration.disposition == SchedulerDisposition.CONSISTENCY_REPAIR:
         result = hint(
             action="repair_interaction_contract_projection",

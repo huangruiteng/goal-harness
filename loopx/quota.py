@@ -1205,6 +1205,99 @@ def _quota_agent_profile(agent_identity: dict[str, Any] | None) -> dict[str, Any
     return profile if isinstance(profile, dict) else None
 
 
+def _owner_pause_requested(quota: Mapping[str, Any]) -> bool:
+    """Return whether the operator explicitly disabled automatic compute."""
+
+    if str(quota.get("state") or "").strip() == "paused":
+        return True
+    try:
+        return float(quota.get("compute")) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _apply_owner_pause_precedence(
+    payload: dict[str, Any],
+    *,
+    owner_pause_requested: bool,
+    inbox_reply_due: bool,
+) -> None:
+    """Fail closed after all lower-priority quota projections have run.
+
+    A verified direct operator reply remains responsive while the owner pause
+    suppresses new autonomous work and outbound topics.
+    """
+
+    if not owner_pause_requested or inbox_reply_due:
+        return
+    reason = (
+        "explicit owner pause outranks autonomous replan, monitor, repair, "
+        "fallback, and ordinary delivery until an explicit quota resume"
+    )
+    quota = payload.get("quota") if isinstance(payload.get("quota"), dict) else {}
+    payload.update(
+        {
+            "decision": "skip",
+            "should_run": False,
+            "normal_delivery_allowed": False,
+            "recovery_delivery_allowed": False,
+            "self_repair_allowed": False,
+            "capability_repair_allowed": False,
+            "workspace_repair_allowed": False,
+            "effective_action": "owner_pause",
+            "actionable_by_codex": False,
+            "reason": reason,
+            "state": "paused",
+            "blocked_action_scope": "automatic_work",
+            "safe_bypass_allowed": False,
+            "safe_bypass_kind": None,
+            "safe_bypass_policy": None,
+            "requires_user_action": False,
+            "quota": {
+                **quota,
+                "state": "paused",
+                "reason": reason,
+                "safe_bypass_allowed": False,
+                "safe_bypass_kind": None,
+                "safe_bypass_policy": None,
+            },
+            "recommended_action": (
+                "Wait for an explicit owner resume; a verified direct operator "
+                "reply may still use the inbox reply lane."
+            ),
+            "heartbeat_recommendation": {
+                "recommended_mode": "owner_pause",
+                "notify": "DONT_NOTIFY",
+                "reason": reason,
+                "spend_policy": "do not append quota spend while owner pause is active",
+            },
+            "execution_obligation": {
+                "must_attempt_work": False,
+                "kind": "owner_pause",
+                "delivery_allowed": False,
+                "notify_is_execution_gate": False,
+                "reason": reason,
+                "spend_policy": "do not append quota spend while owner pause is active",
+            },
+        }
+    )
+    for key in (
+        "agent_command",
+        "autonomous_replan_decision",
+        "autonomous_replan_obligation",
+        "autonomous_replan_scope",
+        "external_evidence_observation",
+        "notify_user_on_capability_gate",
+        "notify_user_on_gate",
+        "notify_user_on_open_todo",
+        "open_todo_notification_policy",
+        "open_todo_notify_reason",
+        "required_reads",
+        "scoped_user_gate_fallback",
+    ):
+        payload.pop(key, None)
+
+
 def build_quota_should_run(
     status_payload: dict[str, Any],
     *,
@@ -1234,6 +1327,7 @@ def build_quota_should_run(
     if item:
         quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
         state = str(quota.get("state") or "unknown")
+        owner_pause_requested = _owner_pause_requested(quota)
         normal_delivery_allowed = bool(plan.get("ok")) and state == "eligible"
         recovery_allowed = _recovery_delivery_allowed(quota, plan_ok=bool(plan.get("ok")))
         reason = str(quota.get("reason") or "quota state is not eligible")
@@ -2150,6 +2244,11 @@ def build_quota_should_run(
             payload["next_handoff_condition"] = item.get("next_handoff_condition")
         if should_run and item.get("agent_command"):
             payload["agent_command"] = item.get("agent_command")
+        _apply_owner_pause_precedence(
+            payload,
+            owner_pause_requested=owner_pause_requested,
+            inbox_reply_due=inbox_reply_due,
+        )
         required_reads = _quota_required_reads(payload)
         if required_reads:
             payload["required_reads"] = required_reads

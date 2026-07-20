@@ -108,6 +108,8 @@ def user_channel_notice_todo_actions(summary: Any, *, limit: int = 3) -> list[st
 
 
 def user_channel_action_required(payload: dict[str, Any]) -> bool:
+    if payload.get("effective_action") == "owner_pause":
+        return False
     if _user_gate_scope_projection_repair_active(payload):
         return False
     if _user_gate_notification_suppressed(payload):
@@ -177,6 +179,8 @@ def projected_user_channel_actions(
     *,
     limit: int = 3,
 ) -> list[str]:
+    if payload.get("effective_action") == "owner_pause":
+        return []
     if _user_gate_scope_projection_repair_active(payload):
         return []
     if _user_gate_notification_suppressed(payload):
@@ -395,6 +399,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
     kind = str(execution_obligation.get("kind") or "")
     effective_action = str(payload.get("effective_action") or "")
     state = str(payload.get("state") or "")
+    if effective_action == "owner_pause":
+        return "owner_pause"
     if effective_action == "terminal_no_followup" or state == "terminal_no_followup":
         return "terminal_no_followup"
     if payload.get("scoped_user_gate_fallback"):
@@ -526,6 +532,8 @@ def interaction_next_cli_actions(
     )
     if mode == "terminal_no_followup":
         return ["no quota spend until explicit goal resume or newly projected work"]
+    if mode == "owner_pause":
+        return ["no quota spend until explicit owner resume"]
     if mode == "automation_prompt_upgrade":
         automation_prompt_upgrade = (
             payload.get("automation_prompt_upgrade")
@@ -688,6 +696,8 @@ def _interaction_spend_policy(
 ) -> str | None:
     if mode == "terminal_no_followup":
         return "no spend for terminal automation shutdown"
+    if mode == "owner_pause":
+        return "no spend while explicit owner pause is active"
     if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
         return "no spend for gate or blocker push"
     if mode == "monitor_quiet_skip":
@@ -787,6 +797,7 @@ def _interaction_quiet_noop_allowed(
         "blocked_wait",
         "user_gate_cooldown_wait",
         "terminal_no_followup",
+        "owner_pause",
         "skip",
     }
 
@@ -1056,7 +1067,8 @@ def build_interaction_contract(
         else {}
     )
     mode = _interaction_mode(payload)
-    user_required = user_channel_action_required(payload)
+    owner_pause = mode == "owner_pause"
+    user_required = False if owner_pause else user_channel_action_required(payload)
     scoped_user_gate_fallback = mode == "scoped_user_gate_fallback"
     bounded_delivery_with_user_notice = mode == "bounded_delivery_with_user_notice"
     must_attempt = _interaction_must_attempt(
@@ -1090,6 +1102,12 @@ def build_interaction_contract(
         heartbeat_recommendation,
         user_required=user_required,
     )
+    if owner_pause:
+        user_channel = {
+            "action_required": False,
+            "notify": "DONT_NOTIFY",
+            "reason": payload.get("reason"),
+        }
     agent_channel = _build_interaction_agent_channel(
         payload,
         mode=mode,
