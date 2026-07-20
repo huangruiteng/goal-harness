@@ -491,15 +491,19 @@ gap, autonomy blocker, or replan obligation fail closed. This keeps recurring
 controllers alive during ordinary waits while honoring an explicit completed
 goal shutdown without another quota-spending turn.
 
-An explicit owner pause is different from terminal closure and has the highest
-runtime precedence. When compute is `0`, `quota should-run` suppresses ordinary
-delivery, autonomous replan, monitor work, capability/workspace repair,
-external-evidence observation, and scoped fallback. It projects
-`effective_action=owner_pause`, `should_run=false`, `delivery_allowed=false`,
-quiet/no-spend interaction, and a slower reply-only scheduler until an explicit
-owner resume. The sole automatic exception is an already verified direct
-operator reply projected as `lark_inbox_reply_due`: it may respond in the
-source thread, but must not open a new topic.
+An individual registered peer can instead be put in `monitor_only` work mode:
+
+```bash
+loopx configure-goal --goal-id <goal-id> \
+  --agent-work-mode <agent-id>=monitor_only --execute
+```
+
+This suppresses that peer's advancement, autonomous replan, repair, fallback,
+and new-topic lanes while preserving due `continuous_monitor` todos and verified
+direct operator replies. A future or unchanged monitor stays quiet and no-spend;
+a due monitor may spend only after a validated material transition. Other peers
+remain active. Use `--clear-agent-work-mode <agent-id>` (or set `=active`) to
+resume ordinary advancement.
 
 The read model exposes that derivation as
 `goal_frontier_projection.terminal_state={kind:no_followup, derived:true,
@@ -1070,7 +1074,7 @@ Other write commands can stay behind explicit operator approval:
 
 ```bash
 loopx quota set --goal-id <goal-id> --compute 0.5
-loopx configure-goal --goal-id <goal-id> --quota-compute 0 --execute
+loopx quota pause --goal-id <goal-id>
 loopx quota burst --goal-id <goal-id> --slots 2 --dry-run
 ```
 

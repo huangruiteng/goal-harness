@@ -1037,13 +1037,13 @@ def build_scheduler_hint(
                 scheduler_hint["cold_path_detail"]["cadence_context"] = cadence_context_detail
         return contextualize(scheduler_hint)
 
-    if arbitration.disposition == SchedulerDisposition.OWNER_PAUSE_WAIT:
+    if arbitration.disposition == SchedulerDisposition.AGENT_MONITOR_ONLY_WAIT:
         return hint(
-            action="backoff_owner_pause_reply_only",
-            cadence_class="owner_pause",
+            action="backoff_agent_monitor_only",
+            cadence_class="agent_monitor_only",
             reason=(
-                "owner pause blocks autonomous work while a quiet poll keeps verified "
-                "direct operator replies responsive"
+                "agent monitor-only mode blocks advancement while a quiet poll keeps "
+                "due monitors and verified direct replies responsive"
             ),
             codex_interval=15,
             codex_max=60,

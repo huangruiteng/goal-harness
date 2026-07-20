@@ -36,19 +36,22 @@ def build_automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
             "stuck for two more eligible turns"
         ),
     }
-    if effective_action == "owner_pause":
+    if effective_action == "agent_monitor_only":
         return {
             **base,
             "keep_active": True,
             "pause_allowed": False,
             "pause_policy": (
-                "keep a quiet reply-only poll so verified direct operator replies "
-                "remain eligible; do not start autonomous work until owner resume"
+                "keep a quiet monitor/reply poll; do not start advancement, "
+                "autonomous replan, repair, or fallback work until mode changes"
             ),
-            "automation_action": "keep_active_owner_pause_reply_only",
-            "reason": "explicit owner pause suppresses automatic work",
-            "next_trigger": "explicit owner resume or verified direct operator reply",
-            "spend_policy": "no quota spend while owner pause is active",
+            "automation_action": "keep_active_monitor_only",
+            "reason": "agent monitor-only mode suppresses advancement work",
+            "next_trigger": (
+                "due monitor, material monitor transition, verified direct operator "
+                "reply, or explicit work-mode change"
+            ),
+            "spend_policy": "no quota spend without a validated material transition",
         }
     if effective_action == "terminal_no_followup":
         return {

@@ -13,7 +13,7 @@ SCHEDULER_ARBITRATION_SCHEMA_VERSION = "scheduler_arbitration_v0"
 
 class SchedulerDisposition(str, Enum):
     TERMINAL_STOP = "terminal_stop"
-    OWNER_PAUSE_WAIT = "owner_pause_wait"
+    AGENT_MONITOR_ONLY_WAIT = "agent_monitor_only_wait"
     ACTIVE_WORK = "active_work"
     AGENT_SCOPE_WAIT = "agent_scope_wait"
     CONSISTENCY_REPAIR = "consistency_repair"
@@ -78,8 +78,8 @@ def _classify_disposition(
     agent_scope_modes = {str(value) for value in agent_scope_frontier_actions}
     if mode == "terminal_no_followup":
         return SchedulerDisposition.TERMINAL_STOP, mode
-    if mode == "owner_pause":
-        return SchedulerDisposition.OWNER_PAUSE_WAIT, mode
+    if mode == "agent_monitor_only":
+        return SchedulerDisposition.AGENT_MONITOR_ONLY_WAIT, mode
     if user_required and not must_attempt:
         return SchedulerDisposition.HUMAN_GATE, "interaction_blocking_user_gate"
     if mode == "monitor_quiet_skip":
@@ -155,7 +155,7 @@ def build_scheduler_arbitration(
         errors.append("interaction_contract.delivery_without_attempt")
     if quiet_noop_allowed and (must_attempt or delivery_allowed or user_required):
         errors.append("interaction_contract.quiet_noop_conflicts_with_required_action")
-    if mode in {"terminal_no_followup", "owner_pause"} and (
+    if mode in {"terminal_no_followup", "agent_monitor_only"} and (
         user_required or must_attempt or delivery_allowed or not quiet_noop_allowed
     ):
         errors.append("interaction_contract.terminal_conflicts_with_open_action")
