@@ -172,12 +172,40 @@ adapters and project profiles:
 The built-in presentation adapters include linear Markdown and a
 self-contained `html_artifact_v0` renderer. The HTML renderer is a zero-build,
 single-file projection with optional local interaction. Its default
-`editorial_dense_v1` presentation keeps normalized item facts visible and
-moves profile identity, source health, generation metadata, and digests into a
-collapsed supporting appendix. It embeds the Markdown rendering generated from
-the same document for copy/export and records that companion artifact digest.
+`editorial_dense_v2` presentation keeps normalized primary item facts visible,
+accepts profile-owned language and at most four first-screen highlights,
+compiles its audience summary from typed primary items, and moves supporting
+items, profile identity, source health,
+generation metadata, and digests into a collapsed appendix. Items may declare
+`visibility=primary|supporting`; `runtime` and `delivery_receipt` content kinds
+must be supporting. The linear Markdown artifact preserves those items in a
+labeled appendix so copy/export remains complete without interrupting the main
+narrative. HTML embeds that Markdown rendering and records its companion
+artifact digest. Audience items may also carry up to four ordered `details`
+rows for readable fact grouping and optional `tag_labels` for localized display;
+the canonical token tags remain unchanged.
 Hosting or generating a shareable URL remains a separate sink action with its
 own idempotency and readback receipt; it is not renderer authority.
+
+The normalized document's optional `editorial` input is split by ownership.
+The project profile owns bounded `kicker`, `period_label`, `language`, and zero
+to four ordered public-safe highlights. The document builder owns `summary` and
+its `periodic_report_editorial_orchestration_v0` receipt. It deterministically
+selects typed primary `outcome`/`decision`, `risk`, and `next_action` titles,
+falls back to an item's typed `next_action` field when needed, records exact
+item lineage, and rejects an authored summary. Both built-in
+renderers recompute the value before rendering, so changing the summary without
+changing its source facts fails closed. Primary summaries are limited to 360
+characters, and primary `capability_change` items require at least two named
+details.
+
+This orchestration is structural, not semantic guessing. Source adapters own
+`content_kind`; the compiler never promotes `runtime` or `delivery_receipt`
+items, and untyped/progress/capability-change facts remain in the body without
+being pulled into the hero. This object is for audience conclusions, not
+artifact construction or sink status.
+Delivery parity, archive-provider validation, digests, canaries, renderer
+lineage, and exact readback remain supporting items or sink receipts.
 
 The core rejects raw content, messages, logs, transcripts, credentials, secret
 fields, and private paths. Public packets retain only compact references and

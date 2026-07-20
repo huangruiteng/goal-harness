@@ -188,6 +188,7 @@ def test_registry_composes_issue_fix_and_second_domain_without_semantic_leak() -
     assert [item["title"] for item in issue_fix["sections"][0]["items"]] == [
         "Fix high-value retrieval regression"
     ]
+    assert issue_fix["sections"][0]["items"][0]["content_kind"] == "outcome"
     next_actions = next(
         section
         for section in issue_fix["sections"]
@@ -196,6 +197,10 @@ def test_registry_composes_issue_fix_and_second_domain_without_semantic_leak() -
     assert next_actions["items"][0]["summary"] == (
         "Obtain reviewer approval and merge."
     )
+    assert next_actions["items"][0]["title"] == (
+        "Obtain reviewer approval and merge."
+    )
+    assert next_actions["items"][0]["content_kind"] == "next_action"
     assert issue_fix["boundary"]["schedule_policy_owned_by_source"] is False
 
     document = build_periodic_report_document(
@@ -554,6 +559,341 @@ def test_source_result_rejects_fractional_ranking_integer() -> None:
         )
 
 
+def test_source_result_requires_runtime_and_delivery_items_to_be_supporting() -> None:
+    item = {
+        "item_id": "delivery_receipt",
+        "title": "Delivery receipt",
+        "summary": "The artifact digest was verified.",
+        "content_kind": "delivery_receipt",
+    }
+    with pytest.raises(ValueError, match="visibility must be supporting"):
+        build_periodic_report_source_result(
+            source_id="report_operations",
+            source_kind="report_operations",
+            status="complete",
+            observed_at="2026-07-20T00:40:00Z",
+            sections=[
+                {
+                    "section_id": "operations",
+                    "title": "Report operations",
+                    "items": [item],
+                }
+            ],
+        )
+
+    result = build_periodic_report_source_result(
+        source_id="report_operations",
+        source_kind="report_operations",
+        status="complete",
+        observed_at="2026-07-20T00:40:00Z",
+        sections=[
+            {
+                "section_id": "operations",
+                "title": "Report operations",
+                "items": [{**item, "visibility": "supporting"}],
+            }
+        ],
+    )
+    normalized = result["sections"][0]["items"][0]
+    assert normalized["content_kind"] == "delivery_receipt"
+    assert normalized["visibility"] == "supporting"
+
+
+def test_source_result_normalizes_bounded_item_details_and_tag_labels() -> None:
+    result = build_periodic_report_source_result(
+        source_id="release_notes",
+        source_kind="release_activity",
+        status="complete",
+        observed_at="2026-07-20T00:40:00Z",
+        sections=[
+            {
+                "section_id": "outcomes",
+                "title": "Outcomes",
+                "items": [
+                    {
+                        "item_id": "release",
+                        "title": "Release completed",
+                        "summary": "The release completed safely.",
+                        "tags": ["delivery"],
+                        "tag_labels": {"delivery": "安全交付"},
+                        "details": [
+                            {
+                                "label": "Evidence",
+                                "text": "All staged checks passed.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+
+    item = result["sections"][0]["items"][0]
+    assert item["tag_labels"] == {"delivery": "安全交付"}
+    assert item["details"] == [
+        {"label": "Evidence", "text": "All staged checks passed."}
+    ]
+
+    for field, value, match in (
+        ("tag_labels", {"unknown": "Unknown"}, "unknown tag"),
+        (
+            "details",
+            [{"label": str(index), "text": "detail"} for index in range(5)],
+            "at most 4",
+        ),
+    ):
+        with pytest.raises(ValueError, match=match):
+            build_periodic_report_source_result(
+                source_id="release_notes",
+                source_kind="release_activity",
+                status="complete",
+                observed_at="2026-07-20T00:40:00Z",
+                sections=[
+                    {
+                        "section_id": "outcomes",
+                        "title": "Outcomes",
+                        "items": [
+                            {
+                                "item_id": "release",
+                                "title": "Release completed",
+                                "summary": "The release completed safely.",
+                                "tags": ["delivery"],
+                                field: value,
+                            }
+                        ],
+                    }
+                ],
+            )
+
+
+def test_source_result_enforces_primary_readability_structure() -> None:
+    with pytest.raises(ValueError, match="360-character primary readability"):
+        build_periodic_report_source_result(
+            source_id="release_notes",
+            source_kind="release_activity",
+            status="complete",
+            observed_at="2026-07-20T00:40:00Z",
+            sections=[
+                {
+                    "section_id": "outcomes",
+                    "title": "Outcomes",
+                    "items": [
+                        {
+                            "item_id": "dense_release",
+                            "title": "Dense release note",
+                            "summary": "x" * 361,
+                            "content_kind": "outcome",
+                        }
+                    ],
+                }
+            ],
+        )
+
+    capability_item = {
+        "item_id": "continuous_execution",
+        "title": "Continuous execution",
+        "summary": "External waiting no longer blocks safe work.",
+        "content_kind": "capability_change",
+        "details": [{"label": "Gap", "text": "Polling hid runnable work."}],
+    }
+    with pytest.raises(ValueError, match="at least 2 items"):
+        build_periodic_report_source_result(
+            source_id="control_plane",
+            source_kind="capability_changes",
+            status="complete",
+            observed_at="2026-07-20T00:40:00Z",
+            sections=[
+                {
+                    "section_id": "evolution",
+                    "title": "Evolution",
+                    "items": [capability_item],
+                }
+            ],
+        )
+
+    result = build_periodic_report_source_result(
+        source_id="control_plane",
+        source_kind="capability_changes",
+        status="complete",
+        observed_at="2026-07-20T00:40:00Z",
+        sections=[
+            {
+                "section_id": "evolution",
+                "title": "Evolution",
+                "items": [
+                    {
+                        **capability_item,
+                        "details": [
+                            {"label": "Gap", "text": "Polling hid runnable work."},
+                            {
+                                "label": "Change",
+                                "text": "Runnable work now advances independently.",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+    assert len(result["sections"][0]["items"][0]["details"]) == 2
+
+
+def test_document_normalizes_bounded_editorial_first_screen() -> None:
+    source = build_periodic_report_source_result(
+        source_id="release_notes",
+        source_kind="release_activity",
+        status="complete",
+        observed_at="2026-07-20T00:40:00Z",
+        sections=[
+            {
+                "section_id": "secondary_outcomes",
+                "title": "次要成果",
+                "order": 5,
+                "items": [
+                    {
+                        "item_id": "secondary_delivery",
+                        "title": "次要交付不进入摘要",
+                        "summary": "这项交付仍保留在正文中。",
+                        "value_rank": 20,
+                        "content_kind": "outcome",
+                    }
+                ],
+            },
+            {
+                "section_id": "outcomes",
+                "title": "阶段成果",
+                "order": 10,
+                "items": [
+                    {
+                        "item_id": "delivery",
+                        "title": "交付形成规模",
+                        "summary": "交付结果已形成规模。",
+                        "value_rank": 10,
+                        "content_kind": "outcome",
+                    }
+                ],
+            },
+            {
+                "section_id": "risks",
+                "title": "当前风险",
+                "order": 20,
+                "items": [
+                    {
+                        "item_id": "convergence",
+                        "title": "开放项待收敛",
+                        "summary": "开放项仍待收敛。",
+                        "content_kind": "risk",
+                    }
+                ],
+            },
+            {
+                "section_id": "next_actions",
+                "title": "下一步",
+                "order": 30,
+                "items": [
+                    {
+                        "item_id": "converge",
+                        "title": "收敛开放项",
+                        "summary": "按优先级收敛开放项。",
+                        "content_kind": "next_action",
+                    }
+                ],
+            },
+        ],
+    )
+    editorial = {
+        "language": "zh-CN",
+        "kicker": "首次全量工作汇报",
+        "period_label": "7 月 10 日–19 日（北京时间）",
+        "highlights": [
+            {
+                "highlight_id": f"metric_{index}",
+                "value": str(index),
+                "label": f"指标 {index}",
+                "tone": "attention" if index == 4 else "positive",
+            }
+            for index in range(1, 5)
+        ],
+    }
+    document = build_periodic_report_document(
+        title="项目工作汇报",
+        generated_at="2026-07-20T01:00:00Z",
+        period_window={
+            "start_at": "2026-07-13T00:00:00Z",
+            "end_at": "2026-07-20T00:00:00Z",
+        },
+        profile={"profile_id": "maintenance", "profile_version": "v1"},
+        sources=[source],
+        editorial=editorial,
+    )
+
+    assert document["editorial"]["summary"] == (
+        "本期进展：交付形成规模。 当前风险：开放项待收敛。 下一步：收敛开放项。"
+    )
+    assert document["editorial"]["orchestration"] == {
+        "schema_version": "periodic_report_editorial_orchestration_v0",
+        "summary_source": "typed_primary_items",
+        "readability_policy": "audience_v1",
+        "summary_item_refs": [
+            {
+                "role": "outcome",
+                "source_id": "release_notes",
+                "item_id": "delivery",
+                "field": "title",
+            },
+            {
+                "role": "risk",
+                "source_id": "release_notes",
+                "item_id": "convergence",
+                "field": "title",
+            },
+            {
+                "role": "next_action",
+                "source_id": "release_notes",
+                "item_id": "converge",
+                "field": "title",
+            },
+        ],
+    }
+    assert document["boundary"]["editorial_selection_owned_by_profile"] is True
+    assert document["boundary"]["editorial_summary_owned_by_orchestrator"] is True
+
+    with pytest.raises(ValueError, match="compiled from typed primary items"):
+        build_periodic_report_document(
+            title="项目工作汇报",
+            generated_at="2026-07-20T01:00:00Z",
+            period_window={
+                "start_at": "2026-07-13T00:00:00Z",
+                "end_at": "2026-07-20T00:00:00Z",
+            },
+            profile={"profile_id": "maintenance", "profile_version": "v1"},
+            sources=[source],
+            editorial={**editorial, "summary": "过程说明不应直接进入首屏。"},
+        )
+
+    with pytest.raises(ValueError, match="at most 4"):
+        build_periodic_report_document(
+            title="Project report",
+            generated_at="2026-07-20T01:00:00Z",
+            period_window={
+                "start_at": "2026-07-13T00:00:00Z",
+                "end_at": "2026-07-20T00:00:00Z",
+            },
+            profile={"profile_id": "maintenance", "profile_version": "v1"},
+            sources=[source],
+            editorial={
+                "highlights": [
+                    {
+                        "highlight_id": f"metric_{index}",
+                        "value": str(index),
+                        "label": f"Metric {index}",
+                    }
+                    for index in range(5)
+                ],
+            },
+        )
+
+
 def test_source_result_rejects_raw_fields_before_projection() -> None:
     with pytest.raises(ValueError, match="forbidden raw/private field"):
         build_periodic_report_source_result(
@@ -625,7 +965,10 @@ def test_source_result_rejects_credential_like_text_values() -> None:
                         {
                             "item_id": "release",
                             "title": "Release",
-                            "summary": "to" + "ken=super" + "sec" + "retabcdef1234567890",
+                            "summary": "to"
+                            + "ken=super"
+                            + "sec"
+                            + "retabcdef1234567890",
                             "status": "published",
                         }
                     ],

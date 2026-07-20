@@ -72,15 +72,15 @@ def _source_ref(outcome: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _state_section(outcome: Mapping[str, Any]) -> tuple[str, str, int]:
+def _state_section(outcome: Mapping[str, Any]) -> tuple[str, str, int, str]:
     status = str(outcome.get("status") or "").lower()
     stage = str(outcome.get("stage") or "").lower()
     result_kind = str(_mapping(outcome.get("result")).get("kind") or "").lower()
     if status == "done" or result_kind in {"merged", "completed", "fixed"}:
-        return "completed", "Completed", 10
+        return "completed", "Completed", 10, "outcome"
     if result_kind in {"blocked", "failed"} or "block" in stage:
-        return "risks", "Risks and blockers", 30
-    return "in_progress", "In progress", 20
+        return "risks", "Risks and blockers", 30, "risk"
+    return "in_progress", "In progress", 20, "progress"
 
 
 def build_issue_fix_periodic_report_source(
@@ -111,7 +111,7 @@ def build_issue_fix_periodic_report_source(
         )
         if not outcome_id or not title or not summary:
             raise ValueError("issue-fix outcomes require public-safe identity and text")
-        section_id, section_title, section_order = _state_section(outcome)
+        section_id, section_title, section_order, content_kind = _state_section(outcome)
         section = sections.setdefault(
             section_id,
             {
@@ -131,6 +131,7 @@ def build_issue_fix_periodic_report_source(
                 maximum=80,
             ),
             "tags": _tags(outcome),
+            "content_kind": content_kind,
         }
         source_ref = _source_ref(outcome)
         next_action = _safe_text(outcome.get("next_action"), maximum=500)
@@ -152,10 +153,11 @@ def build_issue_fix_periodic_report_source(
             actions["items"].append(
                 {
                     "item_id": _item_id(outcome_id, suffix="action"),
-                    "title": title,
+                    "title": _safe_text(next_action, maximum=240),
                     "summary": next_action,
                     "value_rank": _value_rank(outcome),
                     "status": "planned",
+                    "content_kind": "next_action",
                     "source_ref": source_ref,
                     "tags": _tags(outcome),
                 }

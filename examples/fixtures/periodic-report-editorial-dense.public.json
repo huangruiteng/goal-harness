@@ -10,6 +10,66 @@
     "profile_id": "product_delivery",
     "profile_version": "v1"
   },
+  "editorial": {
+    "language": "en",
+    "kicker": "Product delivery · Weekly report",
+    "period_label": "January 5–12, 2026",
+    "summary": "Outcome: Stable release reached all production regions. Risk: Two integrations still use the legacy endpoint. Next: Confirm owners and complete both migrations before the next release window.",
+    "orchestration": {
+      "schema_version": "periodic_report_editorial_orchestration_v0",
+      "summary_source": "typed_primary_items",
+      "readability_policy": "audience_v1",
+      "summary_item_refs": [
+        {
+          "role": "outcome",
+          "source_id": "delivery",
+          "item_id": "stable_release",
+          "field": "title"
+        },
+        {
+          "role": "risk",
+          "source_id": "delivery",
+          "item_id": "adoption_gap",
+          "field": "title"
+        },
+        {
+          "role": "next_action",
+          "source_id": "delivery",
+          "item_id": "adoption_gap",
+          "field": "next_action"
+        }
+      ]
+    },
+    "highlights": [
+      {
+        "highlight_id": "rollout",
+        "value": "100%",
+        "label": "Regions live",
+        "detail": "No rollback",
+        "tone": "positive"
+      },
+      {
+        "highlight_id": "latency",
+        "value": "−18%",
+        "label": "Median latency",
+        "detail": "After staged rollout",
+        "tone": "positive"
+      },
+      {
+        "highlight_id": "migration",
+        "value": "100%",
+        "label": "Workspaces migrated",
+        "tone": "positive"
+      },
+      {
+        "highlight_id": "legacy",
+        "value": "2",
+        "label": "Legacy integrations",
+        "detail": "Needs attention",
+        "tone": "attention"
+      }
+    ]
+  },
   "source_snapshots": [
     {
       "source_id": "delivery",
@@ -17,7 +77,7 @@
       "status": "complete",
       "observed_at": "2026-01-12T08:45:00Z",
       "snapshot_digest": "snapshot_example_delivery",
-      "item_count": 3,
+      "item_count": 4,
       "retryable": false
     }
   ],
@@ -33,9 +93,20 @@
           "title": "Stable release reached all production regions",
           "summary": "The release completed staged rollout with no rollback and reduced median processing latency by 18%.",
           "value_rank": 10,
+          "content_kind": "outcome",
           "status": "shipped",
           "source_ref": "https://example.org/releases/stable",
           "tags": ["delivery", "reliability"],
+          "tag_labels": {
+            "delivery": "Delivery",
+            "reliability": "Reliability"
+          },
+          "details": [
+            {
+              "label": "Validation",
+              "text": "Every staged health check passed before the next region opened."
+            }
+          ],
           "source_id": "delivery"
         },
         {
@@ -43,6 +114,7 @@
           "title": "Customer migration completed",
           "summary": "All active workspaces now use the durable storage path; the compatibility path remains available for rollback only.",
           "value_rank": 20,
+          "content_kind": "outcome",
           "status": "complete",
           "source_ref": "https://example.org/migrations/durable-storage",
           "tags": ["migration"],
@@ -61,10 +133,29 @@
           "title": "Two integrations still use the legacy endpoint",
           "summary": "The legacy traffic is low but prevents retirement of the compatibility path and its operational burden.",
           "value_rank": 10,
+          "content_kind": "risk",
           "status": "attention",
           "source_ref": "https://example.org/operations/legacy-traffic",
           "next_action": "Confirm owners and complete both migrations before the next release window.",
           "tags": ["risk", "adoption"],
+          "source_id": "delivery"
+        }
+      ]
+    },
+    {
+      "schema_version": "periodic_report_section_v0",
+      "section_id": "report_operations",
+      "title": "Report operations",
+      "order": 90,
+      "items": [
+        {
+          "item_id": "delivery_parity",
+          "title": "Shareable formats were generated from one report document",
+          "summary": "The Markdown and HTML artifacts share the same normalized primary content and can be verified by digest.",
+          "value_rank": 10,
+          "content_kind": "delivery_receipt",
+          "visibility": "supporting",
+          "status": "verified",
           "source_id": "delivery"
         }
       ]
@@ -73,6 +164,7 @@
   "boundary": {
     "schedule_policy_owned_by_profile": true,
     "business_semantics_owned_by_sources": true,
+    "editorial_selection_owned_by_profile": true,
     "renderer_owns_business_semantics": false,
     "sink_owns_business_semantics": false,
     "external_writes_performed": false
