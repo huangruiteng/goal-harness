@@ -36,7 +36,7 @@ def main() -> int:
         "turn_key",
         "raw event stream",
         "they do not become new Turn states",
-        "a scenario owner",
+        "scenario owner",
         "loopx-turn-codex-cli-e2e-smoke.py",
         "codex_cli_model_requires_newer_codex",
     ]:
@@ -56,11 +56,14 @@ def main() -> int:
     assert link in product_index, "product index link"
     assert f"product/{link}" in docs_index, "docs index link"
     for required in [
-        "Try One Governed Turn Locally",
-        "loopx-turn-codex-cli-e2e-smoke.py --real-codex-cli",
+        "Try Governed Turns Locally",
+        "--real-codex-cli",
+        "--turn-count 3",
         "status=committed",
         "validation_status=passed",
-        "quota_slot_spend_count=1",
+        "session_resumed=true",
+        "committed_turn_count=3",
+        "quota_slot_spend_count=3",
     ]:
         assert required in readme, f"README local Turn quickstart: {required}"
 

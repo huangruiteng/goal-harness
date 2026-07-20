@@ -22,9 +22,8 @@ isolated project workspace, and an executable validator. The validator receives
 the normalized host result on stdin and exits zero only when the actual artifact
 or state is correct.
 
-Check the local host once with `codex doctor`. If the configured default model
-is newer than the installed Codex CLI supports, update Codex or pass a model
-already qualified for that installation with `--codex-model`.
+Check the local host once with `codex doctor`. If the default model is newer
+than the installed Codex CLI, update Codex or pass `--codex-model`.
 
 ## Run One Turn
 
@@ -59,8 +58,8 @@ The compact JSON result tells the caller what happens next:
 | `result_kind=wait` | No host work should run yet. |
 | `result_kind=user_action_required` | Show the concrete user action and do not invent a substitute. |
 
-A failed or unavailable validator cannot commit or spend. Replaying a committed
-Turn is idempotent: it does not invoke the host, write state, or spend again.
+A failed validator cannot commit or spend; replay invokes nothing. A new logical
+Turn uses a new stable `--turn-instance-id`, while retries reuse that id.
 
 ## Fit Another Runtime
 
@@ -77,21 +76,22 @@ state. Host observations such as requested, accepted, running, outcome-ready,
 failed, and resumed map to committed, repair, replan, or wait; they do not
 become new Turn states.
 
-Qualify a new adapter with one real task, a scenario owner, an adapter owner, a
-validator, and a measurable outcome. Add a structured event-reference field
-only after that call site proves the compact result cannot carry the evidence.
+Qualify a new adapter with a real task, scenario owner, adapter owner, validator,
+and measurable outcome. Add an event reference only after that call site proves
+the compact result cannot carry the evidence.
 
 ## Verify The Integration
 
 The repository ships a disposable qualification that keeps raw prompts,
-transcripts, stdout, stderr, credentials, and temporary workspaces out of LoopX
-state:
+transcripts, credentials, and temporary workspaces out of LoopX state:
 
 ```bash
 python3 examples/loopx-turn-codex-cli-e2e-smoke.py
 python3 examples/loopx-turn-codex-cli-e2e-smoke.py \
   --real-codex-cli \
   --codex-model <qualified-model>
+python3 examples/loopx-turn-codex-cli-e2e-smoke.py \
+  --real-codex-cli --turn-count 3 --codex-model <qualified-model>
 ```
 
 The first command is deterministic and model-free. The second makes one real
@@ -100,7 +100,11 @@ one quota spend, and a replay with no side effects. A compact
 `codex_cli_model_requires_newer_codex` result is a host compatibility failure,
 not task progress; it must show zero state writes and zero quota spend.
 
-That is the complete partner-facing path. Read the
-[Codex CLI adapter notes](codex-cli-automation-driver.md) for operational gaps
-or the [LoopX Turn protocol](../reference/protocols/loopx-turn-v0.md) only when
-implementing another host adapter or maintaining the runtime.
+The third command makes N real calls against one temporary goal and todo. It
+starts one opaque session, resumes it for Turns 2 through N, and independently
+validates every marker. With `--turn-count 3`, success reports
+`committed_turn_count=3`, `session_resumed=true`, and three quota spends. The
+session id remains private and is never printed or synced.
+
+That is the complete partner-facing path. For implementation details, read the
+[adapter notes](codex-cli-automation-driver.md) or the [Turn protocol](../reference/protocols/loopx-turn-v0.md).
