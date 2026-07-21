@@ -37,9 +37,11 @@ def _config(tmp_path: Path) -> runtime.SkillsBenchTurnRuntimeConfig:
 def _install_sequence_runtime(
     monkeypatch: pytest.MonkeyPatch,
     validation_runs: list[list[int] | tuple[int, ...]],
-) -> tuple[list[str], dict[str, int]]:
+) -> tuple[list[str], dict[str, int], list[str], list[str]]:
     plan_instance_ids: list[str] = []
     callback_counts = {"writeback": 0, "spend": 0}
+    bridge_commands: list[str] = []
+    sequence_baseline_paths: list[str] = []
 
     class SequenceBridge:
         instance_count = 0
@@ -53,11 +55,12 @@ def _install_sequence_runtime(
 
         def exec(
             self,
-            _command: str,
+            command: str,
             *,
             meaningful: bool = False,
             allow_nonzero: bool = False,
         ) -> dict[str, Any]:
+            bridge_commands.append(command)
             if allow_nonzero:
                 code = self.validation_codes.pop(0)
                 if meaningful:
@@ -95,6 +98,7 @@ def _install_sequence_runtime(
         turn_instance_id: str,
     ) -> dict[str, Any]:
         plan_instance_ids.append(turn_instance_id)
+        sequence_baseline_paths.append(_config.sequence_baseline_path)
         return {"ok": True, "turn_key": turn_instance_id}
 
     def fake_turn_once(
@@ -129,7 +133,12 @@ def _install_sequence_runtime(
     monkeypatch.setattr(runtime, "SkillsBenchTurnBridge", SequenceBridge)
     monkeypatch.setattr(runtime, "_turn_plan", fake_plan)
     monkeypatch.setattr(runtime, "run_loopx_turn_once", fake_turn_once)
-    return plan_instance_ids, callback_counts
+    return (
+        plan_instance_ids,
+        callback_counts,
+        bridge_commands,
+        sequence_baseline_paths,
+    )
 
 
 def test_nonzero_validation_probe_does_not_return_private_output(
@@ -569,9 +578,12 @@ def test_adaptive_sequence_commits_progress_then_terminal_turns(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    plan_instance_ids, callback_counts = _install_sequence_runtime(
-        monkeypatch, [(3, 10), (10, 0)]
-    )
+    (
+        plan_instance_ids,
+        callback_counts,
+        _bridge_commands,
+        sequence_baseline_paths,
+    ) = _install_sequence_runtime(monkeypatch, [(3, 10), (10, 0)])
     agent_prompts: list[str] = []
     observed: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
@@ -595,6 +607,7 @@ def test_adaptive_sequence_commits_progress_then_terminal_turns(
     assert agent_prompts[0] == "original task prompt"
     assert "Continue the same task" in agent_prompts[1]
     assert callback_counts == {"writeback": 2, "spend": 2}
+    assert sequence_baseline_paths == ["", ""]
     assert [item[0]["quota_slot_spend_count"] for item in records] == [1, 1]
     assert records[0][1]["validated_progress"] is True
     assert records[0][1]["terminal_complete"] is False
@@ -613,9 +626,12 @@ def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
         [0, 10, 0],
         [0, 1, 0],
     ]
-    _plan_instance_ids, callback_counts = _install_sequence_runtime(
-        monkeypatch, validation_codes
-    )
+    (
+        _plan_instance_ids,
+        callback_counts,
+        bridge_commands,
+        sequence_baseline_paths,
+    ) = _install_sequence_runtime(monkeypatch, validation_codes)
     agent_prompts: list[str] = []
 
     records, sequence = runtime.run_skillsbench_loopx_turn_sequence(
@@ -633,6 +649,25 @@ def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
     assert sequence["status"] == "terminal_complete"
     assert sequence["turn_count"] == 3
     assert callback_counts == {"writeback": 3, "spend": 3}
+    assert len(set(sequence_baseline_paths)) == 1
+    assert sequence_baseline_paths[0].startswith(
+        "/app/.loopx/runtime/benchmark-turn-sequences/"
+    )
+    assert sequence_baseline_paths[0].endswith(".baseline")
+    assert (
+        sum(
+            f"{runtime.SKILLSBENCH_TURN_BASELINE_ENV}=" in command
+            for command in bridge_commands
+        )
+        == 3
+    )
+    assert (
+        sum(
+            f"{runtime.SKILLSBENCH_TURN_SEQUENCE_BASELINE_ENV}=" in command
+            for command in bridge_commands
+        )
+        == 6
+    )
     assert agent_prompts[0] == "original task prompt"
     assert all(
         "without manufacturing a change" in prompt for prompt in agent_prompts[1:]
@@ -650,6 +685,8 @@ def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
     assert all(
         record[1]["stability_completion_satisfied"] is True for record in records
     )
+    assert all(record[1]["sequence_baseline_configured"] is True for record in records)
+    assert sequence_baseline_paths[0] not in json.dumps(records, sort_keys=True)
     readiness = runtime.build_skillsbench_benchmark_runner_readiness(
         execution=records[-1][0],
         scored_workspace_validation=records[-1][1],
@@ -670,10 +707,25 @@ def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
     aggregate = controller_trace["scored_workspace_validation"]
     assert aggregate["terminal_policy"] == "stability"
     assert aggregate["terminal_complete"] is True
+    assert aggregate["sequence_baseline_configured"] is True
     assert aggregate["stability_completion_satisfied"] is True
     assert aggregate["stability_progress_detected"] is False
     assert aggregate["stability_repair_turn_count"] == 2
     assert controller_trace["benchmark_runner_readiness"]["ready"] is True
+
+
+def test_stability_turn_requires_sequence_baseline(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="requires a sequence baseline"):
+        runtime.run_skillsbench_loopx_turn(
+            prompt="synthetic prompt",
+            agent_runner=lambda _prompt: "done",
+            config=runtime.SkillsBenchTurnRuntimeConfig(
+                **{
+                    **_config(tmp_path).__dict__,
+                    "terminal_policy": "stability",
+                }
+            ),
+        )
 
 
 def test_stability_policy_is_projected_and_launchable() -> None:
