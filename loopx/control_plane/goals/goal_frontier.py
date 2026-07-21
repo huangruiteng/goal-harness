@@ -1829,6 +1829,8 @@ def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, An
         "triggers": replan_obligation.get("triggers") or [],
         "stop_condition": replan_obligation.get("stop_condition"),
     }
+    if replan_obligation.get("agent_todo_writeback_required") is True:
+        compact["agent_todo_writeback_required"] = True
     if replan_obligation.get("frontier_identity"):
         compact["frontier_identity"] = replan_obligation.get("frontier_identity")
     return compact

@@ -329,6 +329,34 @@ def _monitor_no_change_evidence(
     }
 
 
+def _has_runnable_agent_advancement(agent_todos: dict[str, Any] | None) -> bool:
+    if not isinstance(agent_todos, dict):
+        return False
+    for key in (
+        "first_executable_items",
+        "executable_backlog_items",
+        "first_open_items",
+    ):
+        items = agent_todos.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "open").strip().lower() not in {
+                "",
+                "open",
+                "todo",
+                "active",
+                "pending",
+            }:
+                continue
+            task_class = str(item.get("task_class") or "").strip()
+            if task_class in {"", "advancement_task"}:
+                return True
+    return False
+
+
 def build_autonomous_replan_obligation(
     evidence: list[dict[str, Any]],
     *,
@@ -469,6 +497,21 @@ def build_autonomous_replan_obligation(
             "monitor-only or repeated action consumes the eligible turn"
         )
 
+    extra_fields: dict[str, Any] = {}
+    if (
+        not _has_runnable_agent_advancement(agent_todos)
+        and not dead_monitor_evidence
+        and not blocked_successor_evidence
+    ):
+        extra_fields["agent_todo_writeback_required"] = True
+    if (
+        blocked_successor_evidence
+        and blocked_successor_evidence.get("frontier_identity")
+    ):
+        extra_fields["frontier_identity"] = blocked_successor_evidence.get(
+            "frontier_identity"
+        )
+
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,
         stall_threshold=(
@@ -492,16 +535,7 @@ def build_autonomous_replan_obligation(
         ),
         recommended_action=recommended_action,
         agent_id=replan_agent_id,
-        extra_fields=(
-            {
-                "frontier_identity": blocked_successor_evidence.get(
-                    "frontier_identity"
-                )
-            }
-            if blocked_successor_evidence
-            and blocked_successor_evidence.get("frontier_identity")
-            else None
-        ),
+        extra_fields=extra_fields,
     )
     if dead_monitor_evidence:
         result["dead_monitor_detector"] = {
