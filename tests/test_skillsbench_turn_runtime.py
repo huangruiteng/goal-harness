@@ -18,6 +18,8 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (
 )
 from loopx.benchmark_adapters.skillsbench_turn_route import (
     SkillsBenchTurnTraceSummary,
+    skillsbench_loopx_turn_launch_error,
+    skillsbench_loopx_turn_runner_prerequisites,
     sync_skillsbench_loopx_turn_trace_into_compact,
 )
 
@@ -30,6 +32,104 @@ def _config(tmp_path: Path) -> runtime.SkillsBenchTurnRuntimeConfig:
         agent_id="synthetic-agent",
         runtime_root=tmp_path,
     )
+
+
+def _install_sequence_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    validation_runs: list[list[int] | tuple[int, ...]],
+) -> tuple[list[str], dict[str, int]]:
+    plan_instance_ids: list[str] = []
+    callback_counts = {"writeback": 0, "spend": 0}
+
+    class SequenceBridge:
+        instance_count = 0
+
+        def __init__(self, _config: Any) -> None:
+            self.meaningful_operation_count = 0
+            self.validation_codes = list(
+                validation_runs[SequenceBridge.instance_count]
+            )
+            SequenceBridge.instance_count += 1
+
+        def exec(
+            self,
+            _command: str,
+            *,
+            meaningful: bool = False,
+            allow_nonzero: bool = False,
+        ) -> dict[str, Any]:
+            if allow_nonzero:
+                code = self.validation_codes.pop(0)
+                if meaningful:
+                    self.meaningful_operation_count += 1
+                return {
+                    "ok": code == 0,
+                    "exit_code": code,
+                    "elapsed_ms": 1,
+                    **({"stdout": ""} if code == 0 else {}),
+                }
+            return {"ok": True, "exit_code": 0, "stdout": "", "elapsed_ms": 1}
+
+        def loopx_json(self, command: str) -> dict[str, Any]:
+            if "refresh-state" in command:
+                callback_counts["writeback"] += 1
+                return {"ok": True, "appended": True}
+            if "spend-slot" in command:
+                callback_counts["spend"] += 1
+                return {"ok": True, "appended": True, "slots": 1}
+            return {
+                "scheduler_hint": {
+                    "execution_phase": {
+                        "disposition": "outer_controller_owned",
+                        "completed": True,
+                        "acknowledged": False,
+                        "apply_needed": False,
+                    }
+                }
+            }
+
+    def fake_plan(
+        _bridge: Any,
+        _config: Any,
+        *,
+        turn_instance_id: str,
+    ) -> dict[str, Any]:
+        plan_instance_ids.append(turn_instance_id)
+        return {"ok": True, "turn_key": turn_instance_id}
+
+    def fake_turn_once(
+        plan: dict[str, Any],
+        *,
+        host_runner: Any,
+        task_validator: Any,
+        writeback: Any,
+        spend: Any,
+        scheduler: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        result = host_runner({"turn_key": plan["turn_key"]})
+        validation = dict(task_validator(plan, result))
+        assert validation["status"] in {"progress", "passed"}
+        writeback_payload = writeback(result)
+        spend_payload = spend()
+        scheduler(spend_payload)
+        return {
+            "status": "committed",
+            "validation": validation,
+            "quota_slot_spend_count": 1,
+            "receipt": {"status": "committed"},
+            "effects": {
+                "host_invoked": True,
+                "state_written": writeback_payload["appended"],
+                "quota_spent": spend_payload["appended"],
+                "scheduler_acknowledged": False,
+            },
+        }
+
+    monkeypatch.setattr(runtime, "SkillsBenchTurnBridge", SequenceBridge)
+    monkeypatch.setattr(runtime, "_turn_plan", fake_plan)
+    monkeypatch.setattr(runtime, "run_loopx_turn_once", fake_turn_once)
+    return plan_instance_ids, callback_counts
 
 
 def test_nonzero_validation_probe_does_not_return_private_output(
@@ -334,7 +434,7 @@ def test_satisfied_pre_agent_postcondition_runs_but_does_not_claim_readiness(
     assert validation["pre_agent_postcondition_status"] == "already_satisfied"
     assert validation["meaningful_operation_count"] == 1
     assert receipt["ready"] is False
-    assert "pre_agent_postcondition_unsatisfied" in receipt["blocker_codes"]
+    assert "pre_agent_postcondition_eligible" in receipt["blocker_codes"]
 
 
 def test_fixed_n_maps_accepted_exit_zero_to_nonterminal_progress(
@@ -469,100 +569,11 @@ def test_adaptive_sequence_commits_progress_then_terminal_turns(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    validation_pairs = [(3, 10), (10, 0)]
-    plan_instance_ids: list[str] = []
+    plan_instance_ids, callback_counts = _install_sequence_runtime(
+        monkeypatch, [(3, 10), (10, 0)]
+    )
     agent_prompts: list[str] = []
-    callback_counts = {"writeback": 0, "spend": 0}
     observed: list[tuple[dict[str, Any], dict[str, Any]]] = []
-
-    class SequenceBridge:
-        instance_count = 0
-
-        def __init__(self, _config: Any) -> None:
-            self.meaningful_operation_count = 0
-            self.validation_codes = list(
-                validation_pairs[SequenceBridge.instance_count]
-            )
-            SequenceBridge.instance_count += 1
-
-        def exec(
-            self,
-            _command: str,
-            *,
-            meaningful: bool = False,
-            allow_nonzero: bool = False,
-        ) -> dict[str, Any]:
-            if allow_nonzero:
-                code = self.validation_codes.pop(0)
-                if meaningful:
-                    self.meaningful_operation_count += 1
-                return {
-                    "ok": code == 0,
-                    "exit_code": code,
-                    "elapsed_ms": 1,
-                    **({"stdout": ""} if code == 0 else {}),
-                }
-            return {"ok": True, "exit_code": 0, "stdout": "", "elapsed_ms": 1}
-
-        def loopx_json(self, command: str) -> dict[str, Any]:
-            if "refresh-state" in command:
-                callback_counts["writeback"] += 1
-                return {"ok": True, "appended": True}
-            if "spend-slot" in command:
-                callback_counts["spend"] += 1
-                return {"ok": True, "appended": True, "slots": 1}
-            return {
-                "scheduler_hint": {
-                    "execution_phase": {
-                        "disposition": "outer_controller_owned",
-                        "completed": True,
-                        "acknowledged": False,
-                        "apply_needed": False,
-                    }
-                }
-            }
-
-    def fake_plan(
-        _bridge: Any,
-        _config: Any,
-        *,
-        turn_instance_id: str,
-    ) -> dict[str, Any]:
-        plan_instance_ids.append(turn_instance_id)
-        return {"ok": True, "turn_key": f"turn-{len(plan_instance_ids)}"}
-
-    def fake_turn_once(
-        plan: dict[str, Any],
-        *,
-        host_runner: Any,
-        task_validator: Any,
-        writeback: Any,
-        spend: Any,
-        scheduler: Any,
-        **_kwargs: Any,
-    ) -> dict[str, Any]:
-        result = host_runner({"turn_key": plan["turn_key"]})
-        validation = dict(task_validator(plan, result))
-        assert validation["status"] in {"progress", "passed"}
-        writeback_payload = writeback(result)
-        spend_payload = spend()
-        scheduler(spend_payload)
-        return {
-            "status": "committed",
-            "validation": validation,
-            "quota_slot_spend_count": 1,
-            "receipt": {"status": "committed"},
-            "effects": {
-                "host_invoked": True,
-                "state_written": writeback_payload["appended"],
-                "quota_spent": spend_payload["appended"],
-                "scheduler_acknowledged": False,
-            },
-        }
-
-    monkeypatch.setattr(runtime, "SkillsBenchTurnBridge", SequenceBridge)
-    monkeypatch.setattr(runtime, "_turn_plan", fake_plan)
-    monkeypatch.setattr(runtime, "run_loopx_turn_once", fake_turn_once)
 
     records, sequence = runtime.run_skillsbench_loopx_turn_sequence(
         prompt="original task prompt",
@@ -591,6 +602,101 @@ def test_adaptive_sequence_commits_progress_then_terminal_turns(
     assert records[1][1]["terminal_complete"] is True
     assert records[1][1]["sequence_stop_reason"] == "terminal_complete"
     assert len(observed) == 2
+
+
+def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    validation_codes = [
+        [3, 10, 0],
+        [0, 10, 0],
+        [0, 1, 0],
+    ]
+    _plan_instance_ids, callback_counts = _install_sequence_runtime(
+        monkeypatch, validation_codes
+    )
+    agent_prompts: list[str] = []
+
+    records, sequence = runtime.run_skillsbench_loopx_turn_sequence(
+        prompt="original task prompt",
+        agent_runner=lambda prompt: agent_prompts.append(prompt) or "done",
+        config=runtime.SkillsBenchTurnRuntimeConfig(
+            **{
+                **_config(tmp_path).__dict__,
+                "max_turns": 4,
+                "terminal_policy": "stability",
+            }
+        ),
+    )
+
+    assert sequence["status"] == "terminal_complete"
+    assert sequence["turn_count"] == 3
+    assert callback_counts == {"writeback": 3, "spend": 3}
+    assert agent_prompts[0] == "original task prompt"
+    assert all(
+        "without manufacturing a change" in prompt for prompt in agent_prompts[1:]
+    )
+    assert [record[1]["terminal_complete"] for record in records] == [
+        False,
+        False,
+        True,
+    ]
+    assert [record[1]["stability_progress_detected"] for record in records] == [
+        True,
+        True,
+        False,
+    ]
+    assert all(
+        record[1]["stability_completion_satisfied"] is True for record in records
+    )
+    readiness = runtime.build_skillsbench_benchmark_runner_readiness(
+        execution=records[-1][0],
+        scored_workspace_validation=records[-1][1],
+    )
+    assert readiness["ready"] is True
+    summary = SkillsBenchTurnTraceSummary()
+    for execution, validation in records:
+        trace = runtime.build_skillsbench_loopx_turn_trace(
+            route="loopx-turn-agent-cli",
+            benchmark_id="synthetic-benchmark",
+            task_id="synthetic-task",
+            execution=execution,
+            scored_workspace_validation=validation,
+        )
+        summary.merge(trace, trace["boundary"])
+    controller_trace: dict[str, Any] = {}
+    summary.apply(controller_trace)
+    aggregate = controller_trace["scored_workspace_validation"]
+    assert aggregate["terminal_policy"] == "stability"
+    assert aggregate["terminal_complete"] is True
+    assert aggregate["stability_completion_satisfied"] is True
+    assert aggregate["stability_progress_detected"] is False
+    assert aggregate["stability_repair_turn_count"] == 2
+    assert controller_trace["benchmark_runner_readiness"]["ready"] is True
+
+
+def test_stability_policy_is_projected_and_launchable() -> None:
+    prerequisites = skillsbench_loopx_turn_runner_prerequisites(
+        "loopx-turn-agent-cli",
+        "private-command",
+        max_turns=4,
+        progress_exit_code=10,
+        terminal_policy="stability",
+    )
+    launch_error = skillsbench_loopx_turn_launch_error(
+        SimpleNamespace(
+            route="loopx-turn-agent-cli",
+            host_local_acp_launch=True,
+            loopx_turn_validation_command="private-command",
+            loopx_turn_max_turns=4,
+            loopx_turn_progress_exit_code=10,
+            loopx_turn_terminal_policy="stability",
+        )
+    )
+
+    assert prerequisites["loopx_turn_terminal_policy"] == "stability"
+    assert launch_error is None
 
 
 def test_skillsbench_n_turn_codex_exec_starts_then_resumes_same_thread(
@@ -1171,9 +1277,18 @@ def test_adaptive_sequence_stops_on_missing_progress_or_fixed_maximum(
     assert sequence["status"] == expected_reason
 
 
-def test_fixed_n_sequence_promotes_only_final_validated_step_to_terminal(
+@pytest.mark.parametrize(
+    ("terminal_policy", "expected_step_kinds"),
+    [
+        ("fixed-n", ["progress", "progress", "terminal"]),
+        ("stability", ["validator", "validator", "terminal"]),
+    ],
+)
+def test_sequence_reserves_terminal_step_for_configured_bound(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    terminal_policy: str,
+    expected_step_kinds: list[str],
 ) -> None:
     step_kinds: list[str] = []
 
@@ -1199,15 +1314,15 @@ def test_fixed_n_sequence_promotes_only_final_validated_step_to_terminal(
             **{
                 **_config(tmp_path).__dict__,
                 "max_turns": 3,
-                "terminal_policy": "fixed-n",
+                "terminal_policy": terminal_policy,
             }
         ),
     )
 
-    assert step_kinds == ["progress", "progress", "terminal"]
+    assert step_kinds == expected_step_kinds
     assert len(records) == 3
     assert sequence["status"] == "terminal_complete"
-    assert sequence["terminal_policy"] == "fixed-n"
+    assert sequence["terminal_policy"] == terminal_policy
 
 
 @pytest.mark.parametrize(
@@ -1218,7 +1333,7 @@ def test_fixed_n_sequence_promotes_only_final_validated_step_to_terminal(
             "committed",
             "already_satisfied",
             "satisfied",
-            "pre_agent_postcondition_unsatisfied",
+            "pre_agent_postcondition_eligible",
         ),
         (
             "committed",

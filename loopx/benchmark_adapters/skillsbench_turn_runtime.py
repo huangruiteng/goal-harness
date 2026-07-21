@@ -36,7 +36,10 @@ SKILLSBENCH_BRIDGE_OPERATION_SCHEMA_VERSION = (
     "skillsbench_remote_command_file_bridge_operation_response_v0"
 )
 SKILLSBENCH_TURN_BASELINE_ENV = "LOOPX_TURN_BASELINE_FILE"
-SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES = frozenset({"validator", "fixed-n"})
+SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES = frozenset(
+    {"validator", "fixed-n", "stability"}
+)
+
 
 @dataclass(frozen=True)
 class SkillsBenchTurnAgentResult:
@@ -52,6 +55,13 @@ SKILLSBENCH_LOOPX_TURN_CONTINUATION_PROMPT = """\
 Continue the same task in this same Codex session. Inspect the current workspace
 state, perform the next bounded task-facing step, and stop. Do not use or request
 official verifier, reward, pass/fail, hidden-test, or gold-answer feedback.
+"""
+SKILLSBENCH_LOOPX_TURN_STABILITY_PROMPT = """\
+Review the current solution against the visible task requirements and inspect the
+durable workspace state. Repair concrete defects and run bounded task-derived
+checks when useful. If no repair is needed, stop without manufacturing a change.
+Do not use or request official verifier, reward, pass/fail, hidden-test, or
+gold-answer feedback.
 """
 
 
@@ -363,7 +373,9 @@ def run_skillsbench_loopx_turn(
     if not 1 <= config.progress_exit_code <= 255:
         raise ValueError("SkillsBench progress exit code must be between 1 and 255")
     if config.terminal_policy not in SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES:
-        raise ValueError("SkillsBench terminal policy must be validator or fixed-n")
+        raise ValueError(
+            "SkillsBench terminal policy must be validator, fixed-n, or stability"
+        )
     if sequence_step_kind not in {"validator", "progress", "terminal"}:
         raise ValueError("SkillsBench sequence step kind was unsupported")
     bridge = SkillsBenchTurnBridge(config)
@@ -416,6 +428,57 @@ def run_skillsbench_loopx_turn(
                 "exit_code": 1,
             }
         exit_code = validation_result.get("exit_code")
+        if config.terminal_policy == "stability":
+            try:
+                completion_result = bridge.exec(
+                    config.validation_command,
+                    meaningful=True,
+                    allow_nonzero=True,
+                )
+            except SkillsBenchTurnBridgeError:
+                completion_result = {"ok": False, "exit_code": 1}
+            completion_satisfied = completion_result.get("ok") is True
+            progress_detected = bool(
+                exit_code == config.progress_exit_code
+                or _verified_bridge_write_progress(agent_progress_evidence)
+            )
+            stability_evidence = {
+                "stability_progress_detected": progress_detected,
+                "stability_completion_satisfied": completion_satisfied,
+                "stability_completion_checked": True,
+            }
+            if sequence_step_kind == "terminal" and completion_satisfied:
+                return {
+                    "status": "passed",
+                    "validator_kind": "skillsbench_stability_postcondition",
+                    "summary": "independent completion postcondition passed at the Turn limit",
+                    "exit_code": 0,
+                    **stability_evidence,
+                }
+            if progress_detected:
+                return {
+                    "status": "progress",
+                    "validator_kind": "skillsbench_stability_postcondition",
+                    "summary": "independent task progress requires another review Turn",
+                    "exit_code": config.progress_exit_code,
+                    **stability_evidence,
+                }
+            if completion_satisfied:
+                return {
+                    "status": "passed",
+                    "validator_kind": "skillsbench_stability_postcondition",
+                    "summary": "no new repair was needed and the completion postcondition passed",
+                    "exit_code": 0,
+                    **stability_evidence,
+                }
+            return {
+                "status": "failed",
+                "validator_kind": "skillsbench_stability_postcondition",
+                "summary": "neither independent progress nor completion was validated",
+                "recovery_kind": "repair_required",
+                "exit_code": completion_result.get("exit_code"),
+                **stability_evidence,
+            }
         validation_succeeded = exit_code in {0, config.progress_exit_code}
         if not validation_succeeded:
             if _verified_bridge_write_progress(agent_progress_evidence):
@@ -535,11 +598,7 @@ def run_skillsbench_loopx_turn(
     validation_passed = validation_status in {"passed", "progress"}
     terminal_complete = validation_status == "passed"
     validated_progress = validation_status in {"passed", "progress"}
-    bridge_write_progress = bool(
-        transaction_validation.get("validator_kind")
-        == "skillsbench_bridge_write_progress"
-        and _verified_bridge_write_progress(agent_progress_evidence)
-    )
+    bridge_write_progress = _verified_bridge_write_progress(agent_progress_evidence)
     write_count = agent_progress_evidence.get("successful_task_file_write_count")
     if not isinstance(write_count, int) or isinstance(write_count, bool):
         write_count = 0
@@ -563,6 +622,15 @@ def run_skillsbench_loopx_turn(
         "validated_progress": validated_progress,
         "terminal_complete": terminal_complete,
         "terminal_policy": config.terminal_policy,
+        "stability_progress_detected": bool(
+            transaction_validation.get("stability_progress_detected") is True
+        ),
+        "stability_completion_checked": bool(
+            transaction_validation.get("stability_completion_checked") is True
+        ),
+        "stability_completion_satisfied": bool(
+            transaction_validation.get("stability_completion_satisfied") is True
+        ),
         "baseline_contract": (
             "task_declared_independent_postcondition_or_verified_bridge_write"
         ),
@@ -593,7 +661,9 @@ def run_skillsbench_loopx_turn_sequence(
     if config.max_turns < 1:
         raise ValueError("SkillsBench LoopX Turn max_turns must be at least 1")
     if config.terminal_policy not in SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES:
-        raise ValueError("SkillsBench terminal policy must be validator or fixed-n")
+        raise ValueError(
+            "SkillsBench terminal policy must be validator, fixed-n, or stability"
+        )
     sequence_id = uuid.uuid4().hex[:16]
     deadline = time.monotonic() + max(1.0, config.agent_timeout_seconds)
     records: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -603,14 +673,22 @@ def run_skillsbench_loopx_turn_sequence(
         if remaining_seconds <= 0:
             stop_reason = "time_budget_exhausted"
             break
-        turn_prompt = (
-            prompt if turn_index == 1 else SKILLSBENCH_LOOPX_TURN_CONTINUATION_PROMPT
-        )
+        if turn_index == 1:
+            turn_prompt = prompt
+        elif config.terminal_policy == "stability":
+            turn_prompt = SKILLSBENCH_LOOPX_TURN_STABILITY_PROMPT
+        else:
+            turn_prompt = SKILLSBENCH_LOOPX_TURN_CONTINUATION_PROMPT
         sequence_step_kind = "validator"
         if config.terminal_policy == "fixed-n":
             sequence_step_kind = (
                 "terminal" if turn_index == config.max_turns else "progress"
             )
+        elif (
+            config.terminal_policy == "stability"
+            and turn_index == config.max_turns
+        ):
+            sequence_step_kind = "terminal"
         execution, validation = run_skillsbench_loopx_turn(
             prompt=turn_prompt,
             agent_runner=agent_runner,
@@ -654,14 +732,22 @@ def build_skillsbench_benchmark_runner_readiness(
 ) -> dict[str, Any]:
     """Reduce a Turn outcome to a compact, public-safe runner capability receipt."""
 
+    pre_agent_unsatisfied = scored_workspace_validation.get(
+        "pre_agent_postcondition_status"
+    ) in {"unsatisfied", "progress_validated"}
+    stability_terminal_review = bool(
+        scored_workspace_validation.get("terminal_policy") == "stability"
+        and scored_workspace_validation.get("terminal_complete") is True
+        and scored_workspace_validation.get("stability_completion_checked") is True
+        and scored_workspace_validation.get("stability_completion_satisfied") is True
+    )
     checks = {
         "turn_transaction_committed": execution.get("status") == "committed",
         "pre_agent_postcondition_checked": (
             scored_workspace_validation.get("pre_agent_postcondition_checked") is True
         ),
-        "pre_agent_postcondition_unsatisfied": (
-            scored_workspace_validation.get("pre_agent_postcondition_status")
-            in {"unsatisfied", "progress_validated"}
+        "pre_agent_postcondition_eligible": (
+            pre_agent_unsatisfied or stability_terminal_review
         ),
         "post_agent_postcondition_satisfied": (
             scored_workspace_validation.get("post_agent_postcondition_status")
@@ -679,7 +765,7 @@ def build_skillsbench_benchmark_runner_readiness(
         "ready": not blockers,
         "checks": checks,
         "blocker_codes": blockers,
-        "evidence_kind": "committed_turn_with_independent_postcondition_baseline",
+        "evidence_kind": "committed_turn_with_independent_postcondition",
         "raw_task_text_recorded": False,
         "raw_validator_output_recorded": False,
         "raw_verifier_output_recorded": False,
@@ -822,7 +908,9 @@ def run_skillsbench_loopx_turn_relay(
     if not 1 <= progress_exit_code <= 255:
         raise RuntimeError("LoopX Turn progress exit code must be between 1 and 255")
     if terminal_policy not in SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES:
-        raise RuntimeError("LoopX Turn terminal policy must be validator or fixed-n")
+        raise RuntimeError(
+            "LoopX Turn terminal policy must be validator, fixed-n, or stability"
+        )
     runtime_session = (
         "".join(
             char if char.isalnum() or char in "_.:-" else "_" for char in session_id
