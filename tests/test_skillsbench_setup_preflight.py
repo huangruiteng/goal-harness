@@ -174,7 +174,7 @@ def test_setup_only_mode_does_not_require_host_codex_preflight() -> None:
 
 
 @pytest.mark.parametrize(
-    ("message", "category", "dependency_classes"),
+    ("message", "category", "dependency_classes", "pip_failure_subtype"),
     [
         (
             "Docker compose command failed. ERROR: failed to solve: process "
@@ -182,6 +182,7 @@ def test_setup_only_mode_does_not_require_host_codex_preflight() -> None:
             "failed to fetch package index",
             "skillsbench_docker_compose_apt_repository_failure",
             ["system_package"],
+            "none",
         ),
         (
             "Docker compose command failed. ERROR: failed to solve: process "
@@ -189,12 +190,14 @@ def test_setup_only_mode_does_not_require_host_codex_preflight() -> None:
             "max retries exceeded for pypi.org",
             "skillsbench_docker_compose_pip_bootstrap_failure",
             ["python_package"],
+            "package_index_network_failure",
         ),
         (
             "Docker compose command failed: invalid mount config for type "
             "bind: bind source path does not exist",
             "skillsbench_docker_compose_volume_mount_failure",
             [],
+            "none",
         ),
     ],
 )
@@ -202,6 +205,7 @@ def test_setup_only_preflight_classifies_public_setup_failures(
     message: str,
     category: str,
     dependency_classes: list[str],
+    pip_failure_subtype: str,
 ) -> None:
     FakeRollout.failure_stage = "environment_start"
     FakeRollout.failure = RuntimeError(message)
@@ -212,6 +216,7 @@ def test_setup_only_preflight_classifies_public_setup_failures(
     assert result["failure_stage"] == "environment_start"
     assert result["failure_category"] == category
     assert result["dependency_classes"] == dependency_classes
+    assert result["pip_failure_subtype"] == pip_failure_subtype
     assert result["exit_category"] == "setup_command_failed"
     assert result["cleanup_status"] == "completed"
     serialized = json.dumps(result, sort_keys=True)
@@ -275,6 +280,39 @@ def test_compose_producer_emits_only_bounded_typed_cause() -> None:
     with pytest.raises(RuntimeError, match="Docker compose command failed"):
         asyncio.run(invoke())
     assert environment.command_attempts == 4
+
+
+@pytest.mark.parametrize(
+    ("message", "subtype"),
+    [
+        (
+            "Docker compose command failed: pip install demo failed: "
+            "No matching distribution found for demo==99",
+            "no_matching_distribution",
+        ),
+        (
+            "Docker compose command failed: pip install demo failed: "
+            "Failed building wheel for demo",
+            "wheel_build_failed",
+        ),
+        (
+            "Docker compose command failed: pip install demo returned a non-zero code",
+            "command_failed_unclassified",
+        ),
+    ],
+)
+def test_setup_only_preflight_projects_bounded_pip_failure_subtype(
+    message: str,
+    subtype: str,
+) -> None:
+    FakeRollout.failure_stage = "environment_start"
+    FakeRollout.failure = RuntimeError(message)
+
+    result = run_preflight()
+
+    assert result["pip_failure_subtype"] == subtype
+    serialized = json.dumps(result, sort_keys=True)
+    assert message not in serialized
 
 
 def test_setup_only_preflight_consumes_compose_producer_typed_cause() -> None:
