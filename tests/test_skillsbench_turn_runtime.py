@@ -608,6 +608,13 @@ import sys
 
 with pathlib.Path(os.environ["FAKE_CODEX_ARGV_LOG"]).open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(sys.argv[1:]) + "\\n")
+attempt = len(pathlib.Path(os.environ["FAKE_CODEX_ARGV_LOG"]).read_text().splitlines())
+if attempt == 2:
+    print(json.dumps({
+        "type": "turn.failed",
+        "error": {"message": "stream disconnected before completion: codex/responses"},
+    }))
+    raise SystemExit(1)
 output_index = sys.argv.index("--output-last-message") + 1
 pathlib.Path(sys.argv[output_index]).write_text("bounded turn complete", encoding="utf-8")
 print(json.dumps({"type": "thread.started", "thread_id": "thread-fixture-001"}))
@@ -682,9 +689,25 @@ print(json.dumps({"type": "thread.started", "thread_id": "thread-fixture-001"}))
     assert first == second == "bounded turn complete"
     assert "--ephemeral" not in argv_rows[0]
     assert argv_rows[0][:2] == ["exec", "--skip-git-repo-check"]
+    assert len(argv_rows) == 3
     assert argv_rows[1][:3] == ["exec", "resume", "--skip-git-repo-check"]
+    assert argv_rows[2][:3] == ["exec", "resume", "--skip-git-repo-check"]
     assert "thread-fixture-001" in argv_rows[1]
+    assert "thread-fixture-001" in argv_rows[2]
     assert session["_loopx_turn_codex_thread_id"] == "thread-fixture-001"
+    failures = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in trace_dir.glob("*.compact.json")
+        if json.loads(path.read_text(encoding="utf-8")).get("trace_kind")
+        == "codex_exec_process_failure"
+    ]
+    assert len(failures) == 1
+    process = failures[0]["codex_exec_process"]
+    assert process["failure_category"] == "codex_responses_stream_unavailable"
+    assert process["recoverable_turn_failure"] is True
+    assert process["transport_retry_index"] == 0
+    assert process["retry_scheduled"] is True
+    assert process["raw_stdout_recorded"] is False
     private_cwd_root = tmp_path / ".loopx-turn-codex-sessions"
     assert len(list(private_cwd_root.glob("*/cwd"))) == 1
 
@@ -707,6 +730,97 @@ print(json.dumps({"type": "thread.started", "thread_id": "thread-fixture-001"}))
     )
     assert "_loopx_turn_codex_thread_id" not in session
     assert not private_cwd_root.exists()
+
+
+def test_codex_exec_transport_retry_requires_no_task_facing_operation(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "bridge-summary.jsonl"
+    assert acp_relay._codex_exec_transport_retry_allowed(
+        category="codex_responses_stream_unavailable",
+        bridge_summary_path=summary_path,
+        retry_count=0,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+
+    summary_path.write_text(
+        json.dumps(
+            {
+                "record_phase": "complete",
+                "operation": "read_file",
+                "task_facing_operation": True,
+                "success": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert not acp_relay._codex_exec_transport_retry_allowed(
+        category="codex_responses_stream_unavailable",
+        bridge_summary_path=summary_path,
+        retry_count=0,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+
+    summary_path.write_text(
+        json.dumps(
+            {
+                "record_phase": "complete",
+                "operation": "run_command",
+                "loopx_state_write": True,
+                "loopx_subcommands": ["quota", "spend-slot"],
+                "success": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert not acp_relay._codex_exec_transport_retry_allowed(
+        category="codex_responses_stream_unavailable",
+        bridge_summary_path=summary_path,
+        retry_count=0,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+
+
+def test_codex_exec_failure_category_reads_only_typed_jsonl_errors() -> None:
+    private_message = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": "stream disconnected before completion: codex/responses",
+            },
+        }
+    )
+    typed_error = json.dumps(
+        {
+            "type": "turn.failed",
+            "error": {
+                "message": "stream disconnected before completion: codex/responses"
+            },
+        }
+    )
+
+    assert (
+        acp_relay._codex_exec_failure_category(
+            returncode=1,
+            stderr_text="",
+            stdout_text=private_message,
+        )
+        == "codex_exec_exit_1"
+    )
+    assert (
+        acp_relay._codex_exec_failure_category(
+            returncode=1,
+            stderr_text="",
+            stdout_text=typed_error,
+        )
+        == "codex_responses_stream_unavailable"
+    )
 
 
 def test_skillsbench_n_turn_codex_exec_respects_expired_shared_budget(

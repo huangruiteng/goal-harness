@@ -38,7 +38,6 @@ from loopx.benchmark_adapters.skillsbench_turn_runtime import (
 from loopx.benchmark_adapters.skillsbench_bridge_summary import (
     bridge_summary_has_inflight_operation as _bridge_summary_has_inflight_operation,
     bridge_summary_has_meaningful_agent_progress as _bridge_summary_has_meaningful_agent_progress,
-    bridge_summary_has_successful_task_file_write as _bridge_summary_has_successful_task_file_write,
     bridge_summary_has_successful_task_operation as _bridge_summary_has_successful_task_operation,
     bridge_summary_task_progress_receipt as _bridge_summary_task_progress_receipt,
     bridge_operation_record_interrupted as _bridge_operation_record_interrupted,
@@ -97,6 +96,7 @@ from loopx.control_plane.turn_driver import codex_cli_session_id_from_jsonl
 
 SAFE_LOOPX_TODO_ID_RE = re.compile(r"^todo_[A-Za-z0-9_-]{6,80}$")
 SAFE_LOOPX_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
+CODEX_EXEC_TRANSPORT_RETRY_LIMIT = 1
 
 
 def _loopx_turn_local_session_root(
@@ -276,8 +276,16 @@ def _codex_exec_failure_category(
     *,
     returncode: int | None,
     stderr_text: str,
+    stdout_text: str = "",
 ) -> str:
-    text = (stderr_text or "").lower()
+    text = "\n".join(
+        value
+        for value in (
+            stderr_text or "",
+            _codex_exec_jsonl_error_text(stdout_text),
+        )
+        if value
+    ).lower()
     if any(
         token in text
         for token in (
@@ -372,6 +380,71 @@ def _codex_exec_failure_category(
     if returncode is not None:
         return "codex_exec_exit_nonzero"
     return "codex_exec_failed"
+
+
+def _codex_exec_jsonl_error_text(stdout_text: str) -> str:
+    """Extract only typed Codex error messages from private JSONL output."""
+
+    messages: list[str] = []
+    for line in (stdout_text or "").splitlines():
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "").strip().lower()
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        item_type = str(item.get("type") or "").strip().lower()
+        if event_type not in {"error", "turn.failed"} and item_type != "error":
+            continue
+        error = event.get("error")
+        candidates = [event.get("message")]
+        if isinstance(error, dict):
+            candidates.append(error.get("message"))
+        elif isinstance(error, str):
+            candidates.append(error)
+        if item_type == "error":
+            candidates.extend((item.get("message"), item.get("text")))
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                continue
+            message = candidate.strip()
+            if message:
+                messages.append(message[:4_000])
+        if sum(len(message) for message in messages) >= 16_000:
+            break
+    return "\n".join(messages)[:16_000]
+
+
+def _codex_exec_transport_retry_allowed(
+    *,
+    category: str,
+    bridge_summary_path: Path | None,
+    retry_count: int,
+    final_message_present: bool,
+    turn_deadline: float | None,
+) -> bool:
+    if (
+        category not in RECOVERABLE_CODEX_TURN_FAILURE_CATEGORIES
+        or retry_count >= CODEX_EXEC_TRANSPORT_RETRY_LIMIT
+        or final_message_present
+        or bridge_summary_path is None
+        or turn_deadline is not None
+        and time.monotonic() >= turn_deadline
+        or _bridge_summary_has_inflight_operation(bridge_summary_path)
+        or _bridge_summary_has_meaningful_agent_progress(
+            bridge_summary_path,
+            allow_loopx_closeout=True,
+        )
+    ):
+        return False
+    receipt = _bridge_summary_task_progress_receipt(bridge_summary_path)
+    return bool(
+        receipt.get("task_facing_operation_count") == 0
+        and receipt.get("task_facing_success_count") == 0
+        and receipt.get("raw_material_recorded") is False
+    )
 
 
 def _prompt_with_app_server_closeout_instruction(prompt_text: str) -> str:
@@ -596,6 +669,7 @@ class SkillsBenchLocalAcpRelay:
         stdout: TextIO,
         _bypass_loopx_turn: bool = False,
         _turn_deadline: float | None = None,
+        _transport_retry_count: int = 0,
     ) -> str:
         if self._config.dry_run_response is not None:
             return self._config.dry_run_response
@@ -957,7 +1031,7 @@ class SkillsBenchLocalAcpRelay:
                                 )
                             )
                         time.sleep(0.2)
-            except subprocess.TimeoutExpired as exc:
+            except subprocess.TimeoutExpired:
                 stdout_text = (
                     stdout_path.read_text(encoding="utf-8", errors="replace")
                     if stdout_path.exists()
@@ -999,12 +1073,24 @@ class SkillsBenchLocalAcpRelay:
                 category = _codex_exec_failure_category(
                     returncode=proc.returncode,
                     stderr_text=stderr_text,
+                    stdout_text=stdout_text,
                 )
                 recoverable_turn_failure = bool(
                     category in RECOVERABLE_CODEX_TURN_FAILURE_CATEGORIES
                     and prompt_text.strip()
                     != SKILLSBENCH_LOCAL_ACP_RELAY_HEALTH_PROMPT
                     and not _is_bridge_action_preflight_prompt(prompt_text)
+                )
+                retry_scheduled = bool(
+                    recoverable_turn_failure
+                    and resumable_loopx_turn
+                    and _codex_exec_transport_retry_allowed(
+                        category=category,
+                        bridge_summary_path=bridge_summary_path,
+                        retry_count=_transport_retry_count,
+                        final_message_present=output_path.exists(),
+                        turn_deadline=_turn_deadline,
+                    )
                 )
                 self._publish_codex_exec_failure_trace(
                     stage="exit_nonzero",
@@ -1017,10 +1103,22 @@ class SkillsBenchLocalAcpRelay:
                     ),
                     failure_category=category,
                     recoverable_turn_failure=recoverable_turn_failure,
+                    transport_retry_index=_transport_retry_count,
+                    retry_scheduled=retry_scheduled,
                 )
                 if bridge_summary_path is not None:
                     self._publish_remote_bridge_agent_operations_trace(
                         bridge_summary_path=bridge_summary_path,
+                    )
+                if retry_scheduled:
+                    return self._run_codex(
+                        prompt_text,
+                        session=session,
+                        session_id=session_id,
+                        stdout=stdout,
+                        _bypass_loopx_turn=_bypass_loopx_turn,
+                        _turn_deadline=_turn_deadline,
+                        _transport_retry_count=_transport_retry_count + 1,
                     )
                 if recoverable_turn_failure:
                     return _recoverable_codex_turn_failure_message(category)
@@ -2965,6 +3063,8 @@ raise SystemExit(proc.returncode)
         final_message_bytes: int,
         failure_category: str | None = None,
         recoverable_turn_failure: bool | None = None,
+        transport_retry_index: int = 0,
+        retry_scheduled: bool = False,
     ) -> None:
         if not self._config.worker_public_trace_dir:
             return
@@ -2977,6 +3077,7 @@ raise SystemExit(proc.returncode)
         category = failure_category or _codex_exec_failure_category(
             returncode=returncode,
             stderr_text=stderr_text,
+            stdout_text=stdout_text,
         )
         if recoverable_turn_failure is None:
             recoverable_turn_failure = (
@@ -2994,6 +3095,8 @@ raise SystemExit(proc.returncode)
                 "stage": safe_stage,
                 "failure_category": str(category or "codex_exec_failed")[:120],
                 "recoverable_turn_failure": recoverable_turn_failure,
+                "transport_retry_index": max(0, int(transport_retry_index or 0)),
+                "retry_scheduled": bool(retry_scheduled),
                 "returncode": (
                     returncode
                     if isinstance(returncode, int)
