@@ -290,8 +290,9 @@ if [[ "$route" == "loopx-turn-agent-cli" ]]; then
     exit 2
   fi
   if [[ "$loopx_turn_terminal_policy" != "validator" ]] &&
-    [[ "$loopx_turn_terminal_policy" != "fixed-n" ]]; then
-    echo "SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICY must be validator or fixed-n" >&2
+    [[ "$loopx_turn_terminal_policy" != "fixed-n" ]] &&
+    [[ "$loopx_turn_terminal_policy" != "stability" ]]; then
+    echo "SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICY must be validator, fixed-n, or stability" >&2
     exit 2
   fi
 fi

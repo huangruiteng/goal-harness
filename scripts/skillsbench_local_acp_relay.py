@@ -249,7 +249,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--loopx-turn-progress-exit-code", type=int, default=10)
     parser.add_argument(
         "--loopx-turn-terminal-policy",
-        choices=("validator", "fixed-n"),
+        choices=("validator", "fixed-n", "stability"),
         default="validator",
     )
     parser.add_argument("--loopx-case-goal-id", default="skillsbench-case")
