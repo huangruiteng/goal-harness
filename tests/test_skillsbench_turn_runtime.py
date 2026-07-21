@@ -22,6 +22,7 @@ from loopx.benchmark_adapters.skillsbench_turn_route import (
     skillsbench_loopx_turn_runner_prerequisites,
     sync_skillsbench_loopx_turn_trace_into_compact,
 )
+from loopx.control_plane.turn_driver import executor as turn_executor
 
 
 def _config(tmp_path: Path) -> runtime.SkillsBenchTurnRuntimeConfig:
@@ -112,7 +113,11 @@ def _install_sequence_runtime(
         **_kwargs: Any,
     ) -> dict[str, Any]:
         result = host_runner({"turn_key": plan["turn_key"]})
-        validation = dict(task_validator(plan, result))
+        validation = turn_executor._run_task_validator(
+            plan,
+            result,
+            validator=task_validator,
+        )
         assert validation["status"] in {"progress", "passed"}
         writeback_payload = writeback(result)
         spend_payload = spend()
@@ -687,6 +692,10 @@ def test_stability_sequence_repeats_repairs_then_stops_after_no_change(
     )
     assert all(record[1]["sequence_baseline_configured"] is True for record in records)
     assert sequence_baseline_paths[0] not in json.dumps(records, sort_keys=True)
+    assert all(
+        not any(key.startswith("stability_") for key in execution["validation"])
+        for execution, _validation in records
+    )
     readiness = runtime.build_skillsbench_benchmark_runner_readiness(
         execution=records[-1][0],
         scored_workspace_validation=records[-1][1],
