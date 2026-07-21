@@ -23,6 +23,7 @@ scanning a chronological list.
 - [`todo_detail_cold_path_v0`](todo-detail-cold-path-v0.md): Todo detail cold path v0
 - [`todo_suggestion_prompt_v0`](todo-suggestion-prompt-v0.md): Todo suggestion prompt v0
 - [`turn_envelope_v0`](turn-envelope-v0.md): Turn envelope v0
+- [`loop_turn_loop_disposition_v0`](turn-loop-controller-v0.md): Loop Turn Loop Disposition v0
 
 ## Agent And Multi-Agent Coordination
 
