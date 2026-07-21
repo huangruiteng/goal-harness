@@ -822,6 +822,12 @@ for an exact authority boundary such as merging an aggregate experiment branch
 into `main`, release, benchmark launch, credentials, or protected production
 action. A stable experiment integration branch may collect feature PRs from
 isolated worktrees; keep the aggregate PR to `main` as the final review gate.
+When the next agent slice is not yet known, keep the bound `user_action`
+visible without converting it into a gate. If bounded no-progress evidence
+accumulates while the agent frontier is empty, follow
+`autonomous_replan_required`: create and claim a concrete runnable agent todo,
+then record `runnable_todo_set`. Only authoritative terminal-closure evidence
+may replace that todo writeback with explicit no-follow-up.
 `successor_todo_ids` records lineage only: linking successors does not suspend
 an open parent. When splitting a parent into explicit successors, decide whether
 the parent still has an independent immediate action. If it does not, explicitly
