@@ -36,6 +36,7 @@ SKILLSBENCH_BRIDGE_OPERATION_SCHEMA_VERSION = (
     "skillsbench_remote_command_file_bridge_operation_response_v0"
 )
 SKILLSBENCH_TURN_BASELINE_ENV = "LOOPX_TURN_BASELINE_FILE"
+SKILLSBENCH_TURN_SEQUENCE_BASELINE_ENV = "LOOPX_TURN_SEQUENCE_BASELINE_FILE"
 SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES = frozenset(
     {"validator", "fixed-n", "stability"}
 )
@@ -77,6 +78,7 @@ class SkillsBenchTurnRuntimeConfig:
     max_turns: int = 1
     progress_exit_code: int = 10
     terminal_policy: str = "validator"
+    sequence_baseline_path: str = ""
     case_cli_path: str = "/app/.local/bin/loopx"
     case_registry_path: str = "/app/.loopx/registry.json"
     case_runtime_root: str = "/app/.loopx/runtime"
@@ -329,7 +331,9 @@ def _validation_baseline(
     """Observe whether the task postcondition is satisfied before agent work."""
 
     try:
-        result = bridge.exec(config.validation_command, allow_nonzero=True)
+        result = bridge.exec(
+            _completion_validation_command(config), allow_nonzero=True
+        )
     except SkillsBenchTurnBridgeError as exc:
         raise SkillsBenchTurnBridgeError(
             str(exc),
@@ -354,6 +358,16 @@ def _validation_baseline(
     }
 
 
+def _completion_validation_command(config: SkillsBenchTurnRuntimeConfig) -> str:
+    if not config.sequence_baseline_path:
+        return config.validation_command
+    return (
+        f"env {SKILLSBENCH_TURN_SEQUENCE_BASELINE_ENV}="
+        f"{shlex.quote(config.sequence_baseline_path)} sh -c "
+        f"{shlex.quote(config.validation_command)}"
+    )
+
+
 def run_skillsbench_loopx_turn(
     *,
     prompt: str,
@@ -376,9 +390,20 @@ def run_skillsbench_loopx_turn(
         raise ValueError(
             "SkillsBench terminal policy must be validator, fixed-n, or stability"
         )
+    if config.terminal_policy == "stability" and not config.sequence_baseline_path:
+        raise ValueError("SkillsBench stability policy requires a sequence baseline")
     if sequence_step_kind not in {"validator", "progress", "terminal"}:
         raise ValueError("SkillsBench sequence step kind was unsupported")
     bridge = SkillsBenchTurnBridge(config)
+    if config.terminal_policy == "stability":
+        sequence_baseline_path = shlex.quote(config.sequence_baseline_path)
+        sequence_baseline_dir = shlex.quote(
+            str(Path(config.sequence_baseline_path).parent)
+        )
+        bridge.exec(
+            f"umask 077; mkdir -p {sequence_baseline_dir}; "
+            f"test -e {sequence_baseline_path} || : > {sequence_baseline_path}"
+        )
     plan = (
         _turn_plan(bridge, config, turn_instance_id=turn_instance_id)
         if turn_instance_id is not None
@@ -431,7 +456,7 @@ def run_skillsbench_loopx_turn(
         if config.terminal_policy == "stability":
             try:
                 completion_result = bridge.exec(
-                    config.validation_command,
+                    _completion_validation_command(config),
                     meaningful=True,
                     allow_nonzero=True,
                 )
@@ -622,6 +647,7 @@ def run_skillsbench_loopx_turn(
         "validated_progress": validated_progress,
         "terminal_complete": terminal_complete,
         "terminal_policy": config.terminal_policy,
+        "sequence_baseline_configured": bool(config.sequence_baseline_path),
         "stability_progress_detected": bool(
             transaction_validation.get("stability_progress_detected") is True
         ),
@@ -665,6 +691,16 @@ def run_skillsbench_loopx_turn_sequence(
             "SkillsBench terminal policy must be validator, fixed-n, or stability"
         )
     sequence_id = uuid.uuid4().hex[:16]
+    sequence_baseline_path = (
+        f"{config.case_runtime_root.rstrip('/')}"
+        f"/benchmark-turn-sequences/{sequence_id}.baseline"
+    )
+    sequence_config = replace(
+        config,
+        sequence_baseline_path=(
+            sequence_baseline_path if config.terminal_policy == "stability" else ""
+        ),
+    )
     deadline = time.monotonic() + max(1.0, config.agent_timeout_seconds)
     records: list[tuple[dict[str, Any], dict[str, Any]]] = []
     stop_reason = "max_turns_reached"
@@ -692,7 +728,9 @@ def run_skillsbench_loopx_turn_sequence(
         execution, validation = run_skillsbench_loopx_turn(
             prompt=turn_prompt,
             agent_runner=agent_runner,
-            config=replace(config, agent_timeout_seconds=remaining_seconds),
+            config=replace(
+                sequence_config, agent_timeout_seconds=remaining_seconds
+            ),
             turn_instance_id=f"{sequence_id}-turn-{turn_index:03d}",
             sequence_step_kind=sequence_step_kind,
         )

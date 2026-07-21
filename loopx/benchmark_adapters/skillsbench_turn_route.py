@@ -84,8 +84,11 @@ def add_skillsbench_loopx_turn_arguments(parser: Any) -> None:
             "LoopX Turn Agent CLI route. It must be safe to run before and after "
             "each agent Turn; the pre-agent result qualifies the validation "
             "baseline without blocking later Turns whose overall postcondition "
-            "is already satisfied. The command is executed only through the "
-            "sandbox bridge and is never written to public compact traces."
+            "is already satisfied. Per-Turn progress checks receive "
+            "LOOPX_TURN_BASELINE_FILE; stability completion checks receive "
+            "LOOPX_TURN_SEQUENCE_BASELINE_FILE. The command is executed only "
+            "through the sandbox bridge and is never written to public compact "
+            "traces."
         ),
     )
     parser.add_argument(
@@ -294,6 +297,7 @@ def _public_validation(value: Any) -> dict[str, Any]:
         "raw_verifier_output_recorded",
         "validated_progress",
         "terminal_complete",
+        "sequence_baseline_configured",
         "stability_progress_detected",
         "stability_completion_checked",
         "stability_completion_satisfied",
@@ -451,6 +455,7 @@ def _aggregate_validations(validations: list[dict[str, Any]]) -> dict[str, Any]:
     if validations and validations[-1].get("terminal_policy") == "stability":
         final_validation = validations[-1]
         for key in (
+            "sequence_baseline_configured",
             "stability_progress_detected",
             "stability_completion_checked",
             "stability_completion_satisfied",
