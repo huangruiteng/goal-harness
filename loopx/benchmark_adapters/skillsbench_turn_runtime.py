@@ -413,6 +413,7 @@ def run_skillsbench_loopx_turn(
     prefix = _case_cli_prefix(config)
     baseline_path = ""
     agent_progress_evidence: dict[str, Any] = {}
+    stability_validation_evidence: dict[str, bool] = {}
 
     def host_runner(request: Mapping[str, Any]) -> dict[str, Any]:
         nonlocal agent_progress_evidence, baseline_path
@@ -425,6 +426,7 @@ def run_skillsbench_loopx_turn(
         _plan: Mapping[str, Any],
         _result: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        nonlocal stability_validation_evidence
         if not baseline_path:
             return {
                 "status": "failed",
@@ -467,7 +469,7 @@ def run_skillsbench_loopx_turn(
                 exit_code == config.progress_exit_code
                 or _verified_bridge_write_progress(agent_progress_evidence)
             )
-            stability_evidence = {
+            stability_validation_evidence = {
                 "stability_progress_detected": progress_detected,
                 "stability_completion_satisfied": completion_satisfied,
                 "stability_completion_checked": True,
@@ -478,7 +480,6 @@ def run_skillsbench_loopx_turn(
                     "validator_kind": "skillsbench_stability_postcondition",
                     "summary": "independent completion postcondition passed at the Turn limit",
                     "exit_code": 0,
-                    **stability_evidence,
                 }
             if progress_detected:
                 return {
@@ -486,7 +487,6 @@ def run_skillsbench_loopx_turn(
                     "validator_kind": "skillsbench_stability_postcondition",
                     "summary": "independent task progress requires another review Turn",
                     "exit_code": config.progress_exit_code,
-                    **stability_evidence,
                 }
             if completion_satisfied:
                 return {
@@ -494,7 +494,6 @@ def run_skillsbench_loopx_turn(
                     "validator_kind": "skillsbench_stability_postcondition",
                     "summary": "no new repair was needed and the completion postcondition passed",
                     "exit_code": 0,
-                    **stability_evidence,
                 }
             return {
                 "status": "failed",
@@ -502,7 +501,6 @@ def run_skillsbench_loopx_turn(
                 "summary": "neither independent progress nor completion was validated",
                 "recovery_kind": "repair_required",
                 "exit_code": completion_result.get("exit_code"),
-                **stability_evidence,
             }
         validation_succeeded = exit_code in {0, config.progress_exit_code}
         if not validation_succeeded:
@@ -649,13 +647,13 @@ def run_skillsbench_loopx_turn(
         "terminal_policy": config.terminal_policy,
         "sequence_baseline_configured": bool(config.sequence_baseline_path),
         "stability_progress_detected": bool(
-            transaction_validation.get("stability_progress_detected") is True
+            stability_validation_evidence.get("stability_progress_detected") is True
         ),
         "stability_completion_checked": bool(
-            transaction_validation.get("stability_completion_checked") is True
+            stability_validation_evidence.get("stability_completion_checked") is True
         ),
         "stability_completion_satisfied": bool(
-            transaction_validation.get("stability_completion_satisfied") is True
+            stability_validation_evidence.get("stability_completion_satisfied") is True
         ),
         "baseline_contract": (
             "task_declared_independent_postcondition_or_verified_bridge_write"
