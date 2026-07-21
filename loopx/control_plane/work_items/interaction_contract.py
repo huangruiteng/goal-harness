@@ -649,6 +649,14 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "autonomous_replan":
+        replan_obligation = (
+            payload.get("autonomous_replan_obligation")
+            if isinstance(payload.get("autonomous_replan_obligation"), dict)
+            else {}
+        )
+        agent_todo_writeback_required = (
+            replan_obligation.get("agent_todo_writeback_required") is True
+        )
         lane_action = _protocol_first_candidate_action(payload)
         first_action = (
             "run one bounded autonomous replan slice around "
@@ -656,16 +664,34 @@ def interaction_next_cli_actions(
             if lane_action
             else "run one bounded autonomous replan slice and write back the selected next action/todo changes"
         )
-        return [
+        actions = [
             first_action,
-            f"loopx refresh-state --goal-id {goal_id} --classification autonomous_replan_recorded --autonomous-replan-recorded --repair-delta-kind <delta_kind> --delivery-batch-scale <scale> --delivery-outcome <outcome>{scoped_cli_args}",
+        ]
+        if agent_todo_writeback_required:
+            actor_id = str(agent_identity.get("agent_id") or "").strip()
+            actor_args = (
+                f" --agent-id {shlex.quote(actor_id)} --claimed-by {shlex.quote(actor_id)}"
+                if actor_id
+                else " --agent-id <agent-id> --claimed-by <agent-id>"
+            )
+            actions.append(
+                f"loopx todo add --goal-id {goal_id} --role agent "
+                "--task-class advancement_task --text '<selected runnable next slice>'"
+                f"{actor_args}"
+            )
+        delta_kind = (
+            "runnable_todo_set" if agent_todo_writeback_required else "<delta_kind>"
+        )
+        actions.extend([
+            f"loopx refresh-state --goal-id {goal_id} --classification autonomous_replan_recorded --autonomous-replan-recorded --repair-delta-kind {delta_kind} --delivery-batch-scale <scale> --delivery-outcome <outcome>{scoped_cli_args}",
             (
                 "if the replan writeback records an accountable delta such as "
                 "outcome_progress or primary_goal_outcome, run "
                 f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}; "
                 "otherwise do not spend for surface_only watch-lane continuation/no-followup"
             ),
-        ]
+        ])
+        return actions
     if mode in {
         "bounded_delivery",
         "outcome_floor_recovery",

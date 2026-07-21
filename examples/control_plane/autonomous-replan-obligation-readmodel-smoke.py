@@ -226,6 +226,34 @@ def main() -> int:
     assert regular["todo_actions"][0]["action"] == "split", regular
     assert regular["todo_actions"][1]["action"] == "add", regular
     assert regular["agent_id"] == "codex-control-plane", regular
+    assert "agent_todo_writeback_required" not in regular, regular
+
+    empty_frontier = direct_build_autonomous_replan_obligation(
+        [
+            {
+                "kind": "run_history_no_progress_repeat",
+                "section": "run_history",
+                "text": "two stalled turns left no runnable agent todo",
+            }
+        ],
+        agent_todos=None,
+        public_safe_compact_text=public_safe_compact_text,
+        autonomous_replan_schema_version=AUTONOMOUS_REPLAN_SCHEMA_VERSION,
+        autonomous_replan_stall_threshold=AUTONOMOUS_REPLAN_STALL_THRESHOLD,
+        dead_monitor_repeat_threshold=DEAD_MONITOR_REPEAT_THRESHOLD,
+        dead_monitor_repeat_schema_version=DEAD_MONITOR_REPEAT_SCHEMA_VERSION,
+    )
+    assert empty_frontier is not None, empty_frontier
+    assert empty_frontier["agent_todo_writeback_required"] is True, empty_frontier
+    assert empty_frontier["todo_actions"][0] == {
+        "action": "add",
+        "role": "agent",
+        "priority": "P1",
+        "text": (
+            "write a compact replan record naming trigger, selected next slice, "
+            "validation command, and stop condition"
+        ),
+    }, empty_frontier
 
     conflicting_agents = assert_parity(
         [
