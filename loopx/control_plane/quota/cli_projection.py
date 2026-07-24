@@ -9,12 +9,23 @@ QUOTA_CLI_TODO_SUMMARY_COMPACTION_SCHEMA_VERSION = (
 QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND = (
     "quota should-run --include-todo-summary-detail"
 )
+QUOTA_CLI_USER_TODO_SUMMARY_COMPACTION_SCHEMA_VERSION = (
+    "quota_cli_user_todo_summary_compaction_v0"
+)
+QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND = (
+    "quota should-run --include-user-todo-summary-detail"
+)
 _RETAINED_AGENT_ITEM_LANES = {
     "first_executable_items": 3,
     "unclaimed_priority_open_items": 3,
     "monitor_due_items": 1,
     "monitor_capability_blocked_due_items": 2,
     "monitor_schedule_gap_items": 1,
+}
+_RETAINED_USER_ITEM_LANES = {
+    "first_open_items": 3,
+    "gate_open_items": 3,
+    "active_next_action_items": 3,
 }
 _RETAINED_AGENT_ITEM_FIELDS = (
     "schema_version",
@@ -118,20 +129,69 @@ def _compact_agent_todo_summary(summary: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_user_todo_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    omitted_lanes: dict[str, int] = {}
+    for key, value in summary.items():
+        if isinstance(value, list):
+            limit = _RETAINED_USER_ITEM_LANES.get(key)
+            if limit is None:
+                if value:
+                    omitted_lanes[key] = len(value)
+                continue
+            compact[key] = value[:limit]
+            if len(value) > limit:
+                omitted_lanes[key] = len(value) - limit
+            continue
+        if isinstance(value, dict):
+            compact[key] = _compact_nested_item_lists(
+                value,
+                omitted_lanes=omitted_lanes,
+                path=key,
+            )
+            continue
+        compact[key] = value
+
+    compact["payload_compaction"] = {
+        "schema_version": QUOTA_CLI_USER_TODO_SUMMARY_COMPACTION_SCHEMA_VERSION,
+        "retained_item_lanes": sorted(_RETAINED_USER_ITEM_LANES),
+        "omitted_lanes": omitted_lanes,
+        "full_detail_cold_path": QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND,
+    }
+    return compact
+
+
 def compact_quota_should_run_cli_payload(
     payload: dict[str, Any],
+    *,
+    include_todo_summary_detail: bool = False,
+    include_user_todo_summary_detail: bool = False,
 ) -> dict[str, Any]:
     """Bound CLI-only todo diagnostics after the full decision is computed."""
 
+    compact = payload
+    compacted_roles: list[str] = []
     summary = payload.get("agent_todo_summary")
-    if not isinstance(summary, dict):
-        return payload
-    compact = dict(payload)
-    compact["agent_todo_summary"] = _compact_agent_todo_summary(summary)
-    compact["todo_summary_projection"] = {
-        "schema_version": QUOTA_CLI_TODO_SUMMARY_COMPACTION_SCHEMA_VERSION,
-        "mode": "compact_hot_path",
-        "compacted_roles": ["agent"],
-        "detail_ref": QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND,
-    }
+    if not include_todo_summary_detail and isinstance(summary, dict):
+        compact = dict(compact)
+        compact["agent_todo_summary"] = _compact_agent_todo_summary(summary)
+        compacted_roles.append("agent")
+
+    user_summary = payload.get("user_todo_summary")
+    if not include_user_todo_summary_detail and isinstance(user_summary, dict):
+        compact = dict(compact)
+        compact["user_todo_summary"] = _compact_user_todo_summary(user_summary)
+        compacted_roles.append("user")
+
+    if compacted_roles:
+        compact["todo_summary_projection"] = {
+            "schema_version": QUOTA_CLI_TODO_SUMMARY_COMPACTION_SCHEMA_VERSION,
+            "mode": "compact_hot_path",
+            "compacted_roles": compacted_roles,
+            "detail_ref": (
+                QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND
+                if compacted_roles[0] == "agent"
+                else QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND
+            ),
+        }
     return compact

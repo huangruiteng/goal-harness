@@ -4,6 +4,7 @@ import json
 
 from loopx.control_plane.quota.cli_projection import (
     QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND,
+    QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND,
     compact_quota_should_run_cli_payload,
 )
 from loopx.presentation.renderers.quota_markdown import (
@@ -144,6 +145,98 @@ def test_compact_quota_should_run_cli_payload_keeps_decision_lanes_and_counts() 
     larger_compact_chars = len(json.dumps(larger_compact, sort_keys=True))
     assert compact_chars < 7_000
     assert larger_compact_chars - compact_chars < 200
+
+
+def test_compact_quota_should_run_cli_payload_keeps_active_user_work_and_gate_scope() -> None:
+    active_user_actions = [
+        {
+            **item,
+            "task_class": "user_action",
+            "bound_agent": "quality-agent",
+        }
+        for item in _items(4, prefix="user-action")
+    ]
+    active_gates = [
+        {
+            **item,
+            "task_class": "user_gate",
+            "blocks_agent": "quality-agent",
+            "decision_scope": "release:action:quota-output",
+        }
+        for item in _items(2, prefix="user-gate")
+    ]
+    other_agent_actions = [
+        {
+            **item,
+            "task_class": "user_action",
+            "bound_agent": "other-agent",
+        }
+        for item in _items(20, prefix="other-user-action")
+    ]
+    payload = {
+        "interaction_contract": {
+            "user_channel": {
+                "action_required": True,
+                "items": active_user_actions[:1],
+            }
+        },
+        "selected_todo": {"todo_id": "quality-0"},
+        "scheduler_hint": {"action": "wait"},
+        "user_todo_summary": {
+            "schema_version": "todo_summary_v0",
+            "total_count": 30,
+            "open_count": 6,
+            "all_open_count": 26,
+            "first_open_items": active_user_actions,
+            "gate_open_items": active_gates,
+            "active_next_action_items": active_user_actions[:2],
+            "deferred_items": other_agent_actions,
+            "other_agent_bound_user_action_items": other_agent_actions,
+            "claim_scope": {
+                "schema_version": "agent_claim_scope_v0",
+                "blocked_claimed_open_count": 2,
+                "blocked_claimed_items": other_agent_actions,
+            },
+        },
+    }
+
+    compact = compact_quota_should_run_cli_payload(
+        payload,
+        include_todo_summary_detail=True,
+    )
+
+    summary = compact["user_todo_summary"]
+    assert summary["total_count"] == 30
+    assert summary["open_count"] == 6
+    assert len(summary["first_open_items"]) == 3
+    assert summary["gate_open_items"] == active_gates
+    assert summary["active_next_action_items"] == active_user_actions[:2]
+    assert summary["gate_open_items"][0]["blocks_agent"] == "quality-agent"
+    assert summary["gate_open_items"][0]["decision_scope"] == (
+        "release:action:quota-output"
+    )
+    assert "deferred_items" not in summary
+    assert "other_agent_bound_user_action_items" not in summary
+    assert "blocked_claimed_items" not in summary["claim_scope"]
+    assert summary["payload_compaction"]["omitted_lanes"] == {
+        "claim_scope.blocked_claimed_items": 20,
+        "deferred_items": 20,
+        "first_open_items": 1,
+        "other_agent_bound_user_action_items": 20,
+    }
+    assert summary["payload_compaction"]["full_detail_cold_path"] == (
+        QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND
+    )
+    assert compact["todo_summary_projection"]["compacted_roles"] == ["user"]
+    assert compact["interaction_contract"] == payload["interaction_contract"]
+    assert compact["selected_todo"] == payload["selected_todo"]
+
+    full = compact_quota_should_run_cli_payload(
+        payload,
+        include_todo_summary_detail=True,
+        include_user_todo_summary_detail=True,
+    )
+    assert full == payload
 
 
 def test_compact_quota_should_run_cli_payload_keeps_succession_warning_identity_in_markdown() -> None:

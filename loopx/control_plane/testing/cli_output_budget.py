@@ -128,7 +128,7 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         qualification_policy="absolute_hot_path",
         cold_path=(
             "status, history, active state, --include-scheduler-detail, and "
-            "--include-todo-summary-detail"
+            "--include-todo-summary-detail or --include-user-todo-summary-detail"
         ),
         semantic_json_keys=("interaction_contract", "scheduler_hint", "selected_todo"),
         markdown_anchor="# LoopX Quota Should Run",
@@ -385,6 +385,16 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         markdown_anchor="# LoopX Quota Should Run",
         max_chars={"json": 55_000, "markdown": 7_800},
         max_lines={"json": 1_350, "markdown": 78},
+    ),
+    CliOutputModeVariantSpec(
+        variant_id="quota_should_run_user_todo_summary_detail",
+        parent_surface_id="quota_should_run",
+        command="quota should-run --include-user-todo-summary-detail",
+        output_formats=("json", "markdown"),
+        semantic_json_keys=("interaction_contract", "scheduler_hint", "selected_todo"),
+        markdown_anchor="# LoopX Quota Should Run",
+        max_chars={"json": 35_000, "markdown": 7_800},
+        max_lines={"json": 900, "markdown": 78},
     ),
     CliOutputModeVariantSpec(
         variant_id="quota_should_run_turn_envelope",
