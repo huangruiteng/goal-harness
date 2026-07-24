@@ -15,6 +15,12 @@ QUOTA_CLI_USER_TODO_SUMMARY_COMPACTION_SCHEMA_VERSION = (
 QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND = (
     "quota should-run --include-user-todo-summary-detail"
 )
+QUOTA_CLI_GOAL_BOUNDARY_COMPACTION_SCHEMA_VERSION = (
+    "quota_cli_goal_boundary_compaction_v0"
+)
+QUOTA_CLI_GOAL_BOUNDARY_DETAIL_COMMAND = (
+    "quota should-run --include-goal-boundary-detail"
+)
 _RETAINED_AGENT_ITEM_LANES = {
     "first_executable_items": 3,
     "unclaimed_priority_open_items": 3,
@@ -161,13 +167,34 @@ def _compact_user_todo_summary(summary: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_goal_boundary(boundary: dict[str, Any]) -> dict[str, Any]:
+    authority = boundary.get("checkpointed_boundary_authority")
+    if not isinstance(authority, dict) or not isinstance(
+        authority.get("entries"),
+        list,
+    ):
+        return boundary
+
+    compact_authority = dict(authority)
+    entries = compact_authority.pop("entries")
+    compact_authority["payload_compaction"] = {
+        "schema_version": QUOTA_CLI_GOAL_BOUNDARY_COMPACTION_SCHEMA_VERSION,
+        "omitted_entry_count": len(entries),
+        "full_detail_cold_path": QUOTA_CLI_GOAL_BOUNDARY_DETAIL_COMMAND,
+    }
+    compact = dict(boundary)
+    compact["checkpointed_boundary_authority"] = compact_authority
+    return compact
+
+
 def compact_quota_should_run_cli_payload(
     payload: dict[str, Any],
     *,
     include_todo_summary_detail: bool = False,
     include_user_todo_summary_detail: bool = False,
+    include_goal_boundary_detail: bool = False,
 ) -> dict[str, Any]:
-    """Bound CLI-only todo diagnostics after the full decision is computed."""
+    """Bound CLI-only diagnostics after the full decision is computed."""
 
     compact = payload
     compacted_roles: list[str] = []
@@ -194,4 +221,10 @@ def compact_quota_should_run_cli_payload(
                 else QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND
             ),
         }
+    goal_boundary = payload.get("goal_boundary")
+    if not include_goal_boundary_detail and isinstance(goal_boundary, dict):
+        compact_goal_boundary = _compact_goal_boundary(goal_boundary)
+        if compact_goal_boundary is not goal_boundary:
+            compact = dict(compact)
+            compact["goal_boundary"] = compact_goal_boundary
     return compact

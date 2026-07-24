@@ -182,6 +182,26 @@ def _write_rollout_event(runtime: Path, *, agent_id: str) -> None:
     )
 
 
+def _write_checkpointed_boundary_authority(registry_path: Path) -> None:
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    coordination = registry["goals"][0]["coordination"]
+    coordination["checkpointed_boundary_authority"] = [
+        {
+            "schema_version": "checkpointed_boundary_authority_v0",
+            "status": "active",
+            "decision": "approve",
+            "write_scope": ["docs/**"],
+            "source": "public_fixture_owner_approval",
+            "recorded_at": "2026-01-01T00:00:00+00:00",
+            "decision_id": "todo_fixture_boundary_001",
+        }
+    ]
+    registry_path.write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _invoke_cli(args: list[str]) -> tuple[int, str]:
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
@@ -477,6 +497,18 @@ def _mode_variant_commands(
             str(project),
             "--include-user-todo-summary-detail",
         ],
+        "quota_should_run_goal_boundary_detail": common
+        + [
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_IDS[0],
+            "--scan-root",
+            str(project),
+            "--include-goal-boundary-detail",
+        ],
         "quota_should_run_turn_envelope": common
         + [
             "quota",
@@ -591,6 +623,7 @@ def test_manifest_covers_the_declared_agent_facing_surface_set() -> None:
         "quota_should_run_scheduler_detail",
         "quota_should_run_todo_summary_detail",
         "quota_should_run_user_todo_summary_detail",
+        "quota_should_run_goal_boundary_detail",
         "quota_should_run_turn_envelope",
         "loopx_turn_plan_transaction_detail",
         "loopx_turn_run_once_preview",
@@ -750,6 +783,64 @@ def test_quota_cli_keeps_full_user_todo_diagnostics_on_explicit_cold_path(
         "quota_todo_summary_payload_compaction_v0"
     )
     assert detail_payload["todo_summary_projection"]["compacted_roles"] == ["agent"]
+    for key in ("interaction_contract", "scheduler_hint", "selected_todo"):
+        assert default_payload[key] == detail_payload[key]
+
+
+def test_quota_cli_keeps_goal_boundary_authority_on_explicit_cold_path(
+    tmp_path: Path,
+) -> None:
+    with _stable_budget_fixture_root(
+        tmp_path / "quota-goal-boundary-detail"
+    ) as stable_root:
+        project, runtime, registry_path, state_file = _write_fixture(
+            stable_root,
+            SCENARIOS[1],
+        )
+        _write_checkpointed_boundary_authority(registry_path)
+        default_command = _surface_commands(
+            project=project,
+            runtime=runtime,
+            registry_path=registry_path,
+            state_file=state_file,
+            output_format="json",
+        )["quota_should_run"]
+        detail_command = _mode_variant_commands(
+            project=project,
+            runtime=runtime,
+            registry_path=registry_path,
+            state_file=state_file,
+            output_format="json",
+        )["quota_should_run_goal_boundary_detail"]
+
+        default_exit_code, default_text = _invoke_cli(default_command)
+        detail_exit_code, detail_text = _invoke_cli(detail_command)
+
+    assert default_exit_code == 0, default_text
+    assert detail_exit_code == 0, detail_text
+    default_payload = json.loads(default_text)
+    detail_payload = json.loads(detail_text)
+    default_boundary = default_payload["goal_boundary"]
+    detail_boundary = detail_payload["goal_boundary"]
+    default_authority = default_boundary["checkpointed_boundary_authority"]
+    detail_authority = detail_boundary["checkpointed_boundary_authority"]
+    assert default_authority["payload_compaction"] == {
+        "schema_version": "quota_cli_goal_boundary_compaction_v0",
+        "omitted_entry_count": 1,
+        "full_detail_cold_path": "quota should-run --include-goal-boundary-detail",
+    }
+    assert "entries" not in default_authority
+    assert detail_authority["entries"]
+    for key in ("active_count", "inactive_count", "active_write_scope"):
+        assert default_authority[key] == detail_authority[key]
+    expected_boundary = dict(detail_boundary)
+    expected_authority = dict(detail_authority)
+    expected_authority.pop("entries")
+    expected_authority["payload_compaction"] = default_authority[
+        "payload_compaction"
+    ]
+    expected_boundary["checkpointed_boundary_authority"] = expected_authority
+    assert default_boundary == expected_boundary
     for key in ("interaction_contract", "scheduler_hint", "selected_todo"):
         assert default_payload[key] == detail_payload[key]
 

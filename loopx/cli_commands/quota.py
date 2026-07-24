@@ -230,6 +230,14 @@ def register_quota_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     quota_parser.add_argument(
+        "--include-goal-boundary-detail",
+        action="store_true",
+        help=(
+            "Include checkpointed goal-boundary authority entries in "
+            "`quota should-run`. The default keeps effective scope and counts."
+        ),
+    )
+    quota_parser.add_argument(
         "--codex-app-current-rrule",
         help=(
             "Current RRULE observed from the active Codex App heartbeat. For "
@@ -406,6 +414,14 @@ def handle_quota_command(
         ):
             raise ValueError(
                 "--include-user-todo-summary-detail is only valid with "
+                "`quota should-run`"
+            )
+        if (
+            bool(getattr(args, "include_goal_boundary_detail", False))
+            and args.quota_command != "should-run"
+        ):
+            raise ValueError(
+                "--include-goal-boundary-detail is only valid with "
                 "`quota should-run`"
             )
         raw_heartbeat_turn_id = getattr(args, "turn_instance_id", None)
@@ -910,6 +926,9 @@ def handle_quota_command(
             ),
             include_user_todo_summary_detail=bool(
                 getattr(args, "include_user_todo_summary_detail", False)
+            ),
+            include_goal_boundary_detail=bool(
+                getattr(args, "include_goal_boundary_detail", False)
             ),
         )
     renderer = (
