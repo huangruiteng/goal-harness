@@ -5,8 +5,10 @@ from collections.abc import Callable, Collection
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .assembler import DecisionEvidenceRecords
 from .architecture import build_decision_context_architecture_packet
 from .profile import resolve_decision_context_activation
+from .runtime import assemble_profile_decision_evidence
 from .sources import build_decision_source_manifest
 
 PrintPayload = Callable[
@@ -82,6 +84,43 @@ def register_decision_context_commands(
         "--observed-at",
         help="Optional timezone-aware ISO-8601 time for a reproducible manifest.",
     )
+    prepare = commands.add_parser(
+        "prepare-evidence",
+        help=(
+            "Run bounded source scans and exact reads without applying private "
+            "cursor proposals."
+        ),
+    )
+    add_subcommand_format(prepare)
+    prepare.add_argument("--goal-id", required=True)
+    prepare.add_argument("--agent-id", required=True)
+    prepare.add_argument("--profile", required=True)
+    prepare.add_argument("--decision-id", required=True)
+    prepare.add_argument(
+        "--cursor-state",
+        help="Optional private JSON object mapping source ids to opaque cursors.",
+    )
+    prepare.add_argument(
+        "--source-id",
+        action="append",
+        help=(
+            "Explicit enabled source to scan. Repeat to include on-demand "
+            "sources; omit to scan automatic sources only."
+        ),
+    )
+    prepare.add_argument(
+        "--observed-at",
+        help="Optional timezone-aware ISO-8601 assembly time.",
+    )
+    prepare.add_argument(
+        "--before",
+        help="Optional timezone-aware upper bound for source changes.",
+    )
+    prepare.add_argument(
+        "--timeout-seconds",
+        type=float,
+        help="Optional bounded provider timeout override.",
+    )
 
 
 def handle_decision_context_command(
@@ -94,6 +133,37 @@ def handle_decision_context_command(
         return None
     if args.decision_context_command == "architecture":
         payload = build_decision_context_architecture_packet()
+    elif args.decision_context_command == "prepare-evidence":
+        now = datetime.now(timezone.utc).isoformat()
+        observed_at = str(getattr(args, "observed_at", None) or "").strip() or now
+        before = str(getattr(args, "before", None) or "").strip() or observed_at
+        activation, assembly = assemble_profile_decision_evidence(
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            profile_path=Path(args.profile),
+            decision_id=args.decision_id,
+            observed_at=observed_at,
+            before=before,
+            cursor_path=(
+                Path(args.cursor_state)
+                if str(getattr(args, "cursor_state", None) or "").strip()
+                else None
+            ),
+            source_ids=(
+                tuple(args.source_id)
+                if getattr(args, "source_id", None) is not None
+                else None
+            ),
+            rebase=lambda _collection: DecisionEvidenceRecords(),
+            timeout_seconds=getattr(args, "timeout_seconds", None),
+        )
+        payload = activation | {
+            "assembly": assembly.public_packet() if assembly is not None else None,
+            "semantic_rebase_performed": False,
+            "validated_writeback_required": assembly is not None,
+            "cursor_commit_allowed": False,
+            "cursor_state_mutated": False,
+        }
     elif args.decision_context_command in {"inspect-profile", "source-manifest"}:
         profile_value = str(getattr(args, "profile", None) or "").strip()
         status, profile = resolve_decision_context_activation(

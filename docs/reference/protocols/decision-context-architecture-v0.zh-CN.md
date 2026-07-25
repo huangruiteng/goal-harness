@@ -181,7 +181,7 @@ capability 与 goal 配置承担。
 - 输出 stale/rejected claim 和 provider fail-open receipt；
 - 不采集 raw context。
 
-### P1：实验入口
+### P1：默认关闭入口
 
 - 增加默认关闭、goal-scoped 的 profile/activation status/catalog；
 - 增加 source-provider adapter，提供薄 CLI 编排 source scan、evidence 与 proposal；
@@ -189,9 +189,20 @@ capability 与 goal 配置承担。
 - 不修改 Core todo、gate、quota 或 authority 语义。
 
 首个入口切片已实现严格的私有 profile 加载、goal/agent activation 状态、公开安全的
-source manifest，以及显式配置、只读的 `local-file` source adapter。该切片
-尚不把 source scan 编排为 evidence/proposal packet，也不应用私有 cursor
-checkpoint；这两项仍是 P1 完成前的验收边界。
+source manifest，以及显式配置、只读的 `local-file` source adapter。该切片刻意
+停在 source 编排和私有 cursor checkpoint 之前。
+
+第二个切片增加薄 host API `assemble_profile_decision_evidence(...)`，以及只读的
+CLI 预览 `decision-context prepare-evidence`。profile 会解析已启用的 source
+provider，执行 bounded scan 与 exact read，并输出公开安全的 scan、revision、
+health、evidence 和 cursor checkpoint 记录。host API 通过领域 rebase callback
+消费瞬时正文，原始 cursor proposal 只留在进程内。CLI 则刻意不做语义 rebase：
+只要 changed source 尚未被事实、拒绝项或冲突记录完整解释，cursor 就保持
+`preserve`，避免把“扫描/读过”误记成“已吸收”。`on_demand` source 不进入自动
+扫描，只有显式选择后才会读取。
+
+私有 cursor commit 仍是独立验收边界：只有 evidence/proposal 与既有 LoopX
+lifecycle writeback 验证通过后，才允许显式提交。
 
 ### P1：首个 dogfood
 

@@ -318,6 +318,26 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "goal mutation, or external action"
                 ),
             },
+            {
+                "command": (
+                    "loopx decision-context prepare-evidence "
+                    "--goal-id <goal-id> --agent-id <agent-id> "
+                    "--profile <private-local-profile> "
+                    "--decision-id <decision-id> "
+                    "[--cursor-state <private-cursor-json>] "
+                    "[--source-id <on-demand-source>] --format json"
+                ),
+                "purpose": (
+                    "Resolve enabled profile providers, run bounded scans and "
+                    "exact reads, and emit a public-safe evidence preparation "
+                    "packet for domain rebase."
+                ),
+                "write_boundary": (
+                    "read-only provider access; changed-source cursors remain "
+                    "preserved until semantic rebase and validated lifecycle "
+                    "writeback"
+                ),
+            },
         ],
         "implemented_protocols": [
             {
@@ -370,11 +390,11 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "The capability is default-off and cannot create action authority or mutate Core state.",
             "Private source locators, cursors, raw content, provider payloads, tool output, and credentials stay outside public packets.",
             "DecisionSourceProvider rebases current authority; ContextProvider supplies advisory recall only.",
-            "The built-in local-file adapter is read-only and explicitly configured; domain adapters and cursor writeback remain deferred.",
+            "The built-in local-file adapter and prepare-evidence route are read-only; domain adapters and validated cursor commit remain deferred.",
         ],
         "next_real_step": (
-            "Compose bounded source scans and the evidence assembler behind this "
-            "entry point, then validate an outcome receipt in private dogfood."
+            "Validate explicit cursor commit after lifecycle writeback, then "
+            "produce the first outcome receipt in private dogfood."
         ),
     },
     {

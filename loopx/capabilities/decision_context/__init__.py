@@ -49,6 +49,10 @@ from .providers import (
     decision_source_provider_registered,
     register_decision_source_provider,
 )
+from .runtime import (
+    assemble_profile_decision_evidence,
+    load_private_decision_cursors,
+)
 
 __all__ = [
     "DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION",
@@ -76,6 +80,7 @@ __all__ = [
     "LOCAL_FILE_SOURCE_ADAPTER",
     "LocalFileDecisionSourceProvider",
     "assemble_decision_evidence",
+    "assemble_profile_decision_evidence",
     "build_decision_context_architecture_packet",
     "build_decision_evidence_packet",
     "build_decision_outcome_receipt",
@@ -85,6 +90,7 @@ __all__ = [
     "build_decision_source_provider",
     "decision_source_provider_registered",
     "load_decision_context_profile",
+    "load_private_decision_cursors",
     "normalize_decision_context_profile",
     "register_decision_source_provider",
     "resolve_decision_context_activation",

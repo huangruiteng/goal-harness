@@ -154,7 +154,7 @@ the private source registry and bounded incremental scan receipts. Reuse
 stale/rejected claims and provider fail-open receipts without capturing raw
 context.
 
-### P1: experimental entry point
+### P1: default-off entry point
 
 Add a default-off goal profile, activation status, catalog, source-provider
 adapters, and a thin CLI that orchestrates source scans, evidence, and proposals
@@ -163,9 +163,22 @@ and credential-free in public state.
 
 The first entry-point slice implements strict private profile loading,
 goal-and-agent activation status, public-safe source manifests, and an explicitly
-configured read-only `local-file` source adapter. It does not yet orchestrate
-source scans into evidence/proposal packets or apply private cursor
-checkpoints. Those remain the acceptance boundary for completing P1.
+configured read-only `local-file` source adapter. That slice intentionally
+stopped before source orchestration and private cursor checkpoints.
+
+The second slice adds `assemble_profile_decision_evidence(...)` as the thin
+host API and `decision-context prepare-evidence` as its read-only CLI preview.
+The profile now resolves enabled source providers, performs bounded scans and
+exact reads, and emits public-safe scan, revision, health, evidence, and cursor
+checkpoint records. The host API accepts a domain rebase callback and returns
+raw cursor proposals only in-process. The CLI intentionally performs no
+semantic rebase: changed-source cursors remain at `preserve`, so merely scanning
+or reading a source can never mark it absorbed. Sources marked `on_demand` are
+excluded from automatic collection and require explicit source selection.
+
+Private cursor commit remains a separate acceptance boundary. It may occur only
+after the evidence/proposal and existing LoopX lifecycle writeback have been
+validated.
 
 ### P1: first dogfood
 

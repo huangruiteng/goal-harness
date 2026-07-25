@@ -68,5 +68,5 @@ def build_decision_context_architecture_packet() -> dict[str, object]:
             "proposals_require_existing_authority_confirmation",
             "verified_outcomes_precede_reward_memory_candidates",
         ],
-        "next_stage": "default_off_provider_adapter_then_private_dogfood",
+        "next_stage": "validated_cursor_commit_then_private_dogfood",
     }

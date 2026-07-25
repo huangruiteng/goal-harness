@@ -451,4 +451,4 @@ def test_architecture_projects_assembler_and_checkpoint_stage() -> None:
         "incremental_cursors_advance_only_after_rebase_and_writeback"
         in packet["invariants"]
     )
-    assert packet["next_stage"] == ("default_off_provider_adapter_then_private_dogfood")
+    assert packet["next_stage"] == ("validated_cursor_commit_then_private_dogfood")
