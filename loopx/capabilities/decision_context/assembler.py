@@ -124,6 +124,10 @@ class DecisionContextAssembly:
         repr=False,
     )
     profile_digest: str | None = field(default=None, repr=False)
+    runtime_bound_provider_ids: tuple[str, ...] = field(
+        default_factory=tuple,
+        repr=False,
+    )
 
     def public_packet(self) -> dict[str, Any]:
         return dict(self.packet)

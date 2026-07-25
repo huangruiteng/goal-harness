@@ -228,6 +228,7 @@ def commit_profile_decision_cursors(
         goal_id=goal_id,
         agent_id=agent_id,
         profile_path=profile_path,
+        available_source_provider_ids=assembly.runtime_bound_provider_ids,
     )
     profile_digest_after = private_file_digest(profile_path)
     if (

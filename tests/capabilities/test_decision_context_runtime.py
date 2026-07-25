@@ -236,6 +236,59 @@ def test_private_host_provider_drives_generic_scan_exact_read_and_checkpoint(
     assert str(authority) not in json.dumps(packet, sort_keys=True)
 
 
+def test_private_host_provider_can_commit_cursor_after_validated_writeback(
+    tmp_path: Path,
+) -> None:
+    authority = tmp_path / "authority.md"
+    authority.write_text(PRIVATE_CONTENT, encoding="utf-8")
+    profile = write_profile(
+        tmp_path / "profile.json",
+        authority,
+        adapter="private-host-adapter",
+    )
+    provider = LocalFileDecisionSourceProvider(
+        provider_id="local-authority",
+        max_bytes=4096,
+    )
+    cursors = tmp_path / "cursors.json"
+    event_log = tmp_path / "rollout-events.jsonl"
+
+    _activation, assembly = assemble_profile_decision_evidence(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        decision_id="decision:adoption",
+        observed_at=OBSERVED_AT,
+        before=BEFORE,
+        cursor_path=cursors,
+        rebase=semantic_rebase,
+        source_provider_overrides={"local-authority": provider},
+    )
+    assert assembly is not None
+    assert assembly.runtime_bound_provider_ids == ("local-authority",)
+    proposal, outcome = decision_chain(assembly)
+    event = append_decision_writeback(event_log, assembly, proposal, outcome)
+
+    receipt = commit_profile_decision_cursors(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        cursor_path=cursors,
+        assembly=assembly,
+        proposal=proposal,
+        outcome_receipt=outcome,
+        lifecycle_event_log_path=event_log,
+        lifecycle_event_id=event["event_id"],
+    )
+
+    assert receipt["status"] == "committed"
+    assert receipt["cursor_state_mutated"] is True
+    assert receipt["readback_verified"] is True
+    assert json.loads(cursors.read_text(encoding="utf-8")) == dict(
+        assembly.proposed_cursors
+    )
+
+
 def test_runtime_provider_identity_mismatch_fails_open(
     tmp_path: Path,
 ) -> None:

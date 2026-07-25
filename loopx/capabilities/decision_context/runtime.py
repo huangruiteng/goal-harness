@@ -221,4 +221,8 @@ def assemble_profile_decision_evidence(
     profile_digest_after = private_file_digest(profile_path)
     if profile_digest_before != profile_digest_after:
         raise ValueError("decision-context profile changed during evidence assembly")
-    return activation, replace(assembly, profile_digest=profile_digest_after)
+    return activation, replace(
+        assembly,
+        profile_digest=profile_digest_after,
+        runtime_bound_provider_ids=tuple(sorted(provider_overrides)),
+    )
