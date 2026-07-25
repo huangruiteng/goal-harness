@@ -43,6 +43,52 @@ def recoverable_codex_turn_failure_message(category: str) -> str:
     )
 
 
+def nonrecoverable_codex_turn_failure_category(
+    counters: Mapping[str, Any],
+) -> str:
+    """Return the first typed fatal Codex category from public relay evidence."""
+
+    failure_count = _count(
+        counters,
+        "host_local_acp_codex_exec_failure_trace_count",
+    )
+    fatal_count = _count(
+        counters,
+        "host_local_acp_codex_exec_fatal_failure_trace_count",
+    )
+    if (
+        counters.get("host_local_acp_codex_exec_failure_trace_present") is not True
+        or failure_count == 0
+        or fatal_count == 0
+    ):
+        return ""
+
+    categories: list[str] = []
+    raw_categories = counters.get(
+        "host_local_acp_codex_exec_failure_categories"
+    )
+    if isinstance(raw_categories, list):
+        categories.extend(
+            str(category)[:120]
+            for category in raw_categories
+            if isinstance(category, str) and category
+        )
+    first_category = counters.get(
+        "host_local_acp_codex_exec_failure_category"
+    )
+    if (
+        isinstance(first_category, str)
+        and first_category
+        and first_category not in categories
+    ):
+        categories.insert(0, first_category[:120])
+
+    for category in categories:
+        if category not in RECOVERABLE_CODEX_TURN_FAILURE_CATEGORIES:
+            return category
+    return ""
+
+
 def recoverable_transport_after_bridge_attempt(
     counters: Mapping[str, Any],
     *,

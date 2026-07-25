@@ -74,6 +74,21 @@ def committed_turn_execution() -> dict[str, object]:
     }
 
 
+def fatal_host_turn_execution() -> dict[str, object]:
+    return {
+        "status": "failed",
+        "validation": {},
+        "receipt": {
+            "status": "failed",
+            "failed_phase": "host_execute",
+        },
+        "effects": {
+            "state_written": False,
+            "quota_spent": False,
+        },
+    }
+
+
 def write_turn_trace(
     trace_dir: Path,
     index: int,
@@ -97,6 +112,32 @@ def write_turn_trace(
         },
     }
     (trace_dir / f"turn-{index}.compact.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+
+def write_fatal_codex_trace(trace_dir: Path, index: int) -> None:
+    payload = {
+        "schema_version": "skillsbench_host_local_acp_relay_public_trace_v0",
+        "trace_kind": "codex_exec_process_failure",
+        "codex_exec_process": {
+            "failure_category": "codex_usage_limit",
+            "recoverable_turn_failure": False,
+        },
+        "boundary": {
+            key: False
+            for key in (
+                "raw_task_text_recorded",
+                "raw_trajectory_recorded",
+                "raw_stdout_recorded",
+                "raw_stderr_recorded",
+                "credential_values_recorded",
+                "host_paths_recorded",
+                "remote_paths_recorded",
+            )
+        },
+    }
+    (trace_dir / f"codex-failure-{index}.compact.json").write_text(
         json.dumps(payload), encoding="utf-8"
     )
 
@@ -321,6 +362,61 @@ def test_turn_recovery_controller_stops_or_continues_from_receipts() -> None:
         "failed_turn_transaction_has_durable_effects"
     )
 
+    fatal_trace = base_trace()
+    fatal_trace["loopx_turn_executions"] = [fatal_host_turn_execution()]
+    fatal_trace.update(
+        {
+            "host_local_acp_codex_exec_failure_trace_present": True,
+            "host_local_acp_codex_exec_failure_trace_count": 1,
+            "host_local_acp_codex_exec_fatal_failure_trace_count": 1,
+            "host_local_acp_codex_exec_recoverable_failure_trace_count": 0,
+            "host_local_acp_codex_exec_failure_categories": [
+                "codex_usage_limit"
+            ],
+            "host_local_acp_codex_exec_failure_category": "codex_usage_limit",
+        }
+    )
+    checkpoint = skillsbench_turn_recovery_checkpoint(fatal_trace)
+    assert checkpoint["nonrecoverable_host_failure"] is True, checkpoint
+    assert checkpoint["nonrecoverable_failure_category"] == "codex_usage_limit"
+    decision = advance_skillsbench_typed_repair_controller(
+        fatal_trace,
+        agent_round=1,
+        scheduled_round=2,
+        max_rounds=8,
+        task_instruction_sent=True,
+    )
+    assert decision == {
+        "action": "stop",
+        "last_decision": "stop_after_nonrecoverable_turn_host_failure",
+    }, decision
+    assert fatal_trace["product_mode_typed_repair_terminal_reason"] == (
+        "nonrecoverable_turn_host_failure"
+    )
+    assert fatal_trace[
+        "product_mode_typed_repair_terminal_failure_category"
+    ] == "codex_usage_limit"
+
+    recoverable_trace = base_trace()
+    recoverable_trace["loopx_turn_executions"] = [fatal_host_turn_execution()]
+    recoverable_trace.update(
+        {
+            "host_local_acp_codex_exec_failure_trace_present": True,
+            "host_local_acp_codex_exec_failure_trace_count": 1,
+            "host_local_acp_codex_exec_fatal_failure_trace_count": 0,
+            "host_local_acp_codex_exec_recoverable_failure_trace_count": 1,
+            "host_local_acp_codex_exec_failure_categories": [
+                "transport_interrupted"
+            ],
+            "host_local_acp_codex_exec_failure_category": (
+                "transport_interrupted"
+            ),
+        }
+    )
+    checkpoint = skillsbench_turn_recovery_checkpoint(recoverable_trace)
+    assert checkpoint["nonrecoverable_host_failure"] is False, checkpoint
+    assert checkpoint["nonrecoverable_failure_category"] == "", checkpoint
+
 
 def test_turn_blind_controller_consumes_recovery_receipts() -> None:
     trace = {
@@ -393,6 +489,36 @@ def test_turn_blind_controller_consumes_recovery_receipts() -> None:
                 "stop_after_loopx_turn_commit"
             ), committed_trace
             assert committed_trace.get("product_mode_typed_repair_pending") is not True
+
+        fatal_trace = {
+            "schema_version": "skillsbench_loopx_controller_trace_v0",
+            "route": "loopx-turn-agent-cli",
+            "round_rewards": [],
+        }
+        with tempfile.TemporaryDirectory(prefix="turn-fatal-controller-") as tmp:
+            trace_dir = Path(tmp)
+            user = _build_blind_loop_user(
+                route="loopx-turn-agent-cli",
+                max_rounds=16,
+                trace=fatal_trace,
+                plan={
+                    "route": "loopx-turn-agent-cli",
+                    "host_local_acp_relay_trace_dir": str(trace_dir),
+                    "runner_prerequisites": {},
+                },
+            )
+            assert asyncio.run(user.run(0, "Fix the workbook.")) is not None
+            write_fatal_codex_trace(trace_dir, 1)
+            write_turn_trace(trace_dir, 1, fatal_host_turn_execution())
+            assert asyncio.run(
+                user.run(1, "Fix the workbook.", round_result)
+            ) is None
+            assert fatal_trace["last_decision"] == (
+                "stop_after_nonrecoverable_turn_host_failure"
+            ), fatal_trace
+            assert fatal_trace["controller_action_decisions"] == 2, fatal_trace
+            assert fatal_trace.get("followup_prompt_count", 0) == 0, fatal_trace
+            assert len(fatal_trace["loopx_turn_executions"]) == 1, fatal_trace
 
 
 def test_unchanged_frontier_has_typed_terminal_receipt() -> None:

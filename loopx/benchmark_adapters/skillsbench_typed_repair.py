@@ -10,6 +10,10 @@ from loopx.control_plane.turn_driver.transaction import (
     loopx_turn_execution_recovery_required,
 )
 
+from .skillsbench_acp_failure_policy import (
+    nonrecoverable_codex_turn_failure_category,
+)
+
 
 SKILLSBENCH_TYPED_REPAIR_POLICY_ID = "one_typed_repair_per_frontier_v0"
 SKILLSBENCH_TYPED_REPAIR_SNAPSHOT_SCHEMA_VERSION = (
@@ -47,6 +51,7 @@ _TYPED_REPAIR_TEXT_FIELDS = (
     "product_mode_typed_repair_policy_id",
     "product_mode_typed_repair_trigger_kind",
     "product_mode_typed_repair_terminal_reason",
+    "product_mode_typed_repair_terminal_failure_category",
 )
 
 
@@ -106,11 +111,30 @@ def skillsbench_turn_recovery_checkpoint(
         if isinstance(latest.get("validation"), Mapping)
         else {}
     )
+    receipt = (
+        latest.get("receipt")
+        if isinstance(latest.get("receipt"), Mapping)
+        else {}
+    )
+    nonrecoverable_category = nonrecoverable_codex_turn_failure_category(
+        trace
+    )
+    nonrecoverable_host_failure = bool(
+        latest
+        and latest.get("status") == "failed"
+        and receipt.get("failed_phase") == "host_execute"
+        and nonrecoverable_category
+        and not loopx_turn_execution_has_durable_effects(latest)
+    )
     counts = _turn_outcome_counts(trace)
     return {
         "schema_version": "skillsbench_turn_recovery_checkpoint_v0",
         "observed": bool(latest),
         "repair_required": recovery_required,
+        "nonrecoverable_host_failure": nonrecoverable_host_failure,
+        "nonrecoverable_failure_category": (
+            nonrecoverable_category if nonrecoverable_host_failure else ""
+        ),
         "failed_transaction_with_durable_effects": (
             failed_transaction_with_durable_effects
         ),
@@ -451,6 +475,19 @@ def advance_skillsbench_typed_repair_controller(
             "action": "stop",
             "last_decision": "stop_after_failed_turn_transaction_with_durable_effects",
         }
+    if checkpoint.get("nonrecoverable_host_failure") is True:
+        record_skillsbench_typed_repair_terminal(
+            trace,
+            agent_round=agent_round,
+            reason="nonrecoverable_turn_host_failure",
+            failure_category=str(
+                checkpoint.get("nonrecoverable_failure_category") or ""
+            ),
+        )
+        return {
+            "action": "stop",
+            "last_decision": "stop_after_nonrecoverable_turn_host_failure",
+        }
     if checkpoint.get("repair_required") is not True:
         return {}
     if not begin_skillsbench_typed_repair(
@@ -585,6 +622,7 @@ def record_skillsbench_typed_repair_terminal(
     *,
     agent_round: int,
     reason: str,
+    failure_category: str = "",
 ) -> dict[str, Any]:
     receipt = {
         "schema_version": SKILLSBENCH_TYPED_REPAIR_TERMINAL_RECEIPT_SCHEMA_VERSION,
@@ -607,10 +645,19 @@ def record_skillsbench_typed_repair_terminal(
         "terminal_receipt_consistent": True,
         "raw_material_recorded": False,
     }
+    compact_failure_category = public_safe_compact_text(
+        failure_category,
+        limit=120,
+    )
+    if compact_failure_category:
+        receipt["failure_category"] = compact_failure_category
     trace["product_mode_typed_repair_pending"] = False
     trace["product_mode_typed_repair_terminal"] = True
     trace["product_mode_typed_repair_terminal_round"] = agent_round
     trace["product_mode_typed_repair_terminal_reason"] = reason[:120]
+    trace["product_mode_typed_repair_terminal_failure_category"] = (
+        compact_failure_category
+    )
     trace["product_mode_typed_repair_terminal_receipt"] = receipt
     trace["product_mode_typed_repair_terminal_receipt_consistent"] = True
     return receipt
