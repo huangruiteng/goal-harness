@@ -1812,13 +1812,21 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     continue
 
                 if tunnel_proc.poll() is None:
-                    liveness["state"] = "failed"
-                    liveness["last_probe_status"] = (
-                        "new_connect_admission_failed_tunnel_preserved"
+                    liveness["health_probe_inconclusive_count"] = (
+                        int(liveness["health_probe_inconclusive_count"]) + 1
                     )
-                    tunnel_liveness_failed = True
-                    _stop_process_group(remote_proc, grace_sec=1.0)
-                    break
+                    consecutive_inconclusive += 1
+                    liveness["max_consecutive_inconclusive_count"] = max(
+                        int(liveness["max_consecutive_inconclusive_count"]),
+                        consecutive_inconclusive,
+                    )
+                    consecutive_failures = 0
+                    liveness["state"] = "degraded"
+                    liveness["last_probe_status"] = (
+                        "new_connect_admission_inconclusive_tunnel_preserved"
+                    )
+                    next_health_probe = time.monotonic() + health_interval
+                    continue
 
                 recovered = False
                 for _attempt in range(int(liveness["reconnect_attempt_limit"])):

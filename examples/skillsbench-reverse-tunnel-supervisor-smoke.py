@@ -522,12 +522,11 @@ def test_supervisor_fails_after_startup_retry_budget_is_exhausted() -> None:
         assert tunnel_launch_count == 2, tunnel_launch_count
 
 
-def test_supervisor_preserves_live_tunnel_and_fails_closed() -> None:
-    with tempfile.TemporaryDirectory(prefix="skillsbench-tunnel-fail-closed-") as tmp:
+def test_supervisor_preserves_live_tunnel_until_remote_completion() -> None:
+    with tempfile.TemporaryDirectory(prefix="skillsbench-tunnel-preserved-") as tmp:
         root = Path(tmp)
         fake_ssh = root / "ssh"
         ssh_log = root / "ssh.log"
-        synced_dir = root / "synced"
         _flaky_fake_ssh(fake_ssh, ssh_log, root, first_tunnel_exits=False)
 
         proc = subprocess.run(
@@ -540,12 +539,6 @@ def test_supervisor_preserves_live_tunnel_and_fails_closed() -> None:
                 "opaque-benchmark-host.example",
                 "--remote-command",
                 "run-long-skillsbench --batch-size 6",
-                "--remote-public-artifact-root",
-                "/opaque/private/jobs",
-                "--remote-public-artifact-glob",
-                "job/*/benchmark_run.compact.json",
-                "--local-public-artifact-dir",
-                str(synced_dir),
                 "--tunnel-ready-timeout-sec",
                 "2",
                 "--probe-interval-sec",
@@ -565,17 +558,19 @@ def test_supervisor_preserves_live_tunnel_and_fails_closed() -> None:
             check=False,
             timeout=10,
         )
-        assert proc.returncode == 75, proc.stderr or proc.stdout
+        assert proc.returncode == 0, proc.stderr or proc.stdout
         payload = json.loads(proc.stdout)
-        assert payload["first_blocker"] == (
-            "reverse_tunnel_liveness_unrecoverable"
-        ), payload
-        assert payload["tunnel_ready"] is False, payload
+        assert payload["ok"] is True, payload
+        assert payload["remote_command_exit_code"] == 0, payload
+        assert payload["tunnel_ready"] is True, payload
         liveness = payload["tunnel_liveness"]
-        assert liveness["state"] == "failed", liveness
+        assert liveness["state"] == "degraded", liveness
         assert liveness["reconnect_attempt_count"] == 0, liveness
+        assert liveness["health_probe_failure_count"] >= 2, liveness
+        assert liveness["health_probe_inconclusive_count"] >= 1, liveness
+        assert liveness["max_consecutive_failure_count"] == 2, liveness
         assert liveness["last_probe_status"] == (
-            "new_connect_admission_failed_tunnel_preserved"
+            "new_connect_admission_inconclusive_tunnel_preserved"
         ), liveness
         ssh_log_text = ssh_log.read_text(encoding="utf-8")
         assert ssh_log_text.count("'-R'") == 1, ssh_log_text
@@ -1289,7 +1284,7 @@ if __name__ == "__main__":
     test_supervisor_reconnects_after_tunnel_process_exit()
     test_supervisor_retries_tunnel_exit_before_initial_ready()
     test_supervisor_fails_after_startup_retry_budget_is_exhausted()
-    test_supervisor_preserves_live_tunnel_and_fails_closed()
+    test_supervisor_preserves_live_tunnel_until_remote_completion()
     test_supervisor_recovers_managed_local_forward_dependency()
     test_supervisor_fails_before_launch_when_managed_dependency_is_unavailable()
     test_supervisor_keeps_running_when_ssh_probe_transport_is_unavailable()
