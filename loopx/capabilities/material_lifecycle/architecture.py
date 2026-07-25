@@ -65,6 +65,7 @@ def build_material_lifecycle_architecture_packet() -> dict[str, object]:
         "invariants": [
             "raw_material_and_private_locations_never_enter_public_packets",
             "source_snapshot_and_backup_precede_migration",
+            "source_digest_is_unchanged_across_read_only_inspection",
             "legacy_and_new_stores_dual_read_before_owner_gated_cutover",
             "stable_material_refs_survive_archive_and_reactivation",
             "rerank_is_a_bounded_delta_with_protected_items_and_no_change",
@@ -72,7 +73,7 @@ def build_material_lifecycle_architecture_packet() -> dict[str, object]:
             "automation_prompts_do_not_own_source_lists_or_ranking_rules",
         ],
         "next_stage": (
-            "read_only_legacy_inventory_and_migration_planner_then_"
-            "decision_driven_rerank_and_source_profile_dogfood"
+            "private_legacy_provider_dogfood_and_dual_read_reconciliation_"
+            "then_decision_driven_rerank"
         ),
     }

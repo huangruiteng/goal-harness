@@ -82,6 +82,26 @@ owner gate、验证引用、前后 revision；发生修改时还必须有 rollba
 通用 capability 不内置某种 Markdown parser 或私有目录结构。provider
 adapter 可以与旧存储长期共存，直到完成对账。
 
+## 只读准备路径
+
+`MaterialInventoryProvider` 是 legacy store 的私有 adapter 边界。它只返回
+瞬态元数据 `MaterialStoreSnapshot`：不透明 snapshot/backup 引用、revision、
+digest、生命周期计数、解析错误引用，以及三个显式验证结果：
+
+- stable material ID 已验证；
+- backup 已验证；
+- 清点前后的 source digest 一致。
+
+`prepare_material_migration` 把瞬态 snapshot 转成既有的
+`material_store_inventory_v0`。只有三个验证均通过且没有解析错误时，才生成
+`material_migration_plan_v0`；否则只返回确定性的 readiness blocker，不生成
+计划。provider contract 没有 apply 方法，两个 packet 也始终保持
+`source_mutation_authorized=false`。
+
+具体 provider 与私有文件布局留在通用 capability 之外。本地 host adapter 可以
+解析 Markdown、数据库或其他来源，但必须证明同一组只读与 backup invariant，
+LoopX 才会准备迁移。
+
 ## 决策驱动的排序与探索
 
 Stage 0 接收 Decision Context 产生的不透明 `decision_evidence_ref`。后续
@@ -95,13 +115,13 @@ provider-neutral 阶段可以据此生成小范围重排或探索意图。搜索
 
 ## 本阶段不做什么
 
-Stage 0 只交付确定性契约、catalog、只读架构 CLI、聚焦测试和公开 smoke，
-不交付：
+当前 capability 交付确定性契约、provider-neutral 的只读准备路径、catalog、
+架构 CLI、聚焦测试和公开 smoke，不交付：
 
-- legacy 素材 parser 或迁移 apply；
+- 内置 legacy 素材 parser 或迁移 apply；
 - 原始素材持久化；
 - 联网探索 provider；
 - 群聊/关键联系人 source profile；
 - 自动重排、自动归档或自动推进 cursor。
 
-这些能力必须经过只读 adapter、私有 dogfood、精确对账和显式 owner gate。
+这些能力必须经过私有只读 adapter、精确双读对账和显式 owner gate。

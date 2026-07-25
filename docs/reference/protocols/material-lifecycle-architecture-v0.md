@@ -87,6 +87,29 @@ until a provider-specific adapter proves:
 The generic capability never embeds a legacy parser or a private file layout.
 Adapters may coexist with the old store for as long as reconciliation requires.
 
+## Read-Only Preparation Path
+
+`MaterialInventoryProvider` is the private adapter boundary for legacy stores.
+It returns transient metadata as `MaterialStoreSnapshot`: opaque snapshot and
+backup references, revision and digest, lifecycle counts, parse-error
+references, and three explicit verification results:
+
+- stable material IDs were verified;
+- the backup was verified;
+- the source digest remained unchanged across inspection.
+
+`prepare_material_migration` converts that transient snapshot into the existing
+`material_store_inventory_v0` packet. It creates
+`material_migration_plan_v0` only when all three verifications pass and no parse
+errors remain. Otherwise it returns deterministic readiness blockers and no
+plan. The provider contract has no apply method, and both emitted packets keep
+`source_mutation_authorized=false`.
+
+Provider implementations and private file layouts stay outside the generic
+capability. A host adapter may parse Markdown, a database, or another source,
+but it must prove the same read-only and backup invariants before LoopX will
+prepare migration.
+
 ## Decision-Driven Ranking and Exploration
 
 Stage 0 accepts an opaque `decision_evidence_ref` from Decision Context. A
@@ -102,14 +125,15 @@ validated receipts, not in an automation prompt.
 
 ## Stage Boundary
 
-Stage 0 ships deterministic contracts, catalog visibility, a read-only
-architecture CLI, focused tests, and a public smoke. It does not ship:
+The capability now ships deterministic contracts, a provider-neutral read-only
+preparation path, catalog visibility, an architecture CLI, focused tests, and
+a public smoke. It does not ship:
 
-- a legacy material parser or migration apply path;
+- a built-in legacy material parser or migration apply path;
 - raw-material persistence;
 - an exploration provider;
 - a messaging or contact source profile;
 - automatic reranking, archive moves, or cursor advancement.
 
-Those require a read-only adapter, private dogfood, exact reconciliation, and an
-explicit owner gate.
+Those require a private read-only adapter, exact dual-read reconciliation, and
+an explicit owner gate.
