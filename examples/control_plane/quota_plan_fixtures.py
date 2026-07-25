@@ -472,6 +472,8 @@ def run_cli_throttled_should_run(root: Path) -> dict:
             "should-run",
             "--goal-id",
             "throttled-half",
+            "--runtime-profile",
+            "outer_controller",
             "--scan-path",
             str(project),
         ],
@@ -519,6 +521,8 @@ def run_cli_slot_preview(root: Path) -> tuple[dict, dict]:
             "should-run",
             "--goal-id",
             "near-limit-half",
+            "--runtime-profile",
+            "outer_controller",
             "--scan-path",
             str(project),
         ],
@@ -572,6 +576,8 @@ def run_cli_slot_spend_execute(root: Path) -> tuple[dict, dict, str, str]:
             "should-run",
             "--goal-id",
             "near-limit-half",
+            "--runtime-profile",
+            "outer_controller",
             "--agent-id",
             SCOPED_AGENT_ID,
             "--scan-path",
@@ -656,6 +662,8 @@ def run_cli_slot_void_execute(root: Path) -> tuple[dict, dict, dict, str, str]:
             "should-run",
             "--goal-id",
             "near-limit-half",
+            "--runtime-profile",
+            "outer_controller",
             "--agent-id",
             SCOPED_AGENT_ID,
             "--scan-path",
@@ -675,6 +683,14 @@ def run_cli_slot_void_execute(root: Path) -> tuple[dict, dict, dict, str, str]:
     )
 
 
+def assert_outer_controller_scheduler_context(payload: dict) -> None:
+    scheduler_context = payload["scheduler_hint"]["execution_context"]
+    assert scheduler_context["valid"] is True, payload
+    assert scheduler_context["host_surface"] == "generic_cli", payload
+    assert scheduler_context["scheduler_owner"] == "outer_controller", payload
+    assert scheduler_context["execution_mode"] == "isolated_headless", payload
+
+
 def assert_throttled_cli_should_run(payload: dict) -> None:
     quota = payload["quota"]
 
@@ -684,7 +700,9 @@ def assert_throttled_cli_should_run(payload: dict) -> None:
     assert payload["should_run"] is False, payload
     assert payload["state"] == "throttled", payload
     assert payload["waiting_on"] == "codex", payload
-    assert payload["plan_summary"]["next_automatic_turn"] == "full-speed", payload
+    assert payload["plan_summary"]["registered_goals"] == 1, payload
+    assert payload["plan_summary"]["next_automatic_turn"] is None, payload
+    assert_outer_controller_scheduler_context(payload)
     assert quota["compute"] == 0.5, payload
     assert quota["spent_slots"] == 12, payload
     assert quota["allowed_slots"] == 12, payload
@@ -692,7 +710,7 @@ def assert_throttled_cli_should_run(payload: dict) -> None:
     assert "agent_command" not in payload, payload
 
 
-def assert_slot_preview(payload: dict) -> None:
+def assert_slot_preview(payload: dict, *, goal_scoped: bool = False) -> None:
     before = payload["before"]
     after = payload["after"]
     markdown = render_quota_slot_preview_markdown(payload)
@@ -713,7 +731,11 @@ def assert_slot_preview(payload: dict) -> None:
     assert after["decision"] == "skip", payload
     assert after["quota"]["spent_slots"] == 12, payload
     assert after["quota"]["allowed_slots"] == 12, payload
-    assert after["plan_summary"]["next_automatic_turn"] == "full-speed", payload
+    if goal_scoped:
+        assert after["plan_summary"]["registered_goals"] == 1, payload
+        assert after["plan_summary"]["next_automatic_turn"] is None, payload
+    else:
+        assert after["plan_summary"]["next_automatic_turn"] == "full-speed", payload
     assert "rolling_window_note" in payload, payload
     assert "same-status-payload projection" in payload["rolling_window_note"], payload
     assert "rolling_window_note" in markdown, markdown
@@ -725,6 +747,7 @@ def assert_dry_run_left_cli_fixture_unchanged(payload: dict) -> None:
     assert payload["should_run"] is True, payload
     assert payload["quota"]["spent_slots"] == 11, payload
     assert payload["quota"]["allowed_slots"] == 12, payload
+    assert_outer_controller_scheduler_context(payload)
 
 
 def assert_slot_spend_execute(payload: dict, next_should_run: dict, registry_before: str, registry_after: str) -> None:
@@ -772,6 +795,7 @@ def assert_slot_spend_execute(payload: dict, next_should_run: dict, registry_bef
     assert next_should_run["state"] == "throttled", next_should_run
     assert next_should_run["quota"]["spent_slots"] == 12, next_should_run
     assert next_should_run["quota"]["allowed_slots"] == 12, next_should_run
+    assert_outer_controller_scheduler_context(next_should_run)
 
 
 def assert_slot_void_execute(
@@ -821,6 +845,7 @@ def assert_slot_void_execute(
     assert next_should_run["state"] == "eligible", next_should_run
     assert next_should_run["quota"]["spent_slots"] == 11, next_should_run
     assert next_should_run["quota"]["allowed_slots"] == 12, next_should_run
+    assert_outer_controller_scheduler_context(next_should_run)
 
 
 def assert_quota_void_event_net_ledger() -> None:

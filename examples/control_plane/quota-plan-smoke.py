@@ -1374,7 +1374,7 @@ def main() -> int:
         assert_throttled_cli_should_run(run_cli_throttled_should_run(Path(tmp)))
     with tempfile.TemporaryDirectory(prefix="loopx-quota-slot-smoke-") as tmp:
         slot_preview, should_run_after_preview = run_cli_slot_preview(Path(tmp))
-    assert_slot_preview(slot_preview)
+    assert_slot_preview(slot_preview, goal_scoped=True)
     assert_dry_run_left_cli_fixture_unchanged(should_run_after_preview)
     with tempfile.TemporaryDirectory(prefix="loopx-quota-slot-execute-smoke-") as tmp:
         assert_slot_spend_execute(*run_cli_slot_spend_execute(Path(tmp)))
