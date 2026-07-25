@@ -198,7 +198,7 @@ def test_profile_runtime_fails_open_when_provider_config_cannot_build(
     assert assembly is not None
     receipt = assembly.public_packet()["source_scan_receipts"][0]
     assert receipt["status"] == "unavailable"
-    assert receipt["reason_code"] == "provider_not_configured"
+    assert receipt["reason_code"] == "provider_configuration_failed"
     assert assembly.proposed_cursors == {}
 
 

@@ -19,7 +19,7 @@ from .profile import (
     resolve_decision_context_activation,
 )
 from .providers import build_decision_source_provider
-from .sources import DecisionSourceProvider, DecisionSourceSpec
+from .sources import DecisionSourceProvider, DecisionSourceScan, DecisionSourceSpec
 
 
 class _UnavailableContextProvider:
@@ -32,6 +32,36 @@ class _UnavailableContextProvider:
 
     def sync(self, **_: Any) -> Any:
         raise RuntimeError("context provider is unavailable")
+
+
+class _UnavailableDecisionSourceProvider:
+    """Report a configured-but-invalid binding without exposing its config."""
+
+    def __init__(self, provider_id: str) -> None:
+        self.provider_id = provider_id
+
+    def scan(
+        self,
+        *,
+        source: DecisionSourceSpec,
+        after_cursor: str | None,
+        before: str,
+        limit: int,
+        timeout_seconds: float,
+        observed_at: str,
+    ) -> DecisionSourceScan:
+        del after_cursor, before, limit, timeout_seconds
+        return DecisionSourceScan(
+            provider_id=self.provider_id,
+            source_id=source.source_id,
+            status="unavailable",
+            observed_at=observed_at,
+            requested_limit=source.max_changes,
+            reason_code="provider_configuration_failed",
+        )
+
+    def exact_read(self, **_: Any) -> Any:
+        raise RuntimeError("decision source provider is unavailable")
 
 
 def load_private_decision_cursors(
@@ -83,8 +113,7 @@ def _build_source_providers(
         try:
             providers[provider_id] = build_decision_source_provider(binding)
         except Exception:
-            # The assembler turns an absent provider into a public fail-open receipt.
-            continue
+            providers[provider_id] = _UnavailableDecisionSourceProvider(provider_id)
     return providers
 
 
@@ -100,6 +129,8 @@ def _selected_sources(
             for source in profile.sources
             if source.enabled and source.scan_mode != "on_demand"
         )
+    if isinstance(source_ids, (str, bytes)):
+        raise TypeError("source_ids must be a collection of source ids")
     selected_ids = {str(source_id).strip() for source_id in source_ids}
     unavailable = sorted(
         source_id for source_id in selected_ids if source_id not in enabled
