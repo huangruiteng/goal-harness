@@ -68,9 +68,12 @@ packet 会返回当前 doctor/install、bootstrap command pack、quota guard 和
 对于 `other-agent`，doctor 会有意跳过 `~/.codex/skills` 检查。CLI 健康与 workflow
 交付是两件事：custom host 仍需通过自己的 skill manifest 或等价 prompt injection，
 从同一 LoopX revision 交付 `loopx-project`、`loopx-pr-review`、
-`loopx-doc-registry` 和 `loopx-self-repair`，再 readback integration mode、
-loaded skill ids 和 source revision。不要假设未知 host 采用 Codex、Claude 或 OpenCode
-的目录布局。
+`loopx-doc-registry` 和 `loopx-self-repair`。当当前 goal 启用
+`change_quality_qualification` 时，onboarding packet 会额外把
+`loopx-change-quality` 列为 active project skill；host 需要交付该 workflow，
+或注入等价的自包含 prepare packet 指令。随后 readback integration mode、
+loaded skill ids 和 source revision。不要假设未知 host 采用 Codex、Claude 或
+OpenCode 的目录布局。加载质量 skill 不代表启用，是否生效由当前 goal policy 决定。
 
 如果 host 没有 skill 系统，就注入等价的 `SKILL.md` 指令，并保留一段短
 re-entry instruction，要求 Agent：
@@ -114,6 +117,12 @@ loopx --format json \
    quiet monitor poll 和 no-op retry 都不 spend。
 8. **调度：** runner 应用当前 scheduler hint，readback 实际生效值，再执行 packet 返回的
    ACK CLI。
+
+非平凡交付前，先读取 goal 的 change-quality policy。启用后运行
+`change-quality prepare`，review 精确 final diff，并记录 receipt。没有 skill 系统的
+custom host 可以直接消费自包含的 prepare packet。`safe_fix` 允许一次有界修复；
+`strict_receipt` 会让 `canary premerge --goal-id <goal-id>` 拒绝缺失或已失效的
+receipt。
 
 每次新唤醒都重新从第 1 步开始，不能依赖模型记忆或缓存 packet 续跑。
 

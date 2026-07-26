@@ -738,6 +738,28 @@ creates an `operator_gate_*` compact run so `loopx status` and the
 dashboard can tell whether the project agent may run the approved command. This
 is not a human reward signal and does not grant write-control.
 
+## Qualify Non-Trivial Final Diffs
+
+Before a non-trivial delivery or merge, inspect the current goal configuration.
+When `change_quality_qualification.enabled` is true, load
+`loopx-change-quality` and follow its exact-scope workflow:
+
+```bash
+loopx --format json change-quality prepare \
+  --goal-id <STABLE_GOAL_ID> \
+  --repo-path .
+```
+
+The policy keeps two decisions separate: `safe_fix` permits at most one bounded
+repair pass, while `strict_receipt` requires a passing receipt for the exact
+final diff. Any edit invalidates the old fingerprint. Record and verify the
+final receipt, then pass `--goal-id <STABLE_GOAL_ID>` to `canary premerge`.
+
+If the host cannot load skills, use the self-contained prepare packet as the
+review contract. Turn may carry the packet or receipt reference, but it does
+not own policy or enforcement. Do not invent a receipt, reuse one from an older
+diff, or turn subjective style advice into a blocker.
+
 ## Refresh State After Non-Adapter Work
 
 If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,

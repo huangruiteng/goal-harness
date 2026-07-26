@@ -357,6 +357,8 @@ def main() -> int:
         assert not auto_research_skill.exists(), auto_research_skill
         material_skill = codex_home / "skills" / "loopx-material" / "SKILL.md"
         assert not material_skill.exists(), material_skill
+        quality_skill = codex_home / "skills" / "loopx-change-quality" / "SKILL.md"
+        assert not quality_skill.exists(), quality_skill
         loopx_prompt = codex_home / "prompts" / "loopx.md"
         assert not loopx_prompt.exists(), loopx_prompt
         loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
@@ -499,6 +501,11 @@ def main() -> int:
         assert doctor_payload["skill"]["delivery_hints"] is True, doctor_payload
         assert "loopx-auto-research" not in doctor_payload["skills"], doctor_payload
         assert "loopx-material" not in doctor_payload["skills"], doctor_payload
+        assert "loopx-change-quality" not in doctor_payload["skills"], doctor_payload
+        assert {
+            "loopx-material",
+            "loopx-change-quality",
+        }.issubset(set(doctor_payload["project_scoped_skill_ids"])), doctor_payload
         assert doctor_payload["globally_visible_project_skills"] == [], doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["required_phrases"] is True, doctor_payload

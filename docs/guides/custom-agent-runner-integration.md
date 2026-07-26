@@ -74,11 +74,15 @@ does not grant permission or satisfy a user gate.
 
 For `other-agent`, doctor intentionally does not inspect `~/.codex/skills`.
 CLI health and workflow delivery are separate checks. The custom host must
-deliver `loopx-project`, `loopx-pr-review`, `loopx-doc-registry`, and
-`loopx-self-repair` from the same LoopX revision through its own skill manifest
-or equivalent prompt injection, then read back the integration mode, loaded
-skill ids, and source revision. Do not assume a Codex, Claude, or OpenCode
-directory layout for an unknown host.
+deliver `loopx-project`, `loopx-pr-review`, `loopx-doc-registry`,
+and `loopx-self-repair` from the same LoopX revision through its own skill
+manifest or equivalent prompt injection. When the current goal enables
+`change_quality_qualification`, the onboarding packet also lists
+`loopx-change-quality` as an active project skill; deliver that workflow or its
+equivalent self-contained prepare-packet instructions. Then read back the
+integration mode, loaded skill ids, and source revision. Do not assume a Codex,
+Claude, or OpenCode directory layout for an unknown host. Loading the quality
+skill does not activate it; the current goal policy controls activation.
 
 If the host has no skill system, inject the equivalent `SKILL.md` instructions
 and keep one short re-entry instruction that tells the Agent to:
@@ -124,6 +128,13 @@ Then follow this loop:
    validator, cadence update, quiet monitor poll, or no-op retry does not spend.
 8. **Schedule:** Apply the current scheduler hint in the runner, read back the
    value actually applied, and ACK it through the returned CLI command.
+
+Before a non-trivial delivery, inspect the goal's change-quality policy. When
+enabled, run `change-quality prepare`, review the exact final diff, and record
+its receipt. A custom host without a skill system can consume the self-contained
+prepare packet directly. `safe_fix` allows one bounded repair pass;
+`strict_receipt` makes `canary premerge --goal-id <goal-id>` reject a missing or
+stale receipt.
 
 Every new wake starts again at step 1. Do not resume from remembered model
 state or a cached packet.

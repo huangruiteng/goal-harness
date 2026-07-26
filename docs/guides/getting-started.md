@@ -459,6 +459,7 @@ The reusable skills have intentionally narrow jobs:
 | `loopx-pr-review` | Running `/loopx-pr-review`, preserving the `loopx pr-review` packet, and guiding per-PR five-block reviews. | Approving, commenting on, merging, self-merging, or admin-bypassing a PR. |
 | `loopx-doc-registry` | Registering durable project material and redacted authority-source metadata. | Copying raw doc bodies, internal URLs, or private comments into public repo docs. |
 | `loopx-material` | Operating an explicitly activated project's lossless material inventory, lifecycle, ranked-entry rebuild, bounded rerank, owner-gated apply, and rollback. | Ordinary one-off reading, project-specific source discovery, or mutating a material store merely because the project skill is discoverable. |
+| `loopx-change-quality` | Reviewing one exact final diff, optionally applying one bounded safe fix, and recording a policy-enforced receipt. | Acting when the goal policy is disabled, recursively reviewing reviewers, or replacing project-native validators. |
 | `loopx-self-repair` | Repairing surprising control-plane behavior, stale projection, tiny turns, or contradictory guard payloads. | Lowering gates, guessing around missing authority, or committing private runtime state. |
 
 Auto-research role guidance is worker-local: the visible worker launcher owns
@@ -476,10 +477,10 @@ Keep three layers separate:
   docs. They can constrain contributors and agents in this repository, but they
   should not silently become global skill policy for every project.
 
-`loopx-material` follows **release-owned source, project-managed delivery, and
-goal-scoped activation**. The global installer keeps its canonical source in
-the LoopX release but does not publish it under `~/.codex/skills`. The generic
-lifecycle and host-surface contract is documented in
+`loopx-material` and `loopx-change-quality` follow **release-owned source,
+project-managed delivery, and goal-scoped activation**. The global installer
+keeps their canonical source in the LoopX release but does not publish either
+skill under `~/.codex/skills`. The generic lifecycle and host-surface contract is documented in
 [Project Skill Delivery](../project-skill-delivery.md). Enable discovery only
 for a connected project:
 
@@ -493,6 +494,13 @@ loopx project-skill status \
   --project . \
   --skill loopx-material \
   --surface codex
+
+# Install only when the goal enables change_quality_qualification.
+loopx project-skill install \
+  --project . \
+  --skill loopx-change-quality \
+  --surface codex \
+  --execute
 ```
 
 Host-native project roots are:
@@ -511,9 +519,9 @@ and [OpenCode](https://opencode.ai/docs/skills/#place-files).
 
 Installing a project skill does not grant domain write authority; the current
 goal/profile/todo must still activate the capability. Use
-`loopx project-skill uninstall --project . --skill loopx-material --surface
-codex --execute` to remove a managed copy. Unmanaged or locally modified copies
-fail closed.
+`loopx project-skill uninstall --project . --skill <skill-id> --surface codex
+--execute` to remove a managed copy. Unmanaged or locally modified copies fail
+closed.
 
 To disconnect only the current project from LoopX, use the project-local
 uninstall command from that project root. It defaults to a dry-run preview and

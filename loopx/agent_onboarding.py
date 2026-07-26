@@ -5,6 +5,7 @@ from typing import Any
 
 from .agent_registry import registered_agent_ids_from_registry
 from .bootstrap_command_pack import inspect_bootstrap_connection
+from .capabilities.change_quality.policy import change_quality_goal_policy
 from .host_loop_activation import (
     build_host_loop_activation_packet,
     normalize_agent_type,
@@ -17,6 +18,7 @@ from .project_prompt import (
     render_quota_guard_command,
     shell_arg,
 )
+from .registry import read_json, registry_goals
 
 
 SCHEMA_VERSION = "loopx_agent_onboarding_v0"
@@ -27,6 +29,7 @@ REQUIRED_HOST_SKILL_IDS = [
     "loopx-doc-registry",
     "loopx-self-repair",
 ]
+CHANGE_QUALITY_SKILL_ID = "loopx-change-quality"
 
 
 def _surface_install_command(agent_type: str, cli_bin: str) -> str | None:
@@ -42,7 +45,86 @@ def _surface_install_command(agent_type: str, cli_bin: str) -> str | None:
     return None
 
 
-def _skill_delivery_contract(agent_type: str) -> dict[str, Any]:
+def _project_skill_surface(agent_type: str) -> str | None:
+    if agent_type in {
+        "codex-app",
+        "codex-app-ssh",
+        "codex-ide-plugin",
+        "codex-cli",
+    }:
+        return "codex"
+    if agent_type == "claude-code":
+        return "claude-code"
+    if agent_type == "opencode":
+        return "opencode"
+    return None
+
+
+def _project_skill_command(
+    command: str,
+    *,
+    project: str,
+    skill_id: str,
+    surface: str,
+    cli_bin: str,
+    execute: bool = False,
+) -> str:
+    parts = [
+        shell_arg(cli_bin),
+        "project-skill",
+        command,
+        "--project",
+        shell_arg(project),
+        "--skill",
+        shell_arg(skill_id),
+        "--surface",
+        shell_arg(surface),
+    ]
+    if execute:
+        parts.append("--execute")
+    return " ".join(parts)
+
+
+def _skill_delivery_contract(
+    agent_type: str,
+    *,
+    project: str = ".",
+    cli_bin: str = "loopx",
+    active_project_skill_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    active_project_skills = list(dict.fromkeys(active_project_skill_ids or []))
+    project_surface = _project_skill_surface(agent_type)
+    project_skill_commands = []
+    if project_surface:
+        for skill_id in active_project_skills:
+            project_skill_commands.append(
+                {
+                    "skill_id": skill_id,
+                    "surface": project_surface,
+                    "status": _project_skill_command(
+                        "status",
+                        project=project,
+                        skill_id=skill_id,
+                        surface=project_surface,
+                        cli_bin=cli_bin,
+                    ),
+                    "preview_install": _project_skill_command(
+                        "install",
+                        project=project,
+                        skill_id=skill_id,
+                        surface=project_surface,
+                        cli_bin=cli_bin,
+                    ),
+                    "apply_install": _project_skill_command(
+                        "install",
+                        project=project,
+                        skill_id=skill_id,
+                        surface=project_surface,
+                        cli_bin=cli_bin,
+                        execute=True,
+                    ),
+                }
+            )
     if agent_type != "other-agent":
         return {
             "schema_version": HOST_SKILL_DELIVERY_SCHEMA_VERSION,
@@ -50,7 +132,13 @@ def _skill_delivery_contract(agent_type: str) -> dict[str, Any]:
             "owner": "loopx_surface_installer",
             "codex_skills_root_required": agent_type.startswith("codex-"),
             "host_readback_required": False,
+            "active_project_skill_ids": active_project_skills,
+            "project_skill_commands": project_skill_commands,
         }
+    required_skill_ids = [
+        *REQUIRED_HOST_SKILL_IDS,
+        *active_project_skills,
+    ]
     return {
         "schema_version": HOST_SKILL_DELIVERY_SCHEMA_VERSION,
         "mode": "host_managed",
@@ -59,14 +147,15 @@ def _skill_delivery_contract(agent_type: str) -> dict[str, Any]:
         "codex_skills_root_required": False,
         "required_for_cli_health": False,
         "required_for_loopx_workflow": True,
-        "required_skill_ids": REQUIRED_HOST_SKILL_IDS,
+        "required_skill_ids": required_skill_ids,
+        "active_project_skill_ids": active_project_skills,
         "delivery_options": [
             "host_skill_manifest",
             "prompt_injection",
         ],
         "source_repository": "https://github.com/huangruiteng/loopx",
         "source_directories": [
-            f"skills/{skill_id}" for skill_id in REQUIRED_HOST_SKILL_IDS
+            f"skills/{skill_id}" for skill_id in required_skill_ids
         ],
         "source_contract": (
             "Use the same LoopX release or repository revision as the CLI when "
@@ -82,6 +171,7 @@ def _skill_delivery_contract(agent_type: str) -> dict[str, Any]:
         "success_criteria": [
             "the host reports which integration mode it selected",
             "the host reports every required LoopX skill id as loaded",
+            "the host reports every active project skill id as loaded or injects its equivalent instructions",
             "the host reports the source revision or digest used for delivery",
             "no Codex-specific skill directory is assumed",
         ],
@@ -164,6 +254,20 @@ def build_agent_onboarding_packet(
     resolved_project = str(inspection["project"])
     resolved_goal_id = str(inspection["goal_id"])
     registry_path = Path(str(inspection["registry"]))
+    registry = read_json(registry_path)
+    goal = next(
+        (
+            item
+            for item in registry_goals(registry)
+            if str(item.get("id") or "") == resolved_goal_id
+        ),
+        {},
+    )
+    active_project_skill_ids = (
+        [CHANGE_QUALITY_SKILL_ID]
+        if change_quality_goal_policy(goal)["enabled"]
+        else []
+    )
     registered_agents = registered_agent_ids_from_registry(
         registry_path,
         resolved_goal_id,
@@ -247,7 +351,12 @@ def build_agent_onboarding_packet(
         "task_text": task_text,
         "project_connection": inspection,
         "host_loop_activation": host_loop_activation,
-        "skill_delivery": _skill_delivery_contract(canonical_agent_type),
+        "skill_delivery": _skill_delivery_contract(
+            canonical_agent_type,
+            project=resolved_project,
+            cli_bin=cli_bin,
+            active_project_skill_ids=active_project_skill_ids,
+        ),
         "recommended_start": (
             "Select one registered agent lane from identity_selection_gate, then rerun onboarding."
             if not activation_allowed
@@ -323,6 +432,33 @@ def render_agent_onboarding_markdown(payload: dict[str, Any]) -> str:
     ]
     if commands.get("install_command_facade"):
         lines.extend(["", "```bash", str(commands.get("install_command_facade")), "```"])
+    project_skill_commands = (
+        skill_delivery.get("project_skill_commands")
+        if isinstance(skill_delivery.get("project_skill_commands"), list)
+        else []
+    )
+    if project_skill_commands:
+        lines.extend(
+            [
+                "",
+                "## Active Project Skills",
+                "",
+                f"- skill_ids: `{','.join(skill_delivery.get('active_project_skill_ids') or [])}`",
+            ]
+        )
+        for item in project_skill_commands:
+            if not isinstance(item, dict):
+                continue
+            lines.extend(
+                [
+                    "",
+                    "```bash",
+                    str(item.get("status") or ""),
+                    str(item.get("preview_install") or ""),
+                    str(item.get("apply_install") or ""),
+                    "```",
+                ]
+            )
     if skill_delivery.get("mode") == "host_managed":
         lines.extend(
             [

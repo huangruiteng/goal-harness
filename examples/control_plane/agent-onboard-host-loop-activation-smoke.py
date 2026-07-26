@@ -449,6 +449,43 @@ def main() -> int:
             ]
         ), other_agent_onboarding
 
+        registry["goals"][0]["control_plane"] = {
+            "change_quality_qualification": {
+                "enabled": True,
+                "safe_fix": True,
+                "strict_receipt": True,
+            }
+        }
+        serialized_registry = json.dumps(registry)
+        project_registry.write_text(serialized_registry, encoding="utf-8")
+        global_registry.write_text(serialized_registry, encoding="utf-8")
+        quality_other_agent = build_agent_onboarding_packet(
+            project=project,
+            agent_type="other-agent",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        quality_delivery = quality_other_agent["skill_delivery"]
+        assert "loopx-change-quality" in quality_delivery["active_project_skill_ids"]
+        assert "loopx-change-quality" in quality_delivery["required_skill_ids"]
+        assert "skills/loopx-change-quality" in quality_delivery["source_directories"]
+
+        quality_codex = build_agent_onboarding_packet(
+            project=project,
+            agent_type="codex-cli",
+            goal_id="multi-agent-goal",
+            agent_id="codex-product-capability",
+            cli_bin=cli_bin,
+        )
+        quality_commands = quality_codex["skill_delivery"][
+            "project_skill_commands"
+        ]
+        assert len(quality_commands) == 1, quality_codex
+        assert "project-skill status" in quality_commands[0]["status"]
+        assert "project-skill install" in quality_commands[0]["apply_install"]
+        assert quality_commands[0]["apply_install"].endswith("--execute")
+
         doctor_home = root / "doctor-home"
         doctor_home.mkdir()
         doctor_env = {
