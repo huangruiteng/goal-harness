@@ -68,6 +68,24 @@ flowchart LR
 `material_rerank_apply_receipt_v0` 与 proposal 分离。真正 apply 必须记录
 owner gate、验证引用、前后 revision；发生修改时还必须有 rollback 引用。
 
+`material_ranked_entry_rebuild_plan_v0` 负责小范围 rank move 无法表达的结构
+修复。超过成员预算的 ranked entry 必须拆成两个或更多可以独立排序的条目，
+不能把 overflow 隐藏到 supporting-only index。调用方在 exact read 后提供语义
+分组，provider-neutral builder 统一执行以下硬门禁：
+
+- 每个重建条目最多包含 `max_materials_per_entry` 个素材引用；
+- 每个源素材引用在完整结果中恰好出现一次；
+- child entry 保留精确 source-entry 成员关系，但 exact-read 语义分组可以替换
+  旧存储中的偶然顺序；
+- 完整 ranked set 的 target rank 唯一且从 1 连续；
+- 未拆分条目保留原引用，拆分 child 根据 source entry 与有序成员生成确定性引用；
+- 可选的 material-level rank anchor 必须留在受保护的 target rank。
+
+完整 ranked set 可以大于活跃窗口。窗口外条目进入显式 ranked backlog，仍属于
+排序系统，而不是“隐藏材料”。`material_ranked_entry_rebuild_apply_receipt_v0`
+记录 owner-gated cutover、验证、前后 revision、数量与 rollback 引用。两个 packet
+均不携带标题、正文、来源位置或凭据。
+
 ## 迁移边界
 
 旧 Markdown、数据库、inbox 等存储在以下条件满足前始终是 authority：

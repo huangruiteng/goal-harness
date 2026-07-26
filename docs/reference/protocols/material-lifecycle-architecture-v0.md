@@ -72,6 +72,27 @@ copying raw content into another queue.
 requires an owner-gate reference, validation reference, before/after revisions,
 and rollback reference for applied changes.
 
+`material_ranked_entry_rebuild_plan_v0` handles structural queue repair that a
+bounded rank move cannot express. A ranked entry that exceeds the configured
+member budget must become two or more independently sortable entries; overflow
+cannot be hidden in a supporting-only index. The caller supplies the semantic
+grouping after exact reads. The provider-neutral builder then enforces:
+
+- at most `max_materials_per_entry` references per rebuilt entry;
+- every source material reference appears exactly once;
+- child entries preserve exact source-entry membership while exact-read
+  semantic grouping may replace incidental legacy order;
+- target ranks are unique and contiguous across the complete ranked set;
+- unchanged entries retain their reference, while split children receive a
+  deterministic reference derived from their source entry and ordered members;
+- optional material-level rank anchors remain at their protected target rank.
+
+The complete ranked set may be larger than the active window. Entries below the
+window remain in an explicit ranked backlog, not outside the ranking system.
+`material_ranked_entry_rebuild_apply_receipt_v0` records the owner-gated
+cutover, validation, before/after revisions, counts, and rollback reference.
+Neither packet carries titles, content, source locations, or credentials.
+
 ## Migration Boundary
 
 Legacy Markdown, databases, inboxes, and other stores remain authoritative

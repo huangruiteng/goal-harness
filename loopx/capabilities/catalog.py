@@ -407,7 +407,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         "origin": "builtin",
         "visibility": "public",
         "provider_id": "loopx-core",
-        "title": "Backup-safe material inventory, archive, and bounded rerank contract",
+        "title": "Backup-safe material inventory, ranked-entry rebuild, and rerank",
         "status": "experimental",
         "default_enabled": False,
         "real_world_anchor": (
@@ -416,7 +416,8 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ),
         "user_value": (
             "Preserve raw source authority and stable material references while "
-            "making migration, archive transitions, and small reranks auditable."
+            "making migration, archive transitions, structural entry rebuilds, "
+            "and small reranks auditable."
         ),
         "entry_command": "loopx material-lifecycle architecture --format json",
         "commands": [
@@ -457,6 +458,16 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "module": "loopx.capabilities.material_lifecycle.ranking",
                 "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
             },
+            {
+                "schema_version": "material_ranked_entry_rebuild_plan_v0",
+                "module": "loopx.capabilities.material_lifecycle.rebuild",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_ranked_entry_rebuild_apply_receipt_v0",
+                "module": "loopx.capabilities.material_lifecycle.rebuild",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
         ],
         "smokes": ["python3 examples/material-lifecycle-contract-smoke.py"],
         "docs": [
@@ -468,11 +479,12 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "Raw material, private locations, provider payloads, credentials, and source-store formats stay outside public packets.",
             "Snapshot and verified backup precede dual-read reconciliation; cutover and rollback remain owner-gated.",
             "Decision Context may supply revisioned evidence, but Material Lifecycle owns candidate, archive, and rerank receipts.",
+            "Oversized ranked entries are rebuilt into independently sortable entries; overflow cannot be hidden outside the ranked set.",
             "Concrete legacy adapters, exploration providers, source profiles, and material-store writes remain deferred to private dogfood.",
         ],
         "next_real_step": (
-            "Build one read-only legacy inventory and migration planner, then "
-            "validate a decision-driven bounded rerank without mutating raw sources."
+            "Dogfood one exact-read semantic rebuild through owner-gated apply "
+            "while preserving complete source bytes and canonical records."
         ),
     },
     {

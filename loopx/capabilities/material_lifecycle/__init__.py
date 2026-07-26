@@ -52,6 +52,13 @@ from .ranking import (
     build_material_rerank_apply_receipt,
     build_material_rerank_proposal,
 )
+from .rebuild import (
+    MATERIAL_RANKED_ENTRY_REBUILD_APPLY_RECEIPT_SCHEMA_VERSION,
+    MATERIAL_RANKED_ENTRY_REBUILD_PLAN_SCHEMA_VERSION,
+    build_material_ranked_entry_rebuild_apply_receipt,
+    build_material_ranked_entry_rebuild_plan,
+    derive_material_ranked_entry_ref,
+)
 
 __all__ = [
     "MATERIAL_EXPLORE_INTENT_SCHEMA_VERSION",
@@ -62,6 +69,8 @@ __all__ = [
     "MATERIAL_MIGRATION_APPLY_RECEIPT_SCHEMA_VERSION",
     "MATERIAL_MIGRATION_PLAN_SCHEMA_VERSION",
     "MATERIAL_MIGRATION_ROLLBACK_RECEIPT_SCHEMA_VERSION",
+    "MATERIAL_RANKED_ENTRY_REBUILD_APPLY_RECEIPT_SCHEMA_VERSION",
+    "MATERIAL_RANKED_ENTRY_REBUILD_PLAN_SCHEMA_VERSION",
     "MATERIAL_RERANK_APPLY_RECEIPT_SCHEMA_VERSION",
     "MATERIAL_RERANK_PROPOSAL_SCHEMA_VERSION",
     "MATERIAL_STORE_INVENTORY_SCHEMA_VERSION",
@@ -83,9 +92,12 @@ __all__ = [
     "build_material_lifecycle_architecture_packet",
     "build_material_lifecycle_receipt",
     "build_material_migration_plan",
+    "build_material_ranked_entry_rebuild_apply_receipt",
+    "build_material_ranked_entry_rebuild_plan",
     "build_material_rerank_apply_receipt",
     "build_material_rerank_proposal",
     "build_material_store_inventory",
+    "derive_material_ranked_entry_ref",
     "execute_material_explore_intent",
     "plan_material_decision_actions",
     "prepare_material_migration",

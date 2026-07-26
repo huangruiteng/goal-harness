@@ -6,6 +6,8 @@ from loopx.capabilities.material_lifecycle import (
     build_material_lifecycle_architecture_packet,
     build_material_lifecycle_receipt,
     build_material_migration_plan,
+    build_material_ranked_entry_rebuild_apply_receipt,
+    build_material_ranked_entry_rebuild_plan,
     build_material_rerank_apply_receipt,
     build_material_rerank_proposal,
     build_material_store_inventory,
@@ -316,3 +318,221 @@ def test_no_change_apply_receipt_preserves_revision() -> None:
 
     assert receipt["status"] == "no_change"
     assert receipt["applied_material_refs"] == []
+
+
+def test_ranked_entry_rebuild_splits_overflow_without_hiding_members() -> None:
+    plan = build_material_ranked_entry_rebuild_plan(
+        goal_id="goal:material-example",
+        plan_id="plan:entry-rebuild-1",
+        inventory_ref=str(inventory_packet()["inventory_ref"]),
+        source_revision="revision:42",
+        observed_at=OBSERVED_AT,
+        max_materials_per_entry=3,
+        top_window_size=3,
+        source_entries=[
+            {
+                "entry_ref": "entry:control-plane",
+                "rank": 1,
+                "material_refs": [
+                    "material:a",
+                    "material:b",
+                    "material:c",
+                    "material:d",
+                ],
+            },
+            {
+                "entry_ref": "entry:eval",
+                "rank": 2,
+                "material_refs": ["material:e", "material:f"],
+            },
+        ],
+        rebuilt_entries=[
+            {
+                "source_entry_ref": "entry:control-plane",
+                "target_rank": 1,
+                "material_refs": [
+                    "material:a",
+                    "material:b",
+                    "material:c",
+                ],
+                "reason_code": "split_oversized_entry",
+            },
+            {
+                "source_entry_ref": "entry:eval",
+                "target_rank": 2,
+                "material_refs": ["material:e", "material:f"],
+                "reason_code": "preserve_entry",
+            },
+            {
+                "source_entry_ref": "entry:control-plane",
+                "target_rank": 3,
+                "material_refs": ["material:d"],
+                "reason_code": "split_oversized_entry",
+            },
+        ],
+        protected_rank_anchors=[
+            {"material_ref": "material:a", "rank": 1},
+            {"material_ref": "material:e", "rank": 2},
+        ],
+    )
+
+    assert plan["summary"] == {
+        "source_entry_count": 2,
+        "rebuilt_entry_count": 3,
+        "material_ref_count": 6,
+        "split_source_entry_count": 1,
+        "oversized_source_entry_count": 1,
+        "top_window_entry_count": 3,
+        "ranked_backlog_entry_count": 0,
+    }
+    assert plan["rebuilt_entries"][1]["entry_ref"] == "entry:eval"
+    assert plan["rebuilt_entries"][2]["source_entry_ref"] == (
+        "entry:control-plane"
+    )
+    assert plan["verification"]["complete_coverage_verified"] is True
+    assert plan["apply_authorized"] is False
+
+
+def test_ranked_entry_rebuild_rejects_loss_duplication_and_hidden_overflow() -> None:
+    source_entries = [
+        {
+            "entry_ref": "entry:source",
+            "rank": 1,
+            "material_refs": [
+                "material:a",
+                "material:b",
+                "material:c",
+                "material:d",
+            ],
+        }
+    ]
+    with pytest.raises(ValueError, match="cover every source"):
+        build_material_ranked_entry_rebuild_plan(
+            goal_id="goal:material-example",
+            plan_id="plan:lossy",
+            inventory_ref=str(inventory_packet()["inventory_ref"]),
+            source_revision="revision:42",
+            observed_at=OBSERVED_AT,
+            source_entries=source_entries,
+            rebuilt_entries=[
+                {
+                    "source_entry_ref": "entry:source",
+                    "target_rank": 1,
+                    "material_refs": [
+                        "material:a",
+                        "material:b",
+                        "material:c",
+                    ],
+                    "reason_code": "hide_overflow",
+                }
+            ],
+            top_window_size=1,
+        )
+
+    with pytest.raises(ValueError, match="globally unique"):
+        build_material_ranked_entry_rebuild_plan(
+            goal_id="goal:material-example",
+            plan_id="plan:duplicate",
+            inventory_ref=str(inventory_packet()["inventory_ref"]),
+            source_revision="revision:42",
+            observed_at=OBSERVED_AT,
+            source_entries=source_entries,
+            rebuilt_entries=[
+                {
+                    "source_entry_ref": "entry:source",
+                    "target_rank": 1,
+                    "material_refs": [
+                        "material:a",
+                        "material:b",
+                        "material:c",
+                    ],
+                    "reason_code": "split",
+                },
+                {
+                    "source_entry_ref": "entry:source",
+                    "target_rank": 2,
+                    "material_refs": ["material:c", "material:d"],
+                    "reason_code": "split",
+                },
+            ],
+            top_window_size=2,
+        )
+
+
+def test_ranked_entry_rebuild_allows_exact_read_semantic_regrouping() -> None:
+    plan = build_material_ranked_entry_rebuild_plan(
+        goal_id="goal:material-example",
+        plan_id="plan:semantic-regroup",
+        inventory_ref=str(inventory_packet()["inventory_ref"]),
+        source_revision="revision:42",
+        observed_at=OBSERVED_AT,
+        source_entries=[
+            {
+                "entry_ref": "entry:source",
+                "rank": 1,
+                "material_refs": [
+                    "material:a",
+                    "material:b",
+                    "material:c",
+                    "material:d",
+                ],
+            }
+        ],
+        rebuilt_entries=[
+            {
+                "source_entry_ref": "entry:source",
+                "target_rank": 1,
+                "material_refs": ["material:a", "material:c"],
+                "reason_code": "semantic_regroup",
+            },
+            {
+                "source_entry_ref": "entry:source",
+                "target_rank": 2,
+                "material_refs": ["material:b", "material:d"],
+                "reason_code": "semantic_regroup",
+            },
+        ],
+        top_window_size=2,
+    )
+
+    assert plan["verification"]["source_lineage_membership_verified"] is True
+
+
+def test_ranked_entry_rebuild_apply_receipt_requires_rollback() -> None:
+    receipt = build_material_ranked_entry_rebuild_apply_receipt(
+        goal_id="goal:material-example",
+        receipt_id="receipt:entry-rebuild-1",
+        plan_ref="material-ranked-entry-rebuild-0123456789abcdef",
+        observed_at=OBSERVED_AT,
+        status="applied",
+        before_revision="revision:42",
+        after_revision="revision:43",
+        owner_gate_ref="gate:entry-rebuild-1",
+        validation_ref="validation:entry-rebuild-1",
+        source_entry_count=30,
+        rebuilt_entry_count=40,
+        material_ref_count=89,
+        top_window_size=30,
+        rollback_ref="rollback:revision-42",
+    )
+
+    assert receipt["summary"]["ranked_backlog_entry_count"] == 10
+    assert receipt["verification"]["entry_budget_verified"] is True
+    assert receipt["raw_content_captured"] is False
+
+    with pytest.raises(ValueError, match="rollback_ref"):
+        build_material_ranked_entry_rebuild_apply_receipt(
+            goal_id="goal:material-example",
+            receipt_id="receipt:entry-rebuild-2",
+            plan_ref="material-ranked-entry-rebuild-0123456789abcdef",
+            observed_at=OBSERVED_AT,
+            status="applied",
+            before_revision="revision:42",
+            after_revision="revision:43",
+            owner_gate_ref="gate:entry-rebuild-1",
+            validation_ref="validation:entry-rebuild-1",
+            source_entry_count=30,
+            rebuilt_entry_count=40,
+            material_ref_count=89,
+            top_window_size=30,
+        )

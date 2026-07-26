@@ -12,6 +12,10 @@ from .ranking import (
     MATERIAL_RERANK_APPLY_RECEIPT_SCHEMA_VERSION,
     MATERIAL_RERANK_PROPOSAL_SCHEMA_VERSION,
 )
+from .rebuild import (
+    MATERIAL_RANKED_ENTRY_REBUILD_APPLY_RECEIPT_SCHEMA_VERSION,
+    MATERIAL_RANKED_ENTRY_REBUILD_PLAN_SCHEMA_VERSION,
+)
 
 MATERIAL_LIFECYCLE_ARCHITECTURE_SCHEMA_VERSION = "material_lifecycle_architecture_v0"
 
@@ -35,6 +39,8 @@ def build_material_lifecycle_architecture_packet() -> dict[str, object]:
             MATERIAL_LIFECYCLE_RECEIPT_SCHEMA_VERSION,
             MATERIAL_RERANK_PROPOSAL_SCHEMA_VERSION,
             MATERIAL_RERANK_APPLY_RECEIPT_SCHEMA_VERSION,
+            MATERIAL_RANKED_ENTRY_REBUILD_PLAN_SCHEMA_VERSION,
+            MATERIAL_RANKED_ENTRY_REBUILD_APPLY_RECEIPT_SCHEMA_VERSION,
             MATERIAL_EXPLORE_INTENT_SCHEMA_VERSION,
         ],
         "sibling_capabilities": {
@@ -63,6 +69,7 @@ def build_material_lifecycle_architecture_packet() -> dict[str, object]:
             "active",
             "archive_or_carryover",
             "bounded_rerank",
+            "lossless_ranked_entry_rebuild",
             "bounded_explore_intent",
             "audited_apply",
         ],
@@ -73,6 +80,9 @@ def build_material_lifecycle_architecture_packet() -> dict[str, object]:
             "legacy_and_new_stores_dual_read_before_owner_gated_cutover",
             "stable_material_refs_survive_archive_and_reactivation",
             "rerank_is_a_bounded_delta_with_protected_items_and_no_change",
+            "oversized_ranked_entries_split_instead_of_hiding_members",
+            "ranked_entry_rebuild_preserves_exact_coverage_and_unique_membership",
+            "ranked_entry_children_have_deterministic_stable_references",
             "decision_evidence_is_revision_bound_and_public_safe",
             "explore_intent_is_budgeted_analysis_only_and_has_a_stop_condition",
             "invalid_or_unavailable_policy_fails_open_to_no_change",
