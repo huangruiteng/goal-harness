@@ -1083,6 +1083,41 @@ def test_codex_exec_same_session_continuation_requires_safe_progress(
     )
 
 
+def test_progress_validation_handoff_requires_no_scheduled_continuation(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "bridge-summary.jsonl"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "record_phase": "complete",
+                "operation": "write_file",
+                "task_facing_operation": True,
+                "durable_task_write": True,
+                "durable_task_content_changed": True,
+                "success": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+    assert not acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_bridge_idle_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=True,
+        final_message_present=False,
+        turn_deadline=time.monotonic() + 30,
+    )
+
+
 def test_skillsbench_single_turn_codex_exec_resumes_progressful_idle_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

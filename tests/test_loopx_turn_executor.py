@@ -201,6 +201,9 @@ def test_run_once_explicitly_retries_failed_host_without_duplicate_effects(tmp_p
     recovered = run_loopx_turn_once(plan, retry_failed=True, **kwargs)
 
     assert failed["reason"] == "codex_cli_model_requires_newer_codex"
+    assert failed["result_kind"] == "host_failure"
+    assert failed["receipt"]["result_kind"] == "host_failure"
+    assert failed["receipt"]["failed_phase"] == "host_execute"
     assert replayed["replayed"] is True
     assert recovered["status"] == "committed"
     assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}

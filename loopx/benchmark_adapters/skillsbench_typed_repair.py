@@ -96,16 +96,6 @@ def skillsbench_turn_recovery_checkpoint(
 
     executions = _turn_executions(trace)
     latest = executions[-1] if executions else {}
-    recovery_required = bool(
-        latest
-        and loopx_turn_execution_recovery_required(latest)
-        and not loopx_turn_execution_has_durable_effects(latest)
-    )
-    failed_transaction_with_durable_effects = bool(
-        latest
-        and loopx_turn_execution_recovery_required(latest)
-        and loopx_turn_execution_has_durable_effects(latest)
-    )
     validation = (
         latest.get("validation")
         if isinstance(latest.get("validation"), Mapping)
@@ -116,6 +106,10 @@ def skillsbench_turn_recovery_checkpoint(
         if isinstance(latest.get("receipt"), Mapping)
         else {}
     )
+    receipt_result_kind = public_safe_compact_text(
+        receipt.get("result_kind") or latest.get("result_kind"),
+        limit=80,
+    )
     nonrecoverable_category = nonrecoverable_codex_turn_failure_category(
         trace
     )
@@ -125,6 +119,31 @@ def skillsbench_turn_recovery_checkpoint(
         and receipt.get("failed_phase") == "host_execute"
         and nonrecoverable_category
         and not loopx_turn_execution_has_durable_effects(latest)
+    )
+    typed_receipt_recovery = receipt_result_kind in {
+        "repair_required",
+        "replan_required",
+    }
+    typed_recovery_required = bool(
+        loopx_turn_execution_recovery_required(latest)
+        or typed_receipt_recovery
+    )
+    failed_transaction_with_durable_effects = bool(
+        latest
+        and typed_recovery_required
+        and loopx_turn_execution_has_durable_effects(latest)
+    )
+    recoverable_host_failure = bool(
+        latest
+        and receipt_result_kind == "host_failure"
+        and not nonrecoverable_category
+    )
+    recovery_required = bool(
+        latest
+        and not loopx_turn_execution_has_durable_effects(latest)
+        and (
+            typed_recovery_required or recoverable_host_failure
+        )
     )
     counts = _turn_outcome_counts(trace)
     return {
@@ -139,7 +158,8 @@ def skillsbench_turn_recovery_checkpoint(
             failed_transaction_with_durable_effects
         ),
         "recovery_kind": public_safe_compact_text(
-            validation.get("recovery_kind"), limit=80
+            validation.get("recovery_kind") or receipt_result_kind,
+            limit=80,
         ),
         **counts,
         "raw_material_recorded": False,

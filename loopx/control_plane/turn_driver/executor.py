@@ -847,6 +847,7 @@ def run_loopx_turn_once(
                     reason=failure["reason"],
                     receipt=failure["receipt"],
                     completed_phases=[],
+                    result_kind=LoopXTurnResultKind.HOST_FAILURE.value,
                 )
                 _write_journal(journal_path, journal)
                 return _execution_payload(plan, journal, execute=True, replayed=False, effects=effects)

@@ -101,11 +101,16 @@ def loopx_turn_execution_recovery_required(
 
     validation = _mapping(execution.get("validation"))
     receipt = _mapping(execution.get("receipt"))
+    recovery_kind = (
+        validation.get("recovery_kind")
+        or receipt.get("result_kind")
+        or execution.get("result_kind")
+    )
     return bool(
-        validation.get("recovery_kind") in {"repair_required", "replan_required"}
+        recovery_kind in {"repair_required", "replan_required"}
         and (
             validation.get("status") == "failed"
-            or receipt.get("failed_phase") == "validation"
+            or receipt.get("failed_phase")
             or execution.get("status") in {"failed", "validation_failed"}
         )
     )

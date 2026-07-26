@@ -500,13 +500,13 @@ def _codex_exec_progress_validation_handoff_allowed(
     *,
     category: str,
     bridge_summary_path: Path | None,
-    continuation_count: int,
+    same_session_continuation_scheduled: bool,
     final_message_present: bool,
     turn_deadline: float | None,
 ) -> bool:
     if (
         category != "codex_exec_bridge_idle_timeout"
-        or continuation_count < CODEX_EXEC_SAME_SESSION_CONTINUATION_LIMIT
+        or same_session_continuation_scheduled
         or final_message_present
         or bridge_summary_path is None
         or turn_deadline is not None
@@ -1167,8 +1167,8 @@ class SkillsBenchLocalAcpRelay:
                                 and _codex_exec_progress_validation_handoff_allowed(
                                     category="codex_exec_bridge_idle_timeout",
                                     bridge_summary_path=bridge_summary_path,
-                                    continuation_count=(
-                                        _same_session_continuation_count
+                                    same_session_continuation_scheduled=(
+                                        continuation_scheduled
                                     ),
                                     final_message_present=output_path.exists(),
                                     turn_deadline=_turn_deadline,

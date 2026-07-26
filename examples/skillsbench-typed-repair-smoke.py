@@ -77,9 +77,11 @@ def committed_turn_execution() -> dict[str, object]:
 def fatal_host_turn_execution() -> dict[str, object]:
     return {
         "status": "failed",
+        "result_kind": "host_failure",
         "validation": {},
         "receipt": {
             "status": "failed",
+            "result_kind": "host_failure",
             "failed_phase": "host_execute",
         },
         "effects": {
@@ -416,6 +418,31 @@ def test_turn_recovery_controller_stops_or_continues_from_receipts() -> None:
     checkpoint = skillsbench_turn_recovery_checkpoint(recoverable_trace)
     assert checkpoint["nonrecoverable_host_failure"] is False, checkpoint
     assert checkpoint["nonrecoverable_failure_category"] == "", checkpoint
+    assert checkpoint["repair_required"] is True, checkpoint
+    assert checkpoint["recovery_kind"] == "host_failure", checkpoint
+
+    plan_failure_trace = base_trace()
+    plan_failure_trace["loopx_turn_executions"] = [
+        {
+            "schema_version": "loopx_turn_execution_v0",
+            "status": "failed",
+            "result_kind": "repair_required",
+            "receipt": {
+                "status": "failed",
+                "result_kind": "repair_required",
+                "failed_phase": "turn_plan",
+            },
+            "effects": {
+                "host_invoked": False,
+                "state_written": False,
+                "quota_spent": False,
+                "scheduler_acknowledged": False,
+            },
+        }
+    ]
+    checkpoint = skillsbench_turn_recovery_checkpoint(plan_failure_trace)
+    assert checkpoint["repair_required"] is True, checkpoint
+    assert checkpoint["recovery_kind"] == "repair_required", checkpoint
 
 
 def test_turn_blind_controller_consumes_recovery_receipts() -> None:
