@@ -78,6 +78,13 @@ LARK_KANBAN_TOKENS = (
     "loopx/cli_commands/lark_kanban.py",
     "examples/lark-kanban",
 )
+CHANGE_QUALITY_TOKENS = (
+    "loopx/capabilities/change_quality/",
+    "skills/loopx-change-quality/",
+    "tests/capabilities/test_change_quality.py",
+    "examples/change-quality-qualification-smoke.py",
+    "docs/capabilities/change-quality/",
+)
 INHERITED_BASELINE_COMMANDS = (
     "control-plane-maintainability-ratchet-smoke.py",
 )
@@ -304,6 +311,8 @@ def classify_premerge_surfaces(
         )
     if any(_path_matches(path, LARK_KANBAN_TOKENS) for path in files):
         mark("lark_kanban")
+    if any(_path_matches(path, CHANGE_QUALITY_TOKENS) for path in files):
+        mark("change_quality", "change-quality-exact-receipt")
     if python_files:
         mark("python")
     if not surfaces and files:
@@ -629,6 +638,44 @@ def build_validation_summary(
         "failed_commands": [command for command in failed_commands if command],
         "runs": run_summaries,
     }
+
+
+def apply_change_quality_verification(
+    payload: dict[str, Any],
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach goal policy evidence and fail the merge gate when strict receipt fails."""
+
+    payload["change_quality_qualification"] = verification
+    enforced_failure = bool(
+        verification.get("enforcement_applied")
+        and verification.get("ok") is False
+    )
+    gate = payload.get("gate") if isinstance(payload.get("gate"), dict) else {}
+    summary = (
+        payload.get("validation_summary")
+        if isinstance(payload.get("validation_summary"), dict)
+        else {}
+    )
+    gate["quality_receipt_failure_count"] = 1 if enforced_failure else 0
+    summary["policy_failure_count"] = 1 if enforced_failure else 0
+    if enforced_failure:
+        status = str(verification.get("status") or "receipt_invalid")
+        gate.update(
+            {
+                "status": f"quality_{status}",
+                "merge_gate_passed": False,
+                "self_merge_allowed": False,
+            }
+        )
+        summary["failure_count"] = int(summary.get("failure_count") or 0) + 1
+        payload["ok"] = False
+    payload["gate"] = gate
+    payload["validation_summary"] = summary
+    fields = payload.get("recommended_pr_comment_fields")
+    if isinstance(fields, list) and "change_quality_receipt" not in fields:
+        fields.append("change_quality_receipt")
+    return payload
 
 
 def _recompute_smoke_run_status(run: dict[str, Any]) -> None:
@@ -1035,6 +1082,25 @@ def render_premerge_validation_gate_markdown(payload: dict[str, Any]) -> str:
     append_run("Catalog Canaries", payload.get("catalog_run"))
     append_run("Risk Profile Smokes", payload.get("risk_profile_run"))
     append_run("Public Boundary", payload.get("boundary_run"))
+
+    quality = (
+        payload.get("change_quality_qualification")
+        if isinstance(payload.get("change_quality_qualification"), dict)
+        else None
+    )
+    if quality is not None:
+        lines.extend(
+            [
+                "",
+                "## Change Quality Receipt",
+                f"- status: `{quality.get('status')}`",
+                f"- ok: `{str(quality.get('ok')).lower()}`",
+                f"- enforcement_applied: `{str(quality.get('enforcement_applied')).lower()}`",
+                f"- receipt_id: `{quality.get('receipt_id')}`",
+            ]
+        )
+        if quality.get("required_action"):
+            lines.append(f"- required_action: {quality.get('required_action')}")
 
     manual_holds = classification.get("manual_holds") or []
     if manual_holds:

@@ -16,6 +16,10 @@ from .boundary_authority import (
     checkpointed_boundary_authority_summary,
 )
 from .agent_registry import normalize_registered_agents
+from .capabilities.change_quality.policy import (
+    CHANGE_QUALITY_POLICY_SCHEMA_VERSION,
+    change_quality_goal_policy_summary,
+)
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .configuration_catalog import build_goal_configuration_catalog
 from .explore_graph import compact_explore_graph_policy
@@ -221,6 +225,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "lark_kanban_heartbeat_sync": _lark_kanban_heartbeat_config_summary(goal),
         "reward_memory": reward_memory_goal_policy_summary(goal),
+        "change_quality_qualification": change_quality_goal_policy_summary(goal),
         "explore_graph": compact_explore_graph_policy(goal.get("explore_graph")),
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
@@ -408,6 +413,9 @@ def configure_goal(
     self_repair_enabled: bool | None = None,
     self_repair_health: bool | None = None,
     self_repair_waiting_projection: bool | None = None,
+    change_quality_enabled: bool | None = None,
+    change_quality_safe_fix: bool | None = None,
+    change_quality_strict_receipt: bool | None = None,
     multi_subagent_feature: str | None = None,
     orchestration_mode: str | None = None,
     spawn_allowed: bool | None = None,
@@ -730,6 +738,38 @@ def configure_goal(
         if self_repair_waiting_projection is not None:
             self_repair["allow_waiting_projection_repair"] = self_repair_waiting_projection
         control_plane["self_repair"] = self_repair
+        goal["control_plane"] = control_plane
+
+    if (
+        change_quality_enabled is not None
+        or change_quality_safe_fix is not None
+        or change_quality_strict_receipt is not None
+    ):
+        control_plane = (
+            goal.get("control_plane")
+            if isinstance(goal.get("control_plane"), dict)
+            else {}
+        )
+        current = change_quality_goal_policy_summary(goal)
+        change_quality = {
+            "schema_version": CHANGE_QUALITY_POLICY_SCHEMA_VERSION,
+            "enabled": (
+                change_quality_enabled
+                if change_quality_enabled is not None
+                else current["enabled"]
+            ),
+            "safe_fix": (
+                change_quality_safe_fix
+                if change_quality_safe_fix is not None
+                else current["safe_fix"]
+            ),
+            "strict_receipt": (
+                change_quality_strict_receipt
+                if change_quality_strict_receipt is not None
+                else current["strict_receipt"]
+            ),
+        }
+        control_plane["change_quality_qualification"] = change_quality
         goal["control_plane"] = control_plane
 
     if (
@@ -1096,6 +1136,7 @@ def configure_goal(
         "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "lark_kanban_heartbeat_sync": _lark_kanban_heartbeat_config_summary(goal),
         "reward_memory": reward_memory_goal_policy_summary(goal),
+        "change_quality_qualification": change_quality_goal_policy_summary(goal),
         "default": "off",
         "configuration_entry": "multi_subagent_feature",
     }

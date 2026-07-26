@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from ..capabilities.change_quality.receipt import verify_change_quality_receipt
 from ..canary.planner import (
     build_catalog_canary_coverage_audit,
     build_catalog_canary_plan,
@@ -20,6 +21,7 @@ from ..canary.quality_surface_catalog import (
 )
 from ..canary.premerge import (
     PREMERGE_TIERS,
+    apply_change_quality_verification,
     build_premerge_validation_gate,
     render_premerge_validation_gate_markdown,
 )
@@ -38,6 +40,8 @@ from ..canary.smoke_health import (
 from ..control_plane.testing.release_commit_qualification import (
     render_exact_release_commit_qualification_markdown,
 )
+from ..paths import resolve_runtime_root
+from ..registry import read_json
 from .canary_release_qualification import (
     build_canary_release_qualification_payload,
     register_canary_release_qualification_command,
@@ -523,6 +527,13 @@ def register_canary_commands(
         help="Validation depth. standard runs bounded catalog and risk-profile checks.",
     )
     premerge_parser.add_argument(
+        "--goal-id",
+        help=(
+            "Apply this goal's change-quality policy and exact-scope receipt gate. "
+            "Omit only when no managed goal policy applies."
+        ),
+    )
+    premerge_parser.add_argument(
         "--no-execute",
         action="store_true",
         help="Preview the selected merge gate without running checks.",
@@ -548,6 +559,8 @@ def register_canary_commands(
 def handle_canary_command(
     args: argparse.Namespace,
     *,
+    registry_path: Path | None = None,
+    runtime_root_arg: str | None = None,
     output_format: FormatSelector,
     print_payload: PrintPayload,
 ) -> int | None:
@@ -659,6 +672,27 @@ def handle_canary_command(
             ),
         )
         _attach_selector_sources(payload, git_diff_selector=git_diff_selector)
+        goal_id = str(args.goal_id or "").strip()
+        if goal_id:
+            if registry_path is None:
+                raise ValueError("--goal-id receipt verification requires a registry path")
+            registry = read_json(registry_path)
+            runtime_root = resolve_runtime_root(
+                registry,
+                runtime_root_arg,
+                registry_path=registry_path,
+            )
+            verification = verify_change_quality_receipt(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+                repo_path=target_repo_root,
+                base_ref=str(
+                    getattr(args, "git_diff_base", "origin/main")
+                    or "origin/main"
+                ),
+            )
+            apply_change_quality_verification(payload, verification)
         renderer = render_premerge_validation_gate_markdown
     else:
         raise ValueError(

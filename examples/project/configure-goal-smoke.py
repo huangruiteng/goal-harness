@@ -210,12 +210,21 @@ def main() -> int:
             "multi_subagent",
             "explore_graph",
             "explore_harness",
+            "change_quality_qualification",
             "reward_memory",
             "lark_event_inbox",
             "lark_kanban_heartbeat_sync",
         }
         assert features["multi_subagent"]["current"]["enabled"] is True
         assert features["explore_graph"]["current"]["enabled"] is False
+        assert features["change_quality_qualification"]["current"] == {
+            "enabled": False,
+            "safe_fix": False,
+            "strict_receipt": False,
+        }
+        assert "--change-quality-enabled" in features[
+            "change_quality_qualification"
+        ]["commands"]["preview_enable"]
         assert "--execute" not in features["explore_harness"]["commands"]["preview_enable"]
         assert "--execute" in features["explore_harness"]["commands"]["apply_enable"]
         assert "--execute" not in features["explore_graph"]["commands"]["preview_disable"]

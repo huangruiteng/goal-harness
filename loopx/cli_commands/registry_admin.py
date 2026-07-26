@@ -269,6 +269,24 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Enable or disable waiting-projection repair for this goal.",
     )
     configure_goal_parser.add_argument(
+        "--change-quality-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable exact-scope change-quality qualification for this goal.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-safe-fix",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Allow or forbid one bounded safe-fix pass during change qualification.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-strict-receipt",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Require a valid exact-scope quality receipt at premerge.",
+    )
+    configure_goal_parser.add_argument(
         "--multi-subagent-feature",
         choices=["off", "enabled"],
         help=(
@@ -720,6 +738,9 @@ def handle_registry_admin_command(
                 self_repair_enabled=args.self_repair_enabled,
                 self_repair_health=args.self_repair_health,
                 self_repair_waiting_projection=args.self_repair_waiting_projection,
+                change_quality_enabled=args.change_quality_enabled,
+                change_quality_safe_fix=args.change_quality_safe_fix,
+                change_quality_strict_receipt=args.change_quality_strict_receipt,
                 multi_subagent_feature=args.multi_subagent_feature,
                 orchestration_mode=args.orchestration_mode,
                 spawn_allowed=args.spawn_allowed,

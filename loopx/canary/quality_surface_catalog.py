@@ -46,6 +46,44 @@ def _deferred(*, owner: str, rationale: str) -> dict[str, Any]:
 
 QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
     {
+        "surface_id": "change-quality-exact-receipt",
+        "title": "Change-quality exact-scope receipt integrity",
+        "risk": "high",
+        "canary_profile_id": "change-quality-exact-receipt",
+        "owner_paths": [
+            "loopx/capabilities/change_quality/policy.py",
+            "loopx/capabilities/change_quality/receipt.py",
+            "loopx/capabilities/change_quality/scope.py",
+        ],
+        "semantic_oracle": {
+            "source_kind": "specification",
+            "refs": ["docs/capabilities/change-quality/README.md"],
+            "independence_rationale": (
+                "The public policy defines independent safe-fix and strict-receipt "
+                "controls plus exact final-diff identity before implementation hashing "
+                "and receipt validation are exercised."
+            ),
+        },
+        "layers": {
+            "unit_contract": _covered(
+                "tests/capabilities/test_change_quality.py"
+            ),
+            "durable_smoke": _covered(
+                "examples/change-quality-qualification-smoke.py"
+            ),
+            "catalog_canary": _covered("change-quality-exact-receipt"),
+            "host_upgrade": _covered("examples/install-local-smoke.py"),
+            "model_behavior": _not_applicable(
+                "This catalogued surface proves deterministic scope and receipt integrity; "
+                "reviewer competence remains a provider responsibility and a receipt is "
+                "not proof that every defect was found."
+            ),
+            "release_gate": _covered(
+                "loopx canary premerge --profile change-quality-exact-receipt"
+            ),
+        },
+    },
+    {
         "surface_id": "interaction-scheduler-authority",
         "title": "Interaction contract and scheduler authority",
         "risk": "high",

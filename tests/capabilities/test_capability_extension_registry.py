@@ -23,6 +23,7 @@ from loopx.extensions.runtime import (
 )
 
 BUILTIN_IDS = [
+    "change-quality-qualification",
     "issue-fix",
     "decision-context",
     "project-skill-delivery",
@@ -127,6 +128,27 @@ def test_material_lifecycle_catalog_exposes_managed_project_skill() -> None:
             "loopx-material --surface codex --execute"
         ),
     }
+
+
+def test_change_quality_catalog_exposes_default_off_managed_workflow() -> None:
+    capability = build_capability_detail_packet("change-quality-qualification")[
+        "capability"
+    ]
+
+    assert capability["default_enabled"] is False
+    assert capability["workflow_skill"] == {
+        "name": "loopx-change-quality",
+        "delivery": "project_managed_copy",
+        "activation": "explicit_project_install_plus_goal_policy",
+        "project_copy_required": True,
+        "install_command": (
+            "loopx project-skill install --project . --skill "
+            "loopx-change-quality --surface codex --execute"
+        ),
+    }
+    assert "safe_fix permits at most one bounded repair pass" in "\n".join(
+        capability["boundaries"]
+    )
 
 
 def test_project_skill_delivery_catalog_is_host_neutral() -> None:
