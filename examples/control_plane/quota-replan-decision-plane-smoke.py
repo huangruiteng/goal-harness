@@ -52,6 +52,18 @@ SIDE_AGENT_REPLAN_OBLIGATION = {
     ],
 }
 
+SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION = {
+    **GLOBAL_REPLAN_OBLIGATION,
+    "triggers": [
+        {
+            "kind": "dead_monitor_repeat",
+            "source": "run_history",
+            "agent_id": SIDE_AGENT,
+            "monitor_target_id": "fixture-monitor-target",
+        }
+    ],
+}
+
 
 def monitor_item(
     *,
@@ -366,6 +378,30 @@ def watch_lane_continuation_ack_run(
             },
         },
     }
+
+
+def unchanged_heartbeat_monitor_runs() -> list[dict]:
+    return [
+        {
+            "classification": "quota_monitor_poll",
+            "generated_at": generated_at,
+            "agent_id": SIDE_AGENT,
+            "turn_instance_id": turn_instance_id,
+            "recommended_action": "Keep the as-needed watch lane quiet.",
+            "delivery_outcome": "surface_only",
+            "monitor_target": {
+                "schema_version": "quota_monitor_target_v0",
+                "target_id": "fixture-monitor-target",
+                "monitor_mode": "monitor_quiet_until_material_transition",
+                "effective_action": "monitor_quiet_skip",
+                "agent_id": SIDE_AGENT,
+            },
+        }
+        for generated_at, turn_instance_id in (
+            ("2026-07-04T00:03:00+00:00", "heartbeat-turn-2"),
+            ("2026-07-04T00:02:00+00:00", "heartbeat-turn-1"),
+        )
+    ]
 
 
 def material_progress_runs_after_replan_ack(count: int) -> list[dict]:
@@ -1619,6 +1655,64 @@ def assert_explicit_as_needed_vision_gap_uses_watch_lane_continuation_ack() -> N
     assert "autonomous_replan_ack_alone" in guard["vision_continuation_audit"]["not_satisfied_by"], guard
 
 
+def assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts() -> None:
+    latest_runs = [
+        *unchanged_heartbeat_monitor_runs(),
+        watch_lane_continuation_ack_run(),
+        agent_vision_gap_run(),
+    ]
+    guard = build_quota_should_run(
+        status_payload(
+            [monitor_item()],
+            replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+            latest_runs=latest_runs,
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "skip", guard
+    assert guard["effective_action"] == "monitor_quiet_skip", guard
+    assert guard["goal_frontier_projection"]["replan_required"] is False, guard
+    assert guard.get("autonomous_replan_obligation") is None, guard
+
+    due_guard = build_quota_should_run(
+        status_payload(
+            [monitor_item(next_due_at="2000-01-01T00:00:00+00:00")],
+            replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+            latest_runs=latest_runs,
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert due_guard["decision"] == "run", due_guard
+    assert due_guard["effective_action"] == "normal_run", due_guard
+    assert due_guard["work_lane_contract"]["obligation"] == "attempt_due_monitor", due_guard
+    assert due_guard.get("autonomous_replan_obligation") is None, due_guard
+
+
+def assert_repeat_vision_keeps_repeated_heartbeat_replan() -> None:
+    guard = build_quota_should_run(
+        status_payload(
+            [monitor_item()],
+            replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+            latest_runs=[
+                *unchanged_heartbeat_monitor_runs(),
+                watch_lane_continuation_ack_run(),
+                agent_vision_acceptance_only_run(
+                    advancement_policy="repeat_until_closed"
+                ),
+            ],
+        ),
+        goal_id=GOAL_ID,
+        agent_id=SIDE_AGENT,
+    )
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["effective_action"] == "autonomous_replan_required", guard
+    assert guard["goal_frontier_projection"]["replan_required"] is True, guard
+    obligation = guard["autonomous_replan_obligation"]
+    assert obligation["triggers"][0]["kind"] == "dead_monitor_repeat", guard
+
+
 def assert_blocking_handoff_gate_beats_derived_monitor_replan() -> None:
     guard = build_quota_should_run(
         status_payload([monitor_item(), blocking_handoff_review()], replan_obligation=None),
@@ -1670,6 +1764,8 @@ def main() -> None:
     assert_non_frontier_replan_ack_does_not_clear_monitor_replan()
     assert_projected_replan_ack_is_agent_scoped()
     assert_explicit_as_needed_vision_gap_uses_watch_lane_continuation_ack()
+    assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts()
+    assert_repeat_vision_keeps_repeated_heartbeat_replan()
     assert_blocking_handoff_gate_beats_derived_monitor_replan()
     print("quota-replan-decision-plane-smoke ok")
 
