@@ -51,6 +51,11 @@ DEFAULT_TEST_PORT = 443
 BRIDGE_HELPER = (
     Path(__file__).resolve().with_name("skillsbench_reverse_channel_bridge.py")
 )
+PROXY_PORT_FIELDS = (
+    "codex_reverse_proxy_port",
+    "benchmark_egress_proxy_port",
+    "container_forwarder_port",
+)
 
 
 def _host_kind(value: str) -> str:
@@ -94,6 +99,56 @@ def _forward_public_contract(remote_forward: str) -> dict[str, Any]:
         "local_port": parsed["local_port"],
         "raw_forward_recorded": False,
     }
+
+
+def _proxy_port_coherence_public_contract(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    declared = {
+        field: getattr(args, field, None)
+        for field in PROXY_PORT_FIELDS
+        if getattr(args, field, None) is not None
+    }
+    contract: dict[str, Any] = {
+        "schema_version": "skillsbench_proxy_port_coherence_v0",
+        "state": "not_requested",
+        "guard_enforced": False,
+        "declared_surface_count": len(declared),
+        "expected_surface_count": len(PROXY_PORT_FIELDS),
+        "raw_command_read": False,
+        "raw_command_recorded": False,
+    }
+    if not declared:
+        return contract
+    if len(declared) != len(PROXY_PORT_FIELDS):
+        missing = [
+            "--" + field.replace("_", "-")
+            for field in PROXY_PORT_FIELDS
+            if field not in declared
+        ]
+        raise ValueError(
+            "proxy port coherence declarations are all-or-none; missing "
+            + ", ".join(missing)
+        )
+
+    remote_port = _parse_remote_forward(args.remote_forward)["remote_port"]
+    ports = [remote_port, *(int(declared[field]) for field in PROXY_PORT_FIELDS)]
+    if any(port < 1 or port > 65535 for port in ports):
+        raise ValueError("proxy port coherence declarations must be valid TCP ports")
+    if len(set(ports)) != 1:
+        raise ValueError(
+            "--remote-forward remote port, --codex-reverse-proxy-port, "
+            "--benchmark-egress-proxy-port, and --container-forwarder-port "
+            "must match"
+        )
+    contract.update(
+        {
+            "state": "coherent",
+            "guard_enforced": True,
+            "coherent_port": remote_port,
+        }
+    )
+    return contract
 
 
 def _local_forward_dependency_public_contract(
@@ -1404,6 +1459,7 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "raw_remote_output_recorded": False,
         "private_log_written": False,
         "remote_forward": _forward_public_contract(args.remote_forward),
+        "proxy_port_coherence": dict(args.proxy_port_coherence),
         "local_forward_dependency": (
             _local_forward_dependency_public_contract(args)
         ),
@@ -2031,6 +2087,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--server-alive-count-max", type=int, default=3)
     parser.add_argument("--remote-forward", default=DEFAULT_REMOTE_FORWARD)
     parser.add_argument(
+        "--codex-reverse-proxy-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the remote Codex reverse-proxy port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--benchmark-egress-proxy-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the benchmark egress-proxy port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--container-forwarder-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the container forwarder listen port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
         "--local-forward-managed-command",
         default="",
         help=(
@@ -2350,6 +2433,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional path for compact public-safe supervisor JSON.",
     )
     args = parser.parse_args(argv)
+    try:
+        args.proxy_port_coherence = _proxy_port_coherence_public_contract(args)
+    except ValueError as exc:
+        parser.error(str(exc))
     if _json_bridge_requested(args):
         args.json_bridge = True
         missing = [

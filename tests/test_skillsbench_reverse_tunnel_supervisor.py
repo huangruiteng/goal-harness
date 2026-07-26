@@ -5,6 +5,7 @@ import json
 import stat
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SUPERVISOR_PATH = REPO_ROOT / "scripts" / "skillsbench_reverse_tunnel_supervisor.py"
@@ -52,6 +53,89 @@ exit 0
         encoding="utf-8",
     )
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_proxy_port_coherence_guard_allows_shared_forward_reuse() -> None:
+    supervisor = _load_supervisor_module()
+
+    args = supervisor.parse_args(
+        [
+            "--ssh-destination",
+            "runner.example",
+            "--remote-forward",
+            "127.0.0.1:18184:127.0.0.1:18184",
+            "--codex-reverse-proxy-port",
+            "18184",
+            "--benchmark-egress-proxy-port",
+            "18184",
+            "--container-forwarder-port",
+            "18184",
+        ]
+    )
+
+    assert args.proxy_port_coherence == {
+        "schema_version": "skillsbench_proxy_port_coherence_v0",
+        "state": "coherent",
+        "guard_enforced": True,
+        "declared_surface_count": 3,
+        "expected_surface_count": 3,
+        "raw_command_read": False,
+        "raw_command_recorded": False,
+        "coherent_port": 18184,
+    }
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        [
+            "--codex-reverse-proxy-port",
+            "18184",
+            "--benchmark-egress-proxy-port",
+            "18184",
+        ],
+        [
+            "--codex-reverse-proxy-port",
+            "18184",
+            "--benchmark-egress-proxy-port",
+            "18185",
+            "--container-forwarder-port",
+            "18184",
+        ],
+    ],
+)
+def test_proxy_port_coherence_guard_rejects_incomplete_or_mismatched_ports(
+    extra_args: list[str],
+) -> None:
+    supervisor = _load_supervisor_module()
+
+    with pytest.raises(SystemExit) as exc_info:
+        supervisor.parse_args(
+            [
+                "--ssh-destination",
+                "runner.example",
+                "--remote-forward",
+                "127.0.0.1:18184:127.0.0.1:18184",
+                *extra_args,
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_proxy_port_coherence_guard_is_compatible_when_not_requested() -> None:
+    supervisor = _load_supervisor_module()
+
+    args = supervisor.parse_args(
+        [
+            "--ssh-destination",
+            "runner.example",
+        ]
+    )
+
+    assert args.proxy_port_coherence["state"] == "not_requested"
+    assert args.proxy_port_coherence["guard_enforced"] is False
+    assert args.proxy_port_coherence["declared_surface_count"] == 0
 
 
 def test_supervisor_writes_starting_periodic_and_terminal_public_liveness(
@@ -114,6 +198,9 @@ def test_supervisor_writes_starting_periodic_and_terminal_public_liveness(
     assert persisted["public_liveness"]["raw_trajectory_recorded"] is False
     assert persisted["public_liveness"]["raw_verifier_output_recorded"] is False
     assert persisted["public_liveness"]["local_paths_recorded"] is False
+    assert persisted["proxy_port_coherence"]["state"] == "not_requested"
+    assert persisted["proxy_port_coherence"]["raw_command_read"] is False
+    assert persisted["proxy_port_coherence"]["raw_command_recorded"] is False
     assert persisted["active_phase"] == {
         "schema_version": "skillsbench_supervisor_active_phase_v0",
         "state": "not_observed",

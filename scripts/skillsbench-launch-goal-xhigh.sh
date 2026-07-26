@@ -787,6 +787,9 @@ supervisor_cmd=(
   "${ssh_options[@]}"
   --cleanup-stale-local-forward
   --remote-forward "127.0.0.1:${remote_proxy_port}:${local_proxy_host}:${local_proxy_port}"
+  --codex-reverse-proxy-port "$remote_proxy_port"
+  --benchmark-egress-proxy-port "$remote_proxy_port"
+  --container-forwarder-port "$remote_proxy_port"
   --probe-timeout-sec "$tunnel_probe_timeout"
   --tunnel-ready-timeout-sec "$tunnel_ready_timeout"
   --tunnel-health-interval-sec "$tunnel_health_interval"
@@ -857,6 +860,7 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'public_output=%s/supervisor.public.json\n' "$public_dir"
   printf 'private_dir=%s\n' "$private_dir"
   printf 'remote_proxy_port=%s\n' "$remote_proxy_port"
+  printf 'proxy_port_coherence_guard=enforced\n'
   printf 'docker_proxy_host_recorded=false\n'
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
   printf 'docker_api_version=%s\n' "$docker_api_version"

@@ -129,6 +129,14 @@ def test_launcher_dry_run_does_not_require_reachable_local_proxy(
 
     assert "skillsbench_local_proxy_endpoint_unreachable" not in proc.stderr
     assert "docker_proxy_host_recorded=false" in proc.stdout
+    assert "proxy_port_coherence_guard=enforced" in proc.stdout
+    for expected_arg in (
+        "--remote-forward 127.0.0.1:18180:127.0.0.1:1",
+        "--codex-reverse-proxy-port 18180",
+        "--benchmark-egress-proxy-port 18180",
+        "--container-forwarder-port 18180",
+    ):
+        assert expected_arg in proc.stdout
 
 
 def test_launcher_fails_before_batch_when_exact_host_sandbox_probe_fails(
