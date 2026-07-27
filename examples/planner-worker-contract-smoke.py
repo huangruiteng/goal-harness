@@ -18,6 +18,7 @@ from loopx.orchestration import (
 from loopx.planner_worker import (
     DEFAULT_PLANNER_MODEL,
     DEFAULT_WORKER_MODEL,
+    build_planner_prompt,
     build_worker_step_prompt,
     normalize_planner_worker_plan,
 )
@@ -58,6 +59,13 @@ def main() -> int:
     assert plan["steps"][0]["recommended_executor"] == "cheap_worker", plan
     assert plan["steps"][0]["worker_model_tier"] == "cheap", plan
     assert plan["steps"][0]["worker_ready"] is True, plan
+
+    planner_prompt = build_planner_prompt(
+        objective="Fix a small CLI bug.",
+        task_instruction="The CLI misses one command dispatch branch.",
+    )
+    assert "worker-ready plan with bounded context" in planner_prompt
+    assert "expensive investigation" not in planner_prompt
 
     worker_prompt = build_worker_step_prompt(plan=plan, step=plan["steps"][0])
     assert "Execute only the plan step below" in worker_prompt

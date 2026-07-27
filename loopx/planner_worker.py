@@ -72,7 +72,7 @@ def build_planner_prompt(
     return "\n".join(
         [
             "You are the Planner for a planner-worker coding mode.",
-            "Do the expensive investigation now so cheaper Workers can execute simple scoped steps later.",
+            "Produce a worker-ready plan with bounded context so cheaper Workers can execute simple scoped steps later.",
             "Produce a compact structured plan only; do not edit files.",
             "Each step must name target_files, action_kind, research_summary, implementation_notes, concrete instruction, dependencies, and verification.",
             "Each step must also choose recommended_executor: cheap_worker, strong_worker, or planner_only.",
