@@ -290,7 +290,7 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
     )
     configure_goal_parser.add_argument(
         "--orchestration-mode",
-        choices=["default", "multi_subagent", "planner_worker"],
+        choices=["default", "multi_subagent"],
         help="Per-goal orchestration mode.",
     )
     configure_goal_parser.add_argument(

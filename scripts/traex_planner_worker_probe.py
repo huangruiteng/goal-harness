@@ -12,7 +12,6 @@ sys.path.insert(0, str(REPO_ROOT))
 from loopx.traex_planner_worker import (  # noqa: E402
     DEFAULT_TRAEX_PLANNER_MODEL,
     DEFAULT_TRAEX_WORKER_MODEL,
-    build_synthetic_planner_worker_plan,
     run_traex_planner_worker_probe,
 )
 
@@ -39,11 +38,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
-    plan = build_synthetic_planner_worker_plan(objective=args.objective)
     payload = run_traex_planner_worker_probe(
         objective=args.objective,
         task_instruction=args.task_instruction,
-        planner_output_plan=plan,
         traex_bin=args.traex_bin,
         planner_model=args.planner_model,
         worker_model=args.worker_model,

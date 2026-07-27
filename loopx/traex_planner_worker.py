@@ -46,6 +46,12 @@ def _assistant_text_and_usage(jsonl: str) -> tuple[str, dict[str, int]]:
 
 def _compact_traex_turn(*, model: str, jsonl: str) -> dict[str, Any]:
     assistant_text, usage = _assistant_text_and_usage(jsonl)
+    return _compact_traex_turn_parts(model=model, assistant_text=assistant_text, usage=usage)
+
+
+def _compact_traex_turn_parts(
+    *, model: str, assistant_text: str, usage: dict[str, int]
+) -> dict[str, Any]:
     return {
         "model": model,
         "usage": usage,
@@ -105,7 +111,6 @@ def run_traex_planner_worker_probe(
     *,
     objective: str,
     task_instruction: str,
-    planner_output_plan: dict[str, Any],
     traex_bin: str = "traex",
     planner_model: str = DEFAULT_TRAEX_PLANNER_MODEL,
     worker_model: str = DEFAULT_TRAEX_WORKER_MODEL,
@@ -118,7 +123,6 @@ def run_traex_planner_worker_probe(
 
     workdir = Path(cwd).resolve()
     worker_workdir = Path(worker_cwd).resolve() if worker_cwd is not None else workdir
-    plan = normalize_planner_worker_plan(planner_output_plan)
     planner_prompt = build_planner_prompt(
         objective=objective,
         task_instruction=task_instruction,
@@ -130,6 +134,13 @@ def run_traex_planner_worker_probe(
         cwd=workdir,
         timeout_seconds=timeout_seconds,
     )
+    planner_assistant_text, planner_usage = _assistant_text_and_usage(planner_jsonl)
+    try:
+        plan = parse_planner_worker_plan_text(planner_assistant_text)
+    except ValueError as exc:
+        raise TraexPlannerWorkerError(
+            f"planner returned invalid planner-worker plan: {exc}"
+        ) from exc
     first_step = plan["steps"][0]
     worker_prompt = build_worker_step_prompt(plan=plan, step=first_step)
     worker_jsonl, worker_stderr = _run_traex_exec(
@@ -141,7 +152,11 @@ def run_traex_planner_worker_probe(
         ignore_rules=worker_minimal_context,
         ignore_user_config=worker_minimal_context,
     )
-    planner_turn = _compact_traex_turn(model=planner_model, jsonl=planner_jsonl)
+    planner_turn = _compact_traex_turn_parts(
+        model=planner_model,
+        assistant_text=planner_assistant_text,
+        usage=planner_usage,
+    )
     worker_turn = _compact_traex_turn(model=worker_model, jsonl=worker_jsonl)
     planner_usage = planner_turn.get("usage") if isinstance(planner_turn.get("usage"), dict) else {}
     worker_usage = worker_turn.get("usage") if isinstance(worker_turn.get("usage"), dict) else {}

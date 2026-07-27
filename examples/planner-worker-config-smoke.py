@@ -82,8 +82,6 @@ def main() -> int:
             "configure-goal",
             "--goal-id",
             GOAL_ID,
-            "--orchestration-mode",
-            "planner_worker",
             "--planner-model",
             "gpt-5.5",
             "--planner-effort",
@@ -95,7 +93,7 @@ def main() -> int:
         )
         assert dry["ok"] is True, dry
         assert dry["dry_run"] is True, dry
-        assert dry["after"]["orchestration"]["mode"] == "planner_worker", dry
+        assert dry["after"]["orchestration"]["mode"] == "default", dry
         assert dry["after"]["model_routes"]["planner"]["model"] == "gpt-5.5", dry
         assert dry["after"]["model_routes"]["worker"]["model"] == "deepseek-v4-flash", dry
 
@@ -104,8 +102,6 @@ def main() -> int:
             "configure-goal",
             "--goal-id",
             GOAL_ID,
-            "--orchestration-mode",
-            "planner_worker",
             "--planner-model",
             "gpt-5.5",
             "--planner-effort",
@@ -118,7 +114,7 @@ def main() -> int:
         )
         assert applied["written"] is True, applied
         goal = json.loads(registry_path.read_text(encoding="utf-8"))["goals"][0]
-        assert goal["spawn_policy"]["mode"] == "planner_worker", goal
+        assert goal["spawn_policy"]["mode"] == "default", goal
         routes = model_routes_for_goal(goal)
         assert routes["planner"] == {"model": "gpt-5.5", "effort": "high"}, routes
         assert routes["worker"] == {"model": "deepseek-v4-flash", "effort": "medium"}, routes

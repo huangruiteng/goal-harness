@@ -27,8 +27,8 @@ from loopx.planner_worker import (
 
 
 def main() -> int:
-    assert PLANNER_WORKER_ORCHESTRATION_MODE in VALID_ORCHESTRATION_MODES
-    assert orchestration_mode_from_spawn_policy({"mode": "planner_worker"}) == "planner_worker"
+    assert PLANNER_WORKER_ORCHESTRATION_MODE not in VALID_ORCHESTRATION_MODES
+    assert orchestration_mode_from_spawn_policy({"mode": "planner_worker"}) == "default"
     assert (
         orchestration_mode_from_spawn_policy({"allowed": True, "max_children": 2})
         == "multi_subagent"
