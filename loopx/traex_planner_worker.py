@@ -11,6 +11,7 @@ from .planner_worker import (
     build_planner_prompt,
     build_worker_step_prompt,
     normalize_planner_worker_plan,
+    parse_planner_worker_plan_text,
 )
 from .codex_goal_baseline import stable_text_digest
 
@@ -204,5 +205,6 @@ __all__ = [
     "TRAEX_PLANNER_WORKER_PROBE_SCHEMA_VERSION",
     "TraexPlannerWorkerError",
     "build_synthetic_planner_worker_plan",
+    "parse_planner_worker_plan_text",
     "run_traex_planner_worker_probe",
 ]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 
@@ -55,6 +57,43 @@ def compact_planner_worker_model_routes(model_routes: Any) -> dict[str, dict[str
     return compact
 
 
+def planner_worker_plan_json_skeleton(*, max_steps: int = 8) -> dict[str, Any]:
+    return {
+        "schema_version": PLANNER_WORKER_PLAN_SCHEMA_VERSION,
+        "plan_id": "short-stable-plan-id",
+        "objective": "one sentence objective",
+        "steps": [
+            {
+                "step_id": "short-step-id",
+                "planner_order": 1,
+                "role": "worker",
+                "target_files": ["relative/path.py"],
+                "action_kind": "edit",
+                "recommended_executor": "cheap_worker",
+                "worker_model_tier": "cheap",
+                "worker_autonomy": "bounded",
+                "worker_ready": True,
+                "worker_blockers": [],
+                "context_budget": {
+                    "max_files": 2,
+                    "max_bytes_per_file": 12000,
+                    "allow_extra_files": False,
+                },
+                "research_summary": "facts the Planner already established",
+                "implementation_notes": "precise edit strategy for the Worker",
+                "instruction": "one scoped worker instruction",
+                "depends_on": [],
+                "validation_commands": ["python -m unittest test_parser.py"],
+                "done_criteria": ["focused validation passes"],
+                "escalation_policy": "when to stop and request stronger model or more context",
+                "verification": "same commands the Worker must run",
+                "status": "planned",
+            }
+        ],
+        "max_steps": int(max_steps),
+    }
+
+
 def build_planner_prompt(
     *,
     objective: str,
@@ -82,6 +121,13 @@ def build_planner_prompt(
             "Use strong_worker or planner_only when the step still needs broad exploration, ambiguous design, or risky cross-file reasoning.",
             "Prefer enough file-level detail that the Worker does not need broad repo search or re-planning.",
             f"Limit the plan to at most {int(max_steps)} steps.",
+            "Return only a single JSON object. Do not use markdown fences, prose, comments, or trailing text.",
+            "The JSON object must follow this skeleton exactly; omit max_steps from the returned object:",
+            json.dumps(
+                planner_worker_plan_json_skeleton(max_steps=max_steps),
+                ensure_ascii=False,
+                indent=2,
+            ),
             "",
             "Objective:",
             objective_text,
@@ -89,9 +135,31 @@ def build_planner_prompt(
             "Task instruction:",
             task_text,
             "",
-            "Return JSON with schema_version=planner_worker_plan_v0 and a steps array.",
+            "Return the final JSON object now.",
         ]
     )
+
+
+def parse_planner_worker_plan_text(text: str) -> dict[str, Any]:
+    clean = _clean_text(text)
+    if not clean:
+        raise ValueError("planner output must be non-empty")
+    candidates = [clean]
+    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", clean, flags=re.S)
+    candidates.extend(fenced)
+    first = clean.find("{")
+    last = clean.rfind("}")
+    if first >= 0 and last > first:
+        candidates.append(clean[first : last + 1])
+    errors: list[str] = []
+    for candidate in candidates:
+        try:
+            raw = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            errors.append(str(exc))
+            continue
+        return normalize_planner_worker_plan(raw)
+    raise ValueError("planner output did not contain parseable JSON plan: " + "; ".join(errors[:3]))
 
 
 def build_worker_step_prompt(

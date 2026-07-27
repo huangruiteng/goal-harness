@@ -21,6 +21,8 @@ from loopx.planner_worker import (
     build_planner_prompt,
     build_worker_step_prompt,
     normalize_planner_worker_plan,
+    parse_planner_worker_plan_text,
+    planner_worker_plan_json_skeleton,
 )
 
 
@@ -78,7 +80,14 @@ def main() -> int:
         task_instruction="The CLI misses one command dispatch branch.",
     )
     assert "worker-ready plan with bounded context" in planner_prompt
+    assert "Return only a single JSON object" in planner_prompt
+    assert "Do not use markdown fences" in planner_prompt
+    assert '"context_budget"' in planner_prompt
+    assert '"validation_commands"' in planner_prompt
     assert "expensive investigation" not in planner_prompt
+    skeleton = planner_worker_plan_json_skeleton(max_steps=3)
+    assert skeleton["schema_version"] == "planner_worker_plan_v0", skeleton
+    assert skeleton["steps"][0]["recommended_executor"] == "cheap_worker", skeleton
 
     worker_prompt = build_worker_step_prompt(plan=plan, step=plan["steps"][0])
     assert "Execute only the plan step below" in worker_prompt
@@ -108,6 +117,46 @@ def main() -> int:
     assert app_server_plan["claim_boundary"]["planner_must_define_validation_commands"] is True
     assert app_server_plan["claim_boundary"]["planner_must_define_worker_escalation_policy"] is True
     assert app_server_plan["worker_step_prompt_sha256"], app_server_plan
+
+    parsed = parse_planner_worker_plan_text(
+        """```json
+{
+  "schema_version": "planner_worker_plan_v0",
+  "plan_id": "parsed-plan",
+  "objective": "Fix parser bug.",
+  "steps": [
+    {
+      "step_id": "fix-parser",
+      "planner_order": 1,
+      "role": "worker",
+      "target_files": ["parser.py", "test_parser.py"],
+      "action_kind": "edit",
+      "recommended_executor": "cheap_worker",
+      "worker_model_tier": "cheap",
+      "worker_autonomy": "bounded",
+      "worker_ready": true,
+      "worker_blockers": [],
+      "context_budget": {
+        "max_files": 2,
+        "max_bytes_per_file": 12000,
+        "allow_extra_files": false
+      },
+      "research_summary": "parse_line handles request id extraction.",
+      "implementation_notes": "Skip one optional bracket prefix before request id.",
+      "instruction": "Patch parser.py and keep the regression.",
+      "depends_on": [],
+      "validation_commands": ["python -m unittest test_parser.py"],
+      "done_criteria": ["unittest passes"],
+      "escalation_policy": "Stop if parse_line is absent.",
+      "verification": "Run python -m unittest test_parser.py.",
+      "status": "planned"
+    }
+  ]
+}
+```"""
+    )
+    assert parsed["plan_id"] == "parsed-plan", parsed
+    assert parsed["steps"][0]["validation_commands"] == ["python -m unittest test_parser.py"], parsed
     return 0
 
 
