@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -12,9 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.cli import main as loopx_cli_main  # noqa: E402
 from loopx.control_plane.testing.canary_harness import (  # noqa: E402
-    run_json_cli,
-    run_json_cli_result,
     runtime_root_from_registry,
     write_fixture_registry,
 )
@@ -69,24 +70,56 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
 
 
 def run_cli(registry_path: Path, *args: str) -> dict:
-    return run_json_cli(
-        *args,
-        registry_path=registry_path,
-        runtime_root=runtime_root_from_registry(registry_path),
-        cwd=REPO_ROOT,
-        include_returncode=False,
-    )
+    returncode, payload = run_fixture_cli(registry_path, args)
+    if returncode != 0:
+        raise AssertionError(json.dumps(payload, ensure_ascii=False))
+    payload.pop("_returncode", None)
+    return payload
 
 
 def run_cli_error(registry_path: Path, *args: str) -> dict:
-    returncode, payload = run_json_cli_result(
-        *args,
-        registry_path=registry_path,
-        runtime_root=runtime_root_from_registry(registry_path),
-        cwd=REPO_ROOT,
-    )
+    returncode, payload = run_fixture_cli(registry_path, args)
     assert returncode == 1, payload
     return payload
+
+
+def run_fixture_cli(
+    registry_path: Path,
+    args: tuple[str, ...],
+) -> tuple[int, dict]:
+    args = fixture_cli_args(registry_path, args)
+    argv = [
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime_root_from_registry(registry_path)),
+        "--format",
+        "json",
+        *args,
+    ]
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        try:
+            returncode = loopx_cli_main(argv)
+        except SystemExit as exc:
+            returncode = int(exc.code or 0)
+    if not stdout.getvalue().strip():
+        raise AssertionError(f"empty CLI output for {argv!r}: {stderr.getvalue()}")
+    payload = json.loads(stdout.getvalue())
+    assert isinstance(payload, dict), payload
+    payload["_returncode"] = returncode
+    return returncode, payload
+
+
+def fixture_cli_args(registry_path: Path, args: tuple[str, ...]) -> tuple[str, ...]:
+    if (
+        args[:1] == ("quota",)
+        and "--scan-path" not in args
+        and "--scan-root" not in args
+    ):
+        return (*args, "--scan-path", str(registry_path.parent.parent))
+    return args
 
 
 def parsed_items(state_file: Path) -> list[dict]:
