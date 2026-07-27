@@ -22,12 +22,14 @@ propose a typed transition through the existing Kernel contract.
 
 Current capability paths:
 
-- [decision-context](../reference/protocols/decision-context-architecture-v0.md)
-  ([中文](../reference/protocols/decision-context-architecture-v0.zh-CN.md)):
+- [decision-context](decision-context/README.md)
+  ([中文](decision-context/README.zh-CN.md),
+  [architecture](../reference/protocols/decision-context-architecture-v0.md)):
   separate current evidence, advisory proposals, and verified outcomes through
   default-off provider-neutral packet and incremental source contracts.
-- [material-lifecycle](../reference/protocols/material-lifecycle-architecture-v0.md)
-  ([中文](../reference/protocols/material-lifecycle-architecture-v0.zh-CN.md)):
+- [material-lifecycle](material-lifecycle/README.md)
+  ([中文](material-lifecycle/README.zh-CN.md),
+  [architecture](../reference/protocols/material-lifecycle-architecture-v0.md)):
   preserve raw source authority while inventorying, archiving, migrating, and
   applying bounded material reranks.
 - [periodic-report](periodic-report/README.md): evaluate cadence and material
