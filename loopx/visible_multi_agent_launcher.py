@@ -122,8 +122,10 @@ def build_visible_lane_command(
     bootstrap_command: str,
     codex_bin: str,
     reasoning_effort: str,
+    model_name: str = "",
     frontier_label: str = "[LoopX frontier]",
 ) -> str:
+    model_arg = f"--model {_q(model_name)} " if str(model_name or "").strip() else ""
     scoped_loopx_wrapper = (
         'LOOPX_REAL_CLI="$(command -v loopx)"; '
         "export LOOPX_REAL_CLI; "
@@ -143,7 +145,8 @@ def build_visible_lane_command(
         'printf "loopx_polling_prompt=visible_bootstrap_prompt\\n"; '
         'printf "loopx_cli_scope=scoped_loopx_wrapper\\n"; '
         'printf "takeover_controls=visible\\n"; '
-        f"printf 'reasoning_effort=%s\\n' {_q(reasoning_effort)}"
+        f"printf 'reasoning_effort=%s\\n' {_q(reasoning_effort)}; "
+        f"printf 'model_name=%s\\n' {_q(model_name or '')}"
     )
     keep_visible = (
         f"{visible_summary}; "
@@ -239,7 +242,7 @@ def build_visible_lane_command(
         f"{visible_summary}; "
         'sleep "${LOOPX_VISIBLE_BOOTSTRAP_PAUSE_SECONDS:-1}"; '
         "printf '\\n[Starting visible Codex exec]\\n'; "
-        f"{_q(codex_bin)} exec -c model_reasoning_effort={_q(reasoning_effort)} "
+        f"{_q(codex_bin)} exec {model_arg}-c model_reasoning_effort={_q(reasoning_effort)} "
         '--cd "$LOOPX_PROJECT" --skip-git-repo-check --sandbox danger-full-access "$BOOTSTRAP_PROMPT"; '
         "CODEX_STATUS=$?; "
         "printf '\\n[Codex CLI exited]\\nexit=%s\\n' \"$CODEX_STATUS\"; "

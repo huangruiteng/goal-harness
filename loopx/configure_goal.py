@@ -13,6 +13,7 @@ from .boundary_authority import (
 from .agent_registry import normalize_registered_agents, primary_agent_id_for_goal
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .orchestration import compact_orchestration_policy, orchestration_policy_summary
+from .planner_worker import compact_planner_worker_model_routes
 from .quota import goal_quota_config
 from .registry import read_json, registry_goals
 from .todo_contract import normalize_todo_claimed_by
@@ -79,6 +80,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
     quota = goal_quota_config(goal)
     control_plane = compact_control_plane_policy(goal.get("control_plane"))
     orchestration = compact_orchestration_policy(goal.get("spawn_policy"))
+    spawn_policy = goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else {}
     coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
     return {
         "quota": {
@@ -87,6 +89,10 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         },
         "control_plane": control_plane,
         "orchestration": orchestration,
+        "model_routes": compact_planner_worker_model_routes(
+            spawn_policy.get("model_routes")
+        ),
+        "model_routes_configured": isinstance(spawn_policy.get("model_routes"), dict),
         "waiting_on": goal.get("waiting_on"),
         "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(coordination),
         "registered_agents": normalize_registered_agents(coordination.get("registered_agents")),
@@ -117,6 +123,11 @@ def configure_goal(
     max_children: int | None = None,
     allowed_domains: list[str] | None = None,
     clear_allowed_domains: bool = False,
+    planner_model: str | None = None,
+    worker_model: str | None = None,
+    planner_effort: str | None = None,
+    worker_effort: str | None = None,
+    clear_model_routes: bool = False,
     registered_agents: list[str] | None = None,
     clear_registered_agents: bool = False,
     primary_agent: str | None = None,
@@ -135,6 +146,8 @@ def configure_goal(
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
     if clear_allowed_domains and allowed_domains:
         raise ValueError("--clear-allowed-domains cannot be combined with --allowed-domain")
+    if clear_model_routes and any([planner_model, worker_model, planner_effort, worker_effort]):
+        raise ValueError("--clear-model-routes cannot be combined with model route fields")
     if clear_registered_agents and registered_agents:
         raise ValueError("--clear-registered-agents cannot be combined with --registered-agent")
     if clear_primary_agent and primary_agent:
@@ -206,6 +219,11 @@ def configure_goal(
         or max_children is not None
         or allowed_domains is not None
         or clear_allowed_domains
+        or planner_model is not None
+        or worker_model is not None
+        or planner_effort is not None
+        or worker_effort is not None
+        or clear_model_routes
     ):
         spawn_policy = goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else {}
         if orchestration_mode is not None:
@@ -218,6 +236,23 @@ def configure_goal(
             spawn_policy["allowed_domains"] = []
         elif allowed_domains is not None:
             spawn_policy["allowed_domains"] = allowed_domains
+        if clear_model_routes:
+            spawn_policy.pop("model_routes", None)
+        elif any([planner_model, worker_model, planner_effort, worker_effort]):
+            model_routes = spawn_policy.get("model_routes") if isinstance(spawn_policy.get("model_routes"), dict) else {}
+            planner_route = model_routes.get("planner") if isinstance(model_routes.get("planner"), dict) else {}
+            worker_route = model_routes.get("worker") if isinstance(model_routes.get("worker"), dict) else {}
+            if planner_model is not None:
+                planner_route["model"] = planner_model
+            if planner_effort is not None:
+                planner_route["effort"] = planner_effort
+            if worker_model is not None:
+                worker_route["model"] = worker_model
+            if worker_effort is not None:
+                worker_route["effort"] = worker_effort
+            model_routes["planner"] = planner_route
+            model_routes["worker"] = worker_route
+            spawn_policy["model_routes"] = model_routes
         goal["spawn_policy"] = spawn_policy
 
     if waiting_on is not None:
