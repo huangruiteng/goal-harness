@@ -92,8 +92,8 @@ _OVERSIZED_DECISION_METRIC_CEILINGS = {
         "decision_points": 51,
     },
     "loopx.status:compact_benchmark_run": {
-        "statements": 337,
-        "decision_points": 168,
+        "statements": 271,
+        "decision_points": 118,
     },
     "loopx.status:compact_active_user_assisted_pilot": {
         "statements": 124,
