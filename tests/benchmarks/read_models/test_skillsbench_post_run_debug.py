@@ -197,6 +197,42 @@ def test_typed_repair_exhaustion_opens_rotation_without_qualifying_turn() -> Non
     )
 
 
+def test_committed_prefix_does_not_hide_effect_free_typed_repair_exhaustion() -> None:
+    compact = _typed_repair_exhausted_compact()
+    executions = compact["loopx_turn_executions"]
+    assert isinstance(executions, list)
+    executions.insert(
+        0,
+        {
+            "schema_version": "loopx_turn_execution_v0",
+            "mode": "run_once",
+            "status": "committed",
+            "result_kind": "validated_progress",
+            "validation": {"status": "progress"},
+            "receipt": {"status": "committed"},
+            "effects": {
+                "host_invoked": True,
+                "state_written": True,
+                "quota_spent": True,
+                "scheduler_acknowledged": False,
+            },
+        },
+    )
+
+    gate = build_skillsbench_post_run_debug_gate(compact)
+
+    transaction = gate["loopx_turn_transaction"]
+    assert transaction["committed_count"] == 1
+    assert transaction["validation_failed_count"] == 2
+    assert transaction["state_written_count"] == 1
+    assert transaction["quota_spent_count"] == 1
+    assert transaction["failed_transaction_with_durable_effect_count"] == 0
+    assert transaction["typed_repair_exhausted"] is True
+    assert transaction["next_case_blocked"] is False
+    assert gate["next_case_gate"] == "open_with_exclusion"
+    assert gate["normal_progress_allowed"] is True
+
+
 def test_unrecognized_typed_repair_terminal_reason_keeps_rotation_blocked() -> None:
     compact = _typed_repair_exhausted_compact()
     counters = compact["interaction_counters"]
