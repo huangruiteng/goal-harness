@@ -10,10 +10,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = REPO_ROOT / "scripts" / "skillsbench-launch-goal-xhigh.sh"
 
 
+def _dry_run_value(output: str, key: str) -> str:
+    prefix = f"{key}="
+    return next(
+        line.removeprefix(prefix)
+        for line in output.splitlines()
+        if line.startswith(prefix)
+    )
+
+
 def _base_env(tmp_path: Path) -> dict[str, str]:
     env = os.environ.copy()
     env.pop("SKILLSBENCH_RUNNER_PROFILE", None)
     env.pop("SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND", None)
+    env.pop("SKILLSBENCH_REMOTE_CODEX_PROXY_PORT", None)
     env.update(
         {
             "XDG_STATE_HOME": str(tmp_path / "state"),
@@ -130,13 +140,67 @@ def test_launcher_dry_run_does_not_require_reachable_local_proxy(
     assert "skillsbench_local_proxy_endpoint_unreachable" not in proc.stderr
     assert "docker_proxy_host_recorded=false" in proc.stdout
     assert "proxy_port_coherence_guard=enforced" in proc.stdout
+    remote_port = int(_dry_run_value(proc.stdout, "remote_proxy_port"))
+    assert 20000 <= remote_port <= 59999
+    assert "remote_proxy_port_mode=run_scoped" in proc.stdout
     for expected_arg in (
-        "--remote-forward 127.0.0.1:18180:127.0.0.1:1",
-        "--codex-reverse-proxy-port 18180",
-        "--benchmark-egress-proxy-port 18180",
-        "--container-forwarder-port 18180",
+        f"--remote-forward 127.0.0.1:{remote_port}:127.0.0.1:1",
+        f"--codex-reverse-proxy-port {remote_port}",
+        f"--benchmark-egress-proxy-port {remote_port}",
+        f"--container-forwarder-port {remote_port}",
     ):
         assert expected_arg in proc.stdout
+
+
+def test_launcher_scopes_default_remote_proxy_port_to_run_identity(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+
+    def launch(stamp: str) -> subprocess.CompletedProcess[str]:
+        run_env = env | {"SKILLSBENCH_RUN_STAMP": stamp}
+        return subprocess.run(
+            [str(LAUNCHER), "--dry-run", "public-smoke-case", "port-ownership"],
+            cwd=REPO_ROOT,
+            env=run_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+
+    first = launch("20260716T000000CST")
+    repeated = launch("20260716T000000CST")
+    second = launch("20260716T000001CST")
+
+    first_port = _dry_run_value(first.stdout, "remote_proxy_port")
+    assert _dry_run_value(repeated.stdout, "remote_proxy_port") == first_port
+    assert _dry_run_value(second.stdout, "remote_proxy_port") != first_port
+    assert "remote_proxy_port_mode=run_scoped" in first.stdout
+
+
+def test_launcher_preserves_explicit_remote_proxy_port(tmp_path: Path) -> None:
+    env = _base_env(tmp_path)
+
+    proc = subprocess.run(
+        [
+            str(LAUNCHER),
+            "--dry-run",
+            "public-smoke-case",
+            "port-ownership",
+            "18181",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+
+    assert "remote_proxy_port=18181" in proc.stdout
+    assert "remote_proxy_port_mode=explicit" in proc.stdout
+    assert "--remote-forward 127.0.0.1:18181:127.0.0.1:18180" in proc.stdout
 
 
 def test_launcher_fails_before_batch_when_exact_host_sandbox_probe_fails(

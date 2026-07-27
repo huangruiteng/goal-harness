@@ -24,6 +24,8 @@ Optional env:
                                        python3 -m loopx.benchmark_adapters.skillsbench_runner_profile capture
   SKILLSBENCH_LOCAL_CODEX_PROXY_HOST   Local proxy host, default 127.0.0.1
   SKILLSBENCH_LOCAL_CODEX_PROXY_PORT   Local proxy port, default 18180
+  SKILLSBENCH_REMOTE_CODEX_PROXY_PORT  Remote proxy port override; default is
+                                       deterministic and scoped to the run id
   SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND
                                        Optional private foreground command that
                                        the supervisor owns and restarts when
@@ -172,7 +174,7 @@ fi
 task_id="${task_ids[0]}"
 task_count="${#task_ids[@]}"
 tag="${2:-${SKILLSBENCH_RUN_TAG:-manual}}"
-remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-18180}}"
+remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-}}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runner_profile="${SKILLSBENCH_RUNNER_PROFILE:-}"
@@ -452,6 +454,27 @@ safe_task="${safe_task//_/-}"
 if ((task_count > 1)); then
   safe_task="batch-${task_count}"
 fi
+run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
+job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
+if [[ -z "$remote_proxy_port" ]]; then
+  remote_proxy_port="$(
+    python3 - "$run_group" <<'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256(sys.argv[1].encode("utf-8")).digest()
+print(20000 + (int.from_bytes(digest[:4], "big") % 40000))
+PY
+  )"
+  remote_proxy_port_mode="run_scoped"
+else
+  remote_proxy_port_mode="explicit"
+fi
+if [[ ! "$remote_proxy_port" =~ ^[1-9][0-9]{0,4}$ ]] ||
+  ((10#$remote_proxy_port > 65535)); then
+  echo "remote proxy port must be an integer from 1 through 65535" >&2
+  exit 2
+fi
 
 goal_id="${SKILLSBENCH_GOAL_ID:-loopx-meta}"
 local_run_ledger="${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-.local/goals/${goal_id}/skillsbench-ledgers/live-standard-run-ledger.json}"
@@ -703,8 +726,6 @@ if [[ "$skip_current_aggregate_update" == "1" ]]; then
   extra_runner_args+=(--skip-current-aggregate-update)
 fi
 
-run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
-job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
 codex_channel_id="$(
   python3 - "$job_name" <<'PY'
 import hashlib
@@ -860,6 +881,7 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'public_output=%s/supervisor.public.json\n' "$public_dir"
   printf 'private_dir=%s\n' "$private_dir"
   printf 'remote_proxy_port=%s\n' "$remote_proxy_port"
+  printf 'remote_proxy_port_mode=%s\n' "$remote_proxy_port_mode"
   printf 'proxy_port_coherence_guard=enforced\n'
   printf 'docker_proxy_host_recorded=false\n'
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
@@ -1001,6 +1023,7 @@ job_name=${job_name}
 public_output=${public_dir}/supervisor.public.json
 private_dir=${private_dir}
 remote_proxy_port=${remote_proxy_port}
+remote_proxy_port_mode=${remote_proxy_port_mode}
 docker_proxy_host=${docker_proxy_host}
 docker_proxy_endpoint_mode=${docker_proxy_endpoint_mode}
 docker_api_version=${docker_api_version}
