@@ -327,6 +327,8 @@ def build_codex_app_server_goal_planner_worker_plan(
             "planner_output_must_be_structured_plan": True,
             "planner_must_choose_step_executor": True,
             "cheap_worker_requires_planner_compressed_context": True,
+            "planner_must_define_validation_commands": True,
+            "planner_must_define_worker_escalation_policy": True,
             "requires_worker_turn_evidence": True,
             "worker_input_must_reference_plan_step": True,
         },

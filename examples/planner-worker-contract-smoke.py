@@ -46,8 +46,17 @@ def main() -> int:
                     "implementation_notes": "Add one branch and keep command registration unchanged.",
                     "recommended_executor": "cheap_worker",
                     "worker_model_tier": "cheap",
+                    "worker_autonomy": "bounded",
                     "worker_ready": True,
+                    "context_budget": {
+                        "max_files": 2,
+                        "max_bytes_per_file": 12000,
+                        "allow_extra_files": False,
+                    },
                     "instruction": "Inspect the CLI command dispatch and add the missing branch.",
+                    "validation_commands": ["python examples/cli-registry-admin-command-modularization-smoke.py"],
+                    "done_criteria": ["CLI command dispatch branch is covered by the focused smoke."],
+                    "escalation_policy": "If the dispatch table is not in target_files, stop and ask Planner for one extra file.",
                     "verification": "Run the focused CLI smoke.",
                 }
             ],
@@ -58,7 +67,11 @@ def main() -> int:
     assert plan["steps"][0]["target_files"] == ["loopx/cli.py"], plan
     assert plan["steps"][0]["recommended_executor"] == "cheap_worker", plan
     assert plan["steps"][0]["worker_model_tier"] == "cheap", plan
+    assert plan["steps"][0]["worker_autonomy"] == "bounded", plan
     assert plan["steps"][0]["worker_ready"] is True, plan
+    assert plan["steps"][0]["context_budget"]["max_files"] == 2, plan
+    assert plan["steps"][0]["validation_commands"], plan
+    assert plan["steps"][0]["done_criteria"], plan
 
     planner_prompt = build_planner_prompt(
         objective="Fix a small CLI bug.",
@@ -74,6 +87,9 @@ def main() -> int:
     assert "Do not repeat broad investigation" in worker_prompt
     assert "Planner research summary" in worker_prompt
     assert "Recommended executor: cheap_worker" in worker_prompt
+    assert "Worker autonomy: bounded" in worker_prompt
+    assert "Validation commands:" in worker_prompt
+    assert "Escalation policy:" in worker_prompt
 
     app_server_plan = build_codex_app_server_goal_planner_worker_plan(
         objective="Fix a small CLI bug.",
@@ -89,6 +105,8 @@ def main() -> int:
     assert app_server_plan["claim_boundary"]["planner_output_must_be_structured_plan"] is True
     assert app_server_plan["claim_boundary"]["planner_must_choose_step_executor"] is True
     assert app_server_plan["claim_boundary"]["cheap_worker_requires_planner_compressed_context"] is True
+    assert app_server_plan["claim_boundary"]["planner_must_define_validation_commands"] is True
+    assert app_server_plan["claim_boundary"]["planner_must_define_worker_escalation_policy"] is True
     assert app_server_plan["worker_step_prompt_sha256"], app_server_plan
     return 0
 

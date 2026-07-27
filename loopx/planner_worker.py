@@ -76,6 +76,8 @@ def build_planner_prompt(
             "Produce a compact structured plan only; do not edit files.",
             "Each step must name target_files, action_kind, research_summary, implementation_notes, concrete instruction, dependencies, and verification.",
             "Each step must also choose recommended_executor: cheap_worker, strong_worker, or planner_only.",
+            "For executable steps, include worker_autonomy, context_budget, validation_commands, done_criteria, and escalation_policy.",
+            "Choose the cheapest executor that is likely to pass validation; give Workers more freedom only when it improves completion odds.",
             "Use cheap_worker only when target files, edit shape, and verification are clear enough for a weaker model.",
             "Use strong_worker or planner_only when the step still needs broad exploration, ambiguous design, or risky cross-file reasoning.",
             "Prefer enough file-level detail that the Worker does not need broad repo search or re-planning.",
@@ -121,8 +123,10 @@ def build_worker_step_prompt(
             f"Action kind: {known_step['action_kind']}",
             f"Recommended executor: {known_step['recommended_executor']}",
             f"Worker model tier: {known_step['worker_model_tier']}",
+            f"Worker autonomy: {known_step['worker_autonomy']}",
             f"Worker ready: {known_step['worker_ready']}",
             f"Worker blockers: {', '.join(known_step['worker_blockers']) or '<none>'}",
+            f"Context budget: {known_step['context_budget']}",
             "",
             "Planner research summary:",
             known_step["research_summary"],
@@ -135,6 +139,15 @@ def build_worker_step_prompt(
             "",
             "Verification:",
             known_step["verification"],
+            "",
+            "Validation commands:",
+            "\n".join(f"- {command}" for command in known_step["validation_commands"]) or "- <none>",
+            "",
+            "Done criteria:",
+            "\n".join(f"- {criterion}" for criterion in known_step["done_criteria"]) or "- <none>",
+            "",
+            "Escalation policy:",
+            known_step["escalation_policy"],
         ]
     )
 
@@ -157,6 +170,30 @@ def _worker_model_tier_for_step(item: dict[str, Any]) -> str:
     if executor == "strong_worker":
         return "strong"
     return "none"
+
+
+def _worker_autonomy_for_step(item: dict[str, Any]) -> str:
+    value = _clean_text(item.get("worker_autonomy"))
+    if value in {"narrow", "bounded", "open"}:
+        return value
+    executor = _clean_text(item.get("recommended_executor")) or _recommended_executor_for_step(item)
+    return "bounded" if executor == "cheap_worker" else "open"
+
+
+def _context_budget_for_step(item: dict[str, Any]) -> dict[str, Any]:
+    budget = item.get("context_budget")
+    if isinstance(budget, dict):
+        return {
+            "max_files": int(budget.get("max_files") or 0),
+            "max_bytes_per_file": int(budget.get("max_bytes_per_file") or 0),
+            "allow_extra_files": bool(budget.get("allow_extra_files")),
+        }
+    target_files = _clean_list(item.get("target_files"))
+    return {
+        "max_files": max(1, len(target_files) + 1),
+        "max_bytes_per_file": 20000,
+        "allow_extra_files": False,
+    }
 
 
 def normalize_planner_worker_plan(raw: dict[str, Any]) -> dict[str, Any]:
@@ -185,18 +222,24 @@ def normalize_planner_worker_plan(raw: dict[str, Any]) -> dict[str, Any]:
             or _recommended_executor_for_step(item),
             "worker_model_tier": _clean_text(item.get("worker_model_tier"))
             or _worker_model_tier_for_step(item),
+            "worker_autonomy": _worker_autonomy_for_step(item),
             "worker_ready": bool(
                 item.get("worker_ready")
                 if "worker_ready" in item
                 else _recommended_executor_for_step(item) == "cheap_worker"
             ),
             "worker_blockers": _clean_list(item.get("worker_blockers")),
+            "context_budget": _context_budget_for_step(item),
             "research_summary": _clean_text(item.get("research_summary"))
             or "Planner did not provide a separate research summary.",
             "implementation_notes": _clean_text(item.get("implementation_notes"))
             or "Follow the step instruction and keep execution scoped.",
             "instruction": instruction,
             "depends_on": _clean_list(item.get("depends_on")),
+            "validation_commands": _clean_list(item.get("validation_commands")),
+            "done_criteria": _clean_list(item.get("done_criteria")),
+            "escalation_policy": _clean_text(item.get("escalation_policy"))
+            or "If validation cannot be completed with the context budget, stop and report the smallest missing fact.",
             "verification": _clean_text(item.get("verification")) or "Run the relevant focused checks.",
             "status": _clean_text(item.get("status")) or "planned",
         }
