@@ -48,9 +48,6 @@ _EXISTING_DECISION_DEBT_REASON = (
     "Existing multi-branch control-plane decision owner predates the ratchet."
 )
 _OVERSIZED_DECISION_RETIREMENT_PLANS = {
-    "loopx.control_plane.quota.goal_boundary:goal_boundary": (
-        "Split registry boundary resolution from capability and write-scope projection."
-    ),
     "loopx.control_plane.todos.contract:parse_todo_metadata_line": (
         "Replace branch-heavy field parsing with the canonical todo field schema."
     ),
@@ -75,10 +72,6 @@ _OVERSIZED_DECISION_RETIREMENT_PLANS = {
 }
 
 _OVERSIZED_DECISION_METRIC_CEILINGS = {
-    "loopx.control_plane.quota.goal_boundary:goal_boundary": {
-        "statements": 96,
-        "decision_points": 66,
-    },
     "loopx.control_plane.todos.contract:parse_todo_metadata_line": {
         "statements": 119,
         "decision_points": 60,
