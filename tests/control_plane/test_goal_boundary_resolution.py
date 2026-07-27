@@ -16,10 +16,12 @@ def test_goal_boundary_uses_registry_goal_for_scope_and_capability_projection() 
             "coordination": {
                 "write_scope": ["docs/**"],
                 "available_capabilities": ["registry-coordination"],
+                "requires_parent_approval": ["write", "", "publish"],
             },
             "project_asset": {
                 "available_capabilities": ["registry-project-asset"],
             },
+            "guards": ["stay public", ""],
         },
         item={
             "available_capabilities": ["item-root"],
@@ -44,6 +46,8 @@ def test_goal_boundary_uses_registry_goal_for_scope_and_capability_projection() 
         "registry_coordination",
         "registry_project_asset",
     ]
+    assert boundary["requires_parent_approval"] == ["write", "publish"]
+    assert boundary["guards"] == ["stay public"]
 
 
 def test_goal_boundary_appends_only_active_checkpointed_write_scopes() -> None:
