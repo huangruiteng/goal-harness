@@ -36,7 +36,7 @@ def write_registry(root: Path) -> Path:
                         "coordination": {
                             "agent_profiles": {
                                 "codex-worker": {
-                                    "model": "gpt-5.4-mini",
+                                    "model": "deepseek-v4-flash",
                                     "reasoning_effort": "low",
                                 }
                             }
@@ -89,7 +89,7 @@ def main() -> int:
             "--planner-effort",
             "high",
             "--worker-model",
-            "gpt-5.4-mini",
+            "deepseek-v4-flash",
             "--worker-effort",
             "medium",
         )
@@ -97,7 +97,7 @@ def main() -> int:
         assert dry["dry_run"] is True, dry
         assert dry["after"]["orchestration"]["mode"] == "planner_worker", dry
         assert dry["after"]["model_routes"]["planner"]["model"] == "gpt-5.5", dry
-        assert dry["after"]["model_routes"]["worker"]["model"] == "gpt-5.4-mini", dry
+        assert dry["after"]["model_routes"]["worker"]["model"] == "deepseek-v4-flash", dry
 
         applied = run_cli(
             registry_path,
@@ -111,7 +111,7 @@ def main() -> int:
             "--planner-effort",
             "high",
             "--worker-model",
-            "gpt-5.4-mini",
+            "deepseek-v4-flash",
             "--worker-effort",
             "medium",
             "--execute",
@@ -121,9 +121,9 @@ def main() -> int:
         assert goal["spawn_policy"]["mode"] == "planner_worker", goal
         routes = model_routes_for_goal(goal)
         assert routes["planner"] == {"model": "gpt-5.5", "effort": "high"}, routes
-        assert routes["worker"] == {"model": "gpt-5.4-mini", "effort": "medium"}, routes
+        assert routes["worker"] == {"model": "deepseek-v4-flash", "effort": "medium"}, routes
         worker_route = model_route_for_role(goal, "worker", agent_id="codex-worker")
-        assert worker_route == {"model": "gpt-5.4-mini", "effort": "low"}, worker_route
+        assert worker_route == {"model": "deepseek-v4-flash", "effort": "low"}, worker_route
 
         cleared = run_cli(
             registry_path,

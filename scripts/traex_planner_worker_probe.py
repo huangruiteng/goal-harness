@@ -23,6 +23,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--planner-model", default=DEFAULT_TRAEX_PLANNER_MODEL)
     parser.add_argument("--worker-model", default=DEFAULT_TRAEX_WORKER_MODEL)
     parser.add_argument("--cwd", default=".")
+    parser.add_argument("--worker-cwd")
+    parser.add_argument(
+        "--full-worker-context",
+        action="store_true",
+        help="Load normal TraeX user/project context for the worker instead of the minimal cheap-worker path.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--objective", default="Probe LoopX planner-worker mode with TraeX.")
     parser.add_argument(
@@ -42,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         planner_model=args.planner_model,
         worker_model=args.worker_model,
         cwd=Path(args.cwd),
+        worker_cwd=Path(args.worker_cwd) if args.worker_cwd else None,
+        worker_minimal_context=not args.full_worker_context,
         timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))

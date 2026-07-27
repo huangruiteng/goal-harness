@@ -325,6 +325,8 @@ def build_codex_app_server_goal_planner_worker_plan(
             **plan["claim_boundary"],
             "requires_planner_turn_evidence": True,
             "planner_output_must_be_structured_plan": True,
+            "planner_must_choose_step_executor": True,
+            "cheap_worker_requires_planner_compressed_context": True,
             "requires_worker_turn_evidence": True,
             "worker_input_must_reference_plan_step": True,
         },

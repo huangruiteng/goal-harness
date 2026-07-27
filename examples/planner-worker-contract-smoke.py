@@ -41,6 +41,11 @@ def main() -> int:
                     "planner_order": 1,
                     "target_files": ["loopx/cli.py"],
                     "action_kind": "edit",
+                    "research_summary": "The dispatch table is the only relevant surface.",
+                    "implementation_notes": "Add one branch and keep command registration unchanged.",
+                    "recommended_executor": "cheap_worker",
+                    "worker_model_tier": "cheap",
+                    "worker_ready": True,
                     "instruction": "Inspect the CLI command dispatch and add the missing branch.",
                     "verification": "Run the focused CLI smoke.",
                 }
@@ -50,11 +55,17 @@ def main() -> int:
     assert plan["schema_version"] == "planner_worker_plan_v0", plan
     assert plan["steps"][0]["schema_version"] == "planner_worker_step_v0", plan
     assert plan["steps"][0]["target_files"] == ["loopx/cli.py"], plan
+    assert plan["steps"][0]["recommended_executor"] == "cheap_worker", plan
+    assert plan["steps"][0]["worker_model_tier"] == "cheap", plan
+    assert plan["steps"][0]["worker_ready"] is True, plan
 
     worker_prompt = build_worker_step_prompt(plan=plan, step=plan["steps"][0])
     assert "Execute only the plan step below" in worker_prompt
     assert "loopx/cli.py" in worker_prompt
     assert "Do not re-plan the whole task" in worker_prompt
+    assert "Do not repeat broad investigation" in worker_prompt
+    assert "Planner research summary" in worker_prompt
+    assert "Recommended executor: cheap_worker" in worker_prompt
 
     app_server_plan = build_codex_app_server_goal_planner_worker_plan(
         objective="Fix a small CLI bug.",
@@ -68,6 +79,8 @@ def main() -> int:
     assert messages["planner_turn_start"]["params"]["model"] == DEFAULT_PLANNER_MODEL
     assert messages["worker_turn_start_template"]["params"]["model"] == DEFAULT_WORKER_MODEL
     assert app_server_plan["claim_boundary"]["planner_output_must_be_structured_plan"] is True
+    assert app_server_plan["claim_boundary"]["planner_must_choose_step_executor"] is True
+    assert app_server_plan["claim_boundary"]["cheap_worker_requires_planner_compressed_context"] is True
     assert app_server_plan["worker_step_prompt_sha256"], app_server_plan
     return 0
 

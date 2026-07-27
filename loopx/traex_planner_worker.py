@@ -17,7 +17,7 @@ from .codex_goal_baseline import stable_text_digest
 
 TRAEX_PLANNER_WORKER_PROBE_SCHEMA_VERSION = "traex_planner_worker_probe_v0"
 DEFAULT_TRAEX_PLANNER_MODEL = "GPT-5.5"
-DEFAULT_TRAEX_WORKER_MODEL = "GPT-5.4"
+DEFAULT_TRAEX_WORKER_MODEL = "DeepSeek-V4-Flash"
 
 
 class TraexPlannerWorkerError(RuntimeError):
@@ -62,6 +62,8 @@ def _run_traex_exec(
     prompt: str,
     cwd: Path,
     timeout_seconds: float,
+    ignore_rules: bool = False,
+    ignore_user_config: bool = False,
 ) -> tuple[str, str]:
     command = [
         traex_bin,
@@ -77,8 +79,12 @@ def _run_traex_exec(
         "apply_patch",
         "--model",
         model,
-        prompt,
     ]
+    if ignore_rules:
+        command.append("--ignore-rules")
+    if ignore_user_config:
+        command.append("--ignore-user-config")
+    command.append(prompt)
     result = subprocess.run(
         command,
         cwd=cwd,
@@ -103,11 +109,14 @@ def run_traex_planner_worker_probe(
     planner_model: str = DEFAULT_TRAEX_PLANNER_MODEL,
     worker_model: str = DEFAULT_TRAEX_WORKER_MODEL,
     cwd: Path | str = ".",
+    worker_cwd: Path | str | None = None,
+    worker_minimal_context: bool = True,
     timeout_seconds: float = 120.0,
 ) -> dict[str, Any]:
     """Run a read-only TraeX planner turn followed by a worker step turn."""
 
     workdir = Path(cwd).resolve()
+    worker_workdir = Path(worker_cwd).resolve() if worker_cwd is not None else workdir
     plan = normalize_planner_worker_plan(planner_output_plan)
     planner_prompt = build_planner_prompt(
         objective=objective,
@@ -126,8 +135,10 @@ def run_traex_planner_worker_probe(
         traex_bin=traex_bin,
         model=worker_model,
         prompt=worker_prompt,
-        cwd=workdir,
+        cwd=worker_workdir,
         timeout_seconds=timeout_seconds,
+        ignore_rules=worker_minimal_context,
+        ignore_user_config=worker_minimal_context,
     )
     planner_turn = _compact_traex_turn(model=planner_model, jsonl=planner_jsonl)
     worker_turn = _compact_traex_turn(model=worker_model, jsonl=worker_jsonl)
@@ -158,6 +169,8 @@ def run_traex_planner_worker_probe(
         },
         "boundary": {
             "read_only_traex_exec": True,
+            "worker_minimal_context": bool(worker_minimal_context),
+            "worker_cwd_matches_planner_cwd": worker_workdir == workdir,
             "raw_prompts_recorded": False,
             "raw_assistant_messages_recorded": False,
             "raw_stderr_recorded": False,

@@ -22,6 +22,8 @@ import json
 import sys
 
 model = "unknown"
+ignore_rules = "--ignore-rules" in sys.argv
+ignore_user_config = "--ignore-user-config" in sys.argv
 for index, arg in enumerate(sys.argv):
     if arg == "--model" and index + 1 < len(sys.argv):
         model = sys.argv[index + 1]
@@ -34,7 +36,7 @@ usage = {
 }
 print(json.dumps({"type": "thread.started", "thread_id": "fake"}))
 print(json.dumps({"type": "turn.started"}))
-print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": text}}))
+print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": text + str(ignore_rules) + str(ignore_user_config)}}))
 print(json.dumps({"type": "turn.completed", "usage": usage}))
 """
 
@@ -52,7 +54,7 @@ def main() -> int:
             planner_output_plan=plan,
             traex_bin=str(fake),
             planner_model="GPT-5.5",
-            worker_model="GPT-5.4",
+            worker_model="DeepSeek-V4-Flash",
             cwd=root,
             timeout_seconds=5,
         )
@@ -66,6 +68,8 @@ def main() -> int:
         assert payload["total_usage"]["output_tokens"] == 50, payload
         assert payload["total_usage"]["reasoning_output_tokens"] == 12, payload
         assert payload["boundary"]["read_only_traex_exec"] is True, payload
+        assert payload["boundary"]["worker_minimal_context"] is True, payload
+        assert payload["worker_model"] == "DeepSeek-V4-Flash", payload
         assert "planner answer" not in json.dumps(payload), payload
     return 0
 

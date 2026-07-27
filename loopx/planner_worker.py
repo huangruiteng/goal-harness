@@ -7,14 +7,15 @@ PLANNER_WORKER_PLAN_SCHEMA_VERSION = "planner_worker_plan_v0"
 PLANNER_WORKER_STEP_SCHEMA_VERSION = "planner_worker_step_v0"
 PLANNER_WORKER_COST_PROJECTION_SCHEMA_VERSION = "planner_worker_cost_projection_v0"
 DEFAULT_PLANNER_MODEL = "gpt-5.5"
-DEFAULT_WORKER_MODEL = "gpt-5.4-mini"
+DEFAULT_WORKER_MODEL = "deepseek-v4-flash"
 DEFAULT_PLANNER_EFFORT = "high"
 DEFAULT_WORKER_EFFORT = "medium"
 
 
 DEFAULT_MODEL_TOKEN_PRICES_PER_1K = {
     DEFAULT_PLANNER_MODEL: {"input": 0.02, "output": 0.08},
-    DEFAULT_WORKER_MODEL: {"input": 0.002, "output": 0.008},
+    DEFAULT_WORKER_MODEL: {"input": 0.0005, "output": 0.002},
+    "gpt-5.4-mini": {"input": 0.002, "output": 0.008},
 }
 
 
@@ -71,8 +72,13 @@ def build_planner_prompt(
     return "\n".join(
         [
             "You are the Planner for a planner-worker coding mode.",
+            "Do the expensive investigation now so cheaper Workers can execute simple scoped steps later.",
             "Produce a compact structured plan only; do not edit files.",
-            "Each step must name target_files, action_kind, concrete instruction, dependencies, and verification.",
+            "Each step must name target_files, action_kind, research_summary, implementation_notes, concrete instruction, dependencies, and verification.",
+            "Each step must also choose recommended_executor: cheap_worker, strong_worker, or planner_only.",
+            "Use cheap_worker only when target files, edit shape, and verification are clear enough for a weaker model.",
+            "Use strong_worker or planner_only when the step still needs broad exploration, ambiguous design, or risky cross-file reasoning.",
+            "Prefer enough file-level detail that the Worker does not need broad repo search or re-planning.",
             f"Limit the plan to at most {int(max_steps)} steps.",
             "",
             "Objective:",
@@ -105,12 +111,24 @@ def build_worker_step_prompt(
         [
             "You are the Worker for a planner-worker coding mode.",
             "Execute only the plan step below. Do not re-plan the whole task.",
-            "Keep edits scoped to target_files unless verification proves another file is required.",
+            "Do not repeat broad investigation. Trust the Planner research unless direct execution proves it stale.",
+            "Keep reads and edits scoped to target_files unless verification proves another file is required.",
+            "If context is insufficient, report the smallest missing fact instead of scanning unrelated files.",
             "",
             f"Plan id: {normalized['plan_id']}",
             f"Step id: {known_step['step_id']}",
             f"Target files: {', '.join(known_step['target_files']) or '<none>'}",
             f"Action kind: {known_step['action_kind']}",
+            f"Recommended executor: {known_step['recommended_executor']}",
+            f"Worker model tier: {known_step['worker_model_tier']}",
+            f"Worker ready: {known_step['worker_ready']}",
+            f"Worker blockers: {', '.join(known_step['worker_blockers']) or '<none>'}",
+            "",
+            "Planner research summary:",
+            known_step["research_summary"],
+            "",
+            "Planner implementation notes:",
+            known_step["implementation_notes"],
             "",
             "Instruction:",
             known_step["instruction"],
@@ -119,6 +137,26 @@ def build_worker_step_prompt(
             known_step["verification"],
         ]
     )
+
+
+def _recommended_executor_for_step(item: dict[str, Any]) -> str:
+    blockers = _clean_list(item.get("worker_blockers"))
+    target_files = _clean_list(item.get("target_files"))
+    action_kind = _clean_text(item.get("action_kind"))
+    if blockers:
+        return "strong_worker"
+    if target_files and action_kind not in {"research", "design", "investigate", "planner_only"}:
+        return "cheap_worker"
+    return "planner_only"
+
+
+def _worker_model_tier_for_step(item: dict[str, Any]) -> str:
+    executor = _clean_text(item.get("recommended_executor")) or _recommended_executor_for_step(item)
+    if executor == "cheap_worker":
+        return "cheap"
+    if executor == "strong_worker":
+        return "strong"
+    return "none"
 
 
 def normalize_planner_worker_plan(raw: dict[str, Any]) -> dict[str, Any]:
@@ -143,6 +181,20 @@ def normalize_planner_worker_plan(raw: dict[str, Any]) -> dict[str, Any]:
             "role": _clean_text(item.get("role")) or "worker",
             "target_files": _clean_list(item.get("target_files")),
             "action_kind": _clean_text(item.get("action_kind")) or "edit",
+            "recommended_executor": _clean_text(item.get("recommended_executor"))
+            or _recommended_executor_for_step(item),
+            "worker_model_tier": _clean_text(item.get("worker_model_tier"))
+            or _worker_model_tier_for_step(item),
+            "worker_ready": bool(
+                item.get("worker_ready")
+                if "worker_ready" in item
+                else _recommended_executor_for_step(item) == "cheap_worker"
+            ),
+            "worker_blockers": _clean_list(item.get("worker_blockers")),
+            "research_summary": _clean_text(item.get("research_summary"))
+            or "Planner did not provide a separate research summary.",
+            "implementation_notes": _clean_text(item.get("implementation_notes"))
+            or "Follow the step instruction and keep execution scoped.",
             "instruction": instruction,
             "depends_on": _clean_list(item.get("depends_on")),
             "verification": _clean_text(item.get("verification")) or "Run the relevant focused checks.",
