@@ -124,16 +124,12 @@ def _registry_boundary_projection(goal: Mapping[str, Any]) -> dict[str, Any]:
             "kind": adapter_kind,
             "status": adapter_status,
         }
-    coordination = (
-        goal.get("coordination")
-        if isinstance(goal.get("coordination"), dict)
-        else {}
+    coordination_value = goal.get("coordination")
+    coordination: dict[str, Any] = (
+        coordination_value if isinstance(coordination_value, dict) else {}
     )
-    write_scope = (
-        coordination.get("write_scope")
-        if isinstance(coordination.get("write_scope"), list)
-        else []
-    )
+    write_scope_value = coordination.get("write_scope")
+    write_scope = write_scope_value if isinstance(write_scope_value, list) else []
     normalized_write_scope: list[str] = []
     for value in write_scope:
         scope = str(value).strip()
@@ -152,9 +148,10 @@ def _registry_boundary_projection(goal: Mapping[str, Any]) -> dict[str, Any]:
     available_capabilities = declared_available_capabilities(goal)
     if available_capabilities:
         boundary["available_capabilities"] = available_capabilities
+    requires_approval_value = coordination.get("requires_parent_approval")
     requires_approval = (
-        coordination.get("requires_parent_approval")
-        if isinstance(coordination.get("requires_parent_approval"), list)
+        requires_approval_value
+        if isinstance(requires_approval_value, list)
         else []
     )
     if requires_approval:
