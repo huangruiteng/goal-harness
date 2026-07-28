@@ -118,7 +118,7 @@
       ],
       "source": {
         "fixture_root": "tests/fixtures/change_quality/model_shadow/python",
-        "validator": "python3 -m unittest discover -s tests"
+        "validator": "python3 -m unittest discover -s tests -p '*_unittest.py'"
       },
       "gold": {
         "findings": [
