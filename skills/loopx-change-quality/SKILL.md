@@ -61,12 +61,12 @@ Spend the review budget on simplification before broad quality analysis:
 4. Prefer the smallest coherent edit that leaves ownership and intent clearer.
    Do not create churn when the current shape is already direct and cohesive.
 
-`reuse` and `quality_simplification` are the two primary lenses. Give each a
-distinct, evidence-backed conclusion. The remaining lenses are guardrails:
-expand one only when the changed surface, repository instructions, a native
-validator, or the proposed simplification raises a concrete risk. Otherwise
-mark it `not_applicable` with the same short standard reason; do not spend
-tokens inventing lens-specific prose.
+Write one evidence-backed `reuse` conclusion and one evidence-backed
+`simplification` conclusion. Do not emit a row for every remaining lens.
+Those dimensions are guardrail categories for sparse `risks[]`: add an item
+only when the changed surface, repository instructions, a native validator, or
+the proposed simplification raises a concrete risk. LoopX derives each
+guardrail's status from `risks[]` and `validation[]`.
 
 The available review lenses are:
 
@@ -104,12 +104,12 @@ repository-native instruction; do not fill them with guessed commands. Treat
 `ignored_manifest_refs` as non-executable context, especially fixtures and
 vendored projects.
 
-Record one compact `repository_principles` item for every projected instruction
-reference. Every applicable lens must cite typed `evidence_refs` using
-`path:`, `instruction:`, `finding:`, `validator:`, or `decision:`. A
-`quality_simplification` conclusion cites its decision id, and a
-`test_validation` conclusion cites the repository-native validator. Do not
-repeat the same generic all-clear across the two primary lenses.
+Read every projected instruction reference, but do not copy its prose into the
+result. Ground `reuse`, `simplification`, and each emitted risk with typed
+`evidence_refs` using `path:`, `instruction:`, or `validator:`. Keep
+`risks[]` empty when no guardrail is triggered. Record only validators that
+were selected or required; failed validation and skipped required validation
+are independently blocking.
 
 Use `blocker` only for a concrete correctness, security, privacy, contract, or
 required-validation failure. Style preferences and speculative redesigns are
@@ -119,9 +119,10 @@ This first version is single-level. Review one final diff; do not recursively
 review the review, spawn a hierarchy of quality agents, or require agreement
 between several models.
 
-The required lenses are a review discipline, not evidence that a particular
-model applies them well. Maintainers qualify model behavior separately against
-the public clean-PR and seeded Python, Rust, and TypeScript shadow matrix.
+The guardrail catalog is review guidance, not an Agent output checklist or
+evidence that a particular model applies it well. Maintainers qualify model
+behavior separately against the public clean-PR and seeded Python, Rust, and
+TypeScript shadow matrix.
 Normal delivery does not launch that low-frequency evaluation, and a model
 shadow result cannot mutate goal policy or grant merge authority.
 
@@ -133,10 +134,11 @@ shadow result cannot mutate goal policy or grant merge authority.
 - `strict_receipt=true` requires exact-scope evidence before merge and grants
   no permission to edit.
 
-When `safe_fix` is false, report findings without modifying files. When it is
-true, one repair pass may address clear findings inside the selected todo and
-goal boundary. Do not use destructive git, broaden permissions, change product
-intent, add unrelated refactors, or conceal a failing validator.
+When `safe_fix` is false, report risks without modifying files. When it is
+true, one repair pass may address a clear simplify opportunity or risk inside
+the selected todo and goal boundary. Do not use destructive git, broaden
+permissions, change product intent, add unrelated refactors, or conceal a
+failing validator.
 
 After any edit, rerun `prepare`. The old fingerprint is invalid. Review the
 entire new final scope, not only the lines changed by the repair.
@@ -144,12 +146,12 @@ entire new final scope, not only the lines changed by the repair.
 ## Record The Receipt
 
 Write a compact result conforming to the packet's
-`change_quality_agent_result_v1` template. The result must include every
-required lens, projected repository principles, at least one explicit
-simplification decision, typed evidence references, and typed validation
-evidence. A skipped or failed validator needs a reason; a failed validator
-makes the receipt non-passing. Keep raw transcripts, private paths, credentials,
-and unbounded logs out of the result.
+`change_quality_agent_result_v2` template. Beyond exact-scope metadata, the
+Agent writes only `reuse`, `simplification`, sparse `risks[]`, and
+`validation[]`. `simplification.safe_fix_applied` records the one permitted
+repair pass. A skipped or failed validator needs a reason; failed validation or
+skipped required validation makes the receipt non-passing. Keep raw
+transcripts, private paths, credentials, and unbounded logs out of the result.
 
 Then record and read back the exact receipt:
 
@@ -167,9 +169,10 @@ loopx --format json change-quality verify \
   --base-ref origin/main
 ```
 
-A receipt with an unresolved blocker or failed validator is not passing. A
-receipt for an earlier fingerprint or an earlier receipt protocol does not
-qualify a later diff.
+A receipt with an unresolved blocker, failed validator, or skipped required
+validator is not passing. A receipt for an earlier fingerprint does not
+qualify a later diff. Existing v1 receipts may be verified read-only for their
+exact scope; new writes use v2.
 
 ## Premerge Enforcement
 

@@ -49,28 +49,29 @@ Absence of this policy is equivalent to all three values being false.
 
 1. `change-quality prepare` hashes the committed, staged, unstaged, and
    untracked content relative to a base ref. It emits
-   `change_quality_prepare_packet_v1`.
+   `change_quality_prepare_packet_v2`.
 2. The packet projects path-only repository context: applicable instruction
    files, ownership files, build manifests, language hints, changed surface
    roots, and a provider-neutral validation plan. It does not copy instruction
    text, task bodies, or manifest contents into the control plane.
-3. A host or model reviews that exact scope simplify-first. `reuse` and
-   `quality_simplification` are primary; type/API boundaries, configuration,
-   runtime ownership, efficiency, error/supervision, test/validation,
-   documentation/comments, and security/release are guardrails activated by
-   the changed surface or repository evidence. The result uses
-   `change_quality_agent_result_v1`.
+3. A host or model reviews that exact scope simplify-first. It writes one
+   grounded `reuse` conclusion, one grounded `simplification` conclusion,
+   sparse triggered `risks[]`, and selected `validation[]`. Type/API
+   boundaries, configuration, runtime ownership, efficiency,
+   error/supervision, test/validation, documentation/comments, and
+   security/release remain guardrail categories, but the Agent does not fill
+   an all-clear row for each one. The result uses
+   `change_quality_agent_result_v2`.
 4. If policy allows it, the host may perform one bounded safe-fix pass. Any edit
    invalidates the old fingerprint, so prepare and final review run again.
-5. `change-quality record --execute` requires complete per-lens conclusions,
-   the principles from every projected repository instruction file, an
-   explicit simplification decision, and typed validation evidence. Every
-   applicable lens must cite a changed path, instruction, finding, validator,
-   or simplification decision. The two primary lenses require distinct
-   substantive conclusions; inactive guardrails may share a compact
-   `not_applicable` reason. The command validates the result against the
-   current fingerprint and writes a compact local runtime receipt.
-6. `change-quality verify` checks the current exact scope and v1 protocol.
+5. `change-quality record --execute` validates those four result blocks against
+   the current fingerprint, derives guardrail states from sparse risks and
+   validation outcomes, and writes a compact local runtime receipt. Failed
+   validation, skipped required validation, and unresolved blocker risks fail
+   closed.
+6. `change-quality verify` checks the current exact scope and v2 protocol.
+   Existing v1 receipts remain read-only compatible for the exact scope they
+   already qualified.
 7. `canary premerge --goal-id <goal-id>` enforces `strict_receipt`.
 
 ```bash
@@ -87,11 +88,12 @@ loopx --format json change-quality verify \
 loopx canary premerge --from-git-diff --goal-id <goal-id>
 ```
 
-Receipts live under goal runtime state, not in the repository. They retain
-compact findings, per-lens conclusions, simplification decisions, and typed
-validation evidence. Lens evidence references are typed and cross-checked
-against the exact changed paths and receipt objects. Receipts do not retain raw
-model transcripts, credentials, private context, or validator logs.
+Receipts live under goal runtime state, not in the repository. They retain the
+two primary conclusions, sparse risks, typed validation evidence, and the
+system-derived guardrail summary. Evidence references are typed and
+cross-checked against exact changed paths, projected instructions, and
+validators. Receipts do not retain raw model transcripts, credentials, private
+context, or validator logs.
 
 ## Provider Boundary
 
@@ -135,12 +137,14 @@ same output contract for Python, Rust, and TypeScript while preserving distinct
 Poe, Cargo, and package-script runner identities. It does not invent a shared
 compactor or silently execute any task.
 
-The initial semantic calibration uses five public control-plane PRs covering a
+The semantic calibration uses five public control-plane PRs covering a
 registry boundary extraction, benchmark read-model move, recoverable Turn
 stages, Vision replan repair, and capability-envelope propagation. The replay
 keeps the benchmark-sensitive manual hold independent from receipt success and
-proves that only one coherent safe-fix pass can be reported. These fixtures
-calibrate review behavior; they are not project-specific production policy.
+proves that only one coherent safe-fix pass can be reported. The v2 fixture
+also demonstrates the output-budget change directly: five cases no longer
+carry fifty authored lens rows. These fixtures calibrate review behavior; they
+are not project-specific production policy.
 
 ## Model-Behavior Shadow
 
@@ -154,9 +158,10 @@ separate `change_quality_shadow_matrix_v0` therefore pairs:
   still pass but whose implementation adds one-use wrappers or low-value
   helpers.
 
-The live runner compares the former v0 review instructions with the v1
-simplify contract using the same model and exact case. It scores result-schema
-validity, primary simplify-lens coverage, simplify finding precision and
+The live runner compares its historical v0 and simplify-first v1 shadow
+prompts using the same model and exact case; those labels version the shadow
+experiment, not the receipt protocol. It scores result-schema validity,
+primary simplify coverage, simplify finding precision and
 recall, false positives on accepted PRs, simplification decisions, safe-fix
 eligibility, tracked-file mutation, output tokens, and latency:
 
