@@ -183,6 +183,9 @@ from loopx.benchmarks.read_models.goal_start_control_score import (
     goal_start_public_text_list as _goal_start_public_text_list,
     goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
 )
+from loopx.benchmarks.read_models.skillsbench_verifier_attribution import (
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution,
+)
 from loopx.control_plane.turn_driver import (
     loopx_turn_execution_committed,
     loopx_turn_execution_has_durable_effects,
@@ -15562,7 +15565,7 @@ def reduce_result(
                         if item not in existing_labels:
                             existing_labels.append(item)
                     compact["failure_attribution_labels"] = existing_labels
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         compact,
         task_staging=task_staging,
         setup_preflight=_public_task_setup_preflight(
@@ -16561,7 +16564,7 @@ def build_runner_failure_compact(
     if not recovered:
         _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
     _apply_codex_cli_goal_countability_guard_attribution(reduced)
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         reduced,
         task_staging=_effective_public_task_staging(plan),
         setup_preflight=_public_task_setup_preflight(
