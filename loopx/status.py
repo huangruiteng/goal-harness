@@ -200,6 +200,10 @@ from .benchmarks.read_models.benchmark_run_metrics import (
     compact_benchmark_overhead_attribution_counters as _compact_benchmark_overhead_attribution_counters,
     compact_benchmark_round_reward_trace as _compact_benchmark_round_reward_trace,
 )
+from .benchmarks.read_models.benchmark_run_failure import (
+    compact_benchmark_runner_failure as _compact_benchmark_runner_failure,
+    compact_benchmark_runner_failure_fingerprint as _compact_benchmark_runner_failure_fingerprint,
+)
 from .benchmarks.read_models.goal_start_control_score import (
     compact_goal_start_product_mode_control_score,
 )
@@ -2930,148 +2934,16 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         if compact_model_control:
             compact["model_control"] = compact_model_control
 
-    runner_failure = source.get("runner_failure")
-    if isinstance(runner_failure, dict):
-        compact_runner_failure: dict[str, Any] = {}
-        for field in ("schema_version", "exception_type", "failure_class"):
-            value = public_safe_compact_text(runner_failure.get(field), limit=140)
-            if value:
-                compact_runner_failure[field] = value
-        for field in (
-            "raw_error_recorded",
-            "raw_logs_read",
-            "raw_task_text_read",
-            "raw_trajectory_read",
-        ):
-            if isinstance(runner_failure.get(field), bool):
-                compact_runner_failure[field] = runner_failure[field]
-        controller_cutoff = runner_failure.get("controller_cutoff")
-        if isinstance(controller_cutoff, dict):
-            compact_cutoff: dict[str, Any] = {}
-            for field in ("schema_version", "reason"):
-                value = public_safe_compact_text(
-                    controller_cutoff.get(field),
-                    limit=140,
-                )
-                if value:
-                    compact_cutoff[field] = value
-            if isinstance(controller_cutoff.get("cutoff_before_followup"), bool):
-                compact_cutoff["cutoff_before_followup"] = controller_cutoff[
-                    "cutoff_before_followup"
-                ]
-            for field in (
-                "max_rounds_budget",
-                "initial_prompt_count",
-                "followup_prompt_count",
-                "stop_decision_count",
-            ):
-                if isinstance(controller_cutoff.get(field), int) and not isinstance(
-                    controller_cutoff.get(field),
-                    bool,
-                ):
-                    compact_cutoff[field] = controller_cutoff[field]
-            if compact_cutoff:
-                compact_runner_failure["controller_cutoff"] = compact_cutoff
-        user_loop_recovery = runner_failure.get("user_loop_recovery")
-        if isinstance(user_loop_recovery, dict):
-            compact_recovery: dict[str, Any] = {}
-            for field in ("schema_version", "stage", "exception_type"):
-                value = public_safe_compact_text(
-                    user_loop_recovery.get(field),
-                    limit=140,
-                )
-                if value:
-                    compact_recovery[field] = value
-            for field in ("preserved_final_verify", "raw_error_recorded"):
-                if isinstance(user_loop_recovery.get(field), bool):
-                    compact_recovery[field] = user_loop_recovery[field]
-            for field in ("round", "delta_events", "delta_tool_calls"):
-                if isinstance(user_loop_recovery.get(field), int) and not isinstance(
-                    user_loop_recovery.get(field),
-                    bool,
-                ):
-                    compact_recovery[field] = user_loop_recovery[field]
-            if compact_recovery:
-                compact_runner_failure["user_loop_recovery"] = compact_recovery
-        native_goal_worker = runner_failure.get("native_goal_worker")
-        if isinstance(native_goal_worker, dict):
-            compact_native_worker: dict[str, Any] = {}
-            for field in (
-                "schema_version",
-                "trace_status",
-                "failure_label",
-                "failure_category",
-                "first_blocker",
-            ):
-                value = public_safe_compact_text(
-                    native_goal_worker.get(field),
-                    limit=140,
-                )
-                if value:
-                    compact_native_worker[field] = value
-            for field in (
-                "trace_count",
-            ):
-                value = native_goal_worker.get(field)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    compact_native_worker[field] = value
-            for field in (
-                "raw_transcript_recorded",
-                "raw_assistant_message_recorded",
-            ):
-                if isinstance(native_goal_worker.get(field), bool):
-                    compact_native_worker[field] = native_goal_worker[field]
-            if compact_native_worker:
-                compact_runner_failure["native_goal_worker"] = compact_native_worker
-        if compact_runner_failure:
-            compact["runner_failure"] = compact_runner_failure
+    runner_failure = _compact_benchmark_runner_failure(source.get("runner_failure"))
+    if runner_failure:
+        compact["runner_failure"] = runner_failure
 
-    fingerprint = source.get("runner_failure_fingerprint")
-    if isinstance(fingerprint, dict):
-        compact_fingerprint: dict[str, Any] = {}
-        for field in (
-            "schema_version",
-            "error_len_bucket",
-            "fingerprint_confidence",
-            "apt_failure_subtype",
-            "pip_failure_subtype",
-            "retryability",
-        ):
-            value = public_safe_compact_text(fingerprint.get(field), limit=100)
-            if value:
-                compact_fingerprint[field] = value
-        line_count = fingerprint.get("line_count")
-        if isinstance(line_count, int) and not isinstance(line_count, bool):
-            compact_fingerprint["line_count"] = line_count
-        for field, limit in (
-            ("matched_patterns", MAX_BENCHMARK_RUN_LIST_ITEMS * 4),
-            ("failure_line_dependency_classes", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            ("failure_reason_codes", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            (
-                "terminal_failure_dependency_classes",
-                MAX_BENCHMARK_RUN_LIST_ITEMS * 2,
-            ),
-            ("terminal_failure_reason_codes", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            ("failure_dependency_endpoints", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            (
-                "terminal_failure_dependency_endpoints",
-                MAX_BENCHMARK_RUN_LIST_ITEMS * 2,
-            ),
-        ):
-            values = public_safe_compact_list(fingerprint.get(field), limit=limit)
-            if values:
-                compact_fingerprint[field] = values
-        for field in (
-            "error_present",
-            "has_host_paths",
-            "has_urls",
-            "has_secret_like_tokens",
-            "raw_error_recorded",
-        ):
-            if isinstance(fingerprint.get(field), bool):
-                compact_fingerprint[field] = fingerprint[field]
-        if compact_fingerprint:
-            compact["runner_failure_fingerprint"] = compact_fingerprint
+    fingerprint = _compact_benchmark_runner_failure_fingerprint(
+        source.get("runner_failure_fingerprint"),
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
+    if fingerprint:
+        compact["runner_failure_fingerprint"] = fingerprint
 
     compose_setup_diagnostic = _compact_benchmark_compose_setup_diagnostic(
         source.get("compose_setup_diagnostic")

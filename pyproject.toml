@@ -42,6 +42,7 @@ python_version = "3.11"
 strict = true
 files = [
   "loopx/claude_goal_baseline.py",
+  "loopx/benchmarks/read_models/benchmark_run_failure.py",
   "loopx/control_plane/__init__.py",
   "loopx/control_plane/quota/states.py",
   "loopx/control_plane/runtime/active_user_assisted_pilot.py",
