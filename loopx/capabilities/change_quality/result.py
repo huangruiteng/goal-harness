@@ -291,6 +291,58 @@ def _validate_evidence_targets(
             raise ValueError(f"{field} references unknown evidence: {evidence_ref}")
 
 
+def _normalize_simplification_result(
+    value: Any,
+    *,
+    safe_fix_allowed: bool,
+) -> dict[str, Any]:
+    simplification = _normalize_conclusion(
+        value,
+        field="simplification",
+        allowed_outcomes=SIMPLIFICATION_OUTCOMES,
+    )
+    safe_fix_applied = bool(
+        isinstance(value, dict) and value.get("safe_fix_applied") is True
+    )
+    if safe_fix_applied and not safe_fix_allowed:
+        raise ValueError(
+            "result reports simplification.safe_fix_applied but goal policy "
+            "forbids safe fixes"
+        )
+    if safe_fix_applied != (simplification["outcome"] == "fixed"):
+        raise ValueError(
+            "simplification.outcome=fixed and safe_fix_applied=true must agree"
+        )
+    simplification["safe_fix_applied"] = safe_fix_applied
+    return simplification
+
+
+def _normalize_risks(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("risks must be an array")
+    if len(value) > 20:
+        raise ValueError("risks supports at most 20 items")
+    risks = [_normalize_risk(item, index=index) for index, item in enumerate(value)]
+    risk_codes = [item["code"] for item in risks]
+    if len(set(risk_codes)) != len(risk_codes):
+        raise ValueError("risk codes must be unique")
+    return risks
+
+
+def _normalize_validations(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("validation must contain at least one item")
+    if len(value) > 20:
+        raise ValueError("validation supports at most 20 items")
+    validation = [
+        _normalize_validation(item, index=index) for index, item in enumerate(value)
+    ]
+    validator_ids = [item["validator"] for item in validation]
+    if len(set(validator_ids)) != len(validator_ids):
+        raise ValueError("validation validator ids must be unique")
+    return validation
+
+
 def normalize_change_quality_result(
     value: Any,
     *,
@@ -331,73 +383,33 @@ def normalize_change_quality_result(
         field="reuse",
         allowed_outcomes=REUSE_OUTCOMES,
     )
-    simplification = _normalize_conclusion(
+    simplification = _normalize_simplification_result(
         value.get("simplification"),
-        field="simplification",
-        allowed_outcomes=SIMPLIFICATION_OUTCOMES,
+        safe_fix_allowed=safe_fix_allowed,
     )
-    safe_fix_applied = bool(
-        isinstance(value.get("simplification"), dict)
-        and value["simplification"].get("safe_fix_applied") is True
-    )
-    if safe_fix_applied and not safe_fix_allowed:
-        raise ValueError(
-            "result reports simplification.safe_fix_applied but goal policy "
-            "forbids safe fixes"
-        )
-    if safe_fix_applied != (simplification["outcome"] == "fixed"):
-        raise ValueError(
-            "simplification.outcome=fixed and safe_fix_applied=true must agree"
-        )
-    simplification["safe_fix_applied"] = safe_fix_applied
-
-    raw_risks = value.get("risks")
-    if not isinstance(raw_risks, list):
-        raise ValueError("risks must be an array")
-    if len(raw_risks) > 20:
-        raise ValueError("risks supports at most 20 items")
-    risks = [_normalize_risk(item, index=index) for index, item in enumerate(raw_risks)]
-    risk_codes = [item["code"] for item in risks]
-    if len(set(risk_codes)) != len(risk_codes):
-        raise ValueError("risk codes must be unique")
-
-    raw_validation = value.get("validation")
-    if not isinstance(raw_validation, list) or not raw_validation:
-        raise ValueError("validation must contain at least one item")
-    if len(raw_validation) > 20:
-        raise ValueError("validation supports at most 20 items")
-    validation = [
-        _normalize_validation(item, index=index)
-        for index, item in enumerate(raw_validation)
-    ]
-    validator_ids = [item["validator"] for item in validation]
-    if len(set(validator_ids)) != len(validator_ids):
-        raise ValueError("validation validator ids must be unique")
-
+    risks = _normalize_risks(value.get("risks"))
+    validation = _normalize_validations(value.get("validation"))
     changed_files = set(expected_changed_files or [])
     instruction_refs = set(expected_instruction_refs or [])
-    validators = set(validator_ids)
-    _validate_evidence_targets(
-        reuse["evidence_refs"],
-        field="reuse",
-        changed_files=changed_files,
-        instruction_refs=instruction_refs,
-        validator_ids=validators,
-    )
-    _validate_evidence_targets(
-        simplification["evidence_refs"],
-        field="simplification",
-        changed_files=changed_files,
-        instruction_refs=instruction_refs,
-        validator_ids=validators,
-    )
+    validator_ids = {item["validator"] for item in validation}
+    for field, conclusion in (
+        ("reuse", reuse),
+        ("simplification", simplification),
+    ):
+        _validate_evidence_targets(
+            conclusion["evidence_refs"],
+            field=field,
+            changed_files=changed_files,
+            instruction_refs=instruction_refs,
+            validator_ids=validator_ids,
+        )
     for index, risk in enumerate(risks):
         _validate_evidence_targets(
             risk["evidence_refs"],
             field=f"risks[{index}]",
             changed_files=changed_files,
             instruction_refs=instruction_refs,
-            validator_ids=validators,
+            validator_ids=validator_ids,
         )
         if (
             "path" in risk
