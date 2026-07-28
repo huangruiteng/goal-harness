@@ -8,6 +8,9 @@ from loopx.benchmarks.read_models.benchmark_projection import (
     compact_benchmark_run_trials,
     compact_benchmark_run_validation,
 )
+from loopx.benchmarks.read_models.benchmark_run_execution_contract import (
+    compact_benchmark_run_execution_contract,
+)
 from loopx.status import compact_benchmark_run
 
 
@@ -155,3 +158,95 @@ def test_status_facade_uses_benchmark_validation_and_trial_read_models() -> None
         }
     ]
     assert compact["trial_count"] == 1
+
+
+def test_status_facade_compacts_benchmark_execution_contract_metadata() -> None:
+    source = {
+        "schema_version": "benchmark_run_v0",
+        "benchmark_loop_contract": {
+            "schema_version": "benchmark_loop_contract_v0",
+            "route": "native-goal-worker",
+            "protocol_id": "protocol-1",
+            "claim_blocker": "official feedback remains blinded",
+            "official_feedback_forwarded": False,
+            "official_feedback_blinded": True,
+            "blind_loop": True,
+            "product_mode": True,
+            "strict_treatment_claim_allowed": False,
+            "max_rounds_budget": 3,
+            "private_note": "drop",
+        },
+        "claim_boundary": {
+            "public_claim_allowed": "connectivity only",
+            "bridge_connectivity_claim_allowed": True,
+            "case_success_claim_allowed": False,
+            "official_score_claim_allowed": False,
+            "leaderboard_claim_allowed": False,
+            "forbidden_claims": [f"claim-{index}" for index in range(9)],
+            "private_note": "drop",
+        },
+        "agent": {
+            "name": "loopx-agent",
+            "import_path": "loopx.agent:Agent",
+            "model": "model-1",
+            "kwargs_keys": [f"key-{index}" for index in range(9)],
+            "private_note": "drop",
+        },
+        "model_control": {
+            "schema_version": "model_control_v0",
+            "requested_model": "model-1",
+            "reported_model": "model-1",
+            "control_method": "explicit",
+            "control_status": "verified",
+            "actual_model_source": "runner",
+            "actual_model_verified": True,
+            "warning_labels": [f"warning-{index}" for index in range(9)],
+            "private_note": "drop",
+        },
+    }
+
+    expected = {
+        "benchmark_loop_contract": {
+            "schema_version": "benchmark_loop_contract_v0",
+            "route": "native-goal-worker",
+            "protocol_id": "protocol-1",
+            "claim_blocker": "official feedback remains blinded",
+            "official_feedback_forwarded": False,
+            "official_feedback_blinded": True,
+            "blind_loop": True,
+            "product_mode": True,
+            "strict_treatment_claim_allowed": False,
+            "max_rounds_budget": 3,
+        },
+        "claim_boundary": {
+            "public_claim_allowed": "connectivity only",
+            "bridge_connectivity_claim_allowed": True,
+            "case_success_claim_allowed": False,
+            "official_score_claim_allowed": False,
+            "leaderboard_claim_allowed": False,
+            "forbidden_claims": [f"claim-{index}" for index in range(5)],
+        },
+        "agent": {
+            "name": "loopx-agent",
+            "import_path": "loopx.agent:Agent",
+            "model": "model-1",
+            "kwargs_keys": [f"key-{index}" for index in range(5)],
+        },
+        "model_control": {
+            "schema_version": "model_control_v0",
+            "requested_model": "model-1",
+            "reported_model": "model-1",
+            "control_method": "explicit",
+            "control_status": "verified",
+            "actual_model_source": "runner",
+            "actual_model_verified": True,
+            "warning_labels": [f"warning-{index}" for index in range(5)],
+        },
+    }
+
+    assert (
+        compact_benchmark_run_execution_contract(source, max_list_items=5) == expected
+    )
+    compact = compact_benchmark_run(source)
+    assert compact is not None
+    assert {key: compact[key] for key in expected} == expected

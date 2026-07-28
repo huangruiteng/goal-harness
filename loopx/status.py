@@ -204,6 +204,9 @@ from .benchmarks.read_models.benchmark_run_failure import (
     compact_benchmark_runner_failure as _compact_benchmark_runner_failure,
     compact_benchmark_runner_failure_fingerprint as _compact_benchmark_runner_failure_fingerprint,
 )
+from .benchmarks.read_models.benchmark_run_execution_contract import (
+    compact_benchmark_run_execution_contract as _compact_benchmark_run_execution_contract,
+)
 from .benchmarks.read_models.goal_start_control_score import (
     compact_goal_start_product_mode_control_score,
 )
@@ -2775,36 +2778,12 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         schema_version=BENCHMARK_RUN_SCHEMA_VERSION,
         max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    loop_contract = source.get("benchmark_loop_contract")
-    if isinstance(loop_contract, dict):
-        compact_loop_contract: dict[str, Any] = {}
-        for field in (
-            "schema_version",
-            "route",
-            "protocol_id",
-            "claim_blocker",
-        ):
-            value = public_safe_compact_text(loop_contract.get(field), limit=120)
-            if value:
-                compact_loop_contract[field] = value
-        for field in (
-            "official_feedback_forwarded",
-            "official_feedback_blinded",
-            "blind_loop",
-            "product_mode",
-            "strict_treatment_claim_allowed",
-        ):
-            if isinstance(loop_contract.get(field), bool):
-                compact_loop_contract[field] = loop_contract[field]
-        if isinstance(loop_contract.get("max_rounds_budget"), int) and not isinstance(
-            loop_contract.get("max_rounds_budget"),
-            bool,
-        ):
-            compact_loop_contract["max_rounds_budget"] = loop_contract[
-                "max_rounds_budget"
-            ]
-        if compact_loop_contract:
-            compact["benchmark_loop_contract"] = compact_loop_contract
+    compact.update(
+        _compact_benchmark_run_execution_contract(
+            source,
+            max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
+        )
+    )
     if isinstance(source.get("official_score"), (int, float)) and not isinstance(
         source.get("official_score"),
         bool,
@@ -2868,71 +2847,6 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
                 compact_official[field] = official.get(field)
         if compact_official:
             compact["official_task_score"] = compact_official
-
-    claim_boundary = source.get("claim_boundary")
-    if isinstance(claim_boundary, dict):
-        compact_claim_boundary: dict[str, Any] = {}
-        allowed = public_safe_compact_text(
-            claim_boundary.get("public_claim_allowed"),
-            limit=180,
-        )
-        if allowed:
-            compact_claim_boundary["public_claim_allowed"] = allowed
-        for field in (
-            "bridge_connectivity_claim_allowed",
-            "case_success_claim_allowed",
-            "official_score_claim_allowed",
-            "leaderboard_claim_allowed",
-        ):
-            if isinstance(claim_boundary.get(field), bool):
-                compact_claim_boundary[field] = claim_boundary[field]
-        forbidden = public_safe_compact_list(
-            claim_boundary.get("forbidden_claims"),
-            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
-        if forbidden:
-            compact_claim_boundary["forbidden_claims"] = forbidden
-        if compact_claim_boundary:
-            compact["claim_boundary"] = compact_claim_boundary
-
-    agent = source.get("agent") if isinstance(source.get("agent"), dict) else {}
-    compact_agent: dict[str, Any] = {}
-    for field in ("name", "import_path", "model"):
-        value = public_safe_compact_text(agent.get(field), limit=120)
-        if value:
-            compact_agent[field] = value
-    kwargs_keys = public_safe_compact_list(agent.get("kwargs_keys"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
-    if kwargs_keys:
-        compact_agent["kwargs_keys"] = kwargs_keys
-    if compact_agent:
-        compact["agent"] = compact_agent
-
-    model_control = source.get("model_control")
-    if isinstance(model_control, dict):
-        compact_model_control: dict[str, Any] = {}
-        for field in (
-            "schema_version",
-            "requested_model",
-            "reported_model",
-            "control_method",
-            "control_status",
-            "actual_model_source",
-        ):
-            value = public_safe_compact_text(model_control.get(field), limit=140)
-            if value:
-                compact_model_control[field] = value
-        if isinstance(model_control.get("actual_model_verified"), bool):
-            compact_model_control["actual_model_verified"] = model_control[
-                "actual_model_verified"
-            ]
-        warning_labels = public_safe_compact_list(
-            model_control.get("warning_labels"),
-            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
-        if warning_labels:
-            compact_model_control["warning_labels"] = warning_labels
-        if compact_model_control:
-            compact["model_control"] = compact_model_control
 
     runner_failure = _compact_benchmark_runner_failure(source.get("runner_failure"))
     if runner_failure:

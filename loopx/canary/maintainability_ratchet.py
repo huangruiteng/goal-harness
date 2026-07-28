@@ -58,8 +58,8 @@ _OVERSIZED_DECISION_RETIREMENT_PLANS = {
 
 _OVERSIZED_DECISION_METRIC_CEILINGS = {
     "loopx.status:compact_benchmark_run": {
-        "statements": 201,
-        "decision_points": 78,
+        "statements": 149,
+        "decision_points": 53,
     },
     "loopx.quota:build_quota_should_run": {
         "statements": 366,
