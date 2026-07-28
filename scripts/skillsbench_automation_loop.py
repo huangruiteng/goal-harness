@@ -2374,6 +2374,22 @@ def _host_local_acp_codex_exec_preflight_bridge_success_observed(
     return action_count > 0 and successful_action_count > 0
 
 
+def _host_local_acp_codex_exec_preflight_retry_allowed(
+    *,
+    category: str,
+    bridge_summary: dict[str, Any],
+) -> bool:
+    if category == "codex_reverse_channel_unavailable":
+        return True
+    return bool(
+        category == "codex_exec_first_action_timeout"
+        and int(bridge_summary.get("request_count") or 0) == 0
+        and int(bridge_summary.get("preflight_operation_count") or 0) == 0
+        and int(bridge_summary.get("task_facing_operation_count") or 0) == 0
+        and bridge_summary.get("raw_material_recorded") is False
+    )
+
+
 def _first_bridge_failure_category(bridge_summary: dict[str, Any]) -> str:
     counts = bridge_summary.get("failure_category_counts")
     if isinstance(counts, dict):
@@ -2460,6 +2476,7 @@ def _run_host_local_acp_codex_exec_preflight(
     )
     for attempt in range(1, attempts + 1):
         prerequisites["host_local_acp_codex_exec_preflight_attempt_count"] = attempt
+        prerequisites.pop("host_local_acp_codex_exec_failure_category", None)
         if preflight_trace_dir:
             preflight_trace_dir.mkdir(parents=True, exist_ok=True)
             for trace_file in preflight_trace_dir.glob("*.compact.json"):
@@ -2588,9 +2605,9 @@ def _run_host_local_acp_codex_exec_preflight(
         category = str(
             prerequisites.get("host_local_acp_codex_exec_failure_category") or ""
         )
-        if (
-            category == "codex_reverse_channel_unavailable"
-            and attempt < attempts
+        if attempt < attempts and _host_local_acp_codex_exec_preflight_retry_allowed(
+            category=category,
+            bridge_summary=bridge_summary,
         ):
             time.sleep(2.0)
             continue

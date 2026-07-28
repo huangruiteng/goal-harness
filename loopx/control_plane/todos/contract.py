@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, unquote
 
 from ...repository_identity import normalize_repository_identity
@@ -11,7 +12,9 @@ from ...repository_identity import normalize_repository_identity
 
 TODO_TASK_PATTERN = re.compile(r"^\s*[-*]\s+\[([ xX-])\]\s+(.+?)\s*$")
 TODO_METADATA_PATTERN = re.compile(r"^\s*<!--\s*loopx:(?:todo\s+)?(?P<body>.*?)\s*-->\s*$")
-TODO_METADATA_TOKEN_PATTERN = re.compile(r"(?P<key>[a-z_][a-z0-9_-]*)=(?P<value>[^\s<>]+)")
+TODO_METADATA_TOKEN_PATTERN = re.compile(
+    r"(?<!\S)(?P<key>[a-z_][a-z0-9_]*)=(?P<value>[^\s<>]+)"
+)
 TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
 TODO_AGENT_CLAIM_PATTERN = re.compile(r"^[a-z][a-z0-9_.:@-]{0,79}$")
@@ -42,16 +45,6 @@ TODO_MONITOR_METADATA_FIELDS = (
     "consecutive_no_change",
     "material_change",
     "max_no_change_before_replan",
-)
-TODO_METADATA_FIELDS = (
-    "todo_id", "status", "task_class", "action_kind", "continuation_policy",
-    "task_repository", "required_write_scopes", "required_capabilities", "target_capabilities",
-    "explore_result_node_refs",
-    "decision_scope", "required_decision_scopes", "decision_outcome",
-    "decision_scope_outcomes", "claimed_by", "bound_agent", "goal_bound",
-    "blocks_agent", "excluded_agents", "global_gate", "unblocks_todo_id", "successor_todo_ids",
-    "resume_when", "no_followup", *TODO_MONITOR_METADATA_FIELDS, "note", "evidence",
-    "reason", "completed_at", "updated_at", "superseded_by",
 )
 
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
@@ -765,11 +758,316 @@ def parse_todo_metadata_tokens(line: str) -> list[tuple[str, str]] | None:
         return None
     return [
         (
-            token.group("key").replace("-", "_"),
+            token.group("key"),
             decode_metadata_value(token.group("value")),
         )
         for token in TODO_METADATA_TOKEN_PATTERN.finditer(match.group("body"))
     ]
+
+
+MetadataValueNormalizer = Callable[[Any], Any]
+MetadataValueEncoder = Callable[[Any], str | None]
+MetadataInvalidPredicate = Callable[[Any], bool]
+
+
+def _truthy_value(value: Any) -> Any:
+    return value if value else None
+
+
+def _nonempty_metadata_text(value: Any) -> str | None:
+    text = compact_todo_text(value)
+    return text or None
+
+
+def _optional_output_bool(value: Any) -> bool | None:
+    return None if value is None else bool(value)
+
+
+def _metadata_bool_text(value: Any) -> str:
+    return "true" if value else "false"
+
+
+def _metadata_csv(value: Any) -> str:
+    return ",".join(str(item) for item in value)
+
+
+def _normalize_optional_decision_scope_for_write(value: Any) -> dict[str, str] | None:
+    return None if value is None else require_todo_decision_scope(value)
+
+
+def _normalize_optional_required_decision_scopes_for_write(
+    value: Any,
+) -> list[dict[str, str]]:
+    return [] if value is None else require_todo_required_decision_scopes(value)
+
+
+@dataclass(frozen=True)
+class _TodoMetadataField:
+    key: str
+    read_normalizer: MetadataValueNormalizer
+    write_normalizer: MetadataValueNormalizer | None = None
+    encoder: MetadataValueEncoder = str
+    invalid_when: MetadataInvalidPredicate = bool
+    invalid_message: str | None = None
+    read_fallback_key: str | None = None
+    read_fallback_normalizer: MetadataValueNormalizer | None = None
+    block_field: bool = True
+
+    def normalize_for_write(self, value: Any) -> Any:
+        normalizer = self.write_normalizer or self.read_normalizer
+        normalized = normalizer(value)
+        if (
+            self.invalid_message
+            and self.invalid_when(value)
+            and not _metadata_value_is_present(normalized)
+        ):
+            raise ValueError(self.invalid_message)
+        return normalized
+
+
+def _metadata_value_is_present(value: Any) -> bool:
+    return value is not None and value != "" and value != []
+
+
+_TODO_METADATA_FIELD_SCHEMA = (
+    _TodoMetadataField(
+        "todo_id",
+        normalize_todo_id,
+        invalid_message=(
+            "todo_id must use the public token shape "
+            "todo_<letters-digits-underscore-hyphen>"
+        ),
+    ),
+    _TodoMetadataField(
+        "status",
+        normalize_todo_status,
+        invalid_message=(
+            "todo status must be one of: " + ", ".join(sorted(TODO_STATUS_VALUES))
+        ),
+    ),
+    _TodoMetadataField(
+        "task_class",
+        normalize_explicit_todo_task_class,
+        invalid_message=(
+            "todo task_class must be one of: "
+            + ", ".join(sorted(TODO_TASK_CLASS_VALUES))
+        ),
+    ),
+    _TodoMetadataField(
+        "action_kind",
+        normalize_todo_action_kind,
+        invalid_message=(
+            "todo action_kind must be a public-safe token: lowercase letters, "
+            "digits, '_' or '-'"
+        ),
+    ),
+    _TodoMetadataField(
+        "task_repository",
+        normalize_todo_task_repository,
+        invalid_message=(
+            "todo task_repository must be a credential-free Git remote or canonical "
+            "git:<host>/<path> identity"
+        ),
+    ),
+    _TodoMetadataField(
+        "continuation_policy",
+        normalize_todo_continuation_policy,
+        invalid_message=(
+            "todo continuation_policy must be one of: "
+            + ", ".join(sorted(TODO_CONTINUATION_POLICY_VALUES))
+        ),
+        read_fallback_key="removed_continuation_policy",
+        read_fallback_normalizer=normalize_removed_todo_continuation_policy,
+    ),
+    _TodoMetadataField(
+        "removed_continuation_policy",
+        normalize_removed_todo_continuation_policy,
+        invalid_message=(
+            "removed_continuation_policy must be one of: "
+            + ", ".join(sorted(TODO_REMOVED_REVIEW_CONTINUATION_POLICY_VALUES))
+        ),
+        block_field=False,
+    ),
+    _TodoMetadataField(
+        "required_write_scopes",
+        normalize_required_write_scopes,
+        encoder=_metadata_csv,
+        invalid_message=(
+            "required_write_scopes must contain public-safe relative scope tokens"
+        ),
+    ),
+    _TodoMetadataField(
+        "required_capabilities",
+        normalize_required_capabilities,
+        encoder=_metadata_csv,
+        invalid_message=(
+            "required_capabilities must contain public-safe capability tokens"
+        ),
+    ),
+    _TodoMetadataField(
+        "target_capabilities",
+        normalize_target_capabilities,
+        encoder=_metadata_csv,
+        invalid_message=(
+            "target_capabilities must contain public-safe capability tokens"
+        ),
+    ),
+    _TodoMetadataField(
+        "explore_result_node_refs",
+        normalize_explore_result_node_refs,
+        encoder=_metadata_csv,
+        invalid_message=(
+            "explore_result_node_refs must contain public-safe Explore node ids"
+        ),
+    ),
+    _TodoMetadataField(
+        "decision_scope",
+        normalize_todo_decision_scope,
+        write_normalizer=_normalize_optional_decision_scope_for_write,
+        encoder=decision_scope_metadata_value,
+        invalid_when=lambda value: value is not None,
+    ),
+    _TodoMetadataField(
+        "required_decision_scopes",
+        normalize_todo_required_decision_scopes,
+        write_normalizer=_normalize_optional_required_decision_scopes_for_write,
+        encoder=required_decision_scopes_metadata_value,
+    ),
+    _TodoMetadataField(
+        "decision_outcome",
+        normalize_todo_decision_outcome,
+        invalid_message=(
+            "decision_outcome must be one of: "
+            + ", ".join(sorted(TODO_DECISION_OUTCOME_VALUES))
+        ),
+    ),
+    _TodoMetadataField(
+        "decision_scope_outcomes",
+        normalize_todo_decision_scope_outcomes,
+        encoder=decision_scope_outcomes_metadata_value,
+        invalid_message=(
+            "decision_scope_outcomes must contain outcome, decision_scope, and "
+            "source_todo_id"
+        ),
+    ),
+    _TodoMetadataField(
+        "claimed_by",
+        normalize_todo_claimed_by,
+        invalid_message=(
+            "claimed_by must be a public-safe agent token such as codex-main-control"
+        ),
+    ),
+    _TodoMetadataField(
+        "bound_agent",
+        normalize_todo_bound_agent,
+        invalid_message=(
+            "bound_agent must be a public-safe agent token such as codex-main-control"
+        ),
+    ),
+    _TodoMetadataField(
+        "goal_bound",
+        normalize_todo_goal_bound,
+        write_normalizer=_optional_output_bool,
+        encoder=_metadata_bool_text,
+        invalid_when=lambda value: value is not None,
+    ),
+    _TodoMetadataField(
+        "blocks_agent",
+        normalize_todo_blocks_agent,
+        invalid_message=(
+            "blocks_agent must be a public-safe agent token such as codex-side-bypass"
+        ),
+    ),
+    _TodoMetadataField(
+        "excluded_agents",
+        normalize_todo_excluded_agents,
+        write_normalizer=require_todo_excluded_agents,
+        encoder=_metadata_csv,
+    ),
+    _TodoMetadataField(
+        "global_gate",
+        normalize_todo_global_gate,
+        write_normalizer=_optional_output_bool,
+        encoder=_metadata_bool_text,
+        invalid_when=lambda value: value is not None,
+    ),
+    _TodoMetadataField(
+        "unblocks_todo_id",
+        normalize_todo_id,
+        invalid_message=(
+            "unblocks_todo_id must use the public token shape "
+            "todo_<letters-digits-underscore-hyphen>"
+        ),
+    ),
+    _TodoMetadataField(
+        "successor_todo_ids",
+        normalize_todo_id_list,
+        encoder=_metadata_csv,
+        invalid_message=(
+            "successor_todo_ids must contain public "
+            "todo_<letters-digits-underscore-hyphen> tokens"
+        ),
+    ),
+    _TodoMetadataField(
+        "resume_when",
+        normalize_todo_resume_when,
+        invalid_message=(
+            "resume_when must be public-safe, e.g. "
+            "todo_done:todo_ab12cd34ef56 or pr_merged:#532"
+        ),
+    ),
+    _TodoMetadataField(
+        "no_followup",
+        normalize_todo_no_followup,
+        write_normalizer=_optional_output_bool,
+        encoder=_metadata_bool_text,
+        invalid_when=lambda value: value is not None,
+    ),
+    *(
+        _TodoMetadataField(
+            key,
+            _nonempty_metadata_text,
+            write_normalizer=_truthy_value,
+        )
+        for key in TODO_MONITOR_METADATA_FIELDS
+    ),
+    *(
+        _TodoMetadataField(
+            key,
+            _nonempty_metadata_text,
+            write_normalizer=_truthy_value,
+        )
+        for key in ("note", "evidence", "reason", "completed_at", "updated_at")
+    ),
+    _TodoMetadataField(
+        "superseded_by",
+        normalize_todo_id,
+        invalid_message=(
+            "superseded_by must use the public token shape "
+            "todo_<letters-digits-underscore-hyphen>"
+        ),
+    ),
+)
+
+_TODO_METADATA_FIELD_BY_TOKEN = {
+    field.key: field for field in _TODO_METADATA_FIELD_SCHEMA
+}
+
+
+def _todo_metadata_block_fields() -> tuple[str, ...]:
+    fields = [
+        field.key for field in _TODO_METADATA_FIELD_SCHEMA if field.block_field
+    ]
+    repository_index = fields.index("task_repository")
+    continuation_index = fields.index("continuation_policy")
+    fields[repository_index], fields[continuation_index] = (
+        fields[continuation_index],
+        fields[repository_index],
+    )
+    return tuple(fields)
+
+
+TODO_METADATA_FIELDS = _todo_metadata_block_fields()
 
 
 def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
@@ -778,121 +1076,58 @@ def parse_todo_metadata_line(line: str) -> dict[str, Any] | None:
         return None
     metadata: dict[str, Any] = {}
     for key, value in tokens:
-        if key == "todo_id":
-            todo_id = normalize_todo_id(value)
-            if todo_id:
-                metadata["todo_id"] = todo_id
-        elif key == "status":
-            status = normalize_todo_status(value)
-            if status:
-                metadata["status"] = status
-        elif key == "task_class":
-            task_class = normalize_explicit_todo_task_class(value)
-            if task_class:
-                metadata["task_class"] = task_class
-        elif key == "action_kind":
-            action_kind = normalize_todo_action_kind(value)
-            if action_kind:
-                metadata["action_kind"] = action_kind
-        elif key == "task_repository":
-            task_repository = normalize_todo_task_repository(value)
-            if task_repository:
-                metadata["task_repository"] = task_repository
-        elif key == "continuation_policy":
-            continuation_policy = normalize_todo_continuation_policy(value)
-            if continuation_policy:
-                metadata["continuation_policy"] = continuation_policy
-            else:
-                removed_policy = normalize_removed_todo_continuation_policy(value)
-                if removed_policy:
-                    metadata["removed_continuation_policy"] = removed_policy
-        elif key == "removed_continuation_policy":
-            removed_policy = normalize_removed_todo_continuation_policy(value)
-            if removed_policy:
-                metadata["removed_continuation_policy"] = removed_policy
-        elif key in {"required_write_scope", "required_write_scopes"}:
-            scopes = normalize_required_write_scopes(value)
-            if scopes:
-                metadata["required_write_scopes"] = scopes
-        elif key in {"required_capability", "required_capabilities"}:
-            capabilities = normalize_required_capabilities(value)
-            if capabilities:
-                metadata["required_capabilities"] = capabilities
-        elif key in {"target_capability", "target_capabilities"}:
-            capabilities = normalize_target_capabilities(value)
-            if capabilities:
-                metadata["target_capabilities"] = capabilities
-        elif key in {"explore_result_node_ref", "explore_result_node_refs"}:
-            refs = normalize_explore_result_node_refs(value)
-            if refs:
-                metadata["explore_result_node_refs"] = refs
-        elif key == "decision_scope":
-            decision_scope = normalize_todo_decision_scope(value)
-            if decision_scope:
-                metadata["decision_scope"] = decision_scope
-        elif key in {"required_decision_scope", "required_decision_scopes"}:
-            decision_scopes = normalize_todo_required_decision_scopes(value)
-            if decision_scopes:
-                metadata["required_decision_scopes"] = decision_scopes
-        elif key == "decision_outcome":
-            outcome = normalize_todo_decision_outcome(value)
-            if outcome:
-                metadata["decision_outcome"] = outcome
-        elif key == "decision_scope_outcomes":
-            outcomes = normalize_todo_decision_scope_outcomes(value)
-            if outcomes:
-                metadata["decision_scope_outcomes"] = outcomes
-        elif key == "claimed_by":
-            claimed_by = normalize_todo_claimed_by(value)
-            if claimed_by:
-                metadata["claimed_by"] = claimed_by
-        elif key == "bound_agent":
-            bound_agent = normalize_todo_bound_agent(value)
-            if bound_agent:
-                metadata["bound_agent"] = bound_agent
-        elif key == "goal_bound":
-            goal_bound = normalize_todo_goal_bound(value)
-            if goal_bound is not None:
-                metadata["goal_bound"] = goal_bound
-        elif key == "blocks_agent":
-            blocks_agent = normalize_todo_blocks_agent(value)
-            if blocks_agent:
-                metadata["blocks_agent"] = blocks_agent
-        elif key in {"excluded_agent", "excluded_agents"}:
-            excluded_agents = normalize_todo_excluded_agents(value)
-            if excluded_agents:
-                metadata["excluded_agents"] = excluded_agents
-        elif key == "global_gate":
-            global_gate = normalize_todo_global_gate(value)
-            if global_gate is not None:
-                metadata["global_gate"] = global_gate
-        elif key == "unblocks_todo_id":
-            todo_id = normalize_todo_id(value)
-            if todo_id:
-                metadata["unblocks_todo_id"] = todo_id
-        elif key in {"successor_todo_id", "successor_todo_ids"}:
-            todo_ids = normalize_todo_id_list(value)
-            if todo_ids:
-                metadata["successor_todo_ids"] = todo_ids
-        elif key == "resume_when":
-            resume_when = normalize_todo_resume_when(value)
-            if resume_when:
-                metadata["resume_when"] = resume_when
-        elif key == "no_followup":
-            no_followup = normalize_todo_no_followup(value)
-            if no_followup is not None:
-                metadata["no_followup"] = no_followup
-        elif key in TODO_MONITOR_METADATA_FIELDS:
-            if value:
-                metadata[key] = value
-        elif key in {"note", "evidence", "reason", "completed_at", "updated_at"}:
-            if value:
-                metadata[key] = value
-        elif key == "superseded_by":
-            todo_id = normalize_todo_id(value)
-            if todo_id:
-                metadata["superseded_by"] = todo_id
+        field = _TODO_METADATA_FIELD_BY_TOKEN.get(key)
+        if field is None:
+            continue
+        normalized = field.read_normalizer(value)
+        output_key = field.key
+        if (
+            not _metadata_value_is_present(normalized)
+            and field.read_fallback_key
+            and field.read_fallback_normalizer
+        ):
+            normalized = field.read_fallback_normalizer(value)
+            output_key = field.read_fallback_key
+        if _metadata_value_is_present(normalized):
+            metadata[output_key] = normalized
     return metadata or None
+
+
+def _normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for field in _TODO_METADATA_FIELD_SCHEMA:
+        value = field.normalize_for_write(values.get(field.key))
+        if _metadata_value_is_present(value):
+            normalized[field.key] = value
+        if field.key == "removed_continuation_policy" and {
+            "continuation_policy",
+            "removed_continuation_policy",
+        }.issubset(normalized):
+            raise ValueError(
+                "continuation_policy and removed_continuation_policy are mutually exclusive"
+            )
+        if (
+            field.key == "excluded_agents"
+            and normalized.get("claimed_by")
+            and normalized["claimed_by"] in normalized.get("excluded_agents", [])
+        ):
+            raise ValueError(
+                f"claimed_by={normalized['claimed_by']!r} cannot also appear in "
+                "excluded_agents"
+            )
+    return normalized
+
+
+def _format_todo_metadata_values(values: dict[str, Any]) -> str | None:
+    normalized = _normalize_todo_metadata_for_write(values)
+    fields = [
+        f"{field.key}={encode_metadata_value(field.encoder(normalized[field.key]))}"
+        for field in _TODO_METADATA_FIELD_SCHEMA
+        if field.key in normalized
+    ]
+    if not fields:
+        return None
+    return f"  <!-- loopx:todo {' '.join(fields)} -->"
 
 
 def format_todo_metadata_line(
@@ -938,214 +1173,8 @@ def format_todo_metadata_line(
     updated_at: str | None = None,
     superseded_by: str | None = None,
 ) -> str | None:
-    fields: list[str] = []
-    normalized_todo_id = normalize_todo_id(todo_id)
-    if todo_id and not normalized_todo_id:
-        raise ValueError("todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
-    if normalized_todo_id:
-        fields.append(f"todo_id={encode_metadata_value(normalized_todo_id)}")
-    normalized_status = normalize_todo_status(status)
-    if status and not normalized_status:
-        raise ValueError(f"todo status must be one of: {', '.join(sorted(TODO_STATUS_VALUES))}")
-    if normalized_status:
-        fields.append(f"status={encode_metadata_value(normalized_status)}")
-    if task_class:
-        task_class = normalize_explicit_todo_task_class(task_class)
-        if not task_class:
-            raise ValueError(f"todo task_class must be one of: {', '.join(sorted(TODO_TASK_CLASS_VALUES))}")
-        fields.append(f"task_class={encode_metadata_value(task_class)}")
-    normalized_action_kind = normalize_todo_action_kind(action_kind)
-    if action_kind and not normalized_action_kind:
-        raise ValueError("todo action_kind must be a public-safe token: lowercase letters, digits, '_' or '-'")
-    if normalized_action_kind:
-        fields.append(f"action_kind={encode_metadata_value(normalized_action_kind)}")
-    normalized_task_repository = normalize_todo_task_repository(task_repository)
-    if task_repository and not normalized_task_repository:
-        raise ValueError(
-            "todo task_repository must be a credential-free Git remote or canonical "
-            "git:<host>/<path> identity"
-        )
-    if normalized_task_repository:
-        fields.append(
-            f"task_repository={encode_metadata_value(normalized_task_repository)}"
-        )
-    normalized_continuation_policy = normalize_todo_continuation_policy(
-        continuation_policy
-    )
-    if continuation_policy and not normalized_continuation_policy:
-        raise ValueError(
-            "todo continuation_policy must be one of: "
-            + ", ".join(sorted(TODO_CONTINUATION_POLICY_VALUES))
-        )
-    if normalized_continuation_policy:
-        fields.append(
-            "continuation_policy="
-            f"{encode_metadata_value(normalized_continuation_policy)}"
-        )
-    normalized_removed_continuation_policy = (
-        normalize_removed_todo_continuation_policy(removed_continuation_policy)
-    )
-    if removed_continuation_policy and not normalized_removed_continuation_policy:
-        raise ValueError(
-            "removed_continuation_policy must be one of: "
-            + ", ".join(sorted(TODO_REMOVED_REVIEW_CONTINUATION_POLICY_VALUES))
-        )
-    if normalized_continuation_policy and normalized_removed_continuation_policy:
-        raise ValueError(
-            "continuation_policy and removed_continuation_policy are mutually exclusive"
-        )
-    if normalized_removed_continuation_policy:
-        fields.append(
-            "removed_continuation_policy="
-            f"{encode_metadata_value(normalized_removed_continuation_policy)}"
-        )
-    normalized_write_scopes = normalize_required_write_scopes(required_write_scopes)
-    if required_write_scopes and not normalized_write_scopes:
-        raise ValueError("required_write_scopes must contain public-safe relative scope tokens")
-    if normalized_write_scopes:
-        fields.append(
-            "required_write_scopes="
-            f"{encode_metadata_value(','.join(normalized_write_scopes))}"
-        )
-    normalized_capabilities = normalize_required_capabilities(required_capabilities)
-    if required_capabilities and not normalized_capabilities:
-        raise ValueError("required_capabilities must contain public-safe capability tokens")
-    if normalized_capabilities:
-        fields.append(
-            "required_capabilities="
-            f"{encode_metadata_value(','.join(normalized_capabilities))}"
-        )
-    normalized_target_capabilities = normalize_target_capabilities(target_capabilities)
-    if target_capabilities and not normalized_target_capabilities:
-        raise ValueError("target_capabilities must contain public-safe capability tokens")
-    if normalized_target_capabilities:
-        fields.append(
-            "target_capabilities="
-            f"{encode_metadata_value(','.join(normalized_target_capabilities))}"
-        )
-    normalized_explore_result_node_refs = normalize_explore_result_node_refs(
-        explore_result_node_refs
-    )
-    if explore_result_node_refs and not normalized_explore_result_node_refs:
-        raise ValueError(
-            "explore_result_node_refs must contain public-safe Explore node ids"
-        )
-    if normalized_explore_result_node_refs:
-        fields.append(
-            "explore_result_node_refs="
-            f"{encode_metadata_value(','.join(normalized_explore_result_node_refs))}"
-        )
-    normalized_decision_scope = decision_scope_metadata_value(decision_scope)
-    if normalized_decision_scope:
-        fields.append(f"decision_scope={encode_metadata_value(normalized_decision_scope)}")
-    normalized_required_decision_scopes = required_decision_scopes_metadata_value(required_decision_scopes)
-    if normalized_required_decision_scopes:
-        fields.append(
-            "required_decision_scopes="
-            f"{encode_metadata_value(normalized_required_decision_scopes)}"
-        )
-    normalized_decision_outcome = normalize_todo_decision_outcome(decision_outcome)
-    if decision_outcome and not normalized_decision_outcome:
-        raise ValueError(
-            "decision_outcome must be one of: "
-            + ", ".join(sorted(TODO_DECISION_OUTCOME_VALUES))
-        )
-    if normalized_decision_outcome:
-        fields.append(
-            f"decision_outcome={encode_metadata_value(normalized_decision_outcome)}"
-        )
-    normalized_scope_outcomes = decision_scope_outcomes_metadata_value(
-        decision_scope_outcomes
-    )
-    if decision_scope_outcomes and not normalized_scope_outcomes:
-        raise ValueError(
-            "decision_scope_outcomes must contain outcome, decision_scope, and "
-            "source_todo_id"
-        )
-    if normalized_scope_outcomes:
-        fields.append(
-            "decision_scope_outcomes="
-            f"{encode_metadata_value(normalized_scope_outcomes)}"
-        )
-    normalized_claimed_by = normalize_todo_claimed_by(claimed_by)
-    if claimed_by and not normalized_claimed_by:
-        raise ValueError("claimed_by must be a public-safe agent token such as codex-main-control")
-    if normalized_claimed_by:
-        fields.append(f"claimed_by={encode_metadata_value(normalized_claimed_by)}")
-    normalized_bound_agent = normalize_todo_bound_agent(bound_agent)
-    if bound_agent and not normalized_bound_agent:
-        raise ValueError("bound_agent must be a public-safe agent token such as codex-main-control")
-    if normalized_bound_agent:
-        fields.append(f"bound_agent={encode_metadata_value(normalized_bound_agent)}")
-    if goal_bound is not None:
-        fields.append(f"goal_bound={encode_metadata_value('true' if goal_bound else 'false')}")
-    normalized_blocks_agent = normalize_todo_blocks_agent(blocks_agent)
-    if blocks_agent and not normalized_blocks_agent:
-        raise ValueError("blocks_agent must be a public-safe agent token such as codex-side-bypass")
-    if normalized_blocks_agent:
-        fields.append(f"blocks_agent={encode_metadata_value(normalized_blocks_agent)}")
-    normalized_excluded_agents = require_todo_excluded_agents(excluded_agents)
-    if normalized_claimed_by and normalized_claimed_by in normalized_excluded_agents:
-        raise ValueError(
-            f"claimed_by={normalized_claimed_by!r} cannot also appear in excluded_agents"
-        )
-    if normalized_excluded_agents:
-        fields.append(
-            "excluded_agents="
-            f"{encode_metadata_value(','.join(normalized_excluded_agents))}"
-        )
-    if global_gate is not None:
-        fields.append(f"global_gate={encode_metadata_value('true' if global_gate else 'false')}")
-    normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id)
-    if unblocks_todo_id and not normalized_unblocks_todo_id:
-        raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
-    if normalized_unblocks_todo_id:
-        fields.append(f"unblocks_todo_id={encode_metadata_value(normalized_unblocks_todo_id)}")
-    normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
-    if successor_todo_ids and not normalized_successor_todo_ids:
-        raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
-    if normalized_successor_todo_ids:
-        fields.append(
-            "successor_todo_ids="
-            f"{encode_metadata_value(','.join(normalized_successor_todo_ids))}"
-        )
-    normalized_resume_when = normalize_todo_resume_when(resume_when)
-    if resume_when and not normalized_resume_when:
-        raise ValueError("resume_when must be public-safe, e.g. todo_done:todo_ab12cd34ef56 or pr_merged:#532")
-    if normalized_resume_when:
-        fields.append(f"resume_when={encode_metadata_value(normalized_resume_when)}")
-    if no_followup is not None:
-        fields.append(f"no_followup={encode_metadata_value('true' if no_followup else 'false')}")
-    for key, value in (
-        ("target_key", target_key),
-        ("cadence", cadence),
-        ("next_due_at", next_due_at),
-        ("expires_at", expires_at),
-        ("last_checked_at", last_checked_at),
-        ("result_hash", result_hash),
-        ("consecutive_no_change", consecutive_no_change),
-        ("material_change", material_change),
-        ("max_no_change_before_replan", max_no_change_before_replan),
-    ):
-        if value:
-            fields.append(f"{key}={encode_metadata_value(value)}")
-    for key, value in (
-        ("note", note),
-        ("evidence", evidence),
-        ("reason", reason),
-        ("completed_at", completed_at),
-        ("updated_at", updated_at),
-    ):
-        if value:
-            fields.append(f"{key}={encode_metadata_value(value)}")
-    normalized_superseded_by = normalize_todo_id(superseded_by)
-    if superseded_by and not normalized_superseded_by:
-        raise ValueError("superseded_by must use the public token shape todo_<letters-digits-underscore-hyphen>")
-    if normalized_superseded_by:
-        fields.append(f"superseded_by={encode_metadata_value(normalized_superseded_by)}")
-    if not fields:
-        return None
-    return f"  <!-- loopx:todo {' '.join(fields)} -->"
+    values = locals()
+    return _format_todo_metadata_values(values)
 
 
 def todo_block_metadata(block: dict[str, Any]) -> dict[str, Any]:

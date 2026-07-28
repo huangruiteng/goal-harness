@@ -1109,12 +1109,27 @@ def test_progress_validation_handoff_requires_no_scheduled_continuation(
         final_message_present=False,
         turn_deadline=time.monotonic() + 30,
     )
+    assert acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
+    )
     assert not acp_relay._codex_exec_progress_validation_handoff_allowed(
         category="codex_exec_bridge_idle_timeout",
         bridge_summary_path=summary_path,
         same_session_continuation_scheduled=True,
         final_message_present=False,
         turn_deadline=time.monotonic() + 30,
+    )
+    summary_path.write_text("{}\n", encoding="utf-8")
+    assert not acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
     )
 
 
@@ -1156,7 +1171,7 @@ pathlib.Path(sys.argv[output_index]).write_text("bounded turn complete", encodin
             loopx_turn_max_turns=1,
             remote_command_file_bridge_command="synthetic-bridge",
             worker_public_trace_dir=str(trace_dir),
-            bridge_idle_timeout_sec=0.5,
+            bridge_idle_timeout_sec=1,
             timeout_sec=30,
         )
     )
@@ -1298,7 +1313,7 @@ time.sleep(10)
             loopx_turn_max_turns=1,
             remote_command_file_bridge_command="synthetic-bridge",
             worker_public_trace_dir=str(trace_dir),
-            bridge_idle_timeout_sec=0.25,
+            bridge_idle_timeout_sec=1,
             timeout_sec=30,
         )
     )
@@ -1379,6 +1394,118 @@ time.sleep(10)
     )
     assert "private task fixture" not in json.dumps(traces, sort_keys=True)
     assert "private-thread" not in json.dumps(traces, sort_keys=True)
+
+
+def test_skillsbench_turn_timeout_hands_safe_progress_to_validator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        """#!/usr/bin/env python3
+import json
+import time
+
+print(json.dumps({"type": "thread.started", "thread_id": "private-thread"}), flush=True)
+time.sleep(10)
+""",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    trace_dir = tmp_path / "public-traces"
+    trace_dir.mkdir()
+    relay = SkillsBenchLocalAcpRelay(
+        CodexExecConfig(
+            codex_bin=str(fake_codex),
+            loopx_turn_agent_cli=True,
+            loopx_turn_max_turns=1,
+            remote_command_file_bridge_command="synthetic-bridge",
+            worker_public_trace_dir=str(trace_dir),
+            bridge_idle_timeout_sec=0,
+            timeout_sec=30,
+        )
+    )
+    monkeypatch.setattr(
+        relay,
+        "_consume_remote_bridge_for_solver",
+        lambda: {"ready": True},
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_consumption_trace",
+        lambda _probe: None,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_start_json_file_bridge_server",
+        lambda **_kwargs: ("synthetic-agent-bridge", None),
+    )
+
+    def write_progress_summary(**kwargs: Any) -> Path:
+        kwargs["summary_path"].write_text(
+            json.dumps(
+                {
+                    "record_phase": "complete",
+                    "operation": "run_command",
+                    "task_facing_operation": True,
+                    "success": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return kwargs["tmp_path"] / "synthetic-wrapper"
+
+    monkeypatch.setattr(
+        relay,
+        "_write_instrumented_bridge_wrapper",
+        write_progress_summary,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_prompt_with_remote_bridge_packet",
+        lambda prompt, **_kwargs: prompt,
+    )
+    monkeypatch.setattr(
+        relay,
+        "_publish_remote_bridge_agent_operations_trace",
+        lambda **_kwargs: None,
+    )
+
+    result = relay._run_loopx_turn_agent_prompt(
+        "private timeout task fixture",
+        session={"cwd": str(tmp_path), "model": None},
+        session_id="fixture-session",
+        stdout=SimpleNamespace(write=lambda _value: None, flush=lambda: None),
+        turn_deadline=time.monotonic() + 1,
+    )
+
+    assert (
+        result.response_text
+        == runtime.SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+    )
+    assert result.progress_evidence["task_facing_operation_count"] == 1
+    assert result.progress_evidence["task_facing_success_count"] == 1
+    assert result.progress_evidence["raw_material_recorded"] is False
+    traces = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in trace_dir.glob("*.compact.json")
+    ]
+    failure = next(
+        trace
+        for trace in traces
+        if trace.get("trace_kind") == "codex_exec_process_failure"
+    )
+    assert failure["codex_exec_process"]["failure_category"] == "codex_exec_timeout"
+    assert (
+        failure["codex_exec_process"][
+            "independent_validation_handoff_scheduled"
+        ]
+        is True
+    )
+    public_trace_text = json.dumps(traces, sort_keys=True)
+    assert "private timeout task fixture" not in public_trace_text
+    assert "private-thread" not in public_trace_text
 
 
 def test_skillsbench_progress_validation_handoff_is_not_host_completion() -> None:

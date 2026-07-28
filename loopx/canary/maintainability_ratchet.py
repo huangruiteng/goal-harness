@@ -51,12 +51,6 @@ _OVERSIZED_DECISION_RETIREMENT_PLANS = {
     "loopx.control_plane.quota.goal_boundary:goal_boundary": (
         "Split registry boundary resolution from capability and write-scope projection."
     ),
-    "loopx.control_plane.todos.contract:parse_todo_metadata_line": (
-        "Replace branch-heavy field parsing with the canonical todo field schema."
-    ),
-    "loopx.control_plane.todos.contract:format_todo_metadata_line": (
-        "Replace branch-heavy field formatting with the canonical todo field schema."
-    ),
     "loopx.status:compact_benchmark_run": (
         "Move benchmark run compaction into bounded runtime read-model modules."
     ),
@@ -75,14 +69,6 @@ _OVERSIZED_DECISION_METRIC_CEILINGS = {
     "loopx.control_plane.quota.goal_boundary:goal_boundary": {
         "statements": 96,
         "decision_points": 66,
-    },
-    "loopx.control_plane.todos.contract:parse_todo_metadata_line": {
-        "statements": 119,
-        "decision_points": 60,
-    },
-    "loopx.control_plane.todos.contract:format_todo_metadata_line": {
-        "statements": 129,
-        "decision_points": 77,
     },
     "loopx.status:compact_benchmark_run": {
         "statements": 337,

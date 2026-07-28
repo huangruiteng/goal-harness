@@ -101,6 +101,12 @@ SAFE_LOOPX_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
 CODEX_EXEC_TRANSPORT_RETRY_LIMIT = 1
 CODEX_EXEC_SESSION_ROLLOVER_LIMIT = 1
 CODEX_EXEC_SAME_SESSION_CONTINUATION_LIMIT = 1
+CODEX_EXEC_PROGRESS_VALIDATION_HANDOFF_CATEGORIES = frozenset(
+    {
+        "codex_exec_timeout",
+        "codex_exec_bridge_idle_timeout",
+    }
+)
 
 
 def _loopx_turn_local_session_root(
@@ -504,13 +510,18 @@ def _codex_exec_progress_validation_handoff_allowed(
     final_message_present: bool,
     turn_deadline: float | None,
 ) -> bool:
+    turn_deadline_expired = bool(
+        turn_deadline is not None and time.monotonic() >= turn_deadline
+    )
     if (
-        category != "codex_exec_bridge_idle_timeout"
+        category not in CODEX_EXEC_PROGRESS_VALIDATION_HANDOFF_CATEGORIES
         or same_session_continuation_scheduled
         or final_message_present
         or bridge_summary_path is None
-        or turn_deadline is not None
-        and time.monotonic() >= turn_deadline
+        or (
+            turn_deadline_expired
+            and category != "codex_exec_timeout"
+        )
         or _bridge_summary_has_inflight_operation(bridge_summary_path)
     ):
         return False
@@ -1284,6 +1295,7 @@ class SkillsBenchLocalAcpRelay:
                             )
                         time.sleep(0.2)
             except subprocess.TimeoutExpired:
+                failure_category = "codex_exec_timeout"
                 stdout_text = (
                     stdout_path.read_text(encoding="utf-8", errors="replace")
                     if stdout_path.exists()
@@ -1293,6 +1305,17 @@ class SkillsBenchLocalAcpRelay:
                     stderr_path.read_text(encoding="utf-8", errors="replace")
                     if stderr_path.exists()
                     else ""
+                )
+                validation_handoff_scheduled = bool(
+                    _bypass_loopx_turn
+                    and self._config.loopx_turn_agent_cli
+                    and _codex_exec_progress_validation_handoff_allowed(
+                        category=failure_category,
+                        bridge_summary_path=bridge_summary_path,
+                        same_session_continuation_scheduled=False,
+                        final_message_present=output_path.exists(),
+                        turn_deadline=_turn_deadline,
+                    )
                 )
                 if bridge_summary_path is not None:
                     self._publish_remote_bridge_agent_operations_trace(
@@ -1307,8 +1330,17 @@ class SkillsBenchLocalAcpRelay:
                     final_message_bytes=(
                         output_path.stat().st_size if output_path.exists() else 0
                     ),
+                    failure_category=failure_category,
+                    independent_validation_handoff_scheduled=(
+                        validation_handoff_scheduled
+                    ),
                 )
-                return _recoverable_codex_turn_failure_message("codex_exec_timeout")
+                if validation_handoff_scheduled:
+                    self._latest_loopx_turn_agent_progress_receipt = (
+                        _bridge_summary_task_progress_receipt(bridge_summary_path)
+                    )
+                    return SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+                return _recoverable_codex_turn_failure_message(failure_category)
             finally:
                 self._terminate_bridge_server_process(bridge_server_proc)
             stdout_text = (
