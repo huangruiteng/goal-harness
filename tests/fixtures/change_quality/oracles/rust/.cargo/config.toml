@@ -1,0 +1,5 @@
+[alias]
+quality-format = "fmt --check"
+quality-lint = "clippy --all-targets -- -D warnings"
+quality-typecheck = "check --all-targets"
+quality-test = "test"

@@ -22,7 +22,9 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 
 
 def _add_scope_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--goal-id", required=True, help="Goal whose managed policy applies.")
+    parser.add_argument(
+        "--goal-id", required=True, help="Goal whose managed policy applies."
+    )
     parser.add_argument(
         "--repo-path",
         type=Path,
@@ -61,7 +63,7 @@ def register_change_quality_commands(
         "--result-json",
         type=Path,
         required=True,
-        help="Agent result conforming to change_quality_agent_result_v0.",
+        help="Agent result conforming to change_quality_agent_result_v2.",
     )
     record.add_argument(
         "--execute",
@@ -82,6 +84,8 @@ def render_change_quality_markdown(payload: dict[str, object]) -> str:
     scope_value = payload.get("scope") or receipt.get("scope")
     policy = policy_value if isinstance(policy_value, dict) else {}
     scope = scope_value if isinstance(scope_value, dict) else {}
+    pr_evidence_value = payload.get("pr_evidence")
+    pr_evidence = pr_evidence_value if isinstance(pr_evidence_value, dict) else {}
     lines = [
         "# Change Quality Qualification",
         "",
@@ -96,6 +100,21 @@ def render_change_quality_markdown(payload: dict[str, object]) -> str:
     ]
     if payload.get("receipt_id"):
         lines.append(f"- receipt_id: `{payload.get('receipt_id')}`")
+    if pr_evidence:
+        lines.extend(
+            [
+                f"- receipt_state: `{pr_evidence.get('state')}`",
+                (
+                    "- requalification_required: "
+                    f"`{str(pr_evidence.get('requalification_required')).lower()}`"
+                ),
+                f"- summary: {pr_evidence.get('summary')}",
+            ]
+        )
+        if pr_evidence.get("previous_receipt_id"):
+            lines.append(
+                f"- previous_receipt_id: `{pr_evidence.get('previous_receipt_id')}`"
+            )
     if payload.get("required_action"):
         lines.append(f"- required_action: {payload.get('required_action')}")
     return "\n".join(lines).rstrip() + "\n"

@@ -39,6 +39,7 @@ def collect_status(
     context: StatusCollectionContext,
     include_task_graph: bool = False,
     goal_id: str | None = None,
+    available_capabilities: Any = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
     control_plane_limit = max(display_limit, context.status_control_plane_context_limit)
@@ -128,7 +129,10 @@ def collect_status(
         "promotion_gate": promotion_gate,
     }
     payload["runtime_projection_routes"] = runtime_projection_route_health
-    agent_management_projection = context.build_agent_management_projection(payload)
+    agent_management_projection = context.build_agent_management_projection(
+        payload,
+        available_capabilities=available_capabilities,
+    )
     if agent_management_projection.get("agents"):
         payload["agent_management_projection"] = agent_management_projection
     return payload

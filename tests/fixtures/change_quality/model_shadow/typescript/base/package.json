@@ -1,0 +1,8 @@
+{
+  "name": "loopx-quality-shadow-typescript",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test"
+  }
+}

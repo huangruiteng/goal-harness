@@ -30,6 +30,7 @@ SOURCE_AGENT = "agent-builder"
 SUCCESSOR_AGENT = "agent-reviewer"
 SOURCE_TODO = "todo_material_source"
 SUCCESSOR_TODO = "todo_material_successor"
+MATERIAL_CAPABILITIES = ["material_lifecycle"]
 
 
 def authority_registry() -> dict:
@@ -229,7 +230,14 @@ def management_payload(
 
 def assert_agent_management_cold_path(successor: dict) -> None:
     payload = management_payload(frontiers=[successor])
-    projection = build_agent_management_projection(payload)
+    default_row = build_agent_management_projection(payload)["agents"][0]
+    assert "material_frontier" not in default_row, default_row
+    assert "handoff_note" not in default_row, default_row
+
+    projection = build_agent_management_projection(
+        payload,
+        available_capabilities=MATERIAL_CAPABILITIES,
+    )
     row = projection["agents"][0]
     assert row["agent_id"] == SUCCESSOR_AGENT, row
     assert (
@@ -242,7 +250,8 @@ def assert_agent_management_cold_path(successor: dict) -> None:
 
     other = other_goal_frontier()
     exact = build_agent_management_projection(
-        management_payload(frontiers=[successor, other])
+        management_payload(frontiers=[successor, other]),
+        available_capabilities=MATERIAL_CAPABILITIES,
     )["agents"][0]
     exact_material_ids = {
         ref["material_id"] for ref in exact["material_frontier"]["material_refs"]
@@ -251,7 +260,8 @@ def assert_agent_management_cold_path(successor: dict) -> None:
     assert "other-goal-only" not in exact_material_ids, exact
 
     cross_goal = build_agent_management_projection(
-        management_payload(frontiers=[other])
+        management_payload(frontiers=[other]),
+        available_capabilities=MATERIAL_CAPABILITIES,
     )["agents"][0]
     assert "material_frontier" not in cross_goal, cross_goal
     assert "handoff_note" not in cross_goal, cross_goal
@@ -261,7 +271,8 @@ def assert_agent_management_cold_path(successor: dict) -> None:
             frontiers=[other, successor],
             goal_filter=None,
             goal_ids=[GOAL_ID, OTHER_GOAL_ID],
-        )
+        ),
+        available_capabilities=MATERIAL_CAPABILITIES,
     )["agents"][0]
     assert current_todo["material_frontier"]["summary"] == successor["summary"], current_todo
 
@@ -271,12 +282,16 @@ def assert_agent_management_cold_path(successor: dict) -> None:
             goal_filter=None,
             goal_ids=[GOAL_ID, OTHER_GOAL_ID],
             include_todo=False,
-        )
+        ),
+        available_capabilities=MATERIAL_CAPABILITIES,
     )["agents"][0]
     assert "material_frontier" not in ambiguous, ambiguous
 
     payload.pop("agent_material_frontiers")
-    legacy = build_agent_management_projection(payload)["agents"][0]
+    legacy = build_agent_management_projection(
+        payload,
+        available_capabilities=MATERIAL_CAPABILITIES,
+    )["agents"][0]
     assert "material_frontier" not in legacy, legacy
     assert "handoff_note" not in legacy, legacy
 

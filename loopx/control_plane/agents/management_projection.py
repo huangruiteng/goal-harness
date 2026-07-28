@@ -4,7 +4,11 @@ from typing import Any, Iterable
 
 from ..runtime.public_safety import public_safe_compact_text
 from ..runtime.time import now_utc, now_utc_iso, parse_timestamp
-from ..todos.contract import normalize_todo_claimed_by, normalize_todo_id
+from ..todos.contract import (
+    normalize_required_capabilities,
+    normalize_todo_claimed_by,
+    normalize_todo_id,
+)
 from ..todos.summary_item import TODO_SUMMARY_SOURCE_KEYS
 from .material_frontier import AGENT_MATERIAL_FRONTIER_SCHEMA_VERSION
 from .material_handoff import (
@@ -21,6 +25,7 @@ MAX_AGENT_TODOS = 8
 MAX_REFS = 1
 MAX_WORKSPACE_SCOPES = 4
 STALE_CLAIM_THRESHOLD_HOURS = 36
+MATERIAL_LIFECYCLE_CAPABILITY = "material_lifecycle"
 
 _TODO_GROUP_LIST_KEYS = tuple(
     dict.fromkeys(
@@ -502,7 +507,11 @@ def _safe_next_action(todo: dict[str, Any] | None) -> str:
     return "Inspect projected todo."
 
 
-def build_agent_management_projection(status_payload: dict[str, Any]) -> dict[str, Any]:
+def build_agent_management_projection(
+    status_payload: dict[str, Any],
+    *,
+    available_capabilities: Any = None,
+) -> dict[str, Any]:
     """Build a read-only agent management view from a status payload.
 
     This is a projection over existing LoopX status/todo/history state. It does
@@ -511,7 +520,14 @@ def build_agent_management_projection(status_payload: dict[str, Any]) -> dict[st
     """
 
     rows_by_agent = _registered_agents(status_payload)
-    material_frontiers = _agent_material_frontiers(status_payload)
+    material_projection_enabled = MATERIAL_LIFECYCLE_CAPABILITY in set(
+        normalize_required_capabilities(available_capabilities)
+    )
+    material_frontiers = (
+        _agent_material_frontiers(status_payload)
+        if material_projection_enabled
+        else {}
+    )
     goal_filter = _compact(status_payload.get("goal_filter"), limit=180)
     seen_todos: set[tuple[str, str, str, str]] = set()
     for todo in _iter_status_todos(status_payload):

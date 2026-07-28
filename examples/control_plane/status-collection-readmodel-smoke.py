@@ -97,6 +97,7 @@ def assert_wrapper_parity(registry_path: Path, runtime_root: Path, scan_root: Pa
         "limit": 3,
         "include_task_graph": True,
         "goal_id": GOAL_ID,
+        "available_capabilities": ["network", "material_lifecycle"],
     }
     wrapper = status_module.collect_status(**kwargs)
     direct = collection_read_model.collect_status(
@@ -175,7 +176,13 @@ def assert_context_orchestration() -> None:
         build_promotion_gate=lambda **kwargs: record("build_promotion_gate", {}),
         build_status_contract=lambda: record("build_status_contract", {"schema_version": "fixture"}),
         build_contract_health_projection=lambda contract: record("build_contract_health_projection", {}),
-        build_agent_management_projection=lambda payload: record("build_agent_management_projection", {"agents": []}),
+        build_agent_management_projection=lambda payload, **kwargs: record(
+            "build_agent_management_projection",
+            {
+                "agents": [],
+                "available_capabilities": kwargs.get("available_capabilities"),
+            },
+        ),
         status_control_plane_context_limit=20,
         max_todo_index_items=240,
     )
@@ -186,6 +193,7 @@ def assert_context_orchestration() -> None:
         scan_roots=[Path("project")],
         limit=2,
         goal_id=GOAL_ID,
+        available_capabilities=["network", "material_lifecycle"],
         context=context,
     )
 
@@ -193,6 +201,10 @@ def assert_context_orchestration() -> None:
     assert payload["run_history"]["display_limit"] == 2, payload
     assert payload["todo_index"]["limit"] == 240, payload
     assert "agent_management_projection" not in payload, payload
+    assert calls[-1][1]["available_capabilities"] == [
+        "network",
+        "material_lifecycle",
+    ], calls[-1]
     assert [name for name, _ in calls][:4] == [
         "load_registry",
         "collect_global_registry_health",

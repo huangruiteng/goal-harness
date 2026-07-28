@@ -1,0 +1,179 @@
+{
+  "schema_version": "change_quality_shadow_matrix_v0",
+  "cases": [
+    {
+      "case_id": "pr-2590-clean",
+      "kind": "real_pr_clean",
+      "language": "python",
+      "changed_files": [
+        "loopx/canary/maintainability_ratchet.py",
+        "loopx/control_plane/quota/goal_boundary.py",
+        "tests/control_plane/test_goal_boundary_resolution.py"
+      ],
+      "source": {
+        "pull_request": 2590,
+        "base_ref": "8073c5f9973dbbd1679ea7bacec944e036bd6ca4",
+        "head_ref": "0c05ecd25d51debffb81407c38b58702124d6888"
+      },
+      "gold": {
+        "findings": [],
+        "safe_fix_action": "none",
+        "simplification_outcome": "retain"
+      }
+    },
+    {
+      "case_id": "pr-2593-clean",
+      "kind": "real_pr_clean",
+      "language": "python",
+      "changed_files": [
+        "loopx/benchmarks/read_models/benchmark_projection.py",
+        "loopx/canary/maintainability_ratchet.py",
+        "loopx/status.py",
+        "tests/benchmarks/read_models/test_benchmark_projection.py"
+      ],
+      "source": {
+        "pull_request": 2593,
+        "base_ref": "ae6182599e4dfd3e5d55822418de41b79f71cfb1",
+        "head_ref": "8b6be03d9b57edc6464a6cd9c1c856e1f5f98ed8"
+      },
+      "gold": {
+        "findings": [],
+        "safe_fix_action": "none",
+        "simplification_outcome": "retain"
+      }
+    },
+    {
+      "case_id": "pr-2594-clean",
+      "kind": "real_pr_clean",
+      "language": "python",
+      "changed_files": [
+        "loopx/canary/maintainability_ratchet.py",
+        "loopx/control_plane/turn_driver/executor.py",
+        "tests/test_loopx_turn_executor.py"
+      ],
+      "source": {
+        "pull_request": 2594,
+        "base_ref": "17a3ea60c6861c2d5fc046bc45373803edee955b",
+        "head_ref": "e07717afca500eaa44139b87ffad2ac560f77026"
+      },
+      "gold": {
+        "findings": [],
+        "safe_fix_action": "none",
+        "simplification_outcome": "retain"
+      }
+    },
+    {
+      "case_id": "pr-2597-clean",
+      "kind": "real_pr_clean",
+      "language": "python",
+      "changed_files": [
+        "loopx/control_plane/goals/goal_frontier.py",
+        "tests/control_plane/test_goal_vision_blocked_successor.py"
+      ],
+      "source": {
+        "pull_request": 2597,
+        "base_ref": "8ace946f0b038aae1d46b4d3beff60fd9589e9a6",
+        "head_ref": "82d90a00b61c134850234b37711ede010d9a22f9"
+      },
+      "gold": {
+        "findings": [],
+        "safe_fix_action": "none",
+        "simplification_outcome": "retain"
+      }
+    },
+    {
+      "case_id": "pr-2602-clean",
+      "kind": "real_pr_clean",
+      "language": "python",
+      "changed_files": [
+        "docs/reference/protocols/agent-management-projection-v0.md",
+        "examples/control_plane/status-collection-readmodel-smoke.py",
+        "examples/control_plane/status-quota-review-packet-parity-smoke.py",
+        "loopx/cli_commands/quota.py",
+        "loopx/cli_commands/status.py",
+        "loopx/cli_commands/turn.py",
+        "loopx/control_plane/runtime/status_projection_cache.py",
+        "loopx/control_plane/status_collection.py",
+        "loopx/diagnose.py",
+        "loopx/status.py",
+        "tests/control_plane/test_status_collection_material_capability_wiring.py"
+      ],
+      "source": {
+        "pull_request": 2602,
+        "base_ref": "ced23d485b86cd62742554d33c5f9eae3c0b396e",
+        "head_ref": "b2c934e7a6b579d99ae0d6edd82ccfb19317f27b"
+      },
+      "gold": {
+        "findings": [],
+        "safe_fix_action": "none",
+        "simplification_outcome": "retain"
+      }
+    },
+    {
+      "case_id": "python-one-use-wrapper",
+      "kind": "synthetic_simplification",
+      "language": "python",
+      "changed_files": [
+        "src/app.py"
+      ],
+      "source": {
+        "fixture_root": "tests/fixtures/change_quality/model_shadow/python",
+        "validator": "python3 -m unittest discover -s tests -p '*_unittest.py'"
+      },
+      "gold": {
+        "findings": [
+          {
+            "finding_class": "complexity",
+            "path": "src/app.py"
+          }
+        ],
+        "safe_fix_action": "bounded",
+        "simplification_outcome": "simplify"
+      }
+    },
+    {
+      "case_id": "rust-low-value-helpers",
+      "kind": "synthetic_simplification",
+      "language": "rust",
+      "changed_files": [
+        "src/lib.rs"
+      ],
+      "source": {
+        "fixture_root": "tests/fixtures/change_quality/model_shadow/rust",
+        "validator": "cargo test --quiet"
+      },
+      "gold": {
+        "findings": [
+          {
+            "finding_class": "complexity",
+            "path": "src/lib.rs"
+          }
+        ],
+        "safe_fix_action": "bounded",
+        "simplification_outcome": "simplify"
+      }
+    },
+    {
+      "case_id": "typescript-one-use-class",
+      "kind": "synthetic_simplification",
+      "language": "typescript",
+      "changed_files": [
+        "src/index.ts"
+      ],
+      "source": {
+        "fixture_root": "tests/fixtures/change_quality/model_shadow/typescript",
+        "validator": "npm test --silent"
+      },
+      "gold": {
+        "findings": [
+          {
+            "finding_class": "complexity",
+            "path": "src/index.ts"
+          }
+        ],
+        "safe_fix_action": "bounded",
+        "simplification_outcome": "simplify"
+      }
+    }
+  ]
+}

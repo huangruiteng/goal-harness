@@ -4452,6 +4452,7 @@ def collect_status(
     limit: int,
     include_task_graph: bool = False,
     goal_id: str | None = None,
+    available_capabilities: Any = None,
 ) -> dict[str, Any]:
     return _collect_status_read_model(
         registry_path=registry_path,
@@ -4460,5 +4461,6 @@ def collect_status(
         limit=limit,
         include_task_graph=include_task_graph,
         goal_id=goal_id,
+        available_capabilities=available_capabilities,
         context=build_status_collection_context(),
     )

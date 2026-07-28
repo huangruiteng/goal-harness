@@ -9,10 +9,121 @@ from scripts.skillsbench_automation_loop import (
     DEFAULT_HOST_LOCAL_CODEX_BRIDGE_IDLE_TIMEOUT_SEC,
     HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC,
     SkillsBenchLoopXTurnTerminalFailureStall,
+    _apply_runner_failure_attempt_accounting_from_public_activity,
     _await_benchflow_task_with_loopx_turn_closeout_watchdog,
     _effective_local_codex_exec_timeout_sec,
     _loopx_turn_terminal_failure_checkpoint,
+    build_plan,
+    build_runner_failure_compact,
+    parse_args,
 )
+
+
+def test_runner_failure_counts_public_task_activity_as_solver_attempt() -> None:
+    compact = {
+        "score_failure_attribution": (
+            "skillsbench_host_local_acp_codex_exec_failed_codex_exec_timeout"
+        ),
+        "validation": {},
+    }
+
+    _apply_runner_failure_attempt_accounting_from_public_activity(
+        compact,
+        {
+            "remote_command_file_bridge_agent_task_facing_operation_count": 53,
+            "remote_command_file_bridge_agent_task_facing_success_count": 48,
+        },
+    )
+
+    accounting = compact["attempt_accounting"]
+    assert accounting["lifecycle_phase"] == "worker_started"
+    assert accounting["failure_class"] == "solver_failed"
+    assert accounting["launcher_attempt_countable"] is True
+    assert accounting["case_attempt_countable"] is True
+    assert accounting["solver_attempt_countable"] is True
+    assert accounting["verifier_attempt_countable"] is False
+    assert accounting["official_score_attempt_countable"] is False
+
+
+def test_runner_failure_does_not_count_failed_task_activity_as_solver_attempt() -> None:
+    compact = {
+        "score_failure_attribution": (
+            "skillsbench_host_local_acp_codex_exec_failed_codex_exec_timeout"
+        ),
+        "attempt_accounting": {"failure_label": "not_run_adapter_skeleton"},
+    }
+
+    _apply_runner_failure_attempt_accounting_from_public_activity(
+        compact,
+        {
+            "remote_command_file_bridge_agent_request_count": 4,
+            "remote_command_file_bridge_agent_success_count": 3,
+            "remote_command_file_bridge_agent_task_facing_operation_count": 3,
+            "remote_command_file_bridge_agent_task_facing_success_count": 0,
+        },
+    )
+
+    assert compact["attempt_accounting"] == {
+        "failure_label": "not_run_adapter_skeleton"
+    }
+
+
+def test_runner_failure_derives_task_success_lower_bound_from_public_counts() -> None:
+    compact = {
+        "score_failure_attribution": (
+            "skillsbench_host_local_acp_codex_exec_failed_codex_exec_timeout"
+        ),
+    }
+
+    _apply_runner_failure_attempt_accounting_from_public_activity(
+        compact,
+        {
+            "remote_command_file_bridge_agent_request_count": 54,
+            "remote_command_file_bridge_agent_success_count": 49,
+            "remote_command_file_bridge_agent_task_facing_operation_count": 53,
+        },
+    )
+
+    accounting = compact["attempt_accounting"]
+    assert accounting["case_attempt_countable"] is True
+    assert accounting["solver_attempt_countable"] is True
+
+
+def test_runner_failure_compact_reconciles_public_task_activity(tmp_path) -> None:
+    args = parse_args(
+        [
+            "--task-id",
+            "exam-block-sequencing",
+            "--route",
+            "loopx-turn-agent-cli",
+            "--jobs-dir",
+            str(tmp_path / "jobs"),
+            "--job-name",
+            "skillsbench-timeout-countability-fixture",
+        ]
+    )
+    plan = build_plan(args)
+    plan["runner_prerequisites"].update(
+        {
+            "remote_command_file_bridge_agent_operation_trace_satisfied": True,
+            "remote_command_file_bridge_agent_request_count": 54,
+            "remote_command_file_bridge_agent_success_count": 49,
+            "remote_command_file_bridge_agent_task_facing_operation_count": 53,
+        }
+    )
+
+    compact = build_runner_failure_compact(
+        args,
+        plan,
+        TimeoutError("PRIVATE_TIMEOUT_DETAIL_SHOULD_NOT_ESCAPE"),
+    )
+
+    accounting = compact["attempt_accounting"]
+    assert accounting["case_attempt_countable"] is True
+    assert accounting["solver_attempt_countable"] is True
+    assert accounting["verifier_attempt_countable"] is False
+    assert accounting["official_score_attempt_countable"] is False
+    assert "PRIVATE_TIMEOUT_DETAIL_SHOULD_NOT_ESCAPE" not in json.dumps(compact)
 
 
 def _host_local_args(**overrides):

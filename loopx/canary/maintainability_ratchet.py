@@ -48,15 +48,6 @@ _EXISTING_DECISION_DEBT_REASON = (
     "Existing multi-branch control-plane decision owner predates the ratchet."
 )
 _OVERSIZED_DECISION_RETIREMENT_PLANS = {
-    "loopx.control_plane.quota.goal_boundary:goal_boundary": (
-        "Split registry boundary resolution from capability and write-scope projection."
-    ),
-    "loopx.control_plane.todos.contract:parse_todo_metadata_line": (
-        "Replace branch-heavy field parsing with the canonical todo field schema."
-    ),
-    "loopx.control_plane.todos.contract:format_todo_metadata_line": (
-        "Replace branch-heavy field formatting with the canonical todo field schema."
-    ),
     "loopx.control_plane.turn_driver.executor:run_loopx_turn_once": (
         "Split host execution, receipt validation, and transaction closeout stages."
     ),
@@ -66,27 +57,12 @@ _OVERSIZED_DECISION_RETIREMENT_PLANS = {
     "loopx.status:compact_active_user_assisted_pilot": (
         "Move assisted-pilot compaction into a bounded runtime read model."
     ),
-    "loopx.quota:build_quota_plan": (
-        "Move quota-plan policy selection behind focused control-plane rule helpers."
-    ),
     "loopx.quota:build_quota_should_run": (
         "Continue decomposing the public quota facade into bounded decision stages."
     ),
 }
 
 _OVERSIZED_DECISION_METRIC_CEILINGS = {
-    "loopx.control_plane.quota.goal_boundary:goal_boundary": {
-        "statements": 96,
-        "decision_points": 66,
-    },
-    "loopx.control_plane.todos.contract:parse_todo_metadata_line": {
-        "statements": 119,
-        "decision_points": 60,
-    },
-    "loopx.control_plane.todos.contract:format_todo_metadata_line": {
-        "statements": 129,
-        "decision_points": 77,
-    },
     "loopx.control_plane.turn_driver.executor:run_loopx_turn_once": {
         "statements": 114,
         "decision_points": 51,
@@ -98,10 +74,6 @@ _OVERSIZED_DECISION_METRIC_CEILINGS = {
     "loopx.status:compact_active_user_assisted_pilot": {
         "statements": 124,
         "decision_points": 71,
-    },
-    "loopx.quota:build_quota_plan": {
-        "statements": 61,
-        "decision_points": 69,
     },
     "loopx.quota:build_quota_should_run": {
         "statements": 366,
