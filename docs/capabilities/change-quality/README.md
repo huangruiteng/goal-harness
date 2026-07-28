@@ -48,16 +48,24 @@ Absence of this policy is equivalent to all three values being false.
 ## Protocol
 
 1. `change-quality prepare` hashes the committed, staged, unstaged, and
-   untracked content relative to a base ref. It emits a self-contained
-   `change_quality_prepare_packet_v0`.
-2. A host or model reviews that exact scope using repository instructions and
-   project validators. The result uses `change_quality_agent_result_v0`.
-3. If policy allows it, the host may perform one bounded safe-fix pass. Any edit
+   untracked content relative to a base ref. It emits
+   `change_quality_prepare_packet_v1`.
+2. The packet projects path-only repository context: applicable instruction
+   files, ownership files, build manifests, language hints, and changed surface
+   roots. It does not copy file contents into the control plane.
+3. A host or model reviews that exact scope using ten required lenses: reuse,
+   type/API boundaries, configuration, runtime ownership,
+   quality/simplification, efficiency, error/supervision, test/validation,
+   documentation/comments, and security/release. The result uses
+   `change_quality_agent_result_v1`.
+4. If policy allows it, the host may perform one bounded safe-fix pass. Any edit
    invalidates the old fingerprint, so prepare and final review run again.
-4. `change-quality record --execute` validates the result against the current
-   fingerprint and writes a compact local runtime receipt.
-5. `change-quality verify` checks the current exact scope.
-6. `canary premerge --goal-id <goal-id>` enforces `strict_receipt`.
+5. `change-quality record --execute` requires complete per-lens conclusions,
+   an explicit simplification decision, and typed validation evidence. It
+   validates the result against the current fingerprint and writes a compact
+   local runtime receipt.
+6. `change-quality verify` checks the current exact scope and v1 protocol.
+7. `canary premerge --goal-id <goal-id>` enforces `strict_receipt`.
 
 ```bash
 loopx --format json change-quality prepare \
@@ -74,20 +82,25 @@ loopx canary premerge --from-git-diff --goal-id <goal-id>
 ```
 
 Receipts live under goal runtime state, not in the repository. They retain
-compact findings and validation labels, not raw model transcripts, credentials,
-private context, or validator logs.
+compact findings, per-lens conclusions, simplification decisions, and typed
+validation evidence, not raw model transcripts, credentials, private context,
+or validator logs.
 
 ## Provider Boundary
 
 The packet does not require a particular model, language, framework, or skill
-host. A custom runner may deliver the project-scoped `loopx-change-quality`
-skill or inject equivalent instructions from the same LoopX revision. The
-global installer intentionally skips project-scoped skills. The project still
-owns its tests, lint, type checking, security checks, and repository-specific
-rules.
+host. Its review lenses name engineering outcomes rather than tools. A custom
+runner may deliver the project-scoped `loopx-change-quality` skill or inject
+equivalent instructions from the same LoopX revision. The global installer
+intentionally skips project-scoped skills. The project still owns its tests,
+lint, type checking, security checks, build commands, and repository-specific
+rules; LoopX records which oracles ran and their outcomes instead of pretending
+that one universal checker understands every language.
 
 A blocking finding must be a concrete correctness, security, privacy, contract,
 or required-validation failure. Subjective style advice remains nonblocking.
+A failed validator is independently non-passing even when a reviewer forgot to
+repeat it as a blocker finding.
 
 Turn may carry the packet or receipt reference inside one bounded execution.
 It does not own policy or enforcement. The authoritative merge decision stays
@@ -95,7 +108,9 @@ in `canary premerge`.
 
 ## Initial Scope
 
-The first version deliberately qualifies one final diff with at most one
-safe-fix pass. It does not recursively review reviews, build a model hierarchy,
-or require several agents to reach consensus. Those mechanisms should be added
-only after single-level receipts show a concrete failure they can solve.
+This version deliberately qualifies one final diff with at most one safe-fix
+pass. It does not recursively review reviews, build a model hierarchy, or
+require several agents to reach consensus. Language and build-system hints are
+discovery inputs, not hardcoded validator policy. Repository-native oracle
+selection and cross-language calibration should evolve from observed receipts,
+not from a central list of guessed commands.

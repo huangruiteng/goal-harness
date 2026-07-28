@@ -47,15 +47,35 @@ preview an explicit project install; do not fall back to a global copy.
 
 ## Review Rules
 
-Review the final diff for:
+The prepare packet requires one substantive conclusion for each review lens:
 
-- correctness and behavioral regressions;
-- security, privacy, authority, and public/private boundary violations;
-- broken caller contracts, schemas, migrations, and state transitions;
-- missing validation required by the changed surface;
-- unnecessary complexity, duplication of durable knowledge, and abstractions
-  without a shipped call site;
-- language- and framework-specific issues reported by the project's own tools.
+- **reuse:** established helpers and durable knowledge are reused instead of
+  duplicated;
+- **type/API boundary:** types, schemas, compatibility windows, and caller
+  contracts remain explicit and coherent;
+- **configuration:** configuration stays single-sourced, validated, and free
+  of hidden mode coupling;
+- **runtime ownership:** lifecycle, concurrency, state, and side effects live
+  in the correct boundary;
+- **quality/simplification:** unnecessary indirection, branching, duplication,
+  and speculative abstraction are removed or explicitly justified;
+- **efficiency:** hot paths, repeated work, memory growth, and unbounded loops
+  are considered;
+- **error/supervision:** failures remain observable and actionable without
+  silent fallback or blanket exception handling;
+- **test/validation:** tests and repository-native validators prove intended
+  semantics and important negative paths;
+- **documentation/comments:** names, comments, and docs describe current
+  contracts without stale or duplicated narration;
+- **security/release:** security, privacy, permissions, migrations, and release
+  compatibility are handled at changed boundaries.
+
+The packet projects path-only references to applicable repository instructions,
+ownership files, build manifests, language hints, and changed surface roots.
+Resolve and obey those references before reviewing. The packet deliberately
+does not copy repository content or prescribe one language-specific checker.
+Repository tests, linters, type checkers, build tools, and security checks
+remain the language-specific oracles.
 
 Use `blocker` only for a concrete correctness, security, privacy, contract, or
 required-validation failure. Style preferences and speculative redesigns are
@@ -84,7 +104,10 @@ entire new final scope, not only the lines changed by the repair.
 ## Record The Receipt
 
 Write a compact result conforming to the packet's
-`change_quality_agent_result_v0` template. Keep raw transcripts, private paths,
+`change_quality_agent_result_v1` template. The result must include every
+required lens, at least one explicit simplification decision, and typed
+validation evidence. A skipped or failed validator needs a reason; a failed
+validator makes the receipt non-passing. Keep raw transcripts, private paths,
 credentials, and unbounded logs out of the result.
 
 Then record and read back the exact receipt:
@@ -103,8 +126,9 @@ loopx --format json change-quality verify \
   --base-ref origin/main
 ```
 
-A receipt with an unresolved blocker is not passing. A receipt for an earlier
-fingerprint does not qualify a later diff.
+A receipt with an unresolved blocker or failed validator is not passing. A
+receipt for an earlier fingerprint or an earlier receipt protocol does not
+qualify a later diff.
 
 ## Premerge Enforcement
 
