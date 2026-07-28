@@ -72,10 +72,16 @@ The prepare packet requires one substantive conclusion for each review lens:
 
 The packet projects path-only references to applicable repository instructions,
 ownership files, build manifests, language hints, and changed surface roots.
-Resolve and obey those references before reviewing. The packet deliberately
-does not copy repository content or prescribe one language-specific checker.
-Repository tests, linters, type checkers, build tools, and security checks
-remain the language-specific oracles.
+It also projects a provider-neutral validation plan discovered from structured
+repository task declarations. This is discovery context, not copied repository
+content: instruction text, task bodies, and manifest contents remain in the
+worktree. Read every `required_reads` entry, inspect each candidate's
+`source_ref`, and let the host resolve the named Poe, Hatch, Cargo, or package
+task. Never execute a candidate merely because it was discovered. Unresolved
+format, lint, typecheck, or test categories require reviewer judgment or a
+repository-native instruction; do not fill them with guessed commands. Treat
+`ignored_manifest_refs` as non-executable context, especially fixtures and
+vendored projects.
 
 Record one compact `repository_principles` item for every projected instruction
 reference. Every applicable lens must cite typed `evidence_refs` using

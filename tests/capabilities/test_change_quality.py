@@ -209,7 +209,16 @@ def test_prepare_projects_repository_context_and_required_review_lenses(
     _enable(registry)
     (repo / "AGENTS.md").write_text("# Rules\n", encoding="utf-8")
     (repo / "pyproject.toml").write_text(
-        "[project]\nname='fixture'\n", encoding="utf-8"
+        (
+            "[project]\n"
+            "name='fixture'\n"
+            "[tool.poe.tasks]\n"
+            "format='ruff format --check .'\n"
+            "lint='ruff check .'\n"
+            "typecheck='mypy src'\n"
+            "test='pytest -q'\n"
+        ),
+        encoding="utf-8",
     )
     (repo / ".github").mkdir()
     (repo / ".github" / "CODEOWNERS").write_text("* @fixture\n", encoding="utf-8")
@@ -231,6 +240,21 @@ def test_prepare_projects_repository_context_and_required_review_lenses(
     assert context["ownership_refs"] == [".github/CODEOWNERS"]
     assert context["build_manifest_refs"] == ["pyproject.toml"]
     assert context["language_hints"] == ["python"]
+    assert context["validation_plan"]["required_reads"] == [
+        "AGENTS.md",
+        "src/AGENTS.md",
+    ]
+    assert {item["category"] for item in context["validation_plan"]["candidates"]} == {
+        "format",
+        "lint",
+        "typecheck",
+        "test",
+    }
+    assert {item["runner"] for item in context["validation_plan"]["candidates"]} == {
+        "poe_task"
+    }
+    assert context["validation_plan"]["unresolved_categories"] == []
+    assert context["validation_plan"]["auto_execute"] is False
     assert context["changed_surface_roots"] == [
         ".github",
         "AGENTS.md",

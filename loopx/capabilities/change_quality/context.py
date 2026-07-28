@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .oracles import build_change_quality_validation_plan
 from .scope import resolve_git_root
 
 
@@ -24,6 +25,7 @@ _MANIFEST_SIGNALS: dict[str, tuple[tuple[str, ...], str]] = {
     "pyproject.toml": (("python",), "python-project"),
     "setup.py": (("python",), "python-setuptools"),
     "Cargo.toml": (("rust",), "cargo"),
+    ".cargo/config.toml": (("rust",), "cargo"),
     "package.json": (("javascript", "typescript"), "node"),
     "tsconfig.json": (("typescript",), "typescript"),
     "go.mod": (("go",), "go-modules"),
@@ -135,13 +137,20 @@ def build_change_quality_repository_context(
             if path.parts and path.parts[0] not in {"", "."}
         }
     )
+    sorted_instruction_refs = sorted(instruction_refs)
+    sorted_manifest_refs = sorted(manifest_refs)
     return {
         "schema_version": CHANGE_QUALITY_REPOSITORY_CONTEXT_SCHEMA_VERSION,
-        "instruction_refs": sorted(instruction_refs),
+        "instruction_refs": sorted_instruction_refs,
         "ownership_refs": ownership_refs,
-        "build_manifest_refs": sorted(manifest_refs),
+        "build_manifest_refs": sorted_manifest_refs,
         "language_hints": sorted(language_hints),
         "build_system_hints": sorted(build_system_hints),
         "changed_surface_roots": changed_surface_roots,
+        "validation_plan": build_change_quality_validation_plan(
+            repo_root=repo_root,
+            instruction_refs=sorted_instruction_refs,
+            manifest_refs=sorted_manifest_refs,
+        ),
         "content_included": False,
     }

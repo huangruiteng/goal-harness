@@ -51,8 +51,9 @@ Absence of this policy is equivalent to all three values being false.
    untracked content relative to a base ref. It emits
    `change_quality_prepare_packet_v1`.
 2. The packet projects path-only repository context: applicable instruction
-   files, ownership files, build manifests, language hints, and changed surface
-   roots. It does not copy file contents into the control plane.
+   files, ownership files, build manifests, language hints, changed surface
+   roots, and a provider-neutral validation plan. It does not copy instruction
+   text, task bodies, or manifest contents into the control plane.
 3. A host or model reviews that exact scope using ten required lenses: reuse,
    type/API boundaries, configuration, runtime ownership,
    quality/simplification, efficiency, error/supervision, test/validation,
@@ -101,6 +102,18 @@ lint, type checking, security checks, build commands, and repository-specific
 rules; LoopX records which oracles ran and their outcomes instead of pretending
 that one universal checker understands every language.
 
+The validation plan discovers only repository-declared task identities from
+structured manifests. Initial adapters understand Poe and Hatch task names in
+`pyproject.toml`, Cargo aliases in `.cargo/config.toml`, and package scripts in
+`package.json`. Each candidate carries a category, runner kind, task name, and
+source reference; script bodies stay in the repository and execution remains a
+host decision. Missing format, lint, typecheck, or test categories stay
+explicitly unresolved instead of being filled with guessed commands. Applicable
+`AGENTS.md` and `CLAUDE.md` files are projected as required reads, not parsed as
+shell input. Manifests under fixture, testdata, vendor, third-party, or
+dependency directories are reported as ignored references and never promoted
+to project oracle candidates.
+
 A blocking finding must be a concrete correctness, security, privacy, contract,
 or required-validation failure. Subjective style advice remains nonblocking.
 A failed validator is independently non-passing even when a reviewer forgot to
@@ -115,9 +128,10 @@ in `canary premerge`.
 This version deliberately qualifies one final diff with at most one safe-fix
 pass. It does not recursively review reviews, build a model hierarchy, or
 require several agents to reach consensus. Language and build-system hints are
-discovery inputs, not hardcoded validator policy. Repository-native oracle
-selection and cross-language calibration should evolve from observed receipts,
-not from a central list of guessed commands.
+discovery inputs, not hardcoded validator policy. The initial matrix proves the
+same output contract for Python, Rust, and TypeScript while preserving distinct
+Poe, Cargo, and package-script runner identities. It does not invent a shared
+compactor or silently execute any task.
 
 The initial semantic calibration uses five public control-plane PRs covering a
 registry boundary extraction, benchmark read-model move, recoverable Turn
