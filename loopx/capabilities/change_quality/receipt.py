@@ -141,6 +141,10 @@ def build_change_quality_prepare_packet(
                 "scope_fingerprint": scope["scope_fingerprint"],
                 "reviewed_final_scope": True,
                 "summary": "",
+                "repository_principles": [
+                    {"source": path, "principle": ""}
+                    for path in repository_context["instruction_refs"]
+                ],
                 "findings": [],
                 "lens_reviews": [
                     {
@@ -148,11 +152,13 @@ def build_change_quality_prepare_packet(
                         "status": "checked",
                         "summary": "",
                         "finding_codes": [],
+                        "evidence_refs": [],
                     }
                     for lens_id in REVIEW_LENS_IDS
                 ],
                 "simplification_decisions": [
                     {
+                        "decision_id": "",
                         "subject": "",
                         "outcome": "retained",
                         "reason": "",
@@ -196,10 +202,16 @@ def record_change_quality_receipt(
     scope = build_change_quality_scope(repo_path=repo_path, base_ref=base_ref)
     if not scope["changed_files"]:
         raise ValueError("current scope has no changes and does not need a receipt")
+    repository_context = build_change_quality_repository_context(
+        repo_path=repo_path,
+        changed_files=list(scope["changed_files"]),
+    )
     result = normalize_change_quality_result(
         json.loads(result_path.expanduser().read_text(encoding="utf-8")),
         expected_fingerprint=str(scope["scope_fingerprint"]),
         safe_fix_allowed=bool(policy["safe_fix"]),
+        expected_changed_files=list(scope["changed_files"]),
+        expected_instruction_refs=list(repository_context["instruction_refs"]),
     )
     decision, unresolved_blockers = change_quality_result_decision(result)
     receipt_id = f"cqr_{str(scope['scope_fingerprint'])[:20]}"
@@ -241,6 +253,8 @@ def _stored_receipt_is_valid(
     *,
     scope_fingerprint: str,
     safe_fix_allowed: bool,
+    changed_files: list[str],
+    instruction_refs: list[str],
 ) -> bool:
     if not (
         receipt
@@ -256,6 +270,8 @@ def _stored_receipt_is_valid(
             receipt["result"],
             expected_fingerprint=scope_fingerprint,
             safe_fix_allowed=safe_fix_allowed,
+            expected_changed_files=changed_files,
+            expected_instruction_refs=instruction_refs,
         )
     except (TypeError, ValueError):
         return False
@@ -301,6 +317,10 @@ def verify_change_quality_receipt(
         scope_fingerprint=str(scope["scope_fingerprint"]),
     )
     receipt = None
+    repository_context = build_change_quality_repository_context(
+        repo_path=repo_path,
+        changed_files=list(scope["changed_files"]),
+    )
     if path.exists():
         try:
             receipt = read_json(path)
@@ -310,6 +330,8 @@ def verify_change_quality_receipt(
         receipt,
         scope_fingerprint=str(scope["scope_fingerprint"]),
         safe_fix_allowed=bool(policy["safe_fix"]),
+        changed_files=list(scope["changed_files"]),
+        instruction_refs=list(repository_context["instruction_refs"]),
     )
     if receipt_valid:
         status = "valid"

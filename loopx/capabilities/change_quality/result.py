@@ -11,6 +11,9 @@ FINDING_SEVERITIES = frozenset({"blocker", "warning", "advisory"})
 LENS_STATUSES = frozenset({"checked", "finding", "not_applicable"})
 SIMPLIFICATION_OUTCOMES = frozenset({"fixed", "retained", "deferred", "not_applicable"})
 VALIDATION_STATUSES = frozenset({"passed", "failed", "skipped"})
+EVIDENCE_REF_KINDS = frozenset(
+    {"path", "instruction", "finding", "validator", "decision"}
+)
 REVIEW_LENSES = (
     {
         "lens_id": "reuse",
@@ -163,6 +166,42 @@ def _bounded_text_list(
     return result
 
 
+def _normalize_evidence_ref(value: Any, *, field: str) -> str:
+    text = _bounded_text(value, field=field, limit=400)
+    kind, separator, target = text.partition(":")
+    if not separator or kind not in EVIDENCE_REF_KINDS:
+        raise ValueError(
+            f"{field} must use one of "
+            f"{[f'{item}:<ref>' for item in sorted(EVIDENCE_REF_KINDS)]}"
+        )
+    if kind in {"path", "instruction"}:
+        normalized_target = _relative_path(target, field=field)
+    else:
+        normalized_target = _bounded_text(target, field=field, limit=160)
+    if not normalized_target:
+        raise ValueError(f"{field} requires a non-empty reference target")
+    return f"{kind}:{normalized_target}"
+
+
+def _normalize_repository_principle(value: Any, *, index: int) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"repository_principles[{index}] must be an object")
+    source = _relative_path(
+        value.get("source"),
+        field=f"repository_principles[{index}].source",
+    )
+    principle = _bounded_text(
+        value.get("principle"),
+        field=f"repository_principles[{index}].principle",
+        limit=320,
+    )
+    if not source or not principle:
+        raise ValueError(
+            f"repository_principles[{index}] requires source and principle"
+        )
+    return {"source": source, "principle": principle}
+
+
 def _normalize_lens_review(value: Any, *, index: int) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"lens_reviews[{index}] must be an object")
@@ -195,11 +234,32 @@ def _normalize_lens_review(value: Any, *, index: int) -> dict[str, Any]:
         raise ValueError(
             f"lens_reviews[{index}] may reference findings only with status=finding"
         )
+    evidence_refs = [
+        _normalize_evidence_ref(
+            item,
+            field=f"lens_reviews[{index}].evidence_refs[]",
+        )
+        for item in _bounded_text_list(
+            value.get("evidence_refs"),
+            field=f"lens_reviews[{index}].evidence_refs",
+            item_limit=400,
+            count_limit=20,
+        )
+    ]
+    if status == "not_applicable" and evidence_refs:
+        raise ValueError(
+            f"lens_reviews[{index}] with status=not_applicable cannot cite evidence"
+        )
+    if status != "not_applicable" and not evidence_refs:
+        raise ValueError(
+            f"lens_reviews[{index}] with status={status} requires evidence_refs"
+        )
     return {
         "lens_id": lens_id,
         "status": status,
         "summary": summary,
         "finding_codes": finding_codes,
+        "evidence_refs": evidence_refs,
     }
 
 
@@ -210,6 +270,11 @@ def _normalize_simplification_decision(
 ) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"simplification_decisions[{index}] must be an object")
+    decision_id = _bounded_text(
+        value.get("decision_id"),
+        field=f"simplification_decisions[{index}].decision_id",
+        limit=80,
+    )
     outcome = str(value.get("outcome") or "").strip().lower()
     if outcome not in SIMPLIFICATION_OUTCOMES:
         raise ValueError(
@@ -226,11 +291,16 @@ def _normalize_simplification_decision(
         field=f"simplification_decisions[{index}].reason",
         limit=320,
     )
-    if not subject or not reason:
+    if not decision_id or not subject or not reason:
         raise ValueError(
-            f"simplification_decisions[{index}] requires subject and reason"
+            f"simplification_decisions[{index}] requires decision_id, subject, and reason"
         )
-    decision = {"subject": subject, "outcome": outcome, "reason": reason}
+    decision = {
+        "decision_id": decision_id,
+        "subject": subject,
+        "outcome": outcome,
+        "reason": reason,
+    }
     path = _relative_path(
         value.get("path"),
         field=f"simplification_decisions[{index}].path",
@@ -295,6 +365,8 @@ def normalize_change_quality_result(
     *,
     expected_fingerprint: str,
     safe_fix_allowed: bool,
+    expected_changed_files: list[str] | None = None,
+    expected_instruction_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("result JSON root must be an object")
@@ -322,6 +394,28 @@ def normalize_change_quality_result(
         raise ValueError("safe_fix_applied=true requires safe_fix_passes=1")
     if not safe_fix_applied and safe_fix_passes != 0:
         raise ValueError("safe_fix_passes=1 requires safe_fix_applied=true")
+    raw_principles = value.get("repository_principles")
+    if not isinstance(raw_principles, list):
+        raise ValueError("repository_principles must be an array")
+    if len(raw_principles) > 20:
+        raise ValueError("repository_principles supports at most 20 items")
+    repository_principles = [
+        _normalize_repository_principle(item, index=index)
+        for index, item in enumerate(raw_principles)
+    ]
+    principle_sources = [item["source"] for item in repository_principles]
+    if len(set(principle_sources)) != len(principle_sources):
+        raise ValueError("repository_principles must not repeat a source")
+    if expected_instruction_refs is not None:
+        expected_sources = set(expected_instruction_refs)
+        actual_sources = set(principle_sources)
+        if actual_sources != expected_sources:
+            missing_sources = sorted(expected_sources - actual_sources)
+            unknown_sources = sorted(actual_sources - expected_sources)
+            raise ValueError(
+                "repository_principles must cover the projected instruction refs; "
+                f"missing={missing_sources} unknown={unknown_sources}"
+            )
     findings = [
         _normalize_finding(item, index=index)
         for index, item in enumerate(value.get("findings") or [])
@@ -345,6 +439,13 @@ def normalize_change_quality_result(
     missing_lenses = [lens_id for lens_id in REVIEW_LENS_IDS if lens_id not in lens_map]
     if missing_lenses:
         raise ValueError(f"lens_reviews missing required lenses: {missing_lenses}")
+    summaries = [item["summary"] for item in lens_reviews]
+    if len(set(summaries)) != len(summaries):
+        raise ValueError(
+            "lens_reviews must contain lens-specific summaries, not a repeated generic all-clear"
+        )
+    if not any(item["status"] != "not_applicable" for item in lens_reviews):
+        raise ValueError("at least one review lens must be applicable")
     referenced_codes = {code for lens in lens_reviews for code in lens["finding_codes"]}
     unknown_codes = sorted(referenced_codes - set(finding_codes))
     if unknown_codes:
@@ -366,6 +467,9 @@ def normalize_change_quality_result(
         _normalize_simplification_decision(item, index=index)
         for index, item in enumerate(raw_decisions)
     ]
+    decision_ids = [item["decision_id"] for item in simplification_decisions]
+    if len(set(decision_ids)) != len(decision_ids):
+        raise ValueError("simplification decision ids must be unique")
     fixed_decisions = [
         item for item in simplification_decisions if item["outcome"] == "fixed"
     ]
@@ -387,6 +491,55 @@ def normalize_change_quality_result(
         _normalize_validation_evidence(item, index=index)
         for index, item in enumerate(raw_validation)
     ]
+    validator_ids = [item["validator"] for item in validation_evidence]
+    if len(set(validator_ids)) != len(validator_ids):
+        raise ValueError("validation_evidence validator ids must be unique")
+    evidence_targets = {
+        "path": set(expected_changed_files or []),
+        "instruction": set(principle_sources),
+        "finding": set(finding_codes),
+        "validator": set(validator_ids),
+        "decision": set(decision_ids),
+    }
+    for lens in lens_reviews:
+        refs_by_kind: dict[str, set[str]] = {}
+        for evidence_ref in lens["evidence_refs"]:
+            kind, target = evidence_ref.split(":", 1)
+            refs_by_kind.setdefault(kind, set()).add(target)
+            if kind != "path" and target not in evidence_targets[kind]:
+                raise ValueError(
+                    f"lens {lens['lens_id']} references unknown evidence: {evidence_ref}"
+                )
+            if (
+                kind == "path"
+                and expected_changed_files is not None
+                and target not in evidence_targets["path"]
+            ):
+                raise ValueError(
+                    f"lens {lens['lens_id']} references unchanged path: {target}"
+                )
+        if lens["status"] == "finding" and not set(lens["finding_codes"]).issubset(
+            refs_by_kind.get("finding", set())
+        ):
+            raise ValueError(
+                f"lens {lens['lens_id']} must anchor each finding_code with finding:<code>"
+            )
+        if (
+            lens["lens_id"] == "quality_simplification"
+            and lens["status"] != "not_applicable"
+            and not refs_by_kind.get("decision")
+        ):
+            raise ValueError(
+                "quality_simplification lens requires a decision:<decision_id> reference"
+            )
+        if (
+            lens["lens_id"] == "test_validation"
+            and lens["status"] != "not_applicable"
+            and not refs_by_kind.get("validator")
+        ):
+            raise ValueError(
+                "test_validation lens requires a validator:<validator> reference"
+            )
     summary = _bounded_text(value.get("summary"), field="summary", limit=500)
     if not summary:
         raise ValueError("summary is required")
@@ -395,6 +548,7 @@ def normalize_change_quality_result(
         "scope_fingerprint": fingerprint,
         "reviewed_final_scope": True,
         "summary": summary,
+        "repository_principles": repository_principles,
         "findings": findings,
         "lens_reviews": [lens_map[lens_id] for lens_id in REVIEW_LENS_IDS],
         "simplification_decisions": simplification_decisions,

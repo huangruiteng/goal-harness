@@ -93,18 +93,31 @@ def main() -> int:
                     "scope_fingerprint": prepared["scope"]["scope_fingerprint"],
                     "reviewed_final_scope": True,
                     "summary": "Exact final scope reviewed.",
+                    "repository_principles": [],
                     "findings": [],
                     "lens_reviews": [
                         {
                             "lens_id": lens_id,
                             "status": "checked",
-                            "summary": "Reviewed with no finding.",
+                            "summary": (
+                                f"{lens_id} was checked against the fixture diff."
+                            ),
                             "finding_codes": [],
+                            "evidence_refs": (
+                                ["decision:fixture-simplification", "path:app.py"]
+                                if lens_id == "quality_simplification"
+                                else (
+                                    ["validator:fixture-smoke"]
+                                    if lens_id == "test_validation"
+                                    else ["path:app.py"]
+                                )
+                            ),
                         }
                         for lens_id in REVIEW_LENS_IDS
                     ],
                     "simplification_decisions": [
                         {
+                            "decision_id": "fixture-simplification",
                             "subject": "final fixture diff",
                             "outcome": "retained",
                             "reason": "The direct assignment is already minimal.",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -19,6 +20,7 @@ from loopx.capabilities.change_quality.receipt import (
     record_change_quality_receipt,
     verify_change_quality_receipt,
 )
+from loopx.capabilities.change_quality.result import normalize_change_quality_result
 from loopx.cli import main
 from loopx.configure_goal import configure_goal
 from loopx.project_skill_delivery import (
@@ -97,6 +99,14 @@ def _result(path: Path, fingerprint: str, **overrides: object) -> Path:
         if isinstance(findings, list)
         else []
     )
+    validation_evidence = overrides.get("validation_evidence")
+    validator_id = (
+        str(validation_evidence[0].get("validator"))
+        if isinstance(validation_evidence, list)
+        and validation_evidence
+        and isinstance(validation_evidence[0], dict)
+        else "fixture"
+    )
     lens_reviews = [
         {
             "lens_id": lens_id,
@@ -108,10 +118,23 @@ def _result(path: Path, fingerprint: str, **overrides: object) -> Path:
             "summary": (
                 "See the referenced findings."
                 if lens_id == "quality_simplification" and finding_codes
-                else "Reviewed with no finding."
+                else f"{lens_id} was reviewed against the exact fixture change."
             ),
             "finding_codes": (
                 finding_codes if lens_id == "quality_simplification" else []
+            ),
+            "evidence_refs": (
+                [
+                    "path:app.py",
+                    *[f"finding:{code}" for code in finding_codes],
+                    "decision:fixture-simplification",
+                ]
+                if lens_id == "quality_simplification"
+                else (
+                    [f"validator:{validator_id}"]
+                    if lens_id == "test_validation"
+                    else ["path:app.py"]
+                )
             ),
         }
         for lens_id in REVIEW_LENS_IDS
@@ -122,10 +145,12 @@ def _result(path: Path, fingerprint: str, **overrides: object) -> Path:
         "scope_fingerprint": fingerprint,
         "reviewed_final_scope": True,
         "summary": "Reviewed the exact final scope.",
+        "repository_principles": [],
         "findings": [],
         "lens_reviews": lens_reviews,
         "simplification_decisions": [
             {
+                "decision_id": "fixture-simplification",
                 "subject": "exact final scope",
                 "outcome": "fixed" if safe_fix_applied else "retained",
                 "reason": (
@@ -236,6 +261,7 @@ def test_result_requires_complete_substantive_lens_coverage(tmp_path: Path) -> N
                 "status": "checked",
                 "summary": "Only one lens was reviewed.",
                 "finding_codes": [],
+                "evidence_refs": ["path:app.py"],
             }
         ],
     )
@@ -266,8 +292,21 @@ def test_lens_findings_must_reference_recorded_findings(tmp_path: Path) -> None:
         {
             "lens_id": lens_id,
             "status": "finding" if lens_id == "reuse" else "checked",
-            "summary": "Review complete.",
+            "summary": f"{lens_id} review complete.",
             "finding_codes": ["missing-helper"] if lens_id == "reuse" else [],
+            "evidence_refs": (
+                ["path:app.py", "finding:missing-helper"]
+                if lens_id == "reuse"
+                else (
+                    ["decision:fixture-simplification", "path:app.py"]
+                    if lens_id == "quality_simplification"
+                    else (
+                        ["validator:fixture"]
+                        if lens_id == "test_validation"
+                        else ["path:app.py"]
+                    )
+                )
+            ),
         }
         for lens_id in REVIEW_LENS_IDS
     ]
@@ -287,6 +326,142 @@ def test_lens_findings_must_reference_recorded_findings(tmp_path: Path) -> None:
             base_ref="HEAD",
             execute=False,
         )
+
+
+def test_result_rejects_repeated_generic_lens_summaries(tmp_path: Path) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    _enable(registry)
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    prepared = build_change_quality_prepare_packet(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref="HEAD",
+    )
+    generic_reviews = [
+        {
+            "lens_id": lens_id,
+            "status": "checked",
+            "summary": "Reviewed with no finding.",
+            "finding_codes": [],
+            "evidence_refs": (
+                ["decision:fixture-simplification", "path:app.py"]
+                if lens_id == "quality_simplification"
+                else (
+                    ["validator:fixture"]
+                    if lens_id == "test_validation"
+                    else ["path:app.py"]
+                )
+            ),
+        }
+        for lens_id in REVIEW_LENS_IDS
+    ]
+    result_path = _result(
+        tmp_path / "generic.json",
+        prepared["scope"]["scope_fingerprint"],
+        lens_reviews=generic_reviews,
+    )
+
+    with pytest.raises(ValueError, match="generic all-clear"):
+        record_change_quality_receipt(
+            registry_path=registry,
+            runtime_root=runtime_root,
+            goal_id=GOAL_ID,
+            repo_path=repo,
+            result_path=result_path,
+            base_ref="HEAD",
+            execute=False,
+        )
+
+
+def test_result_requires_all_projected_repository_principles(tmp_path: Path) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    _enable(registry)
+    (repo / "AGENTS.md").write_text("# Review the exact diff.\n", encoding="utf-8")
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    prepared = build_change_quality_prepare_packet(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref="HEAD",
+    )
+    assert prepared["repository_context"]["instruction_refs"] == ["AGENTS.md"]
+    result_path = _result(
+        tmp_path / "missing-principle.json",
+        prepared["scope"]["scope_fingerprint"],
+    )
+
+    with pytest.raises(ValueError, match="projected instruction refs"):
+        record_change_quality_receipt(
+            registry_path=registry,
+            runtime_root=runtime_root,
+            goal_id=GOAL_ID,
+            repo_path=repo,
+            result_path=result_path,
+            base_ref="HEAD",
+            execute=False,
+        )
+
+
+def test_five_pr_calibration_replays_substantive_simplify_receipts() -> None:
+    fixture_path = (
+        Path(__file__).parents[1]
+        / "fixtures"
+        / "change_quality"
+        / "five_pr_calibration.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    cases = fixture["cases"]
+
+    assert {case["source"]["pull_request"] for case in cases} == {
+        2590,
+        2593,
+        2594,
+        2597,
+        2602,
+    }
+    assert {
+        case["source"]["pull_request"] for case in cases if case["manual_holds"]
+    } == {2593}
+    assert [
+        case["source"]["pull_request"] for case in cases if case["safe_fix_applied"]
+    ] == [2594]
+
+    for case in cases:
+        fingerprint = hashlib.sha256(
+            json.dumps(case, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        result = {
+            "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
+            "scope_fingerprint": fingerprint,
+            "reviewed_final_scope": True,
+            "summary": (
+                f"Replayed public PR #{case['source']['pull_request']} "
+                "against the simplify contract."
+            ),
+            "repository_principles": case["repository_principles"],
+            "findings": [],
+            "lens_reviews": case["lens_reviews"],
+            "simplification_decisions": case["simplification_decisions"],
+            "safe_fix_applied": case["safe_fix_applied"],
+            "safe_fix_passes": case["safe_fix_passes"],
+            "validation_evidence": case["validation_evidence"],
+        }
+
+        normalized = normalize_change_quality_result(
+            result,
+            expected_fingerprint=fingerprint,
+            safe_fix_allowed=True,
+            expected_changed_files=case["changed_files"],
+            expected_instruction_refs=[
+                item["source"] for item in case["repository_principles"]
+            ],
+        )
+
+        assert [item["lens_id"] for item in normalized["lens_reviews"]] == list(
+            REVIEW_LENS_IDS
+        )
+        assert normalized["safe_fix_passes"] in {0, 1}
 
 
 def test_failed_validation_cannot_produce_passing_receipt(tmp_path: Path) -> None:
