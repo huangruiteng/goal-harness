@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import signal
 import stat
 import time
 from pathlib import Path
@@ -374,6 +375,44 @@ def test_main_finalizes_public_liveness_after_unhandled_supervisor_failure(
     assert "PRIVATE_FAILURE_DETAIL_MUST_NOT_PROJECT" not in serialized
     assert "PRIVATE_FAILURE_DETAIL_MUST_NOT_PROJECT" not in captured.err
     assert "RuntimeError" in captured.err
+
+
+def test_main_finalizes_public_liveness_after_termination_signal(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    supervisor = _load_supervisor_module()
+    public_output = tmp_path / "public" / "supervisor.public.json"
+
+    def request_termination(_args):
+        signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr(supervisor, "run_supervisor", request_termination)
+
+    returncode = supervisor.main(
+        [
+            "--ssh-destination",
+            "runner.example",
+            "--remote-command",
+            "run-benchmark",
+            "--public-output-path",
+            str(public_output),
+        ]
+    )
+    persisted = json.loads(public_output.read_text(encoding="utf-8"))
+    captured = capsys.readouterr()
+
+    assert returncode == 128 + signal.SIGTERM
+    assert persisted["first_blocker"] == "supervisor_termination_signal"
+    assert persisted["public_liveness"]["terminal"] is True
+    assert persisted["public_liveness"]["process_alive"] is False
+    fallback = persisted["public_terminal_fallback"]
+    assert fallback["trigger"] == "supervisor_termination_signal"
+    assert fallback["signal_name"] == "SIGTERM"
+    assert fallback["exception_message_recorded"] is False
+    assert '"signal_name": "SIGTERM"' in captured.out
+    assert "_SupervisorTerminationSignal" in captured.err
 
 
 def test_remote_command_failure_subtype_uses_public_allowlist() -> None:

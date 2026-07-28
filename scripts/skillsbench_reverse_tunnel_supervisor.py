@@ -58,6 +58,12 @@ PROXY_PORT_FIELDS = (
 )
 
 
+class _SupervisorTerminationSignal(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
+
+
 def _host_kind(value: str) -> str:
     normalized = value.strip("[]").lower()
     if normalized in {"localhost", "127.0.0.1", "::1"}:
@@ -1549,11 +1555,19 @@ def _finalize_unhandled_supervisor_failure(
             "private_log_written": False,
             "fallback_payload_error_type": type(payload_exc).__name__[:80],
         }
-    payload["first_blocker"] = "supervisor_unhandled_exception"
+    termination_signal = (
+        exc.signum if isinstance(exc, _SupervisorTerminationSignal) else None
+    )
+    payload["first_blocker"] = (
+        "supervisor_termination_signal"
+        if termination_signal is not None
+        else "supervisor_unhandled_exception"
+    )
     payload["supervisor_error_type"] = type(exc).__name__[:80]
     payload["public_terminal_fallback"] = {
         "schema_version": "skillsbench_supervisor_terminal_fallback_v0",
         "triggered": True,
+        "trigger": payload["first_blocker"],
         "previous_liveness": previous,
         "exception_message_recorded": False,
         "raw_task_text_recorded": False,
@@ -1562,14 +1576,18 @@ def _finalize_unhandled_supervisor_failure(
         "raw_verifier_output_recorded": False,
         "local_paths_recorded": False,
     }
+    if termination_signal is not None:
+        payload["public_terminal_fallback"]["signal_name"] = signal.Signals(
+            termination_signal
+        ).name
     try:
         payload["remote_failure_cleanup"] = _run_remote_failure_cleanup(
             args,
-            trigger="supervisor_unhandled_exception",
+            trigger=str(payload["first_blocker"]),
         )
     except Exception as cleanup_exc:
         cleanup = _remote_failure_cleanup_public_contract(args)
-        cleanup["trigger"] = "supervisor_unhandled_exception"
+        cleanup["trigger"] = str(payload["first_blocker"])
         cleanup["first_blocker"] = "remote_failure_cleanup_failed"
         cleanup["error_type"] = type(cleanup_exc).__name__[:80]
         payload["remote_failure_cleanup"] = cleanup
@@ -2622,15 +2640,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    previous_signal_handlers: dict[int, Any] = {}
+
+    def request_terminal_closeout(signum: int, _frame: Any) -> None:
+        raise _SupervisorTerminationSignal(signum)
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        previous_signal_handlers[signum] = signal.signal(
+            signum,
+            request_terminal_closeout,
+        )
     try:
         rc, payload = run_supervisor(args)
     except Exception as exc:
         payload = _finalize_unhandled_supervisor_failure(args, exc)
-        rc = 70
+        rc = (
+            128 + exc.signum
+            if isinstance(exc, _SupervisorTerminationSignal)
+            else 70
+        )
         sys.stderr.write(
             "skillsbench supervisor failed unexpectedly: "
             f"{type(exc).__name__}\n"
         )
+    finally:
+        for signum, previous_handler in previous_signal_handlers.items():
+            signal.signal(signum, previous_handler)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     sys.stdout.write(text)
     return rc
