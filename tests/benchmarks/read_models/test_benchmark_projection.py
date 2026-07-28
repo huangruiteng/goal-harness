@@ -163,6 +163,8 @@ def test_status_facade_uses_benchmark_validation_and_trial_read_models() -> None
 def test_status_facade_compacts_benchmark_execution_contract_metadata() -> None:
     source = {
         "schema_version": "benchmark_run_v0",
+        "official_score": 0.5,
+        "official_task_score": {"kind": "pass", "value": 1, "passed": True},
         "benchmark_loop_contract": {
             "schema_version": "benchmark_loop_contract_v0",
             "route": "native-goal-worker",
@@ -250,3 +252,9 @@ def test_status_facade_compacts_benchmark_execution_contract_metadata() -> None:
     compact = compact_benchmark_run(source)
     assert compact is not None
     assert {key: compact[key] for key in expected} == expected
+    keys = list(compact)
+    assert keys.index("benchmark_loop_contract") < keys.index("official_score")
+    assert keys.index("official_task_score") < keys.index("claim_boundary")
+    assert (
+        keys.index("claim_boundary") < keys.index("agent") < keys.index("model_control")
+    )

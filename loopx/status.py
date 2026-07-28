@@ -2778,12 +2778,13 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         schema_version=BENCHMARK_RUN_SCHEMA_VERSION,
         max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    compact.update(
-        _compact_benchmark_run_execution_contract(
-            source,
-            max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
+    execution_contract = _compact_benchmark_run_execution_contract(
+        source,
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
+    loop_contract = execution_contract.get("benchmark_loop_contract")
+    if loop_contract:
+        compact["benchmark_loop_contract"] = loop_contract
     if isinstance(source.get("official_score"), (int, float)) and not isinstance(
         source.get("official_score"),
         bool,
@@ -2847,6 +2848,14 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
                 compact_official[field] = official.get(field)
         if compact_official:
             compact["official_task_score"] = compact_official
+
+    compact.update(
+        {
+            field: execution_contract[field]
+            for field in ("claim_boundary", "agent", "model_control")
+            if field in execution_contract
+        }
+    )
 
     runner_failure = _compact_benchmark_runner_failure(source.get("runner_failure"))
     if runner_failure:
