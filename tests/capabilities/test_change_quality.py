@@ -20,7 +20,11 @@ from loopx.capabilities.change_quality.receipt import (
     record_change_quality_receipt,
     verify_change_quality_receipt,
 )
-from loopx.capabilities.change_quality.result import normalize_change_quality_result
+from loopx.capabilities.change_quality.result import (
+    SIMPLIFY_GUARDRAIL_LENS_IDS,
+    SIMPLIFY_PRIMARY_LENS_IDS,
+    normalize_change_quality_result,
+)
 from loopx.cli import main
 from loopx.configure_goal import configure_goal
 from loopx.project_skill_delivery import (
@@ -264,6 +268,12 @@ def test_prepare_projects_repository_context_and_required_review_lenses(
     assert [
         item["lens_id"] for item in prepared["agent_contract"]["review_lenses"]
     ] == list(REVIEW_LENS_IDS)
+    assert prepared["agent_contract"]["primary_review_lenses"] == list(
+        SIMPLIFY_PRIMARY_LENS_IDS
+    )
+    assert prepared["agent_contract"]["guardrail_review_lenses"] == list(
+        SIMPLIFY_GUARDRAIL_LENS_IDS
+    )
 
 
 def test_result_requires_complete_substantive_lens_coverage(tmp_path: Path) -> None:
@@ -396,6 +406,57 @@ def test_result_rejects_repeated_generic_lens_summaries(tmp_path: Path) -> None:
             base_ref="HEAD",
             execute=False,
         )
+
+
+def test_result_allows_compact_repeated_inactive_guardrails(tmp_path: Path) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    _enable(registry)
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    prepared = build_change_quality_prepare_packet(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref="HEAD",
+    )
+    reviews = [
+        {
+            "lens_id": lens_id,
+            "status": "checked"
+            if lens_id in SIMPLIFY_PRIMARY_LENS_IDS
+            else "not_applicable",
+            "summary": (
+                f"{lens_id} was reviewed against the exact fixture change."
+                if lens_id in SIMPLIFY_PRIMARY_LENS_IDS
+                else "No changed-surface or validator trigger."
+            ),
+            "finding_codes": [],
+            "evidence_refs": (
+                ["decision:fixture-simplification", "path:app.py"]
+                if lens_id == "quality_simplification"
+                else ["path:app.py"]
+                if lens_id == "reuse"
+                else []
+            ),
+        }
+        for lens_id in REVIEW_LENS_IDS
+    ]
+    result_path = _result(
+        tmp_path / "compact-guardrails.json",
+        prepared["scope"]["scope_fingerprint"],
+        lens_reviews=reviews,
+    )
+
+    recorded = record_change_quality_receipt(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        result_path=result_path,
+        base_ref="HEAD",
+        execute=True,
+    )
+
+    assert recorded["decision"] == "pass"
 
 
 def test_result_requires_all_projected_repository_principles(tmp_path: Path) -> None:

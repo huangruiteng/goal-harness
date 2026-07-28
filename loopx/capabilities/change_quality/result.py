@@ -87,6 +87,10 @@ REVIEW_LENSES = (
     },
 )
 REVIEW_LENS_IDS = tuple(item["lens_id"] for item in REVIEW_LENSES)
+SIMPLIFY_PRIMARY_LENS_IDS = ("reuse", "quality_simplification")
+SIMPLIFY_GUARDRAIL_LENS_IDS = tuple(
+    lens_id for lens_id in REVIEW_LENS_IDS if lens_id not in SIMPLIFY_PRIMARY_LENS_IDS
+)
 
 
 def _bounded_text(value: Any, *, field: str, limit: int) -> str:
@@ -439,10 +443,13 @@ def normalize_change_quality_result(
     missing_lenses = [lens_id for lens_id in REVIEW_LENS_IDS if lens_id not in lens_map]
     if missing_lenses:
         raise ValueError(f"lens_reviews missing required lenses: {missing_lenses}")
-    summaries = [item["summary"] for item in lens_reviews]
-    if len(set(summaries)) != len(summaries):
+    primary_summaries = [
+        lens_map[lens_id]["summary"] for lens_id in SIMPLIFY_PRIMARY_LENS_IDS
+    ]
+    if len(set(primary_summaries)) != len(primary_summaries):
         raise ValueError(
-            "lens_reviews must contain lens-specific summaries, not a repeated generic all-clear"
+            "primary simplify lenses must contain lens-specific summaries, "
+            "not a repeated generic all-clear"
         )
     if not any(item["status"] != "not_applicable" for item in lens_reviews):
         raise ValueError("at least one review lens must be applicable")

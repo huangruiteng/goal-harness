@@ -16,6 +16,8 @@ from .result import (
     CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
     REVIEW_LENSES,
     REVIEW_LENS_IDS,
+    SIMPLIFY_GUARDRAIL_LENS_IDS,
+    SIMPLIFY_PRIMARY_LENS_IDS,
     change_quality_result_decision,
     normalize_change_quality_result,
 )
@@ -122,10 +124,13 @@ def build_change_quality_prepare_packet(
             "provider_neutral": True,
             "max_safe_fix_passes": 1,
             "review_lenses": [dict(item) for item in REVIEW_LENSES],
+            "primary_review_lenses": list(SIMPLIFY_PRIMARY_LENS_IDS),
+            "guardrail_review_lenses": list(SIMPLIFY_GUARDRAIL_LENS_IDS),
             "instructions": [
                 "Review only the exact changed scope and resolve the projected repository instruction and ownership references.",
-                "Record a substantive conclusion for every required review lens; do not emit a generic all-clear.",
-                "Preserve intended behavior; prefer deletion, reuse, clarity, and established language idioms over new abstraction.",
+                "Spend review effort first on reuse and quality_simplification; record distinct, evidence-backed conclusions for both.",
+                "Prefer deletion, reuse, direct control flow, and established language idioms over redundant state, parameters, branches, wrappers, or speculative abstraction.",
+                "Treat the remaining lenses as guardrails: expand them only when the changed surface, a repository instruction, a native validator, or a simplify proposal raises a concrete risk; otherwise mark them not_applicable concisely.",
                 "Use blocker only for concrete correctness, security, privacy, contract, or required-validation failures.",
                 "Use repository-native tests, linters, type checkers, and build tools as language-specific oracles.",
                 (

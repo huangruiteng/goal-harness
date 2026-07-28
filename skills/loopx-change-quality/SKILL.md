@@ -47,7 +47,28 @@ preview an explicit project install; do not fall back to a global copy.
 
 ## Review Rules
 
-The prepare packet requires one substantive conclusion for each review lens:
+## Simplify First
+
+Spend the review budget on simplification before broad quality analysis:
+
+1. Reuse an established helper or durable repository rule instead of copying
+   behavior or knowledge.
+2. Remove redundant state, parameters, branches, indirection, and speculative
+   abstraction while preserving behavior.
+3. Challenge a private helper or wrapper when it is only one to three lines,
+   has at most two production callers, and owns no independent domain
+   invariant, effect, or error boundary.
+4. Prefer the smallest coherent edit that leaves ownership and intent clearer.
+   Do not create churn when the current shape is already direct and cohesive.
+
+`reuse` and `quality_simplification` are the two primary lenses. Give each a
+distinct, evidence-backed conclusion. The remaining lenses are guardrails:
+expand one only when the changed surface, repository instructions, a native
+validator, or the proposed simplification raises a concrete risk. Otherwise
+mark it `not_applicable` with the same short standard reason; do not spend
+tokens inventing lens-specific prose.
+
+The available review lenses are:
 
 - **reuse:** established helpers and durable knowledge are reused instead of
   duplicated;
@@ -88,7 +109,7 @@ reference. Every applicable lens must cite typed `evidence_refs` using
 `path:`, `instruction:`, `finding:`, `validator:`, or `decision:`. A
 `quality_simplification` conclusion cites its decision id, and a
 `test_validation` conclusion cites the repository-native validator. Do not
-repeat the same generic all-clear across lenses.
+repeat the same generic all-clear across the two primary lenses.
 
 Use `blocker` only for a concrete correctness, security, privacy, contract, or
 required-validation failure. Style preferences and speculative redesigns are
@@ -97,6 +118,12 @@ required-validation failure. Style preferences and speculative redesigns are
 This first version is single-level. Review one final diff; do not recursively
 review the review, spawn a hierarchy of quality agents, or require agreement
 between several models.
+
+The required lenses are a review discipline, not evidence that a particular
+model applies them well. Maintainers qualify model behavior separately against
+the public clean-PR and seeded Python, Rust, and TypeScript shadow matrix.
+Normal delivery does not launch that low-frequency evaluation, and a model
+shadow result cannot mutate goal policy or grant merge authority.
 
 ## Safe Fix
 
