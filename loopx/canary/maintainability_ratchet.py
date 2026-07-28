@@ -75,10 +75,6 @@ _OVERSIZED_DECISION_METRIC_CEILINGS = {
 }
 
 REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
-    "dependency_debt:loopx.status->loopx.benchmark_adapters.skillsbench_verifier_bootstrap": _exception(
-        "Status still applies one benchmark bootstrap compatibility projection.",
-        "Move the bootstrap attribution into the benchmark runtime projection and delete the edge.",
-    ),
     "compatibility_facade:loopx.quota": _exception(
         "The public loopx.quota import surface remains a supported compatibility contract, "
         "including presentation-owned quota event renderers.",

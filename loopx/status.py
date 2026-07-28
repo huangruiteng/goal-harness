@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .benchmark_adapters.skillsbench_verifier_bootstrap import (
+from .benchmarks.read_models.skillsbench_verifier_attribution import (
     apply_skillsbench_verifier_bootstrap_missing_score_attribution,
 )
 from .benchmark_core import lifecycle as _benchmark_lifecycle
