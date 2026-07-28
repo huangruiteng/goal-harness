@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import signal
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -306,6 +308,111 @@ def test_supervisor_finalizes_public_liveness_on_early_launch_failure(
     assert persisted["public_liveness"]["terminal"] is True
     assert persisted["public_liveness"]["process_alive"] is False
     assert persisted["public_liveness"]["heartbeat_count"] == 2
+
+
+def test_main_finalizes_public_liveness_after_unhandled_supervisor_failure(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    supervisor = _load_supervisor_module()
+    public_output = tmp_path / "public" / "supervisor.public.json"
+    previous_payload = supervisor._initial_public_payload(
+        supervisor.parse_args(
+            [
+                "--ssh-destination",
+                "runner.example",
+                "--remote-command",
+                "run-benchmark",
+                "--public-output-path",
+                str(public_output),
+            ]
+        )
+    )
+    previous_payload["tunnel_ready"] = True
+    supervisor._write_public_checkpoint(
+        str(public_output),
+        previous_payload,
+        state="running",
+        started_at=time.time() - 10,
+        heartbeat_count=4,
+        terminal=False,
+    )
+
+    def raise_private_failure(_args):
+        raise RuntimeError("PRIVATE_FAILURE_DETAIL_MUST_NOT_PROJECT")
+
+    monkeypatch.setattr(supervisor, "run_supervisor", raise_private_failure)
+
+    returncode = supervisor.main(
+        [
+            "--ssh-destination",
+            "runner.example",
+            "--remote-command",
+            "run-benchmark",
+            "--public-output-path",
+            str(public_output),
+        ]
+    )
+    persisted = json.loads(public_output.read_text(encoding="utf-8"))
+    captured = capsys.readouterr()
+    serialized = json.dumps(persisted, sort_keys=True)
+
+    assert returncode == 70
+    assert persisted["ok"] is False
+    assert persisted["first_blocker"] == "supervisor_unhandled_exception"
+    assert persisted["supervisor_error_type"] == "RuntimeError"
+    assert persisted["public_liveness"]["state"] == "failed"
+    assert persisted["public_liveness"]["terminal"] is True
+    assert persisted["public_liveness"]["process_alive"] is False
+    assert persisted["public_liveness"]["heartbeat_count"] == 5
+    fallback = persisted["public_terminal_fallback"]
+    assert fallback["triggered"] is True
+    assert fallback["exception_message_recorded"] is False
+    assert fallback["previous_liveness"]["state"] == "running"
+    assert fallback["previous_liveness"]["heartbeat_count"] == 4
+    assert fallback["previous_liveness"]["last_known_tunnel_ready"] is True
+    assert "PRIVATE_FAILURE_DETAIL_MUST_NOT_PROJECT" not in serialized
+    assert "PRIVATE_FAILURE_DETAIL_MUST_NOT_PROJECT" not in captured.err
+    assert "RuntimeError" in captured.err
+
+
+def test_main_finalizes_public_liveness_after_termination_signal(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    supervisor = _load_supervisor_module()
+    public_output = tmp_path / "public" / "supervisor.public.json"
+
+    def request_termination(_args):
+        signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr(supervisor, "run_supervisor", request_termination)
+
+    returncode = supervisor.main(
+        [
+            "--ssh-destination",
+            "runner.example",
+            "--remote-command",
+            "run-benchmark",
+            "--public-output-path",
+            str(public_output),
+        ]
+    )
+    persisted = json.loads(public_output.read_text(encoding="utf-8"))
+    captured = capsys.readouterr()
+
+    assert returncode == 128 + signal.SIGTERM
+    assert persisted["first_blocker"] == "supervisor_termination_signal"
+    assert persisted["public_liveness"]["terminal"] is True
+    assert persisted["public_liveness"]["process_alive"] is False
+    fallback = persisted["public_terminal_fallback"]
+    assert fallback["trigger"] == "supervisor_termination_signal"
+    assert fallback["signal_name"] == "SIGTERM"
+    assert fallback["exception_message_recorded"] is False
+    assert '"signal_name": "SIGTERM"' in captured.out
+    assert "_SupervisorTerminationSignal" in captured.err
 
 
 def test_remote_command_failure_subtype_uses_public_allowlist() -> None:

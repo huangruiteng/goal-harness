@@ -34,7 +34,8 @@ The projection is derived from:
 - compact run history and the agent-scoped evidence ledger;
 - task graph, handoff, and review-packet projections when present.
 - optional prebuilt `agent_material_frontier_v0` packets on the cold-path
-  `agent_material_frontiers` input.
+  `agent_material_frontiers` input, consumed only when the current execution
+  envelope declares the goal-scoped `material_lifecycle` capability.
 
 The projection is stale after any lifecycle event until recomputed. Consumers
 must tolerate missing fields and fall back to existing status/review-packet
@@ -190,8 +191,9 @@ does not create a chat stream, dispatcher queue, approval mechanism, or runtime
 task separate from the source todo.
 
 When the cold path also receives a full `agent_material_frontier_v0` for the
-same agent, the management projection may enrich the typed note as
-`handoff_note_v1`:
+same agent and the caller passes `material_lifecycle` in
+`available_capabilities`, the management projection may enrich the typed note
+as `handoff_note_v1`:
 
 ```json
 {
@@ -228,6 +230,19 @@ authority ownership, or source bodies. A successor rebuilds its own frontier
 from current goal authority and its own agent-scoped requirements and receipts.
 The optional cold-path input does not create an agent row, claim, or task by
 itself.
+
+Material projection is default-off. Without `material_lifecycle`, LoopX
+ignores `agent_material_frontiers` and omits `material_frontier`,
+`handoff_note_v1`, and `source_summary.material_frontier_count`. Capability
+absence is an observed runtime condition, not a user gate: it does not create
+a todo, notification, or authority request.
+
+Status-backed CLI entry points preserve that same execution envelope:
+`status`, `quota`, and `review-packet` accept repeatable
+`--available-capability` values and pass them through status collection.
+Projection-cache identity includes the normalized capability set, so a
+default-off snapshot cannot satisfy an enabled request and an enabled snapshot
+cannot leak material fields into a default request.
 
 The cold-path join is scoped by `(goal_id, agent_id)`, not agent identity alone.
 An explicit status goal filter takes precedence, followed by the current todo's
@@ -309,6 +324,9 @@ A valid implementation or fixture should prove:
   by this projection;
 - stale claim is rendered as a warning only;
 - handoff notes reference existing todo/history/evidence ids;
+- material frontier fields are absent without the observed
+  `material_lifecycle` capability and retain their bounded shape when it is
+  present;
 - public fixtures do not include credentials, raw logs, private docs, raw
   trajectories, local absolute paths, or internal-only source material;
 - dashboard consumers remain functional when the projection is absent.

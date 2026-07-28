@@ -24,6 +24,8 @@ Optional env:
                                        python3 -m loopx.benchmark_adapters.skillsbench_runner_profile capture
   SKILLSBENCH_LOCAL_CODEX_PROXY_HOST   Local proxy host, default 127.0.0.1
   SKILLSBENCH_LOCAL_CODEX_PROXY_PORT   Local proxy port, default 18180
+  SKILLSBENCH_REMOTE_CODEX_PROXY_PORT  Remote proxy port override; default is
+                                       deterministic and scoped to the run id
   SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND
                                        Optional private foreground command that
                                        the supervisor owns and restarts when
@@ -64,10 +66,16 @@ Optional env:
                                        control; default codex from local PATH
   SKILLSBENCH_LOCAL_CODEX_SANDBOX      Host Codex sandbox mode; default
                                        workspace-write
+  SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC
+                                       Exact-host sandbox probe timeout;
+                                       default 30
   SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC
                                        Optional positive per-prompt timeout for
                                        host-local Codex; unset preserves the
                                        runner default
+  SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS
+                                       Positive startup preflight attempts for
+                                       split-control Codex; default 3
   SKILLSBENCH_OUTER_TIMEOUT_SEC         Optional positive runner-wide timeout;
                                        unset preserves the runner default
   SKILLSBENCH_CLI_GOAL_THREAD_PREWARM  Set to 1 to prewarm the persisted Codex
@@ -172,7 +180,7 @@ fi
 task_id="${task_ids[0]}"
 task_count="${#task_ids[@]}"
 tag="${2:-${SKILLSBENCH_RUN_TAG:-manual}}"
-remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-18180}}"
+remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-}}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runner_profile="${SKILLSBENCH_RUNNER_PROFILE:-}"
@@ -235,7 +243,9 @@ remote_codex_bin="${SKILLSBENCH_REMOTE_CODEX_BIN:-codex}"
 local_codex_split_control="${SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL:-0}"
 local_codex_bin="${SKILLSBENCH_LOCAL_CODEX_BIN:-codex}"
 local_codex_sandbox="${SKILLSBENCH_LOCAL_CODEX_SANDBOX:-workspace-write}"
+exact_host_codex_sandbox_preflight_timeout="${SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC:-30}"
 local_codex_exec_timeout="${SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC:-}"
+host_local_acp_codex_exec_preflight_attempts="${SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS:-3}"
 outer_timeout="${SKILLSBENCH_OUTER_TIMEOUT_SEC:-}"
 codex_cli_goal_thread_prewarm="${SKILLSBENCH_CLI_GOAL_THREAD_PREWARM:-0}"
 if [[ "$codex_cli_goal_thread_prewarm" != "0" && "$codex_cli_goal_thread_prewarm" != "1" ]]; then
@@ -245,6 +255,14 @@ fi
 if [[ -n "$local_codex_exec_timeout" ]] &&
   [[ ! "$local_codex_exec_timeout" =~ ^[1-9][0-9]*$ ]]; then
   echo "SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$host_local_acp_codex_exec_preflight_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$exact_host_codex_sandbox_preflight_timeout" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC must be a positive integer" >&2
   exit 2
 fi
 if [[ -n "$outer_timeout" ]] &&
@@ -391,7 +409,7 @@ elif [[ "$dry_run" == "false" && "$setup_only_public_preflight" != "1" ]]; then
     exit 2
   fi
   remote_codex_sandbox_probe_py='import shutil, subprocess, sys, tempfile
-codex_bin, sandbox_mode = sys.argv[1:]
+codex_bin, sandbox_mode, timeout_raw = sys.argv[1:]
 with tempfile.TemporaryDirectory(prefix="gh-skillsbench-codex-sandbox-") as tmp:
     try:
         proc = subprocess.run(
@@ -406,19 +424,35 @@ with tempfile.TemporaryDirectory(prefix="gh-skillsbench-codex-sandbox-") as tmp:
             cwd=tmp,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=10,
+            timeout=int(timeout_raw),
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        raise SystemExit(1) from None
-raise SystemExit(proc.returncode)'
+    except subprocess.TimeoutExpired:
+        raise SystemExit(124) from None
+    except OSError:
+        raise SystemExit(125) from None
+raise SystemExit(0 if proc.returncode == 0 else 123)'
   printf -v remote_codex_sandbox_probe \
-    '%q -c %q %q %q' \
+    '%q -c %q %q %q %q' \
     python3 "$remote_codex_sandbox_probe_py" \
-    "$remote_codex_bin" "$local_codex_sandbox"
-  if ! ssh "${ssh_command_options[@]}" "$SKILLSBENCH_SSH_DESTINATION" \
+    "$remote_codex_bin" "$local_codex_sandbox" \
+    "$exact_host_codex_sandbox_preflight_timeout"
+  if ssh "${ssh_command_options[@]}" "$SKILLSBENCH_SSH_DESTINATION" \
     "$remote_codex_sandbox_probe" >/dev/null 2>&1; then
-    python3 - "$local_codex_sandbox" "$remote_codex_bin_mode" <<'PY' >&2
+    exact_host_codex_sandbox_preflight="passed"
+  else
+    remote_codex_sandbox_probe_status=$?
+    case "$remote_codex_sandbox_probe_status" in
+      123) remote_codex_sandbox_failure_category="sandbox_command_failed" ;;
+      124) remote_codex_sandbox_failure_category="timeout" ;;
+      125) remote_codex_sandbox_failure_category="execution_unavailable" ;;
+      *) remote_codex_sandbox_failure_category="transport_or_unknown" ;;
+    esac
+    python3 - \
+      "$local_codex_sandbox" \
+      "$remote_codex_bin_mode" \
+      "$remote_codex_sandbox_failure_category" \
+      "$exact_host_codex_sandbox_preflight_timeout" <<'PY' >&2
 import json
 import sys
 
@@ -430,6 +464,8 @@ print(
             "error": "skillsbench_exact_host_codex_sandbox_preflight_failed",
             "sandbox_mode": sys.argv[1],
             "remote_codex_bin_mode": sys.argv[2],
+            "failure_category": sys.argv[3],
+            "timeout_seconds": int(sys.argv[4]),
             "raw_output_recorded": False,
             "remote_path_recorded": False,
             "ssh_destination_recorded": False,
@@ -440,7 +476,6 @@ print(
 PY
     exit 3
   fi
-  exact_host_codex_sandbox_preflight="passed"
 elif [[ "$setup_only_public_preflight" != "1" ]]; then
   exact_host_codex_sandbox_preflight="required"
 fi
@@ -451,6 +486,27 @@ safe_task="${safe_task// /-}"
 safe_task="${safe_task//_/-}"
 if ((task_count > 1)); then
   safe_task="batch-${task_count}"
+fi
+run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
+job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
+if [[ -z "$remote_proxy_port" ]]; then
+  remote_proxy_port="$(
+    python3 - "$run_group" <<'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256(sys.argv[1].encode("utf-8")).digest()
+print(20000 + (int.from_bytes(digest[:4], "big") % 40000))
+PY
+  )"
+  remote_proxy_port_mode="run_scoped"
+else
+  remote_proxy_port_mode="explicit"
+fi
+if [[ ! "$remote_proxy_port" =~ ^[1-9][0-9]{0,4}$ ]] ||
+  ((10#$remote_proxy_port > 65535)); then
+  echo "remote proxy port must be an integer from 1 through 65535" >&2
+  exit 2
 fi
 
 goal_id="${SKILLSBENCH_GOAL_ID:-loopx-meta}"
@@ -610,7 +666,8 @@ if [[ "$local_codex_split_control" == "1" ]]; then
   extra_runner_args+=(
     --local-codex-provider reverse-channel
     --host-local-acp-codex-exec-preflight
-    --host-local-acp-codex-exec-preflight-attempts 1
+    --host-local-acp-codex-exec-preflight-attempts
+    "$host_local_acp_codex_exec_preflight_attempts"
   )
 fi
 if [[ -n "$local_codex_exec_timeout" ]]; then
@@ -703,8 +760,6 @@ if [[ "$skip_current_aggregate_update" == "1" ]]; then
   extra_runner_args+=(--skip-current-aggregate-update)
 fi
 
-run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
-job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
 codex_channel_id="$(
   python3 - "$job_name" <<'PY'
 import hashlib
@@ -860,6 +915,7 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'public_output=%s/supervisor.public.json\n' "$public_dir"
   printf 'private_dir=%s\n' "$private_dir"
   printf 'remote_proxy_port=%s\n' "$remote_proxy_port"
+  printf 'remote_proxy_port_mode=%s\n' "$remote_proxy_port_mode"
   printf 'proxy_port_coherence_guard=enforced\n'
   printf 'docker_proxy_host_recorded=false\n'
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
@@ -876,9 +932,13 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'local_codex_sandbox=%s\n' "$local_codex_sandbox"
   printf 'local_codex_exec_timeout_sec=%s\n' \
     "${local_codex_exec_timeout:-runner-default}"
+  printf 'host_local_acp_codex_exec_preflight_attempts=%s\n' \
+    "$host_local_acp_codex_exec_preflight_attempts"
   printf 'outer_timeout_sec=%s\n' "${outer_timeout:-runner-default}"
   printf 'exact_host_codex_sandbox_preflight=%s\n' \
     "$exact_host_codex_sandbox_preflight"
+  printf 'exact_host_codex_sandbox_preflight_timeout_sec=%s\n' \
+    "$exact_host_codex_sandbox_preflight_timeout"
   printf 'codex_cli_goal_thread_prewarm=%s\n' "$codex_cli_goal_thread_prewarm"
   printf 'allow_staged_bootstrap_repair_run=%s\n' "$allow_staged_bootstrap_repair_run"
   printf 'setup_only_public_preflight=%s\n' "$setup_only_public_preflight"
@@ -1001,6 +1061,7 @@ job_name=${job_name}
 public_output=${public_dir}/supervisor.public.json
 private_dir=${private_dir}
 remote_proxy_port=${remote_proxy_port}
+remote_proxy_port_mode=${remote_proxy_port_mode}
 docker_proxy_host=${docker_proxy_host}
 docker_proxy_endpoint_mode=${docker_proxy_endpoint_mode}
 docker_api_version=${docker_api_version}
@@ -1013,5 +1074,6 @@ codex_cli_goal_thread_prewarm=${codex_cli_goal_thread_prewarm}
 allow_staged_bootstrap_repair_run=${allow_staged_bootstrap_repair_run}
 setup_only_public_preflight=${setup_only_public_preflight}
 exact_host_codex_sandbox_preflight=${exact_host_codex_sandbox_preflight}
+exact_host_codex_sandbox_preflight_timeout_sec=${exact_host_codex_sandbox_preflight_timeout}
 public_artifact_sync_interval_sec=${public_artifact_sync_interval}
 EOF

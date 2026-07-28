@@ -5,21 +5,76 @@ import json
 import os
 import tempfile
 from datetime import datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
-from ...feedback import validate_public_safe_text
 from ...history import validate_goal_id_path_segment
 from ...registry import read_json, registry_goals
+from .context import build_change_quality_repository_context
 from .policy import change_quality_goal_policy
+from .result import (
+    CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
+    LEGACY_CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
+    REVIEW_LENSES,
+    SIMPLIFY_GUARDRAIL_LENS_IDS,
+    change_quality_result_decision,
+    derive_change_quality_guardrails,
+    normalize_change_quality_result,
+    validate_legacy_change_quality_result_v1,
+)
 from .scope import build_change_quality_scope, resolve_git_root
 
 
-CHANGE_QUALITY_PREPARE_SCHEMA_VERSION = "change_quality_prepare_packet_v0"
-CHANGE_QUALITY_RESULT_SCHEMA_VERSION = "change_quality_agent_result_v0"
-CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v0"
-CHANGE_QUALITY_VERIFY_SCHEMA_VERSION = "change_quality_receipt_verification_v0"
-FINDING_SEVERITIES = frozenset({"blocker", "warning", "advisory"})
+CHANGE_QUALITY_PREPARE_SCHEMA_VERSION = "change_quality_prepare_packet_v2"
+CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v2"
+LEGACY_CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v1"
+CHANGE_QUALITY_VERIFY_SCHEMA_VERSION = "change_quality_receipt_verification_v2"
+CHANGE_QUALITY_PR_EVIDENCE_SCHEMA_VERSION = "change_quality_pr_evidence_v0"
+
+_PR_EVIDENCE_BY_STATUS = {
+    "disabled": (
+        "disabled",
+        "Change-quality qualification is disabled for this goal.",
+        None,
+    ),
+    "no_changes": (
+        "not_required",
+        "No changed files require a change-quality receipt.",
+        None,
+    ),
+    "valid": (
+        "valid",
+        "The receipt matches the exact current base and diff.",
+        None,
+    ),
+    "stale_receipt": (
+        "stale",
+        (
+            "A prior receipt exists, but the exact base or diff changed; "
+            "requalification is required."
+        ),
+        (
+            "rerun change-quality prepare against the current base and diff, "
+            "review that exact scope, and record a new passing receipt"
+        ),
+    ),
+    "receipt_missing": (
+        "missing",
+        "No receipt is recorded for the exact current base and diff.",
+        (
+            "run change-quality prepare, review the exact current scope, "
+            "and record a passing receipt"
+        ),
+    ),
+    "invalid_receipt": (
+        "invalid",
+        "The receipt for the exact current base and diff is invalid.",
+        (
+            "repair the recorded result, review the exact current scope, "
+            "and record a new passing receipt"
+        ),
+    ),
+}
 
 
 def _goal_from_registry(registry_path: Path, goal_id: str) -> dict[str, Any]:
@@ -39,7 +94,13 @@ def _goal_from_registry(registry_path: Path, goal_id: str) -> dict[str, Any]:
 
 def _receipt_root(runtime_root: Path, goal_id: str) -> Path:
     validated_goal_id = validate_goal_id_path_segment(goal_id)
-    return runtime_root.expanduser() / "goals" / validated_goal_id / "change-quality" / "receipts"
+    return (
+        runtime_root.expanduser()
+        / "goals"
+        / validated_goal_id
+        / "change-quality"
+        / "receipts"
+    )
 
 
 def _repo_key(repo_path: Path) -> str:
@@ -78,128 +139,6 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def _bounded_text(value: Any, *, field: str, limit: int) -> str:
-    text = " ".join(str(value or "").strip().split())
-    validate_public_safe_text(field, text)
-    if len(text) > limit:
-        raise ValueError(f"{field} exceeds {limit} characters")
-    return text
-
-
-def _relative_path(value: Any, *, field: str) -> str | None:
-    text = str(value or "").strip().replace("\\", "/")
-    if not text:
-        return None
-    path = PurePosixPath(text)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"{field} must be a repo-relative path")
-    validate_public_safe_text(field, text)
-    return path.as_posix()
-
-
-def _normalize_finding(value: Any, *, index: int) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"findings[{index}] must be an object")
-    severity = str(value.get("severity") or "").strip().lower()
-    if severity not in FINDING_SEVERITIES:
-        raise ValueError(
-            f"findings[{index}].severity must be one of {sorted(FINDING_SEVERITIES)}"
-        )
-    code = _bounded_text(
-        value.get("code"),
-        field=f"findings[{index}].code",
-        limit=80,
-    )
-    message = _bounded_text(
-        value.get("message"),
-        field=f"findings[{index}].message",
-        limit=320,
-    )
-    if not code or not message:
-        raise ValueError(f"findings[{index}] requires code and message")
-    finding = {
-        "severity": severity,
-        "code": code,
-        "message": message,
-        "resolved": value.get("resolved") is True,
-    }
-    path = _relative_path(value.get("path"), field=f"findings[{index}].path")
-    if path:
-        finding["path"] = path
-    line = value.get("line")
-    if line is not None:
-        if not isinstance(line, int) or line < 1:
-            raise ValueError(f"findings[{index}].line must be a positive integer")
-        finding["line"] = line
-    return finding
-
-
-def _normalize_result(
-    value: Any,
-    *,
-    expected_fingerprint: str,
-    safe_fix_allowed: bool,
-) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("result JSON root must be an object")
-    if value.get("schema_version") != CHANGE_QUALITY_RESULT_SCHEMA_VERSION:
-        raise ValueError(
-            f"result schema_version must be {CHANGE_QUALITY_RESULT_SCHEMA_VERSION}"
-        )
-    fingerprint = str(value.get("scope_fingerprint") or "").strip()
-    if fingerprint != expected_fingerprint:
-        raise ValueError(
-            "result scope_fingerprint does not match the current exact diff; "
-            "rerun prepare after every safe fix"
-        )
-    if value.get("reviewed_final_scope") is not True:
-        raise ValueError("result must set reviewed_final_scope=true")
-    safe_fix_applied = value.get("safe_fix_applied") is True
-    if safe_fix_applied and not safe_fix_allowed:
-        raise ValueError("result reports safe_fix_applied but goal policy forbids safe fixes")
-    safe_fix_passes = value.get("safe_fix_passes", 0)
-    if not isinstance(safe_fix_passes, int) or safe_fix_passes not in {0, 1}:
-        raise ValueError("safe_fix_passes must be 0 or 1")
-    if safe_fix_applied and safe_fix_passes != 1:
-        raise ValueError("safe_fix_applied=true requires safe_fix_passes=1")
-    if not safe_fix_applied and safe_fix_passes != 0:
-        raise ValueError("safe_fix_passes=1 requires safe_fix_applied=true")
-    findings = [
-        _normalize_finding(item, index=index)
-        for index, item in enumerate(value.get("findings") or [])
-    ]
-    if len(findings) > 20:
-        raise ValueError("result supports at most 20 findings")
-    validations = [
-        _bounded_text(item, field="validations[]", limit=180)
-        for item in (value.get("validations") or [])[:20]
-    ]
-    validations = [item for item in validations if item]
-    return {
-        "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
-        "scope_fingerprint": fingerprint,
-        "reviewed_final_scope": True,
-        "summary": _bounded_text(value.get("summary"), field="summary", limit=500),
-        "findings": findings,
-        "safe_fix_applied": safe_fix_applied,
-        "safe_fix_passes": safe_fix_passes,
-        "validations": validations,
-    }
-
-
-def _decision(result: dict[str, Any]) -> tuple[str, list[str]]:
-    unresolved_blockers = [
-        str(item["code"])
-        for item in result["findings"]
-        if item["severity"] == "blocker" and item["resolved"] is not True
-    ]
-    return (
-        ("fail", unresolved_blockers)
-        if unresolved_blockers
-        else ("pass", [])
-    )
-
-
 def build_change_quality_prepare_packet(
     *,
     registry_path: Path,
@@ -210,6 +149,10 @@ def build_change_quality_prepare_packet(
     goal = _goal_from_registry(registry_path, goal_id)
     policy = change_quality_goal_policy(goal)
     scope = build_change_quality_scope(repo_path=repo_path, base_ref=base_ref)
+    repository_context = build_change_quality_repository_context(
+        repo_path=repo_path,
+        changed_files=list(scope["changed_files"]),
+    )
     if not policy["enabled"]:
         status = "disabled"
     elif not scope["changed_files"]:
@@ -224,13 +167,26 @@ def build_change_quality_prepare_packet(
         "review_required": status == "review_required",
         "policy": policy,
         "scope": scope,
+        "repository_context": repository_context,
         "agent_contract": {
             "provider_neutral": True,
             "max_safe_fix_passes": 1,
+            "primary_result_fields": ["reuse", "simplification"],
+            "sparse_result_fields": ["risks", "validation"],
+            "guardrail_catalog": [
+                dict(item)
+                for item in REVIEW_LENSES
+                if item["lens_id"] in SIMPLIFY_GUARDRAIL_LENS_IDS
+            ],
+            "guardrail_status_owner": "loopx_derived",
             "instructions": [
-                "Review only the exact changed scope and obey repository-local instructions.",
-                "Preserve intended behavior; prefer deletion, clarity, and established language idioms over new abstraction.",
+                "Review only the exact changed scope and resolve the projected repository instruction and ownership references.",
+                "Write one grounded reuse conclusion and one grounded simplification conclusion.",
+                "Prefer deletion, reuse, direct control flow, and established language idioms over redundant state, parameters, branches, wrappers, or speculative abstraction.",
+                "Emit a risks[] item only when a guardrail has a concrete triggered risk; do not write all-clear rows for inactive guardrails.",
+                "LoopX derives guardrail status from sparse risks[] and validation[]; the Agent does not author guardrail states.",
                 "Use blocker only for concrete correctness, security, privacy, contract, or required-validation failures.",
+                "Use repository-native tests, linters, type checkers, and build tools as language-specific oracles.",
                 (
                     "One bounded safe-fix pass is allowed; rerun prepare after edits and review the final scope."
                     if policy["safe_fix"]
@@ -243,11 +199,26 @@ def build_change_quality_prepare_packet(
                 "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
                 "scope_fingerprint": scope["scope_fingerprint"],
                 "reviewed_final_scope": True,
-                "summary": "",
-                "findings": [],
-                "safe_fix_applied": False,
-                "safe_fix_passes": 0,
-                "validations": [],
+                "reuse": {
+                    "outcome": "retained",
+                    "summary": "",
+                    "evidence_refs": [],
+                },
+                "simplification": {
+                    "outcome": "retained",
+                    "summary": "",
+                    "evidence_refs": [],
+                    "safe_fix_applied": False,
+                },
+                "risks": [],
+                "validation": [
+                    {
+                        "validator": "",
+                        "status": "passed",
+                        "scope": "",
+                        "required": True,
+                    }
+                ],
             },
         },
         "turn_boundary": {
@@ -277,12 +248,19 @@ def record_change_quality_receipt(
     scope = build_change_quality_scope(repo_path=repo_path, base_ref=base_ref)
     if not scope["changed_files"]:
         raise ValueError("current scope has no changes and does not need a receipt")
-    result = _normalize_result(
+    repository_context = build_change_quality_repository_context(
+        repo_path=repo_path,
+        changed_files=list(scope["changed_files"]),
+    )
+    result = normalize_change_quality_result(
         json.loads(result_path.expanduser().read_text(encoding="utf-8")),
         expected_fingerprint=str(scope["scope_fingerprint"]),
         safe_fix_allowed=bool(policy["safe_fix"]),
+        expected_changed_files=list(scope["changed_files"]),
+        expected_instruction_refs=list(repository_context["instruction_refs"]),
     )
-    decision, unresolved_blockers = _decision(result)
+    guardrails = derive_change_quality_guardrails(result)
+    decision, unresolved_blockers = change_quality_result_decision(result)
     receipt_id = f"cqr_{str(scope['scope_fingerprint'])[:20]}"
     receipt = {
         "schema_version": CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION,
@@ -292,6 +270,7 @@ def record_change_quality_receipt(
         "policy": policy,
         "scope": scope,
         "result": result,
+        "guardrails": guardrails,
         "decision": decision,
         "unresolved_blockers": unresolved_blockers,
     }
@@ -317,6 +296,116 @@ def record_change_quality_receipt(
     }
 
 
+def _stored_receipt_is_valid(
+    receipt: dict[str, Any] | None,
+    *,
+    scope_fingerprint: str,
+    safe_fix_allowed: bool,
+    changed_files: list[str],
+    instruction_refs: list[str],
+) -> bool:
+    if not (
+        receipt
+        and receipt.get("schema_version")
+        in {
+            CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION,
+            LEGACY_CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION,
+        }
+        and receipt.get("decision") == "pass"
+        and isinstance(receipt.get("result"), dict)
+        and isinstance(receipt.get("scope"), dict)
+        and receipt["scope"].get("scope_fingerprint") == scope_fingerprint
+    ):
+        return False
+    result = receipt["result"]
+    try:
+        if (
+            receipt.get("schema_version") == CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION
+            and result.get("schema_version") == CHANGE_QUALITY_RESULT_SCHEMA_VERSION
+        ):
+            normalized = normalize_change_quality_result(
+                result,
+                expected_fingerprint=scope_fingerprint,
+                safe_fix_allowed=safe_fix_allowed,
+                expected_changed_files=changed_files,
+                expected_instruction_refs=instruction_refs,
+            )
+            guardrails = derive_change_quality_guardrails(normalized)
+            decision, unresolved = change_quality_result_decision(normalized)
+            if receipt.get("guardrails") != guardrails:
+                return False
+        elif (
+            receipt.get("schema_version")
+            == LEGACY_CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION
+            and result.get("schema_version")
+            == LEGACY_CHANGE_QUALITY_RESULT_SCHEMA_VERSION
+        ):
+            decision, unresolved = validate_legacy_change_quality_result_v1(
+                result,
+                expected_fingerprint=scope_fingerprint,
+                safe_fix_allowed=safe_fix_allowed,
+                expected_instruction_refs=instruction_refs,
+            )
+        else:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return decision == "pass" and receipt.get("unresolved_blockers") == unresolved
+
+
+def _read_first_receipt(paths: list[Path]) -> dict[str, Any] | None:
+    for path in paths:
+        try:
+            receipt = read_json(path)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(receipt, dict):
+            return receipt
+    return None
+
+
+def _build_pr_evidence(
+    *,
+    status: str,
+    policy: dict[str, Any],
+    scope: dict[str, Any],
+    receipt: dict[str, Any] | None = None,
+    previous_receipt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    state, summary, required_action = _PR_EVIDENCE_BY_STATUS.get(
+        status,
+        _PR_EVIDENCE_BY_STATUS["invalid_receipt"],
+    )
+    previous_scope = (
+        previous_receipt.get("scope")
+        if isinstance(previous_receipt, dict)
+        and isinstance(previous_receipt.get("scope"), dict)
+        else {}
+    )
+    return {
+        "schema_version": CHANGE_QUALITY_PR_EVIDENCE_SCHEMA_VERSION,
+        "state": state,
+        "summary": summary,
+        "blocking": bool(
+            policy.get("strict_receipt") and state in {"stale", "missing", "invalid"}
+        ),
+        "requalification_required": state == "stale",
+        "scope_fingerprint": scope.get("scope_fingerprint"),
+        "base_ref": scope.get("base_ref"),
+        "base_commit": scope.get("base_commit"),
+        "head_commit": scope.get("head_commit"),
+        "receipt_id": receipt.get("receipt_id") if isinstance(receipt, dict) else None,
+        "previous_receipt_id": (
+            previous_receipt.get("receipt_id")
+            if isinstance(previous_receipt, dict)
+            else None
+        ),
+        "previous_scope_fingerprint": previous_scope.get("scope_fingerprint"),
+        "previous_base_commit": previous_scope.get("base_commit"),
+        "required_action": required_action,
+    }
+
+
 def verify_change_quality_receipt(
     *,
     registry_path: Path,
@@ -329,24 +418,36 @@ def verify_change_quality_receipt(
     policy = change_quality_goal_policy(goal)
     scope = build_change_quality_scope(repo_path=repo_path, base_ref=base_ref)
     if not policy["enabled"]:
+        status = "disabled"
         return {
             "ok": True,
             "schema_version": CHANGE_QUALITY_VERIFY_SCHEMA_VERSION,
             "goal_id": goal_id,
-            "status": "disabled",
+            "status": status,
             "enforcement_applied": False,
             "policy": policy,
             "scope": scope,
+            "pr_evidence": _build_pr_evidence(
+                status=status,
+                policy=policy,
+                scope=scope,
+            ),
         }
     if not scope["changed_files"]:
+        status = "no_changes"
         return {
             "ok": True,
             "schema_version": CHANGE_QUALITY_VERIFY_SCHEMA_VERSION,
             "goal_id": goal_id,
-            "status": "no_changes",
+            "status": status,
             "enforcement_applied": bool(policy["strict_receipt"]),
             "policy": policy,
             "scope": scope,
+            "pr_evidence": _build_pr_evidence(
+                status=status,
+                policy=policy,
+                scope=scope,
+            ),
         }
     path = _receipt_path(
         runtime_root=runtime_root,
@@ -355,18 +456,20 @@ def verify_change_quality_receipt(
         scope_fingerprint=str(scope["scope_fingerprint"]),
     )
     receipt = None
-    if path.exists():
-        try:
-            receipt = read_json(path)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            receipt = None
-    receipt_valid = bool(
-        receipt
-        and receipt.get("schema_version") == CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION
-        and receipt.get("decision") == "pass"
-        and isinstance(receipt.get("scope"), dict)
-        and receipt["scope"].get("scope_fingerprint") == scope["scope_fingerprint"]
+    repository_context = build_change_quality_repository_context(
+        repo_path=repo_path,
+        changed_files=list(scope["changed_files"]),
     )
+    if path.exists():
+        receipt = _read_first_receipt([path])
+    receipt_valid = _stored_receipt_is_valid(
+        receipt,
+        scope_fingerprint=str(scope["scope_fingerprint"]),
+        safe_fix_allowed=bool(policy["safe_fix"]),
+        changed_files=list(scope["changed_files"]),
+        instruction_refs=list(repository_context["instruction_refs"]),
+    )
+    previous_receipt = None
     if receipt_valid:
         status = "valid"
     elif path.exists():
@@ -378,7 +481,15 @@ def verify_change_quality_receipt(
             reverse=True,
         )
         status = "stale_receipt" if repo_receipts else "receipt_missing"
+        previous_receipt = _read_first_receipt(repo_receipts)
     strict = bool(policy["strict_receipt"])
+    pr_evidence = _build_pr_evidence(
+        status=status,
+        policy=policy,
+        scope=scope,
+        receipt=receipt,
+        previous_receipt=previous_receipt,
+    )
     return {
         "ok": receipt_valid or not strict,
         "schema_version": CHANGE_QUALITY_VERIFY_SCHEMA_VERSION,
@@ -390,9 +501,6 @@ def verify_change_quality_receipt(
         "receipt_id": receipt.get("receipt_id") if receipt else None,
         "receipt_path": str(path),
         "receipt_valid": receipt_valid,
-        "required_action": (
-            "run change-quality prepare, review the exact scope, and record a passing receipt"
-            if strict and not receipt_valid
-            else None
-        ),
+        "required_action": pr_evidence["required_action"],
+        "pr_evidence": pr_evidence,
     }

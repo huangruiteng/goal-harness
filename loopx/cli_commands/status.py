@@ -133,6 +133,16 @@ def register_status_commands(
         ),
     )
     status_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in the current execution envelope. "
+            "Repeat for multiple capabilities; capability-gated status fields "
+            "remain absent by default."
+        ),
+    )
+    status_parser.add_argument(
         "--include-task-graph",
         action="store_true",
         help=(
@@ -237,6 +247,16 @@ def register_status_commands(
     review_packet_parser.add_argument(
         "--agent-id",
         help="Registered agent id for adding read-only agent-member status to the review packet.",
+    )
+    review_packet_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in the current execution envelope. "
+            "Repeat for multiple capabilities; capability-gated review fields "
+            "remain absent by default."
+        ),
     )
     review_packet_parser.add_argument("--limit", type=int, default=5)
 
@@ -347,6 +367,7 @@ def handle_status_command(
                 include_task_graph=args.include_task_graph,
                 goal_id=args.goal_id,
                 max_age_seconds=args.projection_cache_ttl_seconds,
+                available_capabilities=args.available_capabilities,
             )
         if payload is None:
             payload = collect_status(
@@ -356,6 +377,7 @@ def handle_status_command(
                 limit=collection_limit,
                 include_task_graph=args.include_task_graph,
                 goal_id=args.goal_id,
+                available_capabilities=args.available_capabilities,
             )
             if args.write_projection_cache:
                 cache_metadata = write_status_projection_cache(
@@ -367,6 +389,7 @@ def handle_status_command(
                     goal_id=args.goal_id,
                     payload=payload,
                     max_age_seconds=args.projection_cache_ttl_seconds,
+                    available_capabilities=args.available_capabilities,
                 )
                 payload["projection_cache"] = cache_metadata
             elif cache_metadata:
@@ -946,6 +969,7 @@ def handle_review_packet_command(
             limit=max(0, args.limit),
             include_task_graph=not args.handoff_only,
             goal_id=args.goal_id,
+            available_capabilities=args.available_capabilities,
         )
         if args.agent_id:
             attach_agent_lane_next_actions(status_payload, agent_id=args.agent_id)

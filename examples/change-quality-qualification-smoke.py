@@ -91,11 +91,26 @@ def main() -> int:
                     "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
                     "scope_fingerprint": prepared["scope"]["scope_fingerprint"],
                     "reviewed_final_scope": True,
-                    "summary": "Exact final scope reviewed.",
-                    "findings": [],
-                    "safe_fix_applied": False,
-                    "safe_fix_passes": 0,
-                    "validations": ["smoke contract passed"],
+                    "reuse": {
+                        "outcome": "retained",
+                        "summary": "The fixture already uses its direct owner.",
+                        "evidence_refs": ["path:app.py"],
+                    },
+                    "simplification": {
+                        "outcome": "retained",
+                        "summary": "The direct assignment is already minimal.",
+                        "evidence_refs": ["path:app.py"],
+                        "safe_fix_applied": False,
+                    },
+                    "risks": [],
+                    "validation": [
+                        {
+                            "validator": "fixture-smoke",
+                            "status": "passed",
+                            "scope": "exact receipt lifecycle",
+                            "required": True,
+                        }
+                    ],
                 }
             ),
             encoding="utf-8",

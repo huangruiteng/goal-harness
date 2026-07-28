@@ -10,10 +10,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = REPO_ROOT / "scripts" / "skillsbench-launch-goal-xhigh.sh"
 
 
+def _dry_run_value(output: str, key: str) -> str:
+    prefix = f"{key}="
+    return next(
+        line.removeprefix(prefix)
+        for line in output.splitlines()
+        if line.startswith(prefix)
+    )
+
+
 def _base_env(tmp_path: Path) -> dict[str, str]:
     env = os.environ.copy()
     env.pop("SKILLSBENCH_RUNNER_PROFILE", None)
     env.pop("SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND", None)
+    env.pop("SKILLSBENCH_REMOTE_CODEX_PROXY_PORT", None)
     env.update(
         {
             "XDG_STATE_HOME": str(tmp_path / "state"),
@@ -130,13 +140,67 @@ def test_launcher_dry_run_does_not_require_reachable_local_proxy(
     assert "skillsbench_local_proxy_endpoint_unreachable" not in proc.stderr
     assert "docker_proxy_host_recorded=false" in proc.stdout
     assert "proxy_port_coherence_guard=enforced" in proc.stdout
+    remote_port = int(_dry_run_value(proc.stdout, "remote_proxy_port"))
+    assert 20000 <= remote_port <= 59999
+    assert "remote_proxy_port_mode=run_scoped" in proc.stdout
     for expected_arg in (
-        "--remote-forward 127.0.0.1:18180:127.0.0.1:1",
-        "--codex-reverse-proxy-port 18180",
-        "--benchmark-egress-proxy-port 18180",
-        "--container-forwarder-port 18180",
+        f"--remote-forward 127.0.0.1:{remote_port}:127.0.0.1:1",
+        f"--codex-reverse-proxy-port {remote_port}",
+        f"--benchmark-egress-proxy-port {remote_port}",
+        f"--container-forwarder-port {remote_port}",
     ):
         assert expected_arg in proc.stdout
+
+
+def test_launcher_scopes_default_remote_proxy_port_to_run_identity(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+
+    def launch(stamp: str) -> subprocess.CompletedProcess[str]:
+        run_env = env | {"SKILLSBENCH_RUN_STAMP": stamp}
+        return subprocess.run(
+            [str(LAUNCHER), "--dry-run", "public-smoke-case", "port-ownership"],
+            cwd=REPO_ROOT,
+            env=run_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+
+    first = launch("20260716T000000CST")
+    repeated = launch("20260716T000000CST")
+    second = launch("20260716T000001CST")
+
+    first_port = _dry_run_value(first.stdout, "remote_proxy_port")
+    assert _dry_run_value(repeated.stdout, "remote_proxy_port") == first_port
+    assert _dry_run_value(second.stdout, "remote_proxy_port") != first_port
+    assert "remote_proxy_port_mode=run_scoped" in first.stdout
+
+
+def test_launcher_preserves_explicit_remote_proxy_port(tmp_path: Path) -> None:
+    env = _base_env(tmp_path)
+
+    proc = subprocess.run(
+        [
+            str(LAUNCHER),
+            "--dry-run",
+            "public-smoke-case",
+            "port-ownership",
+            "18181",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+
+    assert "remote_proxy_port=18181" in proc.stdout
+    assert "remote_proxy_port_mode=explicit" in proc.stdout
+    assert "--remote-forward 127.0.0.1:18181:127.0.0.1:18180" in proc.stdout
 
 
 def test_launcher_fails_before_batch_when_exact_host_sandbox_probe_fails(
@@ -176,6 +240,7 @@ def test_launcher_fails_before_batch_when_exact_host_sandbox_probe_fails(
     payload = json.loads(proc.stderr)
     assert payload == {
         "error": "skillsbench_exact_host_codex_sandbox_preflight_failed",
+        "failure_category": "transport_or_unknown",
         "ok": False,
         "raw_output_recorded": False,
         "remote_codex_bin_mode": "path_lookup",
@@ -183,9 +248,76 @@ def test_launcher_fails_before_batch_when_exact_host_sandbox_probe_fails(
         "sandbox_mode": "workspace-write",
         "schema_version": "skillsbench_exact_host_codex_sandbox_preflight_v0",
         "ssh_destination_recorded": False,
+        "timeout_seconds": 30,
     }
     assert call_count.read_text(encoding="utf-8") == "3"
     assert "pid=" not in proc.stdout
+
+
+def test_launcher_types_exact_host_sandbox_probe_timeout(tmp_path: Path) -> None:
+    env = _base_env(tmp_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    call_count = tmp_path / "ssh-call-count"
+    fake_ssh = fake_bin / "ssh"
+    fake_ssh.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-G" ]; then exit 0; fi\n'
+        f"count_file={call_count!s}\n"
+        'count=0\n'
+        'if [ -f "$count_file" ]; then count=$(cat "$count_file"); fi\n'
+        'count=$((count + 1))\n'
+        'printf "%s" "$count" > "$count_file"\n'
+        'if [ "$count" -le 2 ]; then exit 0; fi\n'
+        'exit 124\n',
+        encoding="utf-8",
+    )
+    fake_ssh.chmod(0o755)
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC"] = "45"
+
+    proc = subprocess.run(
+        [str(LAUNCHER), "public-smoke-case", "exact-host-timeout"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 3, proc
+    payload = json.loads(proc.stderr)
+    assert payload["failure_category"] == "timeout"
+    assert payload["timeout_seconds"] == 45
+    assert payload["raw_output_recorded"] is False
+    assert payload["remote_path_recorded"] is False
+    assert payload["ssh_destination_recorded"] is False
+    assert call_count.read_text(encoding="utf-8") == "3"
+    assert "pid=" not in proc.stdout
+
+
+def test_launcher_rejects_invalid_exact_host_sandbox_probe_timeout(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+    env["SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC"] = "0"
+
+    proc = subprocess.run(
+        [str(LAUNCHER), "--dry-run", "public-smoke-case", "invalid-timeout"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 2
+    assert (
+        "SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC "
+        "must be a positive integer"
+    ) in proc.stderr
 
 
 def test_launcher_fails_before_supervisor_when_runner_connectivity_is_not_ready(
@@ -265,6 +397,7 @@ def test_launcher_split_control_is_opt_in_and_redacts_provider_values(
     assert "local_codex_split_control=1" in output
     assert "local_codex_provider=reverse_channel" in output
     assert "local_codex_exec_timeout_sec=runner-default" in output
+    assert "host_local_acp_codex_exec_preflight_attempts=3" in output
     assert "outer_timeout_sec=runner-default" in output
     assert "remote_codex_bin_mode=split_control_client" in output
     assert (
@@ -288,6 +421,59 @@ def test_launcher_split_control_is_opt_in_and_redacts_provider_values(
     assert "codex_bridge_client" not in output
     assert "loopx-codex-" not in output
     assert "example.invalid" not in output
+
+
+def test_launcher_wires_explicit_host_local_preflight_attempts(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+    env.update(
+        {
+            "SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL": "1",
+            "SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS": "2",
+        }
+    )
+
+    proc = subprocess.run(
+        [str(LAUNCHER), "--dry-run", "public-smoke-case", "preflight-attempts"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+
+    assert "host_local_acp_codex_exec_preflight_attempts=2" in proc.stdout
+    assert "--host-local-acp-codex-exec-preflight-attempts" in proc.stdout
+
+
+def test_launcher_rejects_invalid_host_local_preflight_attempts(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+    env.update(
+        {
+            "SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL": "1",
+            "SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS": "0",
+        }
+    )
+
+    proc = subprocess.run(
+        [str(LAUNCHER), "--dry-run", "public-smoke-case", "preflight-attempts"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 2
+    assert (
+        "SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS must be "
+        "a positive integer"
+    ) in proc.stderr
 
 
 def test_launcher_wires_explicit_local_codex_exec_timeout(

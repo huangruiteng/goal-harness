@@ -32,7 +32,7 @@ def active_state_text() -> str:
         "  <!-- loopx:todo todo_id=todo_user_gate status=open task_class=user_gate blocks_agent=codex-product-capability -->\n\n"
         "## Agent Todo\n\n"
         "- [ ] [P0] Add active-state structured projection parity smoke.\n"
-        "  <!-- loopx:todo todo_id=todo_agent_projection status=open task_class=advancement_task claimed_by=codex-product-capability target_capability=active_state_schema_migration -->\n"
+        "  <!-- loopx:todo todo_id=todo_agent_projection status=open task_class=advancement_task claimed_by=codex-product-capability target_capabilities=active_state_schema_migration -->\n"
         "- [ ] [P1] Watch external launch evidence.\n"
         "  <!-- loopx:todo todo_id=todo_monitor status=open task_class=continuous_monitor target_key=launch cadence=30m next_due_at=2026-06-28T01:00:00+08:00 -->\n\n"
         "## Next Action\n\n"

@@ -256,6 +256,126 @@ def test_pre_agent_receipt_rebinds_to_materialized_sandbox_bridge() -> None:
     assert "task-free-placeholder" not in command
 
 
+def test_task_free_first_action_timeout_retries_before_case_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = skillsbench_loop.parse_args(
+        [
+            "--task-id",
+            "public-case-id",
+            "--route",
+            "codex-cli-goal-baseline",
+            "--host-local-acp-launch",
+            "--local-codex-provider",
+            "reverse-channel",
+            "--host-local-acp-codex-exec-preflight",
+            "--host-local-acp-codex-exec-preflight-attempts",
+            "2",
+            "--remote-command-file-bridge-probe",
+            "--remote-command-file-bridge-solver-command",
+            "task-free-placeholder",
+        ]
+    )
+    plan = {"runner_prerequisites": {}}
+    probe_count = 0
+    summaries = [
+        skillsbench_loop._summarize_host_local_acp_preflight_bridge_trace(None),
+        {
+            **skillsbench_loop._summarize_host_local_acp_preflight_bridge_trace(
+                None
+            ),
+            "trace_present": True,
+            "trace_count": 1,
+            "request_count": 1,
+            "preflight_operation_count": 1,
+            "success_count": 1,
+            "preflight_success_count": 1,
+        },
+    ]
+
+    def relay_probe(*_args: object, **_kwargs: object) -> dict[str, object]:
+        nonlocal probe_count
+        probe_count += 1
+        if probe_count == 1:
+            plan["runner_prerequisites"][
+                "host_local_acp_codex_exec_failure_category"
+            ] = "codex_exec_first_action_timeout"
+            return {
+                "ready": False,
+                "stage": "codex_exec",
+                "first_blocker": (
+                    "skillsbench_host_local_acp_codex_exec_preflight_failed"
+                ),
+                "response_marker_observed": False,
+            }
+        return {
+            "ready": True,
+            "stage": "completed",
+            "first_blocker": "",
+            "response_marker_observed": True,
+        }
+
+    monkeypatch.setattr(
+        skillsbench_loop,
+        "run_skillsbench_local_acp_relay_probe",
+        relay_probe,
+    )
+    monkeypatch.setattr(
+        skillsbench_loop,
+        "_summarize_host_local_acp_preflight_bridge_trace",
+        lambda _trace_dir: summaries.pop(0),
+    )
+    monkeypatch.setattr(
+        skillsbench_loop,
+        "_host_local_proxy_endpoint_probe",
+        lambda **_kwargs: {"status": "not_configured", "checked": True},
+    )
+    monkeypatch.setattr(skillsbench_loop.time, "sleep", lambda _seconds: None)
+
+    skillsbench_loop._run_host_local_acp_codex_exec_preflight(
+        args,
+        plan,
+        sandbox_bridge_command="materialized-sandbox-bridge",
+    )
+
+    prerequisites = plan["runner_prerequisites"]
+    assert probe_count == 2
+    assert prerequisites["host_local_acp_codex_exec_preflight_attempt_count"] == 2
+    assert prerequisites["host_local_acp_codex_exec_preflight_status"] == "passed"
+    assert prerequisites["host_local_acp_codex_exec_preflight_ready"] is True
+    assert "host_local_acp_codex_exec_failure_category" not in prerequisites
+
+
+def test_first_action_timeout_retry_requires_zero_bridge_activity() -> None:
+    summary = skillsbench_loop._summarize_host_local_acp_preflight_bridge_trace(
+        None
+    )
+    assert skillsbench_loop._host_local_acp_codex_exec_preflight_retry_allowed(
+        category="codex_exec_first_action_timeout",
+        bridge_summary=summary,
+    )
+
+    summary["request_count"] = 1
+    assert not skillsbench_loop._host_local_acp_codex_exec_preflight_retry_allowed(
+        category="codex_exec_first_action_timeout",
+        bridge_summary=summary,
+    )
+    assert not skillsbench_loop._host_local_acp_codex_exec_preflight_retry_allowed(
+        category="codex_exec_timeout",
+        bridge_summary=summary,
+    )
+    summary["request_count"] = 0
+    summary["raw_material_recorded"] = True
+    assert not skillsbench_loop._host_local_acp_codex_exec_preflight_retry_allowed(
+        category="codex_exec_first_action_timeout",
+        bridge_summary=summary,
+    )
+    assert skillsbench_loop._host_local_acp_codex_exec_preflight_retry_allowed(
+        category="codex_reverse_channel_unavailable",
+        bridge_summary=summary,
+    )
+
+
 def test_early_tui_failure_does_not_claim_goal_submission(tmp_path: Path) -> None:
     trace_dir = tmp_path / "traces"
     relay = SkillsBenchLocalAcpRelay(

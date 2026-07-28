@@ -123,8 +123,9 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         validation_failed_count > 0
         and committed_count < execution_count
         and failed_transaction_with_durable_effect_count == 0
-        and state_written_count == 0
-        and quota_spent_count == 0
+        # Committed prefixes own their effects; later uncommitted Turns must not.
+        and state_written_count == committed_count
+        and quota_spent_count == committed_count
         and counters.get("product_mode_typed_repair_terminal") is True
         and counters.get(
             "product_mode_typed_repair_terminal_receipt_consistent"

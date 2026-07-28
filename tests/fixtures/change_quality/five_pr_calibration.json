@@ -1,0 +1,178 @@
+{
+  "schema_version": "change_quality_five_pr_calibration_v1",
+  "cases": [
+    {
+      "case_id": "pr-2590-registry-boundary-owner",
+      "source": {
+        "pull_request": 2590,
+        "head_oid": "0c05ecd25d51debffb81407c38b58702124d6888"
+      },
+      "changed_files": [
+        "loopx/canary/maintainability_ratchet.py",
+        "loopx/control_plane/quota/goal_boundary.py",
+        "tests/control_plane/test_goal_boundary_resolution.py"
+      ],
+      "reuse": {
+        "outcome": "reused",
+        "summary": "The extraction reuses existing capability and checkpoint normalization helpers.",
+        "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "One owner-local helper reduces branch density without creating a generic projection framework.",
+        "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
+        {
+          "validator": "pr-2590-focused",
+          "status": "passed",
+          "scope": "goal boundary precedence, checkpoint authority, and maintainability ratchet",
+          "required": true
+        }
+      ],
+      "manual_holds": []
+    },
+    {
+      "case_id": "pr-2593-benchmark-read-model",
+      "source": {
+        "pull_request": 2593,
+        "head_oid": "8b6be03d9b57edc6464a6cd9c1c856e1f5f98ed8"
+      },
+      "changed_files": [
+        "loopx/benchmarks/read_models/benchmark_projection.py",
+        "loopx/canary/maintainability_ratchet.py",
+        "loopx/status.py",
+        "tests/benchmarks/read_models/test_benchmark_projection.py"
+      ],
+      "reuse": {
+        "outcome": "reused",
+        "summary": "The read model reuses existing public-safe compactors and the status facade.",
+        "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "The move gives benchmark projection one owner without introducing a universal compactor.",
+        "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
+        {
+          "validator": "pr-2593-focused",
+          "status": "passed",
+          "scope": "benchmark projection helpers, status facade parity, and neighboring behavior",
+          "required": true
+        }
+      ],
+      "manual_holds": ["benchmark_sensitive"]
+    },
+    {
+      "case_id": "pr-2594-recoverable-turn-stages",
+      "source": {
+        "pull_request": 2594,
+        "head_oid": "e07717afca500eaa44139b87ffad2ac560f77026"
+      },
+      "changed_files": [
+        "loopx/canary/maintainability_ratchet.py",
+        "loopx/control_plane/turn_driver/executor.py",
+        "tests/test_loopx_turn_executor.py"
+      ],
+      "reuse": {
+        "outcome": "retained",
+        "summary": "The executor keeps the existing callback contract instead of adding another adapter.",
+        "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
+      },
+      "simplification": {
+        "outcome": "fixed",
+        "summary": "One bounded fix preserved callback mutation semantics inside the three-stage extraction.",
+        "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"],
+        "safe_fix_applied": true
+      },
+      "risks": [],
+      "validation": [
+        {
+          "validator": "pr-2594-focused",
+          "status": "passed",
+          "scope": "Turn executor and driver recovery semantics plus maintainability ratchet",
+          "required": true
+        }
+      ],
+      "manual_holds": []
+    },
+    {
+      "case_id": "pr-2597-repeat-vision-replan",
+      "source": {
+        "pull_request": 2597,
+        "head_oid": "82d90a00b61c134850234b37711ede010d9a22f9"
+      },
+      "changed_files": [
+        "loopx/control_plane/goals/goal_frontier.py",
+        "tests/control_plane/test_goal_vision_blocked_successor.py"
+      ],
+      "reuse": {
+        "outcome": "reused",
+        "summary": "The fix reuses one shared readiness predicate and the existing ordered delta contract.",
+        "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "The shared predicate removes the contradictory watch-only route without extra state.",
+        "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
+        {
+          "validator": "pr-2597-focused",
+          "status": "passed",
+          "scope": "repeat and as-needed Vision replan behavior",
+          "required": true
+        }
+      ],
+      "manual_holds": []
+    },
+    {
+      "case_id": "pr-2602-capability-envelope",
+      "source": {
+        "pull_request": 2602,
+        "head_oid": "b2c934e7a6b579d99ae0d6edd82ccfb19317f27b"
+      },
+      "changed_files": [
+        "docs/reference/protocols/agent-management-projection-v0.md",
+        "examples/control_plane/status-collection-readmodel-smoke.py",
+        "examples/control_plane/status-quota-review-packet-parity-smoke.py",
+        "loopx/cli_commands/quota.py",
+        "loopx/cli_commands/status.py",
+        "loopx/cli_commands/turn.py",
+        "loopx/control_plane/runtime/status_projection_cache.py",
+        "loopx/control_plane/status_collection.py",
+        "loopx/diagnose.py",
+        "loopx/status.py",
+        "tests/control_plane/test_status_collection_material_capability_wiring.py"
+      ],
+      "reuse": {
+        "outcome": "retained",
+        "summary": "Explicit forwarding preserves the existing public caller boundaries and request identity.",
+        "evidence_refs": ["path:loopx/control_plane/status_collection.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "The repeated forwarding is direct and cheaper than a hidden universal context carrier.",
+        "evidence_refs": ["path:loopx/control_plane/status_collection.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
+        {
+          "validator": "pr-2602-focused",
+          "status": "passed",
+          "scope": "capability projection, cache partitioning, CLI parity, and budgets",
+          "required": true
+        }
+      ],
+      "manual_holds": []
+    }
+  ]
+}
