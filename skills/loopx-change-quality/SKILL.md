@@ -77,6 +77,13 @@ does not copy repository content or prescribe one language-specific checker.
 Repository tests, linters, type checkers, build tools, and security checks
 remain the language-specific oracles.
 
+Record one compact `repository_principles` item for every projected instruction
+reference. Every applicable lens must cite typed `evidence_refs` using
+`path:`, `instruction:`, `finding:`, `validator:`, or `decision:`. A
+`quality_simplification` conclusion cites its decision id, and a
+`test_validation` conclusion cites the repository-native validator. Do not
+repeat the same generic all-clear across lenses.
+
 Use `blocker` only for a concrete correctness, security, privacy, contract, or
 required-validation failure. Style preferences and speculative redesigns are
 `warning` or `advisory`, never blockers.
@@ -105,10 +112,11 @@ entire new final scope, not only the lines changed by the repair.
 
 Write a compact result conforming to the packet's
 `change_quality_agent_result_v1` template. The result must include every
-required lens, at least one explicit simplification decision, and typed
-validation evidence. A skipped or failed validator needs a reason; a failed
-validator makes the receipt non-passing. Keep raw transcripts, private paths,
-credentials, and unbounded logs out of the result.
+required lens, projected repository principles, at least one explicit
+simplification decision, typed evidence references, and typed validation
+evidence. A skipped or failed validator needs a reason; a failed validator
+makes the receipt non-passing. Keep raw transcripts, private paths, credentials,
+and unbounded logs out of the result.
 
 Then record and read back the exact receipt:
 

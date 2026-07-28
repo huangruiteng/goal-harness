@@ -61,9 +61,12 @@ Absence of this policy is equivalent to all three values being false.
 4. If policy allows it, the host may perform one bounded safe-fix pass. Any edit
    invalidates the old fingerprint, so prepare and final review run again.
 5. `change-quality record --execute` requires complete per-lens conclusions,
-   an explicit simplification decision, and typed validation evidence. It
-   validates the result against the current fingerprint and writes a compact
-   local runtime receipt.
+   the principles from every projected repository instruction file, an
+   explicit simplification decision, and typed validation evidence. Every
+   applicable lens must cite a changed path, instruction, finding, validator,
+   or simplification decision. Repeated generic all-clear summaries are
+   rejected. The command validates the result against the current fingerprint
+   and writes a compact local runtime receipt.
 6. `change-quality verify` checks the current exact scope and v1 protocol.
 7. `canary premerge --goal-id <goal-id>` enforces `strict_receipt`.
 
@@ -83,8 +86,9 @@ loopx canary premerge --from-git-diff --goal-id <goal-id>
 
 Receipts live under goal runtime state, not in the repository. They retain
 compact findings, per-lens conclusions, simplification decisions, and typed
-validation evidence, not raw model transcripts, credentials, private context,
-or validator logs.
+validation evidence. Lens evidence references are typed and cross-checked
+against the exact changed paths and receipt objects. Receipts do not retain raw
+model transcripts, credentials, private context, or validator logs.
 
 ## Provider Boundary
 
@@ -114,3 +118,10 @@ require several agents to reach consensus. Language and build-system hints are
 discovery inputs, not hardcoded validator policy. Repository-native oracle
 selection and cross-language calibration should evolve from observed receipts,
 not from a central list of guessed commands.
+
+The initial semantic calibration uses five public control-plane PRs covering a
+registry boundary extraction, benchmark read-model move, recoverable Turn
+stages, Vision replan repair, and capability-envelope propagation. The replay
+keeps the benchmark-sensitive manual hold independent from receipt success and
+proves that only one coherent safe-fix pass can be reported. These fixtures
+calibrate review behavior; they are not project-specific production policy.
