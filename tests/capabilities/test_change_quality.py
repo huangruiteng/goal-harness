@@ -16,14 +16,14 @@ from loopx.canary.premerge import (
 from loopx.capabilities.change_quality.policy import change_quality_goal_policy
 from loopx.capabilities.change_quality.receipt import (
     CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
-    REVIEW_LENS_IDS,
     build_change_quality_prepare_packet,
     record_change_quality_receipt,
     verify_change_quality_receipt,
 )
 from loopx.capabilities.change_quality.result import (
+    REVIEW_LENS_IDS,
     SIMPLIFY_GUARDRAIL_LENS_IDS,
-    SIMPLIFY_PRIMARY_LENS_IDS,
+    derive_change_quality_guardrails,
     normalize_change_quality_result,
 )
 from loopx.cli import main
@@ -94,90 +94,72 @@ def _enable(
 
 
 def _result(path: Path, fingerprint: str, **overrides: object) -> Path:
-    findings = overrides.get("findings")
-    finding_codes = (
-        [
-            str(item["code"])
-            for item in findings
-            if isinstance(item, dict) and item.get("code")
-        ]
-        if isinstance(findings, list)
-        else []
-    )
-    validation_evidence = overrides.get("validation_evidence")
-    validator_id = (
-        str(validation_evidence[0].get("validator"))
-        if isinstance(validation_evidence, list)
-        and validation_evidence
-        and isinstance(validation_evidence[0], dict)
-        else "fixture"
-    )
-    lens_reviews = [
-        {
-            "lens_id": lens_id,
-            "status": (
-                "finding"
-                if lens_id == "quality_simplification" and finding_codes
-                else "checked"
-            ),
-            "summary": (
-                "See the referenced findings."
-                if lens_id == "quality_simplification" and finding_codes
-                else f"{lens_id} was reviewed against the exact fixture change."
-            ),
-            "finding_codes": (
-                finding_codes if lens_id == "quality_simplification" else []
-            ),
-            "evidence_refs": (
-                [
-                    "path:app.py",
-                    *[f"finding:{code}" for code in finding_codes],
-                    "decision:fixture-simplification",
-                ]
-                if lens_id == "quality_simplification"
-                else (
-                    [f"validator:{validator_id}"]
-                    if lens_id == "test_validation"
-                    else ["path:app.py"]
-                )
-            ),
-        }
-        for lens_id in REVIEW_LENS_IDS
-    ]
-    safe_fix_applied = overrides.get("safe_fix_applied") is True
     payload = {
         "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
         "scope_fingerprint": fingerprint,
         "reviewed_final_scope": True,
-        "summary": "Reviewed the exact final scope.",
-        "repository_principles": [],
-        "findings": [],
-        "lens_reviews": lens_reviews,
-        "simplification_decisions": [
-            {
-                "decision_id": "fixture-simplification",
-                "subject": "exact final scope",
-                "outcome": "fixed" if safe_fix_applied else "retained",
-                "reason": (
-                    "Applied the one bounded simplification."
-                    if safe_fix_applied
-                    else "The direct implementation is already cohesive."
-                ),
-            }
-        ],
-        "safe_fix_applied": False,
-        "safe_fix_passes": 0,
-        "validation_evidence": [
+        "reuse": {
+            "outcome": "retained",
+            "summary": "The exact fixture already uses its direct owner.",
+            "evidence_refs": ["path:app.py"],
+        },
+        "simplification": {
+            "outcome": "retained",
+            "summary": "The direct assignment is already cohesive.",
+            "evidence_refs": ["path:app.py"],
+            "safe_fix_applied": False,
+        },
+        "risks": [],
+        "validation": [
             {
                 "validator": "fixture",
                 "status": "passed",
                 "scope": "focused change-quality contract",
+                "required": True,
             }
         ],
         **overrides,
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
+
+
+def _legacy_v1_result(fingerprint: str) -> dict[str, object]:
+    return {
+        "schema_version": "change_quality_agent_result_v1",
+        "scope_fingerprint": fingerprint,
+        "reviewed_final_scope": True,
+        "summary": "Legacy exact scope reviewed.",
+        "repository_principles": [],
+        "findings": [],
+        "lens_reviews": [
+            {
+                "lens_id": lens_id,
+                "status": "checked",
+                "summary": f"{lens_id} checked.",
+                "finding_codes": [],
+                "evidence_refs": ["path:app.py"],
+            }
+            for lens_id in REVIEW_LENS_IDS
+        ],
+        "simplification_decisions": [
+            {
+                "decision_id": "legacy",
+                "subject": "fixture",
+                "outcome": "retained",
+                "reason": "Already direct.",
+            }
+        ],
+        "safe_fix_applied": False,
+        "safe_fix_passes": 0,
+        "validation_evidence": [
+            {
+                "validator": "legacy-fixture",
+                "status": "passed",
+                "scope": "legacy receipt compatibility",
+            }
+        ],
+    }
 
 
 def test_policy_defaults_off_and_configures_independent_controls(
@@ -266,18 +248,25 @@ def test_prepare_projects_repository_context_and_required_review_lenses(
         "pyproject.toml",
         "src",
     ]
-    assert [
-        item["lens_id"] for item in prepared["agent_contract"]["review_lenses"]
-    ] == list(REVIEW_LENS_IDS)
-    assert prepared["agent_contract"]["primary_review_lenses"] == list(
-        SIMPLIFY_PRIMARY_LENS_IDS
-    )
-    assert prepared["agent_contract"]["guardrail_review_lenses"] == list(
+    contract = prepared["agent_contract"]
+    assert contract["primary_result_fields"] == ["reuse", "simplification"]
+    assert contract["sparse_result_fields"] == ["risks", "validation"]
+    assert contract["guardrail_status_owner"] == "loopx_derived"
+    assert [item["lens_id"] for item in contract["guardrail_catalog"]] == list(
         SIMPLIFY_GUARDRAIL_LENS_IDS
     )
+    assert set(contract["result_template"]) == {
+        "schema_version",
+        "scope_fingerprint",
+        "reviewed_final_scope",
+        "reuse",
+        "simplification",
+        "risks",
+        "validation",
+    }
 
 
-def test_result_requires_complete_substantive_lens_coverage(tmp_path: Path) -> None:
+def test_result_rejects_legacy_lens_table(tmp_path: Path) -> None:
     repo, registry, runtime_root = _fixture(tmp_path)
     _enable(registry)
     (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
@@ -288,20 +277,12 @@ def test_result_requires_complete_substantive_lens_coverage(tmp_path: Path) -> N
         base_ref="HEAD",
     )
     result_path = _result(
-        tmp_path / "result.json",
+        tmp_path / "legacy-table.json",
         prepared["scope"]["scope_fingerprint"],
-        lens_reviews=[
-            {
-                "lens_id": REVIEW_LENS_IDS[0],
-                "status": "checked",
-                "summary": "Only one lens was reviewed.",
-                "finding_codes": [],
-                "evidence_refs": ["path:app.py"],
-            }
-        ],
+        lens_reviews=[],
     )
 
-    with pytest.raises(ValueError, match="missing required lenses"):
+    with pytest.raises(ValueError, match="unsupported fields"):
         record_change_quality_receipt(
             registry_path=registry,
             runtime_root=runtime_root,
@@ -313,7 +294,9 @@ def test_result_requires_complete_substantive_lens_coverage(tmp_path: Path) -> N
         )
 
 
-def test_lens_findings_must_reference_recorded_findings(tmp_path: Path) -> None:
+def test_sparse_result_derives_inactive_guardrails_without_agent_rows(
+    tmp_path: Path,
+) -> None:
     repo, registry, runtime_root = _fixture(tmp_path)
     _enable(registry)
     (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
@@ -323,130 +306,10 @@ def test_lens_findings_must_reference_recorded_findings(tmp_path: Path) -> None:
         repo_path=repo,
         base_ref="HEAD",
     )
-    lens_reviews = [
-        {
-            "lens_id": lens_id,
-            "status": "finding" if lens_id == "reuse" else "checked",
-            "summary": f"{lens_id} review complete.",
-            "finding_codes": ["missing-helper"] if lens_id == "reuse" else [],
-            "evidence_refs": (
-                ["path:app.py", "finding:missing-helper"]
-                if lens_id == "reuse"
-                else (
-                    ["decision:fixture-simplification", "path:app.py"]
-                    if lens_id == "quality_simplification"
-                    else (
-                        ["validator:fixture"]
-                        if lens_id == "test_validation"
-                        else ["path:app.py"]
-                    )
-                )
-            ),
-        }
-        for lens_id in REVIEW_LENS_IDS
-    ]
     result_path = _result(
-        tmp_path / "result.json",
+        tmp_path / "sparse.json",
         prepared["scope"]["scope_fingerprint"],
-        lens_reviews=lens_reviews,
     )
-
-    with pytest.raises(ValueError, match="unknown finding codes"):
-        record_change_quality_receipt(
-            registry_path=registry,
-            runtime_root=runtime_root,
-            goal_id=GOAL_ID,
-            repo_path=repo,
-            result_path=result_path,
-            base_ref="HEAD",
-            execute=False,
-        )
-
-
-def test_result_rejects_repeated_generic_lens_summaries(tmp_path: Path) -> None:
-    repo, registry, runtime_root = _fixture(tmp_path)
-    _enable(registry)
-    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
-    prepared = build_change_quality_prepare_packet(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        repo_path=repo,
-        base_ref="HEAD",
-    )
-    generic_reviews = [
-        {
-            "lens_id": lens_id,
-            "status": "checked",
-            "summary": "Reviewed with no finding.",
-            "finding_codes": [],
-            "evidence_refs": (
-                ["decision:fixture-simplification", "path:app.py"]
-                if lens_id == "quality_simplification"
-                else (
-                    ["validator:fixture"]
-                    if lens_id == "test_validation"
-                    else ["path:app.py"]
-                )
-            ),
-        }
-        for lens_id in REVIEW_LENS_IDS
-    ]
-    result_path = _result(
-        tmp_path / "generic.json",
-        prepared["scope"]["scope_fingerprint"],
-        lens_reviews=generic_reviews,
-    )
-
-    with pytest.raises(ValueError, match="generic all-clear"):
-        record_change_quality_receipt(
-            registry_path=registry,
-            runtime_root=runtime_root,
-            goal_id=GOAL_ID,
-            repo_path=repo,
-            result_path=result_path,
-            base_ref="HEAD",
-            execute=False,
-        )
-
-
-def test_result_allows_compact_repeated_inactive_guardrails(tmp_path: Path) -> None:
-    repo, registry, runtime_root = _fixture(tmp_path)
-    _enable(registry)
-    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
-    prepared = build_change_quality_prepare_packet(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        repo_path=repo,
-        base_ref="HEAD",
-    )
-    reviews = [
-        {
-            "lens_id": lens_id,
-            "status": "checked"
-            if lens_id in SIMPLIFY_PRIMARY_LENS_IDS
-            else "not_applicable",
-            "summary": (
-                f"{lens_id} was reviewed against the exact fixture change."
-                if lens_id in SIMPLIFY_PRIMARY_LENS_IDS
-                else "No changed-surface or validator trigger."
-            ),
-            "finding_codes": [],
-            "evidence_refs": (
-                ["decision:fixture-simplification", "path:app.py"]
-                if lens_id == "quality_simplification"
-                else ["path:app.py"]
-                if lens_id == "reuse"
-                else []
-            ),
-        }
-        for lens_id in REVIEW_LENS_IDS
-    ]
-    result_path = _result(
-        tmp_path / "compact-guardrails.json",
-        prepared["scope"]["scope_fingerprint"],
-        lens_reviews=reviews,
-    )
-
     recorded = record_change_quality_receipt(
         registry_path=registry,
         runtime_root=runtime_root,
@@ -458,9 +321,24 @@ def test_result_allows_compact_repeated_inactive_guardrails(tmp_path: Path) -> N
     )
 
     assert recorded["decision"] == "pass"
+    guardrails = recorded["receipt"]["guardrails"]
+    assert guardrails["derived"] is True
+    assert guardrails["blocking_codes"] == []
+    assert {
+        item["guardrail_id"]: item["status"] for item in guardrails["states"]
+    } == {
+        "type_api_boundary": "not_triggered",
+        "configuration": "not_triggered",
+        "runtime_ownership": "not_triggered",
+        "efficiency": "not_triggered",
+        "error_supervision": "not_triggered",
+        "test_validation": "satisfied",
+        "documentation_comments": "not_triggered",
+        "security_release": "not_triggered",
+    }
 
 
-def test_result_requires_all_projected_repository_principles(tmp_path: Path) -> None:
+def test_result_evidence_must_reference_projected_scope(tmp_path: Path) -> None:
     repo, registry, runtime_root = _fixture(tmp_path)
     _enable(registry)
     (repo / "AGENTS.md").write_text("# Review the exact diff.\n", encoding="utf-8")
@@ -471,13 +349,17 @@ def test_result_requires_all_projected_repository_principles(tmp_path: Path) -> 
         repo_path=repo,
         base_ref="HEAD",
     )
-    assert prepared["repository_context"]["instruction_refs"] == ["AGENTS.md"]
     result_path = _result(
-        tmp_path / "missing-principle.json",
+        tmp_path / "unknown-evidence.json",
         prepared["scope"]["scope_fingerprint"],
+        reuse={
+            "outcome": "retained",
+            "summary": "Grounded in an instruction outside the projected scope.",
+            "evidence_refs": ["instruction:docs/UNKNOWN.md"],
+        },
     )
 
-    with pytest.raises(ValueError, match="projected instruction refs"):
+    with pytest.raises(ValueError, match="unknown evidence"):
         record_change_quality_receipt(
             registry_path=registry,
             runtime_root=runtime_root,
@@ -510,7 +392,9 @@ def test_five_pr_calibration_replays_substantive_simplify_receipts() -> None:
         case["source"]["pull_request"] for case in cases if case["manual_holds"]
     } == {2593}
     assert [
-        case["source"]["pull_request"] for case in cases if case["safe_fix_applied"]
+        case["source"]["pull_request"]
+        for case in cases
+        if case["simplification"]["safe_fix_applied"]
     ] == [2594]
 
     for case in cases:
@@ -521,17 +405,10 @@ def test_five_pr_calibration_replays_substantive_simplify_receipts() -> None:
             "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
             "scope_fingerprint": fingerprint,
             "reviewed_final_scope": True,
-            "summary": (
-                f"Replayed public PR #{case['source']['pull_request']} "
-                "against the simplify contract."
-            ),
-            "repository_principles": case["repository_principles"],
-            "findings": [],
-            "lens_reviews": case["lens_reviews"],
-            "simplification_decisions": case["simplification_decisions"],
-            "safe_fix_applied": case["safe_fix_applied"],
-            "safe_fix_passes": case["safe_fix_passes"],
-            "validation_evidence": case["validation_evidence"],
+            "reuse": case["reuse"],
+            "simplification": case["simplification"],
+            "risks": case["risks"],
+            "validation": case["validation"],
         }
 
         normalized = normalize_change_quality_result(
@@ -539,15 +416,19 @@ def test_five_pr_calibration_replays_substantive_simplify_receipts() -> None:
             expected_fingerprint=fingerprint,
             safe_fix_allowed=True,
             expected_changed_files=case["changed_files"],
-            expected_instruction_refs=[
-                item["source"] for item in case["repository_principles"]
-            ],
+            expected_instruction_refs=[],
         )
 
-        assert [item["lens_id"] for item in normalized["lens_reviews"]] == list(
-            REVIEW_LENS_IDS
-        )
-        assert normalized["safe_fix_passes"] in {0, 1}
+        assert set(normalized) == {
+            "schema_version",
+            "scope_fingerprint",
+            "reviewed_final_scope",
+            "reuse",
+            "simplification",
+            "risks",
+            "validation",
+        }
+        assert derive_change_quality_guardrails(normalized)["derived"] is True
 
 
 def test_failed_validation_cannot_produce_passing_receipt(tmp_path: Path) -> None:
@@ -563,12 +444,13 @@ def test_failed_validation_cannot_produce_passing_receipt(tmp_path: Path) -> Non
     result_path = _result(
         tmp_path / "result.json",
         prepared["scope"]["scope_fingerprint"],
-        validation_evidence=[
+        validation=[
             {
                 "validator": "pytest-focused",
                 "status": "failed",
                 "scope": "changed capability tests",
                 "reason": "One contract assertion failed.",
+                "required": True,
             }
         ],
     )
@@ -584,6 +466,50 @@ def test_failed_validation_cannot_produce_passing_receipt(tmp_path: Path) -> Non
     )
     assert recorded["decision"] == "fail"
     assert recorded["unresolved_blockers"] == ["validator:pytest-focused"]
+
+
+def test_skipped_required_validation_is_derived_as_blocking(tmp_path: Path) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    _enable(registry)
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    prepared = build_change_quality_prepare_packet(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref="HEAD",
+    )
+    result_path = _result(
+        tmp_path / "result.json",
+        prepared["scope"]["scope_fingerprint"],
+        validation=[
+            {
+                "validator": "required-typecheck",
+                "status": "skipped",
+                "scope": "changed public schema",
+                "required": True,
+                "reason": "The checker was unavailable.",
+            }
+        ],
+    )
+
+    recorded = record_change_quality_receipt(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        result_path=result_path,
+        base_ref="HEAD",
+        execute=False,
+    )
+
+    assert recorded["decision"] == "fail"
+    assert recorded["unresolved_blockers"] == ["validator:required-typecheck"]
+    validation_guardrail = next(
+        item
+        for item in recorded["receipt"]["guardrails"]["states"]
+        if item["guardrail_id"] == "test_validation"
+    )
+    assert validation_guardrail["status"] == "blocked"
 
 
 def test_verification_revalidates_stored_result_semantics(tmp_path: Path) -> None:
@@ -611,7 +537,7 @@ def test_verification_revalidates_stored_result_semantics(tmp_path: Path) -> Non
     )
     receipt_path = Path(recorded["receipt_path"])
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    receipt["result"]["lens_reviews"] = receipt["result"]["lens_reviews"][:-1]
+    del receipt["result"]["reuse"]
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
 
     verified = verify_change_quality_receipt(
@@ -623,6 +549,52 @@ def test_verification_revalidates_stored_result_semantics(tmp_path: Path) -> Non
     )
     assert verified["status"] == "invalid_receipt"
     assert verified["ok"] is False
+
+
+def test_verification_accepts_exact_v1_receipt_read_only(tmp_path: Path) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    _enable(registry)
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    prepared = build_change_quality_prepare_packet(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref="HEAD",
+    )
+    result_path = _result(
+        tmp_path / "result.json",
+        prepared["scope"]["scope_fingerprint"],
+    )
+    recorded = record_change_quality_receipt(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        result_path=result_path,
+        base_ref="HEAD",
+        execute=True,
+    )
+    legacy_receipt = dict(recorded["receipt"])
+    legacy_receipt["schema_version"] = "change_quality_receipt_v1"
+    legacy_receipt["result"] = _legacy_v1_result(
+        prepared["scope"]["scope_fingerprint"]
+    )
+    legacy_receipt.pop("guardrails")
+    Path(recorded["receipt_path"]).write_text(
+        json.dumps(legacy_receipt),
+        encoding="utf-8",
+    )
+
+    verified = verify_change_quality_receipt(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref="HEAD",
+    )
+
+    assert verified["status"] == "valid"
+    assert verified["ok"] is True
 
 
 def test_exact_scope_receipt_becomes_stale_after_any_diff_change(
@@ -806,8 +778,12 @@ def test_safe_fix_result_is_rejected_when_policy_forbids_mutation(
     result_path = _result(
         tmp_path / "result.json",
         prepared["scope"]["scope_fingerprint"],
-        safe_fix_applied=True,
-        safe_fix_passes=1,
+        simplification={
+            "outcome": "fixed",
+            "summary": "Applied one bounded simplification.",
+            "evidence_refs": ["path:app.py"],
+            "safe_fix_applied": True,
+        },
     )
 
     with pytest.raises(ValueError, match="policy forbids safe fixes"):
@@ -837,12 +813,14 @@ def test_unresolved_blocker_cannot_produce_passing_receipt(
     result_path = _result(
         tmp_path / "result.json",
         prepared["scope"]["scope_fingerprint"],
-        findings=[
+        risks=[
             {
+                "category": "test_validation",
                 "severity": "blocker",
                 "code": "required-validation-failed",
                 "message": "The required fixture validation failed.",
                 "resolved": False,
+                "evidence_refs": ["path:app.py"],
                 "path": "app.py",
                 "line": 1,
             }

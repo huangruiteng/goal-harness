@@ -14,19 +14,21 @@ from .context import build_change_quality_repository_context
 from .policy import change_quality_goal_policy
 from .result import (
     CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
+    LEGACY_CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
     REVIEW_LENSES,
-    REVIEW_LENS_IDS,
     SIMPLIFY_GUARDRAIL_LENS_IDS,
-    SIMPLIFY_PRIMARY_LENS_IDS,
     change_quality_result_decision,
+    derive_change_quality_guardrails,
     normalize_change_quality_result,
+    validate_legacy_change_quality_result_v1,
 )
 from .scope import build_change_quality_scope, resolve_git_root
 
 
-CHANGE_QUALITY_PREPARE_SCHEMA_VERSION = "change_quality_prepare_packet_v1"
-CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v1"
-CHANGE_QUALITY_VERIFY_SCHEMA_VERSION = "change_quality_receipt_verification_v1"
+CHANGE_QUALITY_PREPARE_SCHEMA_VERSION = "change_quality_prepare_packet_v2"
+CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v2"
+LEGACY_CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v1"
+CHANGE_QUALITY_VERIFY_SCHEMA_VERSION = "change_quality_receipt_verification_v2"
 CHANGE_QUALITY_PR_EVIDENCE_SCHEMA_VERSION = "change_quality_pr_evidence_v0"
 
 _PR_EVIDENCE_BY_STATUS = {
@@ -169,14 +171,20 @@ def build_change_quality_prepare_packet(
         "agent_contract": {
             "provider_neutral": True,
             "max_safe_fix_passes": 1,
-            "review_lenses": [dict(item) for item in REVIEW_LENSES],
-            "primary_review_lenses": list(SIMPLIFY_PRIMARY_LENS_IDS),
-            "guardrail_review_lenses": list(SIMPLIFY_GUARDRAIL_LENS_IDS),
+            "primary_result_fields": ["reuse", "simplification"],
+            "sparse_result_fields": ["risks", "validation"],
+            "guardrail_catalog": [
+                dict(item)
+                for item in REVIEW_LENSES
+                if item["lens_id"] in SIMPLIFY_GUARDRAIL_LENS_IDS
+            ],
+            "guardrail_status_owner": "loopx_derived",
             "instructions": [
                 "Review only the exact changed scope and resolve the projected repository instruction and ownership references.",
-                "Spend review effort first on reuse and quality_simplification; record distinct, evidence-backed conclusions for both.",
+                "Write one grounded reuse conclusion and one grounded simplification conclusion.",
                 "Prefer deletion, reuse, direct control flow, and established language idioms over redundant state, parameters, branches, wrappers, or speculative abstraction.",
-                "Treat the remaining lenses as guardrails: expand them only when the changed surface, a repository instruction, a native validator, or a simplify proposal raises a concrete risk; otherwise mark them not_applicable concisely.",
+                "Emit a risks[] item only when a guardrail has a concrete triggered risk; do not write all-clear rows for inactive guardrails.",
+                "LoopX derives guardrail status from sparse risks[] and validation[]; the Agent does not author guardrail states.",
                 "Use blocker only for concrete correctness, security, privacy, contract, or required-validation failures.",
                 "Use repository-native tests, linters, type checkers, and build tools as language-specific oracles.",
                 (
@@ -191,37 +199,24 @@ def build_change_quality_prepare_packet(
                 "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
                 "scope_fingerprint": scope["scope_fingerprint"],
                 "reviewed_final_scope": True,
-                "summary": "",
-                "repository_principles": [
-                    {"source": path, "principle": ""}
-                    for path in repository_context["instruction_refs"]
-                ],
-                "findings": [],
-                "lens_reviews": [
-                    {
-                        "lens_id": lens_id,
-                        "status": "checked",
-                        "summary": "",
-                        "finding_codes": [],
-                        "evidence_refs": [],
-                    }
-                    for lens_id in REVIEW_LENS_IDS
-                ],
-                "simplification_decisions": [
-                    {
-                        "decision_id": "",
-                        "subject": "",
-                        "outcome": "retained",
-                        "reason": "",
-                    }
-                ],
-                "safe_fix_applied": False,
-                "safe_fix_passes": 0,
-                "validation_evidence": [
+                "reuse": {
+                    "outcome": "retained",
+                    "summary": "",
+                    "evidence_refs": [],
+                },
+                "simplification": {
+                    "outcome": "retained",
+                    "summary": "",
+                    "evidence_refs": [],
+                    "safe_fix_applied": False,
+                },
+                "risks": [],
+                "validation": [
                     {
                         "validator": "",
                         "status": "passed",
                         "scope": "",
+                        "required": True,
                     }
                 ],
             },
@@ -264,6 +259,7 @@ def record_change_quality_receipt(
         expected_changed_files=list(scope["changed_files"]),
         expected_instruction_refs=list(repository_context["instruction_refs"]),
     )
+    guardrails = derive_change_quality_guardrails(result)
     decision, unresolved_blockers = change_quality_result_decision(result)
     receipt_id = f"cqr_{str(scope['scope_fingerprint'])[:20]}"
     receipt = {
@@ -274,6 +270,7 @@ def record_change_quality_receipt(
         "policy": policy,
         "scope": scope,
         "result": result,
+        "guardrails": guardrails,
         "decision": decision,
         "unresolved_blockers": unresolved_blockers,
     }
@@ -309,24 +306,50 @@ def _stored_receipt_is_valid(
 ) -> bool:
     if not (
         receipt
-        and receipt.get("schema_version") == CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION
+        and receipt.get("schema_version")
+        in {
+            CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION,
+            LEGACY_CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION,
+        }
         and receipt.get("decision") == "pass"
         and isinstance(receipt.get("result"), dict)
         and isinstance(receipt.get("scope"), dict)
         and receipt["scope"].get("scope_fingerprint") == scope_fingerprint
     ):
         return False
+    result = receipt["result"]
     try:
-        normalized = normalize_change_quality_result(
-            receipt["result"],
-            expected_fingerprint=scope_fingerprint,
-            safe_fix_allowed=safe_fix_allowed,
-            expected_changed_files=changed_files,
-            expected_instruction_refs=instruction_refs,
-        )
+        if (
+            receipt.get("schema_version") == CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION
+            and result.get("schema_version") == CHANGE_QUALITY_RESULT_SCHEMA_VERSION
+        ):
+            normalized = normalize_change_quality_result(
+                result,
+                expected_fingerprint=scope_fingerprint,
+                safe_fix_allowed=safe_fix_allowed,
+                expected_changed_files=changed_files,
+                expected_instruction_refs=instruction_refs,
+            )
+            guardrails = derive_change_quality_guardrails(normalized)
+            decision, unresolved = change_quality_result_decision(normalized)
+            if receipt.get("guardrails") != guardrails:
+                return False
+        elif (
+            receipt.get("schema_version")
+            == LEGACY_CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION
+            and result.get("schema_version")
+            == LEGACY_CHANGE_QUALITY_RESULT_SCHEMA_VERSION
+        ):
+            decision, unresolved = validate_legacy_change_quality_result_v1(
+                result,
+                expected_fingerprint=scope_fingerprint,
+                safe_fix_allowed=safe_fix_allowed,
+                expected_instruction_refs=instruction_refs,
+            )
+        else:
+            return False
     except (TypeError, ValueError):
         return False
-    decision, unresolved = change_quality_result_decision(normalized)
     return decision == "pass" and receipt.get("unresolved_blockers") == unresolved
 
 

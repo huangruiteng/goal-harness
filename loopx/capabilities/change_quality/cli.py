@@ -63,7 +63,7 @@ def register_change_quality_commands(
         "--result-json",
         type=Path,
         required=True,
-        help="Agent result conforming to change_quality_agent_result_v1.",
+        help="Agent result conforming to change_quality_agent_result_v2.",
     )
     record.add_argument(
         "--execute",
