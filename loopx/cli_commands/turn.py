@@ -299,6 +299,7 @@ def handle_turn_command(
             scan_roots=scan_roots,
             limit=max(max(0, args.limit), AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK),
             goal_id=args.goal_id,
+            available_capabilities=args.available_capabilities,
         )
         scheduler_context = scheduler_execution_context_for_turn(
             host=args.host,
@@ -477,6 +478,7 @@ def handle_turn_command(
                     scan_roots=scan_roots,
                     limit=max(max(0, args.limit), AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK),
                     goal_id=args.goal_id,
+                    available_capabilities=args.available_capabilities,
                 )
 
             def spend() -> dict[str, object]:

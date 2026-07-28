@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -1125,6 +1126,68 @@ def test_progress_validation_handoff_requires_no_scheduled_continuation(
     )
     summary_path.write_text("{}\n", encoding="utf-8")
     assert not acp_relay._codex_exec_progress_validation_handoff_allowed(
+        category="codex_exec_timeout",
+        bridge_summary_path=summary_path,
+        same_session_continuation_scheduled=False,
+        final_message_present=False,
+        turn_deadline=time.monotonic() - 1,
+    )
+
+
+def test_timeout_handoff_waits_for_bridge_summary_quiescence(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "bridge-summary.jsonl"
+    summary_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "record_phase": "complete",
+                        "operation": "write_file",
+                        "task_facing_operation": True,
+                        "durable_task_write": True,
+                        "durable_task_content_changed": True,
+                        "success": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "record_phase": "start",
+                        "operation": "run_command",
+                        "task_facing_operation": True,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def finish_bridge_record() -> None:
+        time.sleep(0.03)
+        with summary_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "record_phase": "complete",
+                        "operation": "run_command",
+                        "task_facing_operation": True,
+                        "success": True,
+                    }
+                )
+                + "\n"
+            )
+
+    writer = threading.Thread(target=finish_bridge_record)
+    writer.start()
+    assert acp_relay._wait_for_bridge_summary_quiescence(
+        summary_path,
+        timeout_sec=0.5,
+        poll_interval_sec=0.005,
+    )
+    writer.join()
+    assert acp_relay._codex_exec_progress_validation_handoff_allowed(
         category="codex_exec_timeout",
         bridge_summary_path=summary_path,
         same_session_continuation_scheduled=False,

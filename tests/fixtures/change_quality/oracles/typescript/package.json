@@ -1,0 +1,10 @@
+{
+  "name": "change-quality-typescript-fixture",
+  "private": true,
+  "scripts": {
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

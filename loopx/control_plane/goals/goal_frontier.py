@@ -39,6 +39,10 @@ VISION_GAP_JUDGE_SCHEMA_VERSION = "vision_gap_judge_v0"
 AUTONOMOUS_REPLAN_DECISION_SCHEMA_VERSION = "autonomous_replan_decision_v0"
 AUTONOMOUS_REPLAN_SCOPE_SCHEMA_VERSION = "autonomous_replan_scope_v0"
 AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
+REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
+    "runnable_todo_set",
+    "successor_or_supersede",
+)
 AUTONOMOUS_REPLAN_REQUIRED_MODE = "autonomous_replan_required"
 GOAL_TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
@@ -244,6 +248,26 @@ def autonomous_replan_ack_has_frontier_delta(ack: dict[str, Any] | None) -> bool
     return repair_delta_kinds_have_frontier_delta(delta_contract.get("delta_kinds"))
 
 
+def _blocked_successor_repeat_vision_open(
+    replan_obligation: dict[str, Any] | None,
+    acceptance_gaps: list[dict[str, Any]] | None,
+) -> bool:
+    trigger_kinds = {
+        str(trigger.get("kind") or "").strip()
+        for trigger in (
+            replan_obligation.get("triggers") or []
+            if isinstance(replan_obligation, dict)
+            else []
+        )
+        if isinstance(trigger, dict)
+    }
+    return "blocked_successor_no_progress_repeat" in trigger_kinds and any(
+        goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
+        for gap in (acceptance_gaps or [])
+        if isinstance(gap, dict)
+    )
+
+
 def autonomous_replan_ack_satisfies_obligation(
     ack: dict[str, Any] | None,
     *,
@@ -254,23 +278,9 @@ def autonomous_replan_ack_satisfies_obligation(
 
     if not autonomous_replan_ack_has_frontier_delta(ack):
         return False
-    trigger_kinds = {
-        str(trigger.get("kind") or "").strip()
-        for trigger in (
-            replan_obligation.get("triggers") or []
-            if isinstance(replan_obligation, dict)
-            else []
-        )
-        if isinstance(trigger, dict)
-    }
-    repeat_vision_open = any(
-        goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
-        for gap in (acceptance_gaps or [])
-        if isinstance(gap, dict)
-    )
-    if (
-        "blocked_successor_no_progress_repeat" not in trigger_kinds
-        or not repeat_vision_open
+    if not _blocked_successor_repeat_vision_open(
+        replan_obligation,
+        acceptance_gaps,
     ):
         return True
     delta_contract = ack.get("delta_contract") if isinstance(ack, dict) else {}
@@ -283,7 +293,55 @@ def autonomous_replan_ack_satisfies_obligation(
         )
         if str(item or "").strip()
     }
-    return bool(delta_kinds & {"runnable_todo_set", "successor_or_supersede"})
+    return bool(delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS))
+
+
+def align_autonomous_replan_guidance_with_acceptance_policy(
+    replan_obligation: dict[str, Any] | None,
+    *,
+    acceptance_gaps: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Remove wait-only guidance when the active vision requires advancement."""
+
+    if not isinstance(replan_obligation, dict):
+        return replan_obligation
+    if not _blocked_successor_repeat_vision_open(
+        replan_obligation,
+        acceptance_gaps,
+    ):
+        return replan_obligation
+
+    aligned = dict(replan_obligation)
+    aligned["guidance_actions"] = [
+        "discover_safe_successor",
+        "create_runnable_todo",
+        "successor_or_supersede",
+    ]
+    aligned["todo_actions"] = [
+        {
+            **action,
+            "text": (
+                "discover and promote one safe in-scope evidence-backed runnable "
+                "todo, or replace the blocked successor through an explicit "
+                "successor/supersede transition"
+            ),
+        }
+        if isinstance(action, dict)
+        and action.get("action") == "add"
+        and action.get("role") == "agent"
+        else action
+        for action in (replan_obligation.get("todo_actions") or [])
+    ]
+    aligned["recommended_action"] = (
+        "run a bounded autonomous replan for the exact blocked successor: "
+        "create or claim one safe in-scope runnable advancement todo, or record "
+        "an explicit successor/supersede transition; watch-lane continuation "
+        "alone does not satisfy a repeat-until-closed vision"
+    )
+    aligned["satisfying_repair_delta_kinds"] = list(
+        REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
+    )
+    return aligned
 
 
 def _autonomous_replan_ack_has_delta_kind(
@@ -1837,6 +1895,10 @@ def build_goal_frontier_projection_context_from_status(
             goal_status=goal_status,
         )
         + acceptance_gaps_from_vision_checkpoint(latest_missing_vision_checkpoint)
+    )
+    replan_obligation = align_autonomous_replan_guidance_with_acceptance_policy(
+        replan_obligation,
+        acceptance_gaps=source_acceptance_gaps,
     )
     frontier_counts = _frontier_advancement_counts(
         agent_todo_summary=agent_todo_summary,

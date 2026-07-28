@@ -101,6 +101,7 @@ SAFE_LOOPX_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
 CODEX_EXEC_TRANSPORT_RETRY_LIMIT = 1
 CODEX_EXEC_SESSION_ROLLOVER_LIMIT = 1
 CODEX_EXEC_SAME_SESSION_CONTINUATION_LIMIT = 1
+CODEX_EXEC_PROGRESS_HANDOFF_SETTLE_TIMEOUT_SEC = 1.0
 CODEX_EXEC_PROGRESS_VALIDATION_HANDOFF_CATEGORIES = frozenset(
     {
         "codex_exec_timeout",
@@ -531,6 +532,25 @@ def _codex_exec_progress_validation_handoff_allowed(
         and receipt.get("task_facing_success_count", 0) > 0
         and receipt.get("raw_material_recorded") is False
     )
+
+
+def _wait_for_bridge_summary_quiescence(
+    bridge_summary_path: Path | None,
+    *,
+    timeout_sec: float = CODEX_EXEC_PROGRESS_HANDOFF_SETTLE_TIMEOUT_SEC,
+    poll_interval_sec: float = 0.05,
+) -> bool:
+    """Let a terminating bridge wrapper finish its final compact record."""
+
+    if bridge_summary_path is None:
+        return False
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while _bridge_summary_has_inflight_operation(bridge_summary_path):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(max(0.001, poll_interval_sec), remaining))
+    return True
 
 
 def _codex_exec_session_rollover_allowed(
@@ -1306,9 +1326,13 @@ class SkillsBenchLocalAcpRelay:
                     if stderr_path.exists()
                     else ""
                 )
+                validation_handoff_eligible = bool(
+                    _bypass_loopx_turn and self._config.loopx_turn_agent_cli
+                )
+                if validation_handoff_eligible:
+                    _wait_for_bridge_summary_quiescence(bridge_summary_path)
                 validation_handoff_scheduled = bool(
-                    _bypass_loopx_turn
-                    and self._config.loopx_turn_agent_cli
+                    validation_handoff_eligible
                     and _codex_exec_progress_validation_handoff_allowed(
                         category=failure_category,
                         bridge_summary_path=bridge_summary_path,

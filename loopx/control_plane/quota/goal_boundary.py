@@ -113,15 +113,7 @@ def _lark_kanban_post_writeback_projection(
     }
 
 
-def goal_boundary(
-    goal: dict[str, Any],
-    item: dict[str, Any] | None = None,
-    *,
-    agent_id: str | None = None,
-    registry_path: Path | None = None,
-    operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
-    reward_memory_experiment_status: Mapping[str, Any] | None = None,
-) -> dict[str, Any] | None:
+def _registry_boundary_projection(goal: Mapping[str, Any]) -> dict[str, Any]:
     boundary: dict[str, Any] = {}
     adapter_kind, adapter_status = (
         goal.get("adapter_kind"),
@@ -132,13 +124,12 @@ def goal_boundary(
             "kind": adapter_kind,
             "status": adapter_status,
         }
-    coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
-    write_scope = coordination.get("write_scope") if isinstance(coordination.get("write_scope"), list) else []
-    requires_approval = (
-        coordination.get("requires_parent_approval")
-        if isinstance(coordination.get("requires_parent_approval"), list)
-        else []
+    coordination_value = goal.get("coordination")
+    coordination: dict[str, Any] = (
+        coordination_value if isinstance(coordination_value, dict) else {}
     )
+    write_scope_value = coordination.get("write_scope")
+    write_scope = write_scope_value if isinstance(write_scope_value, list) else []
     normalized_write_scope: list[str] = []
     for value in write_scope:
         scope = str(value).strip()
@@ -146,7 +137,9 @@ def goal_boundary(
             normalized_write_scope.append(scope)
     boundary_authority = checkpointed_boundary_authority_summary(coordination)
     if boundary_authority:
-        for scope in normalize_required_write_scopes(boundary_authority.get("active_write_scope")):
+        for scope in normalize_required_write_scopes(
+            boundary_authority.get("active_write_scope")
+        ):
             if scope not in normalized_write_scope:
                 normalized_write_scope.append(scope)
         boundary["checkpointed_boundary_authority"] = boundary_authority
@@ -155,6 +148,12 @@ def goal_boundary(
     available_capabilities = declared_available_capabilities(goal)
     if available_capabilities:
         boundary["available_capabilities"] = available_capabilities
+    requires_approval_value = coordination.get("requires_parent_approval")
+    requires_approval = (
+        requires_approval_value
+        if isinstance(requires_approval_value, list)
+        else []
+    )
     if requires_approval:
         boundary["requires_parent_approval"] = [
             str(value) for value in requires_approval if str(value).strip()
@@ -162,6 +161,19 @@ def goal_boundary(
     guards = goal.get("guards") if isinstance(goal.get("guards"), list) else []
     if guards:
         boundary["guards"] = [str(value) for value in guards if str(value).strip()]
+    return boundary
+
+
+def goal_boundary(
+    goal: dict[str, Any],
+    item: dict[str, Any] | None = None,
+    *,
+    agent_id: str | None = None,
+    registry_path: Path | None = None,
+    operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    reward_memory_experiment_status: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    boundary = _registry_boundary_projection(goal)
     control_plane = (
         goal.get("control_plane")
         if isinstance(goal.get("control_plane"), dict)

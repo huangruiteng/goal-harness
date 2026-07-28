@@ -133,6 +133,7 @@ def test_setup_only_preflight_stops_before_agent_and_verifier() -> None:
     serialized = json.dumps(result, sort_keys=True)
     assert "/private/" not in serialized
     assert "should-not-project" not in serialized
+    assert "apt_transport_failure_receipt" not in result
 
 
 def test_setup_only_preflight_projects_incremental_public_stages() -> None:
@@ -647,6 +648,73 @@ def test_setup_only_preflight_classifies_public_setup_failures(
     assert message not in serialized
     assert result["raw_error_recorded"] is False
     assert result["raw_logs_read"] is False
+
+
+def test_setup_only_preflight_emits_actionable_apt_transport_receipt() -> None:
+    message = (
+        "Docker compose command failed. apt update failed to fetch index: "
+        "407 Proxy Authentication Required at /private/job"
+    )
+    FakeRollout.failure_stage = "environment_start"
+    FakeRollout.failure = RuntimeError(message)
+
+    result = run_preflight()
+
+    receipt = result["apt_transport_failure_receipt"]
+    assert receipt["schema_version"] == ("skillsbench_apt_transport_failure_receipt_v0")
+    assert receipt["classification_status"] == "classified_transport_failure"
+    assert receipt["classification_complete"] is True
+    assert receipt["failure_subtype"] == "proxy_authentication_required"
+    assert receipt["retryability"] == "non_retryable"
+    assert receipt["failure_cause_source"] == "exception_text_fingerprint"
+    assert receipt["disposition"] == "repair_before_retry"
+    assert receipt["transport_configuration"] == {
+        "source_mode": "mirror",
+        "transport_mode": "default",
+        "apt_retry_patch_applied": True,
+        "proxy_env_patch_required": False,
+        "proxy_env_patch_applied": False,
+        "ubuntu_mirror_patch_required": False,
+        "ubuntu_mirror_patch_applied": False,
+        "debian_mirror_patch_required": True,
+        "debian_mirror_patch_applied": True,
+    }
+    assert receipt["raw_failure_text_recorded"] is False
+    assert receipt["raw_logs_recorded"] is False
+    assert receipt["host_paths_recorded"] is False
+    assert receipt["secret_values_recorded"] is False
+    serialized = json.dumps(receipt, sort_keys=True)
+    assert message not in serialized
+    assert "/private/job" not in serialized
+
+
+def test_setup_only_preflight_marks_unclassified_apt_transport_receipt() -> None:
+    message = (
+        "Docker compose command failed. apt-get update failed to fetch package index"
+    )
+    FakeRollout.failure_stage = "environment_start"
+    FakeRollout.failure = RuntimeError(message)
+
+    result = run_preflight()
+
+    receipt = result["apt_transport_failure_receipt"]
+    assert receipt["classification_status"] == "unclassified_transport_failure"
+    assert receipt["classification_complete"] is False
+    assert receipt["failure_subtype"] == "fetch_failed_unclassified"
+    assert receipt["retryability"] == "unknown"
+    assert receipt["disposition"] == "do_not_blind_retry"
+    assert message not in json.dumps(receipt, sort_keys=True)
+
+
+def test_setup_only_preflight_omits_apt_receipt_for_non_apt_failure() -> None:
+    FakeRollout.failure_stage = "environment_start"
+    FakeRollout.failure = RuntimeError(
+        "Docker compose command failed: invalid mount config for type bind"
+    )
+
+    result = run_preflight()
+
+    assert "apt_transport_failure_receipt" not in result
 
 
 def test_compose_producer_emits_only_bounded_typed_cause() -> None:

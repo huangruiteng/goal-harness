@@ -515,8 +515,36 @@ def test_two_identical_blocked_successor_waits_trigger_bounded_replan() -> None:
     )
     assert obligation["guidance_actions"] == [
         "discover_safe_successor",
+        "create_runnable_todo",
+        "successor_or_supersede",
+    ]
+    assert obligation["satisfying_repair_delta_kinds"] == [
+        "runnable_todo_set",
+        "successor_or_supersede",
+    ]
+    assert "watch-lane continuation alone does not satisfy" in obligation[
+        "recommended_action"
+    ]
+    assert "watch-lane continuation" not in obligation["todo_actions"][-1]["text"]
+    primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
+    assert "watch-lane continuation alone" in primary_action
+    assert "otherwise record a no-spend wait continuation" not in primary_action
+
+
+def test_as_needed_blocked_successor_guidance_keeps_wait_continuation() -> None:
+    guard = _quota_with_replan_runs(
+        [*_blocked_wait_polls(), _vision_run(advancement_policy="as_needed")]
+    )
+
+    obligation = guard["autonomous_replan_obligation"]
+    assert obligation["guidance_actions"] == [
+        "discover_safe_successor",
         "create_successor",
         "record_wait_continuation",
+    ]
+    assert "satisfying_repair_delta_kinds" not in obligation
+    assert "otherwise record a no-spend wait continuation" in obligation[
+        "recommended_action"
     ]
 
 

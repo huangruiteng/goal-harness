@@ -8126,6 +8126,12 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
     )
     block = (
         f"{DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_SECURITY_MIRROR_BASE}\n"
         "RUN set -eux; \\\n"
         "    if command -v curl >/dev/null 2>&1 && \\\n"
         "       command -v tar >/dev/null 2>&1 && \\\n"
@@ -8144,7 +8150,19 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
         "        'Acquire::https::No-Cache \"true\";' \\\n"
         "        'Acquire::Check-Valid-Until \"false\";' \\\n"
         "        > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
-        "      apt-get update -qq; \\\n"
+        "      if ! apt-get update -qq; then \\\n"
+        "        find /etc/apt -type f \\\n"
+        "          \\( -name '*.list' -o -name '*.sources' \\) \\\n"
+        "          -exec sed -i \\\n"
+        '            -e "s#https\\?://archive.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR}#g" \\\n'
+        "            {} +; \\\n"
+        "        rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
+        "        apt-get update -qq; \\\n"
+        "      fi; \\\n"
         "      apt-get install -y -qq --no-install-recommends ca-certificates curl tar xz-utils; \\\n"
         "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
         "    elif command -v apk >/dev/null 2>&1; then \\\n"
@@ -8651,10 +8669,6 @@ def stage_task_for_sandbox(
                 staged_path / "environment" / "Dockerfile"
             )
         )
-    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
-        staged_path / "environment" / "Dockerfile",
-        proxy_env=benchmark_egress_proxy_env,
-    )
     apt_retry_patched = patch_dockerfile_apt_retry(
         staged_path / "environment" / "Dockerfile",
         transport_mode=docker_apt_transport_mode,
@@ -8703,6 +8717,10 @@ def stage_task_for_sandbox(
     )
     runtime_tools_patched = patch_dockerfile_codex_acp_runtime_tools(
         staged_path / "environment" / "Dockerfile"
+    )
+    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
+        staged_path / "environment" / "Dockerfile",
+        proxy_env=benchmark_egress_proxy_env,
     )
     staged_verifier_script = proxy_runtime.skillsbench_verifier_script(staged_path)
     uv_mirror_metadata = verifier_bootstrap.patch_verifier_uv_bootstrap_mirror(
@@ -16278,6 +16296,72 @@ def _recover_runner_failure_score_from_verifier_artifact(
     return True
 
 
+def _apply_runner_failure_attempt_accounting_from_public_activity(
+    compact: dict[str, Any],
+    runner_prerequisites: Mapping[str, Any],
+) -> None:
+    """Count a solver attempt when public bridge evidence proves task work."""
+
+    task_operation_count = _nonbool_int(
+        runner_prerequisites.get(
+            "remote_command_file_bridge_agent_task_facing_operation_count"
+        )
+    )
+    raw_task_success_count = runner_prerequisites.get(
+        "remote_command_file_bridge_agent_task_facing_success_count"
+    )
+    if isinstance(raw_task_success_count, int) and not isinstance(
+        raw_task_success_count, bool
+    ):
+        task_success_count = max(0, raw_task_success_count)
+    else:
+        raw_request_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_request_count"
+        )
+        raw_success_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_success_count"
+        )
+        if (
+            isinstance(raw_request_count, int)
+            and not isinstance(raw_request_count, bool)
+            and raw_request_count >= task_operation_count
+            and isinstance(raw_success_count, int)
+            and not isinstance(raw_success_count, bool)
+            and 0 <= raw_success_count <= raw_request_count
+        ):
+            non_task_operation_count = raw_request_count - task_operation_count
+            task_success_count = max(
+                0,
+                raw_success_count - non_task_operation_count,
+            )
+        else:
+            task_success_count = 0
+    if task_operation_count <= 0 or task_success_count <= 0:
+        return
+
+    from loopx.benchmark_core import (
+        BenchmarkFailureClass,
+        build_benchmark_attempt_accounting,
+        canonical_lifecycle,
+    )
+
+    failure_label = str(compact.get("score_failure_attribution") or "")
+    compact["attempt_accounting"] = build_benchmark_attempt_accounting(
+        lifecycle=canonical_lifecycle(
+            process_started=True,
+            runner_accepted_args=True,
+            job_root_materialized=True,
+            trial_started=True,
+            worker_started=True,
+        ),
+        failure_label=failure_label,
+        failure_class=BenchmarkFailureClass.SOLVER_FAILED,
+        solver_attempted=True,
+        verifier_attempted=False,
+        official_score_attempted=False,
+    )
+
+
 def build_runner_failure_compact(
     args: argparse.Namespace,
     plan: dict[str, Any],
@@ -16420,6 +16504,11 @@ def build_runner_failure_compact(
         "no_raw_trajectory_read": True,
         "no_leaderboard_upload_requested": True,
     }
+    if runner_prerequisites:
+        _apply_runner_failure_attempt_accounting_from_public_activity(
+            compact,
+            runner_prerequisites,
+        )
     reduced = compact_benchmark_run(compact)
     if reduced is None:
         raise RuntimeError("SkillsBench runner failure reducer produced non-compact run")

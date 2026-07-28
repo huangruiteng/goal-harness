@@ -869,6 +869,56 @@ def _execution_obligation(
     )
 
 
+def _quota_plan_goal_quota(
+    *,
+    attention: dict[str, Any],
+    project_asset: dict[str, Any],
+    goal: dict[str, Any],
+    waiting_on: str,
+    lifecycle_phase: Any,
+    lifecycle_flags: Any,
+    status: Any,
+) -> dict[str, Any]:
+    project_asset_quota = (
+        project_asset.get("quota")
+        if isinstance(project_asset.get("quota"), dict)
+        else {}
+    )
+    raw_quota = (
+        attention.get("quota")
+        if isinstance(attention.get("quota"), dict)
+        else goal.get("quota")
+    )
+    if project_asset_quota:
+        raw_quota_base = raw_quota if isinstance(raw_quota, dict) else {}
+        quota = {**raw_quota_base, **project_asset_quota}
+    elif isinstance(raw_quota, dict):
+        quota = _quota_with_focus_wait_override(
+            raw_quota,
+            waiting_on=waiting_on,
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
+        )
+    else:
+        quota = quota_status(
+            goal,
+            waiting_on=waiting_on,
+            severity=str(attention.get("severity") or ""),
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
+        )
+    return quota_with_handoff_outcome_floor(
+        quota,
+        waiting_on=waiting_on,
+        project_asset=project_asset,
+        handoff_readiness=attention.get("handoff_readiness")
+        if isinstance(attention.get("handoff_readiness"), dict)
+        else None,
+    )
+
+
 def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
     queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
     queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
@@ -910,11 +960,6 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             if isinstance(attention.get("project_asset"), dict)
             else {}
         )
-        project_asset_quota = (
-            project_asset.get("quota")
-            if isinstance(project_asset.get("quota"), dict)
-            else {}
-        )
         latest = _latest_run(goal)
         waiting_on = attention.get("waiting_on") or "none"
         lifecycle_phase = attention.get("lifecycle_phase") or goal.get("lifecycle_phase")
@@ -925,35 +970,14 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             or compact_control_plane_policy(project_asset.get("control_plane"))
             or compact_control_plane_policy(goal.get("control_plane"))
         )
-        raw_quota = attention.get("quota") if isinstance(attention.get("quota"), dict) else goal.get("quota")
-        if project_asset_quota:
-            raw_quota_base = raw_quota if isinstance(raw_quota, dict) else {}
-            quota = {**raw_quota_base, **project_asset_quota}
-        elif isinstance(raw_quota, dict):
-            quota = raw_quota
-            quota = _quota_with_focus_wait_override(
-                quota,
-                waiting_on=str(waiting_on or ""),
-                lifecycle_phase=lifecycle_phase,
-                lifecycle_flags=lifecycle_flags,
-                status=status,
-            )
-        else:
-            quota = quota_status(
-                goal,
-                waiting_on=str(waiting_on or ""),
-                severity=str(attention.get("severity") or ""),
-                lifecycle_phase=lifecycle_phase,
-                lifecycle_flags=lifecycle_flags,
-                status=status,
-            )
-        quota = quota_with_handoff_outcome_floor(
-            quota,
-            waiting_on=str(waiting_on or ""),
+        quota = _quota_plan_goal_quota(
+            attention=attention,
             project_asset=project_asset,
-            handoff_readiness=attention.get("handoff_readiness")
-            if isinstance(attention.get("handoff_readiness"), dict)
-            else None,
+            goal=goal,
+            waiting_on=str(waiting_on or ""),
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
         )
         state = str(quota.get("state") or "waiting")
         item: dict[str, Any] = {

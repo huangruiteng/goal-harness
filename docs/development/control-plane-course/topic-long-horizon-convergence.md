@@ -834,9 +834,9 @@ Detect
 这条链刻意没有一个“万能 planner”。Detector、Frontier policy、obligation builder、Quota
 和 writeback 各自保留边界。复杂度来自这些合同的组合，而不是来自一个超长函数。
 
-一小时现场主讲只需保留这张六层链、ordered rules 的三组优先级和后面的端到端 trace，
-约 10 到 12 分钟。下面“之一”到“之六”是讲师备课与课后下钻材料，不要求逐行投屏；这样
-既能说明真实复杂度，也不会把专题变成模块目录巡礼。
+一小时现场主讲只需保留这张六层链、ordered rules 的三组优先级、Guidance/ACK 不一致
+案例和后面的端到端 trace，约 10 到 12 分钟。下面“之一”到“之六”是讲师备课与课后下钻
+材料，不要求逐行投屏；这样既能说明真实复杂度，也不会把专题变成模块目录巡礼。
 
 ### 核心代码四之一：先从多个 Read Model 归一化 Facts
 
@@ -1175,6 +1175,95 @@ spend_one_slot()
 仅写 `autonomous_replan_recorded=True` 不够。`autonomous_replan_ack_recorded` 还要求
 `delta_contract.delta_present=True`；否则这是 `replan_noop`，下一轮 obligation 仍然成立。
 这条约束防止 Agent 用一篇新总结关闭旧循环。
+
+### 工程案例：Guidance 与 ACK 不一致时，Replan 也会成环
+
+[PR #2597](https://github.com/huangruiteng/loopx/pull/2597) 修复了一个很适合解释长程控制面
+的真实问题：系统投影给 Agent 的 Replan guidance 允许继续等待，但同一条控制链末端的 ACK
+validator 又不接受这次等待。Agent 每一轮都遵循建议，却永远无法关闭 obligation。
+
+问题发生在下面这组状态同时成立时：
+
+- blocked successor 连续两次没有进展；
+- 对应 Vision 使用 `repeat_until_closed`，要求 Acceptance gap 关闭前持续推进；
+- 当前没有其他 runnable advancement；
+- Replan guidance 仍把 `record_wait_continuation` 列为合法选择。
+
+修改前的执行链可以压成：
+
+```text
+blocked successor 连续无进展
+  -> 派生 autonomous_replan_obligation
+  -> guidance 建议：创建 successor，或者继续 watch
+  -> Agent 选择成本最低的 wait continuation
+  -> ACK validator 拒绝：repeat-until-closed 不能只等待
+  -> obligation 保持 open
+  -> 下一轮收到同一条 guidance
+```
+
+这类循环很难仅从单个模块看出来。Obligation builder 的输出合理，ACK validator 的约束也
+合理；错误来自两处对“什么算完成 Replan”给出了不同答案。模型换一种措辞、增加思考长度，
+都不会改变这个结构性矛盾。
+
+修复先把严格场景归一化成同一个事实判断。下面是对应实现的等价伪代码：
+
+```python
+def blocked_successor_repeat_vision_open(obligation, acceptance_gaps):
+    return (
+        obligation.trigger == "blocked_successor_no_progress_repeat"
+        and any(
+            gap.advancement_policy == "repeat_until_closed"
+            for gap in acceptance_gaps
+        )
+    )
+```
+
+然后让 guidance 与 ACK 共享同一组满足条件：
+
+```python
+REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
+    "runnable_todo_set",
+    "successor_or_supersede",
+)
+
+if blocked_successor_repeat_vision_open(obligation, acceptance_gaps):
+    obligation.guidance_actions = [
+        "discover_safe_successor",
+        "create_runnable_todo",
+        "successor_or_supersede",
+    ]
+    obligation.satisfying_repair_delta_kinds = (
+        REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
+    )
+
+ack_valid = bool(
+    ack.delta_kinds
+    & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS)
+)
+```
+
+`runnable_todo_set` 表示建立一项当前即可执行、并能缩小 Acceptance gap 的工作；它不能是为
+了填空而制造的旁支 Todo。`successor_or_supersede` 表示修复原有任务关系：给 blocked work
+接上新的 successor，或者显式退役已经失效的路径。
+
+这里不能简单放宽 ACK，让 `watch_lane_continuation` 也算成功。对
+`repeat_until_closed` Vision 来说，合法终态必须保留一条能够继续推进的 Frontier。若 ACK
+接受纯等待，系统会把“没有可执行工作”结算成成功，随后进入长期合法空转。
+
+`as_needed` Vision 则继续允许 wait continuation。它可能在等 CI、外部数据、定时 monitor
+或下一次人工输入，等待本身就是受约束的正确动作：
+
+| Vision advancement policy | 合法的 Replan 结果 |
+| --- | --- |
+| `repeat_until_closed` | `runnable_todo_set` 或 `successor_or_supersede` |
+| `as_needed` | 可以写入有 cadence、expiry 或恢复条件的 wait continuation |
+
+这个案例补充了一条实现层不变量：
+
+> Guidance、writeback schema 与 ACK acceptance 必须描述同一组可结算动作。
+
+检测到循环只解决了一半问题。控制面还要保证 Agent 被引导执行的动作能够通过结算，并在
+下一轮形成不同且合法的 Frontier；否则 Replan 自己也会成为局部循环的一部分。
 
 ### 端到端 Trace：为什么一次 Replan 之后还可能继续 Replan
 

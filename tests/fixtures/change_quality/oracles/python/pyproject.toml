@@ -1,0 +1,9 @@
+[project]
+name = "change-quality-python-fixture"
+version = "0.0.0"
+
+[tool.poe.tasks]
+format = "ruff format --check ."
+lint = "ruff check ."
+typecheck = "mypy src"
+test = "pytest -q"
